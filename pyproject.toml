@@ -16,6 +16,7 @@ pytest = "^7.4.3"
 pytest-asyncio = "^0.21.1"
 pytest-cov = "^4.1.0"
 httpx = "^0.25.2"
+requests = "^2.31.0"
 openapi-python-client = "^0.16.0"
 black = "^23.11.0"
 isort = "^5.12.0"
@@ -44,3 +45,6 @@ disallow_untyped_defs = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: marks tests as integration tests (slow)",
+]

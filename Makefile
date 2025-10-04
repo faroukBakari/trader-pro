@@ -1,4 +1,4 @@
-.PHONY: help install test lint format dev clients clean
+.PHONY: help install test test-all test-integration lint format dev clients clean
 
 help: ## Show this help message
 	@echo "Available commands:"
@@ -9,6 +9,16 @@ install: ## Install dependencies
 
 test: ## Run tests with coverage
 	poetry run pytest --cov=trading_api --cov-report=term-missing --cov-report=html
+
+test-all: ## Run all tests including client generation tests
+	poetry run pytest --cov=trading_api --cov-report=term-missing --cov-report=html -m "not integration"
+	$(MAKE) clients
+	poetry run pytest tests/test_client_generation.py::TestClientGeneration::test_generated_vue_client_structure -v
+	poetry run pytest tests/test_client_generation.py::TestClientGeneration::test_generated_vue_client_typescript_validity -v
+
+test-integration: ## Run integration tests (requires external tools)
+	$(MAKE) clients
+	poetry run pytest -m integration -v
 
 lint: ## Run all linters
 	poetry run black --check src/ tests/
