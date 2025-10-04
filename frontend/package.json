@@ -15,8 +15,8 @@
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix",
     "format": "prettier --write src/",
-    "install:hooks": "git config core.hooksPath .githooks && chmod +x ../.githooks/*",
-    "uninstall:hooks": "git config --unset core.hooksPath"
+    "install:hooks": "make -f ../project.mk install-hooks",
+    "uninstall:hooks": "make -f ../project.mk uninstall-hooks"
   },
   "dependencies": {
     "pinia": "^3.0.3",

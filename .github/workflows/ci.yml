@@ -35,32 +35,27 @@ jobs:
         path: backend/.venv
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}
 
-    - name: Install dependencies
-      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+    - name: Install backend dependencies
       working-directory: backend
-      run: poetry install --no-interaction --no-root
-
-    - name: Install project
-      working-directory: backend
-      run: poetry install --no-interaction
+      run: |
+        if [ "${{ steps.cached-poetry-dependencies.outputs.cache-hit }}" != "true" ]; then
+          make install-ci
+        else
+          make install-ci
+        fi
 
     - name: Install Git hooks
       run: |
         git config core.hooksPath .githooks
         chmod +x .githooks/*
 
-    - name: Run tests
+    - name: Run backend tests with coverage
       working-directory: backend
-      run: |
-        poetry run pytest --cov=trading_api --cov-report=xml --cov-report=term-missing
+      run: make test-cov
 
-    - name: Run linting
+    - name: Run backend linting
       working-directory: backend
-      run: |
-        poetry run black --check src/ tests/
-        poetry run isort --check-only src/ tests/
-        poetry run flake8 src/ tests/
-        poetry run mypy src/
+      run: make lint-check
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -85,7 +80,7 @@ jobs:
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
-    - name: Install dependencies
+    - name: Install frontend dependencies
       working-directory: frontend
       run: npm ci
 
@@ -94,21 +89,21 @@ jobs:
         git config core.hooksPath .githooks
         chmod +x .githooks/*
 
-    - name: Run linting
+    - name: Run frontend linting
       working-directory: frontend
       run: |
         npm run lint
         npx prettier --check src/
 
-    - name: Run type checking
+    - name: Run frontend type checking
       working-directory: frontend
       run: npm run type-check
 
-    - name: Run tests
+    - name: Run frontend tests
       working-directory: frontend
       run: npm run test:unit run
 
-    - name: Build
+    - name: Build frontend
       working-directory: frontend
       run: npm run build
 
@@ -141,7 +136,7 @@ jobs:
 
     - name: Install backend dependencies
       working-directory: backend
-      run: poetry install --no-interaction
+      run: make install-ci
 
     - name: Install frontend dependencies
       working-directory: frontend
@@ -149,20 +144,14 @@ jobs:
 
     - name: Start backend server
       working-directory: backend
-      run: |
-        poetry run uvicorn trading_api.main:app --host 0.0.0.0 --port 8000 &
-        sleep 10
+      run: make dev-ci
       env:
         CI: true
 
-    - name: Test API health
-      run: |
-        curl -f http://localhost:8000/api/v1/health || exit 1
-        curl -f http://localhost:8000/api/v1/version || exit 1
+    - name: Test API endpoints
+      working-directory: backend
+      run: make health-ci
 
     - name: Build frontend against live API
       working-directory: frontend
-      run: |
-        npm run build
-      env:
-        VITE_API_URL: http://localhost:8000
+      run: VITE_API_URL=http://localhost:8000 npm run build

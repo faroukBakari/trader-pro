@@ -33,16 +33,16 @@ git clone https://github.com/faroukBakari/trading-api.git
 cd trading-api
 
 # Install Git hooks and dependencies
-make setup
+make -f project.mk setup
 ```
 
 ### Development
 ```bash
 # Start backend (terminal 1)
-make dev-backend
+make -f project.mk dev-backend
 
 # Start frontend (terminal 2)
-make dev-frontend
+make -f project.mk dev-frontend
 ```
 
 - Backend: http://localhost:8000
@@ -59,7 +59,7 @@ Automatic code quality checks run on every commit:
 
 ```bash
 # Install hooks (one-time setup)
-make install-hooks
+make -f project.mk install-hooks
 
 # Skip hooks temporarily
 git commit --no-verify
@@ -68,10 +68,10 @@ git commit --no-verify
 ### Testing
 ```bash
 # Run all tests
-make test
+make -f project.mk test-all
 
 # Backend only
-cd backend && poetry run pytest
+make -C backend test
 
 # Frontend only
 cd frontend && npm run test:unit
@@ -80,10 +80,14 @@ cd frontend && npm run test:unit
 ### Code Quality
 ```bash
 # Run all linters
-make lint
+make -f project.mk lint-all
 
 # Format all code
-make format
+make -f project.mk format-all
+
+# Backend only
+make -C backend lint-check
+make -C backend format
 ```
 
 ## 📖 API Documentation
@@ -147,9 +151,9 @@ The project uses GitHub Actions for continuous integration:
 ### Development Setup for Contributors
 ```bash
 # After cloning
-make setup          # Install all dependencies and hooks
-make dev-backend    # Start backend server
-make dev-frontend   # Start frontend server
+make -f project.mk setup    # Install all dependencies and hooks
+make -f project.mk dev-backend    # Start backend server
+make -f project.mk dev-frontend   # Start frontend server
 ```
 
 ## 📜 License

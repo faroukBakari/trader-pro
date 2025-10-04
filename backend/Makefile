@@ -1,50 +1,109 @@
-.PHONY: help install test test-all test-integration lint format dev clients clean
+# Trading API Backend Makefile
 
-help: ## Show this help message
-	@echo "Available commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+.PHONY: help install test test-cov lint lint-check format build clean dev health clients export-openapi docs-html
 
-install: ## Install dependencies
+# Default target
+help:
+	@echo "Backend targets:"
+	@echo "  install           Install backend dependencies"
+	@echo "  test              Run backend tests"
+	@echo "  test-cov          Run backend tests with coverage"
+	@echo "  lint              Run backend linting (check only)"
+	@echo "  lint-check        Run backend linting with type checking"
+	@echo "  format            Format backend code"
+	@echo "  build             Build backend package"
+	@echo "  dev               Start backend development server"
+	@echo "  clean             Clean build artifacts"
+	@echo "  health            Check backend health"
+	@echo "  clients           Generate API clients"
+	@echo "  export-openapi    Export OpenAPI specification"
+	@echo "  docs-html         Generate static HTML documentation"
+
+# Backend dependency management
+install:
+	@echo "Installing backend dependencies..."
+	@if ! command -v poetry >/dev/null 2>&1; then \
+		echo "Poetry not found. Please install Poetry: https://python-poetry.org/docs/#installation"; \
+		exit 1; \
+	fi
 	poetry install
 
-test: ## Run tests with coverage
-	poetry run pytest --cov=trading_api --cov-report=term-missing --cov-report=html
+# CI-optimized install (non-interactive)
+install-ci:
+	@echo "Installing backend dependencies for CI..."
+	poetry install --no-interaction --no-root
+	poetry install --no-interaction
 
-test-all: ## Run all tests including client generation tests
-	poetry run pytest --cov=trading_api --cov-report=term-missing --cov-report=html -m "not integration"
-	$(MAKE) clients
-	poetry run pytest tests/test_client_generation.py::TestClientGeneration::test_generated_vue_client_structure -v
-	poetry run pytest tests/test_client_generation.py::TestClientGeneration::test_generated_vue_client_typescript_validity -v
+# Testing
+test:
+	@echo "Running backend tests..."
+	poetry run pytest -v
 
-test-integration: ## Run integration tests (requires external tools)
-	$(MAKE) clients
-	poetry run pytest -m integration -v
+test-cov:
+	@echo "Running backend tests with coverage..."
+	poetry run pytest --cov=trading_api --cov-report=xml --cov-report=term-missing
 
-lint: ## Run all linters
+# Linting and formatting
+lint:
+	@echo "Running backend linting..."
+	poetry run flake8 src/ tests/
+
+lint-check:
+	@echo "Running backend linting with full checks..."
 	poetry run black --check src/ tests/
 	poetry run isort --check-only src/ tests/
 	poetry run flake8 src/ tests/
 	poetry run mypy src/
 
-format: ## Format code with black and isort
+format:
+	@echo "Formatting backend code..."
 	poetry run black src/ tests/
 	poetry run isort src/ tests/
 
-dev: ## Start development server
-	poetry run uvicorn trading_api.main:app --host 0.0.0.0 --port 8000 --reload
+# Development server
+dev:
+	@echo "Starting backend development server on http://localhost:8000"
+	poetry run uvicorn trading_api.main:app --reload --host 0.0.0.0 --port 8000
 
-clients: ## Generate API clients (Vue.js, Python)
+# CI development server (background)
+dev-ci:
+	@echo "Starting backend server for CI..."
+	poetry run uvicorn trading_api.main:app --host 0.0.0.0 --port 8000 &
+	sleep 10
+
+# Build
+build:
+	@echo "Building backend package..."
+	poetry build
+
+# Health check
+health:
+	@echo "Checking backend health..."
+	@curl -f http://localhost:8000/api/v1/health 2>/dev/null || echo "Backend not running"
+
+# CI health check
+health-ci:
+	@echo "Testing API endpoints for CI..."
+	curl -f http://localhost:8000/api/v1/health || exit 1
+	curl -f http://localhost:8000/api/v1/version || exit 1
+
+# Cleanup
+clean:
+	@echo "Cleaning backend build artifacts..."
+	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage
+	@echo "Backend clean complete."
+
+# Client generation
+clients:
+	@echo "Generating API clients..."
 	./scripts/generate-clients.sh
 
-export-openapi: ## Export OpenAPI specification
+# Export OpenAPI specification
+export-openapi:
+	@echo "Exporting OpenAPI specification..."
 	curl -s http://localhost:8000/api/v1/openapi.json -o openapi.json
 
-docs-html: ## Generate static HTML documentation
+# Generate static HTML documentation
+docs-html:
+	@echo "Generating static HTML documentation..."
 	npx redoc-cli bundle openapi.json -o docs/api.html
-
-clean: ## Clean generated files
-	rm -rf clients/
-	rm -f openapi.json openapi-3.0.json
-	rm -rf .pytest_cache/
-	rm -rf htmlcov/
-	rm -rf .coverage
