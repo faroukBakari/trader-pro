@@ -122,18 +122,25 @@ const success = await testApiIntegration()
 
 ## Client Generation
 
-The API client is automatically generated from the backend's OpenAPI specification:
+The API client is automatically generated from the backend's OpenAPI specification.
+
+**⚠️ Note**: Client generation requires a running backend server and is not part of the build process.
 
 ```bash
-# Generate client manually
+# Generate client manually (requires backend running)
 npm run client:generate
 
-# Watch for API changes and regenerate
+# Watch for API changes and regenerate (development only)
 npm run client:watch
 
-# Development with auto-generation
+# Development with client generation
 npm run dev:with-client
 ```
+
+**For Production Builds**:
+- The frontend works without generated client (uses mock data)
+- Generate client separately in development/staging environments
+- Include generated client files in deployment if needed
 
 ## Benefits
 
