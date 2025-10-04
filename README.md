@@ -44,9 +44,35 @@ poetry run pytest
 ### API Documentation
 
 Once the server is running, visit:
-- Interactive docs: http://127.0.0.1:8000/docs
-- ReDoc: http://127.0.0.1:8000/redoc
-- OpenAPI spec: http://127.0.0.1:8000/openapi.json
+- Interactive docs: http://127.0.0.1:8000/api/v1/docs
+- ReDoc: http://127.0.0.1:8000/api/v1/redoc
+- OpenAPI spec: http://127.0.0.1:8000/api/v1/openapi.json
+
+### Client Generation
+
+Generate typed clients for different platforms:
+
+```bash
+# Generate all clients (Vue.js TypeScript + Python)
+make clients
+
+# Or use the script directly
+./scripts/generate-clients.sh
+```
+
+**Vue.js/TypeScript Client:**
+```bash
+# Install the generated client in your Vue.js project
+cd clients/vue-client
+npm install
+# Copy the generated files to your Vue.js project
+```
+
+**Python Client:**
+```bash
+# Install the generated Python client
+pip install ./clients/python-client
+```
 
 ## Development
 

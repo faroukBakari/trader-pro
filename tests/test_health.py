@@ -9,7 +9,10 @@ from trading_api.main import app
 async def test_healthcheck_returns_200_and_payload() -> None:
     """Test that health endpoint returns status 200 with correct payload."""
     async with AsyncClient(app=app, base_url="http://test") as ac:
-        response = await ac.get("/health")
+        response = await ac.get("/api/v1/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["message"] == "Trading API is running"
+    assert "timestamp" in data
