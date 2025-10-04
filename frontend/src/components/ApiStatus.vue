@@ -7,12 +7,8 @@
       <div v-if="clientType === 'server'" class="client-type server">
         🌐 Connected to Live Server
       </div>
-      <div v-else-if="clientType === 'mock'" class="client-type mock">
-        🎭 Using Mock Client
-      </div>
-      <div v-else class="client-type unknown">
-        ⏳ Checking Connection...
-      </div>
+      <div v-else-if="clientType === 'mock'" class="client-type mock">🎭 Using Mock Client</div>
+      <div v-else class="client-type unknown">⏳ Checking Connection...</div>
     </div>
 
     <div class="status-grid">
@@ -37,11 +33,15 @@
             <li v-for="version in versionsData.available_versions" :key="version.version">
               {{ version.version }} - {{ version.status }}
               <span v-if="version.deprecation_notice" class="deprecated">(deprecated)</span>
-              <span v-if="version.sunset_date" class="sunset">sunset: {{ new Date(version.sunset_date).toLocaleDateString() }}</span>
+              <span v-if="version.sunset_date" class="sunset"
+                >sunset: {{ new Date(version.sunset_date).toLocaleDateString() }}</span
+              >
             </li>
           </ul>
           <p class="docs-link">
-            <a :href="versionsData.documentation_url" target="_blank" rel="noopener">📚 API Documentation</a>
+            <a :href="versionsData.documentation_url" target="_blank" rel="noopener"
+              >📚 API Documentation</a
+            >
           </p>
         </div>
       </div>

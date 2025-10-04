@@ -36,6 +36,7 @@ export interface ApiServiceInterface {
 }
 
 // Dynamic import helper for generated client
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let generatedClient: any = null
 let clientLoadAttempted = false
 
@@ -56,7 +57,7 @@ async function getGeneratedClient() {
       console.info('✅ Generated API client loaded successfully')
     }
     return generatedClient
-  } catch (error) {
+  } catch {
     return null
   }
 }
@@ -65,9 +66,9 @@ async function getGeneratedClient() {
 const MOCK_CONFIG = {
   networkDelay: {
     health: 100,
-    versions: 150
+    versions: 150,
   },
-  enableLogs: false  // Disabled by default for cleaner UX
+  enableLogs: false, // Disabled by default for cleaner UX
 }
 
 // Fallback implementation with mock data for development/testing
@@ -78,7 +79,7 @@ class FallbackApiService implements ApiServiceInterface {
     }
 
     // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, MOCK_CONFIG.networkDelay.health))
+    await new Promise((resolve) => setTimeout(resolve, MOCK_CONFIG.networkDelay.health))
 
     return {
       status: 'ok',
@@ -90,7 +91,7 @@ class FallbackApiService implements ApiServiceInterface {
         release_date: new Date().toISOString().split('T')[0],
         status: 'stable',
         deprecation_notice: null,
-      }
+      },
     }
   }
 
@@ -100,7 +101,7 @@ class FallbackApiService implements ApiServiceInterface {
     }
 
     // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, MOCK_CONFIG.networkDelay.versions))
+    await new Promise((resolve) => setTimeout(resolve, MOCK_CONFIG.networkDelay.versions))
 
     return {
       current_version: 'v1',
@@ -120,14 +121,14 @@ class FallbackApiService implements ApiServiceInterface {
           breaking_changes: [
             'Authentication required for all endpoints',
             'New response format for error messages',
-            'Renamed health endpoint to status'
+            'Renamed health endpoint to status',
           ],
           deprecation_notice: null,
           sunset_date: null,
-        }
+        },
       ],
       documentation_url: 'https://api.trading.com/docs',
-      support_contact: 'support@trading.com'
+      support_contact: 'support@trading.com',
     }
   }
 }
@@ -145,7 +146,7 @@ class ApiService implements ApiServiceInterface {
         const response = await client.getHealthStatus()
         this.isUsingMockClient = false
         return response.data
-      } catch (error) {
+      } catch {
         // Silently fall back to mock data
         this.isUsingMockClient = true
       }
@@ -166,6 +167,9 @@ class ApiService implements ApiServiceInterface {
         return response.data
       } catch (error) {
         // Silently fall back to mock data
+        if (MOCK_CONFIG.enableLogs) {
+          console.error('API client getAPIVersions() failed:', error)
+        }
         this.isUsingMockClient = true
       }
     } else {

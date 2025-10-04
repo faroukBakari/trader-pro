@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { apiService, ApiService, MOCK_CONFIG, type HealthResponse, type APIMetadata } from '../apiService'
+import { apiService, ApiService, MOCK_CONFIG } from '../apiService'
 
 describe('ApiService', () => {
   beforeEach(() => {
@@ -25,7 +25,7 @@ describe('ApiService', () => {
         message: expect.stringContaining('Trading API is running'),
         api_version: 'v1',
         timestamp: expect.any(String),
-        version_info: expect.any(Object)
+        version_info: expect.any(Object),
       })
 
       // Verify timestamp is recent (within last minute)
@@ -54,15 +54,15 @@ describe('ApiService', () => {
         available_versions: expect.arrayContaining([
           expect.objectContaining({
             version: 'v1',
-            status: 'stable'
+            status: 'stable',
           }),
           expect.objectContaining({
             version: 'v2',
-            status: 'planned'
-          })
+            status: 'planned',
+          }),
         ]),
         documentation_url: expect.stringContaining('trading.com'),
-        support_contact: expect.stringContaining('@trading.com')
+        support_contact: expect.stringContaining('@trading.com'),
       })
     })
 
@@ -71,8 +71,8 @@ describe('ApiService', () => {
 
       expect(result.available_versions).toHaveLength(2)
 
-      const v1 = result.available_versions.find(v => v.version === 'v1')
-      const v2 = result.available_versions.find(v => v.version === 'v2')
+      const v1 = result.available_versions.find((v) => v.version === 'v1')
+      const v2 = result.available_versions.find((v) => v.version === 'v2')
 
       expect(v1?.status).toBe('stable')
       expect(v2?.status).toBe('planned')

@@ -57,8 +57,8 @@ When using the fallback (mock) implementation:
 import { MOCK_CONFIG } from '@/services/apiService'
 
 // Customize mock behavior
-MOCK_CONFIG.networkDelay.health = 50  // Faster for testing
-MOCK_CONFIG.enableLogs = false        // Quiet during tests
+MOCK_CONFIG.networkDelay.health = 50 // Faster for testing
+MOCK_CONFIG.enableLogs = false // Quiet during tests
 ```
 
 ### Generated Client (Advanced)
@@ -85,7 +85,7 @@ import { apiService, MOCK_CONFIG } from '../apiService'
 
 // Customize mock behavior for testing
 MOCK_CONFIG.enableLogs = false
-MOCK_CONFIG.networkDelay.health = 0  // No delay for faster tests
+MOCK_CONFIG.networkDelay.health = 0 // No delay for faster tests
 
 // Test the mock responses
 const health = await apiService.getHealth()
@@ -104,8 +104,8 @@ import { vi } from 'vitest'
 vi.mock('@/services/generated/client-config', () => ({
   apiClient: {
     getHealthStatus: vi.fn(),
-    getAPIVersions: vi.fn()
-  }
+    getAPIVersions: vi.fn(),
+  },
 }))
 
 // Your test here...

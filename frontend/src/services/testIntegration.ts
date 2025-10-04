@@ -14,7 +14,7 @@ export async function testApiIntegration() {
     console.log('✅ Health check successful:', {
       status: health.status,
       api_version: health.api_version,
-      timestamp: health.timestamp
+      timestamp: health.timestamp,
     })
 
     console.log('📡 Testing versions endpoint...')
@@ -22,12 +22,11 @@ export async function testApiIntegration() {
     console.log('✅ Versions check successful:', {
       current_version: versions.current_version,
       available_versions_count: versions.available_versions.length,
-      documentation_url: versions.documentation_url
+      documentation_url: versions.documentation_url,
     })
 
     console.log('🎉 All API service tests passed!')
     return true
-
   } catch (error) {
     console.error('❌ API service test failed:', error)
 
