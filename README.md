@@ -5,13 +5,14 @@ A FastAPI-based trading API server built with Test Driven Development.
 ## Quick Start
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.10+
 - Poetry (recommended) or pip
 
 ### Installation
 
 Using Poetry:
 ```bash
+poetry config virtualenvs.in-project true
 poetry install
 poetry shell
 ```
