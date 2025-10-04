@@ -15,14 +15,20 @@
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix",
     "format": "prettier --write src/",
-    "fix-whitespace": "find src/ -name '*.ts' -o -name '*.vue' | xargs sed -i 's/[[:space:]]*$//'"
+    "fix-whitespace": "find src/ -name '*.ts' -o -name '*.vue' | xargs sed -i 's/[[:space:]]*$//'",
+    "client:generate": "cd ../backend && make frontend-client",
+    "client:watch": "cd ../backend && make watch-client",
+    "dev:with-client": "npm run client:generate && npm run dev",
+    "prebuild": "npm run client:generate"
   },
   "dependencies": {
+    "axios": "^1.6.2",
     "pinia": "^3.0.3",
     "vue": "^3.5.22",
     "vue-router": "^4.5.1"
   },
   "devDependencies": {
+    "@openapitools/openapi-generator-cli": "^2.7.0",
     "@tsconfig/node22": "^22.0.2",
     "@types/jsdom": "^21.1.7",
     "@types/node": "^22.18.6",

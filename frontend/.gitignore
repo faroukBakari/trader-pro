@@ -27,4 +27,7 @@ coverage
 *.sln
 *.sw?
 
+# Generated API client
+src/services/generated/
+
 *.tsbuildinfo

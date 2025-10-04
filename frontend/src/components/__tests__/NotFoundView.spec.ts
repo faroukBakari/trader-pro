@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createRouter, createWebHistory } from 'vue-router'
-import NotFoundView from '../../views/NotFoundView.vue'
+import NotFoundView from '@/views/NotFoundView.vue'
 
 // Create a simple mock router
 const router = createRouter({

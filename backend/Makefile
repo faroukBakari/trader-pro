@@ -16,6 +16,8 @@ help:
 	@echo "  clean             Clean build artifacts"
 	@echo "  health            Check backend health"
 	@echo "  clients           Generate API clients"
+	@echo "  frontend-client   Generate frontend TypeScript client"
+	@echo "  watch-client      Watch for changes and regenerate frontend client"
 	@echo "  export-openapi    Export OpenAPI specification"
 	@echo "  docs-html         Generate static HTML documentation"
 
@@ -97,6 +99,22 @@ clean:
 clients:
 	@echo "Generating API clients..."
 	./scripts/generate-clients.sh
+
+frontend-client:
+	@echo "Generating frontend TypeScript client..."
+	./scripts/generate-frontend-client.sh
+
+watch-client:
+	@echo "Starting watch mode for frontend client..."
+	./scripts/watch-api-changes.sh
+
+frontend-client:
+	@echo "Generating frontend TypeScript client..."
+	./scripts/generate-frontend-client.sh
+
+watch-client:
+	@echo "Starting watch mode for frontend client..."
+	./scripts/watch-api-changes.sh
 
 # Export OpenAPI specification
 export-openapi:

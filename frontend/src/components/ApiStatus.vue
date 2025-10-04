@@ -1,6 +1,20 @@
 <template>
   <div class="api-status">
     <h3>API Status</h3>
+
+    <!-- Client Type Indicator -->
+    <div class="client-type-indicator">
+      <div v-if="clientType === 'server'" class="client-type server">
+        🌐 Connected to Live Server
+      </div>
+      <div v-else-if="clientType === 'mock'" class="client-type mock">
+        🎭 Using Mock Client
+      </div>
+      <div v-else class="client-type unknown">
+        ⏳ Checking Connection...
+      </div>
+    </div>
+
     <div class="status-grid">
       <div class="status-item">
         <h4>Health Check</h4>
@@ -20,11 +34,15 @@
         <div v-else-if="versionsData" class="success">
           <p>Current: {{ versionsData.current_version }}</p>
           <ul>
-            <li v-for="version in versionsData.versions" :key="version.version">
+            <li v-for="version in versionsData.available_versions" :key="version.version">
               {{ version.version }} - {{ version.status }}
-              <span v-if="version.deprecated" class="deprecated">(deprecated)</span>
+              <span v-if="version.deprecation_notice" class="deprecated">(deprecated)</span>
+              <span v-if="version.sunset_date" class="sunset">sunset: {{ new Date(version.sunset_date).toLocaleDateString() }}</span>
             </li>
           </ul>
+          <p class="docs-link">
+            <a :href="versionsData.documentation_url" target="_blank" rel="noopener">📚 API Documentation</a>
+          </p>
         </div>
       </div>
     </div>
@@ -35,7 +53,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { apiService, type HealthResponse, type ApiVersionsResponse } from '@/services/api'
+import { apiService, type HealthResponse, type APIMetadata } from '@/services/apiService'
 
 // Health check state
 const healthData = ref<HealthResponse | null>(null)
@@ -43,15 +61,20 @@ const healthLoading = ref(false)
 const healthError = ref<string | null>(null)
 
 // Versions state
-const versionsData = ref<ApiVersionsResponse | null>(null)
+const versionsData = ref<APIMetadata | null>(null)
 const versionsLoading = ref(false)
 const versionsError = ref<string | null>(null)
+
+// Client type state
+const clientType = ref<'server' | 'mock' | 'unknown'>('unknown')
 
 const fetchHealth = async () => {
   healthLoading.value = true
   healthError.value = null
   try {
     healthData.value = await apiService.getHealth()
+    // Update client type after successful call
+    clientType.value = apiService.getClientType()
   } catch (error) {
     healthError.value = error instanceof Error ? error.message : 'Unknown error'
   } finally {
@@ -64,6 +87,8 @@ const fetchVersions = async () => {
   versionsError.value = null
   try {
     versionsData.value = await apiService.getVersions()
+    // Update client type after successful call
+    clientType.value = apiService.getClientType()
   } catch (error) {
     versionsError.value = error instanceof Error ? error.message : 'Unknown error'
   } finally {
@@ -85,6 +110,36 @@ onMounted(() => {
   max-width: 800px;
   margin: 0 auto;
   padding: 20px;
+}
+
+.client-type-indicator {
+  margin-bottom: 20px;
+}
+
+.client-type {
+  display: inline-block;
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.client-type.server {
+  background: #e8f5e8;
+  color: #2e7d32;
+  border: 1px solid #c8e6c9;
+}
+
+.client-type.mock {
+  background: #fff3e0;
+  color: #f57c00;
+  border: 1px solid #ffcc02;
+}
+
+.client-type.unknown {
+  background: #f5f5f5;
+  color: #666;
+  border: 1px solid #ddd;
 }
 
 .status-grid {
@@ -132,6 +187,27 @@ onMounted(() => {
 .deprecated {
   color: #f57c00;
   font-size: 0.8em;
+}
+
+.sunset {
+  color: #d32f2f;
+  font-size: 0.8em;
+  margin-left: 8px;
+}
+
+.docs-link {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #ddd;
+}
+
+.docs-link a {
+  color: #42b883;
+  text-decoration: none;
+}
+
+.docs-link a:hover {
+  text-decoration: underline;
 }
 
 button {

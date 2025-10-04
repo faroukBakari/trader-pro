@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ApiStatus from '../ApiStatus.vue'
-import * as apiService from '@/services/api'
-import type { HealthResponse, ApiVersionsResponse } from '@/services/api'
+import * as apiService from '@/services/apiService'
+import type { HealthResponse, APIMetadata } from '@/services/apiService'
 
 // Mock the API service
-vi.mock('@/services/api', () => ({
+vi.mock('@/services/apiService', () => ({
   apiService: {
     getHealth: vi.fn(),
     getVersions: vi.fn(),
@@ -34,13 +34,17 @@ describe('ApiStatus', () => {
 
     vi.mocked(apiService.apiService.getVersions).mockResolvedValue({
       current_version: 'v1',
-      versions: [
+      available_versions: [
         {
           version: 'v1',
           status: 'stable',
-          deprecated: false,
+          release_date: '2025-01-01',
+          deprecation_notice: null,
+          sunset_date: null,
         },
       ],
+      documentation_url: 'https://api.example.com/docs',
+      support_contact: 'support@example.com',
     })
 
     const wrapper = mount(ApiStatus)
@@ -52,7 +56,7 @@ describe('ApiStatus', () => {
   it('shows loading state initially', async () => {
     // Mock pending promises that never resolve
     const healthPromise = new Promise<HealthResponse>(() => {}) // Never resolves
-    const versionsPromise = new Promise<ApiVersionsResponse>(() => {}) // Never resolves
+    const versionsPromise = new Promise<APIMetadata>(() => {}) // Never resolves
 
     vi.mocked(apiService.apiService.getHealth).mockReturnValue(healthPromise)
     vi.mocked(apiService.apiService.getVersions).mockReturnValue(versionsPromise)
