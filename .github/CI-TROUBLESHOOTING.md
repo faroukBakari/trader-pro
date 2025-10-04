@@ -69,6 +69,30 @@
 - Use appropriate Python/Node setup actions
 - Consider reducing matrix for faster CI
 
+### 7. API endpoint 404 errors in integration tests
+
+**Error**: `curl: (22) The requested URL returned error: 404`
+
+**Common causes**:
+- Incorrect API endpoint URLs
+- Server not fully started
+- Wrong base URL or missing API prefix
+
+**Solutions**:
+- Verify endpoint URLs match the FastAPI router configuration
+- Check `/api/v1/health` not `/health`
+- Check `/api/v1/version` not `/api/v1/api/v1/version`
+- Increase sleep time after starting server
+- Use health check with retry logic
+
+**Debug API endpoints**:
+```bash
+# Check what endpoints are available
+curl http://localhost:8000/api/v1/docs
+# Or check the root endpoint for available routes
+curl http://localhost:8000/
+```
+
 ## Best Practices
 
 ### For Backend (Python)
@@ -116,7 +140,8 @@ npm run build
 # Test integration
 cd backend && poetry run uvicorn trading_api.main:app --port 8000 &
 sleep 5
-curl -f http://localhost:8000/health
+curl -f http://localhost:8000/api/v1/health
+curl -f http://localhost:8000/api/v1/version
 ```
 
 ## Monitoring CI
