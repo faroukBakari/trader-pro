@@ -1,0 +1,144 @@
+#!/bin/bash
+# Pre-commit hook dispatcher for trading-api
+# This script runs appropriate checks based on changed files
+
+set -e
+
+# Source shared library
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$script_dir/shared-lib.sh"
+
+# Repository root
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# Check if we should skip hooks
+if should_skip_hooks; then
+    log_warning "Skipping pre-commit hooks (SKIP_HOOKS=true or NO_VERIFY=true)"
+    exit 0
+fi
+
+log_info "Running pre-commit checks for trading-api..."
+
+# Detect what files are staged
+backend_files=$(get_staged_files "^backend/.*\.py$")
+frontend_files=$(get_staged_files "^frontend/.*\.(js|ts|vue)$")
+config_files=$(get_staged_files "\.(json|yaml|yml|toml)$")
+
+# Track failures
+failed_checks=()
+
+# Common checks for all files
+if [[ -n "$config_files" ]] || [[ -n "$backend_files" ]] || [[ -n "$frontend_files" ]]; then
+    log_info "Running common file checks..."
+
+    # Check for trailing whitespace
+    if ! run_check "Trailing whitespace check" "git diff --check --cached"; then
+        failed_checks+=("trailing-whitespace")
+    fi
+
+    # Check for merge conflicts (avoid false positives from regex patterns)
+    if git diff --cached --name-only | xargs -I {} git show :{} 2>/dev/null | grep -E "^(<<<<<<<|=======|>>>>>>>)"; then
+        log_error "Merge conflict markers found in staged files"
+        failed_checks+=("merge-conflicts")
+    fi
+fi
+
+# Backend Python checks
+if [[ -n "$backend_files" ]]; then
+    log_info "Found Python files, running backend checks..."
+
+    cd "$repo_root/backend"
+
+    # Check if Poetry is available
+    if ! command_exists poetry; then
+        log_error "Poetry not found. Please install Poetry to run backend checks."
+        failed_checks+=("poetry-missing")
+    else
+        # Python formatting with Black
+        if ! run_check "Black formatting" "poetry run black --check --diff src/ tests/" "$repo_root/backend"; then
+            log_warning "Run 'cd backend && poetry run black src/ tests/' to fix formatting"
+            failed_checks+=("black")
+        fi
+
+        # Import sorting with isort
+        if ! run_check "Import sorting" "poetry run isort --check-only --diff src/ tests/" "$repo_root/backend"; then
+            log_warning "Run 'cd backend && poetry run isort src/ tests/' to fix import order"
+            failed_checks+=("isort")
+        fi
+
+        # Linting with flake8
+        if ! run_check "Flake8 linting" "poetry run flake8 src/ tests/" "$repo_root/backend"; then
+            failed_checks+=("flake8")
+        fi
+
+        # Type checking with mypy
+        if ! run_check "MyPy type checking" "poetry run mypy src/" "$repo_root/backend"; then
+            failed_checks+=("mypy")
+        fi
+
+        # Run tests (only if not in CI for speed)
+        if ! is_ci; then
+            if ! run_check "Backend tests" "poetry run pytest tests/ -v" "$repo_root/backend"; then
+                failed_checks+=("backend-tests")
+            fi
+        fi
+    fi
+fi
+
+# Frontend TypeScript/Vue checks
+if [[ -n "$frontend_files" ]]; then
+    log_info "Found frontend files, running frontend checks..."
+
+    cd "$repo_root/frontend"
+
+    # Check if npm is available
+    if ! command_exists npm; then
+        log_error "npm not found. Please install Node.js and npm to run frontend checks."
+        failed_checks+=("npm-missing")
+    else
+        # Check if node_modules exists
+        if [[ ! -d "node_modules" ]]; then
+            log_warning "node_modules not found. Running npm install..."
+            npm install
+        fi
+
+        # ESLint
+        if ! run_check "ESLint" "npm run lint" "$repo_root/frontend"; then
+            log_warning "Run 'cd frontend && npm run lint' to fix linting issues"
+            failed_checks+=("eslint")
+        fi
+
+        # Prettier formatting
+        if ! run_check "Prettier formatting" "npx prettier --check src/" "$repo_root/frontend"; then
+            log_warning "Run 'cd frontend && npm run format' to fix formatting"
+            failed_checks+=("prettier")
+        fi
+
+        # TypeScript type checking
+        if ! run_check "TypeScript checking" "npm run type-check" "$repo_root/frontend"; then
+            failed_checks+=("typescript")
+        fi
+
+        # Run tests (only if not in CI for speed)
+        if ! is_ci; then
+            if ! run_check "Frontend tests" "npm run test:unit run" "$repo_root/frontend"; then
+                failed_checks+=("frontend-tests")
+            fi
+        fi
+    fi
+fi
+
+# Summary
+if [[ ${#failed_checks[@]} -eq 0 ]]; then
+    log_success "All pre-commit checks passed! 🎉"
+    exit 0
+else
+    log_error "Pre-commit checks failed: ${failed_checks[*]}"
+    echo
+    log_info "To skip these checks temporarily, use: git commit --no-verify"
+    log_info "To skip all hooks: SKIP_HOOKS=true git commit"
+    echo
+    log_info "Fix the issues above and try committing again."
+    exit 1
+fi
