@@ -8,6 +8,10 @@ echo "🚀 Generating Vue.js client from OpenAPI specification..."
 # Create clients directory if it doesn't exist
 mkdir -p clients
 
+# Clean up existing clients to avoid conflicts
+echo "🧹 Cleaning up existing clients..."
+rm -rf clients/vue-client clients/python-client clients/trading-api-client clients/my-test-api-client
+
 # Start the API server temporarily if not running
 API_RUNNING=$(curl -s http://localhost:8000/api/v1/health > /dev/null 2>&1 && echo "true" || echo "false")
 
@@ -39,15 +43,17 @@ echo "🔧 Generating Python client (for reference)..."
 cd clients
 if poetry run openapi-python-client generate --path ../openapi-3.0.json; then
     # Rename the generated directory to python-client for consistency
-    if [ -d "trading-api-client" ]; then
-        mv trading-api-client python-client
-    elif [ -d "my-test-api-client" ]; then
-        mv my-test-api-client python-client
-    fi
+    for dir in trading-api-client my-test-api-client; do
+        if [ -d "$dir" ]; then
+            mv "$dir" python-client
+            break
+        fi
+    done
     echo "✅ Python client generated successfully"
 else
-    echo "⚠️  Python client generation failed (likely due to OpenAPI 3.1 compatibility)"
-    echo "   Consider using the Vue.js TypeScript client or other generators"
+    echo "⚠️  Python client generation failed"
+    echo "   This is usually due to OpenAPI version compatibility issues"
+    echo "   The Vue.js TypeScript client should work perfectly"
 fi
 cd ..
 

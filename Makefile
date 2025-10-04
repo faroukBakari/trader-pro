@@ -44,7 +44,7 @@ docs-html: ## Generate static HTML documentation
 
 clean: ## Clean generated files
 	rm -rf clients/
-	rm -f openapi.json
+	rm -f openapi.json openapi-3.0.json
 	rm -rf .pytest_cache/
 	rm -rf htmlcov/
 	rm -rf .coverage
