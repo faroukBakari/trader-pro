@@ -4,8 +4,15 @@ const API_BASE_URL = ''
 
 export interface HealthResponse {
   status: string
-  api_version: string
+  message: string
   timestamp: string
+  api_version: string
+  version_info: {
+    version: string
+    release_date: string
+    status: string
+    deprecation_notice: string | null
+  }
 }
 
 export interface ApiVersion {

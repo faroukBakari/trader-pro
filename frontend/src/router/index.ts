@@ -5,12 +5,13 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      redirect: '/api-status',
-    },
-    {
-      path: '/api-status',
       name: 'api-status',
       component: () => import('../views/ApiStatusView.vue'),
+    },
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('../views/NotFoundView.vue'),
     },
   ],
 })

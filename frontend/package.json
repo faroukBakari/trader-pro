@@ -15,8 +15,7 @@
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix",
     "format": "prettier --write src/",
-    "install:hooks": "make -f ../project.mk install-hooks",
-    "uninstall:hooks": "make -f ../project.mk uninstall-hooks"
+    "fix-whitespace": "find src/ -name '*.ts' -o -name '*.vue' | xargs sed -i 's/[[:space:]]*$//'"
   },
   "dependencies": {
     "pinia": "^3.0.3",

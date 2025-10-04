@@ -5,12 +5,16 @@ import { RouterView } from 'vue-router'
 <template>
   <header>
     <div class="header-content">
-      <h1>Trading API Frontend</h1>
+      <router-link to="/" class="logo">
+        <h1>Trading API Frontend</h1>
+      </router-link>
       <p>Monitor your FastAPI backend status</p>
     </div>
   </header>
 
-  <RouterView />
+  <main>
+    <RouterView />
+  </main>
 </template>
 
 <style scoped>
@@ -22,16 +26,30 @@ header {
   margin-bottom: 2rem;
 }
 
+.logo {
+  text-decoration: none;
+  color: inherit;
+}
+
+.logo:hover {
+  opacity: 0.9;
+}
+
 .header-content h1 {
   margin: 0;
   font-size: 2.5rem;
   font-weight: 600;
+  transition: opacity 0.2s ease;
 }
 
 .header-content p {
   margin: 0.5rem 0 0 0;
   font-size: 1.1rem;
   opacity: 0.9;
+}
+
+main {
+  min-height: calc(100vh - 200px);
 }
 
 @media (max-width: 768px) {
