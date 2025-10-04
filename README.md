@@ -43,10 +43,51 @@ poetry run pytest
 
 ### API Documentation
 
+The Trading API supports versioning to ensure backwards compatibility and smooth transitions.
+
+**Current Version**: v1 (stable)
+
 Once the server is running, visit:
-- Interactive docs: http://127.0.0.1:8000/api/v1/docs
-- ReDoc: http://127.0.0.1:8000/api/v1/redoc
-- OpenAPI spec: http://127.0.0.1:8000/api/v1/openapi.json
+- **API Root**: http://127.0.0.1:8000/ - API information and version details
+- **Interactive docs**: http://127.0.0.1:8000/api/v1/docs
+- **ReDoc**: http://127.0.0.1:8000/api/v1/redoc
+- **OpenAPI spec**: http://127.0.0.1:8000/api/v1/openapi.json
+- **Version info**: http://127.0.0.1:8000/api/v1/versions
+- **Health check**: http://127.0.0.1:8000/api/v1/health
+
+### API Versioning
+
+The API uses URL-based versioning with the following strategy:
+
+- **Current version**: `/api/v1/` (stable)
+- **Future version**: `/api/v2/` (planned with breaking changes)
+
+#### Version Information Endpoints
+
+```bash
+# Get all available versions
+GET /api/v1/versions
+
+# Get current version info
+GET /api/v1/version
+
+# Health check with version info
+GET /api/v1/health
+```
+
+#### Breaking Changes Planning
+
+Version 2 (v2) will include:
+- Authentication required for all endpoints
+- New response format for error messages
+- Renamed health endpoint to status
+
+#### Versioning Best Practices
+
+1. **Always specify version** in your API calls
+2. **Monitor deprecation notices** via `/api/v1/versions`
+3. **Test against new versions** before they become stable
+4. **Update clients** before old versions sunset
 
 ### Client Generation
 

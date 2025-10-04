@@ -5,12 +5,10 @@ set -e
 
 echo "🚀 Generating Vue.js client from OpenAPI specification..."
 
-# Create clients directory if it doesn't exist
+# Clean up existing clients directory completely to avoid conflicts
+echo "🧹 Cleaning up existing clients directory..."
+rm -rf clients/
 mkdir -p clients
-
-# Clean up existing clients to avoid conflicts
-echo "🧹 Cleaning up existing clients..."
-rm -rf clients/vue-client clients/python-client clients/trading-api-client clients/my-test-api-client
 
 # Start the API server temporarily if not running
 API_RUNNING=$(curl -s http://localhost:8000/api/v1/health > /dev/null 2>&1 && echo "true" || echo "false")
@@ -28,7 +26,20 @@ curl -s http://localhost:8000/api/v1/openapi.json -o openapi.json
 
 # Create OpenAPI 3.0 version for Python client compatibility
 echo "🔄 Creating OpenAPI 3.0 compatible version..."
-jq '.openapi = "3.0.3"' openapi.json > openapi-3.0.json
+jq '
+  .openapi = "3.0.3" |
+  # Convert anyOf with null to nullable properties for 3.0 compatibility
+  walk(
+    if type == "object" and has("anyOf") and
+       (.anyOf | length == 2) and
+       (.anyOf[1] | type == "object" and .type == "null") then
+      {
+        type: .anyOf[0].type,
+        nullable: true
+      } + (if .title then {title: .title} else {} end)
+    else . end
+  )
+' openapi.json > openapi-3.0.json
 
 # Generate TypeScript/Vue.js client using openapi-generator
 echo "🔧 Generating Vue.js TypeScript client..."

@@ -92,6 +92,8 @@ class TestClientGeneration:
         assert "status" in health_response_schema["properties"]
         assert "message" in health_response_schema["properties"]
         assert "timestamp" in health_response_schema["properties"]
+        assert "api_version" in health_response_schema["properties"]
+        assert "version_info" in health_response_schema["properties"]
 
     def test_generate_clients_script_exists(self) -> None:
         """Test that the client generation script exists and is executable."""

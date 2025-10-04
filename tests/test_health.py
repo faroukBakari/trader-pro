@@ -16,3 +16,8 @@ async def test_healthcheck_returns_200_and_payload() -> None:
     assert data["status"] == "ok"
     assert data["message"] == "Trading API is running"
     assert "timestamp" in data
+    assert "api_version" in data
+    assert data["api_version"] == "v1"
+    assert "version_info" in data
+    assert data["version_info"]["version"] == "v1"
+    assert data["version_info"]["status"] == "stable"
