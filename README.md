@@ -1,0 +1,164 @@
+# Trading API
+
+[![CI](https://github.com/faroukBakari/trading-api/actions/workflows/ci.yml/badge.svg)](https://github.com/faroukBakari/trading-api/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/faroukBakari/trading-api/branch/main/graph/badge.svg)](https://codecov.io/gh/faroukBakari/trading-api)
+
+A FastAPI-based trading API with Vue.js frontend, built with modern development practices.
+
+## 🏗️ Project Structure
+
+```
+├── backend/          # FastAPI application
+│   ├── src/         # Source code
+│   ├── tests/       # Test files
+│   └── pyproject.toml
+├── frontend/        # Vue.js application
+│   ├── src/         # Source code
+│   └── package.json
+├── .githooks/       # Git hooks for code quality
+└── .github/         # CI/CD workflows
+```
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.10+ with Poetry
+- Node.js 20+ with npm
+- Git
+
+### Setup
+```bash
+# Clone the repository
+git clone https://github.com/faroukBakari/trading-api.git
+cd trading-api
+
+# Install Git hooks and dependencies
+make setup
+```
+
+### Development
+```bash
+# Start backend (terminal 1)
+make dev-backend
+
+# Start frontend (terminal 2)
+make dev-frontend
+```
+
+- Backend: http://localhost:8000
+- Frontend: http://localhost:5173
+- API Docs: http://localhost:8000/docs
+
+## 🔧 Development
+
+### Git Hooks
+Automatic code quality checks run on every commit:
+- **Backend**: Black, isort, Flake8, MyPy, pytest
+- **Frontend**: ESLint, Prettier, TypeScript, Vitest
+- **All files**: Whitespace, merge conflicts, syntax
+
+```bash
+# Install hooks (one-time setup)
+make install-hooks
+
+# Skip hooks temporarily
+git commit --no-verify
+```
+
+### Testing
+```bash
+# Run all tests
+make test
+
+# Backend only
+cd backend && poetry run pytest
+
+# Frontend only
+cd frontend && npm run test:unit
+```
+
+### Code Quality
+```bash
+# Run all linters
+make lint
+
+# Format all code
+make format
+```
+
+## 📖 API Documentation
+
+- **Interactive Docs**: http://localhost:8000/docs
+- **OpenAPI Spec**: http://localhost:8000/openapi.json
+- **ReDoc**: http://localhost:8000/redoc
+
+### Available Endpoints
+- `GET /health` - Health check
+- `GET /api/v1/version` - API version info
+- `GET /` - Root API metadata
+
+## 🏃‍♂️ CI/CD
+
+The project uses GitHub Actions for continuous integration:
+
+### Workflows
+- **Backend**: Python 3.10-3.11, Poetry, pytest, linting
+- **Frontend**: Node.js 20-22, npm, ESLint, Vitest, build
+- **Integration**: End-to-end API tests, frontend build against live API
+
+### Quality Gates
+- All tests must pass
+- Code coverage reporting
+- Linting and formatting checks
+- Type checking (MyPy + TypeScript)
+- Build verification
+
+## 📁 Project Details
+
+### Backend (`/backend`)
+- **Framework**: FastAPI
+- **Testing**: pytest, pytest-asyncio, httpx
+- **Code Quality**: Black, isort, Flake8, MyPy
+- **Dependencies**: Poetry
+
+### Frontend (`/frontend`)
+- **Framework**: Vue 3 + TypeScript
+- **Build Tool**: Vite
+- **Testing**: Vitest + Vue Test Utils
+- **Code Quality**: ESLint, Prettier
+- **Dependencies**: npm
+
+### Git Hooks (`/.githooks`)
+- **Centralized**: Single source of truth for all hooks
+- **Cross-platform**: Works on Windows, macOS, Linux
+- **Fast**: Only checks changed files
+- **Smart**: CI detection, easy bypass options
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes
+4. Run the hooks: `make lint && make test`
+5. Commit: `git commit -m 'Add amazing feature'`
+6. Push: `git push origin feature/amazing-feature`
+7. Open a Pull Request
+
+### Development Setup for Contributors
+```bash
+# After cloning
+make setup          # Install all dependencies and hooks
+make dev-backend    # Start backend server
+make dev-frontend   # Start frontend server
+```
+
+## 📜 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🔗 Links
+
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [Vue.js Documentation](https://vuejs.org/)
+- [Poetry Documentation](https://python-poetry.org/)
+- [Vite Documentation](https://vitejs.dev/)
