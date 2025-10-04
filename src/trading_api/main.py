@@ -14,6 +14,10 @@ app = FastAPI(
     docs_url="/api/v1/docs",
     redoc_url="/api/v1/redoc",
     openapi_tags=[{"name": "health", "description": "Health check operations"}],
+    servers=[
+        {"url": "http://localhost:8000", "description": "Development server"},
+        {"url": "https://api.trading.com", "description": "Production server"},
+    ],
 )
 
 app.include_router(health_router, prefix="/api/v1")

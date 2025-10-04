@@ -22,6 +22,10 @@ fi
 echo "📥 Downloading OpenAPI specification..."
 curl -s http://localhost:8000/api/v1/openapi.json -o openapi.json
 
+# Create OpenAPI 3.0 version for Python client compatibility
+echo "🔄 Creating OpenAPI 3.0 compatible version..."
+jq '.openapi = "3.0.3"' openapi.json > openapi-3.0.json
+
 # Generate TypeScript/Vue.js client using openapi-generator
 echo "🔧 Generating Vue.js TypeScript client..."
 npx @openapitools/openapi-generator-cli generate \
@@ -32,9 +36,20 @@ npx @openapitools/openapi-generator-cli generate \
 
 # Alternative: Generate using openapi-python-client for comparison
 echo "🔧 Generating Python client (for reference)..."
-poetry run openapi-python-client generate \
-  --path openapi.json \
-  --output ./clients/python-client
+cd clients
+if poetry run openapi-python-client generate --path ../openapi-3.0.json; then
+    # Rename the generated directory to python-client for consistency
+    if [ -d "trading-api-client" ]; then
+        mv trading-api-client python-client
+    elif [ -d "my-test-api-client" ]; then
+        mv my-test-api-client python-client
+    fi
+    echo "✅ Python client generated successfully"
+else
+    echo "⚠️  Python client generation failed (likely due to OpenAPI 3.1 compatibility)"
+    echo "   Consider using the Vue.js TypeScript client or other generators"
+fi
+cd ..
 
 # Stop the temporary API server if we started it
 if [ "$API_RUNNING" = "false" ] && [ ! -z "$API_PID" ]; then
