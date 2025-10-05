@@ -83,12 +83,9 @@ onMounted(() => {
   }
 
   try {
-    // Create datafeed instance
-    const datafeed = new DatafeedService()
-
     const widgetOptions: ChartingLibraryWidgetOptions = {
       symbol: props.symbol,
-      datafeed: datafeed,
+      datafeed: new DatafeedService(),
       interval: props.interval as ResolutionString,
       container: chartContainer.value,
       library_path: props.libraryPath,

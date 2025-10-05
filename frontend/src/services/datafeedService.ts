@@ -1,3 +1,4 @@
+import symbolsData from '@debug/symbols.json'
 import type {
   Bar,
   DatafeedErrorCallback,
@@ -10,7 +11,9 @@ import type {
   ResolveCallback,
   SearchSymbolResultItem,
   SearchSymbolsCallback,
+  SeriesFormat,
   SubscribeBarsCallback,
+  Timezone,
 } from '@public/charting_library/charting_library'
 
 // documentation:
@@ -29,64 +32,26 @@ import type {
  */
 export class DatafeedService implements IBasicDataFeed {
   /**
-   * Hardcoded list of available symbols for search
+   * Available symbols loaded from JSON file
    */
-  private readonly availableSymbols: SearchSymbolResultItem[] = [
-    {
-      symbol: 'AAPL',
-      description: 'Apple Inc.',
-      exchange: 'NASDAQ',
-      ticker: 'AAPL',
-      type: 'stock',
-    },
-    {
-      symbol: 'GOOGL',
-      description: 'Alphabet Inc. Class A',
-      exchange: 'NASDAQ',
-      ticker: 'GOOGL',
-      type: 'stock',
-    },
-    {
-      symbol: 'MSFT',
-      description: 'Microsoft Corporation',
-      exchange: 'NASDAQ',
-      ticker: 'MSFT',
-      type: 'stock',
-    },
-    {
-      symbol: 'TSLA',
-      description: 'Tesla, Inc.',
-      exchange: 'NASDAQ',
-      ticker: 'TSLA',
-      type: 'stock',
-    },
-    {
-      symbol: 'AMZN',
-      description: 'Amazon.com, Inc.',
-      exchange: 'NASDAQ',
-      ticker: 'AMZN',
-      type: 'stock',
-    },
-    {
-      symbol: 'NVDA',
-      description: 'NVIDIA Corporation',
-      exchange: 'NASDAQ',
-      ticker: 'NVDA',
-      type: 'stock',
-    },
-    {
-      symbol: 'META',
-      description: 'Meta Platforms, Inc.',
-      exchange: 'NASDAQ',
-      ticker: 'META',
-      type: 'stock',
-    },
-  ]
+  private readonly availableSymbols: LibrarySymbolInfo[]
+
   /**
    * Generated sample bars for the last 30 days
    * Each bar represents one day of OHLC data
    */
   private readonly sampleBars: Bar[] = this.generateLast30DaysBars()
+
+  constructor() {
+    // Load and parse symbols from JSON file
+    this.availableSymbols = symbolsData.map((symbol) => ({
+      ...symbol,
+      supported_resolutions: symbol.supported_resolutions as ResolutionString[],
+      timezone: symbol.timezone as Timezone,
+      format: symbol.format as SeriesFormat,
+      data_status: symbol.data_status as 'streaming' | 'endofday' | 'delayed_streaming',
+    }))
+  }
 
   /**
    * Generate 30 bars for the last 30 days until today
@@ -204,12 +169,12 @@ export class DatafeedService implements IBasicDataFeed {
     // Filter symbols based on user input and filters
     let filteredSymbols = this.availableSymbols
 
-    // Filter by user input (search in symbol, description, or ticker)
+    // Filter by user input (search in name, description, or ticker)
     if (userInput && userInput.trim() !== '') {
       const searchTerm = userInput.toLowerCase().trim()
       filteredSymbols = filteredSymbols.filter(
         (symbol) =>
-          symbol.symbol.toLowerCase().includes(searchTerm) ||
+          symbol.name.toLowerCase().includes(searchTerm) ||
           symbol.description.toLowerCase().includes(searchTerm) ||
           (symbol.ticker && symbol.ticker.toLowerCase().includes(searchTerm)),
       )
@@ -231,7 +196,16 @@ export class DatafeedService implements IBasicDataFeed {
 
     // Limit results to prevent overwhelming the UI
     const maxResults = 50
-    const results = filteredSymbols.slice(0, maxResults)
+    const limitedSymbols = filteredSymbols.slice(0, maxResults)
+
+    // Convert LibrarySymbolInfo to SearchSymbolResultItem for the callback
+    const results: SearchSymbolResultItem[] = limitedSymbols.map((symbol) => ({
+      symbol: symbol.name,
+      description: symbol.description,
+      exchange: symbol.exchange,
+      ticker: symbol.ticker,
+      type: symbol.type,
+    }))
 
     console.log(`[Datafeed] Found ${results.length} symbols matching search`)
 
@@ -253,31 +227,28 @@ export class DatafeedService implements IBasicDataFeed {
     onResolve: ResolveCallback,
     onError: DatafeedErrorCallback,
   ): void {
-    void symbolName
-    void onResolve
-    void onError
-    // TODO: Implement symbol resolution
-    // Example:
-    // const symbolInfo: LibrarySymbolInfo = {
-    //   name: symbolName,
-    //   full_name: symbolName,
-    //   description: `${symbolName} Description`,
-    //   type: 'stock',
-    //   session: '24x7',
-    //   timezone: 'Etc/UTC',
-    //   ticker: symbolName,
-    //   exchange: 'Your Exchange',
-    //   listed_exchange: 'Your Exchange',
-    //   format: 'price',
-    //   minmov: 1,
-    //   pricescale: 100,
-    //   has_intraday: false,
-    //   has_daily: true,
-    //   supported_resolutions: ['1D'],
-    //   volume_precision: 0,
-    //   data_status: 'streaming',
-    // }
-    // onResolve(symbolInfo)
+    console.log('[Datafeed] resolveSymbol called:', { symbolName })
+
+    // Search for the symbol in our available symbols
+    const symbolInfo = this.availableSymbols.find(
+      (symbol) =>
+        symbol.name === symbolName ||
+        symbol.ticker === symbolName ||
+        symbol.name.toLowerCase() === symbolName.toLowerCase() ||
+        (symbol.ticker && symbol.ticker.toLowerCase() === symbolName.toLowerCase()),
+    )
+
+    // Use setTimeout to ensure asynchronous callback as required by TradingView
+    setTimeout(() => {
+      if (symbolInfo) {
+        console.log('[Datafeed] Symbol resolved:', symbolInfo)
+        onResolve(symbolInfo)
+      } else {
+        console.log('[Datafeed] Symbol not found:', symbolName)
+        // Use "unknown_symbol" to display the default TradingView ghost icon
+        onError('unknown_symbol')
+      }
+    }, 0)
   }
 
   /**
