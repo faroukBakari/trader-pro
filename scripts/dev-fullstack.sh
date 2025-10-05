@@ -100,7 +100,7 @@ print_step "0. Cleaning up generated files..."
 print_step "🧹 Removing backend generated files..."
 rm -f backend/openapi*.json
 print_step "🧹 Removing frontend generated client..."
-rm -rf frontend/src/services/generated
+rm -rf frontend/src/clients/trader-api-generated
 print_step "🧹 Removing frontend build artifacts..."
 rm -rf frontend/dist frontend/node_modules/.vite
 print_success "Clean up complete - fresh start ready"

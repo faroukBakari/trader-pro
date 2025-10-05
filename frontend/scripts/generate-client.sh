@@ -7,7 +7,7 @@ set -e
 
 # Configuration
 API_URL="${VITE_API_URL:-http://localhost:${BACKEND_PORT:-8000}}"
-OUTPUT_DIR="./src/services/generated"
+OUTPUT_DIR="./src/clients/trader-api-generated"
 OPENAPI_SPEC="openapi.json"
 CLIENT_PACKAGE_NAME="@trading-api/client"
 
@@ -213,7 +213,7 @@ main() {
                 echo -e "${GREEN}🎉 Success! Generated client from live API${NC}"
                 echo -e "${GREEN}📁 Client location: $OUTPUT_DIR${NC}"
                 echo -e "${GREEN}🔧 Import in your components:${NC}"
-                echo -e "   import { healthApi, versioningApi } from '@/services/generated/client-config'"
+                echo -e "   import { healthApi, versioningApi } from '@/clients/trader-api-generated/client-config'"
                 echo ""
 
                 # Cleanup
