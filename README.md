@@ -25,8 +25,11 @@ A FastAPI-based trading API with Vue.js frontend, built with modern development 
 - Python 3.10+ with Poetry
 - Node.js 20+ with npm
 - Git
+- **VS Code**: Recommended for best TypeScript/Python experience
 
 ### Setup
+
+#### 1. Clone and Install Dependencies
 ```bash
 # Clone the repository
 git clone https://github.com/faroukBakari/trading-api.git
@@ -35,6 +38,20 @@ cd trading-api
 # Install Git hooks and dependencies
 make -f project.mk setup
 ```
+
+#### 2. Open in VS Code (Recommended)
+```bash
+# Open the multi-root workspace for proper TypeScript/Python support
+code trader-pro.code-workspace
+```
+
+**Why use the workspace file?**
+- ✅ Proper TypeScript resolution for frontend
+- ✅ Correct Python environment detection for backend
+- ✅ No `import.meta` errors
+- ✅ Better IntelliSense and debugging
+
+See [WORKSPACE-SETUP.md](./WORKSPACE-SETUP.md) for details.
 
 ### Development
 ```bash

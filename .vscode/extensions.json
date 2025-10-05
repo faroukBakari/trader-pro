@@ -1,0 +1,16 @@
+{
+  "recommendations": [
+    // Core extensions
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "vue.volar",
+    "dbaeumer.vscode-eslint",
+
+    // Recommended to use multi-root workspace
+    // Open: trader-pro.code-workspace
+    "ms-vscode.workspace-recommended"
+  ],
+  "unwantedRecommendations": [
+    "octref.vetur" // Use Volar instead for Vue 3
+  ]
+}

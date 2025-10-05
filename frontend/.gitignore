@@ -30,4 +30,9 @@ coverage
 # Generated API client
 src/services/generated/
 
+# OpenAPI generation artifacts
+openapi.json
+openapi-3.0.json
+openapitools.json
+
 *.tsbuildinfo

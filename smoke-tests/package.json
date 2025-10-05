@@ -1,0 +1,19 @@
+{
+  "name": "trader-pro-smoke-tests",
+  "version": "1.0.0",
+  "description": "Smoke tests for Trader Pro full-stack application",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:report": "playwright show-report",
+    "install-browsers": "playwright install",
+    "fix-whitespace": "find . -name '*.ts' -o -name '*.vue' -o -name '*.sh' | grep -v '^\\./node_modules' | xargs sed -i 's/[[:space:]]*$//'"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^24.6.2",
+    "typescript": "^5.0.0"
+  }
+}

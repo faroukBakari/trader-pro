@@ -1,19 +1,20 @@
 # Trading API Frontend Makefile
 
-.PHONY: help install install-ci lint type-check test test-run build dev clean
+.PHONY: help install install-ci lint type-check test test-run build dev clean client-generate
 
 # Default target
 help:
 	@echo "Frontend targets:"
-	@echo "  install       Install frontend dependencies"
-	@echo "  install-ci    Install frontend dependencies for CI"
-	@echo "  lint          Run frontend linting and formatting checks"
-	@echo "  type-check    Run TypeScript type checking"
-	@echo "  test          Run frontend tests in watch mode"
-	@echo "  test-run      Run frontend tests once (for CI)"
-	@echo "  build         Build frontend for production"
-	@echo "  dev           Start frontend development server"
-	@echo "  clean         Clean build artifacts"
+	@echo "  install         Install frontend dependencies"
+	@echo "  install-ci      Install frontend dependencies for CI"
+	@echo "  client-generate Generate API client from live server or use mock"
+	@echo "  lint            Run frontend linting and formatting checks"
+	@echo "  type-check      Run TypeScript type checking"
+	@echo "  test            Run frontend tests in watch mode"
+	@echo "  test-run        Run frontend tests once (for CI)"
+	@echo "  build           Build frontend for production"
+	@echo "  dev             Start frontend development server"
+	@echo "  clean           Clean build artifacts"
 
 # Dependency management
 install:
@@ -23,6 +24,11 @@ install:
 install-ci:
 	@echo "Installing frontend dependencies for CI..."
 	npm ci
+
+# Client generation
+client-generate:
+	@echo "Generating API client..."
+	./scripts/generate-client.sh
 
 # Linting and formatting
 lint:

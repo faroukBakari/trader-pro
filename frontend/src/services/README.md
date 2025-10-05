@@ -12,6 +12,7 @@ src/services/
 │   ├── api/               # Generated API classes
 │   ├── models/            # Generated TypeScript types
 │   ├── client-config.ts   # Pre-configured client instance
+│   ├── .client-type       # Marker: 'server' or 'mock'
 │   └── ...
 └── __tests__/
     └── apiService.spec.ts  # Unit tests with mocking examples
@@ -32,6 +33,34 @@ const health: HealthResponse = await apiService.getHealth()
 // Get API versions
 const versions: APIMetadata = await apiService.getVersions()
 ```
+
+### Smart Client Generation
+
+The API client is **automatically generated** when you run the development server or build:
+
+```bash
+# Development (auto-generates client if API is available)
+npm run dev
+
+# Build (auto-generates client if API is available)
+npm run build
+
+# Manual generation
+npm run client:generate
+```
+
+**How it works:**
+
+1. **Live API Available**: Script checks if backend is running at `http://localhost:8000`
+   - ✅ Downloads OpenAPI spec from live API
+   - ✅ Generates TypeScript client with full type safety
+   - ✅ Creates `.client-type: server` marker
+   - ✅ App uses generated client
+
+2. **No Live API**: Backend not running or not accessible
+   - ✅ Creates `.client-type: mock` marker
+   - ✅ App automatically uses mock data
+   - ✅ Development continues seamlessly
 
 ### Resilient Architecture
 
@@ -66,10 +95,10 @@ MOCK_CONFIG.enableLogs = false // Quiet during tests
 For more control, you can use the generated client directly (when available):
 
 ```typescript
-import { apiClient } from '@/services/generated/client-config'
+import { healthApi, versioningApi } from '@/services/generated/client-config'
 
 // Direct client usage (only works when generated client exists)
-const response = await apiClient.getHealthStatus()
+const response = await healthApi.getHealthStatus()
 const health = response.data
 ```
 
@@ -90,7 +119,6 @@ MOCK_CONFIG.networkDelay.health = 0 // No delay for faster tests
 // Test the mock responses
 const health = await apiService.getHealth()
 expect(health.status).toBe('ok')
-expect(health.message).toContain('mock data')
 ```
 
 ### Testing Generated Client (When Available)
@@ -102,8 +130,10 @@ import { vi } from 'vitest'
 
 // Mock the generated client
 vi.mock('@/services/generated/client-config', () => ({
-  apiClient: {
+  healthApi: {
     getHealthStatus: vi.fn(),
+  },
+  versioningApi: {
     getAPIVersions: vi.fn(),
   },
 }))
@@ -124,33 +154,59 @@ const success = await testApiIntegration()
 
 The API client is automatically generated from the backend's OpenAPI specification.
 
-**⚠️ Note**: Client generation requires a running backend server and is not part of the build process.
+### Automatic Generation
+
+Client generation happens automatically during:
+
+- `npm run dev` - Before starting dev server
+- `npm run build` - Before building for production
+- `npm run client:generate` - Manual generation
+
+### How It Works
+
+The generation script (`scripts/generate-client.sh`):
+
+1. Checks if backend API is running at `http://localhost:8000`
+2. If available:
+   - Downloads OpenAPI spec
+   - Generates TypeScript client
+   - Creates type-safe API classes
+3. If not available:
+   - Sets up mock fallback
+   - App uses mock data
+   - Development continues normally
+
+### Custom API URL
+
+Set the API URL via environment variable:
 
 ```bash
-# Generate client manually (requires backend running)
-npm run client:generate
+# Development
+VITE_API_URL=http://api.example.com npm run client:generate
 
-# Watch for API changes and regenerate (development only)
-npm run client:watch
-
-# Development with client generation
-npm run dev:with-client
+# Or in .env file
+VITE_API_URL=http://api.example.com
 ```
 
-**For Production Builds**:
+### Manual Generation
 
-- The frontend works without generated client (uses mock data)
-- Generate client separately in development/staging environments
-- Include generated client files in deployment if needed
+```bash
+# Generate client (checks for live API)
+npm run client:generate
+
+# Or use the script directly
+./scripts/generate-client.sh
+```
 
 ## Benefits
 
 1. **🛡️ Type Safety**: Full TypeScript support with generated types (when available)
 2. **🔄 Auto-sync**: Client automatically stays in sync with backend API
-3. **🧪 Testability**: Easy to mock with native fetch fallback
+3. **🧪 Testability**: Easy to mock with native fallback
 4. **🚀 Resilient**: Works with or without generated client
 5. **📚 Self-documenting**: Generated types serve as documentation
 6. **🎯 Maintainability**: Minimal manual API code to maintain
+7. **⚡ Developer Friendly**: Zero configuration, works out of the box
 
 ## Architecture Benefits
 
@@ -158,3 +214,4 @@ npm run dev:with-client
 - **Development Friendly**: Tests work without requiring client generation
 - **Production Ready**: Automatically uses generated client when available
 - **Fail-Safe**: Multiple fallback layers ensure reliability
+- **CI/CD Compatible**: Works in all environments

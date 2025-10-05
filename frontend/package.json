@@ -16,9 +16,9 @@
     "lint": "eslint . --fix",
     "format": "prettier --write src/",
     "fix-whitespace": "find src/ -name '*.ts' -o -name '*.vue' -o -name '*.sh' | xargs sed -i 's/[[:space:]]*$//'",
-    "client:generate": "cd ../backend && make frontend-client",
-    "client:watch": "cd ../backend && make watch-client",
-    "dev:with-client": "npm run client:generate && npm run dev"
+    "client:generate": "./scripts/generate-client.sh",
+    "prebuild": "npm run client:generate",
+    "predev": "npm run client:generate"
   },
   "dependencies": {
     "axios": "^1.6.2",

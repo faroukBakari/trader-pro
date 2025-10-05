@@ -1,0 +1,244 @@
+{
+  "folders": [
+    {
+      "name": "🎯 Trader Pro",
+      "path": "."
+    }
+  ],
+  "settings": {
+    // Global workspace settings
+    // "files.exclude": {
+    //   "**/__pycache__": true,
+    //   "**/*.pyc": true,
+    //   "**/.pytest_cache": true,
+    //   "**/node_modules": true,
+    //   "**/.venv": true,
+    //   "**/dist": true,
+    //   "**/.DS_Store": true
+    // },
+
+    // Python settings (backend)
+    "python.defaultInterpreterPath": "./backend/.venv/bin/python",
+    "[python]": {
+      "editor.formatOnSave": true,
+      "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+      },
+      "editor.defaultFormatter": "ms-python.black-formatter"
+    },
+    "python.testing.pytestEnabled": true,
+    "python.testing.pytestArgs": [
+      "tests"
+    ],
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.autoImportCompletions": true,
+
+    // TypeScript/Vue settings (frontend)
+    "typescript.tsdk": "./frontend/node_modules/typescript/lib",
+    "typescript.enablePromptUseWorkspaceTsdk": true,
+    "[typescript]": {
+      "editor.formatOnSave": true,
+      "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+      },
+      "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[vue]": {
+      "editor.formatOnSave": true,
+      "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[javascript]": {
+      "editor.formatOnSave": true,
+      "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[json]": {
+      "editor.formatOnSave": true,
+      "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+
+    // ESLint
+    "eslint.workingDirectories": [
+      {
+        "pattern": "./frontend"
+      }
+    ],
+
+    // Git
+    "git.ignoreLimitWarning": true,
+
+    // Search exclusions
+    "search.exclude": {
+      "**/node_modules": true,
+      "**/.venv": true,
+      "**/dist": true,
+      "**/__pycache__": true,
+      "**/htmlcov": true,
+      "**/.pytest_cache": true,
+      "**/clients": true,
+      "**/coverage.xml": true,
+      "**/*.pyc": true
+    },
+
+    // File associations
+    "files.associations": {
+      "*.vue": "vue",
+      "Makefile": "makefile",
+      "*.mk": "makefile"
+    },
+
+    // Terminal
+    "terminal.integrated.cwd": "."
+  },
+  "extensions": {
+    "recommendations": [
+      // Python/Backend
+      "ms-python.python",
+      "ms-python.vscode-pylance",
+      "ms-python.black-formatter",
+      "ms-python.isort",
+      "ms-python.mypy-type-checker",
+
+      // TypeScript/Frontend
+      "vue.volar",
+      "dbaeumer.vscode-eslint",
+      "esbenp.prettier-vscode",
+
+      // General
+      "editorconfig.editorconfig",
+      "github.vscode-pull-request-github",
+      "eamodio.gitlens"
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Backend: FastAPI Dev Server",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "uvicorn",
+        "args": [
+          "trading_api.main:app",
+          "--reload",
+          "--host",
+          "0.0.0.0",
+          "--port",
+          "8000"
+        ],
+        "cwd": "./backend",
+        "console": "integratedTerminal",
+        "justMyCode": true,
+        "env": {
+          "PYTHONPATH": "src"
+        }
+      },
+      {
+        "name": "Backend: Run Tests",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "pytest",
+        "args": [
+          "tests",
+          "-v"
+        ],
+        "cwd": "./backend",
+        "console": "integratedTerminal",
+        "justMyCode": true
+      },
+      {
+        "name": "Frontend: Vite Dev Server",
+        "type": "chrome",
+        "request": "launch",
+        "url": "http://localhost:5173",
+        "webRoot": "./frontend/src",
+        "preLaunchTask": "frontend-dev"
+      }
+    ],
+    "compounds": [
+      {
+        "name": "Full Stack: Backend + Frontend",
+        "configurations": [
+          "Backend: FastAPI Dev Server",
+          "Frontend: Vite Dev Server"
+        ],
+        "stopAll": true
+      }
+    ]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "backend-dev",
+        "type": "shell",
+        "command": "make dev",
+        "options": {
+          "cwd": "./backend"
+        },
+        "isBackground": true,
+        "problemMatcher": {
+          "pattern": {
+            "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+            "file": 1,
+            "line": 2,
+            "column": 3,
+            "severity": 4,
+            "message": 5
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": ".*Uvicorn running.*",
+            "endsPattern": ".*Application startup complete.*"
+          }
+        }
+      },
+      {
+        "label": "frontend-dev",
+        "type": "shell",
+        "command": "npm run dev",
+        "options": {
+          "cwd": "./frontend"
+        },
+        "isBackground": true,
+        "problemMatcher": {
+          "pattern": {
+            "regexp": "^(.*)$",
+            "file": 1
+          },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": ".*VITE.*",
+            "endsPattern": ".*Local:.*"
+          }
+        }
+      },
+      {
+        "label": "backend-test",
+        "type": "shell",
+        "command": "make test",
+        "options": {
+          "cwd": "./backend"
+        },
+        "group": "test"
+      },
+      {
+        "label": "frontend-test",
+        "type": "shell",
+        "command": "npm run test:unit",
+        "options": {
+          "cwd": "./frontend"
+        },
+        "group": "test"
+      },
+      {
+        "label": "integration-test",
+        "type": "shell",
+        "command": "make test-integration",
+        "options": {
+          "cwd": "."
+        },
+        "group": "test"
+      }
+    ]
+  }
+}

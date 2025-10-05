@@ -51,7 +51,10 @@ async function getGeneratedClient() {
     // Use dynamic import with variable to avoid Vite static analysis
     const modulePath = './generated/client-config'
     const clientModule = await import(/* @vite-ignore */ modulePath)
-    generatedClient = clientModule.apiClient
+    generatedClient = {
+      healthApi: clientModule.healthApi,
+      versioningApi: clientModule.versioningApi,
+    }
     // Only log in development mode to avoid console noise in production
     if (import.meta.env.DEV) {
       console.info('✅ Generated API client loaded successfully')
@@ -141,9 +144,9 @@ class ApiService implements ApiServiceInterface {
   async getHealth(): Promise<HealthResponse> {
     const client = await getGeneratedClient()
 
-    if (client) {
+    if (client?.healthApi) {
       try {
-        const response = await client.getHealthStatus()
+        const response = await client.healthApi.getHealthStatus()
         this.isUsingMockClient = false
         return response.data
       } catch {
@@ -160,9 +163,9 @@ class ApiService implements ApiServiceInterface {
   async getVersions(): Promise<APIMetadata> {
     const client = await getGeneratedClient()
 
-    if (client) {
+    if (client?.versioningApi) {
       try {
-        const response = await client.getAPIVersions()
+        const response = await client.versioningApi.getAPIVersions()
         this.isUsingMockClient = false
         return response.data
       } catch (error) {

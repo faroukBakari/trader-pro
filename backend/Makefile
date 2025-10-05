@@ -15,9 +15,6 @@ help:
 	@echo "  dev               Start backend development server"
 	@echo "  clean             Clean build artifacts"
 	@echo "  health            Check backend health"
-	@echo "  clients           Generate API clients"
-	@echo "  frontend-client   Generate frontend TypeScript client"
-	@echo "  watch-client      Watch for changes and regenerate frontend client"
 	@echo "  export-openapi    Export OpenAPI specification"
 	@echo "  docs-html         Generate static HTML documentation"
 
@@ -91,21 +88,8 @@ health-ci:
 # Cleanup
 clean:
 	@echo "Cleaning backend build artifacts..."
-	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage
+	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage clients/ openapi*.json
 	@echo "Backend clean complete."
-
-# Client generation
-clients:
-	@echo "Generating API clients..."
-	./scripts/generate-clients.sh
-
-frontend-client:
-	@echo "Generating frontend TypeScript client..."
-	./scripts/generate-frontend-client.sh
-
-watch-client:
-	@echo "Starting watch mode for frontend client..."
-	./scripts/watch-api-changes.sh
 
 # Export OpenAPI specification
 export-openapi:
