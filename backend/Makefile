@@ -60,13 +60,13 @@ format:
 
 # Development server
 dev:
-	@echo "Starting backend development server on http://localhost:8000"
-	poetry run uvicorn trading_api.main:app --reload --host 0.0.0.0 --port 8000
+	@echo "Starting backend development server on http://localhost:$(BACKEND_PORT)"
+	poetry run uvicorn trading_api.main:app --reload --host 0.0.0.0 --port $(BACKEND_PORT)
 
 # CI development server (background)
 dev-ci:
 	@echo "Starting backend server for CI..."
-	poetry run uvicorn trading_api.main:app --host 0.0.0.0 --port 8000 &
+	poetry run uvicorn trading_api.main:app --host 0.0.0.0 --port $(BACKEND_PORT) &
 	sleep 10
 
 # Build
@@ -77,13 +77,13 @@ build:
 # Health check
 health:
 	@echo "Checking backend health..."
-	@curl -f http://localhost:8000/api/v1/health 2>/dev/null || echo "Backend not running"
+	@curl -f http://localhost:$(BACKEND_PORT)/api/v1/health 2>/dev/null || echo "Backend not running"
 
 # CI health check
 health-ci:
 	@echo "Testing API endpoints for CI..."
-	curl -f http://localhost:8000/api/v1/health || exit 1
-	curl -f http://localhost:8000/api/v1/version || exit 1
+	curl -f http://localhost:$(BACKEND_PORT)/api/v1/health || exit 1
+	curl -f http://localhost:$(BACKEND_PORT)/api/v1/version || exit 1
 
 # Cleanup
 clean:
@@ -94,7 +94,7 @@ clean:
 # Export OpenAPI specification
 export-openapi:
 	@echo "Exporting OpenAPI specification..."
-	curl -s http://localhost:8000/api/v1/openapi.json -o openapi.json
+	curl -s http://localhost:$(BACKEND_PORT)/api/v1/openapi.json -o openapi.json
 
 # Generate static HTML documentation
 docs-html:

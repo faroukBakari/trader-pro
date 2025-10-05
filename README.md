@@ -62,9 +62,11 @@ make -f project.mk dev-backend
 make -f project.mk dev-frontend
 ```
 
-- Backend: http://localhost:8000
-- Frontend: http://localhost:5173
-- API Docs: http://localhost:8000/docs
+- Backend: http://localhost:${BACKEND_PORT:-8000}
+- Frontend: http://localhost:${FRONTEND_PORT:-5173}
+- API Docs: http://localhost:${BACKEND_PORT:-8000}/docs
+
+See [ENVIRONMENT-CONFIG.md](./ENVIRONMENT-CONFIG.md) for environment variable configuration.
 
 ## 🔧 Development
 
@@ -109,9 +111,9 @@ make -C backend format
 
 ## 📖 API Documentation
 
-- **Interactive Docs**: http://localhost:8000/docs
-- **OpenAPI Spec**: http://localhost:8000/openapi.json
-- **ReDoc**: http://localhost:8000/redoc
+- **Interactive Docs**: http://localhost:${BACKEND_PORT:-8000}/docs
+- **OpenAPI Spec**: http://localhost:${BACKEND_PORT:-8000}/openapi.json
+- **ReDoc**: http://localhost:${BACKEND_PORT:-8000}/redoc
 
 ### Available Endpoints
 - `GET /health` - Health check

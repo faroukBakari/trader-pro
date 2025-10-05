@@ -1,4 +1,5 @@
 """Main FastAPI application with API versioning support."""
+
 from fastapi import FastAPI
 
 from trading_api.api.health import router as health_router
@@ -19,10 +20,6 @@ app = FastAPI(
     openapi_tags=[
         {"name": "health", "description": "Health check operations"},
         {"name": "versioning", "description": "API version information"},
-    ],
-    servers=[
-        {"url": "http://localhost:8000", "description": "Development server"},
-        {"url": "https://api.trading.com", "description": "Production server"},
     ],
 )
 

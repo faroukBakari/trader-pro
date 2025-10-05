@@ -5,6 +5,12 @@
 
 set -e
 
+# Environment configuration
+export BACKEND_PORT="${BACKEND_PORT:-8000}"
+export VITE_API_URL="${VITE_API_URL:-http://localhost:$BACKEND_PORT}"
+export FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+export FRONTEND_URL="${FRONTEND_URL:-http://localhost:$FRONTEND_PORT}"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -50,7 +56,7 @@ print_step "🚀 Starting full-stack development environment..."
 # Step 1: Start backend server in background
 print_step "1. Starting backend server..."
 cd backend
-poetry run uvicorn trading_api.main:app --reload --host 0.0.0.0 --port 8000 &
+poetry run uvicorn trading_api.main:app --reload --host 0.0.0.0 --port $BACKEND_PORT &
 BACKEND_PID=$!
 cd ..
 
@@ -60,7 +66,7 @@ print_step "Backend started with PID: $BACKEND_PID"
 print_step "2. Waiting for backend to be ready..."
 timeout=60
 while [ $timeout -gt 0 ]; do
-    if curl -f http://localhost:8000/api/v1/health >/dev/null 2>&1; then
+    if curl -f http://localhost:$BACKEND_PORT/api/v1/health >/dev/null 2>&1; then
         print_success "Backend is ready and responding"
         break
     fi
@@ -94,7 +100,7 @@ generate_client_and_hash() {
     if npm run client:generate >/dev/null 2>&1; then
         cd ..
         # Get hash of the OpenAPI spec
-        curl -s http://localhost:8000/openapi.json | sha256sum | cut -d' ' -f1
+        curl -s http://localhost:$BACKEND_PORT/api/v1/openapi.json | sha256sum | cut -d' ' -f1
     else
         cd ..
         echo "error"
@@ -115,7 +121,7 @@ print_success "Initial OpenAPI schema hash: ${OPENAPI_HASH:0:8}..."
     print_step "Starting OpenAPI schema watcher..."
     while true; do
         sleep 5  # Check every 5 seconds
-        NEW_HASH=$(curl -s http://localhost:8000/openapi.json 2>/dev/null | sha256sum | cut -d' ' -f1 2>/dev/null || echo "error")
+        NEW_HASH=$(curl -s http://localhost:$BACKEND_PORT/api/v1/openapi.json 2>/dev/null | sha256sum | cut -d' ' -f1 2>/dev/null || echo "error")
 
         if [ "$NEW_HASH" != "error" ] && [ "$NEW_HASH" != "$OPENAPI_HASH" ]; then
             print_warning "OpenAPI schema changed! Regenerating client..."
@@ -133,8 +139,8 @@ print_success "Initial OpenAPI schema hash: ${OPENAPI_HASH:0:8}..."
 WATCHER_PID=$!
 
 print_step "5. Starting frontend development server..."
-print_step "🌐 Frontend will be available at: http://localhost:5173"
-print_step "🔧 Backend API is running at: http://localhost:8000"
+print_step "🌐 Frontend will be available at: $FRONTEND_URL"
+print_step "🔧 Backend API is running at: $VITE_API_URL"
 print_step "👁️  OpenAPI schema watcher is active"
 print_step ""
 print_warning "Press Ctrl+C to stop all servers and watchers"
