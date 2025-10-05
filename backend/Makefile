@@ -1,4 +1,4 @@
-# Trading API Backend Makefile
+# TraderPRO Backend Makefile
 
 .PHONY: help install test test-cov lint lint-check format build clean dev health clients export-openapi docs-html
 

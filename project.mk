@@ -1,4 +1,4 @@
-# Trading API Project Makefile
+# TraderPRO Project Makefile
 
 .PHONY: help setup install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration
 
