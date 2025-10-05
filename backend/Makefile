@@ -108,7 +108,6 @@ watch-client:
 	@echo "Starting watch mode for frontend client..."
 	./scripts/watch-api-changes.sh
 
-frontend-client:\n\t@echo \"Generating frontend TypeScript client...\"\n\t./scripts/generate-frontend-client.sh\n\nwatch-client:\n\t@echo \"Starting watch mode for frontend client...\"\n\t./scripts/watch-api-changes.sh\n\n# Export OpenAPI specification\nexport-openapi:
 	@echo "Exporting OpenAPI specification..."
 	curl -s http://localhost:8000/api/v1/openapi.json -o openapi.json
 
