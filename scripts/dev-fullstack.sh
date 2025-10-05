@@ -35,21 +35,63 @@ print_error() {
     echo -e "${RED}❌ $1${NC}"
 }
 
+# Function to check if a process is running
+is_process_running() {
+    local pid=$1
+    if [ -z "$pid" ]; then
+        return 1
+    fi
+    kill -0 "$pid" 2>/dev/null
+}
+
 # Function to cleanup background processes
 cleanup() {
-    if [ ! -z "$BACKEND_PID" ]; then
+    print_step "🛑 Shutting down full-stack development environment..."
+
+    if [ ! -z "$FRONTEND_PID" ] && is_process_running "$FRONTEND_PID"; then
+        print_step "Stopping frontend server (PID: $FRONTEND_PID)..."
+        kill -TERM $FRONTEND_PID 2>/dev/null || true
+        # Wait a bit for graceful shutdown
+        sleep 2
+        # Force kill if still running
+        if is_process_running "$FRONTEND_PID"; then
+            kill -KILL $FRONTEND_PID 2>/dev/null || true
+        fi
+    fi
+
+    if [ ! -z "$BACKEND_PID" ] && is_process_running "$BACKEND_PID"; then
         print_step "Stopping backend server (PID: $BACKEND_PID)..."
-        kill $BACKEND_PID 2>/dev/null || true
+        kill -TERM $BACKEND_PID 2>/dev/null || true
+        # Wait a bit for graceful shutdown
+        sleep 2
+        # Force kill if still running
+        if is_process_running "$BACKEND_PID"; then
+            kill -KILL $BACKEND_PID 2>/dev/null || true
+        fi
     fi
-    if [ ! -z "$WATCHER_PID" ]; then
+
+    if [ ! -z "$WATCHER_PID" ] && is_process_running "$WATCHER_PID"; then
         print_step "Stopping OpenAPI watcher (PID: $WATCHER_PID)..."
-        kill $WATCHER_PID 2>/dev/null || true
+        kill -TERM $WATCHER_PID 2>/dev/null || true
+        # Wait a bit for graceful shutdown
+        sleep 1
+        # Force kill if still running
+        if is_process_running "$WATCHER_PID"; then
+            kill -KILL $WATCHER_PID 2>/dev/null || true
+        fi
     fi
+
+    print_success "All processes stopped. Environment cleaned up."
     exit 0
 }
 
 # Set up trap to cleanup on exit
 trap cleanup EXIT INT TERM
+
+# Global variables for process IDs
+BACKEND_PID=""
+FRONTEND_PID=""
+WATCHER_PID=""
 
 print_step "🚀 Starting full-stack development environment..."
 
@@ -162,5 +204,13 @@ print_step ""
 print_warning "Press Ctrl+C to stop all servers and watchers"
 print_step ""
 
+# Start frontend in background and capture PID
 cd frontend
-npm run dev
+npm run dev &
+FRONTEND_PID=$!
+cd ..
+
+print_step "Frontend started with PID: $FRONTEND_PID"
+
+# Wait for frontend process to finish (or be interrupted)
+wait $FRONTEND_PID

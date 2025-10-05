@@ -40,13 +40,24 @@ SERVER_PID=""
 cleanup() {
     if [ "$SERVER_STARTED" = true ] && [ ! -z "$SERVER_PID" ]; then
         echo -e "\n${YELLOW}🛑 Stopping backend server (PID: $SERVER_PID)...${NC}"
-        kill $SERVER_PID 2>/dev/null || true
+        # Try graceful shutdown first
+        kill -TERM $SERVER_PID 2>/dev/null || true
+        sleep 2
+        # Force kill if still running
+        if kill -0 $SERVER_PID 2>/dev/null; then
+            kill -KILL $SERVER_PID 2>/dev/null || true
+        fi
         wait $SERVER_PID 2>/dev/null || true
     fi
+
+    # Also clean up any remaining uvicorn processes
+    pkill -TERM -f "uvicorn trading_api.main:app" 2>/dev/null || true
+    sleep 1
+    pkill -KILL -f "uvicorn trading_api.main:app" 2>/dev/null || true
 }
 
-# Register cleanup on exit
-trap cleanup EXIT
+# Register cleanup on exit and signals
+trap cleanup EXIT INT TERM
 
 echo -e "${BLUE}Step 1: Testing Backend${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
