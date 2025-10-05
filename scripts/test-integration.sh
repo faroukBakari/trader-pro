@@ -26,7 +26,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🧹 Cleaning backend generated files..."
 rm -f backend/openapi*.json
 echo "🧹 Cleaning frontend generated client..."
-rm -rf frontend/src/services/generated
+rm -rf frontend/src/clients/trader-api-generated
 echo "🧹 Cleaning frontend build artifacts..."
 rm -rf frontend/dist frontend/node_modules/.vite
 echo -e "${GREEN}✅ Clean up complete${NC}"
@@ -123,7 +123,7 @@ echo "📦 Installing frontend dependencies..."
 npm ci > /dev/null 2>&1
 
 echo "🧹 Cleaning generated client..."
-rm -rf src/services/generated
+rm -rf src/clients/trader-api-generated
 
 echo "🧪 Running frontend tests (with mocks)..."
 if npm run test:unit run > /dev/null 2>&1; then
@@ -146,12 +146,12 @@ else
 fi
 
 echo "🔍 Verifying generated client..."
-if [ ! -f "src/services/generated/.client-type" ]; then
+if [ ! -f "src/clients/trader-api-generated/.client-type" ]; then
     echo -e "${RED}❌ No .client-type file found${NC}"
     exit 1
 fi
 
-CLIENT_TYPE=$(cat src/services/generated/.client-type)
+CLIENT_TYPE=$(cat src/clients/trader-api-generated/.client-type)
 if [ "$CLIENT_TYPE" != "server" ]; then
     echo -e "${RED}❌ Expected 'server' client but got '$CLIENT_TYPE'${NC}"
     exit 1
@@ -161,11 +161,11 @@ echo -e "${GREEN}✅ Generated client type: $CLIENT_TYPE${NC}"
 
 echo "📝 Checking generated files..."
 REQUIRED_FILES=(
-    "src/services/generated/api.ts"
-    "src/services/generated/base.ts"
-    "src/services/generated/configuration.ts"
-    "src/services/generated/client-config.ts"
-    "src/services/generated/index.ts"
+    "src/clients/trader-api-generated/api.ts"
+    "src/clients/trader-api-generated/base.ts"
+    "src/clients/trader-api-generated/configuration.ts"
+    "src/clients/trader-api-generated/client-config.ts"
+    "src/clients/trader-api-generated/index.ts"
 )
 
 for file in "${REQUIRED_FILES[@]}"; do
@@ -217,7 +217,7 @@ pkill -9 -f "uvicorn trading_api.main:app" 2>/dev/null || true
 sleep 3
 
 echo "🧹 Cleaning generated client..."
-rm -rf src/services/generated
+rm -rf src/clients/trader-api-generated
 
 echo "🎭 Generating client without backend..."
 if npm run client:generate > /dev/null 2>&1; then
@@ -227,12 +227,12 @@ else
     exit 1
 fi
 
-if [ ! -f "src/services/generated/.client-type" ]; then
+if [ ! -f "src/clients/trader-api-generated/.client-type" ]; then
     echo -e "${RED}❌ No .client-type file found${NC}"
     exit 1
 fi
 
-CLIENT_TYPE=$(cat src/services/generated/.client-type)
+CLIENT_TYPE=$(cat src/clients/trader-api-generated/.client-type)
 if [ "$CLIENT_TYPE" != "mock" ]; then
     echo -e "${RED}❌ Expected 'mock' client but got '$CLIENT_TYPE'${NC}"
     exit 1

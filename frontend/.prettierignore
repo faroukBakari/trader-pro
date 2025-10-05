@@ -7,7 +7,7 @@ coverage/
 node_modules/
 
 # Generated files
-src/services/generated/
+src/clients/trader-api-generated/
 
 # External libraries and dependencies
 public/charting_library/
