@@ -4,6 +4,10 @@
 
 set -e
 
+# Environment configuration
+export BACKEND_PORT="${BACKEND_PORT:-8000}"
+export VITE_API_URL="${VITE_API_URL:-http://localhost:$BACKEND_PORT}"
+
 # Colors
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -66,7 +70,7 @@ SERVER_STARTED=true
 
 echo "⏳ Waiting for server to be ready..."
 for i in {1..20}; do
-    if curl -sf http://localhost:8000/api/v1/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:$BACKEND_PORT/api/v1/health > /dev/null 2>&1; then
         echo -e "${GREEN}✅ Backend server is ready${NC}"
         break
     fi
@@ -78,9 +82,9 @@ for i in {1..20}; do
 done
 
 echo "🩺 Testing API endpoints..."
-if curl -sf http://localhost:8000/api/v1/health > /dev/null 2>&1 && \
-   curl -sf http://localhost:8000/api/v1/version > /dev/null 2>&1 && \
-   curl -sf http://localhost:8000/api/v1/versions > /dev/null 2>&1; then
+if curl -sf http://localhost:$BACKEND_PORT/api/v1/health > /dev/null 2>&1 && \
+   curl -sf http://localhost:$BACKEND_PORT/api/v1/version > /dev/null 2>&1 && \
+   curl -sf http://localhost:$BACKEND_PORT/api/v1/versions > /dev/null 2>&1; then
     echo -e "${GREEN}✅ All API endpoints responding${NC}"
 else
     echo -e "${RED}❌ Some API endpoints failed${NC}"
@@ -155,7 +159,7 @@ echo -e "${BLUE}Step 5: Building Frontend with Generated Client${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 echo "🏗️  Building frontend..."
-if VITE_API_URL=http://localhost:8000 npm run build > /dev/null 2>&1; then
+if VITE_API_URL=$VITE_API_URL npm run build > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Frontend build successful${NC}"
 else
     echo -e "${RED}❌ Frontend build failed${NC}"

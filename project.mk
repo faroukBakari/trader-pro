@@ -136,4 +136,4 @@ health:
 	make -C backend health
 	@echo ""
 	@echo "Frontend health:"
-	@curl -f http://localhost:5173 2>/dev/null >/dev/null && echo "Frontend running" || echo "Frontend not running"
+	@curl -f http://localhost:$(FRONTEND_PORT) 2>/dev/null >/dev/null && echo "Frontend running" || echo "Frontend not running"

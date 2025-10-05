@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-API_URL="${VITE_API_URL:-http://localhost:8000}"
+API_URL="${VITE_API_URL:-http://localhost:${BACKEND_PORT:-8000}}"
 OUTPUT_DIR="./src/services/generated"
 OPENAPI_SPEC="openapi.json"
 CLIENT_PACKAGE_NAME="@trading-api/client"
@@ -119,16 +119,16 @@ EOF
 
 # Function to create configuration wrapper
 create_config_wrapper() {
-    cat > "$OUTPUT_DIR/client-config.ts" << EOF
+    cat > "$OUTPUT_DIR/client-config.ts" << 'EOF'
 // Trading API Client Configuration
 // This file provides a pre-configured client instance
 
 import { Configuration } from './configuration'
 import { HealthApi, VersioningApi } from './api'
 
-// API Configuration
+// API Configuration - using empty basePath for same-origin requests
 const apiConfig = new Configuration({
-  basePath: '${API_URL}',
+  basePath: '',
 })
 
 // Pre-configured API client instances
