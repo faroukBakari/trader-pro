@@ -57,10 +57,12 @@ build:
 # Development server
 dev:
 	@echo "Starting frontend development server..."
+	@echo "🧹 Cleaning generated client..."
+	rm -rf src/services/generated
 	npm run dev
 
 # Cleanup
 clean:
 	@echo "Cleaning frontend build artifacts..."
-	rm -rf dist/ node_modules/.vite
+	rm -rf dist/ node_modules/.vite src/services/generated
 	@echo "Frontend clean complete."

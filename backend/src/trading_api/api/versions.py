@@ -1,4 +1,5 @@
 """API versioning endpoints."""
+
 from fastapi import APIRouter
 
 from trading_api.core.versioning import VERSION_CONFIG, APIMetadata, APIVersion
@@ -19,8 +20,8 @@ async def get_api_versions() -> APIMetadata:
     return APIMetadata(
         current_version=APIVersion.get_latest(),
         available_versions=list(VERSION_CONFIG.values()),
-        documentation_url="https://api.trading.com/docs",
-        support_contact="support@trading.com",
+        documentation_url="/api/v1/docs",
+        support_contact="support@trading-pro.nodomainyet",
     )
 
 

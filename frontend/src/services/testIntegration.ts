@@ -10,7 +10,7 @@ export async function testApiIntegration() {
 
   try {
     console.log('📡 Testing health endpoint...')
-    const health = await apiService.getHealth()
+    const health = await apiService.getHealthStatus()
     console.log('✅ Health check successful:', {
       status: health.status,
       api_version: health.api_version,
@@ -18,7 +18,7 @@ export async function testApiIntegration() {
     })
 
     console.log('📡 Testing versions endpoint...')
-    const versions = await apiService.getVersions()
+    const versions = await apiService.getAPIVersions()
     console.log('✅ Versions check successful:', {
       current_version: versions.current_version,
       available_versions_count: versions.available_versions.length,

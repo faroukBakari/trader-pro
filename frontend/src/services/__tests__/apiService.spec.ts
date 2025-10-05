@@ -4,7 +4,9 @@
  * Tests the API service wrapper functionality with mocking
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import fs from 'fs'
+import path from 'path'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiService, ApiService, MOCK_CONFIG } from '../apiService'
 
 describe('ApiService', () => {
@@ -14,11 +16,28 @@ describe('ApiService', () => {
     vi.resetModules()
     // Disable logs during testing
     MOCK_CONFIG.enableLogs = false
+
+    // Clean up any generated client to ensure tests use fallback
+    try {
+      // Remove generated client directory to force fallback behavior
+      const generatedPath = path.join(__dirname, '../generated')
+      if (fs.existsSync(generatedPath)) {
+        fs.rmSync(generatedPath, { recursive: true, force: true })
+      }
+    } catch {
+      // Ignore cleanup errors - the client just won't exist
+    }
+
+    // Reset the singleton apiService instance state
+    // @ts-expect-error - accessing private properties for testing
+    apiService.clientType = 'unknown'
+    // @ts-expect-error - accessing private properties for testing
+    apiService.clientPromise = null
   })
 
-  describe('getHealth', () => {
+  describe('getHealthStatus', () => {
     it('should return health data using fallback when generated client is not available', async () => {
-      const result = await apiService.getHealth()
+      const result = await apiService.getHealthStatus()
 
       expect(result).toMatchObject({
         status: 'ok',
@@ -36,7 +55,7 @@ describe('ApiService', () => {
     })
 
     it('should include realistic mock data', async () => {
-      const result = await apiService.getHealth()
+      const result = await apiService.getHealthStatus()
 
       expect(result.status).toBe('ok')
       expect(result.api_version).toBe('v1')
@@ -45,9 +64,9 @@ describe('ApiService', () => {
     })
   })
 
-  describe('getVersions', () => {
+  describe('getAPIVersions', () => {
     it('should return versions data using fallback when generated client is not available', async () => {
-      const result = await apiService.getVersions()
+      const result = await apiService.getAPIVersions()
 
       expect(result).toMatchObject({
         current_version: 'v1',
@@ -61,13 +80,13 @@ describe('ApiService', () => {
             status: 'planned',
           }),
         ]),
-        documentation_url: expect.stringContaining('trading.com'),
-        support_contact: expect.stringContaining('@trading.com'),
+        documentation_url: expect.stringContaining('/api/v1/docs'),
+        support_contact: expect.stringContaining('trading-pro'),
       })
     })
 
     it('should include realistic version information', async () => {
-      const result = await apiService.getVersions()
+      const result = await apiService.getAPIVersions()
 
       expect(result.available_versions).toHaveLength(2)
 
@@ -81,7 +100,7 @@ describe('ApiService', () => {
 
     it('should simulate network delay', async () => {
       const startTime = Date.now()
-      await apiService.getVersions()
+      await apiService.getAPIVersions()
       const endTime = Date.now()
 
       // Should take at least 100ms due to simulated delay
@@ -99,11 +118,12 @@ describe('ApiService', () => {
   describe('getClientType', () => {
     it('should return unknown before any API calls', () => {
       const customService = new ApiService()
+      // New instances start with 'unknown' until first API call attempt
       expect(customService.getClientType()).toBe('unknown')
     })
 
     it('should return mock after using fallback client', async () => {
-      await apiService.getHealth()
+      await apiService.getHealthStatus()
       expect(apiService.getClientType()).toBe('mock')
     })
   })

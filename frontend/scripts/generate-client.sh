@@ -21,6 +21,13 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}🚀 Frontend API Client Generator${NC}"
 echo ""
 
+# Clean up previous generated client
+echo -e "${BLUE}🧹 Cleaning previous generated client...${NC}"
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
+echo -e "${GREEN}✅ Cleanup complete${NC}"
+echo ""
+
 # Function to check if API server is available
 check_api_available() {
     local health_url="$API_URL/api/v1/health"
@@ -37,6 +44,16 @@ check_api_available() {
 
 # Function to download OpenAPI specification
 download_openapi_spec() {
+    # First, try to use local file if it exists (for file watching mode)
+    local local_openapi="../backend/openapi.json"
+    if [ -f "$local_openapi" ]; then
+        echo -e "${BLUE}📁 Using local OpenAPI specification: $local_openapi${NC}"
+        cp "$local_openapi" "$OPENAPI_SPEC"
+        echo -e "${GREEN}✅ Local OpenAPI specification copied${NC}"
+        return 0
+    fi
+
+    # Fallback to downloading from server
     local openapi_url="$API_URL/api/v1/openapi.json"
     echo -e "${BLUE}📥 Downloading OpenAPI specification from: $openapi_url${NC}"
 
@@ -52,10 +69,6 @@ download_openapi_spec() {
 # Function to generate TypeScript client
 generate_client() {
     echo -e "${BLUE}🔧 Generating TypeScript client...${NC}"
-
-    # Clean output directory
-    rm -rf "$OUTPUT_DIR"
-    mkdir -p "$OUTPUT_DIR"
 
     # Generate client using openapi-generator
     if npx @openapitools/openapi-generator-cli generate \
@@ -148,8 +161,7 @@ EOF
 setup_mock_fallback() {
     echo -e "${YELLOW}🎭 Setting up mock client fallback...${NC}"
 
-    # Create minimal generated directory structure for mock
-    rm -rf "$OUTPUT_DIR"
+    # Ensure directory exists for mock mode
     mkdir -p "$OUTPUT_DIR"
 
     # Create a marker file to indicate mock mode
