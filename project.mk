@@ -1,6 +1,6 @@
 # Trading API Project Makefile
 
-.PHONY: help setup install-hooks uninstall-hooks dev-backend dev-frontend test-all lint-all format-all build-all clean-all health test-integration
+.PHONY: help setup install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all health test-integration
 
 # Default target
 help:
@@ -10,7 +10,9 @@ help:
 	@echo "  uninstall-hooks   Remove Git hooks"
 	@echo "  dev-backend       Start backend development server"
 	@echo "  dev-frontend      Start frontend development server"
+	@echo "  dev-fullstack     Start backend, generate client, then start frontend"
 	@echo "  test-all          Run all tests"
+	@echo "  test-smoke        Run smoke tests with Playwright"
 	@echo "  test-integration  Run full integration test suite"
 	@echo "  lint-all          Run all linters"
 	@echo "  format-all        Format all code"
@@ -68,6 +70,11 @@ dev-frontend:
 	@echo "Starting frontend development server..."
 	make -C frontend dev
 
+# Full-stack development
+dev-fullstack:
+	@echo "Starting full-stack development environment..."
+	./scripts/dev-fullstack.sh
+
 # Testing
 test-all:
 	@echo "Running all tests..."
@@ -76,6 +83,11 @@ test-all:
 	@echo ""
 	@echo "Frontend tests:"
 	make -C frontend test-run
+
+# Smoke testing
+test-smoke:
+	@echo "Running smoke tests..."
+	cd smoke-tests && ./run-tests.sh
 
 # Integration testing
 test-integration:

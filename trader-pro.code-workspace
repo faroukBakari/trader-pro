@@ -7,18 +7,18 @@
   ],
   "settings": {
     // Global workspace settings
-    "files.exclude": {
-      "**/__pycache__": true,
-      "**/*.pyc": true,
-      "**/.pytest_cache": true,
-      "**/node_modules": true,
-      "**/.venv": true,
-      "**/dist": true,
-      "**/.DS_Store": true
-    },
+    // "files.exclude": {
+    //   "**/__pycache__": true,
+    //   "**/*.pyc": true,
+    //   "**/.pytest_cache": true,
+    //   "**/node_modules": true,
+    //   "**/.venv": true,
+    //   "**/dist": true,
+    //   "**/.DS_Store": true
+    // },
 
     // Python settings (backend)
-    "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
+    "python.defaultInterpreterPath": "./backend/.venv/bin/python",
     "[python]": {
       "editor.formatOnSave": true,
       "editor.codeActionsOnSave": {
@@ -34,7 +34,7 @@
     "python.analysis.autoImportCompletions": true,
 
     // TypeScript/Vue settings (frontend)
-    "typescript.tsdk": "${workspaceFolder}/frontend/node_modules/typescript/lib",
+    "typescript.tsdk": "./frontend/node_modules/typescript/lib",
     "typescript.enablePromptUseWorkspaceTsdk": true,
     "[typescript]": {
       "editor.formatOnSave": true,
@@ -87,7 +87,7 @@
     },
 
     // Terminal
-    "terminal.integrated.cwd": "${workspaceFolder}"
+    "terminal.integrated.cwd": "."
   },
   "extensions": {
     "recommendations": [
@@ -125,11 +125,11 @@
           "--port",
           "8000"
         ],
-        "cwd": "${workspaceFolder}/backend",
+        "cwd": "./backend",
         "console": "integratedTerminal",
         "justMyCode": true,
         "env": {
-          "PYTHONPATH": "${workspaceFolder}/backend/src"
+          "PYTHONPATH": "src"
         }
       },
       {
@@ -141,7 +141,7 @@
           "tests",
           "-v"
         ],
-        "cwd": "${workspaceFolder}/backend",
+        "cwd": "./backend",
         "console": "integratedTerminal",
         "justMyCode": true
       },
@@ -150,7 +150,7 @@
         "type": "chrome",
         "request": "launch",
         "url": "http://localhost:5173",
-        "webRoot": "${workspaceFolder}/frontend/src",
+        "webRoot": "./frontend/src",
         "preLaunchTask": "frontend-dev"
       }
     ],
@@ -173,7 +173,7 @@
         "type": "shell",
         "command": "make dev",
         "options": {
-          "cwd": "${workspaceFolder}/backend"
+          "cwd": "./backend"
         },
         "isBackground": true,
         "problemMatcher": {
@@ -197,7 +197,7 @@
         "type": "shell",
         "command": "npm run dev",
         "options": {
-          "cwd": "${workspaceFolder}/frontend"
+          "cwd": "./frontend"
         },
         "isBackground": true,
         "problemMatcher": {
@@ -217,7 +217,7 @@
         "type": "shell",
         "command": "make test",
         "options": {
-          "cwd": "${workspaceFolder}/backend"
+          "cwd": "./backend"
         },
         "group": "test"
       },
@@ -226,7 +226,7 @@
         "type": "shell",
         "command": "npm run test:unit",
         "options": {
-          "cwd": "${workspaceFolder}/frontend"
+          "cwd": "./frontend"
         },
         "group": "test"
       },
@@ -235,7 +235,7 @@
         "type": "shell",
         "command": "make test-integration",
         "options": {
-          "cwd": "${workspaceFolder}"
+          "cwd": "."
         },
         "group": "test"
       }
