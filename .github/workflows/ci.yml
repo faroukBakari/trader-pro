@@ -33,16 +33,11 @@ jobs:
       uses: actions/cache@v3
       with:
         path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
 
     - name: Install backend dependencies
       working-directory: backend
-      run: |
-        if [ "${{ steps.cached-poetry-dependencies.outputs.cache-hit }}" != "true" ]; then
-          make install-ci
-        else
-          make install-ci
-        fi
+      run: make install-ci
 
     - name: Install Git hooks
       run: |
@@ -82,7 +77,7 @@ jobs:
 
     - name: Install frontend dependencies
       working-directory: frontend
-      run: npm ci
+      run: make install-ci
 
     - name: Install Git hooks
       run: |
@@ -91,21 +86,19 @@ jobs:
 
     - name: Run frontend linting
       working-directory: frontend
-      run: |
-        npm run lint
-        npx prettier --check src/
+      run: make lint
 
     - name: Run frontend type checking
       working-directory: frontend
-      run: npm run type-check
+      run: make type-check
 
     - name: Run frontend tests
       working-directory: frontend
-      run: npm run test:unit run
+      run: make test-run
 
     - name: Build frontend
       working-directory: frontend
-      run: npm run build
+      run: make build
 
   integration:
     runs-on: ubuntu-latest
@@ -140,7 +133,7 @@ jobs:
 
     - name: Install frontend dependencies
       working-directory: frontend
-      run: npm ci
+      run: make install-ci
 
     - name: Start backend server
       working-directory: backend
@@ -154,4 +147,6 @@ jobs:
 
     - name: Build frontend against live API
       working-directory: frontend
-      run: VITE_API_URL=http://localhost:8000 npm run build
+      run: make build
+      env:
+        VITE_API_URL: http://localhost:8000

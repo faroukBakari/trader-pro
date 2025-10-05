@@ -138,6 +138,7 @@ npm run dev:with-client
 ```
 
 **For Production Builds**:
+
 - The frontend works without generated client (uses mock data)
 - Generate client separately in development/staging environments
 - Include generated client files in deployment if needed

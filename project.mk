@@ -17,8 +17,11 @@ help:
 	@echo "  clean-all         Clean all build artifacts"
 	@echo "  health            Check project health"
 	@echo ""
-	@echo "Backend-specific targets (in backend/):"
+	@echo "Backend-specific targets:"
 	@echo "  make -C backend help"
+	@echo ""
+	@echo "Frontend-specific targets:"
+	@echo "  make -C frontend help"
 
 # Git hooks management
 install-hooks:
@@ -47,7 +50,7 @@ setup: install-hooks
 		echo "npm not found. Please install Node.js: https://nodejs.org/"; \
 		exit 1; \
 	fi
-	cd frontend && npm install
+	make -C frontend install
 	@echo ""
 	@echo "Project setup complete!"
 	@echo ""
@@ -62,7 +65,7 @@ dev-backend:
 
 dev-frontend:
 	@echo "Starting frontend development server..."
-	cd frontend && npm run dev
+	make -C frontend dev
 
 # Testing
 test-all:
@@ -71,7 +74,7 @@ test-all:
 	make -C backend test
 	@echo ""
 	@echo "Frontend tests:"
-	cd frontend && npm run test:unit run
+	make -C frontend test-run
 
 # Linting
 lint-all:
@@ -80,8 +83,8 @@ lint-all:
 	make -C backend lint-check
 	@echo ""
 	@echo "Frontend linting:"
-	cd frontend && npm run lint
-	cd frontend && npx prettier --check src/
+	make -C frontend lint
+	make -C frontend type-check
 
 # Formatting
 format-all:
@@ -99,13 +102,13 @@ build-all:
 	make -C backend build
 	@echo ""
 	@echo "Frontend build:"
-	cd frontend && npm run build
+	make -C frontend build
 
 # Cleanup
 clean-all:
 	@echo "Cleaning all build artifacts..."
 	make -C backend clean
-	cd frontend && rm -rf dist/ node_modules/.cache/
+	make -C frontend clean
 	@echo "Clean complete."
 
 # Health check

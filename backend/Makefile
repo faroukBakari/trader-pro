@@ -33,7 +33,6 @@ install:
 # CI-optimized install (non-interactive)
 install-ci:
 	@echo "Installing backend dependencies for CI..."
-	poetry install --no-interaction --no-root
 	poetry install --no-interaction
 
 # Testing
@@ -108,6 +107,8 @@ watch-client:
 	@echo "Starting watch mode for frontend client..."
 	./scripts/watch-api-changes.sh
 
+# Export OpenAPI specification
+export-openapi:
 	@echo "Exporting OpenAPI specification..."
 	curl -s http://localhost:8000/api/v1/openapi.json -o openapi.json
 

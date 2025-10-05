@@ -1,0 +1,60 @@
+# Trading API Frontend Makefile
+
+.PHONY: help install install-ci lint type-check test test-run build dev clean
+
+# Default target
+help:
+	@echo "Frontend targets:"
+	@echo "  install       Install frontend dependencies"
+	@echo "  install-ci    Install frontend dependencies for CI"
+	@echo "  lint          Run frontend linting and formatting checks"
+	@echo "  type-check    Run TypeScript type checking"
+	@echo "  test          Run frontend tests in watch mode"
+	@echo "  test-run      Run frontend tests once (for CI)"
+	@echo "  build         Build frontend for production"
+	@echo "  dev           Start frontend development server"
+	@echo "  clean         Clean build artifacts"
+
+# Dependency management
+install:
+	@echo "Installing frontend dependencies..."
+	npm install
+
+install-ci:
+	@echo "Installing frontend dependencies for CI..."
+	npm ci
+
+# Linting and formatting
+lint:
+	@echo "Running frontend linting and formatting checks..."
+	npm run lint
+
+# Type checking
+type-check:
+	@echo "Running TypeScript type checking..."
+	npm run type-check
+
+# Testing
+test:
+	@echo "Running frontend tests in watch mode..."
+	npm run test:unit
+
+test-run:
+	@echo "Running frontend tests..."
+	npm run test:unit run
+
+# Build
+build:
+	@echo "Building frontend for production..."
+	npm run build
+
+# Development server
+dev:
+	@echo "Starting frontend development server..."
+	npm run dev
+
+# Cleanup
+clean:
+	@echo "Cleaning frontend build artifacts..."
+	rm -rf dist/ node_modules/.vite
+	@echo "Frontend clean complete."
