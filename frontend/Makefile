@@ -1,4 +1,4 @@
-# Trading API Frontend Makefile
+# TraderPRO Frontend Makefile
 
 .PHONY: help install install-ci lint type-check test test-run build dev clean client-generate
 
