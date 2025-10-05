@@ -1,6 +1,6 @@
 # Trading API Project Makefile
 
-.PHONY: help setup install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all health test-integration
+.PHONY: help setup install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration
 
 # Default target
 help:
@@ -17,7 +17,12 @@ help:
 	@echo "  lint-all          Run all linters"
 	@echo "  format-all        Format all code"
 	@echo "  build-all         Build all projects"
-	@echo "  clean-all         Clean all build artifacts"
+	@echo ""
+	@echo "Cleanup targets:"
+	@echo "  clean-generated   Clean only generated files (quick cleanup)"
+	@echo "  clean-all         Clean all build artifacts (full cleanup)"
+	@echo ""
+	@echo "Other targets:"
 	@echo "  health            Check project health"
 	@echo ""
 	@echo "Backend-specific targets:"
@@ -64,10 +69,14 @@ setup: install-hooks
 # Development servers
 dev-backend:
 	@echo "Starting backend development server..."
+	@echo "🧹 Cleaning backend generated files..."
+	rm -f backend/openapi*.json
 	make -C backend dev
 
 dev-frontend:
 	@echo "Starting frontend development server..."
+	@echo "🧹 Cleaning frontend generated files..."
+	rm -rf frontend/src/services/generated
 	make -C frontend dev
 
 # Full-stack development
@@ -125,9 +134,29 @@ build-all:
 # Cleanup
 clean-all:
 	@echo "Cleaning all build artifacts..."
+	@echo "🧹 Cleaning backend..."
 	make -C backend clean
+	@echo "🧹 Cleaning frontend..."
 	make -C frontend clean
+	@echo "🧹 Cleaning project-level generated files..."
+	rm -f backend/openapi*.json
+	rm -rf frontend/src/services/generated
+	@echo "🧹 Cleaning smoke test artifacts..."
+	rm -rf smoke-tests/test-results smoke-tests/playwright-report
 	@echo "Clean complete."
+
+# Clean only generated files (lighter cleanup)
+clean-generated:
+	@echo "Cleaning generated files..."
+	@echo "🧹 Removing backend OpenAPI files..."
+	rm -f backend/openapi*.json
+	@echo "🧹 Removing frontend generated client..."
+	rm -rf frontend/src/services/generated
+	@echo "🧹 Removing frontend build cache..."
+	rm -rf frontend/node_modules/.vite
+	@echo "🧹 Removing test artifacts..."
+	rm -rf smoke-tests/test-results smoke-tests/playwright-report
+	@echo "Generated files cleanup complete."
 
 # Health check
 health:

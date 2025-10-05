@@ -20,6 +20,18 @@ echo -e "${BLUE}  Integration Test - Backend + Frontend${NC}"
 echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
 echo ""
 
+# Clean up generated files for fresh test environment
+echo -e "${BLUE}Step 0: Cleaning Generated Files${NC}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "🧹 Cleaning backend generated files..."
+rm -f backend/openapi*.json
+echo "🧹 Cleaning frontend generated client..."
+rm -rf frontend/src/services/generated
+echo "🧹 Cleaning frontend build artifacts..."
+rm -rf frontend/dist frontend/node_modules/.vite
+echo -e "${GREEN}✅ Clean up complete${NC}"
+echo ""
+
 # Track if we started the server
 SERVER_STARTED=false
 SERVER_PID=""

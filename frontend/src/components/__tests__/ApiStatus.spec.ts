@@ -1,14 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
-import ApiStatus from '../ApiStatus.vue'
+import type { APIMetadata, HealthResponse } from '@/services/apiService'
 import * as apiService from '@/services/apiService'
-import type { HealthResponse, APIMetadata } from '@/services/apiService'
+import { mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import ApiStatus from '../ApiStatus.vue'
 
 // Mock the API service
 vi.mock('@/services/apiService', () => ({
   apiService: {
-    getHealth: vi.fn(),
-    getVersions: vi.fn(),
+    getHealthStatus: vi.fn(),
+    getAPIVersions: vi.fn(),
+    getClientType: vi.fn(),
   },
 }))
 
@@ -19,7 +20,7 @@ describe('ApiStatus', () => {
 
   it('renders the component with title', () => {
     // Mock successful API responses
-    vi.mocked(apiService.apiService.getHealth).mockResolvedValue({
+    vi.mocked(apiService.apiService.getHealthStatus).mockResolvedValue({
       status: 'ok',
       message: 'Trading API is running',
       timestamp: '2025-01-01T00:00:00Z',
@@ -32,7 +33,7 @@ describe('ApiStatus', () => {
       },
     })
 
-    vi.mocked(apiService.apiService.getVersions).mockResolvedValue({
+    vi.mocked(apiService.apiService.getAPIVersions).mockResolvedValue({
       current_version: 'v1',
       available_versions: [
         {
@@ -58,8 +59,8 @@ describe('ApiStatus', () => {
     const healthPromise = new Promise<HealthResponse>(() => {}) // Never resolves
     const versionsPromise = new Promise<APIMetadata>(() => {}) // Never resolves
 
-    vi.mocked(apiService.apiService.getHealth).mockReturnValue(healthPromise)
-    vi.mocked(apiService.apiService.getVersions).mockReturnValue(versionsPromise)
+    vi.mocked(apiService.apiService.getHealthStatus).mockReturnValue(healthPromise)
+    vi.mocked(apiService.apiService.getAPIVersions).mockReturnValue(versionsPromise)
 
     const wrapper = mount(ApiStatus)
 

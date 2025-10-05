@@ -53,6 +53,16 @@ trap cleanup EXIT INT TERM
 
 print_step "🚀 Starting full-stack development environment..."
 
+# Step 0: Clean up generated files for fresh start
+print_step "0. Cleaning up generated files..."
+print_step "🧹 Removing backend generated files..."
+rm -f backend/openapi*.json
+print_step "🧹 Removing frontend generated client..."
+rm -rf frontend/src/services/generated
+print_step "🧹 Removing frontend build artifacts..."
+rm -rf frontend/dist frontend/node_modules/.vite
+print_success "Clean up complete - fresh start ready"
+
 # Step 1: Start backend server in background
 print_step "1. Starting backend server..."
 cd backend
@@ -91,48 +101,53 @@ else
 fi
 cd ..
 
-# Step 4: Start frontend development server with OpenAPI watching
-print_step "4. Setting up OpenAPI schema watching..."
+# Step 4: Start frontend development server with OpenAPI file watching
+print_step "4. Setting up OpenAPI file watching..."
 
-# Function to generate client and get hash
-generate_client_and_hash() {
-    cd frontend
-    if npm run client:generate >/dev/null 2>&1; then
-        cd ..
-        # Get hash of the OpenAPI spec
-        curl -s http://localhost:$BACKEND_PORT/api/v1/openapi.json | sha256sum | cut -d' ' -f1
-    else
-        cd ..
-        echo "error"
-    fi
-}
+# Define the OpenAPI file path
+OPENAPI_FILE="backend/openapi.json"
 
-# Get initial OpenAPI hash
-OPENAPI_HASH=$(generate_client_and_hash)
-if [ "$OPENAPI_HASH" = "error" ]; then
-    print_error "Failed to get initial OpenAPI hash"
-    exit 1
+# Generate initial client
+print_step "Generating initial frontend client..."
+cd frontend
+if npm run client:generate >/dev/null 2>&1; then
+    print_success "Initial client generated successfully"
+else
+    print_warning "Initial client generation failed, continuing..."
+fi
+cd ..
+
+# Get initial file modification time
+if [ -f "$OPENAPI_FILE" ]; then
+    INITIAL_MTIME=$(stat -c %Y "$OPENAPI_FILE" 2>/dev/null || echo "0")
+    print_success "Watching OpenAPI file: $OPENAPI_FILE"
+else
+    INITIAL_MTIME="0"
+    print_warning "OpenAPI file not found, will watch for creation"
 fi
 
-print_success "Initial OpenAPI schema hash: ${OPENAPI_HASH:0:8}..."
-
-# Start OpenAPI watcher in background
+# Start file watcher in background
 {
-    print_step "Starting OpenAPI schema watcher..."
-    while true; do
-        sleep 5  # Check every 5 seconds
-        NEW_HASH=$(curl -s http://localhost:$BACKEND_PORT/api/v1/openapi.json 2>/dev/null | sha256sum | cut -d' ' -f1 2>/dev/null || echo "error")
+    print_step "Starting OpenAPI file watcher..."
+    LAST_MTIME="$INITIAL_MTIME"
 
-        if [ "$NEW_HASH" != "error" ] && [ "$NEW_HASH" != "$OPENAPI_HASH" ]; then
-            print_warning "OpenAPI schema changed! Regenerating client..."
-            cd frontend
-            if npm run client:generate >/dev/null 2>&1; then
-                print_success "Frontend client regenerated (hash: ${NEW_HASH:0:8}...)"
-                OPENAPI_HASH="$NEW_HASH"
-            else
-                print_error "Failed to regenerate client"
+    while true; do
+        sleep 2  # Check every 2 seconds (much less frequent than server polling)
+
+        if [ -f "$OPENAPI_FILE" ]; then
+            CURRENT_MTIME=$(stat -c %Y "$OPENAPI_FILE" 2>/dev/null || echo "0")
+
+            if [ "$CURRENT_MTIME" != "$LAST_MTIME" ] && [ "$CURRENT_MTIME" != "0" ]; then
+                print_warning "OpenAPI file changed! Regenerating client..."
+                cd frontend
+                if npm run client:generate >/dev/null 2>&1; then
+                    print_success "Frontend client regenerated successfully"
+                else
+                    print_error "Failed to regenerate client"
+                fi
+                cd ..
+                LAST_MTIME="$CURRENT_MTIME"
             fi
-            cd ..
         fi
     done
 } &
@@ -141,7 +156,8 @@ WATCHER_PID=$!
 print_step "5. Starting frontend development server..."
 print_step "🌐 Frontend will be available at: $FRONTEND_URL"
 print_step "🔧 Backend API is running at: $VITE_API_URL"
-print_step "👁️  OpenAPI schema watcher is active"
+print_step "👁️  OpenAPI file watcher is active"
+print_step "📄 Watching: backend/openapi.json for changes"
 print_step ""
 print_warning "Press Ctrl+C to stop all servers and watchers"
 print_step ""

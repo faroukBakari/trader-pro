@@ -49,10 +49,19 @@ cp .env.example .env.local
 
 ## Client Generation Configuration
 
-The frontend client generation uses these environment variables:
+The frontend client generation uses an efficient file-based approach:
 
-1. **`VITE_API_URL`** - Used to fetch OpenAPI spec from live backend
-2. **Empty `basePath`** - Generated client uses relative URLs for same-origin requests
+1. **FastAPI Auto-Generation**: Backend automatically generates `backend/openapi.json` on startup/reload
+2. **File Watching**: Development script watches the file for changes (instead of polling the server)
+3. **Local File Priority**: Client generation prefers local file over HTTP requests
+4. **Empty `basePath`** - Generated client uses relative URLs for same-origin requests
+
+### How it Works:
+
+1. **Backend Startup**: FastAPI generates `openapi.json` file automatically
+2. **File Watcher**: Monitors file modification time every 2 seconds (vs. 5-second server polling)
+3. **Smart Generation**: Uses local file when available, falls back to HTTP if needed
+4. **Efficient**: No more server spam - only regenerates when schema actually changes
 
 This configuration allows the frontend to work with backend and frontend on:
 - Same domain (production)
@@ -94,6 +103,25 @@ export FRONTEND_URL=http://localhost:3000
 ```
 
 ## Component Integration
+
+### Cleanup System
+The project includes comprehensive cleanup to ensure fresh starts:
+
+**Automatic Cleanup (on dev start)**:
+- `dev-fullstack`: Cleans all generated files before starting
+- `dev-backend`: Cleans backend OpenAPI files
+- `dev-frontend`: Cleans frontend generated client
+- `client:generate`: Cleans previous client before generating
+
+**Manual Cleanup Commands**:
+- `make -f project.mk clean-generated`: Quick cleanup (generated files only)
+- `make -f project.mk clean-all`: Full cleanup (includes build artifacts)
+- Individual: `make -C backend clean`, `make -C frontend clean`
+
+**Files Cleaned**:
+- Backend: `openapi*.json`
+- Frontend: `src/services/generated/`, `dist/`, `node_modules/.vite`
+- Tests: `smoke-tests/test-results`, `smoke-tests/playwright-report`
 
 ### Backend (FastAPI)
 - No hardcoded servers in OpenAPI spec

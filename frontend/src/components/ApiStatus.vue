@@ -72,7 +72,7 @@ const fetchHealth = async () => {
   healthLoading.value = true
   healthError.value = null
   try {
-    healthData.value = await apiService.getHealth()
+    healthData.value = await apiService.getHealthStatus()
     // Update client type after successful call
     clientType.value = apiService.getClientType()
   } catch (error) {
@@ -86,7 +86,7 @@ const fetchVersions = async () => {
   versionsLoading.value = true
   versionsError.value = null
   try {
-    versionsData.value = await apiService.getVersions()
+    versionsData.value = await apiService.getAPIVersions()
     // Update client type after successful call
     clientType.value = apiService.getClientType()
   } catch (error) {
