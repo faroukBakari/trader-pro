@@ -9,20 +9,22 @@
 
 <script setup lang="ts">
 import { onMounted, ref, onUnmounted } from 'vue'
-
-// TradingView widget will be loaded from global window object
-declare global {
-  interface Window {
-    TradingView: {
-      widget: new (options: Record<string, unknown>) => TradingViewWidget
-    }
-  }
-}
+import { DatafeedService } from '@/services/datafeedService'
+import { widget } from '@public/charting_library'
+import type {
+  IChartingLibraryWidget,
+  ResolutionString,
+  LanguageCode,
+  AvailableSaveloadVersions,
+  ChartingLibraryWidgetOptions,
+} from '@public/charting_library'
 
 function getLanguageFromURL() {
   const regex = new RegExp('[\\?&]lang=([^&#]*)')
   const results = regex.exec(window.location.search)
-  return results === null ? null : decodeURIComponent(results[1].replace(/\+/g, ' '))
+  return results === null
+    ? null
+    : (decodeURIComponent(results[1].replace(/\+/g, ' ')) as LanguageCode)
 }
 
 const props = defineProps({
@@ -71,16 +73,8 @@ const props = defineProps({
   },
 })
 
-interface TradingViewWidget {
-  onChartReady: (callback: () => void) => void
-  headerReady: () => Promise<void>
-  createButton: () => HTMLElement
-  showNoticeDialog: (options: { title: string; body: string; callback: () => void }) => void
-  remove: () => void
-}
-
 const chartContainer = ref<HTMLDivElement>()
-let chartWidget: TradingViewWidget | null = null
+let chartWidget: IChartingLibraryWidget | null = null
 
 onMounted(() => {
   if (!chartContainer.value) {
@@ -89,45 +83,13 @@ onMounted(() => {
   }
 
   try {
-    const widgetOptions = {
+    // Create datafeed instance
+    const datafeed = new DatafeedService()
+
+    const widgetOptions: ChartingLibraryWidgetOptions = {
       symbol: props.symbol,
-      datafeed: {
-        onReady: (callback: (config: unknown) => void) => {
-          setTimeout(() => callback({}), 0)
-        },
-        searchSymbols: () => {},
-        resolveSymbol: (
-          symbolName: string,
-          onSymbolResolvedCallback: (symbol: unknown) => void,
-        ) => {
-          setTimeout(
-            () =>
-              onSymbolResolvedCallback({
-                name: symbolName,
-                full_name: symbolName,
-                description: symbolName,
-                type: 'stock',
-                session: '24x7',
-                timezone: 'Etc/UTC',
-                ticker: symbolName,
-                minmov: 1,
-                pricescale: 100,
-                has_intraday: true,
-                supported_resolutions: ['1', '5', '15', '30', '60', '240', '1D'],
-                volume_precision: 2,
-                data_status: 'streaming',
-              }),
-            0,
-          )
-        },
-        getBars: () => {
-          // Return empty bars for now
-          return Promise.resolve({ bars: [], meta: { noData: true } })
-        },
-        subscribeBars: () => {},
-        unsubscribeBars: () => {},
-      },
-      interval: props.interval,
+      datafeed: datafeed,
+      interval: props.interval as ResolutionString,
       container: chartContainer.value,
       library_path: props.libraryPath,
 
@@ -135,14 +97,15 @@ onMounted(() => {
       disabled_features: ['use_localstorage_for_settings'],
       enabled_features: ['study_templates'],
       charts_storage_url: props.chartsStorageUrl,
-      charts_storage_api_version: props.chartsStorageApiVersion,
+      charts_storage_api_version: props.chartsStorageApiVersion as AvailableSaveloadVersions,
       client_id: props.clientId,
       user_id: props.userId,
       fullscreen: props.fullscreen,
       autosize: props.autosize,
       studies_overrides: props.studiesOverrides,
     }
-    chartWidget = new window.TradingView.widget(widgetOptions)
+
+    chartWidget = new widget(widgetOptions)
 
     if (chartWidget) {
       chartWidget.onChartReady(() => {
@@ -187,8 +150,6 @@ onUnmounted(() => {
 
 <style scoped>
 .trader-chart-container {
-  width: 100%;
-  max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
   border: 1px solid #ddd;
@@ -209,8 +170,8 @@ onUnmounted(() => {
 }
 
 .TVChartContainer {
-  height: 400px;
   width: 100%;
+  height: 600px;
 }
 
 @media (max-width: 768px) {

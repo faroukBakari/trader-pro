@@ -161,3 +161,61 @@ Pre-commit configuration (example)
 Create .pre-commit-config.yaml:
 repos:
 - repo: https
+
+
+Copilot instructions for working with TradingView Charting Library
+
+Overview
+- Purpose: Help a developer quickly run, integrate, extend, and debug the TradingView Charting Library located at frontend/public/charting_library in the project.
+- Primary resources: official docs, tutorials, tutorial code, and examples — links provided below. Use your MCP web-search server to locate additional pages, follow internal links, and retrieve sample code as needed.
+
+Direct links to use
+- TradingView GitHub organization: https://github.com/tradingview
+- Charting Library Tutorials: https://www.tradingview.com/charting-library-docs/latest/tutorials/
+- Charting Library tutorial code repo: https://github.com/tradingview/charting-library-tutorial
+- Charting Library examples repo: https://github.com/tradingview/charting-library-examples
+- Getting started documentation: https://www.tradingview.com/charting-library-docs/latest/getting_started/
+- Full API reference: https://www.tradingview.com/charting-library-docs/latest/api/
+
+Quick start checklist
+- Confirm files
+- Verify the Charting Library files exist at frontend/public/charting_library and that the release matches the examples you plan to use.
+- Run a tutorial/example locally
+- Clone the tutorial or examples repo, align its charting_library path with frontend/public/charting_library, then serve static files (for example using a simple static server) and open the demo index.
+- Implement a minimal Datafeed
+- Implement required Datafeed methods: searchSymbols, resolveSymbol, getBars, subscribeBars, unsubscribeBars. Use the tutorial repo as a working reference.
+- Verify SymbolInfo and time settings
+- Ensure SymbolInfo shapes, timezone settings, and resolutions match your data source to avoid missing bars or misaligned timestamps.
+- Add streaming and subscription logic
+- Wire streaming ticks into subscribeBars; handle resubscriptions and edge cases such as session boundaries and market holidays.
+- Integrate Broker features only if needed
+- If using trading features, follow Broker module patterns in tutorials for order creation, account flow, and host callbacks.
+
+Recommended dev workflow
+- Use the matching example from charting-library-examples for your framework (React, Vue, Next.js, Svelte, plain HTML, etc.) and adapt container and lifecycle handling.
+- Keep the tutorial repo open as a runnable reference for Datafeed and streaming patterns.
+- During integration, run the chart in debug mode and log Datafeed lifecycle events to trace getBars and subscribe/unsubscribe calls.
+- Maintain a local copy of the exact Charting Library release used by examples to avoid API mismatches.
+
+Debugging and common pitfalls
+- Missing bars or gaps: check timezone, resolution mapping, and bar-end timestamps returned by getBars.
+- No live updates: verify subscribeBars is called with the same symbol/resolution used by resolveSymbol and that your stream forwards tick aggregation correctly.
+- Version mismatch: ensure example code and Charting Library version align; overwrite or symlink frontend/public/charting_library in examples during local testing.
+
+Action items for you
+- Verify the Charting Library directory at frontend/public/charting_library and list top-level files to confirm the release.
+- Clone the tutorial repo https://github.com/tradingview/charting-library-tutorial and the examples repo https://github.com/tradingview/charting-library-examples for runnable references.
+- Use your MCP web-search server to search the provided documentation pages, follow internal links for deeper examples, and copy the Datafeed and Broker patterns you need.
+- Implement a minimal IDatafeedChart wrapper returning SymbolInfo and historical bars, then add subscribeBars to forward live ticks into the chart.
+- Add a debug overlay or console logger for Datafeed calls and Broker events to speed troubleshooting.
+
+Helpful reference priorities
+- Start with Getting started to confirm hosting and embedding steps: https://www.tradingview.com/charting-library-docs/latest/getting_started/
+- Use Tutorials to implement Datafeed and Broker features step-by-step: https://www.tradingview.com/charting-library-docs/latest/tutorials/
+- Consult the API reference for exact interfaces and TypeScript definitions: https://www.tradingview.com/charting-library-docs/latest/api/
+- Use the tutorial code repo for complete example implementations: https://github.com/tradingview/charting-library-tutorial
+- Use the examples repo to bootstrap framework-specific integrations: https://github.com/tradingview/charting-library-examples
+
+Notes
+- Bold labels above highlight key steps and files to check.
+- Use your MCP web-search server to locate any additional pages inside the TradingView docs or GitHub repos, and follow internal links in those pages to find code snippets, changelogs, and versioned artifacts as needed.

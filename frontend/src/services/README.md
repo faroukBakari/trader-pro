@@ -7,6 +7,7 @@ This directory contains the API service layer for the frontend application.
 ```
 src/services/
 ├── apiService.ts           # Main API service wrapper (use this in components)
+├── datafeedService.ts      # TradingView Datafeed service (implement methods)
 ├── testIntegration.ts      # Integration test utility
 ├── generated/              # Auto-generated API client (gitignored)
 │   ├── api/               # Generated API classes
@@ -18,7 +19,21 @@ src/services/
     └── apiService.spec.ts  # Unit tests with mocking examples
 ```
 
-## Usage
+## DatafeedService
+
+The `DatafeedService` class provides a blank template for implementing the TradingView Charting Library's datafeed interface. All methods are left empty for custom implementation.
+
+### Quick Start
+
+1. **Implement Required Methods**: Add your data fetching logic to each method in `datafeedService.ts`
+2. **Connect Data Source**: Hook up to your API, WebSocket, or database
+3. **Test Integration**: Verify charts display your data correctly
+
+### Required Methods Implementation
+
+See the [DatafeedService Implementation Guide](#datafeedservice-implementation-guide) below for detailed examples.
+
+## API Services Usage
 
 ### In Components
 
@@ -215,3 +230,174 @@ npm run client:generate
 - **Production Ready**: Automatically uses generated client when available
 - **Fail-Safe**: Multiple fallback layers ensure reliability
 - **CI/CD Compatible**: Works in all environments
+
+---
+
+# DatafeedService Implementation Guide
+
+The `DatafeedService` class provides a blank template for implementing the TradingView Charting Library's datafeed interface. All methods are left empty for custom implementation.
+
+## Required Methods
+
+### `onReady(callback: OnReadyCallback): void`
+
+Called when the library is ready. Should provide datafeed configuration.
+
+**Example Implementation:**
+
+```typescript
+onReady(callback: OnReadyCallback): void {
+  setTimeout(() => callback({
+    supported_resolutions: ['1D', '1W', '1M'],
+    supports_marks: false,
+    supports_timescale_marks: false,
+    supports_time: false,
+  }), 0)
+}
+```
+
+### `searchSymbols(userInput, exchange, symbolType, onResult): void`
+
+Called when user searches for symbols in the symbol search box.
+
+**Example Implementation:**
+
+```typescript
+searchSymbols(userInput: string, exchange: string, symbolType: string, onResult: SearchSymbolsCallback): void {
+  // Search your database/API for symbols
+  const symbols = searchYourDatabase(userInput, exchange, symbolType)
+  onResult(symbols)
+}
+```
+
+### `resolveSymbol(symbolName, onResolve, onError): void`
+
+Called to get detailed symbol information.
+
+**Example Implementation:**
+
+```typescript
+resolveSymbol(symbolName: string, onResolve: ResolveCallback, onError: DatafeedErrorCallback): void {
+  try {
+    const symbolInfo: LibrarySymbolInfo = {
+      name: symbolName,
+      full_name: symbolName,
+      description: `${symbolName} Description`,
+      type: 'stock',
+      session: '24x7',
+      timezone: 'Etc/UTC',
+      ticker: symbolName,
+      exchange: 'Your Exchange',
+      listed_exchange: 'Your Exchange',
+      format: 'price',
+      minmov: 1,
+      pricescale: 100,
+      has_intraday: false,
+      has_daily: true,
+      supported_resolutions: ['1D'],
+      volume_precision: 0,
+      data_status: 'streaming',
+    }
+    onResolve(symbolInfo)
+  } catch (error) {
+    onError(error.message)
+  }
+}
+```
+
+### `getBars(symbolInfo, resolution, periodParams, onResult, onError): void`
+
+Called to get historical OHLC data for the chart.
+
+**Example Implementation:**
+
+```typescript
+async getBars(symbolInfo: LibrarySymbolInfo, resolution: ResolutionString, periodParams: PeriodParams, onResult: HistoryCallback, onError: DatafeedErrorCallback): void {
+  try {
+    const bars = await fetchHistoricalData(
+      symbolInfo.name,
+      resolution,
+      periodParams.from,
+      periodParams.to
+    )
+    onResult(bars, { noData: bars.length === 0 })
+  } catch (error) {
+    onError(error.message)
+  }
+}
+```
+
+### `subscribeBars(symbolInfo, resolution, onTick, listenerGuid, onResetCacheNeededCallback): void`
+
+Called to subscribe to real-time data updates.
+
+**Example Implementation:**
+
+```typescript
+subscribeBars(symbolInfo: LibrarySymbolInfo, resolution: ResolutionString, onTick: SubscribeBarsCallback, listenerGuid: string, onResetCacheNeededCallback: () => void): void {
+  // Store subscription
+  this.subscriptions.set(listenerGuid, {
+    symbolInfo,
+    resolution,
+    onTick,
+    onResetCacheNeededCallback
+  })
+
+  // Start real-time updates
+  startRealTimeUpdates(symbolInfo.name, resolution, onTick)
+}
+```
+
+### `unsubscribeBars(listenerGuid): void`
+
+Called to unsubscribe from real-time data updates.
+
+**Example Implementation:**
+
+```typescript
+unsubscribeBars(listenerGuid: string): void {
+  const subscription = this.subscriptions.get(listenerGuid)
+  if (subscription) {
+    stopRealTimeUpdates(listenerGuid)
+    this.subscriptions.delete(listenerGuid)
+  }
+}
+```
+
+## Data Format
+
+### Bar Format
+
+```typescript
+interface Bar {
+  time: number // Unix timestamp in SECONDS
+  open: number // Opening price
+  high: number // Highest price
+  low: number // Lowest price
+  close: number // Closing price
+  volume?: number // Volume (optional)
+}
+```
+
+## Usage
+
+The service is automatically instantiated in `TraderChartContainer.vue`:
+
+```typescript
+import { DatafeedService } from '@/services/datafeed'
+
+// In component setup
+const datafeed = new DatafeedService()
+```
+
+## Integration Steps
+
+1. Implement the required methods in `DatafeedService`
+2. Connect to your data source (API, WebSocket, etc.)
+3. Handle error cases appropriately
+4. Test with TradingView charts
+
+## Documentation
+
+- [TradingView Datafeed API](https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi)
+- [TradingView Tutorials](https://www.tradingview.com/charting-library-docs/latest/tutorials/)
