@@ -176,6 +176,10 @@ pnpm-debug.log*
 dist/
 build/
 
+# Frontend public assets (TradingView library, external dependencies)
+# frontend/public/charting_library/
+# frontend/public/datafeeds/
+
 # IDE and editor files
 .vscode/
 *.swp
@@ -190,3 +194,4 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
+.playwright-mcp

@@ -1,0 +1,24 @@
+# Build and distribution directories
+dist/
+dist-ssr/
+coverage/
+
+# Node modules
+node_modules/
+
+# Generated files
+src/services/generated/
+
+# External libraries and dependencies
+public/charting_library/
+public/datafeeds/
+
+# Configuration files that should not be formatted
+*.json
+*.yml
+*.yaml
+
+# Lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
