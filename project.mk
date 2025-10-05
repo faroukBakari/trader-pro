@@ -1,6 +1,6 @@
 # Trading API Project Makefile
 
-.PHONY: help setup install-hooks uninstall-hooks dev-backend dev-frontend test-all lint-all format-all build-all clean-all health
+.PHONY: help setup install-hooks uninstall-hooks dev-backend dev-frontend test-all lint-all format-all build-all clean-all health test-integration
 
 # Default target
 help:
@@ -11,6 +11,7 @@ help:
 	@echo "  dev-backend       Start backend development server"
 	@echo "  dev-frontend      Start frontend development server"
 	@echo "  test-all          Run all tests"
+	@echo "  test-integration  Run full integration test suite"
 	@echo "  lint-all          Run all linters"
 	@echo "  format-all        Format all code"
 	@echo "  build-all         Build all projects"
@@ -75,6 +76,11 @@ test-all:
 	@echo ""
 	@echo "Frontend tests:"
 	make -C frontend test-run
+
+# Integration testing
+test-integration:
+	@echo "Running integration tests..."
+	./scripts/test-integration.sh
 
 # Linting
 lint-all:

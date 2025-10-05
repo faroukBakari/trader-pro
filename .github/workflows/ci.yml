@@ -145,6 +145,26 @@ jobs:
       working-directory: backend
       run: make health-ci
 
+    - name: Generate frontend client from live API
+      working-directory: frontend
+      run: npm run client:generate
+      env:
+        VITE_API_URL: http://localhost:8000
+
+    - name: Verify client generation
+      working-directory: frontend
+      run: |
+        if [ ! -f "src/services/generated/.client-type" ]; then
+          echo "❌ Client generation failed - no .client-type file"
+          exit 1
+        fi
+        CLIENT_TYPE=$(cat src/services/generated/.client-type)
+        if [ "$CLIENT_TYPE" != "server" ]; then
+          echo "❌ Expected 'server' client but got '$CLIENT_TYPE'"
+          exit 1
+        fi
+        echo "✅ Client generated successfully from live API"
+
     - name: Build frontend against live API
       working-directory: frontend
       run: make build
