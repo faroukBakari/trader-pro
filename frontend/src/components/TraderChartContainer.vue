@@ -8,6 +8,7 @@
 </template>
 
 <script setup lang="ts">
+// other charting library sources : https://github.com/search?q=charting_library%2Fbundles%2Ffloating-toolbars.&type=code
 import { onMounted, ref, onUnmounted } from 'vue'
 import { DatafeedService } from '@/services/datafeedService'
 import { widget } from '@public/charting_library'
@@ -75,6 +76,13 @@ const props = defineProps({
 const chartContainer = ref<HTMLDivElement>()
 let chartWidget: IChartingLibraryWidget | null = null
 
+// Add chartWidget to global context for external access
+declare global {
+  interface Window {
+    tradingViewChart?: IChartingLibraryWidget | null
+  }
+}
+
 onMounted(() => {
   if (!chartContainer.value) {
     console.error('Chart container element not found')
@@ -103,6 +111,9 @@ onMounted(() => {
     }
 
     chartWidget = new widget(widgetOptions)
+
+    // Expose chartWidget globally for external access
+    window.tradingViewChart = chartWidget
 
     if (chartWidget) {
       chartWidget.onChartReady(() => {
@@ -141,6 +152,8 @@ onUnmounted(() => {
   if (chartWidget !== null) {
     chartWidget.remove()
     chartWidget = null
+    // Clean up global reference
+    window.tradingViewChart = null
   }
 })
 </script>

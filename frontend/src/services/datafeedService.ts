@@ -2,11 +2,16 @@ import symbolsData from '@debug/symbols.json'
 import type {
   Bar,
   DatafeedErrorCallback,
+  DatafeedQuoteValues,
   HistoryCallback,
   IBasicDataFeed,
+  IDatafeedQuotesApi,
   LibrarySymbolInfo,
   OnReadyCallback,
   PeriodParams,
+  QuoteData,
+  QuotesCallback,
+  QuotesErrorCallback,
   ResolutionString,
   ResolveCallback,
   SearchSymbolResultItem,
@@ -30,7 +35,7 @@ import type {
  *
  * @see https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi
  */
-export class DatafeedService implements IBasicDataFeed {
+export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   /**
    * Available symbols loaded from JSON file
    */
@@ -53,6 +58,19 @@ export class DatafeedService implements IBasicDataFeed {
       resolution: string
       onTick: SubscribeBarsCallback
       onResetCacheNeeded?: () => void
+      intervalId?: number
+    }
+  >()
+
+  /**
+   * Active quotes subscriptions map: listenerGuid -> subscription info
+   */
+  private readonly quotesSubscriptions = new Map<
+    string,
+    {
+      symbols: string[]
+      fastSymbols: string[]
+      onRealtimeCallback: QuotesCallback
       intervalId?: number
     }
   >()
@@ -449,22 +467,209 @@ export class DatafeedService implements IBasicDataFeed {
    */
   unsubscribeBars(listenerGuid: string): void {
     console.log('[Datafeed] unsubscribeBars called:', { listenerGuid })
-
     const subscription = this.subscriptions.get(listenerGuid)
     if (subscription) {
-      // Clear the update interval
       if (subscription.intervalId) {
         window.clearInterval(subscription.intervalId)
       }
-
-      // Remove the subscription
       this.subscriptions.delete(listenerGuid)
-
       console.log(
         `[Datafeed] Subscription removed for ${subscription.symbolInfo.name} (${listenerGuid})`,
       )
     } else {
       console.log(`[Datafeed] No subscription found for listenerGuid: ${listenerGuid}`)
+    }
+  }
+
+  /**
+   * Called when the library needs quote data for trading platform features.
+   * This method provides real-time market data for watchlist, order ticket, DOM, etc.
+   *
+   * @param symbols - Array of symbol names to get quotes for
+   * @param onDataCallback - Callback to return the quote data
+   * @param onErrorCallback - Callback for error handling
+   */
+  getQuotes(
+    symbols: string[],
+    onDataCallback: QuotesCallback,
+    onErrorCallback: QuotesErrorCallback,
+  ): void {
+    console.log('[Datafeed] getQuotes called:', { symbols })
+
+    // Use setTimeout to ensure asynchronous callback as required
+    setTimeout(() => {
+      try {
+        const quoteData: QuoteData[] = []
+
+        symbols.forEach((symbol) => {
+          // Check if symbol exists in our available symbols
+          const symbolExists = this.availableSymbols.some(
+            (availableSymbol) =>
+              availableSymbol.name === symbol ||
+              availableSymbol.ticker === symbol ||
+              availableSymbol.name.toLowerCase() === symbol.toLowerCase() ||
+              (availableSymbol.ticker &&
+                availableSymbol.ticker.toLowerCase() === symbol.toLowerCase()),
+          )
+
+          if (!symbolExists) {
+            console.log(`[Datafeed] Symbol not found for quotes: ${symbol}`)
+            quoteData.push({
+              s: 'error',
+              n: symbol,
+              v: { error: 'Symbol not found' },
+            })
+            return
+          }
+
+          // Generate realistic quote data based on the last bar
+          const lastBar = this.sampleBars[this.sampleBars.length - 1]
+          if (!lastBar) {
+            console.log(`[Datafeed] No historical data available for quotes: ${symbol}`)
+            quoteData.push({
+              s: 'error',
+              n: symbol,
+              v: { error: 'No data available' },
+            })
+            return
+          }
+
+          // Create realistic quote values based on the last bar
+          const basePrice = lastBar.close
+          const spread = basePrice * 0.001 // 0.1% spread
+          const bid = basePrice - spread / 2
+          const ask = basePrice + spread / 2
+          const change = basePrice - lastBar.open
+          const changePercent = (change / lastBar.open) * 100
+
+          // Generate some variation for real-time feel
+          const variation = (Math.random() - 0.5) * basePrice * 0.005 // 0.5% max variation
+          const currentPrice = basePrice + variation
+
+          const quoteValues: DatafeedQuoteValues = {
+            // Price data
+            lp: parseFloat(currentPrice.toFixed(2)), // Last price
+            ask: parseFloat((ask + variation).toFixed(2)),
+            bid: parseFloat((bid + variation).toFixed(2)),
+            spread: parseFloat((ask - bid).toFixed(2)),
+
+            // Daily statistics
+            open_price: parseFloat(lastBar.open.toFixed(2)),
+            high_price: parseFloat(Math.max(lastBar.high, currentPrice).toFixed(2)),
+            low_price: parseFloat(Math.min(lastBar.low, currentPrice).toFixed(2)),
+            prev_close_price: parseFloat((lastBar.close * 0.995).toFixed(2)), // Simulate previous day close
+            volume: lastBar.volume || 0,
+
+            // Changes (required for mobile)
+            ch: parseFloat(change.toFixed(2)),
+            chp: parseFloat(changePercent.toFixed(2)),
+
+            // Symbol information
+            short_name: symbol,
+            exchange: 'DEMO',
+            description: `Demo quotes for ${symbol}`,
+            original_name: symbol,
+          }
+
+          quoteData.push({
+            s: 'ok',
+            n: symbol,
+            v: quoteValues,
+          })
+        })
+
+        console.log(`[Datafeed] Generated quotes for ${quoteData.length} symbols`)
+        onDataCallback(quoteData)
+      } catch (error) {
+        console.error('[Datafeed] Error in getQuotes:', error)
+        onErrorCallback(error instanceof Error ? error.message : 'Unknown error occurred')
+      }
+    }, 0)
+  }
+
+  /**
+   * Called when the library wants to subscribe to real-time quote updates.
+   * This is used for trading platform features like watchlist, order ticket, etc.
+   *
+   * @param symbols - Array of symbols that should be updated rarely (once per minute)
+   * @param fastSymbols - Array of symbols that should be updated frequently (every 10 seconds)
+   * @param onRealtimeCallback - Callback to send real-time quote data updates
+   * @param listenerGUID - Unique identifier for this subscription
+   */
+  subscribeQuotes(
+    symbols: string[],
+    fastSymbols: string[],
+    onRealtimeCallback: QuotesCallback,
+    listenerGUID: string,
+  ): void {
+    console.log('[Datafeed] subscribeQuotes called:', {
+      symbols,
+      fastSymbols,
+      listenerGUID,
+    })
+
+    // Combine all symbols for subscription
+    const allSymbols = [...symbols, ...fastSymbols]
+
+    if (allSymbols.length === 0) {
+      console.log('[Datafeed] No symbols to subscribe to for quotes')
+      return
+    }
+
+    // Store subscription info
+    this.quotesSubscriptions.set(listenerGUID, {
+      symbols,
+      fastSymbols,
+      onRealtimeCallback,
+      // Use different intervals for regular vs fast symbols
+      // Fast symbols update every 5 seconds, regular symbols every 30 seconds
+      intervalId: window.setInterval(
+        () => {
+          if (!this.quotesSubscriptions.has(listenerGUID)) {
+            return
+          }
+
+          // Get fresh quotes for all subscribed symbols
+          this.getQuotes(
+            allSymbols,
+            (quoteData) => {
+              console.debug('[Datafeed] Sending real-time quote updates:', {
+                listenerGUID,
+                symbolCount: quoteData.length,
+              })
+              onRealtimeCallback(quoteData)
+            },
+            (error) => {
+              console.error('[Datafeed] Error getting quotes for real-time update:', error)
+            },
+          )
+        },
+        fastSymbols.length > 0 ? 1 : 2,
+      ), // 5s for fast symbols, 30s for regular
+    })
+
+    console.log(
+      `[Datafeed] Quote subscription started for ${allSymbols.length} symbols (${listenerGUID})`,
+    )
+  }
+
+  /**
+   * Called when the library wants to unsubscribe from real-time quote updates.
+   *
+   * @param listenerGUID - Unique identifier for the subscription to remove
+   */
+  unsubscribeQuotes(listenerGUID: string): void {
+    console.log('[Datafeed] unsubscribeQuotes called:', { listenerGUID })
+
+    const subscription = this.quotesSubscriptions.get(listenerGUID)
+    if (subscription) {
+      if (subscription.intervalId) {
+        window.clearInterval(subscription.intervalId)
+      }
+      this.quotesSubscriptions.delete(listenerGUID)
+      console.log(`[Datafeed] Quote subscription removed (${listenerGUID})`)
+    } else {
+      console.log(`[Datafeed] No quote subscription found for listenerGUID: ${listenerGUID}`)
     }
   }
 }
