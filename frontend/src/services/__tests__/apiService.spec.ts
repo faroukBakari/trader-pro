@@ -20,7 +20,7 @@ describe('ApiService', () => {
     // Clean up any generated client to ensure tests use fallback
     try {
       // Remove generated client directory to force fallback behavior
-      const generatedPath = path.join(__dirname, '../generated')
+      const generatedPath = path.join(__dirname, '../../clients/trader-api-generated')
       if (fs.existsSync(generatedPath)) {
         fs.rmSync(generatedPath, { recursive: true, force: true })
       }

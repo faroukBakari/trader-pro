@@ -124,7 +124,7 @@ class ApiService {
   private async getGeneratedClient(): Promise<ApiServiceInterface> {
     if (!this.clientPromise) {
       // Use dynamic path construction to avoid Vite's static analysis
-      const baseUrl = './generated/'
+      const baseUrl = '../clients/trader-api-generated/'
       const fileName = 'client-config'
       const modulePath = baseUrl + fileName
 
