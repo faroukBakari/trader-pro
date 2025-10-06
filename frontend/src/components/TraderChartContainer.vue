@@ -15,7 +15,6 @@ import type {
   IChartingLibraryWidget,
   ResolutionString,
   LanguageCode,
-  AvailableSaveloadVersions,
   ChartingLibraryWidgetOptions,
 } from '@public/charting_library'
 
@@ -36,30 +35,30 @@ const props = defineProps({
     default: '1D',
     type: String,
   },
-  datafeedUrl: {
-    default: 'https://demo_feed.tradingview.com',
-    type: String,
-  },
+  // datafeedUrl: {
+  //   default: 'https://demo_feed.trader-pro.com',
+  //   type: String,
+  // },
   libraryPath: {
     default: '/charting_library/',
     type: String,
   },
-  chartsStorageUrl: {
-    default: 'https://saveload.tradingview.com',
-    type: String,
-  },
-  chartsStorageApiVersion: {
-    default: '1.1',
-    type: String,
-  },
-  clientId: {
-    default: 'tradingview.com',
-    type: String,
-  },
-  userId: {
-    default: 'public_user_id',
-    type: String,
-  },
+  // chartsStorageUrl: {
+  //   default: 'https://saveload.trader-pro.com',
+  //   type: String,
+  // },
+  // chartsStorageApiVersion: {
+  //   default: '1.1',
+  //   type: String,
+  // },
+  // clientId: {
+  //   default: 'trader-pro.com',
+  //   type: String,
+  // },
+  // userId: {
+  //   default: 'public_user_id',
+  //   type: String,
+  // },
   fullscreen: {
     default: false,
     type: Boolean,
@@ -91,12 +90,13 @@ onMounted(() => {
       library_path: props.libraryPath,
 
       locale: getLanguageFromURL() || 'en',
-      disabled_features: ['use_localstorage_for_settings'],
-      enabled_features: ['study_templates'],
-      charts_storage_url: props.chartsStorageUrl,
-      charts_storage_api_version: props.chartsStorageApiVersion as AvailableSaveloadVersions,
-      client_id: props.clientId,
-      user_id: props.userId,
+      enabled_features: ['use_localstorage_for_settings'],
+      disabled_features: ['study_templates'],
+      // enabled_features: ['study_templates'], // Removed since we're disabling study_templates
+      // charts_storage_url: props.chartsStorageUrl,
+      // charts_storage_api_version: props.chartsStorageApiVersion as AvailableSaveloadVersions,
+      // client_id: props.clientId,
+      // user_id: props.userId,
       fullscreen: props.fullscreen,
       autosize: props.autosize,
       studies_overrides: props.studiesOverrides,
@@ -118,7 +118,7 @@ onMounted(() => {
                 if (chartWidget) {
                   chartWidget.showNoticeDialog({
                     title: 'Notification',
-                    body: 'TradingView Charting Library API works correctly',
+                    body: 'Charting Library API works correctly',
                     callback: () => {
                       console.log('Noticed!')
                     },
@@ -133,7 +133,7 @@ onMounted(() => {
       })
     }
   } catch (error) {
-    console.error('Failed to initialize TradingView chart:', error)
+    console.error('Failed to initialize chart:', error)
   }
 })
 
