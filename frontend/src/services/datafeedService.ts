@@ -43,6 +43,24 @@ export class DatafeedService implements IBasicDataFeed {
    */
   private readonly sampleBars: Bar[] = this.generateLast400DaysBars()
 
+  /**
+   * Active subscriptions map: listenerGuid -> subscription info
+   */
+  private readonly subscriptions = new Map<
+    string,
+    {
+      symbolInfo: LibrarySymbolInfo
+      resolution: string
+      onTick: SubscribeBarsCallback
+      onResetCacheNeeded?: () => void
+      intervalId?: number
+    }
+  >()
+
+  /**
+   * Configuration for real-time tick frequency
+   */
+
   constructor() {
     // Load and parse symbols from JSON file
     this.availableSymbols = symbolsData.map((symbol) => ({
@@ -102,6 +120,32 @@ export class DatafeedService implements IBasicDataFeed {
     }
 
     return bars
+  }
+
+  /**
+   * Create a mock bar by duplicating the last bar and randomizing the close value
+   * within the high-low range to simulate real-time data updates
+   */
+  private mockLastBar(lastBar: Bar): Bar {
+    const range = lastBar.high - lastBar.low
+    const randomFactor = Math.random() // 0 to 1
+    const newClose = lastBar.low + range * randomFactor
+
+    // Ensure the new close doesn't exceed the original high/low bounds
+    const adjustedClose = Math.max(lastBar.low, Math.min(lastBar.high, newClose))
+
+    // Update high/low if the new close exceeds them
+    const newHigh = Math.max(lastBar.high, adjustedClose)
+    const newLow = Math.min(lastBar.low, adjustedClose)
+
+    return {
+      time: lastBar.time, // Same time to update existing bar
+      open: lastBar.open, // Keep original open
+      high: parseFloat(newHigh.toFixed(2)),
+      low: parseFloat(newLow.toFixed(2)),
+      close: parseFloat(adjustedClose.toFixed(2)),
+      volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000), // Add some volume
+    }
   }
 
   /**
@@ -339,22 +383,63 @@ export class DatafeedService implements IBasicDataFeed {
     resolution: string,
     onTick: SubscribeBarsCallback,
     listenerGuid: string,
-    onResetCacheNeededCallback: () => void,
+    onResetCacheNeededCallback?: () => void,
   ): void {
-    void symbolInfo
-    void resolution
-    void onTick
-    void listenerGuid
-    void onResetCacheNeededCallback
-    // TODO: Implement real-time data subscription
-    // Example:
-    // this.subscriptions.set(listenerGuid, {
-    //   symbolInfo,
-    //   resolution,
-    //   onTick,
-    //   onResetCacheNeededCallback
-    // })
-    // startRealTimeUpdates(symbolInfo.name, resolution, onTick)
+    console.log('[Datafeed] subscribeBars called:', {
+      symbol: symbolInfo.name,
+      resolution,
+      listenerGuid,
+    })
+
+    // Only support 1D resolution for now
+    if (resolution !== '1D') {
+      console.log('[Datafeed] Unsupported resolution for subscription:', resolution)
+      return
+    }
+
+    // Check if symbol exists in our available symbols
+    const symbolExists = this.availableSymbols.some(
+      (symbol) =>
+        symbol.name === symbolInfo.name ||
+        symbol.ticker === symbolInfo.name ||
+        symbol.name === symbolInfo.ticker ||
+        (symbol.ticker && symbol.ticker === symbolInfo.ticker),
+    )
+
+    if (!symbolExists) {
+      console.log('[Datafeed] Symbol not found for subscription:', symbolInfo.name)
+      return
+    }
+
+    this.subscriptions.set(listenerGuid, {
+      symbolInfo,
+      resolution,
+      onTick,
+      onResetCacheNeeded: onResetCacheNeededCallback,
+      intervalId: window.setInterval(() => {
+        if (!this.subscriptions.has(listenerGuid)) {
+          return
+        }
+
+        const lastBar = this.sampleBars[this.sampleBars.length - 1]
+        if (!lastBar) {
+          console.log('[Datafeed] No last bar available to mock')
+          return
+        }
+        const mockedBar = this.mockLastBar(lastBar)
+
+        console.debug('[Datafeed] Sending real-time update:', {
+          symbol: symbolInfo.name,
+          listenerGuid,
+          bar: mockedBar,
+          interval: 500,
+        })
+
+        onTick(mockedBar)
+      }, 500),
+    })
+
+    console.log(`[Datafeed] Subscription started for ${symbolInfo.name} (${listenerGuid})`)
   }
 
   /**
@@ -363,13 +448,23 @@ export class DatafeedService implements IBasicDataFeed {
    * @param listenerGuid - Unique identifier for the subscription to remove
    */
   unsubscribeBars(listenerGuid: string): void {
-    void listenerGuid
-    // TODO: Implement unsubscription
-    // Example:
-    // const subscription = this.subscriptions.get(listenerGuid)
-    // if (subscription) {
-    //   stopRealTimeUpdates(listenerGuid)
-    //   this.subscriptions.delete(listenerGuid)
-    // }
+    console.log('[Datafeed] unsubscribeBars called:', { listenerGuid })
+
+    const subscription = this.subscriptions.get(listenerGuid)
+    if (subscription) {
+      // Clear the update interval
+      if (subscription.intervalId) {
+        window.clearInterval(subscription.intervalId)
+      }
+
+      // Remove the subscription
+      this.subscriptions.delete(listenerGuid)
+
+      console.log(
+        `[Datafeed] Subscription removed for ${subscription.symbolInfo.name} (${listenerGuid})`,
+      )
+    } else {
+      console.log(`[Datafeed] No subscription found for listenerGuid: ${listenerGuid}`)
+    }
   }
 }
