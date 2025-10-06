@@ -21,17 +21,36 @@ src/services/
 
 ## DatafeedService
 
-The `DatafeedService` class provides a blank template for implementing the TradingView Charting Library's datafeed interface. All methods are left empty for custom implementation.
+The `DatafeedService` class implements the TradingView Charting Library's datafeed interface, including both basic charting functionality and trading platform quotes support.
+
+### Features Implemented
+
+✅ **Basic Charting (IBasicDataFeed)**
+
+- Symbol search and resolution
+- Historical data (OHLC bars)
+- Real-time data updates
+
+✅ **Trading Platform Quotes (IDatafeedQuotesApi)**
+
+- Real-time market quotes (bid/ask, last price, volume)
+- Quote subscriptions for watchlists and trading features
+- Mobile-compatible quote data with change calculations
 
 ### Quick Start
 
-1. **Implement Required Methods**: Add your data fetching logic to each method in `datafeedService.ts`
-2. **Connect Data Source**: Hook up to your API, WebSocket, or database
-3. **Test Integration**: Verify charts display your data correctly
+1. **Use Existing Implementation**: The service is fully functional with demo data
+2. **Customize Data Sources**: Replace demo data with your API/WebSocket feeds
+3. **Test Trading Features**: Quotes support enables watchlist, order ticket, and DOM widgets
 
-### Required Methods Implementation
+### Supported TradingView Features
 
-See the [DatafeedService Implementation Guide](#datafeedservice-implementation-guide) below for detailed examples.
+- **Charts**: Historical and real-time price charts
+- **Watchlist**: Live quotes for multiple symbols
+- **Order Ticket**: Real-time pricing for order entry
+- **Buy/Sell Buttons**: Bid/ask price display
+- **Legend**: Last day change values (mobile compatible)
+- **Details Widget**: Market statistics and extended session data
 
 ## API Services Usage
 
@@ -235,9 +254,91 @@ npm run client:generate
 
 # DatafeedService Implementation Guide
 
-The `DatafeedService` class provides a blank template for implementing the TradingView Charting Library's datafeed interface. All methods are left empty for custom implementation.
+The `DatafeedService` class implements the TradingView Charting Library's datafeed interface with both basic charting and trading platform quotes functionality.
 
-## Required Methods
+## Implementation Status
+
+### ✅ Fully Implemented Methods
+
+All required methods are implemented with demo data:
+
+- **Basic Charting**: `onReady`, `searchSymbols`, `resolveSymbol`, `getBars`, `subscribeBars`, `unsubscribeBars`
+- **Trading Platform Quotes**: `getQuotes`, `subscribeQuotes`, `unsubscribeQuotes`
+
+### Demo Data Features
+
+- **400 days of historical bars** with realistic OHLC patterns
+- **Real-time price updates** every 500ms for subscribed symbols
+- **Quote data** with bid/ask spreads, daily statistics, and change calculations
+- **Mobile compatibility** with required fields for legend display
+- **Error handling** for unknown symbols and edge cases
+
+## Trading Platform Quotes API
+
+### `getQuotes(symbols, onDataCallback, onErrorCallback): void`
+
+Provides real-time market quotes for trading platform features.
+
+**Current Implementation:**
+
+```typescript
+// Returns quote data with realistic market information
+const quoteData = {
+  s: 'ok', // Status: 'ok' | 'error'
+  n: 'AAPL', // Symbol name
+  v: {
+    // Quote values
+    lp: 173.68, // Last price
+    ask: 173.7, // Ask price
+    bid: 173.66, // Bid price
+    spread: 0.04, // Bid-ask spread
+    ch: 0.91, // Price change
+    chp: 0.53, // Change percentage
+    open_price: 173.0, // Open price
+    high_price: 174.0, // High price
+    low_price: 172.5, // Low price
+    prev_close_price: 172.77, // Previous close
+    volume: 1234567, // Volume
+    short_name: 'AAPL', // Short symbol name
+    exchange: 'DEMO', // Exchange name
+    description: 'Demo quotes for AAPL',
+  },
+}
+```
+
+**Used By:**
+
+- Watchlist widget
+- Order Ticket widget
+- Buy/Sell buttons
+- Details widget
+- Legend (mobile compatibility)
+- Depth of Market (DOM)
+
+### `subscribeQuotes(symbols, fastSymbols, onRealtimeCallback, listenerGUID): void`
+
+Subscribes to real-time quote updates for trading features.
+
+**Current Implementation:**
+
+```typescript
+// Different update frequencies:
+// - Fast symbols: 5 second updates (for active trading)
+// - Regular symbols: 30 second updates (for watchlist)
+
+subscribeQuotes(['AAPL'], ['GOOGL'], callback, 'listener-1')
+// GOOGL updates every 5s, AAPL updates every 30s
+```
+
+### `unsubscribeQuotes(listenerGUID): void`
+
+Removes quote subscription and cleans up timers.
+
+```typescript
+unsubscribeQuotes('listener-1') // Stops all updates for this listener
+```
+
+## Required Methods (Basic Charting)
 
 ### `onReady(callback: OnReadyCallback): void`
 
