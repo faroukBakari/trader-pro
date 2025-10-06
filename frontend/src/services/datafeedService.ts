@@ -23,9 +23,9 @@ import type {
 // - https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/additional-methods
 
 /**
- * TradingView Datafeed Service
+ * Datafeed Service
  *
- * This class implements the IDatafeedChartApi interface required by TradingView.
+ * This class implements the IDatafeedChartApi interface required.
  * All methods are left blank for custom implementation.
  *
  * @see https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi
@@ -37,10 +37,11 @@ export class DatafeedService implements IBasicDataFeed {
   private readonly availableSymbols: LibrarySymbolInfo[]
 
   /**
-   * Generated sample bars for the last 30 days
+   * Generated sample bars for the last 400 days
    * Each bar represents one day of OHLC data
+   * Used as base data for getBars implementation
    */
-  private readonly sampleBars: Bar[] = this.generateLast30DaysBars()
+  private readonly sampleBars: Bar[] = this.generateLast400DaysBars()
 
   constructor() {
     // Load and parse symbols from JSON file
@@ -54,15 +55,15 @@ export class DatafeedService implements IBasicDataFeed {
   }
 
   /**
-   * Generate 30 bars for the last 30 days until today
+   * Generate 400 bars for the last 400 days until today
    */
-  private generateLast30DaysBars(): Bar[] {
+  private generateLast400DaysBars(): Bar[] {
     const bars: Bar[] = []
     const today = new Date()
     let currentPrice = 100 // Starting price
 
-    // Generate bars for the last 30 days
-    for (let i = 29; i >= 0; i--) {
+    // Generate bars for the last 400 days
+    for (let i = 400; i >= 0; i--) {
       const date = new Date(today)
       date.setDate(today.getDate() - i)
       date.setUTCHours(0, 0, 0, 0) // Set to midnight UTC
@@ -86,7 +87,7 @@ export class DatafeedService implements IBasicDataFeed {
       const volume = Math.floor(seededRandom(4) * 1000000) + 500000
 
       const bar: Bar = {
-        time: timestamp,
+        time: timestamp * 1000, // Convert to milliseconds
         open: parseFloat(open.toFixed(2)),
         high: parseFloat(high.toFixed(2)),
         low: parseFloat(low.toFixed(2)),
@@ -139,7 +140,7 @@ export class DatafeedService implements IBasicDataFeed {
       ],
     }
 
-    // Use setTimeout to ensure asynchronous callback as required by TradingView
+    // Use setTimeout to ensure asynchronous callback as required
     setTimeout(() => {
       console.log('[Datafeed] Sending configuration:', configuration)
       callback(configuration)
@@ -209,7 +210,7 @@ export class DatafeedService implements IBasicDataFeed {
 
     console.log(`[Datafeed] Found ${results.length} symbols matching search`)
 
-    // Use setTimeout to ensure asynchronous callback as required by TradingView
+    // Use setTimeout to ensure asynchronous callback as required
     setTimeout(() => {
       onResult(results)
     }, 0)
@@ -238,14 +239,14 @@ export class DatafeedService implements IBasicDataFeed {
         (symbol.ticker && symbol.ticker.toLowerCase() === symbolName.toLowerCase()),
     )
 
-    // Use setTimeout to ensure asynchronous callback as required by TradingView
+    // Use setTimeout to ensure asynchronous callback as required
     setTimeout(() => {
       if (symbolInfo) {
         console.log('[Datafeed] Symbol resolved:', symbolInfo)
         onResolve(symbolInfo)
       } else {
         console.log('[Datafeed] Symbol not found:', symbolName)
-        // Use "unknown_symbol" to display the default TradingView ghost icon
+        // Use "unknown_symbol" to display the default ghost icon
         onError('unknown_symbol')
       }
     }, 0)
@@ -267,24 +268,61 @@ export class DatafeedService implements IBasicDataFeed {
     onResult: HistoryCallback,
     onError: DatafeedErrorCallback,
   ): void {
-    void symbolInfo
-    void resolution
-    void periodParams
-    void onResult
-    void onError
-    // TODO: Implement historical data fetching
-    // Example:
-    // try {
-    //   const bars = await fetchHistoricalData(
-    //     symbolInfo.name,
-    //     resolution,
-    //     periodParams.from,
-    //     periodParams.to
-    //   )
-    //   onResult(bars, { noData: bars.length === 0 })
-    // } catch (error) {
-    //   onError(error.message)
-    // }
+    console.log('[Datafeed] getBars called:', {
+      symbol: symbolInfo.name,
+      resolution,
+      from: new Date(periodParams.from * 1000).toISOString(),
+      to: new Date(periodParams.to * 1000).toISOString(),
+      countBack: periodParams.countBack,
+    })
+
+    // Use setTimeout to ensure asynchronous callback as required
+    setTimeout(() => {
+      try {
+        // Only support 1D resolution for now
+        if (resolution !== '1D') {
+          console.log('[Datafeed] Unsupported resolution:', resolution)
+          onResult([], { noData: true })
+          return
+        }
+
+        // Check if symbol exists in our available symbols
+        const symbolExists = this.availableSymbols.some(
+          (symbol) =>
+            symbol.name === symbolInfo.name ||
+            symbol.ticker === symbolInfo.name ||
+            symbol.name === symbolInfo.ticker ||
+            (symbol.ticker && symbol.ticker === symbolInfo.ticker),
+        )
+
+        if (!symbolExists) {
+          console.log('[Datafeed] Symbol not found in available symbols:', symbolInfo.name)
+          onResult([], { noData: true })
+          return
+        }
+
+        const from: number = periodParams.from * 1000,
+          to: number = periodParams.to * 1000
+
+        // Filter bars within the requested time range [from, to]
+        const filteredBars = this.sampleBars.filter((bar) => bar.time >= from && bar.time <= to)
+
+        console.log(
+          `[Datafeed] Found ${filteredBars.length} bars in time range, need ${periodParams.countBack}`,
+        )
+
+        filteredBars.sort((a, b) => a.time - b.time)
+        if (1 < filteredBars.length) {
+          // prevent single bar which causes issues in charting library
+          onResult(filteredBars)
+        } else {
+          onResult([], { noData: true })
+        }
+      } catch (error) {
+        console.error('[Datafeed] Error in getBars:', error)
+        onError(error instanceof Error ? error.message : 'Unknown error occurred')
+      }
+    }, 0)
   }
 
   /**

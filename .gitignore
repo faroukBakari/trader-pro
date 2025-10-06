@@ -176,7 +176,7 @@ pnpm-debug.log*
 dist/
 build/
 
-# Frontend public assets (TradingView library, external dependencies)
+# Frontend public assets (Charting library, external dependencies)
 # frontend/public/charting_library/
 # frontend/public/datafeeds/
 
