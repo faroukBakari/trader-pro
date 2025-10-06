@@ -28,11 +28,15 @@ coverage
 *.sw?
 
 # Generated API client
-src/services/generated/
+src/clients/trader-api-generated/
 
 # OpenAPI generation artifacts
 openapi.json
 openapi-3.0.json
 openapitools.json
+
+# External libraries and dependencies (should not be linted or checked)
+# public/charting_library/
+# public/datafeeds/
 
 *.tsbuildinfo

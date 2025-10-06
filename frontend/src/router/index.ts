@@ -9,6 +9,11 @@ const router = createRouter({
       component: () => import('../views/ApiStatusView.vue'),
     },
     {
+      path: '/chart',
+      name: 'trader-chart',
+      component: () => import('../views/TraderChartView.vue'),
+    },
+    {
       path: '/:pathMatch(.*)*',
       name: 'not-found',
       component: () => import('../views/NotFoundView.vue'),
