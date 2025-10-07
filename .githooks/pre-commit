@@ -33,7 +33,7 @@ if [[ -n "$config_files" ]] || [[ -n "$backend_files" ]] || [[ -n "$frontend_fil
     log_info "Running common file checks..."
 
     # Check for trailing whitespace
-    if ! run_check "Trailing whitespace check" "git diff --check --cached"; then
+    if ! run_check "Trailing whitespace check" "git diff --check --cached  -- .:^frontend/public/"; then
         failed_checks+=("trailing-whitespace")
     fi
 

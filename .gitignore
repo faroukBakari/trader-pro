@@ -176,10 +176,6 @@ pnpm-debug.log*
 dist/
 build/
 
-# Frontend public assets (Charting library, external dependencies)
-# frontend/public/charting_library/
-# frontend/public/datafeeds/
-
 # IDE and editor files
 .vscode/
 *.swp

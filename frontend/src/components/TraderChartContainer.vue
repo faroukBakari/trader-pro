@@ -11,13 +11,13 @@
 // other charting library sources : https://github.com/search?q=charting_library%2Fbundles%2Ffloating-toolbars.&type=code
 import { onMounted, ref, onUnmounted } from 'vue'
 import { DatafeedService } from '@/services/datafeedService'
-import { widget } from '@public/charting_library'
+import { widget } from '@public/trading_terminal'
 import type {
   IChartingLibraryWidget,
   ResolutionString,
   LanguageCode,
   ChartingLibraryWidgetOptions,
-} from '@public/charting_library'
+} from '@public/trading_terminal'
 
 function getLanguageFromURL() {
   const regex = new RegExp('[\\?&]lang=([^&#]*)')
@@ -41,7 +41,7 @@ const props = defineProps({
   //   type: String,
   // },
   libraryPath: {
-    default: '/charting_library/',
+    default: '/trading_terminal/',
     type: String,
   },
   // chartsStorageUrl: {

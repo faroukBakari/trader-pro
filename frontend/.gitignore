@@ -35,8 +35,4 @@ openapi.json
 openapi-3.0.json
 openapitools.json
 
-# External libraries and dependencies (should not be linted or checked)
-# public/charting_library/
-# public/datafeeds/
-
 *.tsbuildinfo

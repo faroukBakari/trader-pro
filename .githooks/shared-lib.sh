@@ -33,13 +33,13 @@ is_ci() {
 # Get list of staged files matching pattern
 get_staged_files() {
     local pattern="$1"
-    git diff --cached --name-only --diff-filter=ACM | grep -E "$pattern" | grep -v -E "(node_modules/|\.venv/|__pycache__/|\.pytest_cache/|dist/|build/|frontend/public/charting_library/|frontend/public/datafeeds/)" || true
+    git diff --cached --name-only --diff-filter=ACM | grep -E "$pattern" | grep -v -E "(node_modules/|\.venv/|__pycache__/|\.pytest_cache/|dist/|build/|frontend/public/)" || true
 }
 
 # Get list of changed files (staged + unstaged) matching pattern
 get_changed_files() {
     local pattern="$1"
-    git diff --name-only --diff-filter=ACM HEAD | grep -E "$pattern" | grep -v -E "(node_modules/|\.venv/|__pycache__/|\.pytest_cache/|dist/|build/|frontend/public/charting_library/|frontend/public/datafeeds/)" || true
+    git diff --name-only --diff-filter=ACM HEAD | grep -E "$pattern" | grep -v -E "(node_modules/|\.venv/|__pycache__/|\.pytest_cache/|dist/|build/|frontend/public/)" || true
 }
 
 # Check if directory exists and has files
