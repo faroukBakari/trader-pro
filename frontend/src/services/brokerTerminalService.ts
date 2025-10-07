@@ -13,7 +13,8 @@ import type {
   ConnectionStatus,
   Execution,
   IBrokerConnectionAdapterHost,
-  IBrokerTerminal,
+  IBrokerWithoutRealtime, // IBrokerTerminal,
+  IDatafeedQuotesApi,
   InstrumentInfo,
   INumberFormatter,
   IWatchedValue,
@@ -35,8 +36,9 @@ import { OrderStatus, OrderType, Side, StandardFormatterName } from '@public/tra
  * - Manages orders, positions, and executions using official TradingView types
  * - Follows reference implementation patterns
  */
-export class brokerTerminalService implements IBrokerTerminal {
+export class brokerTerminalService implements IBrokerWithoutRealtime {
   private readonly host: IBrokerConnectionAdapterHost
+  private readonly datafeed: IDatafeedQuotesApi
 
   // Private data management using actual TradingView types
   private readonly _orders = new Map<string, Order>()
@@ -51,28 +53,29 @@ export class brokerTerminalService implements IBrokerTerminal {
   private readonly accountName = 'Demo Trading Account'
   private readonly startingBalance = 100000
 
-  constructor(host: IBrokerConnectionAdapterHost) {
+  constructor(host: IBrokerConnectionAdapterHost, datafeed: IDatafeedQuotesApi) {
     this.host = host
+    this.datafeed = datafeed
     this.balance = host.factory.createWatchedValue(this.startingBalance)
     this.equity = host.factory.createWatchedValue(this.startingBalance)
 
     console.log('Mock Broker Service initialized with TradingView types')
-    this.initializeSampleData()
+    this.initializeBrokerData()
   }
 
-  private initializeSampleData(): void {
-    // Create sample position using actual TradingView Position type
-    const samplePosition: Position = {
+  private initializeBrokerData(): void {
+    // Create broker position using actual TradingView Position type
+    const brokerPosition: Position = {
       id: 'AAPL-POS-1',
       symbol: 'AAPL',
       qty: 100,
       side: Side.Buy,
       avgPrice: 150.0,
     }
-    this._positions.set(samplePosition.id, samplePosition)
+    this._positions.set(brokerPosition.id, brokerPosition)
 
-    // Create sample order using actual TradingView Order type
-    const sampleOrder: Order = {
+    // Create broker order using actual TradingView Order type
+    const brokerOrder: Order = {
       id: 'ORDER-1',
       symbol: 'TSLA',
       type: OrderType.Limit,
@@ -82,7 +85,7 @@ export class brokerTerminalService implements IBrokerTerminal {
       limitPrice: 200.0,
       updateTime: Date.now(),
     }
-    this._orders.set(sampleOrder.id, sampleOrder)
+    this._orders.set(brokerOrder.id, brokerOrder)
 
     console.log('Sample trading data initialized')
   }
@@ -200,6 +203,8 @@ export class brokerTerminalService implements IBrokerTerminal {
   }
 
   async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
+    console.log('[Broker] Attempting to place order:', order)
+
     const orderId = `ORDER-${this.orderCounter++}`
 
     const newOrder: Order = {
@@ -221,7 +226,7 @@ export class brokerTerminalService implements IBrokerTerminal {
       this.simulateOrderExecution(orderId)
     }, 1000)
 
-    console.log(`Mock order placed: ${orderId}`, newOrder)
+    console.log(`[Broker] Mock order placed: ${orderId}`, newOrder)
     return { orderId }
   }
 
@@ -318,14 +323,13 @@ export class brokerTerminalService implements IBrokerTerminal {
     return this.accountId
   }
 
-  // Required methods for streaming subscriptions (simplified)
-  subscribeRealtime(): void {
-    console.log('Mock realtime subscription started')
-  }
+  // subscribeRealtime(symbol: string): void {
+  //   console.log('Mock realtime subscription started for symbol:', symbol)
+  // }
 
-  unsubscribeRealtime(): void {
-    console.log('Mock realtime subscription stopped')
-  }
+  // unsubscribeRealtime(symbol: string): void {
+  //   console.log('Mock realtime subscription stopped for symbol:', symbol)
+  // }
 
   connectionStatus(): ConnectionStatus {
     return 1 // Connected status

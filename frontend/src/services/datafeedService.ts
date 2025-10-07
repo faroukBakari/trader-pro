@@ -535,34 +535,36 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
           }
 
           // Create realistic quote values based on the last bar
-          const basePrice = lastBar.close
-          const spread = basePrice * 0.001 // 0.1% spread
-          const bid = basePrice - spread / 2
-          const ask = basePrice + spread / 2
-          const change = basePrice - lastBar.open
-          const changePercent = (change / lastBar.open) * 100
+          const basePrice = Math.max(lastBar.close, 0.01) // Ensure positive price
+          const spread = Math.max(basePrice * 0.001, 0.01) // 0.1% spread, minimum 0.01
 
           // Generate some variation for real-time feel
           const variation = (Math.random() - 0.5) * basePrice * 0.005 // 0.5% max variation
-          const currentPrice = basePrice + variation
+          const currentPrice = Math.max(basePrice + variation, 0.01) // Ensure positive
+
+          const bid = Math.max(currentPrice - spread / 2, 0.01) // Ensure positive bid
+          const ask = Math.max(currentPrice + spread / 2, bid + 0.01) // Ensure ask > bid
+
+          const change = currentPrice - lastBar.open
+          const changePercent = lastBar.open > 0 ? (change / lastBar.open) * 100 : 0
 
           const quoteValues: DatafeedQuoteValues = {
-            // Price data
-            lp: parseFloat(currentPrice.toFixed(2)), // Last price
-            ask: parseFloat((ask + variation).toFixed(2)),
-            bid: parseFloat((bid + variation).toFixed(2)),
-            spread: parseFloat((ask - bid).toFixed(2)),
+            // Price data - ensure all prices are positive numbers
+            lp: Number(currentPrice.toFixed(2)), // Last price
+            ask: Number(ask.toFixed(2)), // Ask price
+            bid: Number(bid.toFixed(2)), // Bid price
+            spread: Number((ask - bid).toFixed(2)), // Spread
 
             // Daily statistics
-            open_price: parseFloat(lastBar.open.toFixed(2)),
-            high_price: parseFloat(Math.max(lastBar.high, currentPrice).toFixed(2)),
-            low_price: parseFloat(Math.min(lastBar.low, currentPrice).toFixed(2)),
-            prev_close_price: parseFloat((lastBar.close * 0.995).toFixed(2)), // Simulate previous day close
-            volume: lastBar.volume || 0,
+            open_price: Number(Math.max(lastBar.open, 0.01).toFixed(2)),
+            high_price: Number(Math.max(lastBar.high, currentPrice, 0.01).toFixed(2)),
+            low_price: Number(Math.max(Math.min(lastBar.low, currentPrice), 0.01).toFixed(2)),
+            prev_close_price: Number(Math.max(lastBar.close * 0.995, 0.01).toFixed(2)),
+            volume: Math.max(lastBar.volume || 0, 0),
 
-            // Changes (required for mobile)
-            ch: parseFloat(change.toFixed(2)),
-            chp: parseFloat(changePercent.toFixed(2)),
+            // Changes
+            ch: Number(change.toFixed(2)),
+            chp: Number(changePercent.toFixed(2)),
 
             // Symbol information
             short_name: symbol,
@@ -571,11 +573,13 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
             original_name: symbol,
           }
 
-          quoteData.push({
+          const responseData: QuoteData = {
             s: 'ok',
-            n: symbol,
+            n: symbol, // Ensure this exactly matches the requested symbol
             v: quoteValues,
-          })
+          }
+
+          quoteData.push(responseData)
         })
 
         console.debug(`[Datafeed] Generated quotes for ${quoteData.length} symbols`)
@@ -609,7 +613,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     })
 
     // Combine all symbols for subscription
-    const allSymbols = [...symbols, ...fastSymbols]
+    const allSymbols = [...new Set([...symbols, ...fastSymbols])]
 
     if (allSymbols.length === 0) {
       console.log('[Datafeed] No symbols to subscribe to for quotes')
@@ -622,7 +626,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       fastSymbols,
       onRealtimeCallback,
       // Use different intervals for regular vs fast symbols
-      // Fast symbols update every 5 seconds, regular symbols every 30 seconds
+      // Fast symbols update every 2 seconds, regular symbols every 10 seconds
       intervalId: window.setInterval(
         () => {
           if (!this.quotesSubscriptions.has(listenerGUID)) {
@@ -644,8 +648,8 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
             },
           )
         },
-        fastSymbols.length > 0 ? 1 : 2,
-      ), // 5s for fast symbols, 30s for regular
+        fastSymbols.length > 0 ? 2000 : 10000,
+      ), // 2s for fast symbols, 10s for regular
     })
 
     console.log(
