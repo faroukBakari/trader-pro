@@ -19,8 +19,7 @@ export default defineConfigWithVueTs(
     '**/dist/**',
     '**/dist-ssr/**',
     '**/coverage/**',
-    '**/public/charting_library/**',
-    '**/public/datafeeds/**',
+    '**/public/**',
     '**/node_modules/**',
   ]),
 

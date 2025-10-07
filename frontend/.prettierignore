@@ -10,8 +10,8 @@ node_modules/
 src/clients/trader-api-generated/
 
 # External libraries and dependencies
-public/charting_library/
-public/datafeeds/
+public/
+public/
 
 # Configuration files that should not be formatted
 *.json

@@ -19,7 +19,7 @@ import type {
   SeriesFormat,
   SubscribeBarsCallback,
   Timezone,
-} from '@public/charting_library/charting_library'
+} from '@public/trading_terminal/charting_library'
 
 // documentation:
 // - https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/
@@ -494,7 +494,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onDataCallback: QuotesCallback,
     onErrorCallback: QuotesErrorCallback,
   ): void {
-    console.log('[Datafeed] getQuotes called:', { symbols })
+    console.debug('[Datafeed] getQuotes called:', { symbols })
 
     // Use setTimeout to ensure asynchronous callback as required
     setTimeout(() => {
@@ -578,7 +578,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
           })
         })
 
-        console.log(`[Datafeed] Generated quotes for ${quoteData.length} symbols`)
+        console.debug(`[Datafeed] Generated quotes for ${quoteData.length} symbols`)
         onDataCallback(quoteData)
       } catch (error) {
         console.error('[Datafeed] Error in getQuotes:', error)
