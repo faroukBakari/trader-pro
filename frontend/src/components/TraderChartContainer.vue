@@ -11,12 +11,14 @@
 // other charting library sources : https://github.com/search?q=charting_library%2Fbundles%2Ffloating-toolbars.&type=code
 import { onMounted, ref, onUnmounted } from 'vue'
 import { DatafeedService } from '@/services/datafeedService'
+import { brokerTerminalService } from '@/services/brokerTerminalService'
 import { widget } from '@public/trading_terminal'
 import type {
   IChartingLibraryWidget,
   ResolutionString,
   LanguageCode,
   ChartingLibraryWidgetOptions,
+  IBrokerConnectionAdapterHost,
 } from '@public/trading_terminal'
 
 function getLanguageFromURL() {
@@ -71,6 +73,10 @@ const props = defineProps({
   studiesOverrides: {
     type: Object,
   },
+  enableTrading: {
+    default: true,
+    type: Boolean,
+  },
 })
 
 const chartContainer = ref<HTMLDivElement>()
@@ -90,9 +96,10 @@ onMounted(() => {
   }
 
   try {
+    const datafeed = new DatafeedService()
     const widgetOptions: ChartingLibraryWidgetOptions = {
       symbol: props.symbol,
-      datafeed: new DatafeedService(),
+      datafeed,
       interval: props.interval as ResolutionString,
       container: chartContainer.value,
       library_path: props.libraryPath,
@@ -108,6 +115,28 @@ onMounted(() => {
       fullscreen: props.fullscreen,
       autosize: props.autosize,
       studies_overrides: props.studiesOverrides,
+
+      // Trading functionality
+      ...(props.enableTrading && {
+        broker_factory: (host: IBrokerConnectionAdapterHost) => {
+          console.log('Creating mock broker terminal with host:', host)
+          return new brokerTerminalService(host)
+        },
+        broker_config: {
+          configFlags: {
+            supportClosePosition: true,
+            supportNativeReversePosition: true,
+            supportPLUpdate: true,
+            supportExecutions: true,
+            supportPositions: true,
+            showQuantityInsteadOfAmount: false,
+            supportLevel2Data: false,
+            supportDOM: false,
+            supportOrdersHistory: false,
+            supportEquity: true,
+          },
+        },
+      }),
     }
 
     chartWidget = new widget(widgetOptions)
@@ -127,17 +156,20 @@ onMounted(() => {
 
               button.addEventListener('click', () => {
                 if (chartWidget) {
+                  const message = props.enableTrading
+                    ? 'Trading functionality is enabled with mock broker terminal!'
+                    : 'Charting Library API works correctly'
                   chartWidget.showNoticeDialog({
-                    title: 'Notification',
-                    body: 'Charting Library API works correctly',
+                    title: 'Status',
+                    body: message,
                     callback: () => {
-                      console.log('Noticed!')
+                      console.log('Status checked!')
                     },
                   })
                 }
               })
 
-              button.innerHTML = 'Check API'
+              button.innerHTML = props.enableTrading ? 'Trading Status' : 'Check API'
             }
           })
         }

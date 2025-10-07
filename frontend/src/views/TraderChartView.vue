@@ -1,6 +1,6 @@
 <template>
   <main>
-    <TraderChartContainer />
+    <TraderChartContainer :enableTrading="true" />
   </main>
 </template>
 
