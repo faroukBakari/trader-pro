@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# Ignore whitespace checks for third-party TradingView libraries
+frontend/public/** -diff
