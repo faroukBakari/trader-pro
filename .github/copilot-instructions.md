@@ -497,7 +497,9 @@ Notes
 
 
 Enable trading features for TradingView Charting Library:
-https://www.tradingview.com/charting-library-docs/latest/trading_terminal/trading-concepts/#how-to-enable-trading
-https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/trading-platform-methods
+Explore these library docs and feel free to follow links for more details:
+https://www.tradingview.com/charting-library-docs/latest/trading_terminal/trading-concepts/
 https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IBrokerTerminal/
-investigate this repo: https://github.com/FarmaanElahi/terminal-web/blob/d4865c1e55963caaf1691c99f1cae923a4b8a7db/components/chart/terminal/broker_terminal.ts
+Explore these broker terminal implementations examples:
+https://github.com/FarmaanElahi/terminal-web/blob/main/components/chart/terminal/broker_terminal.ts
+https://github.com/TargetHit/tradingview-binance/blob/master/broker-sample/src/broker.ts
