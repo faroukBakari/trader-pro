@@ -2,14 +2,26 @@
 # Frontend API Client Generator
 # This script attempts to generate the TypeScript client from a live API server.
 # If the API is not available, it falls back to using the mock client implementation.
+#
+# Usage:
+#   ./scripts/generate-client.sh                    # Use default settings
+#   VITE_API_URL=http://api.example.com ./scripts/generate-client.sh    # Custom API URL
+#   TRADER_API_BASE_PATH="" ./scripts/generate-client.sh                 # Empty basePath (relative URLs)
+#   TRADER_API_BASE_PATH="/api" ./scripts/generate-client.sh             # Custom basePath
+#
+# Environment Variables:
+#   VITE_API_URL      - API server URL (default: http://localhost:8000)
+#   BACKEND_PORT      - Backend port when using localhost (default: 8000)
+#   TRADER_API_BASE_PATH - BasePath for generated client (default: auto-detected from OpenAPI spec)
 
 set -e
 
 # Configuration
 API_URL="${VITE_API_URL:-http://localhost:${BACKEND_PORT:-8000}}"
-OUTPUT_DIR="./src/clients/trader-api-generated"
+OUTPUT_DIR="./src/clients/trader-client-generated"
 OPENAPI_SPEC="openapi.json"
 CLIENT_PACKAGE_NAME="@trading-api/client"
+BASE_PATH="${TRADER_API_BASE_PATH:-}"  # Use same env var as frontend
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -44,16 +56,7 @@ check_api_available() {
 
 # Function to download OpenAPI specification
 download_openapi_spec() {
-    # First, try to use local file if it exists (for file watching mode)
-    local local_openapi="../backend/openapi.json"
-    if [ -f "$local_openapi" ]; then
-        echo -e "${BLUE}📁 Using local OpenAPI specification: $local_openapi${NC}"
-        cp "$local_openapi" "$OPENAPI_SPEC"
-        echo -e "${GREEN}✅ Local OpenAPI specification copied${NC}"
-        return 0
-    fi
-
-    # Fallback to downloading from server
+    # Downloading from server
     local openapi_url="$API_URL/api/v1/openapi.json"
     echo -e "${BLUE}📥 Downloading OpenAPI specification from: $openapi_url${NC}"
 
@@ -70,32 +73,26 @@ download_openapi_spec() {
 generate_client() {
     echo -e "${BLUE}🔧 Generating TypeScript client...${NC}"
 
-    # Generate client using openapi-generator
-    if npx @openapitools/openapi-generator-cli generate \
-        -i "$OPENAPI_SPEC" \
+    # Prepare generator command
+    local generator_cmd="npx @openapitools/openapi-generator-cli generate \
+        -i \"$OPENAPI_SPEC\" \
         -g typescript-axios \
-        -o "$OUTPUT_DIR" \
-        --additional-properties="\
-npmName=$CLIENT_PACKAGE_NAME,\
-supportsES6=true,\
-typescriptThreePlus=true,\
-withInterfaces=true,\
-withSeparateModelsAndApi=true,\
-apiPackage=api,\
-modelPackage=models,\
-useSingleRequestParameter=true\
-" > /dev/null 2>&1; then
+        -o \"$OUTPUT_DIR\" \
+        -c \"./openapi-generator-config.json\" \
+        --server-variables=host=,basePath="
 
+    # Add basePath override if specified
+    if [ -n "$BASE_PATH" ]; then
+        echo -e "${BLUE}🔧 Using custom basePath: $BASE_PATH${NC}"
+        generator_cmd="$generator_cmd --additional-properties=basePath=\"$BASE_PATH\""
+    fi
+
+    # Generate client using openapi-generator
+    if eval "$generator_cmd" > /dev/null 2>&1; then
         echo -e "${GREEN}✅ Client generation successful${NC}"
 
         # Create index file for easy imports
         create_index_file
-
-        # Create configuration wrapper
-        create_config_wrapper
-
-        # Create client type indicator
-        echo "server" > "$OUTPUT_DIR/.client-type"
 
         return 0
     else
@@ -127,33 +124,6 @@ export type {
   AxiosError,
   AxiosRequestConfig
 } from 'axios'
-EOF
-}
-
-# Function to create configuration wrapper
-create_config_wrapper() {
-    cat > "$OUTPUT_DIR/client-config.ts" << 'EOF'
-// Trading API Client Configuration
-// This file provides a pre-configured client instance
-
-import { Configuration } from './configuration'
-import { HealthApi, VersioningApi } from './api'
-
-// API Configuration - using empty basePath for same-origin requests
-const apiConfig = new Configuration({
-  basePath: '',
-})
-
-// Pre-configured API client instances
-export const healthApi = new HealthApi(apiConfig)
-export const versioningApi = new VersioningApi(apiConfig)
-
-// Export configuration for custom instances
-export { apiConfig, Configuration }
-
-// Export all API classes
-export * from './api'
-export * from './models'
 EOF
 }
 
@@ -212,12 +182,15 @@ main() {
                 echo ""
                 echo -e "${GREEN}🎉 Success! Generated client from live API${NC}"
                 echo -e "${GREEN}📁 Client location: $OUTPUT_DIR${NC}"
+                if [ -n "$BASE_PATH" ]; then
+                    echo -e "${GREEN}🔧 Using basePath: $BASE_PATH${NC}"
+                fi
                 echo -e "${GREEN}🔧 Import in your components:${NC}"
-                echo -e "   import { healthApi, versioningApi } from '@/clients/trader-api-generated/client-config'"
+                echo -e "   import { healthApi, versioningApi } from '@/clients/trader-client-generated/client-config'"
                 echo ""
 
                 # Cleanup
-                rm -f "$OPENAPI_SPEC"
+                # rm -f "$OPENAPI_SPEC"
                 exit 0
             fi
         fi
@@ -238,15 +211,7 @@ main() {
     echo -e "   • All features will work for development"
     echo -e "   • You can generate later when API is ready"
     echo ""
-    echo -e "${BLUE}🚀 To generate from live API:${NC}"
-    echo -e "   1. Start backend: ${GREEN}cd backend && make dev${NC}"
-    echo -e "   2. Run: ${GREEN}npm run client:generate${NC}"
-    echo ""
-
-    setup_mock_fallback
-
-    echo ""
-    echo -e "${GREEN}✅ Setup complete - using mock client${NC}"
+    echo -e "${YELLOW}⚠️ Setup complete - using mock client${NC}"
     echo ""
 }
 

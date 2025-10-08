@@ -161,11 +161,11 @@ jobs:
     - name: Verify client generation
       working-directory: frontend
       run: |
-        if [ ! -f "src/clients/trader-api-generated/.client-type" ]; then
+        if [ ! -f "src/clients/trader-client-generated/.client-type" ]; then
           echo "❌ Client generation failed - no .client-type file"
           exit 1
         fi
-        CLIENT_TYPE=$(cat src/clients/trader-api-generated/.client-type)
+        CLIENT_TYPE=$(cat src/clients/trader-client-generated/.client-type)
         if [ "$CLIENT_TYPE" != "server" ]; then
           echo "❌ Expected 'server' client but got '$CLIENT_TYPE'"
           exit 1

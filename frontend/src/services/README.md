@@ -113,16 +113,6 @@ When using the fallback (mock) implementation:
 - 🎭 **Realistic Data**: Returns data that matches the real API structure
 - ⏱️ **Network Simulation**: Includes realistic network delays (100-150ms)
 - 📊 **Multiple Scenarios**: Provides both stable (v1) and planned (v2) API versions
-- 🔧 **Configurable**: Mock behavior can be customized for testing
-- 📝 **Logging**: Optional console logs to indicate when mocks are being used
-
-```typescript
-import { MOCK_CONFIG } from '@/services/apiService'
-
-// Customize mock behavior
-MOCK_CONFIG.networkDelay.health = 50 // Faster for testing
-MOCK_CONFIG.enableLogs = false // Quiet during tests
-```
 
 ### Generated Client (Advanced)
 
@@ -144,11 +134,7 @@ The service uses mock data implementation, making it easy to test:
 
 ```typescript
 import { vi } from 'vitest'
-import { apiService, MOCK_CONFIG } from '../apiService'
-
-// Customize mock behavior for testing
-MOCK_CONFIG.enableLogs = false
-MOCK_CONFIG.networkDelay.health = 0 // No delay for faster tests
+import { apiService } from '../apiService'
 
 // Test the mock responses
 const health = await apiService.getHealth()

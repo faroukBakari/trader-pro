@@ -7,20 +7,18 @@
 import fs from 'fs'
 import path from 'path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { apiService, ApiService, MOCK_CONFIG } from '../apiService'
+import { apiService, ApiService } from '../apiService'
 
 describe('ApiService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // Reset any cached state for each test
     vi.resetModules()
-    // Disable logs during testing
-    MOCK_CONFIG.enableLogs = false
 
     // Clean up any generated client to ensure tests use fallback
     try {
       // Remove generated client directory to force fallback behavior
-      const generatedPath = path.join(__dirname, '../../clients/trader-api-generated')
+      const generatedPath = path.join(__dirname, '../../clients/trader-client-generated')
       if (fs.existsSync(generatedPath)) {
         fs.rmSync(generatedPath, { recursive: true, force: true })
       }
@@ -112,19 +110,6 @@ describe('ApiService', () => {
     it('should allow creating custom instances for testing', () => {
       const customService = new ApiService()
       expect(customService).toBeInstanceOf(ApiService)
-    })
-  })
-
-  describe('getClientType', () => {
-    it('should return unknown before any API calls', () => {
-      const customService = new ApiService()
-      // New instances start with 'unknown' until first API call attempt
-      expect(customService.getClientType()).toBe('unknown')
-    })
-
-    it('should return mock after using fallback client', async () => {
-      await apiService.getHealthStatus()
-      expect(apiService.getClientType()).toBe('mock')
     })
   })
 })

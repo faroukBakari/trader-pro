@@ -1,5 +1,8 @@
 # TraderPRO Backend Makefile
 
+# Environment variables with fallback values
+BACKEND_PORT ?= 8000
+
 .PHONY: help install test test-cov lint lint-check format build clean dev health clients export-openapi docs-html
 
 # Default target
@@ -52,6 +55,10 @@ lint-check:
 	poetry run isort --check-only src/ tests/
 	poetry run flake8 src/ tests/
 	poetry run mypy src/
+
+lint-response-models:
+	@echo "Validating FastAPI response models..."
+	poetry run python scripts/check_response_models.py src/trading_api/api/*.py
 
 format:
 	@echo "Formatting backend code..."
