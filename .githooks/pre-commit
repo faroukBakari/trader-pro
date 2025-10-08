@@ -122,7 +122,7 @@ if [[ -n "$frontend_files" ]]; then
 
         # Run tests (only if not in CI for speed)
         if ! is_ci; then
-            if ! run_check "Frontend tests" "npm run test:unit run" "$repo_root/frontend"; then
+            if ! run_check "Frontend tests" "rm -rf $repo_root/frontend/clients/* && npm run test:unit" "$repo_root/frontend"; then
                 failed_checks+=("frontend-tests")
             fi
         fi

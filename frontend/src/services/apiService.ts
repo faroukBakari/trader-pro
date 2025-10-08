@@ -7,7 +7,7 @@
 
 // Type definitions (fallback when generated types are not available)
 
-import { TraderPlugin } from '@clients/traderPlugin'
+import { TraderPlugin } from '@/plugins/traderPlugin'
 export interface HealthResponse {
   status: string
   message?: string
@@ -47,7 +47,7 @@ const MOCK_CONFIG = {
 }
 
 // Fallback implementation with mock data for development/testing
-class FallbackClentInterface implements ClientInterface {
+class FallbackClent implements ClientInterface {
   async getHealthStatus(): Promise<{ status: number; data: HealthResponse }> {
     if (MOCK_CONFIG.enableLogs) {
       console.info('🎭 Using mock API response for health endpoint')
@@ -119,7 +119,7 @@ export class ApiService {
   }
 
   async getHealthStatus(): Promise<HealthResponse> {
-    return this.plugin.getClient(FallbackClentInterface).then(async (client) => {
+    return this.plugin.getClientWithFallback(FallbackClent).then(async (client) => {
       const { status, data } = await client.getHealthStatus()
       if (status !== 200) {
         return Promise.reject(new Error(`Health check failed with status ${status}`))
@@ -129,7 +129,7 @@ export class ApiService {
   }
 
   async getAPIVersions(): Promise<APIMetadata> {
-    return this.plugin.getClient(FallbackClentInterface).then(async (client) => {
+    return this.plugin.getClientWithFallback(FallbackClent).then(async (client) => {
       const { status, data } = await client.getAPIVersions()
       if (status !== 200) {
         return Promise.reject(new Error(`Versions check failed with status ${status}`))
