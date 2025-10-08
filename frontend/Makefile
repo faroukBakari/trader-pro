@@ -58,11 +58,11 @@ build:
 dev:
 	@echo "Starting frontend development server..."
 	@echo "🧹 Cleaning generated client..."
-	rm -rf src/clients/trader-api-generated
+	rm -rf src/clients/trader-client-generated
 	npm run dev
 
 # Cleanup
 clean:
 	@echo "Cleaning frontend build artifacts..."
-	rm -rf dist/ node_modules/.vite src/clients/trader-api-generated
+	rm -rf dist/ node_modules/.vite src/clients/trader-client-generated
 	@echo "Frontend clean complete."

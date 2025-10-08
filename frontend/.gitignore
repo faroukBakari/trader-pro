@@ -28,7 +28,7 @@ coverage
 *.sw?
 
 # Generated API client
-src/clients/trader-api-generated/
+src/clients/trader-client-generated/
 
 # OpenAPI generation artifacts
 openapi.json

@@ -1,5 +1,9 @@
 # TraderPRO Project Makefile
 
+# Environment variables with fallback values
+BACKEND_PORT ?= 8000
+FRONTEND_PORT ?= 5173
+
 .PHONY: help setup install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration
 
 # Default target
@@ -76,7 +80,7 @@ dev-backend:
 dev-frontend:
 	@echo "Starting frontend development server..."
 	@echo "🧹 Cleaning frontend generated files..."
-	rm -rf frontend/src/clients/trader-api-generated
+	rm -rf frontend/src/clients/trader-client-generated
 	make -C frontend dev
 
 # Full-stack development
@@ -140,7 +144,7 @@ clean-all:
 	make -C frontend clean
 	@echo "🧹 Cleaning project-level generated files..."
 	rm -f backend/openapi*.json
-	rm -rf frontend/src/clients/trader-api-generated
+	rm -rf frontend/src/clients/trader-client-generated
 	@echo "🧹 Cleaning smoke test artifacts..."
 	rm -rf smoke-tests/test-results smoke-tests/playwright-report
 	@echo "Clean complete."
@@ -151,7 +155,7 @@ clean-generated:
 	@echo "🧹 Removing backend OpenAPI files..."
 	rm -f backend/openapi*.json
 	@echo "🧹 Removing frontend generated client..."
-	rm -rf frontend/src/clients/trader-api-generated
+	rm -rf frontend/src/clients/trader-client-generated
 	@echo "🧹 Removing frontend build cache..."
 	rm -rf frontend/node_modules/.vite
 	@echo "🧹 Removing test artifacts..."

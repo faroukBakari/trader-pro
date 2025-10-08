@@ -7,14 +7,46 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI
 
+from trading_api.api.datafeed import router as datafeed_router
 from trading_api.api.health import router as health_router
 from trading_api.api.versions import router as versions_router
 from trading_api.core.versioning import APIVersion
 
 
+def validate_response_models(app: FastAPI) -> None:
+    """Validate that all routes have response_model defined for OpenAPI compliance"""
+    from fastapi.routing import APIRoute
+
+    missing_models = []
+
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            if route.response_model is None:
+                # Skip OPTIONS method as it's auto-generated
+                methods = route.methods or set()
+                if methods and "OPTIONS" not in methods:
+                    endpoint_name = getattr(route.endpoint, "__name__", "unknown")
+                    path = route.path
+                    missing_models.append(f"{list(methods)} {path} -> {endpoint_name}")
+
+    if missing_models:
+        error_msg = (
+            "❌ FastAPI Response Model Violations Found:\n"
+            + "\n".join(f"  - {model}" for model in missing_models)
+            + "\n\nAll FastAPI routes must have response_model"
+            + " defined for OpenAPI compliance."
+        )
+        raise ValueError(error_msg)
+
+    print("✅ All FastAPI routes have response_model defined")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Handle application startup and shutdown events."""
+    # Startup: Validate all routes have response models
+    validate_response_models(app)
+
     # Startup: Generate openapi.json file for file-based watching
     openapi_schema = app.openapi()
 
@@ -49,6 +81,7 @@ app = FastAPI(
     openapi_tags=[
         {"name": "health", "description": "Health check operations"},
         {"name": "versioning", "description": "API version information"},
+        {"name": "datafeed", "description": "Market data and symbols operations"},
     ],
     lifespan=lifespan,
 )
@@ -56,6 +89,7 @@ app = FastAPI(
 # Include version 1 routes
 app.include_router(health_router, prefix="/api/v1", tags=["v1"])
 app.include_router(versions_router, prefix="/api/v1", tags=["v1"])
+app.include_router(datafeed_router, prefix="/api/v1", tags=["v1"])
 
 
 # Add version information to root endpoint
@@ -69,4 +103,5 @@ async def root() -> dict:
         "documentation": "/api/v1/docs",
         "health": "/api/v1/health",
         "versions": "/api/v1/versions",
+        "datafeed": "/api/v1/datafeed",
     }
