@@ -3,12 +3,13 @@
  * This tests that the wrapper correctly interfaces with the generated client
  */
 
-import { apiService } from '@/services/apiService'
+import { ApiService } from '@/services/apiService'
 
 export async function testApiIntegration() {
   console.log('🧪 Testing API Service Integration...')
 
   try {
+    const apiService = new ApiService()
     console.log('📡 Testing health endpoint...')
     const health = await apiService.getHealthStatus()
     console.log('✅ Health check successful:', {
