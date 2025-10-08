@@ -127,49 +127,6 @@ export type {
 EOF
 }
 
-# Function to setup mock client fallback
-setup_mock_fallback() {
-    echo -e "${YELLOW}🎭 Setting up mock client fallback...${NC}"
-
-    # Ensure directory exists for mock mode
-    mkdir -p "$OUTPUT_DIR"
-
-    # Create a marker file to indicate mock mode
-    echo "mock" > "$OUTPUT_DIR/.client-type"
-
-    cat > "$OUTPUT_DIR/README.md" << 'EOF'
-# Mock API Client
-
-The generated API client is not available because the backend API server is not running.
-
-The application will automatically use mock data from `apiService.ts` for development and testing.
-
-## To generate the real client:
-
-1. Start the backend API server:
-   ```bash
-   cd ../backend
-   make dev
-   ```
-
-2. Re-run client generation:
-   ```bash
-   npm run client:generate
-   ```
-
-## Manual generation:
-
-```bash
-./scripts/generate-client.sh
-```
-
-The app will work perfectly fine with mock data for development!
-EOF
-
-    echo -e "${GREEN}✅ Mock client fallback configured${NC}"
-    echo -e "${YELLOW}📝 The app will use mock data from apiService.ts${NC}"
-}
-
 # Main execution
 main() {
     echo ""

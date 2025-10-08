@@ -91,14 +91,9 @@ The frontend automatically uses mocked data when:
 ### Example Frontend Test
 
 ```typescript
-import { apiService, MOCK_CONFIG } from '@/services/apiService'
+import { apiService } from '@/services/apiService'
 
 describe('API Service', () => {
-  beforeEach(() => {
-    // Configure mocks for testing
-    MOCK_CONFIG.enableLogs = false
-    MOCK_CONFIG.networkDelay.health = 0
-  })
 
   it('returns health status with mock data', async () => {
     const health = await apiService.getHealth()
@@ -107,14 +102,6 @@ describe('API Service', () => {
     expect(health.api_version).toBe('v1')
   })
 })
-```
-
-### Mock Data Configuration
-
-```typescript
-// Customize mock behavior
-MOCK_CONFIG.networkDelay.health = 100    // Simulate network delay
-MOCK_CONFIG.enableLogs = true            // Enable console logs
 ```
 
 ## Integration Testing
@@ -390,7 +377,7 @@ rm -rf src/services/generated
 npm run client:generate
 
 # Check generated client
-cat src/services/generated/.client-type  # Should be 'server'
+cat src/services/generated/index.ts  # Should be present
 ```
 
 ## Best Practices

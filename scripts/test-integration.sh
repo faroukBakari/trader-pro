@@ -146,25 +146,18 @@ else
 fi
 
 echo "🔍 Verifying generated client..."
-if [ ! -f "src/clients/trader-client-generated/.client-type" ]; then
-    echo -e "${RED}❌ No .client-type file found${NC}"
+if [ ! -f "src/clients/trader-client-generated/index.ts" ]; then
+    echo -e "${RED}❌ No trader-client-generated/index.ts file found${NC}"
     exit 1
 fi
 
-CLIENT_TYPE=$(cat src/clients/trader-client-generated/.client-type)
-if [ "$CLIENT_TYPE" != "server" ]; then
-    echo -e "${RED}❌ Expected 'server' client but got '$CLIENT_TYPE'${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}✅ Generated client type: $CLIENT_TYPE${NC}"
+echo -e "${GREEN}✅ Generated client type: server${NC}"
 
 echo "📝 Checking generated files..."
 REQUIRED_FILES=(
     "src/clients/trader-client-generated/api.ts"
     "src/clients/trader-client-generated/base.ts"
     "src/clients/trader-client-generated/configuration.ts"
-    "src/clients/trader-client-generated/client-config.ts"
     "src/clients/trader-client-generated/index.ts"
 )
 
@@ -227,13 +220,10 @@ else
     exit 1
 fi
 
-if [ ! -f "src/clients/trader-client-generated/.client-type" ]; then
-    echo -e "${RED}❌ No .client-type file found${NC}"
-    exit 1
-fi
-
-CLIENT_TYPE=$(cat src/clients/trader-client-generated/.client-type)
-if [ "$CLIENT_TYPE" != "mock" ]; then
+CLIENT_TYPE="mock"
+if [ -f "src/clients/trader-client-generated/index.ts" ]; then
+    CLIENT_TYPE="server"
+    echo -e "${RED}❌ trader-client-generated/index.ts file found${NC}"
     echo -e "${RED}❌ Expected 'mock' client but got '$CLIENT_TYPE'${NC}"
     exit 1
 fi

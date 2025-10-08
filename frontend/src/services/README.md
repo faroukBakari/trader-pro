@@ -13,7 +13,6 @@ src/services/
 │   ├── api/               # Generated API classes
 │   ├── models/            # Generated TypeScript types
 │   ├── client-config.ts   # Pre-configured client instance
-│   ├── .client-type       # Marker: 'server' or 'mock'
 │   └── ...
 └── __tests__/
     └── apiService.spec.ts  # Unit tests with mocking examples
@@ -88,11 +87,9 @@ npm run client:generate
 1. **Live API Available**: Script checks if backend is running at `http://localhost:8000`
    - ✅ Downloads OpenAPI spec from live API
    - ✅ Generates TypeScript client with full type safety
-   - ✅ Creates `.client-type: server` marker
    - ✅ App uses generated client
 
 2. **No Live API**: Backend not running or not accessible
-   - ✅ Creates `.client-type: mock` marker
    - ✅ App automatically uses mock data
    - ✅ Development continues seamlessly
 

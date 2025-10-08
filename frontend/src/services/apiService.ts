@@ -32,9 +32,9 @@ export interface APIMetadata {
   support_contact: string
 }
 
-export interface ApiServiceInterface {
-  getHealthStatus(): Promise<HealthResponse>
-  getAPIVersions(): Promise<APIMetadata>
+export interface ClientInterface {
+  getHealthStatus(): Promise<{ status: number; data: HealthResponse }>
+  getAPIVersions(): Promise<{ status: number; data: APIMetadata }>
 }
 
 // Configuration for mock behavior
@@ -47,8 +47,8 @@ const MOCK_CONFIG = {
 }
 
 // Fallback implementation with mock data for development/testing
-class FallbackApiService implements ApiServiceInterface {
-  async getHealthStatus(): Promise<HealthResponse> {
+class FallbackClentInterface implements ClientInterface {
+  async getHealthStatus(): Promise<{ status: number; data: HealthResponse }> {
     if (MOCK_CONFIG.enableLogs) {
       console.info('🎭 Using mock API response for health endpoint')
     }
@@ -57,19 +57,23 @@ class FallbackApiService implements ApiServiceInterface {
     await new Promise((resolve) => setTimeout(resolve, MOCK_CONFIG.networkDelay.health))
 
     return {
-      status: 'ok',
-      message: 'Trading API is running',
-      timestamp: new Date().toISOString(),
-      api_version: 'v1',
-      version_info: {
-        version: 'v1',
-        release_date: new Date().toISOString().split('T')[0],
-        status: 'stable',
-        deprecation_notice: null,
+      status: 200,
+      data: {
+        status: 'ok',
+        message: 'Trading API down',
+        timestamp: new Date().toISOString(),
+        api_version: 'v0',
+        version_info: {
+          version: 'v0',
+          release_date: new Date().toISOString().split('T')[0],
+          status: 'none',
+          deprecation_notice: null,
+        },
       },
     }
   }
-  async getAPIVersions(): Promise<APIMetadata> {
+
+  async getAPIVersions(): Promise<{ status: number; data: APIMetadata }> {
     if (MOCK_CONFIG.enableLogs) {
       console.info('🎭 Using mock API response for versions endpoint')
     }
@@ -78,49 +82,60 @@ class FallbackApiService implements ApiServiceInterface {
     await new Promise((resolve) => setTimeout(resolve, MOCK_CONFIG.networkDelay.versions))
 
     return {
-      current_version: 'v1',
-      available_versions: [
-        {
-          version: 'v1',
-          release_date: '2024-01-01',
-          status: 'stable',
-          breaking_changes: [],
-          deprecation_notice: null,
-          sunset_date: null,
-        },
-        {
-          version: 'v2',
-          release_date: 'TBD',
-          status: 'planned',
-          breaking_changes: [
-            'Authentication required for all endpoints',
-            'New response format for error messages',
-            'Renamed health endpoint to status',
-          ],
-          deprecation_notice: null,
-          sunset_date: null,
-        },
-      ],
-      documentation_url: '/api/v1/docs',
-      support_contact: 'support@trading-pro.nodomainyet',
+      status: 200,
+      data: {
+        current_version: 'v0',
+        available_versions: [
+          {
+            version: 'v0',
+            release_date: '2024-01-01',
+            status: 'none',
+            breaking_changes: [],
+            deprecation_notice: null,
+            sunset_date: null,
+          },
+          {
+            version: 'v1',
+            release_date: 'none',
+            status: 'next',
+            breaking_changes: ['none'],
+            deprecation_notice: null,
+            sunset_date: null,
+          },
+        ],
+        documentation_url: '/',
+        support_contact: 'none',
+      },
     }
   }
 }
 
 // Main API service implementation
-class ApiService {
-  private plugin: TraderPlugin<ApiServiceInterface>
+export class ApiService {
+  private plugin: TraderPlugin<ClientInterface>
 
   constructor() {
-    this.plugin = new TraderPlugin<ApiServiceInterface>()
+    this.plugin = new TraderPlugin<ClientInterface>()
   }
 
   async getHealthStatus(): Promise<HealthResponse> {
-    return this.plugin.getClient(FallbackApiService).then((client) => client.getHealthStatus())
+    return this.plugin.getClient(FallbackClentInterface).then(async (client) => {
+      const { status, data } = await client.getHealthStatus()
+      if (status !== 200) {
+        return Promise.reject(new Error(`Health check failed with status ${status}`))
+      }
+      return data
+    })
   }
 
   async getAPIVersions(): Promise<APIMetadata> {
-    return this.plugin.getClient(FallbackApiService).then((client) => client.getAPIVersions())
+    return this.plugin.getClient(FallbackClentInterface).then(async (client) => {
+      const { status, data } = await client.getAPIVersions()
+      if (status !== 200) {
+        return Promise.reject(new Error(`Versions check failed with status ${status}`))
+      }
+      return data
+    })
   }
 
   // Check if currently using mock client
@@ -128,12 +143,3 @@ class ApiService {
     return TraderPlugin.getClientType()
   }
 }
-
-// Export singleton instance
-export const apiService = new ApiService()
-
-// Export classes for testing/mocking
-export { ApiService, FallbackApiService }
-
-// Export mock configuration for testing
-export { MOCK_CONFIG }

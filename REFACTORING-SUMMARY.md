@@ -144,19 +144,11 @@ npm run build
 
 ### Generated Client Structure
 
-**With Live API** (`.client-type: server`):
 ```typescript
-import { healthApi, versioningApi } from '@/services/generated/client-config'
-
-const health = await healthApi.getHealthStatus()
-const versions = await versioningApi.getAPIVersions()
-```
-
-**Without Live API** (`.client-type: mock`):
-```typescript
-import { apiService } from '@/services/apiService'
+import { ApiService } from '@/services/apiService'
 
 // Automatically uses mock data
+const apiService = new ApiService()
 const health = await apiService.getHealth()
 const versions = await apiService.getVersions()
 ```

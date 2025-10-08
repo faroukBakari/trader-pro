@@ -49,9 +49,7 @@ This document describes the intelligent client generation architecture that enab
            ▼                     ▼
 ┌──────────────────────┐ ┌──────────────────────┐
 │ Download OpenAPI     │ │ Setup Mock Fallback  │
-│ Generate TS Client   │ │ Create .client-type  │
-│ Create .client-type  │ │ marker: 'mock'       │
-│ marker: 'server'     │ │                      │
+│ Generate TS Client   │ │                      │
 └──────────┬───────────┘ └──────┬───────────────┘
            │                     │
            └──────────┬──────────┘
@@ -78,7 +76,6 @@ frontend/
 │           ├── api/                # Generated API classes
 │           ├── models/             # Generated TypeScript types
 │           ├── client-config.ts    # Pre-configured instances
-│           └── .client-type        # 'server' or 'mock' marker
 └── package.json                    # Hooks into prebuild/predev
 ```
 
@@ -92,8 +89,6 @@ frontend/
 - Check if backend API is available
 - Download OpenAPI specification if available
 - Generate TypeScript client using openapi-generator
-- Create fallback mock structure if API unavailable
-- Set `.client-type` marker for debugging
 
 **Usage**:
 ```bash
@@ -124,7 +119,7 @@ npm run client:generate
 
 ### 3. Generated Client Structure
 
-**When API is Available** (`.client-type: server`):
+**When API is Available**:
 ```
 generated/
 ├── api/
@@ -136,14 +131,6 @@ generated/
 │   └── api-metadata.ts
 ├── client-config.ts      # Pre-configured instances
 ├── index.ts              # Clean exports
-└── .client-type          # Contains: 'server'
-```
-
-**When API is Unavailable** (`.client-type: mock`):
-```
-generated/
-├── README.md            # Instructions for setup
-└── .client-type         # Contains: 'mock'
 ```
 
 ## Integration Points
@@ -304,9 +291,6 @@ curl http://localhost:8000/api/v1/health
 # Force regeneration
 rm -rf src/services/generated
 npm run client:generate
-
-# Check .client-type
-cat src/services/generated/.client-type
 ```
 
 ### Type Errors After API Changes
@@ -340,11 +324,7 @@ echo "VITE_API_URL=http://your-api-url" >> .env
 ### Unit Tests
 
 ```typescript
-import { apiService, MOCK_CONFIG } from '@/services/apiService'
-
-// Always uses mocks in tests
-MOCK_CONFIG.enableLogs = false
-MOCK_CONFIG.networkDelay.health = 0
+import { apiService } from '@/services/apiService'
 
 const health = await apiService.getHealth()
 expect(health.status).toBe('ok')
