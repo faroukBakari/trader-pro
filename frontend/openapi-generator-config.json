@@ -1,5 +1,5 @@
 {
-  "npmName": "@trading-api/client",
+  "npmName": "@trader-pro/client",
   "supportsES6": true,
   "typescriptThreePlus": true,
   "withInterfaces": true,
@@ -11,7 +11,7 @@
   "enumNameSuffix": "",
   "removeOperationIdPrefix": true,
   "generateAliasAsModel": false,
-  "nullSafeAdditionalProps": true,
+  "nullSafeAdditionalProps": false,
   "sortParamsByRequiredFlag": true,
   "sortModelPropertiesByRequiredFlag": true,
   "ensureUniqueParams": true,

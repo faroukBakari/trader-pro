@@ -244,13 +244,9 @@ class DatafeedService:
         if not symbol_info:
             return []
 
-        # Convert from seconds to milliseconds
-        from_ms = from_time * 1000
-        to_ms = to_time * 1000
-
         # Filter bars within the requested time range
         filtered_bars = [
-            bar for bar in self._sample_bars if from_ms <= bar.time <= to_ms
+            bar for bar in self._sample_bars if from_time <= bar.time <= to_time
         ]
 
         # Sort bars by time

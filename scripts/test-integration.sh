@@ -5,6 +5,12 @@
 set -e
 
 # Environment configuration
+# Generate random free port for backend
+get_free_port() {
+    python3 -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()"
+}
+
+export BACKEND_PORT="${BACKEND_PORT:-$(get_free_port)}"
 export BACKEND_PORT="${BACKEND_PORT:-8000}"
 export VITE_API_URL="${VITE_API_URL:-http://localhost:$BACKEND_PORT}"
 
@@ -106,8 +112,8 @@ done
 
 echo "🩺 Testing API endpoints..."
 if curl -sf http://localhost:$BACKEND_PORT/api/v1/health > /dev/null 2>&1 && \
-   curl -sf http://localhost:$BACKEND_PORT/api/v1/version > /dev/null 2>&1 && \
-   curl -sf http://localhost:$BACKEND_PORT/api/v1/versions > /dev/null 2>&1; then
+    curl -sf http://localhost:$BACKEND_PORT/api/v1/version > /dev/null 2>&1 && \
+    curl -sf http://localhost:$BACKEND_PORT/api/v1/versions > /dev/null 2>&1; then
     echo -e "${GREEN}✅ All API endpoints responding${NC}"
 else
     echo -e "${RED}❌ Some API endpoints failed${NC}"
