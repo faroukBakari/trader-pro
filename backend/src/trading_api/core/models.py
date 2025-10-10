@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class SymbolInfo(BaseModel):
-    """Symbol information model matching TradingView LibrarySymbolInfo interface"""
+    """Symbol information model matching LibrarySymbolInfo interface"""
 
     name: str = Field(..., description="Symbol name")
     description: str = Field(..., description="Symbol description")
@@ -31,7 +31,7 @@ class SymbolInfo(BaseModel):
 
 
 class Bar(BaseModel):
-    """OHLC bar model matching TradingView Bar interface"""
+    """OHLC bar model matching Bar interface"""
 
     time: int = Field(..., description="Bar timestamp in milliseconds")
     open: float = Field(..., description="Open price")
@@ -42,7 +42,7 @@ class Bar(BaseModel):
 
 
 class SearchSymbolResultItem(BaseModel):
-    """Search result item model matching TradingView SearchSymbolResultItem interface"""
+    """Search result item model matching SearchSymbolResultItem interface"""
 
     symbol: str = Field(..., description="Symbol name")
     description: str = Field(..., description="Symbol description")
@@ -51,42 +51,58 @@ class SearchSymbolResultItem(BaseModel):
     type: str = Field(..., description="Symbol type")
 
 
-class DatafeedConfiguration(BaseModel):
-    """Datafeed configuration model"""
+class Exchange(BaseModel):
+    """Exchange descriptor model matching Exchange interface"""
 
-    supported_resolutions: List[str] = Field(
-        default=["1D"], description="Supported resolutions"
+    value: str = Field(
+        ..., description="Value to be passed as exchange argument to searchSymbols"
     )
-    supports_marks: bool = Field(default=False, description="Supports marks")
-    supports_timescale_marks: bool = Field(
+    name: str = Field(..., description="Name of the exchange")
+    desc: str = Field(..., description="Description of the exchange")
+
+
+class DatafeedSymbolType(BaseModel):
+    """Symbol type descriptor model matching DatafeedSymbolType interface"""
+
+    name: str = Field(..., description="Name of the symbol type")
+    value: str = Field(
+        ..., description="Value to be passed as symbolType argument to searchSymbols"
+    )
+
+
+class DatafeedConfiguration(BaseModel):
+    """Datafeed configuration model matching DatafeedConfiguration interface"""
+
+    supported_resolutions: Optional[List[str]] = Field(
+        default=["5", "1D", "1W"], description="Supported resolutions"
+    )
+    supports_marks: Optional[bool] = Field(default=False, description="Supports marks")
+    supports_timescale_marks: Optional[bool] = Field(
         default=False, description="Supports timescale marks"
     )
-    supports_time: bool = Field(default=False, description="Supports time")
-    supports_search: bool = Field(default=True, description="Supports search")
-    supports_group_request: bool = Field(
-        default=False, description="Supports group request"
-    )
-    exchanges: List[dict] = Field(
+    supports_time: Optional[bool] = Field(default=False, description="Supports time")
+
+    exchanges: Optional[List[Exchange]] = Field(
         default=[
-            {"value": "", "name": "All Exchanges", "desc": ""},
-            {"value": "NASDAQ", "name": "NASDAQ", "desc": "NASDAQ"},
-            {"value": "NYSE", "name": "NYSE", "desc": "NYSE"},
+            Exchange(value="", name="All Exchanges", desc=""),
+            Exchange(value="NASDAQ", name="NASDAQ", desc="NASDAQ"),
+            Exchange(value="NYSE", name="NYSE", desc="NYSE"),
         ],
         description="Available exchanges",
     )
-    symbols_types: List[dict] = Field(
+    symbols_types: Optional[List[DatafeedSymbolType]] = Field(
         default=[
-            {"name": "All types", "value": ""},
-            {"name": "Stock", "value": "stock"},
-            {"name": "Crypto", "value": "crypto"},
-            {"name": "Forex", "value": "forex"},
+            DatafeedSymbolType(name="All types", value=""),
+            DatafeedSymbolType(name="Stock", value="stock"),
+            DatafeedSymbolType(name="Crypto", value="crypto"),
+            DatafeedSymbolType(name="Forex", value="forex"),
         ],
         description="Available symbol types",
     )
 
 
 class QuoteValues(BaseModel):
-    """Quote values model matching TradingView DatafeedQuoteValues interface"""
+    """Quote values model matching DatafeedQuoteValues interface"""
 
     lp: float = Field(..., description="Last price")
     ask: float = Field(..., description="Ask price")
@@ -106,7 +122,7 @@ class QuoteValues(BaseModel):
 
 
 class QuoteData(BaseModel):
-    """Quote data model matching TradingView QuoteData interface"""
+    """Quote data model matching QuoteData interface"""
 
     s: Literal["ok", "error"] = Field(..., description="Status")
     n: str = Field(..., description="Symbol name")
@@ -158,7 +174,5 @@ class DatafeedHealthResponse(BaseModel):
     status: str = Field(..., description="Health status")
     message: str = Field(..., description="Health message")
     symbols_loaded: int = Field(..., description="Number of symbols loaded")
-    sample_bars_generated: int = Field(
-        ..., description="Number of sample bars generated"
-    )
+    bars_count: int = Field(..., description="Number of sample bars generated")
     timestamp: str = Field(..., description="Timestamp of health check")

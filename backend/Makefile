@@ -15,7 +15,8 @@ help:
 	@echo "  lint-check        Run backend linting with type checking"
 	@echo "  format            Format backend code"
 	@echo "  build             Build backend package"
-	@echo "  dev               Start backend development server"
+	@echo "  dev               Start backend development server with debugpy"
+	@echo "  dev-no-debug      Start backend development server without debugpy"
 	@echo "  clean             Clean build artifacts"
 	@echo "  health            Check backend health"
 	@echo "  export-openapi    Export OpenAPI specification"
@@ -67,8 +68,9 @@ format:
 
 # Development server
 dev:
-	@echo "Starting backend development server on http://localhost:$(BACKEND_PORT)"
-	poetry run uvicorn trading_api.main:app --reload --host 0.0.0.0 --port $(BACKEND_PORT)
+	@echo "Starting backend development server with debugpy on http://localhost:$(BACKEND_PORT)"
+	@echo "Debug server listening on port 5678 (attach debugger to localhost:5678)"
+	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn trading_api.main:app --reload --host 0.0.0.0 --port $(BACKEND_PORT)
 
 # CI development server (background)
 dev-ci:

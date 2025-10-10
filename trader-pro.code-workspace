@@ -133,6 +133,22 @@
         }
       },
       {
+        "name": "Backend: Attach to Remote Debugpy (Port 5678)",
+        "type": "debugpy",
+        "request": "attach",
+        "connect": {
+          "host": "localhost",
+          "port": 5678
+        },
+        "pathMappings": [
+          {
+            "localRoot": "${workspaceFolder}/backend/",
+            "remoteRoot": "."
+          }
+        ],
+        "justMyCode": true
+      },
+      {
         "name": "Backend: Run Tests",
         "type": "debugpy",
         "request": "launch",

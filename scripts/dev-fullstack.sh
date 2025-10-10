@@ -108,7 +108,7 @@ print_success "Clean up complete - fresh start ready"
 # Step 1: Start backend server in background
 print_step "1. Starting backend server..."
 cd backend
-poetry run uvicorn trading_api.main:app --reload --host 0.0.0.0 --port $BACKEND_PORT &
+make dev &
 BACKEND_PID=$!
 cd ..
 

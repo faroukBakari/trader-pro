@@ -9,7 +9,6 @@ from fastapi import APIRouter, HTTPException, Query
 
 from ..core.datafeed_service import DatafeedService
 from ..core.models import (
-    Bar,
     DatafeedConfiguration,
     DatafeedHealthResponse,
     GetBarsResponse,
@@ -30,6 +29,7 @@ datafeed_service = DatafeedService()
     "/config",
     response_model=DatafeedConfiguration,
     summary="Get datafeed configuration",
+    operation_id="getConfig",
 )
 async def get_config() -> DatafeedConfiguration:
     """
@@ -47,7 +47,10 @@ async def get_config() -> DatafeedConfiguration:
 
 
 @router.get(
-    "/search", response_model=List[SearchSymbolResultItem], summary="Search symbols"
+    "/search",
+    response_model=List[SearchSymbolResultItem],
+    summary="Search symbols",
+    operation_id="searchSymbols",
 )
 async def search_symbols(
     user_input: str = Query(..., description="User search input"),
@@ -77,7 +80,12 @@ async def search_symbols(
         )
 
 
-@router.get("/resolve/{symbol}", response_model=SymbolInfo, summary="Resolve symbol")
+@router.get(
+    "/resolve/{symbol}",
+    response_model=SymbolInfo,
+    summary="Resolve symbol",
+    operation_id="resolveSymbol",
+)
 async def resolve_symbol(symbol: str) -> SymbolInfo:
     """
     Resolve symbol information by name or ticker.
@@ -95,7 +103,12 @@ async def resolve_symbol(symbol: str) -> SymbolInfo:
         raise HTTPException(status_code=500, detail=f"Error resolving symbol: {str(e)}")
 
 
-@router.get("/bars", response_model=GetBarsResponse, summary="Get historical bars")
+@router.get(
+    "/bars",
+    response_model=GetBarsResponse,
+    summary="Get historical bars",
+    operation_id="getBars",
+)
 async def get_bars(
     symbol: str = Query(..., description="Symbol name"),
     resolution: str = Query(..., description="Resolution (e.g., '1D')"),
@@ -120,55 +133,35 @@ async def get_bars(
             to_time=to_time,
             count_back=count_back,
         )
-
-        # Check if we have meaningful data (more than 1 bar to prevent
-        # charting issues)
-        if len(bars) < 2:
-            return GetBarsResponse(bars=[], no_data=True)
-
         return GetBarsResponse(bars=bars, no_data=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting bars: {str(e)}")
 
 
 @router.post(
-    "/quotes", response_model=List[QuoteData], summary="Get quotes for symbols"
+    "/quotes",
+    response_model=List[QuoteData],
+    summary="Get quotes for symbols",
+    operation_id="getQuotes",
 )
-async def get_quotes(request: GetQuotesRequest) -> List[QuoteData]:
+async def get_quotes(body: GetQuotesRequest) -> List[QuoteData]:
     """
     Get real-time quotes for multiple symbols.
 
     - **symbols**: Array of symbol names to get quotes for
     """
     try:
-        quotes = datafeed_service.get_quotes(request.symbols)
+        quotes = datafeed_service.get_quotes(body.symbols)
         return quotes
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting quotes: {str(e)}")
 
 
-@router.get("/mock-bar/{symbol}", response_model=Bar, summary="Get mock real-time bar")
-async def get_mock_bar(symbol: str) -> Bar:
-    """
-    \"\"\"\n    Get a mock real-time bar for simulation purposes.\n    This endpoint
-    simulates real-time price updates by modifying the last\n    historical bar.\n\n
-            - **symbol**: Symbol name or ticker\n    \"\"\"
-    """
-    try:
-        mock_bar = datafeed_service.mock_last_bar(symbol)
-        if not mock_bar:
-            raise HTTPException(
-                status_code=404, detail="Symbol not found or no historical data"
-            )
-        return mock_bar
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting mock bar: {str(e)}")
-
-
 @router.get(
-    "/health", response_model=DatafeedHealthResponse, summary="Datafeed health check"
+    "/health",
+    response_model=DatafeedHealthResponse,
+    summary="Datafeed health check",
+    operation_id="datafeedHealthCheck",
 )
 async def datafeed_health() -> DatafeedHealthResponse:
     """
@@ -183,7 +176,7 @@ async def datafeed_health() -> DatafeedHealthResponse:
             status="ok",
             message="Datafeed service is running",
             symbols_loaded=symbols_count,
-            sample_bars_generated=bars_count,
+            bars_count=bars_count,
             timestamp=datetime.now().isoformat(),
         )
     except Exception as e:

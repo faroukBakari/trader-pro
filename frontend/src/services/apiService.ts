@@ -47,7 +47,7 @@ const MOCK_CONFIG = {
 }
 
 // Fallback implementation with mock data for development/testing
-class FallbackClent implements ClientInterface {
+class FallbackClient implements ClientInterface {
   async getHealthStatus(): Promise<{ status: number; data: HealthResponse }> {
     if (MOCK_CONFIG.enableLogs) {
       console.info('🎭 Using mock API response for health endpoint')
@@ -118,8 +118,12 @@ export class ApiService {
     this.plugin = new TraderPlugin<ClientInterface>()
   }
 
+  async _loadClient(): Promise<ClientInterface> {
+    return this.plugin.getClientWithFallback(FallbackClient)
+  }
+
   async getHealthStatus(): Promise<HealthResponse> {
-    return this.plugin.getClientWithFallback(FallbackClent).then(async (client) => {
+    return this._loadClient().then(async (client) => {
       const { status, data } = await client.getHealthStatus()
       if (status !== 200) {
         return Promise.reject(new Error(`Health check failed with status ${status}`))
@@ -129,7 +133,7 @@ export class ApiService {
   }
 
   async getAPIVersions(): Promise<APIMetadata> {
-    return this.plugin.getClientWithFallback(FallbackClent).then(async (client) => {
+    return this._loadClient().then(async (client) => {
       const { status, data } = await client.getAPIVersions()
       if (status !== 200) {
         return Promise.reject(new Error(`Versions check failed with status ${status}`))
