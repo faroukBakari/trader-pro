@@ -22,7 +22,7 @@ A FastAPI-based trading API with Vue.js frontend, built with modern development 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.10+ with Poetry
+- Python 3.11 with Poetry
 - Node.js 20+ with npm
 - Git
 - **VS Code**: Recommended for best TypeScript/Python experience
@@ -125,7 +125,7 @@ make -C backend format
 The project uses GitHub Actions for continuous integration:
 
 ### Workflows
-- **Backend**: Python 3.10-3.11, Poetry, pytest, linting
+- **Backend**: Python 3.11, Poetry, pytest, linting
 - **Frontend**: Node.js 20-22, npm, ESLint, Vitest, build
 - **Integration**: End-to-end API tests, frontend build against live API
 
@@ -140,6 +140,7 @@ The project uses GitHub Actions for continuous integration:
 
 ### Backend (`/backend`)
 - **Framework**: FastAPI
+- **Runtime**: Python 3.11
 - **Testing**: pytest, pytest-asyncio, httpx
 - **Code Quality**: Black, isort, Flake8, MyPy
 - **Dependencies**: Poetry
