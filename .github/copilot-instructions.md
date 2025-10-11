@@ -18,20 +18,23 @@ Always keep an ARCHITECTURE.md file up to date with the current overall architec
 Features / Refactoring / Bug Fixing workflow:
 - Explore related md files and summarize relevant informations.
 - Explore related code files and summarize relevant informations.
-- Explore any related external references and summarize relevant informations.
+- Explore any related external references for examples and summarize relevant informations.
 - Ask clarifying questions if needed.
 - Suggest improvements or optimizations if needed.
 - Suggest a plan with a todo list for implementing the feature / refactoring / bug fixing.
-- Allways ask for approval of the plan before implementing.
+- Always ask for approval of the plan before implementing.
 - After approval, implement the plan using TDD.
 
 TDD workflow rules
 - Only test for features. dont test implementation details.
-- Write/Rewrite a failing tests for the feature (start with the smallest behavior).
+- Write/Rewrite a failing tests for the feature/refactoring (start with the smallest behavior).
 - Run tests and confirm the tests fails.
 - Implement minimal code to make the tests pass.
 - Run tests until all tests pass.
 - Refactor if needed while keeping tests green to achieve the desired behavior.
+- Ask for approval before changing important design decisions.
+- Never skip tests or validation hooks.
+- Always clean up the code from unnecessary parts. this incluedes unused imports, variables, functions, and comments.
 - Suggest further improvements or optimizations.
 - Suggest commit message
 
@@ -46,6 +49,6 @@ whenever possible, reusable makefile commands are preferred over direct commands
 docs:
 always check all available readme files and summarize relevant parts for the task at hand.
 after updating the code with refactoring or new features, also update the related readme files to reflect the changes.
-add new readme files for topics or components that don't fit in existing ones.
+add new readme files in their related base directory for topics or components that don't fit in existing ones.
 Never leave trailing white spaces in the code or markdown files.
 we want documentation aware code and code aware documentation.
