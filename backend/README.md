@@ -1,207 +1,148 @@
 # Trading API
 
-A FastAPI-based trading API server with **hybrid OpenAPI + AsyncAPI architecture** for both REST and real-time WebSocket communication.
+FastAPI backend that powers the Trading Pro platform. It exposes a RESTful API for health reporting, API versioning, and TradingView-compatible market data.
 
-## 🚀 Features
+## Features
 
-- **REST API** (OpenAPI) - Traditional HTTP endpoints for CRUD operations
-- **WebSocket API** (AsyncAPI) - Real-time market data streaming
-- **API Versioning** - Backwards compatibility and smooth migrations
-- **Type Safety** - Full TypeScript client generation
-- **TDD Approach** - Test-driven development practices
-- **Auto Documentation** - Interactive API docs for both REST and WebSocket
+- REST API with typed responses generated from FastAPI + Pydantic models
+- Built-in market datafeed service compatible with the TradingView UDF contract
+- Versioned API surface (`/api/v1`) with pluggable future versions
+- Automatic OpenAPI generation for client tooling and contract tests
+- Test-driven development workflow with pytest and FastAPI TestClient
 
-## 📚 Documentation
+## Documentation
 
-- **[WebSocket Implementation Guide](WEBSOCKET-README.md)** - Complete WebSocket & AsyncAPI architecture
-- **[AsyncAPI Generator Guide](ASYNCAPI-GENERATOR.md)** - Client generation and frontend integration
-- **[Versioning Guide](docs/versioning.md)** - API version management
+- `ARCHITECTURE.md` – end-to-end system architecture
+- `docs/versioning.md` – API versioning strategy and lifecycle
+- `backend/README.md` (this file) – backend setup and reference
+- `frontend/CLIENT-GENERATION.md` – TypeScript client generation that consumes the backend OpenAPI spec
+- `MAKEFILE-GUIDE.md` – consolidated command reference for the whole project
 
 ## Quick Start
 
 ### Prerequisites
 - Python 3.10+
-- Poetry (recommended) or pip
+- [Poetry](https://python-poetry.org/) for dependency management
 
-### Installation
+### Install dependencies
 
-Using Poetry:
 ```bash
-poetry config virtualenvs.in-project true
+cd backend
+make install       # runs poetry install
+```
+
+Alternatively, run Poetry manually:
+
+```bash
 poetry install
-poetry shell
 ```
 
-Using pip:
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-dev.txt
-```
+### Run the API locally
 
-### Running the API
-
-#### Using Make (Recommended)
 ```bash
-# Start development server with real-time data feeds
+# Start the development server on http://localhost:8000
 make dev
 
-# Run tests
-make test
+# Or start without debug tooling
+make dev-no-debug
 
-# Check health
-make health
-```
-
-#### Manual Start
-```bash
+# Manual start (inside Poetry shell)
 poetry run uvicorn trading_api.main:app --reload
 ```
 
-#### WebSocket Testing
-```bash
-# Test WebSocket connection with wscat
-npm install -g wscat
-wscat -c ws://localhost:8000/api/v1/ws/v1
-
-# Send subscription
-{"type": "subscribe", "channel": "market_data", "symbol": "AAPL"}
-```
-
-### Running Tests
+### Run tests and quality checks
 
 ```bash
-poetry run pytest
+make test              # pytest -v
+make lint              # flake8
+make lint-check        # black --check + isort --check-only + flake8 + mypy
+make format            # black + isort
 ```
 
-### API Documentation
+## API Surface
 
-The Trading API supports both REST and WebSocket endpoints with full documentation.
+The backend publishes an OpenAPI document at startup. After running the dev server, visit:
 
-**Current Version**: v1 (stable)
+- Root metadata: `http://127.0.0.1:8000/`
+- Interactive docs (Swagger UI): `http://127.0.0.1:8000/api/v1/docs`
+- ReDoc: `http://127.0.0.1:8000/api/v1/redoc`
+- Raw OpenAPI JSON: `http://127.0.0.1:8000/api/v1/openapi.json`
 
-Once the server is running, visit:
+### Key endpoints
 
-#### REST API (OpenAPI)
-- **API Root**: http://127.0.0.1:8000/ - API information and version details
-- **Interactive docs**: http://127.0.0.1:8000/api/v1/docs
-- **ReDoc**: http://127.0.0.1:8000/api/v1/redoc
-- **OpenAPI spec**: http://127.0.0.1:8000/api/v1/openapi.json
+| Path | Method | Description |
+| ---- | ------ | ----------- |
+| `/api/v1/health` | GET | Service health heartbeat including version metadata |
+| `/api/v1/versions` | GET | List of supported API versions |
+| `/api/v1/version` | GET | Details about the active API version |
+| `/api/v1/datafeed/config` | GET | TradingView configuration contract |
+| `/api/v1/datafeed/search` | GET | Symbol search |
+| `/api/v1/datafeed/resolve/{symbol}` | GET | Symbol metadata |
+| `/api/v1/datafeed/bars` | GET | Historical OHLC data |
+| `/api/v1/datafeed/quotes` | POST | Latest quote snapshot for multiple symbols |
+| `/api/v1/datafeed/health` | GET | Datafeed service diagnostics |
 
-#### WebSocket API (AsyncAPI)
-- **WebSocket endpoint**: ws://127.0.0.1:8000/api/v1/ws/v1
-- **AsyncAPI spec**: http://127.0.0.1:8000/api/v1/asyncapi.yaml
-- **WebSocket config**: http://127.0.0.1:8000/api/v1/ws/config
-- **Connection stats**: http://127.0.0.1:8000/api/v1/ws/stats
+## API Versioning
 
-#### Health & Versioning
-- **Health check**: http://127.0.0.1:8000/api/v1/health
-- **Version info**: http://127.0.0.1:8000/api/v1/versions
+- Current stable surface: `/api/v1`
+- Future major versions are announced through `/api/v1/versions`
+- Version metadata is defined in `src/trading_api/core/versioning.py`
+- Planned `v2` changes (authentication, error payloads, renamed health endpoint) are tracked but not yet exposed
 
-### API Versioning
+## Client Generation
 
-The API uses URL-based versioning with the following strategy:
+- The OpenAPI specification is regenerated on application startup and saved to `backend/openapi.json`
+- Frontend consumers run `npm run client:generate` (defined in `frontend/package.json`) which uses `frontend/scripts/generate-client.sh`
+- For ad-hoc exports use `make export-openapi`
 
-- **Current version**: `/api/v1/` (stable)
-- **Future version**: `/api/v2/` (planned with breaking changes)
+## Development Workflow
 
-#### Version Information Endpoints
+1. Write a failing test in `backend/tests`
+2. Implement the minimal change under `src/trading_api`
+3. Keep imports tidy and run formatters via `make format`
+4. Use `make lint-check` before raising a pull request
 
-```bash
-# Get all available versions
-GET /api/v1/versions
-
-# Get current version info
-GET /api/v1/version
-
-# Health check with version info
-GET /api/v1/health
-```
-
-#### Breaking Changes Planning
-
-Version 2 (v2) will include:
-- Authentication required for all endpoints
-- New response format for error messages
-- Renamed health endpoint to status
-
-#### Versioning Best Practices
-
-1. **Always specify version** in your API calls
-2. **Monitor deprecation notices** via `/api/v1/versions`
-3. **Test against new versions** before they become stable
-4. **Update clients** before old versions sunset
-
-### Client Generation
-
-Generate typed clients for different platforms:
-
-```bash
-# Generate all clients (Vue.js TypeScript + Python)
-make clients
-
-# Or use the script directly
-./scripts/generate-clients.sh
-```
-
-**Vue.js/TypeScript Client:**
-```bash
-# Install the generated client in your Vue.js project
-cd clients/vue-client
-npm install
-# Copy the generated files to your Vue.js project
-```
-
-**Python Client:**
-```bash
-# Install the generated Python client
-pip install ./clients/python-client
-```
-
-## Development
-
-This project follows Test Driven Development (TDD) practices:
-1. Write failing tests first
-2. Implement minimal code to pass tests
-3. Refactor while keeping tests green
-
-### Code Quality
-
-We use:
-- Black for code formatting
-- isort for import sorting
-- flake8 for linting
-- mypy for type checking
-- pre-commit for git hooks
-
-## Project Structure
+## Project Layout
 
 ```
 backend/
+├── Makefile
+├── pyproject.toml
 ├── src/trading_api/
-│   ├── main.py                    # FastAPI app with REST + WebSocket
+│   ├── __init__.py
+│   ├── main.py                # FastAPI application factory & OpenAPI writer
 │   ├── api/
-│   │   ├── health.py             # Health check endpoints
-│   │   ├── versions.py           # API versioning
-│   │   ├── datafeed.py           # Market data REST API
-│   │   └── websockets.py         # WebSocket endpoints
+│   │   ├── datafeed.py        # TradingView-compatible endpoints
+│   │   ├── health.py          # Service heartbeat
+│   │   └── versions.py        # API version catalogue
 │   ├── core/
-│   │   ├── websocket_manager.py  # Connection management
-│   │   ├── realtime_service.py   # Mock data generators
-│   │   ├── datafeed_service.py   # Market data service
-│   │   ├── response_validation.py # API response model validation
-│   │   └── versioning.py         # Version management
+│   │   ├── datafeed_service.py    # In-memory market data provider
+│   │   ├── response_validation.py # FastAPI response model guardrails
+│   │   └── versioning.py          # Version metadata and helpers
 │   └── models/
-│       ├── __init__.py           # Unified model exports
-│       ├── models.py             # Core datafeed and market data models
-│       └── websocket_models.py   # WebSocket and real-time message models
+│       ├── __init__.py
+│       ├── common.py
+│       └── market/
+│           ├── bars.py
+│           ├── configuration.py
+│           ├── instruments.py
+│           ├── quotes.py
+│           └── search.py
 ├── tests/
 │   ├── test_health.py
 │   └── test_versioning.py
-├── asyncapi.yaml                 # AsyncAPI 3.0 specification
-├── pyproject.toml               # Poetry dependencies
-├── Makefile                     # Development commands
-├── WEBSOCKET-README.md          # WebSocket implementation guide
-├── ASYNCAPI-GENERATOR.md        # Client generation guide
+├── docs/
+│   └── versioning.md
 └── README.md
 ```
+
+## Troubleshooting
+
+- Ensure the Poetry environment is activated (`poetry shell`) before running manual commands
+- `make lint-response-models` validates that every FastAPI route declares a response model (used in CI)
+- Regenerate the OpenAPI file manually with `make export-openapi` if frontend tooling requires a fresh contract without starting the server
+
+## Next Steps
+
+- Track API changes in `docs/versioning.md`
+- Coordinate with the frontend when updating models so that TypeScript clients remain in sync
