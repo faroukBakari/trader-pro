@@ -6,7 +6,7 @@
 
 ## Overview
 
-Trading Pro is a modern full-stack trading platform built with **FastAPI** backend and **Vue.js** frontend, featuring a hybrid **OpenAPI + AsyncAPI** architecture for both REST and real-time WebSocket communication. The system is designed with **Test-Driven Development (TDD)** principles and follows modern DevOps practices.
+Trading Pro is a modern full-stack trading platform built with **FastAPI** backend and **Vue.js** frontend. The current backend surface is REST-first (OpenAPI), with WebSocket capabilities planned in a future release. The system is designed with **Test-Driven Development (TDD)** principles and follows modern DevOps practices.
 
 ## Architecture Philosophy
 
@@ -15,7 +15,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 1. **🔄 Decoupled Architecture**: Frontend and backend can be developed and deployed independently
 2. **🛡️ Type Safety**: End-to-end TypeScript/Python type safety with automatic client generation
 3. **🧪 Test-Driven Development**: TDD workflow with comprehensive test coverage
-4. **⚡ Real-Time First**: Native WebSocket support for live market data streaming
+4. **⚡ Real-Time Ready**: Architecture prepared for future WebSocket market data streaming
 5. **🔄 API Versioning**: Backwards-compatible API evolution strategy
 6. **🚀 DevOps Ready**: Automated CI/CD with parallel testing and deployment
 7. **🔧 Developer Experience**: Zero-configuration setup with intelligent fallbacks
@@ -30,10 +30,10 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 ├─────────────────────────────────────────────────────────────────┤
 │  Frontend (Vue.js)           │  Backend (FastAPI)               │
 │  ├─ Vue 3 + Composition API  │  ├─ REST API (OpenAPI)          │
-│  ├─ TypeScript + Vite        │  ├─ WebSocket API (AsyncAPI)    │
-│  ├─ Pinia State Management   │  ├─ API Versioning (v1, v2)     │
-│  ├─ Auto Client Generation   │  ├─ Real-time Data Service      │
-│  ├─ TradingView Integration   │  └─ Connection Management       │
+│  ├─ TypeScript + Vite        │  ├─ API Versioning (v1, v2)     │
+│  ├─ Pinia State Management   │  ├─ TradingView Datafeed        │
+│  ├─ Auto Client Generation   │  │   endpoints                   │
+│  ├─ TradingView Integration  │  └─ OpenAPI generation          │
 │  └─ Smart Mock Fallbacks     │                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │  Development & CI/CD Infrastructure                             │
@@ -66,12 +66,12 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 - **🛡️ Type Safety**: TypeScript + Vue TSC
 - **📝 Code Quality**: ESLint + Prettier + pre-commit hooks
 
-#### Real-Time Infrastructure
-- **🔌 Protocol**: WebSocket (ws/wss) for real-time communication
-- **📊 Market Data**: Live price feeds, order books, trade data
-- **👤 User Data**: Account updates, position changes, notifications
-- **📡 Broadcasting**: Multi-client subscription management
-- **🔐 Authentication**: JWT-based for private channels
+#### Real-Time Infrastructure (Planned)
+- **🔌 Protocol**: WebSocket (ws/wss) for real-time communication (future work)
+- **📊 Market Data**: Live price feeds, order books, trade data (future work)
+- **👤 User Data**: Account updates, position changes, notifications (future work)
+- **📡 Broadcasting**: Multi-client subscription management (future work)
+- **🔐 Authentication**: JWT-based for private channels (future work)
 
 #### DevOps & Infrastructure
 - **⚙️ CI/CD**: GitHub Actions with parallel job execution
@@ -100,14 +100,11 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 health.py         # Health check endpoints
 versions.py       # API versioning management
 datafeed.py       # Market data REST endpoints
-websockets.py     # WebSocket connection handling
 ```
 
 #### 3. Core Services (`src/trading_api/core/`)
 ```python
 versioning.py         # API version management
-websocket_manager.py  # Connection & subscription management
-realtime_service.py   # Mock data generation service
 datafeed_service.py   # Market data business logic
 response_validation.py # API response model validation
 ```
@@ -115,11 +112,11 @@ response_validation.py # API response model validation
 #### 4. Models Package (`src/trading_api/models/`)
 ```python
 __init__.py           # Unified model exports
-models.py             # Core datafeed and market data models
-websocket_models.py   # WebSocket and real-time message models
+common.py             # Shared primitives
+market/               # TradingView datafeed contracts (bars, config, quotes, search)
 ```
 
-#### 4. Testing Infrastructure (`tests/`)
+#### 5. Testing Infrastructure (`tests/`)
 ```python
 test_health.py        # Health endpoint tests
 test_versioning.py    # API versioning tests
@@ -174,20 +171,21 @@ generate-client.sh # Intelligent client generation
 └─────────────┘                └─────────────┘                └─────────────┘
 ```
 
-### WebSocket Data Flow
+### Real-Time Data Flow (Planned)
 ```
 ┌─────────────┐   WebSocket     ┌─────────────┐   Subscription  ┌─────────────┐
 │   Frontend  │ ─────────────► │  WebSocket  │ ─────────────► │ Connection  │
 │   Client    │                │  Endpoint   │                │  Manager    │
 └─────────────┘ ◄───────────── └─────────────┘ ◄───────────── └─────────────┘
-     │                              │                              │
-     │                              │                              ▼
-     │                              │                        ┌─────────────┐
-     │                              │                        │ Real-time   │
-     │                              │                        │  Service    │
-     │                              │                        └─────────────┘
-     │                              │                              │
-     ▼                              ▼                              ▼
+    │                              │                              │
+    │                     (future implementation)                  │
+    │                              │                              ▼
+    │                              │                        ┌─────────────┐
+    │                              │                        │ Real-time   │
+    │                              │                        │  Service    │
+    │                              │                        └─────────────┘
+    │                              │                              │
+    ▼                              ▼                              ▼
 ┌─────────────┐                ┌─────────────┐                ┌─────────────┐
 │   Message   │                │   AsyncAPI  │                │Market Data  │
 │  Handling   │                │ Validation  │                │ Broadcast   │
@@ -276,7 +274,7 @@ Planned: /api/v2/     (Breaking changes planned)
 ├─────────────────────────────────────────────────────────────┤
 │  🔗 Integration Tests            │ API contracts            │
 │     ├─ Backend + Frontend       │ Real API communication   │
-│     └─ WebSocket connections    │ Real-time data flow      │
+│     └─ WebSocket prototypes     │ Planned real-time flow   │
 ├─────────────────────────────────────────────────────────────┤
 │  🧪 Unit Tests (Fast)           │ Isolated components      │
 │     ├─ Backend (pytest)         │ FastAPI TestClient      │
@@ -304,13 +302,13 @@ const health = await apiService.getHealth()
 expect(health.status).toBe('ok')
 ```
 
-## WebSocket Architecture
+## Real-Time Architecture (Planned)
 
-### Real-Time Communication System
+### Target State
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  WebSocket Channel Architecture                              │
+│  Future WebSocket Channel Architecture                       │
 ├─────────────────────────────────────────────────────────────┤
 │  Public Channels (No Auth)      │  Private Channels (Auth)  │
 │  ├─ market_data (100/sec)       │  ├─ account (10/sec)      │
@@ -322,19 +320,17 @@ expect(health.status).toBe('ok')
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### WebSocket Message Flow
-1. **Connection**: Client connects to `ws://localhost:8000/api/v1/ws/v1`
-2. **Authentication**: JWT token for private channels
-3. **Subscription**: Subscribe to specific channels/symbols
-4. **Data Flow**: Real-time market data streaming
-5. **Heartbeat**: Connection health monitoring
+### Implementation Roadmap
+1. **Endpoint**: Expose `ws://localhost:8000/api/v1/ws/v1`
+2. **Authentication**: JWT enforcement for private channels
+3. **Subscription Model**: Fine-grained topic subscriptions per symbol
+4. **Streaming Pipeline**: Integrate `DatafeedService` with live streaming backend
+5. **Heartbeat & Metrics**: Monitor connection health and throughput
 
-### AsyncAPI 3.0 Specification
-- Complete message schema definitions
-- Channel parameter validation
-- Authentication requirements
-- Rate limiting specifications
-- Client generation support
+### Contract Definition
+- AsyncAPI 3.0 specification will document the WebSocket API
+- Channel parameter validation will mirror TradingView broker API semantics
+- Client generation will reuse the existing OpenAPI tooling pipeline once endpoints ship
 
 ## Build & Development Architecture
 
@@ -441,7 +437,7 @@ make -f project.mk dev-fullstack
 - **📱 Responsive Design**: Mobile-first UI approach
 
 ### Cross-Cutting Patterns
-- **🔄 Event-Driven**: WebSocket event handling
+- **🔄 Event-Driven**: WebSocket event handling (planned)
 - **📋 Contract-First**: OpenAPI/AsyncAPI specifications
 - **🧪 Test-Driven**: TDD development workflow
 - **🎯 Type-First**: TypeScript/Python type safety
@@ -450,9 +446,13 @@ make -f project.mk dev-fullstack
 
 ### Backend Performance
 - **⚡ ASGI Framework**: FastAPI with async/await support
-- **🔄 Connection Pooling**: Efficient WebSocket management
-- **📊 Streaming**: Real-time data with minimal latency
+- **� In-memory Datafeed**: Cached symbols and pre-generated OHLC bars for quick responses
 - **🗜️ Response Optimization**: Pydantic serialization
+- **🧮 Lightweight Computation**: Deterministic generators for repeatable test data
+
+### Real-Time Performance (Planned)
+- **�🔄 Connection Pooling**: Efficient WebSocket management
+- **📊 Streaming**: Real-time data with minimal latency
 
 ### Frontend Performance
 - **⚡ Vite Build**: Fast ES-based build system
@@ -460,7 +460,7 @@ make -f project.mk dev-fullstack
 - **📊 State Management**: Efficient reactive state with Pinia
 - **🎯 Component Optimization**: Vue 3 Composition API benefits
 
-### WebSocket Performance
+### WebSocket Performance (Planned)
 - **📡 Broadcasting**: Efficient multi-client data distribution
 - **💾 Memory Management**: Connection cleanup and limits
 - **🔄 Heartbeat System**: Connection health monitoring
@@ -471,7 +471,6 @@ make -f project.mk dev-fullstack
 ### Current Monitoring
 - **🏥 Health Endpoints**: `/api/v1/health` with status checks
 - **📊 Version Tracking**: API version usage monitoring
-- **🔌 WebSocket Stats**: Connection count and status
 - **🧪 Test Reporting**: Comprehensive test coverage
 
 ### Planned Monitoring
@@ -520,7 +519,7 @@ The Trading Pro architecture represents a modern, scalable, and maintainable app
 
 ✅ **Independent Development**: Teams can work in parallel without blocking each other  
 ✅ **Type Safety**: End-to-end type safety with automatic client generation  
-✅ **Real-Time Ready**: Native WebSocket support for live market data  
+✅ **Real-Time Ready**: Architecture prepared for future WebSocket market data  
 ✅ **Test-Driven**: Comprehensive testing at all levels  
 ✅ **DevOps Friendly**: Automated CI/CD with parallel execution  
 ✅ **Developer Experience**: Zero-configuration setup with intelligent fallbacks  

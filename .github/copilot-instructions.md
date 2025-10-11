@@ -23,6 +23,7 @@ Features / Refactoring / Bug Fixing workflow:
 - Suggest a plan with a todo list for implementing the feature / refactoring / bug fixing.
 - Always ask for approval of the plan before implementing.
 - After approval, implement the plan using TDD.
+- ALWAYS Ask for approval before changing important design decisions.
 
 TDD workflow rules
 - Only test for features. dont test implementation details.
@@ -31,7 +32,7 @@ TDD workflow rules
 - Implement minimal code to make the tests pass.
 - Run tests until all tests pass.
 - Refactor if needed while keeping tests green to achieve the desired behavior.
-- Ask for approval before changing important design decisions.
+- ALWAYS Ask for approval before changing important design decisions.
 - Never skip tests or validation hooks.
 - Always clean up the code from unnecessary parts. this incluedes unused imports, variables, functions, and comments.
 - Suggest further improvements or optimizations.
