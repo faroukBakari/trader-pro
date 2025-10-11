@@ -1,6 +1,21 @@
 # Trading API
 
-A FastAPI-based trading API server built with Test Driven Development.
+A FastAPI-based trading API server with **hybrid OpenAPI + AsyncAPI architecture** for both REST and real-time WebSocket communication.
+
+## 🚀 Features
+
+- **REST API** (OpenAPI) - Traditional HTTP endpoints for CRUD operations
+- **WebSocket API** (AsyncAPI) - Real-time market data streaming
+- **API Versioning** - Backwards compatibility and smooth migrations
+- **Type Safety** - Full TypeScript client generation
+- **TDD Approach** - Test-driven development practices
+- **Auto Documentation** - Interactive API docs for both REST and WebSocket
+
+## 📚 Documentation
+
+- **[WebSocket Implementation Guide](WEBSOCKET-README.md)** - Complete WebSocket & AsyncAPI architecture
+- **[AsyncAPI Generator Guide](ASYNCAPI-GENERATOR.md)** - Client generation and frontend integration
+- **[Versioning Guide](docs/versioning.md)** - API version management
 
 ## Quick Start
 
@@ -26,13 +41,31 @@ pip install -r requirements-dev.txt
 
 ### Running the API
 
+#### Using Make (Recommended)
+```bash
+# Start development server with real-time data feeds
+make dev
+
+# Run tests
+make test
+
+# Check health
+make health
+```
+
+#### Manual Start
 ```bash
 poetry run uvicorn trading_api.main:app --reload
 ```
 
-Or with pip:
+#### WebSocket Testing
 ```bash
-uvicorn trading_api.main:app --reload
+# Test WebSocket connection with wscat
+npm install -g wscat
+wscat -c ws://localhost:8000/api/v1/ws/v1
+
+# Send subscription
+{"type": "subscribe", "channel": "market_data", "symbol": "AAPL"}
 ```
 
 ### Running Tests
@@ -43,17 +76,27 @@ poetry run pytest
 
 ### API Documentation
 
-The Trading API supports versioning to ensure backwards compatibility and smooth transitions.
+The Trading API supports both REST and WebSocket endpoints with full documentation.
 
 **Current Version**: v1 (stable)
 
 Once the server is running, visit:
+
+#### REST API (OpenAPI)
 - **API Root**: http://127.0.0.1:8000/ - API information and version details
 - **Interactive docs**: http://127.0.0.1:8000/api/v1/docs
 - **ReDoc**: http://127.0.0.1:8000/api/v1/redoc
 - **OpenAPI spec**: http://127.0.0.1:8000/api/v1/openapi.json
-- **Version info**: http://127.0.0.1:8000/api/v1/versions
+
+#### WebSocket API (AsyncAPI)
+- **WebSocket endpoint**: ws://127.0.0.1:8000/api/v1/ws/v1
+- **AsyncAPI spec**: http://127.0.0.1:8000/api/v1/asyncapi.yaml
+- **WebSocket config**: http://127.0.0.1:8000/api/v1/ws/config
+- **Connection stats**: http://127.0.0.1:8000/api/v1/ws/stats
+
+#### Health & Versioning
 - **Health check**: http://127.0.0.1:8000/api/v1/health
+- **Version info**: http://127.0.0.1:8000/api/v1/versions
 
 ### API Versioning
 
@@ -134,18 +177,27 @@ We use:
 ## Project Structure
 
 ```
-trading-api/
-├── .github/
-│   └── workflows/
-│       └── ci.yml
-├── src/
-│   └── trading_api/
-│       ├── __init__.py
-│       ├── main.py
-│       └── api/
-│           └── health.py
+backend/
+├── src/trading_api/
+│   ├── main.py                    # FastAPI app with REST + WebSocket
+│   ├── api/
+│   │   ├── health.py             # Health check endpoints
+│   │   ├── versions.py           # API versioning
+│   │   ├── datafeed.py           # Market data REST API
+│   │   └── websockets.py         # WebSocket endpoints
+│   └── core/
+│       ├── websocket_models.py   # WebSocket message models
+│       ├── websocket_manager.py  # Connection management
+│       ├── realtime_service.py   # Mock data generators
+│       ├── datafeed_service.py   # Market data service
+│       └── versioning.py         # Version management
 ├── tests/
-│   └── test_health.py
-├── pyproject.toml
+│   ├── test_health.py
+│   └── test_versioning.py
+├── asyncapi.yaml                 # AsyncAPI 3.0 specification
+├── pyproject.toml               # Poetry dependencies
+├── Makefile                     # Development commands
+├── WEBSOCKET-README.md          # WebSocket implementation guide
+├── ASYNCAPI-GENERATOR.md        # Client generation guide
 └── README.md
 ```
