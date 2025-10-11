@@ -48,7 +48,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 
 #### Backend Stack
 - **🐍 Framework**: FastAPI 0.104+ (ASGI-based async framework)
-- **🔄 Runtime**: Python 3.8+ with Uvicorn ASGI server
+- **🔄 Runtime**: Python 3.11 with Uvicorn ASGI server
 - **📦 Dependencies**: Poetry for package management
 - **🧪 Testing**: pytest + pytest-asyncio + httpx TestClient
 - **🛡️ Type Safety**: MyPy static type checking + Pydantic models

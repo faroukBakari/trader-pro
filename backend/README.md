@@ -21,7 +21,7 @@ FastAPI backend that powers the Trading Pro platform. It exposes a RESTful API f
 ## Quick Start
 
 ### Prerequisites
-- Python 3.10+
+- Python 3.11
 - [Poetry](https://python-poetry.org/) for dependency management
 
 ### Install dependencies
