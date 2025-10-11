@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
-from .models import (
+from ..models import (
     Bar,
     DatafeedConfiguration,
     QuoteData,

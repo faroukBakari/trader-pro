@@ -107,9 +107,16 @@ websockets.py     # WebSocket connection handling
 ```python
 versioning.py         # API version management
 websocket_manager.py  # Connection & subscription management
-websocket_models.py   # WebSocket message models
 realtime_service.py   # Mock data generation service
 datafeed_service.py   # Market data business logic
+response_validation.py # API response model validation
+```
+
+#### 4. Models Package (`src/trading_api/models/`)
+```python
+__init__.py           # Unified model exports
+models.py             # Core datafeed and market data models
+websocket_models.py   # WebSocket and real-time message models
 ```
 
 #### 4. Testing Infrastructure (`tests/`)

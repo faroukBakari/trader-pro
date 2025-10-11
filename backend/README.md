@@ -185,12 +185,16 @@ backend/
 │   │   ├── versions.py           # API versioning
 │   │   ├── datafeed.py           # Market data REST API
 │   │   └── websockets.py         # WebSocket endpoints
-│   └── core/
-│       ├── websocket_models.py   # WebSocket message models
-│       ├── websocket_manager.py  # Connection management
-│       ├── realtime_service.py   # Mock data generators
-│       ├── datafeed_service.py   # Market data service
-│       └── versioning.py         # Version management
+│   ├── core/
+│   │   ├── websocket_manager.py  # Connection management
+│   │   ├── realtime_service.py   # Mock data generators
+│   │   ├── datafeed_service.py   # Market data service
+│   │   ├── response_validation.py # API response model validation
+│   │   └── versioning.py         # Version management
+│   └── models/
+│       ├── __init__.py           # Unified model exports
+│       ├── models.py             # Core datafeed and market data models
+│       └── websocket_models.py   # WebSocket and real-time message models
 ├── tests/
 │   ├── test_health.py
 │   └── test_versioning.py

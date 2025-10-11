@@ -38,7 +38,7 @@ if [[ -n "$config_files" ]] || [[ -n "$backend_files" ]] || [[ -n "$frontend_fil
     fi
 
     # Check for merge conflicts (avoid false positives from regex patterns)
-    if git diff --cached --name-only | xargs -I {} git show :{} 2>/dev/null | grep -E "^(<<<<<<<|=======|>>>>>>>)"; then
+    if git diff --check | grep -i conflict; then
         log_error "Merge conflict markers found in staged files"
         failed_checks+=("merge-conflicts")
     fi

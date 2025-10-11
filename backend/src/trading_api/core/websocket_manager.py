@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Set
 
 from fastapi import WebSocket
 
-from .websocket_models import (
+from ..models import (
     AuthenticationMessage,
     AuthenticationResponse,
     ChannelStatus,

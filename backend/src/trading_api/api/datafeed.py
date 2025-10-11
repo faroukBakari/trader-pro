@@ -8,7 +8,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 
 from ..core.datafeed_service import DatafeedService
-from ..core.models import (
+from ..models import (
     DatafeedConfiguration,
     DatafeedHealthResponse,
     GetBarsResponse,
