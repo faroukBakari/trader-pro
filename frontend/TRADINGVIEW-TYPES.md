@@ -343,6 +343,63 @@ To add real-time data streaming:
    }
    ```
 
+## Working with TradingView Charting Library in the Frontend
+
+### Overview
+- **Purpose**: Help a developer quickly run, integrate, extend, and debug the TradingView Charting Library located at `frontend/public/charting_library` in the project.
+- **Primary resources**: Official docs, tutorials, tutorial code, and examples — links provided below. Use your MCP web-search server to locate additional pages, follow internal links, and retrieve sample code as needed.
+
+### Direct Links to Use
+- **TradingView GitHub organization**: https://github.com/tradingview
+- **Charting Library Tutorials**: https://www.tradingview.com/charting-library-docs/latest/tutorials/
+- **Charting Library tutorial code repo**: https://github.com/tradingview/charting-library-tutorial
+- **Charting Library examples repo**: https://github.com/tradingview/charting-library-examples
+- **Getting started documentation**: https://www.tradingview.com/charting-library-docs/latest/getting_started/
+- **Full API reference**: https://www.tradingview.com/charting-library-docs/latest/api/
+
+### Recommended Dev Workflow
+- Use the matching example from `charting-library-examples` for your framework (React, Vue, Next.js, Svelte, plain HTML, etc.) and adapt container and lifecycle handling.
+- Keep the tutorial repo open as a runnable reference for Datafeed and streaming patterns.
+- During integration, run the chart in debug mode and log Datafeed lifecycle events to trace `getBars` and subscribe/unsubscribe calls.
+- Maintain a local copy of the exact Charting Library release used by examples to avoid API mismatches.
+
+### Debugging and Common Pitfalls
+- **Missing bars or gaps**: Check timezone, resolution mapping, and bar-end timestamps returned by `getBars`.
+- **No live updates**: Verify `subscribeBars` is called with the same symbol/resolution used by `resolveSymbol` and that your stream forwards tick aggregation correctly.
+- **Version mismatch**: Ensure example code and Charting Library version align; overwrite or symlink `frontend/public/charting_library` in examples during local testing.
+
+### Action Items for You
+- **Verify the Charting Library directory** at `frontend/public/charting_library` and list top-level files to confirm the release.
+- **Clone the tutorial repo** https://github.com/tradingview/charting-library-tutorial and the examples repo https://github.com/tradingview/charting-library-examples for runnable references.
+- **Use your MCP web-search server** to search the provided documentation pages, follow internal links for deeper examples, and copy the Datafeed and Broker patterns you need.
+- **Implement a minimal IDatafeedChart wrapper** returning SymbolInfo and historical bars, then add `subscribeBars` to forward live ticks into the chart.
+- **Add a debug overlay or console logger** for Datafeed calls and Broker events to speed troubleshooting.
+
+### Helpful Reference Priorities
+1. **Start with Getting started** to confirm hosting and embedding steps: https://www.tradingview.com/charting-library-docs/latest/getting_started/
+2. **Use Tutorials** to implement Datafeed and Broker features step-by-step: https://www.tradingview.com/charting-library-docs/latest/tutorials/
+3. **Consult the API reference** for exact interfaces and TypeScript definitions: https://www.tradingview.com/charting-library-docs/latest/api/
+4. **Use the tutorial code repo** for complete example implementations: https://github.com/tradingview/charting-library-tutorial
+5. **Use the examples repo** to bootstrap framework-specific integrations: https://github.com/tradingview/charting-library-examples
+
+### Notes
+- Bold labels above highlight key steps and files to check.
+- Use your MCP web-search server to locate any additional pages inside the TradingView docs or GitHub repos, and follow internal links in those pages to find code snippets, changelogs, and versioned artifacts as needed.
+
+## Trading Features Integration
+
+### Enable Trading Features for TradingView Charting Library
+
+Explore these library docs and feel free to follow links for more details:
+- **Trading concepts**: https://www.tradingview.com/charting-library-docs/latest/trading_terminal/trading-concepts/
+- **IBrokerTerminal API**: https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IBrokerTerminal/
+
+### Broker Terminal Implementation Examples
+
+Explore these broker terminal implementations examples:
+- **Terminal Web Implementation**: https://github.com/FarmaanElahi/terminal-web/blob/main/components/chart/terminal/broker_terminal.ts
+- **Binance Broker Sample**: https://github.com/TargetHit/tradingview-binance/blob/master/broker-sample/src/broker.ts
+
 ## References
 
 - [TradingView Datafeed API Documentation](https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/)
