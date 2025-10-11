@@ -30,7 +30,7 @@ This document describes the hybrid **OpenAPI + AsyncAPI** architecture implement
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| **WebSocket Models** | `src/trading_api/core/websocket_models.py` | Pydantic models for all WebSocket messages |
+| **WebSocket Models** | `src/trading_api/models/websocket_models.py` | Pydantic models for all WebSocket messages |
 | **Connection Manager** | `src/trading_api/core/websocket_manager.py` | Manages connections, subscriptions, broadcasting |
 | **WebSocket API** | `src/trading_api/api/websockets.py` | FastAPI WebSocket endpoints |
 | **Real-time Service** | `src/trading_api/core/realtime_service.py` | Mock data generators for testing |

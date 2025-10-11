@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from ..core.websocket_manager import connection_manager
-from ..core.websocket_models import (
+from ..models import (
     CandlestickUpdate,
     MarketDataTick,
     OrderBookUpdate,
@@ -316,7 +316,7 @@ class RealTimeDataService:
     ) -> int:
         """Broadcast a custom message to a specific channel"""
         try:
-            from .websocket_models import WebSocketMessage
+            from ..models import WebSocketMessage
 
             message = WebSocketMessage(
                 type=message_data.get("type", "custom"),

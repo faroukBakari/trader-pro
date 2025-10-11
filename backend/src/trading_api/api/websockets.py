@@ -11,11 +11,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from ..core.websocket_manager import connection_manager
-from ..core.websocket_models import (
-    AuthenticationMessage,
-    WebSocketServerConfig,
-    WebSocketSubscription,
-)
+from ..models import AuthenticationMessage, WebSocketServerConfig, WebSocketSubscription
 
 logger = logging.getLogger(__name__)
 
