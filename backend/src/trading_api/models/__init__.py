@@ -3,17 +3,32 @@ Trading API models package
 
 This package contains all Pydantic models used throughout the trading API,
 organized by functionality:
-- models.py: Core datafeed and market data models
-- websocket_models.py: WebSocket and real-time message models
+- common/: Shared base models and utilities
+- market/: Market data, instruments, quotes, and bars
+- trading/: Orders, positions, and trading operations
+- account/: User accounts, authentication, and balances
+- realtime/: WebSocket messages and real-time streams
 """
 
-# Datafeed and market data models
-from .models import (
+from typing import Union
+
+# Import from account domain
+from .account import AuthenticationMessage, AuthenticationResponse, BalanceUpdate
+
+# Import from common utilities
+from .common import (
+    ErrorResponse,
+    WebSocketMessage,
+    WebSocketResponse,
+    WebSocketSubscription,
+)
+
+# Import from market data domain
+from .market import (
     Bar,
     DatafeedConfiguration,
     DatafeedHealthResponse,
     DatafeedSymbolType,
-    ErrorResponse,
     Exchange,
     GetBarsRequest,
     GetBarsResponse,
@@ -25,37 +40,52 @@ from .models import (
     SymbolInfo,
 )
 
-# WebSocket and real-time models
-from .websocket_models import (
-    AuthenticationMessage,
-    AuthenticationResponse,
-    BalanceUpdate,
+# Import from realtime domain
+from .realtime import (
     CandlestickUpdate,
     ChannelConfig,
     ChannelStatus,
     HeartbeatMessage,
     MarketDataTick,
     OrderBookUpdate,
-    OrderUpdate,
-    PositionUpdate,
     SubscriptionConfirmation,
     SystemMessage,
     TradeUpdate,
     TradingNotification,
-    WebSocketMessage,
-    WebSocketMessageUnion,
-    WebSocketResponse,
     WebSocketServerConfig,
-    WebSocketSubscription,
 )
 
+# Import from trading domain
+from .trading import OrderUpdate, PositionUpdate
+
+WebSocketMessageUnion = Union[
+    MarketDataTick,
+    OrderBookUpdate,
+    TradeUpdate,
+    BalanceUpdate,
+    PositionUpdate,
+    OrderUpdate,
+    TradingNotification,
+    CandlestickUpdate,
+    SystemMessage,
+    HeartbeatMessage,
+    AuthenticationMessage,
+    AuthenticationResponse,
+    SubscriptionConfirmation,
+    ChannelStatus,
+]
+
 __all__ = [
-    # Datafeed models
+    # Common utilities
+    "ErrorResponse",
+    "WebSocketMessage",
+    "WebSocketResponse",
+    "WebSocketSubscription",
+    # Market data models
     "Bar",
     "DatafeedConfiguration",
     "DatafeedHealthResponse",
     "DatafeedSymbolType",
-    "ErrorResponse",
     "Exchange",
     "GetBarsRequest",
     "GetBarsResponse",
@@ -65,25 +95,24 @@ __all__ = [
     "SearchSymbolResultItem",
     "SearchSymbolsRequest",
     "SymbolInfo",
-    # WebSocket models
+    # Trading models
+    "OrderUpdate",
+    "PositionUpdate",
+    # Account models
     "AuthenticationMessage",
     "AuthenticationResponse",
     "BalanceUpdate",
+    # Real-time models
     "CandlestickUpdate",
     "ChannelConfig",
     "ChannelStatus",
     "HeartbeatMessage",
     "MarketDataTick",
     "OrderBookUpdate",
-    "OrderUpdate",
-    "PositionUpdate",
     "SubscriptionConfirmation",
     "SystemMessage",
     "TradeUpdate",
     "TradingNotification",
-    "WebSocketMessage",
     "WebSocketMessageUnion",
-    "WebSocketResponse",
     "WebSocketServerConfig",
-    "WebSocketSubscription",
 ]

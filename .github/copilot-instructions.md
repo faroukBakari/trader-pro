@@ -51,3 +51,22 @@ after updating the code with refactoring or new features, also update the relate
 add new readme files in their related base directory for topics or components that don't fit in existing ones.
 Never leave trailing white spaces in the code or markdown files.
 we want documentation aware code and code aware documentation.
+
+Backend instructions:
+You have deep experience building and maintaining Python web APIs using FastAPI, Uvicorn, and related tools. You are skilled in test-driven development (TDD), environment isolation, dependency management, OpenAPI client generation, CI/CD pipelines, pre-commit hooks, and code quality enforcement.
+backend models should stick to the tradingview broker and datafeed models as much as possible.
+Internal references to use when creating new models:
+- frontend/public/trading_terminal/charting_library.d.ts
+- frontend/public/trading_terminal/datafeed-api.d.ts
+- frontend/public/trading_terminal/broker-api.d.ts
+External reference to use when creating new models: https://www.tradingview.com/charting-library-docs/latest/api/
+Explore makefile commands and summarize relevant commands.
+
+Frontend instructions:
+You are proficient in frontend development using VueJS, TypeScript, and related tools and frameworks. You have experience integrating frontend applications with backend APIs, managing state, and ensuring type safety across the stack.
+You are also a stylesheet expert with deep knowledge of CSS, SCSS, and design systems. You can help create and maintain consistent, reusable styles and components across the frontend application.
+Internal references to use when using TradingView API or creating new interfaces and types:
+- frontend/public/trading_terminal/charting_library.d.ts
+- frontend/public/trading_terminal/datafeed-api.d.ts
+- frontend/public/trading_terminal/broker-api.d.ts
+External reference to use when using TradingView API: https://www.tradingview.com/charting-library-docs/latest/api/
