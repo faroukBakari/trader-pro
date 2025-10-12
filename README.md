@@ -3,7 +3,7 @@
 [![CI](https://github.com/faroukBakari/trading-api/actions/workflows/ci.yml/badge.svg)](https://github.com/faroukBakari/trading-api/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/faroukBakari/trading-api/branch/main/graph/badge.svg)](https://codecov.io/gh/faroukBakari/trading-api)
 
-A FastAPI-based trading API with Vue.js frontend, built with modern development practices.
+A modern full-stack trading platform with FastAPI backend and Vue.js frontend. Features REST API for traditional request/response operations and WebSocket streaming for real-time market data updates.
 
 ## 🏗️ Project Structure
 
@@ -111,14 +111,29 @@ make -C backend format
 
 ## 📖 API Documentation
 
-- **Interactive Docs**: http://localhost:${BACKEND_PORT:-8000}/docs
-- **OpenAPI Spec**: http://localhost:${BACKEND_PORT:-8000}/openapi.json
-- **ReDoc**: http://localhost:${BACKEND_PORT:-8000}/redoc
+### REST API
+- **Interactive Docs (Swagger)**: http://localhost:${BACKEND_PORT:-8000}/api/v1/docs
+- **OpenAPI Spec**: http://localhost:${BACKEND_PORT:-8000}/api/v1/openapi.json
+- **ReDoc**: http://localhost:${BACKEND_PORT:-8000}/api/v1/redoc
 
-### Available Endpoints
-- `GET /health` - Health check
-- `GET /api/v1/version` - API version info
+### WebSocket API
+- **AsyncAPI Interactive UI**: http://localhost:${BACKEND_PORT:-8000}/api/v1/ws/asyncapi
+- **AsyncAPI Spec**: http://localhost:${BACKEND_PORT:-8000}/api/v1/ws/asyncapi.json
+- **WebSocket Endpoint**: ws://localhost:${BACKEND_PORT:-8000}/api/v1/ws
+
+### Available REST Endpoints
+- `GET /api/v1/health` - Health check with version info
+- `GET /api/v1/versions` - List all API versions
+- `GET /api/v1/version` - Current version details
+- `GET /api/v1/datafeed/*` - TradingView-compatible market data
 - `GET /` - Root API metadata
+
+### WebSocket Operations
+- `bars.subscribe` - Subscribe to real-time OHLC bar updates
+- `bars.unsubscribe` - Unsubscribe from bar updates
+- `bars.update` - Server broadcasts (receive-only)
+
+See [backend/docs/websockets.md](backend/docs/websockets.md) for complete WebSocket documentation.
 
 ## 🏃‍♂️ CI/CD
 
@@ -139,10 +154,11 @@ The project uses GitHub Actions for continuous integration:
 ## 📁 Project Details
 
 ### Backend (`/backend`)
-- **Framework**: FastAPI
+- **Framework**: FastAPI + FastWS (WebSocket)
 - **Runtime**: Python 3.11
-- **Testing**: pytest, pytest-asyncio, httpx
+- **Testing**: pytest, pytest-asyncio, httpx, WebSocket testing
 - **Code Quality**: Black, isort, Flake8, MyPy
+- **Documentation**: OpenAPI 3.0 + AsyncAPI 2.4.0
 - **Dependencies**: Poetry
 
 ### Frontend (`/frontend`)

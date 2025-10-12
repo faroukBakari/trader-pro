@@ -5,15 +5,17 @@ FastAPI backend that powers the Trading Pro platform. It exposes a RESTful API f
 ## Features
 
 - REST API with typed responses generated from FastAPI + Pydantic models
+- WebSocket real-time streaming with FastWS and AsyncAPI documentation
 - Built-in market datafeed service compatible with the TradingView UDF contract
 - Versioned API surface (`/api/v1`) with pluggable future versions
-- Automatic OpenAPI generation for client tooling and contract tests
+- Automatic OpenAPI + AsyncAPI generation for client tooling and contract tests
 - Test-driven development workflow with pytest and FastAPI TestClient
 
 ## Documentation
 
 - `ARCHITECTURE.md` – end-to-end system architecture
 - `docs/versioning.md` – API versioning strategy and lifecycle
+- `docs/websockets.md` – WebSocket real-time data streaming guide
 - `backend/README.md` (this file) – backend setup and reference
 - `frontend/CLIENT-GENERATION.md` – TypeScript client generation that consumes the backend OpenAPI spec
 - `MAKEFILE-GUIDE.md` – consolidated command reference for the whole project
@@ -61,14 +63,20 @@ make format            # black + isort
 
 ## API Surface
 
-The backend publishes an OpenAPI document at startup. After running the dev server, visit:
+The backend publishes OpenAPI and AsyncAPI documentation at startup. After running the dev server, visit:
 
+### REST API Documentation
 - Root metadata: `http://127.0.0.1:8000/`
 - Interactive docs (Swagger UI): `http://127.0.0.1:8000/api/v1/docs`
 - ReDoc: `http://127.0.0.1:8000/api/v1/redoc`
 - Raw OpenAPI JSON: `http://127.0.0.1:8000/api/v1/openapi.json`
 
-### Key endpoints
+### WebSocket API Documentation
+- AsyncAPI Interactive UI: `http://127.0.0.1:8000/api/v1/ws/asyncapi`
+- Raw AsyncAPI JSON: `http://127.0.0.1:8000/api/v1/ws/asyncapi.json`
+- WebSocket endpoint: `ws://127.0.0.1:8000/api/v1/ws`
+
+### Key REST Endpoints
 
 | Path | Method | Description |
 | ---- | ------ | ----------- |
@@ -81,6 +89,16 @@ The backend publishes an OpenAPI document at startup. After running the dev serv
 | `/api/v1/datafeed/bars` | GET | Historical OHLC data |
 | `/api/v1/datafeed/quotes` | POST | Latest quote snapshot for multiple symbols |
 | `/api/v1/datafeed/health` | GET | Datafeed service diagnostics |
+
+### WebSocket Operations
+
+| Operation | Type | Description |
+| --------- | ---- | ----------- |
+| `bars.subscribe` | SEND | Subscribe to real-time bar updates for a symbol |
+| `bars.unsubscribe` | SEND | Unsubscribe from bar updates |
+| `bars.update` | RECEIVE | Real-time OHLC bar data broadcast |
+
+See `docs/websockets.md` for detailed WebSocket documentation.
 
 ## API Versioning
 
@@ -110,11 +128,17 @@ backend/
 ├── pyproject.toml
 ├── src/trading_api/
 │   ├── __init__.py
-│   ├── main.py                # FastAPI application factory & OpenAPI writer
+│   ├── main.py                # FastAPI + FastWS application factory
 │   ├── api/
-│   │   ├── datafeed.py        # TradingView-compatible endpoints
+│   │   ├── datafeed.py        # TradingView-compatible REST endpoints
 │   │   ├── health.py          # Service heartbeat
 │   │   └── versions.py        # API version catalogue
+│   ├── ws/
+│   │   ├── __init__.py        # WebSocket module exports
+│   │   ├── common.py          # Shared WebSocket models
+│   │   └── datafeed.py        # Real-time bar operations
+│   ├── plugins/
+│   │   └── fastws_adapter.py  # FastWS integration adapter
 │   ├── core/
 │   │   ├── datafeed_service.py    # In-memory market data provider
 │   │   ├── response_validation.py # FastAPI response model guardrails
@@ -128,11 +152,15 @@ backend/
 │           ├── instruments.py
 │           ├── quotes.py
 │           └── search.py
+├── external_packages/
+│   └── fastws/                # FastWS framework (vendored)
 ├── tests/
-│   ├── test_health.py
-│   └── test_versioning.py
+│   ├── test_api_health.py
+│   ├── test_api_versioning.py
+│   └── test_ws_datafeed.py    # WebSocket integration tests
 ├── docs/
-│   └── versioning.md
+│   ├── versioning.md
+│   └── websockets.md          # WebSocket streaming guide
 └── README.md
 ```
 
