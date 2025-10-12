@@ -118,7 +118,7 @@
         "request": "launch",
         "module": "uvicorn",
         "args": [
-          "trading_api.main:app",
+          "trading_api.main:$BACKEND_APP_NAME",
           "--reload",
           "--host",
           "0.0.0.0",
@@ -129,8 +129,26 @@
         "console": "integratedTerminal",
         "justMyCode": true,
         "env": {
-          "PYTHONPATH": "src"
+          "PYTHONPATH": "src",
+          "BACKEND_APP_NAME": "app"
         }
+      },
+      {
+        "name": "Backend: Attach to Debugpy (from Make)",
+        "type": "debugpy",
+        "request": "attach",
+        "connect": {
+          "host": "localhost",
+          "port": 5678
+        },
+        "pathMappings": [
+          {
+            "localRoot": "${workspaceFolder}/backend/",
+            "remoteRoot": "."
+          }
+        ],
+        "justMyCode": true,
+        "preLaunchTask": "backend-dev"
       },
       {
         "name": "Backend: Attach to Remote Debugpy (Port 5678)",
@@ -172,9 +190,17 @@
     ],
     "compounds": [
       {
-        "name": "Full Stack: Backend + Frontend",
+        "name": "Full Stack: Direct Debug",
         "configurations": [
           "Backend: FastAPI Dev Server",
+          "Frontend: Vite Dev Server"
+        ],
+        "stopAll": true
+      },
+      {
+        "name": "Full Stack: Makefile-based",
+        "configurations": [
+          "Backend: Attach to Debugpy (from Make)",
           "Frontend: Vite Dev Server"
         ],
         "stopAll": true
@@ -211,7 +237,7 @@
       {
         "label": "frontend-dev",
         "type": "shell",
-        "command": "npm run dev",
+        "command": "make dev",
         "options": {
           "cwd": "./frontend"
         },
@@ -229,31 +255,137 @@
         }
       },
       {
+        "label": "fullstack-dev",
+        "type": "shell",
+        "command": "make -f project.mk dev-fullstack",
+        "options": {
+          "cwd": "."
+        },
+        "isBackground": true,
+        "problemMatcher": []
+      },
+      {
         "label": "backend-test",
         "type": "shell",
         "command": "make test",
         "options": {
           "cwd": "./backend"
         },
-        "group": "test"
+        "group": "test",
+        "problemMatcher": []
+      },
+      {
+        "label": "backend-test-coverage",
+        "type": "shell",
+        "command": "make test-cov",
+        "options": {
+          "cwd": "./backend"
+        },
+        "group": "test",
+        "problemMatcher": []
       },
       {
         "label": "frontend-test",
         "type": "shell",
-        "command": "npm run test:unit",
+        "command": "make test-run",
         "options": {
           "cwd": "./frontend"
         },
-        "group": "test"
+        "group": "test",
+        "problemMatcher": []
+      },
+      {
+        "label": "test-all",
+        "type": "shell",
+        "command": "make -f project.mk test-all",
+        "options": {
+          "cwd": "."
+        },
+        "group": "test",
+        "problemMatcher": []
       },
       {
         "label": "integration-test",
         "type": "shell",
-        "command": "make test-integration",
+        "command": "make -f project.mk test-integration",
         "options": {
           "cwd": "."
         },
-        "group": "test"
+        "group": "test",
+        "problemMatcher": []
+      },
+      {
+        "label": "smoke-test",
+        "type": "shell",
+        "command": "make -f project.mk test-smoke",
+        "options": {
+          "cwd": "."
+        },
+        "group": "test",
+        "problemMatcher": []
+      },
+      {
+        "label": "backend-lint",
+        "type": "shell",
+        "command": "make lint-check",
+        "options": {
+          "cwd": "./backend"
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "frontend-lint",
+        "type": "shell",
+        "command": "make lint",
+        "options": {
+          "cwd": "./frontend"
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "lint-all",
+        "type": "shell",
+        "command": "make -f project.mk lint-all",
+        "options": {
+          "cwd": "."
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "backend-format",
+        "type": "shell",
+        "command": "make format",
+        "options": {
+          "cwd": "./backend"
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "format-all",
+        "type": "shell",
+        "command": "make -f project.mk format-all",
+        "options": {
+          "cwd": "."
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "clean-generated",
+        "type": "shell",
+        "command": "make -f project.mk clean-generated",
+        "options": {
+          "cwd": "."
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "clean-all",
+        "type": "shell",
+        "command": "make -f project.mk clean-all",
+        "options": {
+          "cwd": "."
+        },
+        "problemMatcher": []
       }
     ]
   }

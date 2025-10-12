@@ -3,15 +3,18 @@
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Annotated, AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
-from trading_api.api.datafeed import router as datafeed_router
-from trading_api.api.health import router as health_router
-from trading_api.api.versions import router as versions_router
-from trading_api.core.versioning import APIVersion
-from trading_api.ws.bars import bars_adapter
+from external_packages.fastws import Client
+from trading_api.plugins.fastws_adapter import FastWSAdapter
+
+from .api.datafeed import router as datafeed_router
+from .api.health import router as health_router
+from .api.versions import router as versions_router
+from .core.versioning import APIVersion
+from .ws.datafeed import router as ws_datafeed_router
 
 
 def validate_response_models(app: FastAPI) -> None:
@@ -68,7 +71,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print("🛑 FastAPI application shutdown complete")
 
 
-app = FastAPI(
+apiApp = FastAPI(
     title="Trading API",
     description=(
         "A comprehensive trading API server with market data "
@@ -87,19 +90,43 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+wsApp = FastWSAdapter(
+    title="Trading WebSockets",
+    description=(
+        "Real-time trading data streaming. "
+        "Read the documentation to subscribe to specific data feeds."
+    ),
+    version="1.0.0",
+    asyncapi_url="/api/v1/ws/asyncapi.json",
+    asyncapi_docs_url="/api/v1/ws/asyncapi",
+    heartbeat_interval=30.0,
+    max_connection_lifespan=3600.0,
+)
+
 # Include version 1 routes
-app.include_router(health_router, prefix="/api/v1", tags=["v1"])
-app.include_router(versions_router, prefix="/api/v1", tags=["v1"])
-app.include_router(datafeed_router, prefix="/api/v1", tags=["v1"])
+apiApp.include_router(health_router, prefix="/api/v1", tags=["v1"])
+apiApp.include_router(versions_router, prefix="/api/v1", tags=["v1"])
+apiApp.include_router(datafeed_router, prefix="/api/v1", tags=["v1"])
 
 # Register WebSocket endpoints and AsyncAPI documentation
 # Note: WebSocket endpoints don't appear in OpenAPI/Swagger docs (/api/v1/docs)
-# They use AsyncAPI specification instead (see /api/v1/ws/bars/asyncapi)
-bars_adapter.register_endpoint(app)
+# They use AsyncAPI specification instead (see /api/v1/ws/asyncapi)
+# Note: No prefix here - the prefix applies to HTTP paths, not WebSocket message types
+wsApp.include_router(ws_datafeed_router)
+wsApp.setup(apiApp)
+
+
+# Register the WebSocket endpoint
+@apiApp.websocket("/api/v1/ws")
+async def websocket_bars_endpoint(
+    client: Annotated[Client, Depends(wsApp.manage)],
+) -> None:
+    """WebSocket endpoint for real-time bar data streaming"""
+    await wsApp.serve(client)
 
 
 # Add version information to root endpoint
-@app.get("/", tags=["root"])
+@apiApp.get("/", tags=["root"])
 async def root() -> dict:
     """Root endpoint with API information."""
     return {
@@ -112,9 +139,9 @@ async def root() -> dict:
         "datafeed": "/api/v1/datafeed",
         "websockets": {
             "bars": {
-                "endpoint": "/api/v1/ws/bars",
-                "docs": "/api/v1/ws/bars/asyncapi",
-                "spec": "/api/v1/ws/bars/asyncapi.json",
+                "endpoint": "/api/v1/ws",
+                "docs": wsApp.asyncapi_docs_url,
+                "spec": wsApp.asyncapi_url,
                 "operations": [
                     "bars.subscribe",
                     "bars.unsubscribe",
@@ -124,3 +151,7 @@ async def root() -> dict:
             },
         },
     }
+
+
+# Backward compatibility alias for ASGI servers
+app = apiApp
