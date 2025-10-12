@@ -10,6 +10,7 @@ packages = [
 ]
 include = ["trading_api/py.typed", "external_packages/py.typed", "external_packages/fastws/py.typed"]
 
+
 [tool.poetry.dependencies]
 python = "^3.11"
 fastapi = "^0.104.1"
