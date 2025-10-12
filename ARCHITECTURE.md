@@ -108,8 +108,9 @@ datafeed.py       # Market data REST endpoints
 #### 2b. WebSocket Layer (`src/trading_api/ws/`)
 ```python
 __init__.py       # WebSocket module exports
-common.py         # Shared WebSocket models (SubscriptionRequest/Response)
 datafeed.py       # Real-time bar data operations (subscribe/unsubscribe/update)
+                  # Uses BarsSubscriptionRequest from models/market/bars.py
+                  # Uses SubscriptionResponse from models/common.py
 ```
 
 #### 2c. Plugins (`src/trading_api/plugins/`)
@@ -122,13 +123,20 @@ fastws_adapter.py # FastWS integration adapter with publish() helper
 versioning.py         # API version management
 datafeed_service.py   # Market data business logic
 response_validation.py # API response model validation
+bar_broadcaster.py    # Background bar broadcasting service
+config.py             # Application configuration models
 ```
 
 #### 4. Models Package (`src/trading_api/models/`)
 ```python
 __init__.py           # Unified model exports
-common.py             # Shared primitives
-market/               # TradingView datafeed contracts (bars, config, quotes, search)
+common.py             # Shared primitives (BaseApiResponse, ErrorApiResponse, SubscriptionResponse)
+market/               # TradingView datafeed contracts
+  bars.py             # Bar, BarsSubscriptionRequest
+  config.py           # DatafeedConfiguration
+  quotes.py           # QuoteData
+  search.py           # SymbolSearchResult
+  instruments.py      # SymbolInfo
 ```
 
 #### 5. Testing Infrastructure (`tests/`)
@@ -353,7 +361,7 @@ All WebSocket messages follow a structured JSON format:
   "type": "bars.subscribe",
   "payload": {
     "symbol": "AAPL",
-    "params": { "resolution": "1" }
+    "resolution": "1"
   }
 }
 
@@ -376,7 +384,7 @@ All WebSocket messages follow a structured JSON format:
   "type": "bars.unsubscribe",
   "payload": {
     "symbol": "AAPL",
-    "params": { "resolution": "1" }
+    "resolution": "1"
   }
 }
 
@@ -461,10 +469,11 @@ wsApp = FastWSAdapter(
 - Prefix: `bars.` for all bar-related operations
 - Tags: `["datafeed"]` for AsyncAPI grouping
 
-**3. Message Models** (`ws/common.py`)
-- `SubscriptionRequest`: Generic subscribe/unsubscribe payload
-- `SubscriptionResponse`: Standard response format
+**3. Message Models**
+- `BarsSubscriptionRequest` (`models/market/bars.py`): Typed subscription payload with symbol and resolution fields
+- `SubscriptionResponse` (`models/common.py`): Standard response format inheriting from BaseApiResponse
 - Pydantic validation for all messages
+- Flat payload structure (no nested `params` dict)
 
 #### Integration Points
 

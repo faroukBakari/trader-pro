@@ -38,6 +38,16 @@ class GetBarsResponse(BaseModel):
     no_data: bool = Field(default=False, description="No data flag")
 
 
+# Type alias for bars subscription request
+class BarsSubscriptionRequest(BaseModel):
+    symbol: str = Field(..., description="Symbol to subscribe to")
+    resolution: str = Field(
+        default="1",
+        description="Time resolution: '1', '5', '15', '30', '60' (minutes),"
+        + " 'D' (day), 'W' (week), 'M' (month)",
+    )
+
+
 __all__ = [
     "Bar",
     "GetBarsRequest",

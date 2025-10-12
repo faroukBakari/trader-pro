@@ -1,0 +1,1226 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Trading API",
+    "description": "A comprehensive trading API server with market data and portfolio management. Supports multiple API versions for backwards compatibility.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": [
+          "v1",
+          "health"
+        ],
+        "summary": "Health Check",
+        "description": "Returns the current health status of the trading API service with version information",
+        "operationId": "getHealthStatus",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/versions": {
+      "get": {
+        "tags": [
+          "v1",
+          "versioning"
+        ],
+        "summary": "API Versions",
+        "description": "Returns information about all available API versions",
+        "operationId": "getAPIVersions",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIMetadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/version": {
+      "get": {
+        "tags": [
+          "v1",
+          "versioning"
+        ],
+        "summary": "Current API Version",
+        "description": "Returns information about the current API version",
+        "operationId": "getCurrentAPIVersion",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Getcurrentapiversion"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datafeed/config": {
+      "get": {
+        "tags": [
+          "v1",
+          "datafeed"
+        ],
+        "summary": "Get datafeed configuration",
+        "description": "Get datafeed configuration including supported resolutions, exchanges,\nand symbol types. This endpoint provides the configuration needed by\nTradingView charting library.",
+        "operationId": "getConfig",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatafeedConfiguration"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datafeed/search": {
+      "get": {
+        "tags": [
+          "v1",
+          "datafeed"
+        ],
+        "summary": "Search symbols",
+        "description": "Search symbols based on user input and optional filters.\n\n- **user_input**: Text to search for in symbol name, description, or ticker\n- **exchange**: Filter by exchange (optional)\n- **symbol_type**: Filter by symbol type (optional)\n- **max_results**: Maximum number of results to return",
+        "operationId": "searchSymbols",
+        "parameters": [
+          {
+            "name": "user_input",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "User search input",
+              "title": "User Input"
+            },
+            "description": "User search input"
+          },
+          {
+            "name": "exchange",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Exchange filter",
+              "default": "",
+              "title": "Exchange"
+            },
+            "description": "Exchange filter"
+          },
+          {
+            "name": "symbol_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Symbol type filter",
+              "default": "",
+              "title": "Symbol Type"
+            },
+            "description": "Symbol type filter"
+          },
+          {
+            "name": "max_results",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "Maximum results",
+              "default": 50,
+              "title": "Max Results"
+            },
+            "description": "Maximum results"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SearchSymbolResultItem"
+                  },
+                  "title": "Response Searchsymbols"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datafeed/resolve/{symbol}": {
+      "get": {
+        "tags": [
+          "v1",
+          "datafeed"
+        ],
+        "summary": "Resolve symbol",
+        "description": "Resolve symbol information by name or ticker.\n\n- **symbol**: Symbol name or ticker to resolve",
+        "operationId": "resolveSymbol",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Symbol"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SymbolInfo"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datafeed/bars": {
+      "get": {
+        "tags": [
+          "v1",
+          "datafeed"
+        ],
+        "summary": "Get historical bars",
+        "description": "Get historical OHLC bars for a symbol.\n\n- **symbol**: Symbol name or ticker\n- **resolution**: Time resolution (currently only '1D' is supported)\n- **from_time**: Start timestamp in seconds\n- **to_time**: End timestamp in seconds\n- **count_back**: Number of bars to count back (optional)",
+        "operationId": "getBars",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Symbol name",
+              "title": "Symbol"
+            },
+            "description": "Symbol name"
+          },
+          {
+            "name": "resolution",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Resolution (e.g., '1D')",
+              "title": "Resolution"
+            },
+            "description": "Resolution (e.g., '1D')"
+          },
+          {
+            "name": "from_time",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "From timestamp (seconds)",
+              "title": "From Time"
+            },
+            "description": "From timestamp (seconds)"
+          },
+          {
+            "name": "to_time",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "To timestamp (seconds)",
+              "title": "To Time"
+            },
+            "description": "To timestamp (seconds)"
+          },
+          {
+            "name": "count_back",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Count back",
+              "title": "Count Back"
+            },
+            "description": "Count back"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetBarsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datafeed/quotes": {
+      "post": {
+        "tags": [
+          "v1",
+          "datafeed"
+        ],
+        "summary": "Get quotes for symbols",
+        "description": "Get real-time quotes for multiple symbols.\n\n- **symbols**: Array of symbol names to get quotes for",
+        "operationId": "getQuotes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetQuotesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/QuoteData"
+                  },
+                  "type": "array",
+                  "title": "Response Getquotes"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datafeed/health": {
+      "get": {
+        "tags": [
+          "v1",
+          "datafeed"
+        ],
+        "summary": "Datafeed health check",
+        "description": "Health check endpoint for the datafeed service.",
+        "operationId": "datafeedHealthCheck",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatafeedHealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "tags": [
+          "root"
+        ],
+        "summary": "Root",
+        "description": "Root endpoint with API information.",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Root  Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "APIMetadata": {
+        "properties": {
+          "current_version": {
+            "$ref": "#/components/schemas/APIVersion"
+          },
+          "available_versions": {
+            "items": {
+              "$ref": "#/components/schemas/VersionInfo"
+            },
+            "type": "array",
+            "title": "Available Versions"
+          },
+          "documentation_url": {
+            "type": "string",
+            "title": "Documentation Url"
+          },
+          "support_contact": {
+            "type": "string",
+            "title": "Support Contact"
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_version",
+          "available_versions",
+          "documentation_url",
+          "support_contact"
+        ],
+        "title": "APIMetadata",
+        "description": "Complete API metadata including version information."
+      },
+      "APIVersion": {
+        "type": "string",
+        "enum": [
+          "v1",
+          "v2"
+        ],
+        "title": "APIVersion",
+        "description": "Supported API versions."
+      },
+      "Bar": {
+        "properties": {
+          "time": {
+            "type": "integer",
+            "title": "Time",
+            "description": "Bar timestamp in milliseconds"
+          },
+          "open": {
+            "type": "number",
+            "title": "Open",
+            "description": "Open price"
+          },
+          "high": {
+            "type": "number",
+            "title": "High",
+            "description": "High price"
+          },
+          "low": {
+            "type": "number",
+            "title": "Low",
+            "description": "Low price"
+          },
+          "close": {
+            "type": "number",
+            "title": "Close",
+            "description": "Close price"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume",
+            "description": "Volume"
+          }
+        },
+        "type": "object",
+        "required": [
+          "time",
+          "open",
+          "high",
+          "low",
+          "close"
+        ],
+        "title": "Bar",
+        "description": "OHLC bar model matching Bar interface"
+      },
+      "DatafeedConfiguration": {
+        "properties": {
+          "supported_resolutions": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supported Resolutions",
+            "description": "Supported resolutions",
+            "default": [
+              "5",
+              "1D",
+              "1W"
+            ]
+          },
+          "supports_marks": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Marks",
+            "description": "Supports marks",
+            "default": false
+          },
+          "supports_timescale_marks": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Timescale Marks",
+            "description": "Supports timescale marks",
+            "default": false
+          },
+          "supports_time": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supports Time",
+            "description": "Supports time",
+            "default": false
+          },
+          "exchanges": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Exchange"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchanges",
+            "description": "Available exchanges",
+            "default": [
+              {
+                "value": "",
+                "name": "All Exchanges",
+                "desc": ""
+              },
+              {
+                "value": "NASDAQ",
+                "name": "NASDAQ",
+                "desc": "NASDAQ"
+              },
+              {
+                "value": "NYSE",
+                "name": "NYSE",
+                "desc": "NYSE"
+              }
+            ]
+          },
+          "symbols_types": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/DatafeedSymbolType"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbols Types",
+            "description": "Available symbol types",
+            "default": [
+              {
+                "name": "All types",
+                "value": ""
+              },
+              {
+                "name": "Stock",
+                "value": "stock"
+              },
+              {
+                "name": "Crypto",
+                "value": "crypto"
+              },
+              {
+                "name": "Forex",
+                "value": "forex"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "DatafeedConfiguration",
+        "description": "Datafeed configuration model matching DatafeedConfiguration interface"
+      },
+      "DatafeedHealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "Health status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Health message"
+          },
+          "symbols_loaded": {
+            "type": "integer",
+            "title": "Symbols Loaded",
+            "description": "Number of symbols loaded"
+          },
+          "bars_count": {
+            "type": "integer",
+            "title": "Bars Count",
+            "description": "Number of sample bars generated"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp",
+            "description": "Timestamp of health check"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "message",
+          "symbols_loaded",
+          "bars_count",
+          "timestamp"
+        ],
+        "title": "DatafeedHealthResponse",
+        "description": "Datafeed health check response model"
+      },
+      "DatafeedSymbolType": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Name of the symbol type"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "description": "Value to be passed as symbolType argument to searchSymbols"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "title": "DatafeedSymbolType",
+        "description": "Symbol type descriptor model matching DatafeedSymbolType interface"
+      },
+      "Exchange": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "description": "Value to be passed as exchange argument to searchSymbols"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Name of the exchange"
+          },
+          "desc": {
+            "type": "string",
+            "title": "Desc",
+            "description": "Description of the exchange"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "name",
+          "desc"
+        ],
+        "title": "Exchange",
+        "description": "Exchange descriptor model matching Exchange interface"
+      },
+      "GetBarsResponse": {
+        "properties": {
+          "bars": {
+            "items": {
+              "$ref": "#/components/schemas/Bar"
+            },
+            "type": "array",
+            "title": "Bars",
+            "description": "Historical bars"
+          },
+          "no_data": {
+            "type": "boolean",
+            "title": "No Data",
+            "description": "No data flag",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "bars"
+        ],
+        "title": "GetBarsResponse",
+        "description": "Response model for getBars endpoint"
+      },
+      "GetQuotesRequest": {
+        "properties": {
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Symbols",
+            "description": "Symbol names"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbols"
+        ],
+        "title": "GetQuotesRequest",
+        "description": "Request model for getQuotes endpoint"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "Service is healthy"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "api_version": {
+            "type": "string",
+            "title": "Api Version"
+          },
+          "version_info": {
+            "type": "object",
+            "title": "Version Info"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "timestamp",
+          "api_version",
+          "version_info"
+        ],
+        "title": "HealthResponse",
+        "description": "Health check response model."
+      },
+      "QuoteData": {
+        "properties": {
+          "s": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "S",
+            "description": "Status"
+          },
+          "n": {
+            "type": "string",
+            "title": "N",
+            "description": "Symbol name"
+          },
+          "v": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteValues"
+              },
+              {
+                "type": "object"
+              }
+            ],
+            "title": "V",
+            "description": "Quote values or error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "s",
+          "n",
+          "v"
+        ],
+        "title": "QuoteData",
+        "description": "Quote data model matching QuoteData interface"
+      },
+      "QuoteValues": {
+        "properties": {
+          "lp": {
+            "type": "number",
+            "title": "Lp",
+            "description": "Last price"
+          },
+          "ask": {
+            "type": "number",
+            "title": "Ask",
+            "description": "Ask price"
+          },
+          "bid": {
+            "type": "number",
+            "title": "Bid",
+            "description": "Bid price"
+          },
+          "spread": {
+            "type": "number",
+            "title": "Spread",
+            "description": "Spread"
+          },
+          "open_price": {
+            "type": "number",
+            "title": "Open Price",
+            "description": "Open price"
+          },
+          "high_price": {
+            "type": "number",
+            "title": "High Price",
+            "description": "High price"
+          },
+          "low_price": {
+            "type": "number",
+            "title": "Low Price",
+            "description": "Low price"
+          },
+          "prev_close_price": {
+            "type": "number",
+            "title": "Prev Close Price",
+            "description": "Previous close price"
+          },
+          "volume": {
+            "type": "integer",
+            "title": "Volume",
+            "description": "Volume"
+          },
+          "ch": {
+            "type": "number",
+            "title": "Ch",
+            "description": "Change"
+          },
+          "chp": {
+            "type": "number",
+            "title": "Chp",
+            "description": "Change percent"
+          },
+          "short_name": {
+            "type": "string",
+            "title": "Short Name",
+            "description": "Short name"
+          },
+          "exchange": {
+            "type": "string",
+            "title": "Exchange",
+            "description": "Exchange"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Description"
+          },
+          "original_name": {
+            "type": "string",
+            "title": "Original Name",
+            "description": "Original name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lp",
+          "ask",
+          "bid",
+          "spread",
+          "open_price",
+          "high_price",
+          "low_price",
+          "prev_close_price",
+          "volume",
+          "ch",
+          "chp",
+          "short_name",
+          "exchange",
+          "description",
+          "original_name"
+        ],
+        "title": "QuoteValues",
+        "description": "Quote values model matching DatafeedQuoteValues interface"
+      },
+      "SearchSymbolResultItem": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol",
+            "description": "Symbol name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Symbol description"
+          },
+          "exchange": {
+            "type": "string",
+            "title": "Exchange",
+            "description": "Exchange name"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker",
+            "description": "Symbol ticker"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Symbol type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "description",
+          "exchange",
+          "type"
+        ],
+        "title": "SearchSymbolResultItem",
+        "description": "Search result item model matching SearchSymbolResultItem interface"
+      },
+      "SymbolInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Symbol name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Symbol description"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Symbol type (stock, crypto, forex, etc.)"
+          },
+          "session": {
+            "type": "string",
+            "title": "Session",
+            "description": "Trading session hours"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone",
+            "description": "Symbol timezone"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker",
+            "description": "Symbol ticker"
+          },
+          "exchange": {
+            "type": "string",
+            "title": "Exchange",
+            "description": "Exchange name"
+          },
+          "listed_exchange": {
+            "type": "string",
+            "title": "Listed Exchange",
+            "description": "Listed exchange"
+          },
+          "format": {
+            "type": "string",
+            "title": "Format",
+            "description": "Price format"
+          },
+          "pricescale": {
+            "type": "integer",
+            "title": "Pricescale",
+            "description": "Price scale"
+          },
+          "minmov": {
+            "type": "integer",
+            "title": "Minmov",
+            "description": "Minimum movement"
+          },
+          "has_intraday": {
+            "type": "boolean",
+            "title": "Has Intraday",
+            "description": "Has intraday data"
+          },
+          "has_daily": {
+            "type": "boolean",
+            "title": "Has Daily",
+            "description": "Has daily data"
+          },
+          "supported_resolutions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Supported Resolutions",
+            "description": "Supported resolutions"
+          },
+          "volume_precision": {
+            "type": "integer",
+            "title": "Volume Precision",
+            "description": "Volume precision"
+          },
+          "data_status": {
+            "type": "string",
+            "enum": [
+              "streaming",
+              "endofday",
+              "delayed_streaming"
+            ],
+            "title": "Data Status",
+            "description": "Data status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "type",
+          "session",
+          "timezone",
+          "exchange",
+          "listed_exchange",
+          "format",
+          "pricescale",
+          "minmov",
+          "has_intraday",
+          "has_daily",
+          "supported_resolutions",
+          "volume_precision",
+          "data_status"
+        ],
+        "title": "SymbolInfo",
+        "description": "Symbol information model matching LibrarySymbolInfo interface"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VersionInfo": {
+        "properties": {
+          "version": {
+            "$ref": "#/components/schemas/APIVersion"
+          },
+          "release_date": {
+            "type": "string",
+            "title": "Release Date"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "breaking_changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Breaking Changes",
+            "default": []
+          },
+          "deprecation_notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deprecation Notice"
+          },
+          "sunset_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sunset Date"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "release_date",
+          "status"
+        ],
+        "title": "VersionInfo",
+        "description": "API version information."
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Health check operations"
+    },
+    {
+      "name": "versioning",
+      "description": "API version information"
+    },
+    {
+      "name": "datafeed",
+      "description": "Market data and symbols operations"
+    }
+  ]
+}

@@ -10,11 +10,12 @@ organized by functionality:
 """
 
 # Import from common utilities
-from .common import ErrorResponse
+from .common import BaseApiResponse, ErrorApiResponse, SubscriptionResponse
 
 # Import from market data domain
 from .market import (
     Bar,
+    BarsSubscriptionRequest,
     DatafeedConfiguration,
     DatafeedHealthResponse,
     DatafeedSymbolType,
@@ -31,7 +32,10 @@ from .market import (
 
 __all__ = [
     # Common utilities
-    "ErrorResponse",
+    "BaseApiResponse",
+    "ErrorApiResponse",
+    "SubscriptionResponse",
+    "BarsSubscriptionRequest",
     # Market data models
     "Bar",
     "DatafeedConfiguration",

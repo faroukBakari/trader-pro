@@ -53,21 +53,28 @@ class FastWSAdapter(FastWS):
 - Server-initiated broadcast to subscribed clients
 - Payload: OHLC bar data (time, open, high, low, close, volume)
 
-### 3. Message Models (ws/common.py)
+### 3. Message Models
 
+**Common Models** (`models/common.py`):
 ```python
-class SubscriptionRequest(BaseModel):
-    """Generic subscription request"""
-    symbol: str
-    params: dict[str, Any] = Field(default_factory=dict)
-
-class SubscriptionResponse(BaseModel):
-    """Generic subscription response"""
-    status: Literal["ok", "error"]
-    symbol: str
-    message: str
-    topic: str
+class SubscriptionResponse(BaseApiResponse):
+    """Generic WebSocket subscription response"""
+    topic: str  # Inherits status and message from BaseApiResponse
 ```
+
+**Market-Specific Models** (`models/market/bars.py`):
+```python
+class BarsSubscriptionRequest(BaseModel):
+    """WebSocket subscription request for bar data"""
+    symbol: str
+    resolution: str = "1"  # Default 1-minute bars
+```
+
+**Design Changes**:
+- Removed generic `params: dict` in favor of typed fields
+- Domain-specific request models (e.g., `BarsSubscriptionRequest`)
+- Response models inherit from `BaseApiResponse` for consistency
+- Models located in central `models/` package, not `ws/common.py`
 
 ### 4. Topic-Based Pub/Sub
 
@@ -125,7 +132,7 @@ def test_subscribe_to_bars():
     with client.websocket_connect("/api/v1/ws") as websocket:
         websocket.send_json({
             "type": "bars.subscribe",
-            "payload": {"symbol": "AAPL", "params": {"resolution": "1"}}
+            "payload": {"symbol": "AAPL", "resolution": "1"}
         })
 
         response = websocket.receive_json()
@@ -263,8 +270,12 @@ backend/src/trading_api/
 │   └── fastws_adapter.py          # NEW: FastWS adapter with publish()
 └── ws/
     ├── __init__.py                # NEW: WebSocket module
-    ├── common.py                  # NEW: Shared models
     └── datafeed.py                # NEW: Bar operations
+
+backend/src/trading_api/models/
+├── common.py                      # UPDATED: Added SubscriptionResponse
+└── market/
+    └── bars.py                    # UPDATED: Added BarsSubscriptionRequest
 
 backend/docs/
 └── websockets.md                  # NEW: Complete WebSocket guide
@@ -321,7 +332,7 @@ ws.onopen = () => {
     type: 'bars.subscribe',
     payload: {
       symbol: 'AAPL',
-      params: { resolution: '1' }
+      resolution: '1'
     }
   }));
 };
@@ -354,7 +365,7 @@ async def stream_bars():
             "type": "bars.subscribe",
             "payload": {
                 "symbol": "AAPL",
-                "params": {"resolution": "1"}
+                "resolution": "1"
             }
         }))
 

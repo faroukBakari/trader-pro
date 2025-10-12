@@ -3,18 +3,19 @@ Tests for BarBroadcaster background service.
 """
 
 import asyncio
+from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from trading_api.core.bar_broadcaster import BarBroadcaster
 from trading_api.core.datafeed_service import DatafeedService
 from trading_api.models.market.bars import Bar
 from trading_api.plugins.fastws_adapter import FastWSAdapter
-from trading_api.services.bar_broadcaster import BarBroadcaster
 
 
 @pytest.fixture
-def mock_ws_app() -> FastWSAdapter:
+def mock_ws_app() -> Any:
     """Create a mock FastWSAdapter."""
     ws_app = Mock(spec=FastWSAdapter)
     ws_app.connections = {}
@@ -23,7 +24,7 @@ def mock_ws_app() -> FastWSAdapter:
 
 
 @pytest.fixture
-def mock_datafeed_service() -> DatafeedService:
+def mock_datafeed_service() -> Any:
     """Create a mock DatafeedService."""
     service = Mock(spec=DatafeedService)
     # Mock bar with realistic data
@@ -41,8 +42,8 @@ def mock_datafeed_service() -> DatafeedService:
 
 @pytest.fixture
 def broadcaster(
-    mock_ws_app: FastWSAdapter,
-    mock_datafeed_service: DatafeedService,
+    mock_ws_app: Any,
+    mock_datafeed_service: Any,
 ) -> BarBroadcaster:
     """Create a BarBroadcaster instance."""
     return BarBroadcaster(
@@ -59,9 +60,9 @@ class TestBarBroadcasterInitialization:
 
     def test_initialization_with_defaults(
         self,
-        mock_ws_app: FastWSAdapter,
-        mock_datafeed_service: DatafeedService,
-    ):
+        mock_ws_app: Any,
+        mock_datafeed_service: Any,
+    ) -> None:
         """Test broadcaster initializes with default values."""
         broadcaster = BarBroadcaster(
             ws_app=mock_ws_app,
@@ -77,9 +78,9 @@ class TestBarBroadcasterInitialization:
 
     def test_initialization_with_custom_values(
         self,
-        mock_ws_app: FastWSAdapter,
-        mock_datafeed_service: DatafeedService,
-    ):
+        mock_ws_app: Any,
+        mock_datafeed_service: Any,
+    ) -> None:
         """Test broadcaster initializes with custom values."""
         broadcaster = BarBroadcaster(
             ws_app=mock_ws_app,
@@ -93,7 +94,7 @@ class TestBarBroadcasterInitialization:
         assert broadcaster.symbols == ["BTC", "ETH"]
         assert broadcaster.resolutions == ["1", "5", "D"]
 
-    def test_initial_metrics(self, broadcaster: BarBroadcaster):
+    def test_initial_metrics(self, broadcaster: BarBroadcaster) -> None:
         """Test initial metrics are zero."""
         metrics = broadcaster.metrics
 
@@ -110,7 +111,7 @@ class TestBarBroadcasterLifecycle:
     """Test broadcaster start/stop lifecycle."""
 
     @pytest.mark.asyncio
-    async def test_start_broadcaster(self, broadcaster: BarBroadcaster):
+    async def test_start_broadcaster(self, broadcaster: BarBroadcaster) -> None:
         """Test starting the broadcaster creates a task."""
         broadcaster.start()
 
@@ -122,7 +123,7 @@ class TestBarBroadcasterLifecycle:
         broadcaster.stop()
 
     @pytest.mark.asyncio
-    async def test_start_already_running(self, broadcaster: BarBroadcaster):
+    async def test_start_already_running(self, broadcaster: BarBroadcaster) -> None:
         """Test starting an already running broadcaster does nothing."""
         broadcaster.start()
         task1 = broadcaster._task
@@ -137,7 +138,7 @@ class TestBarBroadcasterLifecycle:
         broadcaster.stop()
 
     @pytest.mark.asyncio
-    async def test_stop_broadcaster(self, broadcaster: BarBroadcaster):
+    async def test_stop_broadcaster(self, broadcaster: BarBroadcaster) -> None:
         """Test stopping the broadcaster cancels the task."""
         broadcaster.start()
         assert broadcaster.is_running
@@ -148,10 +149,10 @@ class TestBarBroadcasterLifecycle:
         await asyncio.sleep(0.05)
 
         assert not broadcaster.is_running
-        if broadcaster._task:
-            assert broadcaster._task.cancelled() or broadcaster._task.done()
+        assert broadcaster._task is not None  # type: ignore[unreachable]
+        assert broadcaster._task.cancelled() or broadcaster._task.done()
 
-    def test_stop_not_running(self, broadcaster: BarBroadcaster):
+    def test_stop_not_running(self, broadcaster: BarBroadcaster) -> None:
         """Test stopping a non-running broadcaster does nothing."""
         assert not broadcaster.is_running
 
@@ -163,7 +164,9 @@ class TestBarBroadcasterLifecycle:
 class TestBarBroadcasterSubscriberCheck:
     """Test subscriber checking logic."""
 
-    def test_has_subscribers_with_active_client(self, broadcaster: BarBroadcaster):
+    def test_has_subscribers_with_active_client(
+        self, broadcaster: BarBroadcaster
+    ) -> None:
         """Test has_subscribers returns True when client is subscribed."""
         # Create mock client with topic
         mock_client = Mock()
@@ -173,13 +176,17 @@ class TestBarBroadcasterSubscriberCheck:
 
         assert broadcaster._has_subscribers("bars:AAPL:1") is True
 
-    def test_has_subscribers_without_active_client(self, broadcaster: BarBroadcaster):
+    def test_has_subscribers_without_active_client(
+        self, broadcaster: BarBroadcaster
+    ) -> None:
         """Test has_subscribers returns False when no client is subscribed."""
         broadcaster.ws_app.connections = {}
 
         assert broadcaster._has_subscribers("bars:AAPL:1") is False
 
-    def test_has_subscribers_with_different_topic(self, broadcaster: BarBroadcaster):
+    def test_has_subscribers_with_different_topic(
+        self, broadcaster: BarBroadcaster
+    ) -> None:
         """Test has_subscribers returns False for different topic."""
         # Create mock client subscribed to different topic
         mock_client = Mock()
@@ -189,7 +196,9 @@ class TestBarBroadcasterSubscriberCheck:
 
         assert broadcaster._has_subscribers("bars:AAPL:1") is False
 
-    def test_has_subscribers_with_multiple_clients(self, broadcaster: BarBroadcaster):
+    def test_has_subscribers_with_multiple_clients(
+        self, broadcaster: BarBroadcaster
+    ) -> None:
         """Test has_subscribers with multiple clients."""
         # Client 1: subscribed to AAPL
         client1 = Mock()
@@ -210,7 +219,7 @@ class TestBarBroadcasterBroadcasting:
     """Test bar broadcasting functionality."""
 
     @pytest.mark.asyncio
-    async def test_broadcast_with_subscriber(self, broadcaster: BarBroadcaster):
+    async def test_broadcast_with_subscriber(self, broadcaster: BarBroadcaster) -> None:
         """Test broadcasting sends data when subscribers exist."""
         # Setup subscriber
         mock_client = Mock()
@@ -221,11 +230,11 @@ class TestBarBroadcasterBroadcasting:
         await broadcaster._broadcast_bars()
 
         # Verify publish was called
-        assert broadcaster.ws_app.publish.called
-        assert broadcaster.ws_app.publish.call_count == 1
+        assert broadcaster.ws_app.publish.called  # type: ignore[attr-defined]
+        assert broadcaster.ws_app.publish.call_count == 1  # type: ignore[attr-defined]
 
         # Verify call arguments
-        call_args = broadcaster.ws_app.publish.call_args
+        call_args = broadcaster.ws_app.publish.call_args  # type: ignore[attr-defined]
         assert call_args.kwargs["topic"] == "bars:AAPL:1"
         assert call_args.kwargs["message_type"] == "bars.update"
         assert isinstance(call_args.kwargs["data"], Bar)
@@ -235,7 +244,9 @@ class TestBarBroadcasterBroadcasting:
         assert broadcaster._broadcasts_skipped == 0
 
     @pytest.mark.asyncio
-    async def test_broadcast_without_subscriber(self, broadcaster: BarBroadcaster):
+    async def test_broadcast_without_subscriber(
+        self, broadcaster: BarBroadcaster
+    ) -> None:
         """Test broadcasting skips when no subscribers exist."""
         # No subscribers
         broadcaster.ws_app.connections = {}
@@ -244,7 +255,7 @@ class TestBarBroadcasterBroadcasting:
         await broadcaster._broadcast_bars()
 
         # Verify publish was NOT called
-        assert not broadcaster.ws_app.publish.called
+        assert not broadcaster.ws_app.publish.called  # type: ignore[attr-defined]
 
         # Verify metrics
         assert broadcaster._broadcasts_sent == 0
@@ -253,9 +264,9 @@ class TestBarBroadcasterBroadcasting:
     @pytest.mark.asyncio
     async def test_broadcast_multiple_symbols(
         self,
-        mock_ws_app: FastWSAdapter,
-        mock_datafeed_service: DatafeedService,
-    ):
+        mock_ws_app: Any,
+        mock_datafeed_service: Any,
+    ) -> None:
         """Test broadcasting for multiple symbols."""
         broadcaster = BarBroadcaster(
             ws_app=mock_ws_app,
@@ -273,15 +284,15 @@ class TestBarBroadcasterBroadcasting:
         await broadcaster._broadcast_bars()
 
         # Should publish twice (once per symbol)
-        assert broadcaster.ws_app.publish.call_count == 2
+        assert broadcaster.ws_app.publish.call_count == 2  # type: ignore[attr-defined]
         assert broadcaster._broadcasts_sent == 2
 
     @pytest.mark.asyncio
     async def test_broadcast_multiple_resolutions(
         self,
-        mock_ws_app: FastWSAdapter,
-        mock_datafeed_service: DatafeedService,
-    ):
+        mock_ws_app: Any,
+        mock_datafeed_service: Any,
+    ) -> None:
         """Test broadcasting for multiple resolutions."""
         broadcaster = BarBroadcaster(
             ws_app=mock_ws_app,
@@ -299,14 +310,17 @@ class TestBarBroadcasterBroadcasting:
         await broadcaster._broadcast_bars()
 
         # Should publish three times (once per resolution)
-        assert broadcaster.ws_app.publish.call_count == 3
+        assert broadcaster.ws_app.publish.call_count == 3  # type: ignore[attr-defined]
         assert broadcaster._broadcasts_sent == 3
 
     @pytest.mark.asyncio
-    async def test_broadcast_handles_datafeed_error(self, broadcaster: BarBroadcaster):
+    async def test_broadcast_handles_datafeed_error(
+        self, broadcaster: BarBroadcaster
+    ) -> None:
         """Test broadcasting handles datafeed service errors."""
         # Mock datafeed to return None (error case)
-        broadcaster.datafeed_service.mock_last_bar.return_value = None
+        # noqa: E501
+        broadcaster.datafeed_service.mock_last_bar.return_value = None  # type: ignore[attr-defined]
 
         # Setup subscriber
         client = Mock()
@@ -317,14 +331,16 @@ class TestBarBroadcasterBroadcasting:
         await broadcaster._broadcast_bars()
 
         # Should not publish
-        assert not broadcaster.ws_app.publish.called
+        assert not broadcaster.ws_app.publish.called  # type: ignore[attr-defined]
         assert broadcaster._broadcasts_sent == 0
 
     @pytest.mark.asyncio
-    async def test_broadcast_handles_publish_error(self, broadcaster: BarBroadcaster):
+    async def test_broadcast_handles_publish_error(
+        self, broadcaster: BarBroadcaster
+    ) -> None:
         """Test broadcasting handles publish errors gracefully."""
         # Make publish raise an error
-        broadcaster.ws_app.publish.side_effect = Exception("Publish failed")
+        broadcaster.ws_app.publish.side_effect = Exception("Publish failed")  # type: ignore[attr-defined]
 
         # Setup subscriber
         client = Mock()
@@ -343,7 +359,9 @@ class TestBarBroadcasterLoop:
     """Test the main broadcast loop."""
 
     @pytest.mark.asyncio
-    async def test_broadcast_loop_runs_periodically(self, broadcaster: BarBroadcaster):
+    async def test_broadcast_loop_runs_periodically(
+        self, broadcaster: BarBroadcaster
+    ) -> None:
         """Test broadcast loop runs at configured interval."""
         # Setup subscriber
         client = Mock()
@@ -361,12 +379,12 @@ class TestBarBroadcasterLoop:
 
         # Verify multiple broadcasts occurred
         assert broadcaster._broadcasts_sent >= 2
-        assert broadcaster.ws_app.publish.call_count >= 2
+        assert broadcaster.ws_app.publish.call_count >= 2  # type: ignore[attr-defined]
 
     @pytest.mark.asyncio
     async def test_broadcast_loop_continues_after_error(
         self, broadcaster: BarBroadcaster
-    ):
+    ) -> None:
         """Test broadcast loop continues running after errors."""
         # Setup subscriber
         client = Mock()
@@ -374,7 +392,7 @@ class TestBarBroadcasterLoop:
         broadcaster.ws_app.connections = {"client1": client}
 
         # Make first call fail, then succeed
-        broadcaster.ws_app.publish.side_effect = [
+        broadcaster.ws_app.publish.side_effect = [  # type: ignore[attr-defined]
             Exception("Error 1"),
             None,  # Success
             None,  # Success
@@ -394,7 +412,9 @@ class TestBarBroadcasterLoop:
         assert broadcaster._broadcasts_sent >= 1
 
     @pytest.mark.asyncio
-    async def test_broadcast_loop_stops_gracefully(self, broadcaster: BarBroadcaster):
+    async def test_broadcast_loop_stops_gracefully(
+        self, broadcaster: BarBroadcaster
+    ) -> None:
         """Test broadcast loop stops gracefully when cancelled."""
         broadcaster.start()
         assert broadcaster.is_running
@@ -409,6 +429,7 @@ class TestBarBroadcasterLoop:
         await asyncio.sleep(0.1)
 
         assert not broadcaster.is_running
+        assert broadcaster._task is not None  # type: ignore[unreachable]
         assert broadcaster._task.cancelled() or broadcaster._task.done()
 
 
@@ -416,7 +437,7 @@ class TestBarBroadcasterMetrics:
     """Test broadcaster metrics tracking."""
 
     @pytest.mark.asyncio
-    async def test_metrics_track_broadcasts(self, broadcaster: BarBroadcaster):
+    async def test_metrics_track_broadcasts(self, broadcaster: BarBroadcaster) -> None:
         """Test metrics accurately track broadcasts."""
         # Setup subscriber
         client = Mock()
@@ -435,7 +456,7 @@ class TestBarBroadcasterMetrics:
         assert metrics["errors"] == 0
 
     @pytest.mark.asyncio
-    async def test_metrics_track_skipped(self, broadcaster: BarBroadcaster):
+    async def test_metrics_track_skipped(self, broadcaster: BarBroadcaster) -> None:
         """Test metrics track skipped broadcasts."""
         # No subscribers
         broadcaster.ws_app.connections = {}
@@ -451,7 +472,7 @@ class TestBarBroadcasterMetrics:
         assert metrics["errors"] == 0
 
     @pytest.mark.asyncio
-    async def test_metrics_track_errors(self, broadcaster: BarBroadcaster):
+    async def test_metrics_track_errors(self, broadcaster: BarBroadcaster) -> None:
         """Test metrics track errors."""
         # Setup subscriber
         client = Mock()
@@ -459,7 +480,7 @@ class TestBarBroadcasterMetrics:
         broadcaster.ws_app.connections = {"client1": client}
 
         # Make publish fail
-        broadcaster.ws_app.publish.side_effect = Exception("Error")
+        broadcaster.ws_app.publish.side_effect = Exception("Error")  # type: ignore[attr-defined]
 
         # Do broadcast
         await broadcaster._broadcast_bars()

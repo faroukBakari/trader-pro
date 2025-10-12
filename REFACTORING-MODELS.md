@@ -1,12 +1,112 @@
 # Models Directory Refactoring Summary
 
 **Date**: October 11, 2025  
+**Last Updated**: [Current Date]  
 **Branch**: server-side-broker  
 **Type**: Code Organization Refactoring
 
 ## Overview
 
-This refactoring reorganized the Pydantic models in the trading API backend by moving them from the `core` directory to a dedicated `models` package. This improves code organization, maintainability, and follows Python packaging best practices.
+This document tracks the Pydantic models refactoring history in the trading API backend. The models have been reorganized multiple times to improve code organization, maintainability, and follow Python packaging best practices.
+
+## Latest Changes (Current)
+
+### Response Model Renames
+
+To avoid naming conflicts and improve clarity, common response models were renamed:
+
+**Before:**
+```python
+from trading_api.models.common import BaseResponse, ErrorResponse
+```
+
+**After:**
+```python
+from trading_api.models.common import BaseApiResponse, ErrorApiResponse
+```
+
+**Rationale**: The generic names `BaseResponse` and `ErrorResponse` conflicted with TradingView's broker API models. The new names clearly indicate these are API-level response wrappers.
+
+### WebSocket Model Consolidation
+
+WebSocket-specific models were moved from `ws/common.py` to the central models package:
+
+**Before:**
+```python
+# ws/common.py (DELETED)
+class SubscriptionRequest(BaseModel):
+    symbol: str
+    params: dict[str, Any] = Field(default_factory=dict)
+
+class SubscriptionResponse(BaseModel):
+    status: Literal["ok", "error"]
+    symbol: str
+    message: str
+    topic: str
+```
+
+**After:**
+```python
+# models/common.py
+class SubscriptionResponse(BaseApiResponse):
+    """Generic WebSocket subscription response"""
+    topic: str
+
+# models/market/bars.py
+class BarsSubscriptionRequest(BaseModel):
+    """WebSocket subscription request for bar data"""
+    symbol: str
+    resolution: str = "1"
+```
+
+**Benefits:**
+- Centralized model location
+- Removed generic `params: dict` in favor of typed fields
+- Better integration with existing `BaseApiResponse`
+- Domain-specific models (e.g., `BarsSubscriptionRequest` vs generic `SubscriptionRequest`)
+
+### WebSocket API Signature Simplification
+
+The WebSocket datafeed operations were updated to use the new typed models:
+
+**Before:**
+```python
+# ws/datafeed.py
+def bars_topic_builder(symbol: str, params: dict) -> str:
+    resolution = params.get("resolution", "1")
+    return f"bars:{symbol}:{resolution}"
+
+# Client payload (nested structure)
+{
+    "symbol": "AAPL",
+    "params": {"resolution": "1"}
+}
+```
+
+**After:**
+```python
+# ws/datafeed.py
+def bars_topic_builder(params: BarsSubscriptionRequest) -> str:
+    return f"bars:{params.symbol}:{params.resolution}"
+
+# Client payload (flat structure)
+{
+    "symbol": "AAPL",
+    "resolution": "1"
+}
+```
+
+**Benefits:**
+- Type-safe operations (Pydantic validation)
+- Simpler payload structure for clients
+- Self-documenting via typed models
+- AsyncAPI spec generation from models
+
+## Previous Refactoring (October 11, 2025)
+
+### Initial Models Package Creation
+
+The initial refactoring reorganized the Pydantic models by moving them from the `core` directory to a dedicated `models` package.
 
 ## Changes Made
 
