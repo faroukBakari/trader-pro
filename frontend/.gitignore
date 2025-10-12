@@ -33,6 +33,9 @@ src/clients/trader-client-generated/
 # Generated WebSocket types
 src/clients/ws-types-generated/
 
+# Generated WebSocket client
+src/clients/ws-generated/
+
 # OpenAPI/AsyncAPI generation artifacts
 openapi.json
 asyncapi.json

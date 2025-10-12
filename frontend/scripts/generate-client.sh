@@ -19,7 +19,8 @@ set -e
 # Configuration
 API_URL="${VITE_API_URL:-http://localhost:${BACKEND_PORT:-8000}}"
 OUTPUT_DIR="./src/clients/trader-client-generated"
-WS_OUTPUT_DIR="./src/clients/ws-types-generated"
+WS_TYPES_OUTPUT_DIR="./src/clients/ws-types-generated"
+WS_CLIENT_OUTPUT_DIR="./src/clients/ws-generated"
 OPENAPI_SPEC="openapi.json"
 ASYNCAPI_SPEC="asyncapi.json"
 CLIENT_PACKAGE_NAME="@trading-api/client"
@@ -38,9 +39,11 @@ echo ""
 # Clean up previous generated clients
 echo -e "${BLUE}🧹 Cleaning previous generated clients...${NC}"
 rm -rf "$OUTPUT_DIR"
-rm -rf "$WS_OUTPUT_DIR"
+rm -rf "$WS_TYPES_OUTPUT_DIR"
+rm -rf "$WS_CLIENT_OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
-mkdir -p "$WS_OUTPUT_DIR"
+mkdir -p "$WS_TYPES_OUTPUT_DIR"
+mkdir -p "$WS_CLIENT_OUTPUT_DIR"
 echo -e "${GREEN}✅ Cleanup complete${NC}"
 echo ""
 
@@ -149,11 +152,24 @@ EOF
 generate_ws_types() {
     echo -e "${BLUE}🔧 Generating WebSocket types from AsyncAPI...${NC}"
 
-    if node "./scripts/generate-ws-types.mjs" "$ASYNCAPI_SPEC" "$WS_OUTPUT_DIR"; then
+    if node "./scripts/generate-ws-types.mjs" "$ASYNCAPI_SPEC" "$WS_TYPES_OUTPUT_DIR"; then
         echo -e "${GREEN}✅ WebSocket types generation successful${NC}"
         return 0
     else
         echo -e "${RED}❌ WebSocket types generation failed${NC}"
+        return 1
+    fi
+}
+
+# Function to generate WebSocket client
+generate_ws_client() {
+    echo -e "${BLUE}🔧 Generating WebSocket client from AsyncAPI...${NC}"
+
+    if node "./scripts/generate-ws-client.mjs" "$ASYNCAPI_SPEC" "$WS_CLIENT_OUTPUT_DIR"; then
+        echo -e "${GREEN}✅ WebSocket client generation successful${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ WebSocket client generation failed${NC}"
         return 1
     fi
 }
@@ -164,6 +180,7 @@ main() {
 
     local rest_client_generated=false
     local ws_types_generated=false
+    local ws_client_generated=false
 
     if check_api_available; then
         echo ""
@@ -176,12 +193,17 @@ main() {
             fi
         fi
 
-        # Try to generate WebSocket types
+        # Try to generate WebSocket types and client
         echo ""
         if download_asyncapi_spec; then
             echo ""
             if generate_ws_types; then
                 ws_types_generated=true
+            fi
+            
+            echo ""
+            if generate_ws_client; then
+                ws_client_generated=true
             fi
         fi
 
@@ -198,7 +220,7 @@ main() {
             fi
             
             if [ "$ws_types_generated" = true ]; then
-                echo -e "${GREEN}� WebSocket Types: $WS_OUTPUT_DIR${NC}"
+                echo -e "${GREEN}� WebSocket Types: $WS_TYPES_OUTPUT_DIR${NC}"
                 echo -e "${GREEN}   - Import: import { Bar, SubscriptionRequest, WS_OPERATIONS } from '@/clients/ws-types-generated'${NC}"
             fi
             
