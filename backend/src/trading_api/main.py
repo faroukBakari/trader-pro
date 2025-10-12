@@ -11,6 +11,7 @@ from trading_api.api.datafeed import router as datafeed_router
 from trading_api.api.health import router as health_router
 from trading_api.api.versions import router as versions_router
 from trading_api.core.versioning import APIVersion
+from trading_api.ws.bars import bars_adapter
 
 
 def validate_response_models(app: FastAPI) -> None:
@@ -63,6 +64,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    # Shutdown: Cleanup is handled by FastAPIAdapter
+    print("🛑 FastAPI application shutdown complete")
+
 
 app = FastAPI(
     title="Trading API",
@@ -88,6 +92,11 @@ app.include_router(health_router, prefix="/api/v1", tags=["v1"])
 app.include_router(versions_router, prefix="/api/v1", tags=["v1"])
 app.include_router(datafeed_router, prefix="/api/v1", tags=["v1"])
 
+# Register WebSocket endpoints and AsyncAPI documentation
+# Note: WebSocket endpoints don't appear in OpenAPI/Swagger docs (/api/v1/docs)
+# They use AsyncAPI specification instead (see /api/v1/ws/bars/asyncapi)
+bars_adapter.register_endpoint(app)
+
 
 # Add version information to root endpoint
 @app.get("/", tags=["root"])
@@ -101,4 +110,17 @@ async def root() -> dict:
         "health": "/api/v1/health",
         "versions": "/api/v1/versions",
         "datafeed": "/api/v1/datafeed",
+        "websockets": {
+            "bars": {
+                "endpoint": "/api/v1/ws/bars",
+                "docs": "/api/v1/ws/bars/asyncapi",
+                "spec": "/api/v1/ws/bars/asyncapi.json",
+                "operations": [
+                    "bars.subscribe",
+                    "bars.unsubscribe",
+                    "bars.update",
+                ],
+                "note": "WebSocket endpoints use AsyncAPI spec, not OpenAPI/Swagger",
+            },
+        },
     }

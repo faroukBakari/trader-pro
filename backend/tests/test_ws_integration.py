@@ -1,0 +1,180 @@
+"""
+Integration tests for WebSocket endpoints
+"""
+
+import pytest
+from fastapi.testclient import TestClient
+
+from trading_api.main import app
+from trading_api.models.market.bars import Bar
+
+
+class TestBarsWebSocketIntegration:
+    """Integration tests for bars WebSocket endpoint"""
+
+    def test_websocket_connection(self):
+        """Test basic WebSocket connection to /api/v1/ws/bars"""
+        client = TestClient(app)
+
+        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+            # Connection successful if we get here
+            assert websocket is not None
+
+    def test_subscribe_to_bars(self):
+        """Test subscribing to bar updates"""
+        client = TestClient(app)
+
+        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+            # Send subscribe message
+            subscribe_msg = {
+                "type": "bars.subscribe",
+                "payload": {"symbol": "AAPL", "params": {"resolution": "1"}},
+            }
+            websocket.send_json(subscribe_msg)
+
+            # Receive response
+            response = websocket.receive_json()
+
+            # Verify response structure
+            assert response["type"] == "bars.subscribe.response"
+            assert response["payload"]["status"] == "ok"
+            assert response["payload"]["symbol"] == "AAPL"
+            assert response["payload"]["topic"] == "bars:AAPL:1"
+            assert "Subscribed" in response["payload"]["message"]
+
+    def test_subscribe_with_different_resolutions(self):
+        """Test subscribing to different resolutions creates different topics"""
+        client = TestClient(app)
+
+        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+            # Subscribe to 1-minute bars
+            websocket.send_json(
+                {
+                    "type": "bars.subscribe",
+                    "payload": {"symbol": "AAPL", "params": {"resolution": "1"}},
+                }
+            )
+            response1 = websocket.receive_json()
+            assert response1["payload"]["topic"] == "bars:AAPL:1"
+
+            # Subscribe to daily bars
+            websocket.send_json(
+                {
+                    "type": "bars.subscribe",
+                    "payload": {"symbol": "AAPL", "params": {"resolution": "D"}},
+                }
+            )
+            response2 = websocket.receive_json()
+            assert response2["payload"]["topic"] == "bars:AAPL:D"
+
+    def test_unsubscribe_from_bars(self):
+        """Test unsubscribing from bar updates"""
+        client = TestClient(app)
+
+        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+            # First subscribe
+            websocket.send_json(
+                {
+                    "type": "bars.subscribe",
+                    "payload": {"symbol": "GOOGL", "params": {"resolution": "5"}},
+                }
+            )
+            subscribe_response = websocket.receive_json()
+            assert subscribe_response["payload"]["status"] == "ok"
+
+            # Then unsubscribe
+            websocket.send_json(
+                {
+                    "type": "bars.unsubscribe",
+                    "payload": {"symbol": "GOOGL", "params": {"resolution": "5"}},
+                }
+            )
+            unsubscribe_response = websocket.receive_json()
+
+            # Verify unsubscribe response
+            assert unsubscribe_response["type"] == "bars.unsubscribe.response"
+            assert unsubscribe_response["payload"]["status"] == "ok"
+            assert unsubscribe_response["payload"]["symbol"] == "GOOGL"
+            assert unsubscribe_response["payload"]["topic"] == "bars:GOOGL:5"
+            assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
+
+    def test_multiple_symbols_subscription(self):
+        """Test subscribing to multiple symbols"""
+        client = TestClient(app)
+
+        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+            symbols = ["AAPL", "GOOGL", "MSFT"]
+
+            for symbol in symbols:
+                websocket.send_json(
+                    {
+                        "type": "bars.subscribe",
+                        "payload": {"symbol": symbol, "params": {"resolution": "1"}},
+                    }
+                )
+                response = websocket.receive_json()
+                assert response["payload"]["status"] == "ok"
+                assert response["payload"]["symbol"] == symbol
+                assert response["payload"]["topic"] == f"bars:{symbol}:1"
+
+    def test_subscribe_without_resolution_uses_default(self):
+        """Test that subscribing without resolution parameter uses default"""
+        client = TestClient(app)
+
+        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+            # Subscribe without specifying resolution
+            websocket.send_json(
+                {"type": "bars.subscribe", "payload": {"symbol": "AAPL", "params": {}}}
+            )
+            response = websocket.receive_json()
+
+            # Should use default resolution "1"
+            assert response["payload"]["topic"] == "bars:AAPL:1"
+
+    @pytest.mark.asyncio
+    async def test_broadcast_to_subscribed_clients(self):
+        """Test that broadcast sends updates to subscribed clients"""
+        import time
+
+        from trading_api.ws.bars import bars_adapter
+
+        client = TestClient(app)
+
+        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+            # Subscribe to AAPL bars
+            websocket.send_json(
+                {
+                    "type": "bars.subscribe",
+                    "payload": {"symbol": "AAPL", "params": {"resolution": "1"}},
+                }
+            )
+            subscribe_response = websocket.receive_json()
+            assert subscribe_response["payload"]["status"] == "ok"
+
+            # Broadcast a bar update
+            test_bar = Bar(
+                time=int(time.time() * 1000),
+                open=150.0,
+                high=151.0,
+                low=149.5,
+                close=150.5,
+                volume=1000000,
+            )
+
+            await bars_adapter.broadcast(
+                symbol="AAPL", data=test_bar, params={"resolution": "1"}
+            )
+
+            # Receive the broadcast message
+            update_msg = websocket.receive_json()
+
+            # Verify the update message
+            assert update_msg["type"] == "bars.update"
+            assert update_msg["payload"]["time"] == test_bar.time
+            assert update_msg["payload"]["open"] == test_bar.open
+            assert update_msg["payload"]["high"] == test_bar.high
+            assert update_msg["payload"]["low"] == test_bar.low
+            assert update_msg["payload"]["close"] == test_bar.close
+            assert update_msg["payload"]["volume"] == test_bar.volume
+            assert update_msg["payload"]["close"] == test_bar.close
+            assert update_msg["payload"]["volume"] == test_bar.volume
