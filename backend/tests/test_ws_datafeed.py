@@ -2,10 +2,13 @@
 Integration tests for WebSocket endpoints
 """
 
+from venv import logger
+
 import pytest
 from fastapi.testclient import TestClient
 
 from trading_api.main import apiApp, wsApp
+from trading_api.models.common import SubscriptionUpdate
 from trading_api.models.market.bars import Bar, BarsSubscriptionRequest
 
 
@@ -158,11 +161,12 @@ class TestBarsWebSocketIntegration:
                 volume=1000000,
             )
 
+            update = SubscriptionUpdate[Bar](type="bars.update", payload=test_bar)
             await wsApp.publish(
                 topic=bars_topic_builder(
                     params=BarsSubscriptionRequest(symbol="AAPL", resolution="1")
                 ),
-                data=test_bar,
+                data=update,
             )
 
             # Receive the broadcast message
@@ -170,11 +174,20 @@ class TestBarsWebSocketIntegration:
 
             # Verify the update message
             assert update_msg["type"] == "bars.update"
-            assert update_msg["payload"]["time"] == test_bar.time
-            assert update_msg["payload"]["open"] == test_bar.open
-            assert update_msg["payload"]["high"] == test_bar.high
-            assert update_msg["payload"]["low"] == test_bar.low
-            assert update_msg["payload"]["close"] == test_bar.close
-            assert update_msg["payload"]["volume"] == test_bar.volume
-            assert update_msg["payload"]["close"] == test_bar.close
-            assert update_msg["payload"]["volume"] == test_bar.volume
+
+            # The payload should contain the nested structure with type and payload
+            # Because SubscriptionUpdate[Bar] gets returned by the handler
+            assert "payload" in update_msg
+            inner_payload = update_msg["payload"]
+
+            # The inner payload should have type and payload fields from SubscriptionUpdate
+            assert inner_payload["type"] == "bars.update"
+            bar_data = inner_payload["payload"]
+
+            # Now verify the actual bar data
+            assert bar_data["time"] == test_bar.time
+            assert bar_data["open"] == test_bar.open
+            assert bar_data["high"] == test_bar.high
+            assert bar_data["low"] == test_bar.low
+            assert bar_data["close"] == test_bar.close
+            assert bar_data["volume"] == test_bar.volume

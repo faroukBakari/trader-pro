@@ -17,7 +17,7 @@ Always keep type safety in mind across the entire codebase.
 Prefer using a common model that can be shared between backend and frontend.
 
 Project guidelines:
-Always keep an ARCHITECTURE.md file up to date with the current overall architecture and design decisions.
+When asked for documentation, always keep an ARCHITECTURE.md file up to date with the current overall architecture and design decisions.
 Always validate the todos created before starting to implement them.
 
 Features / Refactoring / Bug Fixing workflow:
@@ -53,11 +53,10 @@ tooling:
 whenever possible, reusable makefile commands are preferred over direct commands.
 
 docs:
-always check all available readme files and summarize relevant parts for the task at hand.
-after updating the code with refactoring or new features, also update the related readme files to reflect the changes.
-add new readme files in their related base directory for topics or components that don't fit in existing ones.
-Never leave trailing white spaces in the code or markdown files.
-we want documentation aware code and code aware documentation.
+When asked for documentation always check all available readme files and summarize relevant parts for the task at hand.
+When asked for documentation after updating the code with refactoring or new features, also update the related readme files to reflect the changes.
+When asked for documentation add new readme files in their related base directory for topics or components that don't fit in existing ones.
+When asked for documentation Never leave trailing white spaces in the code or markdown files.
 
 Backend instructions:
 You have deep experience building and maintaining Python web APIs using FastAPI, Uvicorn, and related tools. You are skilled in test-driven development (TDD), environment isolation, dependency management, OpenAPI client generation, CI/CD pipelines, pre-commit hooks, and code quality enforcement.

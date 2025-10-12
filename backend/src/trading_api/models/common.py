@@ -6,7 +6,7 @@ that are used across multiple domains.
 """
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Generic, Literal, Optional, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -36,8 +36,19 @@ class SubscriptionResponse(BaseModel):
     topic: str = Field(..., description="Subscription topic")
 
 
+T = TypeVar("T", bound=BaseModel)
+
+
+class SubscriptionUpdate(BaseModel, Generic[T]):
+    """Generic subscription update with typed payload"""
+
+    type: str = Field(..., description="Update type")
+    payload: T = Field(..., description="Update payload")
+
+
 __all__ = [
     "BaseApiResponse",
     "ErrorApiResponse",
     "SubscriptionResponse",
+    "SubscriptionUpdate",
 ]

@@ -5,9 +5,9 @@ WebSocket adapter for real-time bar (OHLC) data subscriptions
 import logging
 
 from external_packages.fastws import Client, OperationRouter
+from trading_api.models import BarsSubscriptionRequest, SubscriptionResponse
+from trading_api.models.common import SubscriptionUpdate
 from trading_api.models.market.bars import Bar
-
-from ..models import BarsSubscriptionRequest, SubscriptionResponse
 
 logger = logging.getLogger(__name__)
 router = OperationRouter(prefix="bars.", tags=["datafeed"])
@@ -55,6 +55,6 @@ async def send_unsubscribe(
 
 
 @router.recv("update")  # type: ignore[misc]
-async def update(payload: Bar) -> Bar:
+async def update(payload: SubscriptionUpdate[Bar]) -> SubscriptionUpdate[Bar]:
     """Broadcast data updates to subscribed clients"""
     return payload
