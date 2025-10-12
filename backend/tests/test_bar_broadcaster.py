@@ -10,6 +10,7 @@ import pytest
 
 from trading_api.core.bar_broadcaster import BarBroadcaster
 from trading_api.core.datafeed_service import DatafeedService
+from trading_api.models.common import SubscriptionUpdate
 from trading_api.models.market.bars import Bar
 from trading_api.plugins.fastws_adapter import FastWSAdapter
 
@@ -73,7 +74,7 @@ class TestBarBroadcasterInitialization:
         assert broadcaster.datafeed_service == mock_datafeed_service
         assert broadcaster.interval == 2.0
         assert broadcaster.symbols == ["AAPL", "GOOGL", "MSFT"]
-        assert broadcaster.resolutions == ["1"]
+        assert broadcaster.resolutions == ["1D"]
         assert not broadcaster.is_running
 
     def test_initialization_with_custom_values(
@@ -237,7 +238,7 @@ class TestBarBroadcasterBroadcasting:
         call_args = broadcaster.ws_app.publish.call_args  # type: ignore[attr-defined]
         assert call_args.kwargs["topic"] == "bars:AAPL:1"
         assert call_args.kwargs["message_type"] == "bars.update"
-        assert isinstance(call_args.kwargs["data"], Bar)
+        assert isinstance(call_args.kwargs["data"], SubscriptionUpdate)
 
         # Verify metrics
         assert broadcaster._broadcasts_sent == 1

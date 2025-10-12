@@ -2,8 +2,6 @@
 Integration tests for WebSocket endpoints
 """
 
-from venv import logger
-
 import pytest
 from fastapi.testclient import TestClient
 

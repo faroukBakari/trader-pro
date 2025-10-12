@@ -125,7 +125,7 @@
           "--port",
           "8000"
         ],
-        "cwd": "./backend",
+        "cwd": "${workspaceFolder}/backend",
         "console": "integratedTerminal",
         "justMyCode": true,
         "env": {

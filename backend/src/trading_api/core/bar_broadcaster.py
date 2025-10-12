@@ -10,6 +10,8 @@ import logging
 from typing import List
 
 from trading_api.core.datafeed_service import DatafeedService
+from trading_api.models.common import SubscriptionUpdate
+from trading_api.models.market.bars import Bar
 from trading_api.plugins.fastws_adapter import FastWSAdapter
 from trading_api.ws.datafeed import BarsSubscriptionRequest, bars_topic_builder
 
@@ -46,7 +48,7 @@ class BarBroadcaster:
         self.datafeed_service = datafeed_service
         self.interval = interval
         self.symbols = symbols or ["AAPL", "GOOGL", "MSFT"]
-        self.resolutions = resolutions or ["1"]
+        self.resolutions = resolutions or ["1D"]
 
         self._task: asyncio.Task[None] | None = None
         self._running = False
@@ -171,10 +173,16 @@ class BarBroadcaster:
                     continue
 
                 try:
+                    # Wrap bar data in SubscriptionUpdate envelope
+                    update = SubscriptionUpdate[Bar](
+                        type="bar_update",
+                        payload=mocked_bar,
+                    )
+
                     # Broadcast to all subscribed clients
                     await self.ws_app.publish(
                         topic=topic,
-                        data=mocked_bar,
+                        data=update,
                         message_type="bars.update",
                     )
 

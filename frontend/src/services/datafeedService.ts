@@ -24,6 +24,7 @@ import type {
   Timezone,
 } from '@public/trading_terminal/charting_library'
 
+import { BarsWebSocketClient, type BarsWebSocketInterface } from '@/plugins/barsClient'
 import { TraderPlugin } from '@/plugins/traderPlugin'
 import type { AxiosPromise } from 'axios'
 
@@ -59,7 +60,7 @@ export interface GetQuotesRequest {
  * @see https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi
  */
 
-export interface ClientInterface {
+export interface ApiClientInterface {
   getConfig(): AxiosPromise<DatafeedConfiguration>
   resolveSymbol(symbol: string): AxiosPromise<LibrarySymbolInfo>
   searchSymbols(
@@ -78,7 +79,7 @@ export interface ClientInterface {
   getQuotes(getQuotesRequest: GetQuotesRequest): AxiosPromise<Array<QuoteData>>
 }
 
-class FallbackClient implements ClientInterface {
+class ApiFallbackClient implements ApiClientInterface {
   /**
    * Available symbols loaded from JSON file
    */
@@ -367,8 +368,9 @@ class FallbackClient implements ClientInterface {
 }
 
 export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
-  private plugin: TraderPlugin<ClientInterface>
-  private fallbackClient: ClientInterface = new FallbackClient()
+  private plugin: TraderPlugin<ApiClientInterface>
+  private apiFallbackClient: ApiClientInterface = new ApiFallbackClient()
+  private barsWsClient: BarsWebSocketInterface | null = null
   private readonly subscriptions = new Map<
     string,
     {
@@ -377,6 +379,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       onTick: SubscribeBarsCallback
       onResetCacheNeeded?: () => void
       intervalId?: number
+      wsSubscriptionId?: string // WebSocket subscription ID
     }
   >()
   private readonly quotesSubscriptions = new Map<
@@ -389,17 +392,37 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     }
   >()
   constructor() {
-    this.plugin = new TraderPlugin<ClientInterface>()
+    this.plugin = new TraderPlugin<ApiClientInterface>()
+    this.initializeWebSocketClient()
   }
-  async _loadClient(mock: boolean = false): Promise<ClientInterface> {
+
+  private async initializeWebSocketClient(): Promise<void> {
+    try {
+      // In dev mode, use relative path to leverage Vite proxy
+      // In production, use absolute WebSocket URL from env
+      const isDev = import.meta.env.DEV
+      const wsUrl = '/api/v1/ws'
+
+      console.log('[Datafeed] Initializing WebSocket client:', { wsUrl, isDev })
+      this.barsWsClient = await BarsWebSocketClient.create({
+        url: wsUrl,
+        debug: true,
+      })
+      console.log('[Datafeed] WebSocket client initialized successfully')
+    } catch (error) {
+      console.error('[Datafeed] Failed to initialize WebSocket client:', error)
+      this.barsWsClient = null
+    }
+  }
+  async _loadApiClient(mock: boolean = false): Promise<ApiClientInterface> {
     return mock
-      ? Promise.resolve(this.fallbackClient)
-      : this.plugin.getClientWithFallback(FallbackClient)
+      ? Promise.resolve(this.apiFallbackClient)
+      : this.plugin.getClientWithFallback(ApiFallbackClient)
   }
   onReady(callback: OnReadyCallback): void {
     console.log('[Datafeed] onReady called')
 
-    this._loadClient().then((client) => {
+    this._loadApiClient().then((client) => {
       client.getConfig().then((response) => {
         // Handle both AxiosResponse (generated client) and direct data (fallback client)
         const config = 'data' in response ? response.data : response
@@ -414,7 +437,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     symbolType: string,
     onResult: SearchSymbolsCallback,
   ): void {
-    this._loadClient().then((client) => {
+    this._loadApiClient().then((client) => {
       client.searchSymbols(userInput, exchange, symbolType, 30).then((response) => {
         console.log(
           `[Datafeed] searchSymbols found ${response.data.length} symbols for input "${userInput}"`,
@@ -428,7 +451,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onResolve: ResolveCallback,
     onError: DatafeedErrorCallback,
   ): void {
-    this._loadClient().then((client) => {
+    this._loadApiClient().then((client) => {
       client.resolveSymbol(symbolName).then((response) => {
         console.log(
           `[Datafeed] resolveSymbol found ${response.data ? 'a' : 'no'} symbol for input "${symbolName}"`,
@@ -450,7 +473,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onResult: HistoryCallback,
     onError: DatafeedErrorCallback,
   ): void {
-    this._loadClient().then((client) => {
+    this._loadApiClient().then((client) => {
       client
         .getBars(
           symbolInfo.name,
@@ -507,55 +530,60 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       listenerGuid,
     })
 
-    if (resolution !== '1D') {
-      console.log('[Datafeed] Unsupported resolution for subscription:', resolution)
+    if (!this.barsWsClient) {
+      console.error('[Datafeed] WebSocket client not initialized')
       return
     }
 
-    this._loadClient().then((client) =>
-      client
-        .getBars(
-          symbolInfo.name,
+    // Subscribe to bars via WebSocket
+    this.barsWsClient
+      .subscribeToBars(symbolInfo.name, resolution, (bar) => {
+        console.debug('[Datafeed] Bar received from WebSocket:', {
+          symbol: symbolInfo.name,
           resolution,
-          Date.now() - 25 * 60 * 60 * 1000, // Last 25 hours
-          Date.now(),
-          1, // Just need the last bar
-        )
-        .then((response) => {
-          if (response.data && response.data.bars.length > 0) {
-            const lastBar = response.data.bars[response.data.bars.length - 1]
-            console.log('[Datafeed] Last bar received:', lastBar)
-            this.subscriptions.set(listenerGuid, {
-              symbolInfo,
-              resolution,
-              onTick,
-              onResetCacheNeeded: onResetCacheNeededCallback,
-              intervalId: window.setInterval(() => {
-                if (!this.subscriptions.has(listenerGuid)) {
-                  return
-                }
-                const mockedBar = this.mockLastBar(lastBar)
-                console.debug('[Datafeed] Sending real-time update:', {
-                  symbol: symbolInfo.name,
-                  listenerGuid,
-                  bar: mockedBar,
-                  interval: 500,
-                })
-                onTick(mockedBar)
-              }, 500),
-            })
-          } else {
-            console.log('[Datafeed] No bars found in response:', response)
-          }
-        }),
-    )
+          listenerGuid,
+          bar,
+        })
+        onTick(bar)
+      })
+      .then((wsSubscriptionId) => {
+        console.log('[Datafeed] WebSocket subscription successful:', {
+          symbol: symbolInfo.name,
+          resolution,
+          listenerGuid,
+          wsSubscriptionId,
+        })
+
+        // Store subscription info with WebSocket subscription ID
+        this.subscriptions.set(listenerGuid, {
+          symbolInfo,
+          resolution,
+          onTick,
+          onResetCacheNeeded: onResetCacheNeededCallback,
+          wsSubscriptionId,
+        })
+      })
+      .catch((error) => {
+        console.error('[Datafeed] WebSocket subscription failed:', error)
+      })
   }
   unsubscribeBars(listenerGuid: string): void {
     console.log('[Datafeed] unsubscribeBars called:', { listenerGuid })
     const subscription = this.subscriptions.get(listenerGuid)
     if (subscription) {
-      if (subscription.intervalId) {
-        window.clearInterval(subscription.intervalId)
+      // Unsubscribe from WebSocket if we have a WebSocket subscription ID
+      if (subscription.wsSubscriptionId && this.barsWsClient) {
+        this.barsWsClient
+          .unsubscribe(subscription.wsSubscriptionId)
+          .then(() => {
+            console.log(
+              `[Datafeed] WebSocket unsubscription successful for ${subscription.symbolInfo.name} (${listenerGuid})`,
+            )
+            this.subscriptions.delete(listenerGuid)
+          })
+          .catch((error) => {
+            console.error('[Datafeed] WebSocket unsubscription failed:', error)
+          })
       }
       this.subscriptions.delete(listenerGuid)
       console.log(
@@ -572,7 +600,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   ): void {
     console.debug('[Datafeed] getQuotes called:', { symbols })
 
-    this._loadClient().then((client) =>
+    this._loadApiClient().then((client) =>
       client
         .getQuotes({ symbols })
         .then((response) => {

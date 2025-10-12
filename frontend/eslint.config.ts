@@ -21,6 +21,7 @@ export default defineConfigWithVueTs(
     '**/coverage/**',
     '**/public/**',
     '**/node_modules/**',
+    'src/clients/*-generated/**',
   ]),
 
   pluginVue.configs['flat/essential'],
