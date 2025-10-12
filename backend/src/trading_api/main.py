@@ -13,8 +13,15 @@ from trading_api.plugins.fastws_adapter import FastWSAdapter
 from .api.datafeed import router as datafeed_router
 from .api.health import router as health_router
 from .api.versions import router as versions_router
+from .core.config import BroadcasterConfig
+from .core.datafeed_service import DatafeedService
 from .core.versioning import APIVersion
+from .services.bar_broadcaster import BarBroadcaster
 from .ws.datafeed import router as ws_datafeed_router
+
+# Global instances
+datafeed_service = DatafeedService()
+bar_broadcaster: BarBroadcaster | None = None
 
 
 def validate_response_models(app: FastAPI) -> None:
@@ -48,6 +55,8 @@ def validate_response_models(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Handle application startup and shutdown events."""
+    global bar_broadcaster
+
     # Startup: Validate all routes have response models
     validate_response_models(app)
 
@@ -65,7 +74,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         print(f"⚠️  Failed to generate OpenAPI file: {e}")
 
+    # Startup: Start bar broadcaster if enabled
+    if BroadcasterConfig.get_enabled():
+        bar_broadcaster = BarBroadcaster(
+            ws_app=wsApp,
+            datafeed_service=datafeed_service,
+            interval=BroadcasterConfig.get_interval(),
+            symbols=BroadcasterConfig.get_symbols(),
+            resolutions=BroadcasterConfig.get_resolutions(),
+        )
+        bar_broadcaster.start()
+        print(
+            f"📡 Bar broadcaster started: "
+            f"symbols={BroadcasterConfig.get_symbols()}, "
+            f"interval={BroadcasterConfig.get_interval()}s"
+        )
+    else:
+        print(
+            "⏸️  Bar broadcaster disabled (set BAR_BROADCASTER_ENABLED=true to enable)"
+        )
+
     yield
+
+    # Shutdown: Stop bar broadcaster
+    if bar_broadcaster:
+        bar_broadcaster.stop()
+        print("📡 Bar broadcaster stopped")
 
     # Shutdown: Cleanup is handled by FastAPIAdapter
     print("🛑 FastAPI application shutdown complete")
