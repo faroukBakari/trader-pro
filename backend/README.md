@@ -100,6 +100,46 @@ The backend publishes OpenAPI and AsyncAPI documentation at startup. After runni
 
 See `docs/websockets.md` for detailed WebSocket documentation.
 
+## Bar Broadcasting (Real-Time Mocked Data)
+
+The API includes an optional background service that broadcasts mocked bar data to WebSocket clients:
+
+### Quick Start
+
+```bash
+# Default: Enabled, 2s interval, AAPL/GOOGL/MSFT, 1-min resolution
+make dev
+
+# Custom configuration
+export BAR_BROADCASTER_INTERVAL=1.0
+export BAR_BROADCASTER_SYMBOLS=AAPL,TSLA,BTC
+export BAR_BROADCASTER_RESOLUTIONS=1,5,D
+make dev
+
+# Disable broadcaster
+export BAR_BROADCASTER_ENABLED=false
+make dev
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `BAR_BROADCASTER_ENABLED` | `true` | Enable/disable broadcaster |
+| `BAR_BROADCASTER_INTERVAL` | `2.0` | Broadcast interval in seconds |
+| `BAR_BROADCASTER_SYMBOLS` | `AAPL,GOOGL,MSFT` | Comma-separated symbols |
+| `BAR_BROADCASTER_RESOLUTIONS` | `1` | Comma-separated resolutions |
+
+### Features
+
+- ✅ **Automatic**: Starts with the application
+- ✅ **Efficient**: Only broadcasts to topics with subscribers
+- ✅ **Metrics**: Track broadcasts_sent, broadcasts_skipped, errors
+- ✅ **Realistic Data**: Uses `DatafeedService.mock_last_bar()` for variations
+- ✅ **Configurable**: Full control via environment variables
+
+See `docs/websockets.md` (Bar Broadcasting Service section) for details.
+
 ## API Versioning
 
 - Current stable surface: `/api/v1`
