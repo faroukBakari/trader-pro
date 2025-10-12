@@ -19,7 +19,9 @@ set -e
 # Configuration
 API_URL="${VITE_API_URL:-http://localhost:${BACKEND_PORT:-8000}}"
 OUTPUT_DIR="./src/clients/trader-client-generated"
+WS_OUTPUT_DIR="./src/clients/ws-types-generated"
 OPENAPI_SPEC="openapi.json"
+ASYNCAPI_SPEC="asyncapi.json"
 CLIENT_PACKAGE_NAME="@trading-api/client"
 BASE_PATH="${TRADER_API_BASE_PATH:-}"  # Use same env var as frontend
 
@@ -33,10 +35,12 @@ NC='\033[0m' # No Color
 echo -e "${BLUE}🚀 Frontend API Client Generator${NC}"
 echo ""
 
-# Clean up previous generated client
-echo -e "${BLUE}🧹 Cleaning previous generated client...${NC}"
+# Clean up previous generated clients
+echo -e "${BLUE}🧹 Cleaning previous generated clients...${NC}"
 rm -rf "$OUTPUT_DIR"
+rm -rf "$WS_OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
+mkdir -p "$WS_OUTPUT_DIR"
 echo -e "${GREEN}✅ Cleanup complete${NC}"
 echo ""
 
@@ -65,6 +69,20 @@ download_openapi_spec() {
         return 0
     else
         echo -e "${RED}❌ Failed to download OpenAPI specification${NC}"
+        return 1
+    fi
+}
+
+# Function to download AsyncAPI specification
+download_asyncapi_spec() {
+    local asyncapi_url="$API_URL/api/v1/ws/asyncapi.json"
+    echo -e "${BLUE}📥 Downloading AsyncAPI specification from: $asyncapi_url${NC}"
+
+    if curl -sf "$asyncapi_url" -o "$ASYNCAPI_SPEC"; then
+        echo -e "${GREEN}✅ AsyncAPI specification downloaded${NC}"
+        return 0
+    else
+        echo -e "${YELLOW}⚠️  Failed to download AsyncAPI specification${NC}"
         return 1
     fi
 }
@@ -127,29 +145,68 @@ export type {
 EOF
 }
 
+# Function to generate WebSocket types
+generate_ws_types() {
+    echo -e "${BLUE}🔧 Generating WebSocket types from AsyncAPI...${NC}"
+
+    if node "./scripts/generate-ws-types.cjs" "$ASYNCAPI_SPEC" "$WS_OUTPUT_DIR" > /dev/null 2>&1; then
+        echo -e "${GREEN}✅ WebSocket types generation successful${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ WebSocket types generation failed${NC}"
+        return 1
+    fi
+}
+
 # Main execution
 main() {
     echo ""
 
+    local rest_client_generated=false
+    local ws_types_generated=false
+
     if check_api_available; then
         echo ""
+        
+        # Try to generate REST client
         if download_openapi_spec; then
             echo ""
             if generate_client; then
-                echo ""
-                echo -e "${GREEN}🎉 Success! Generated client from live API${NC}"
-                echo -e "${GREEN}📁 Client location: $OUTPUT_DIR${NC}"
-                if [ -n "$BASE_PATH" ]; then
-                    echo -e "${GREEN}🔧 Using basePath: $BASE_PATH${NC}"
-                fi
-                echo -e "${GREEN}🔧 Import in your components:${NC}"
-                echo -e "   import { healthApi, versioningApi } from '@/clients/trader-client-generated/client-config'"
-                echo ""
-
-                # Cleanup
-                # rm -f "$OPENAPI_SPEC"
-                exit 0
+                rest_client_generated=true
             fi
+        fi
+
+        # Try to generate WebSocket types
+        echo ""
+        if download_asyncapi_spec; then
+            echo ""
+            if generate_ws_types; then
+                ws_types_generated=true
+            fi
+        fi
+
+        # Report success
+        if [ "$rest_client_generated" = true ] || [ "$ws_types_generated" = true ]; then
+            echo ""
+            echo -e "${GREEN}🎉 Success! Generated client(s) from live API${NC}"
+            
+            if [ "$rest_client_generated" = true ]; then
+                echo -e "${GREEN}📁 REST Client: $OUTPUT_DIR${NC}"
+                if [ -n "$BASE_PATH" ]; then
+                    echo -e "${GREEN}   - Using basePath: $BASE_PATH${NC}"
+                fi
+            fi
+            
+            if [ "$ws_types_generated" = true ]; then
+                echo -e "${GREEN}� WebSocket Types: $WS_OUTPUT_DIR${NC}"
+                echo -e "${GREEN}   - Import: import { Bar, SubscriptionRequest, WS_OPERATIONS } from '@/clients/ws-types-generated'${NC}"
+            fi
+            
+            echo ""
+
+            # Cleanup
+            rm -f "$OPENAPI_SPEC" "$ASYNCAPI_SPEC"
+            exit 0
         fi
     fi
 

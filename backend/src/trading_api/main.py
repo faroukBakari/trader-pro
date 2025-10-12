@@ -13,10 +13,10 @@ from trading_api.plugins.fastws_adapter import FastWSAdapter
 from .api.datafeed import router as datafeed_router
 from .api.health import router as health_router
 from .api.versions import router as versions_router
+from .core.bar_broadcaster import BarBroadcaster
 from .core.config import BroadcasterConfig
 from .core.datafeed_service import DatafeedService
 from .core.versioning import APIVersion
-from .services.bar_broadcaster import BarBroadcaster
 from .ws.datafeed import router as ws_datafeed_router
 
 # Global instances

@@ -18,13 +18,12 @@ All todos completed:
 
 ### Core Implementation
 ```
-backend/src/trading_api/services/
-├── __init__.py                    # Service module exports
-└── bar_broadcaster.py             # BarBroadcaster class (165 lines)
-
 backend/src/trading_api/core/
+├── bar_broadcaster.py             # BarBroadcaster class (moved from services/)
 └── config.py                      # BroadcasterConfig class
 ```
+
+**Note**: The `BarBroadcaster` was originally implemented in `services/bar_broadcaster.py` but has been moved to `core/bar_broadcaster.py` to consolidate core functionality.
 
 ### Tests
 ```

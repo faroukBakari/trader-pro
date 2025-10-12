@@ -6,12 +6,12 @@ that are used across multiple domains.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
 
-class BaseResponse(BaseModel):
+class BaseApiResponse(BaseModel):
     """Base response model with common fields."""
 
     success: bool = Field(..., description="Response success status")
@@ -21,14 +21,23 @@ class BaseResponse(BaseModel):
     )
 
 
-class ErrorResponse(BaseModel):
+class ErrorApiResponse(BaseModel):
     """Error response model"""
 
     error: str = Field(..., description="Error message")
     details: Optional[str] = Field(None, description="Error details")
 
 
+class SubscriptionResponse(BaseModel):
+    """Generic subscription response"""
+
+    status: Literal["ok", "error"] = Field(..., description="Status")
+    message: str = Field(..., description="Status message")
+    topic: str = Field(..., description="Subscription topic")
+
+
 __all__ = [
-    "BaseResponse",
-    "ErrorResponse",
+    "BaseApiResponse",
+    "ErrorApiResponse",
+    "SubscriptionResponse",
 ]

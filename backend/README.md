@@ -175,19 +175,20 @@ backend/
 │   │   └── versions.py        # API version catalogue
 │   ├── ws/
 │   │   ├── __init__.py        # WebSocket module exports
-│   │   ├── common.py          # Shared WebSocket models
 │   │   └── datafeed.py        # Real-time bar operations
 │   ├── plugins/
 │   │   └── fastws_adapter.py  # FastWS integration adapter
 │   ├── core/
+│   │   ├── bar_broadcaster.py     # Background bar broadcasting service
+│   │   ├── config.py              # Application configuration
 │   │   ├── datafeed_service.py    # In-memory market data provider
 │   │   ├── response_validation.py # FastAPI response model guardrails
 │   │   └── versioning.py          # Version metadata and helpers
 │   └── models/
 │       ├── __init__.py
-│       ├── common.py
+│       ├── common.py          # BaseApiResponse, SubscriptionResponse
 │       └── market/
-│           ├── bars.py
+│           ├── bars.py        # Bar, BarsSubscriptionRequest
 │           ├── configuration.py
 │           ├── instruments.py
 │           ├── quotes.py

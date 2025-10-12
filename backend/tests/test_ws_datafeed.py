@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trading_api.main import apiApp, wsApp
-from trading_api.models.market.bars import Bar
+from trading_api.models.market.bars import Bar, BarsSubscriptionRequest
 
 
 class TestBarsWebSocketIntegration:
@@ -28,7 +28,7 @@ class TestBarsWebSocketIntegration:
             # Send subscribe message
             subscribe_msg = {
                 "type": "bars.subscribe",
-                "payload": {"symbol": "AAPL", "params": {"resolution": "1"}},
+                "payload": {"symbol": "AAPL", "resolution": "1"},
             }
             websocket.send_json(subscribe_msg)
 
@@ -38,7 +38,6 @@ class TestBarsWebSocketIntegration:
             # Verify response structure
             assert response["type"] == "bars.subscribe.response"
             assert response["payload"]["status"] == "ok"
-            assert response["payload"]["symbol"] == "AAPL"
             assert response["payload"]["topic"] == "bars:AAPL:1"
             assert "Subscribed" in response["payload"]["message"]
 
@@ -51,7 +50,7 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.subscribe",
-                    "payload": {"symbol": "AAPL", "params": {"resolution": "1"}},
+                    "payload": {"symbol": "AAPL", "resolution": "1"},
                 }
             )
             response1 = websocket.receive_json()
@@ -61,7 +60,7 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.subscribe",
-                    "payload": {"symbol": "AAPL", "params": {"resolution": "D"}},
+                    "payload": {"symbol": "AAPL", "resolution": "D"},
                 }
             )
             response2 = websocket.receive_json()
@@ -76,7 +75,7 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.subscribe",
-                    "payload": {"symbol": "GOOGL", "params": {"resolution": "5"}},
+                    "payload": {"symbol": "GOOGL", "resolution": "5"},
                 }
             )
             subscribe_response = websocket.receive_json()
@@ -86,7 +85,7 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.unsubscribe",
-                    "payload": {"symbol": "GOOGL", "params": {"resolution": "5"}},
+                    "payload": {"symbol": "GOOGL", "resolution": "5"},
                 }
             )
             unsubscribe_response = websocket.receive_json()
@@ -94,7 +93,6 @@ class TestBarsWebSocketIntegration:
             # Verify unsubscribe response
             assert unsubscribe_response["type"] == "bars.unsubscribe.response"
             assert unsubscribe_response["payload"]["status"] == "ok"
-            assert unsubscribe_response["payload"]["symbol"] == "GOOGL"
             assert unsubscribe_response["payload"]["topic"] == "bars:GOOGL:5"
             assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
@@ -109,12 +107,11 @@ class TestBarsWebSocketIntegration:
                 websocket.send_json(
                     {
                         "type": "bars.subscribe",
-                        "payload": {"symbol": symbol, "params": {"resolution": "1"}},
+                        "payload": {"symbol": symbol, "resolution": "1"},
                     }
                 )
                 response = websocket.receive_json()
                 assert response["payload"]["status"] == "ok"
-                assert response["payload"]["symbol"] == symbol
                 assert response["payload"]["topic"] == f"bars:{symbol}:1"
 
     def test_subscribe_without_resolution_uses_default(self):
@@ -124,7 +121,7 @@ class TestBarsWebSocketIntegration:
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Subscribe without specifying resolution
             websocket.send_json(
-                {"type": "bars.subscribe", "payload": {"symbol": "AAPL", "params": {}}}
+                {"type": "bars.subscribe", "payload": {"symbol": "AAPL"}}
             )
             response = websocket.receive_json()
 
@@ -145,7 +142,7 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.subscribe",
-                    "payload": {"symbol": "AAPL", "params": {"resolution": "1"}},
+                    "payload": {"symbol": "AAPL", "resolution": "1"},
                 }
             )
             subscribe_response = websocket.receive_json()
@@ -162,7 +159,9 @@ class TestBarsWebSocketIntegration:
             )
 
             await wsApp.publish(
-                topic=bars_topic_builder(symbol="AAPL", params={"resolution": "1"}),
+                topic=bars_topic_builder(
+                    params=BarsSubscriptionRequest(symbol="AAPL", resolution="1")
+                ),
                 data=test_bar,
             )
 

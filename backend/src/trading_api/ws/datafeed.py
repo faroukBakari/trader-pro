@@ -3,38 +3,34 @@ WebSocket adapter for real-time bar (OHLC) data subscriptions
 """
 
 import logging
-from typing import Any, Callable
 
 from external_packages.fastws import Client, OperationRouter
 from trading_api.models.market.bars import Bar
-from trading_api.ws.common import SubscriptionRequest, SubscriptionResponse
+
+from ..models import BarsSubscriptionRequest, SubscriptionResponse
 
 logger = logging.getLogger(__name__)
 router = OperationRouter(prefix="bars.", tags=["datafeed"])
 
-# Type alias for topic builder
-TopicBuilder = Callable[[str, dict[str, Any]], str]
-
 
 # Topic builder for bars: bars:SYMBOL:RESOLUTION
-def bars_topic_builder(symbol: str, params: dict[str, Any]) -> str:
-    return f"bars:{symbol}:{params.get('resolution', '1')}"
+def bars_topic_builder(params: BarsSubscriptionRequest) -> str:
+    return f"bars:{params.symbol}:{params.resolution}"
 
 
 @router.send("subscribe", reply="subscribe.response")  # type: ignore[misc]
 async def send_subscribe(
-    payload: SubscriptionRequest,
+    payload: BarsSubscriptionRequest,
     client: Client,
 ) -> SubscriptionResponse:
     """Subscribe to real-time data updates"""
-    topic = bars_topic_builder(payload.symbol, payload.params)
+    topic = bars_topic_builder(payload)
     client.subscribe(topic)
 
     logger.debug(f"Client {client.uid} subscribed to topic: {topic}")
 
     return SubscriptionResponse(
         status="ok",
-        symbol=payload.symbol,
         message=f"Subscribed to {payload.symbol}",
         topic=topic,
     )
@@ -42,18 +38,17 @@ async def send_subscribe(
 
 @router.send("unsubscribe", reply="unsubscribe.response")  # type: ignore[misc]
 async def send_unsubscribe(
-    payload: SubscriptionRequest,
+    payload: BarsSubscriptionRequest,
     client: Client,
 ) -> SubscriptionResponse:
     """Unsubscribe from data updates"""
-    topic = bars_topic_builder(payload.symbol, payload.params)
+    topic = bars_topic_builder(payload)
     client.unsubscribe(topic)
 
     logger.debug(f"Client {client.uid} unsubscribed from topic: {topic}")
 
     return SubscriptionResponse(
         status="ok",
-        symbol=payload.symbol,
         message=f"Unsubscribed from {payload.symbol}",
         topic=topic,
     )
