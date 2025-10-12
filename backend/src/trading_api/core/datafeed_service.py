@@ -252,7 +252,7 @@ class DatafeedService:
         # Sort bars by time
         filtered_bars.sort(key=lambda x: x.time)
 
-        return filtered_bars
+        return filtered_bars[count_back * -1 :] if count_back else filtered_bars
 
     def get_quotes(self, symbols: List[str]) -> List[QuoteData]:
         """Get quotes for multiple symbols"""

@@ -6,7 +6,7 @@
 
 ## Overview
 
-Trading Pro is a modern full-stack trading platform built with **FastAPI** backend and **Vue.js** frontend. The current backend surface is REST-first (OpenAPI), with WebSocket capabilities planned in a future release. The system is designed with **Test-Driven Development (TDD)** principles and follows modern DevOps practices.
+Trading Pro is a modern full-stack trading platform built with **FastAPI** backend and **Vue.js** frontend. The backend provides both RESTful API (OpenAPI) for request/response operations and real-time WebSocket streaming (AsyncAPI) for market data updates. The system is designed with **Test-Driven Development (TDD)** principles and follows modern DevOps practices.
 
 ## Architecture Philosophy
 
@@ -15,7 +15,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 1. **🔄 Decoupled Architecture**: Frontend and backend can be developed and deployed independently
 2. **🛡️ Type Safety**: End-to-end TypeScript/Python type safety with automatic client generation
 3. **🧪 Test-Driven Development**: TDD workflow with comprehensive test coverage
-4. **⚡ Real-Time Ready**: Architecture prepared for future WebSocket market data streaming
+4. **⚡ Real-Time Streaming**: WebSocket-based real-time market data with FastWS framework
 5. **🔄 API Versioning**: Backwards-compatible API evolution strategy
 6. **🚀 DevOps Ready**: Automated CI/CD with parallel testing and deployment
 7. **🔧 Developer Experience**: Zero-configuration setup with intelligent fallbacks
@@ -48,12 +48,13 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 
 #### Backend Stack
 - **🐍 Framework**: FastAPI 0.104+ (ASGI-based async framework)
-- **🔄 Runtime**: Python 3.11 with Uvicorn ASGI server
+- **� WebSocket**: FastWS 0.1.7 (AsyncAPI-documented WebSocket framework)
+- **�🔄 Runtime**: Python 3.11 with Uvicorn ASGI server
 - **📦 Dependencies**: Poetry for package management
-- **🧪 Testing**: pytest + pytest-asyncio + httpx TestClient
+- **🧪 Testing**: pytest + pytest-asyncio + httpx TestClient + WebSocket testing
 - **🛡️ Type Safety**: MyPy static type checking + Pydantic models
 - **📝 Code Quality**: Black + isort + Flake8 + pre-commit hooks
-- **📋 Documentation**: OpenAPI 3.0 + AsyncAPI 3.0 specifications
+- **📋 Documentation**: OpenAPI 3.0 + AsyncAPI 2.4.0 specifications
 
 #### Frontend Stack
 - **⚡ Framework**: Vue 3 with Composition API + TypeScript
@@ -66,12 +67,14 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 - **🛡️ Type Safety**: TypeScript + Vue TSC
 - **📝 Code Quality**: ESLint + Prettier + pre-commit hooks
 
-#### Real-Time Infrastructure (Planned)
-- **🔌 Protocol**: WebSocket (ws/wss) for real-time communication (future work)
-- **📊 Market Data**: Live price feeds, order books, trade data (future work)
-- **👤 User Data**: Account updates, position changes, notifications (future work)
-- **📡 Broadcasting**: Multi-client subscription management (future work)
-- **🔐 Authentication**: JWT-based for private channels (future work)
+#### Real-Time Infrastructure
+- **🔌 Protocol**: WebSocket (ws/wss) for real-time bidirectional communication
+- **📚 Framework**: FastWS with AsyncAPI 2.4.0 auto-documentation
+- **📊 Market Data**: Real-time bar (OHLC) data streaming with topic-based subscriptions
+- **� Broadcasting**: Multi-client pub/sub with topic filtering (bars:SYMBOL:RESOLUTION)
+- **� Operations**: Subscribe, Unsubscribe, and Update message types
+- **⏱️ Heartbeat**: Configurable connection lifespan and heartbeat intervals
+- **🔐 Authentication**: Extensible auth_handler support (currently optional)
 
 #### DevOps & Infrastructure
 - **⚙️ CI/CD**: GitHub Actions with parallel job execution
@@ -100,6 +103,18 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 health.py         # Health check endpoints
 versions.py       # API versioning management
 datafeed.py       # Market data REST endpoints
+```
+
+#### 2b. WebSocket Layer (`src/trading_api/ws/`)
+```python
+__init__.py       # WebSocket module exports
+common.py         # Shared WebSocket models (SubscriptionRequest/Response)
+datafeed.py       # Real-time bar data operations (subscribe/unsubscribe/update)
+```
+
+#### 2c. Plugins (`src/trading_api/plugins/`)
+```python
+fastws_adapter.py # FastWS integration adapter with publish() helper
 ```
 
 #### 3. Core Services (`src/trading_api/core/`)
@@ -171,24 +186,31 @@ generate-client.sh # Intelligent client generation
 └─────────────┘                └─────────────┘                └─────────────┘
 ```
 
-### Real-Time Data Flow (Planned)
+### Real-Time Data Flow (WebSocket)
 ```
-┌─────────────┐   WebSocket     ┌─────────────┐   Subscription  ┌─────────────┐
-│   Frontend  │ ─────────────► │  WebSocket  │ ─────────────► │ Connection  │
-│   Client    │                │  Endpoint   │                │  Manager    │
-└─────────────┘ ◄───────────── └─────────────┘ ◄───────────── └─────────────┘
+┌─────────────┐   WebSocket     ┌─────────────┐   FastWS        ┌─────────────┐
+│   Frontend  │ ═══════════════►│  /api/v1/ws │ ═══════════════►│ FastWS      │
+│   Client    │   WS Connect    │  Endpoint   │   manage()      │  Adapter    │
+└─────────────┘ ◄═══════════════└─────────────┘ ◄═══════════════└─────────────┘
     │                              │                              │
-    │                     (future implementation)                  │
-    │                              │                              ▼
-    │                              │                        ┌─────────────┐
-    │                              │                        │ Real-time   │
-    │                              │                        │  Service    │
-    │                              │                        └─────────────┘
+    │ bars.subscribe               │ client.subscribe(topic)       │
+    │ {symbol, params}             │                              │
+    ├──────────────────────────────┼──────────────────────────────►
+    │                              │                              │
+    │◄─────────────────────────────┼──────────────────────────────┤
+    │ bars.subscribe.response      │                              │
+    │ {status, topic}              │                              │
+    │                              │                              │
+    │                              │  publish(topic, data)        │
+    │◄─────────────────────────────┼──────────────────────────────┤
+    │ bars.update                  │  broadcast to subscribers    │
+    │ {OHLC data}                  │  topic: bars:AAPL:1         │
     │                              │                              │
     ▼                              ▼                              ▼
 ┌─────────────┐                ┌─────────────┐                ┌─────────────┐
-│   Message   │                │   AsyncAPI  │                │Market Data  │
-│  Handling   │                │ Validation  │                │ Broadcast   │
+│   Pydantic  │                │   AsyncAPI  │                │   Topic     │
+│ Validation  │                │    Docs     │                │ Management  │
+│ (Message)   │                │ /asyncapi   │                │ (pub/sub)   │
 └─────────────┘                └─────────────┘                └─────────────┘
 ```
 
@@ -302,35 +324,229 @@ const health = await apiService.getHealth()
 expect(health.status).toBe('ok')
 ```
 
-## Real-Time Architecture (Planned)
+## Real-Time Architecture (WebSocket)
 
-### Target State
+### Current Implementation
 
+#### WebSocket Endpoint
+- **URL**: `ws://localhost:8000/api/v1/ws`
+- **Protocol**: WebSocket (RFC 6455) over HTTP upgrade
+- **Framework**: FastWS 0.1.7 (FastAPI WebSocket wrapper)
+- **Documentation**: AsyncAPI 2.4.0 at `/api/v1/ws/asyncapi`
+- **Interactive Docs**: AsyncAPI UI at `/api/v1/ws/asyncapi` (HTML)
+
+#### Message Format
+All WebSocket messages follow a structured JSON format:
+```json
+{
+  "type": "operation.name",
+  "payload": { /* operation-specific data */ }
+}
+```
+
+#### Implemented Operations
+
+**1. Subscribe to Bar Updates (SEND)**
+```json
+// Client → Server
+{
+  "type": "bars.subscribe",
+  "payload": {
+    "symbol": "AAPL",
+    "params": { "resolution": "1" }
+  }
+}
+
+// Server → Client (Reply)
+{
+  "type": "bars.subscribe.response",
+  "payload": {
+    "status": "ok",
+    "symbol": "AAPL",
+    "message": "Subscribed to AAPL",
+    "topic": "bars:AAPL:1"
+  }
+}
+```
+
+**2. Unsubscribe from Updates (SEND)**
+```json
+// Client → Server
+{
+  "type": "bars.unsubscribe",
+  "payload": {
+    "symbol": "AAPL",
+    "params": { "resolution": "1" }
+  }
+}
+
+// Server → Client (Reply)
+{
+  "type": "bars.unsubscribe.response",
+  "payload": {
+    "status": "ok",
+    "symbol": "AAPL",
+    "message": "Unsubscribed from AAPL",
+    "topic": "bars:AAPL:1"
+  }
+}
+```
+
+**3. Bar Data Updates (RECEIVE)**
+```json
+// Server → Client (Broadcast)
+{
+  "type": "bars.update",
+  "payload": {
+    "time": 1697097600000,
+    "open": 150.0,
+    "high": 151.0,
+    "low": 149.5,
+    "close": 150.5,
+    "volume": 1000000
+  }
+}
+```
+
+#### Topic-Based Subscription Model
+
+**Topic Format**: `bars:{SYMBOL}:{RESOLUTION}`
+
+**Examples**:
+- `bars:AAPL:1` - Apple 1-minute bars
+- `bars:GOOGL:5` - Google 5-minute bars
+- `bars:MSFT:D` - Microsoft daily bars
+
+**Features**:
+- Multi-symbol subscriptions per client
+- Resolution-specific topics (1, 5, 15, 60, D, W, M)
+- Broadcast only to subscribed clients
+- Automatic topic management via subscribe/unsubscribe
+
+#### Connection Management
+
+**Configuration** (from `main.py`):
+```python
+wsApp = FastWSAdapter(
+    heartbeat_interval=30.0,      # Client must send message every 30s
+    max_connection_lifespan=3600.0  # Max 1 hour connection time
+)
+```
+
+**Lifecycle**:
+1. **Connect**: Client initiates WebSocket handshake
+2. **Authenticate**: Optional auth_handler validation (currently disabled)
+3. **Subscribe**: Client subscribes to topics via `bars.subscribe`
+4. **Stream**: Server broadcasts updates to subscribed topics
+5. **Heartbeat**: Client must send messages within interval
+6. **Disconnect**: Graceful cleanup on close or timeout
+
+**Error Handling**:
+- Invalid message format: WS_1003_UNSUPPORTED_DATA
+- Validation errors: WS_1003_UNSUPPORTED_DATA with reason
+- Heartbeat timeout: Connection closed with timeout reason
+- Unknown operation: WS_1003_UNSUPPORTED_DATA with "No matching type"
+
+### FastWS Architecture
+
+#### Core Components
+
+**1. FastWSAdapter** (`plugins/fastws_adapter.py`)
+- Inherits from FastWS base class
+- Provides `publish(topic, data, message_type)` helper
+- Manages connection lifecycle and broadcasting
+
+**2. OperationRouter** (`ws/datafeed.py`)
+- Defines WebSocket operations (subscribe, unsubscribe, update)
+- Prefix: `bars.` for all bar-related operations
+- Tags: `["datafeed"]` for AsyncAPI grouping
+
+**3. Message Models** (`ws/common.py`)
+- `SubscriptionRequest`: Generic subscribe/unsubscribe payload
+- `SubscriptionResponse`: Standard response format
+- Pydantic validation for all messages
+
+#### Integration Points
+
+**Main Application** (`main.py`):
+```python
+# Create FastWS application
+wsApp = FastWSAdapter(...)
+
+# Include router with operations
+wsApp.include_router(ws_datafeed_router)
+
+# Register AsyncAPI docs
+wsApp.setup(apiApp)
+
+# Define WebSocket endpoint
+@apiApp.websocket("/api/v1/ws")
+async def websocket_endpoint(client: Annotated[Client, Depends(wsApp.manage)]):
+    await wsApp.serve(client)
+```
+
+**Publishing Updates**:
+```python
+# From any async context (e.g., background task, external service)
+from trading_api.main import wsApp
+from trading_api.ws.datafeed import bars_topic_builder
+
+await wsApp.publish(
+    topic=bars_topic_builder(symbol="AAPL", params={"resolution": "1"}),
+    data=bar_instance,
+    message_type="bars.update"
+)
+```
+
+### Testing Strategy
+
+#### Integration Tests (`tests/test_ws_datafeed.py`)
+- FastAPI TestClient with WebSocket support
+- Subscribe/unsubscribe operation testing
+- Multi-symbol and multi-resolution scenarios
+- Broadcast verification
+- Message format validation
+
+**Example Test Pattern**:
+```python
+with client.websocket_connect("/api/v1/ws") as websocket:
+    # Send subscribe message
+    websocket.send_json({"type": "bars.subscribe", "payload": {...}})
+    
+    # Verify response
+    response = websocket.receive_json()
+    assert response["type"] == "bars.subscribe.response"
+    
+    # Trigger server-side broadcast
+    await wsApp.publish(topic="bars:AAPL:1", data=bar)
+    
+    # Verify update received
+    update = websocket.receive_json()
+    assert update["type"] == "bars.update"
+```
+
+### Future Enhancements
+
+#### Planned Features
+1. **Authentication**: JWT token validation for private channels
+2. **Additional Channels**: Order book, trades, account updates
+3. **Rate Limiting**: Per-client message rate limits
+4. **Compression**: WebSocket per-message deflate
+5. **Metrics**: Connection count, message throughput, latency
+6. **Client Library**: Auto-generated TypeScript WebSocket client
+
+#### Architecture Expansion
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Future WebSocket Channel Architecture                       │
 ├─────────────────────────────────────────────────────────────┤
 │  Public Channels (No Auth)      │  Private Channels (Auth)  │
-│  ├─ market_data (100/sec)       │  ├─ account (10/sec)      │
-│  ├─ orderbook (50/sec)          │  ├─ positions (20/sec)    │
-│  ├─ trades (100/sec)            │  ├─ orders (50/sec)       │
-│  ├─ chart_data (10/sec)         │  └─ notifications (20/sec)│
-│  ├─ system (5/sec)              │                            │
-│  └─ heartbeat (1/sec)           │                            │
+│  ├─ bars.* (implemented)        │  ├─ account.* (planned)   │
+│  ├─ orderbook.* (planned)       │  ├─ positions.* (planned) │
+│  ├─ trades.* (planned)          │  ├─ orders.* (planned)    │
+│  └─ quotes.* (planned)          │  └─ notifications.* (...)  │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-### Implementation Roadmap
-1. **Endpoint**: Expose `ws://localhost:8000/api/v1/ws/v1`
-2. **Authentication**: JWT enforcement for private channels
-3. **Subscription Model**: Fine-grained topic subscriptions per symbol
-4. **Streaming Pipeline**: Integrate `DatafeedService` with live streaming backend
-5. **Heartbeat & Metrics**: Monitor connection health and throughput
-
-### Contract Definition
-- AsyncAPI 3.0 specification will document the WebSocket API
-- Channel parameter validation will mirror TradingView broker API semantics
-- Client generation will reuse the existing OpenAPI tooling pipeline once endpoints ship
 
 ## Build & Development Architecture
 
