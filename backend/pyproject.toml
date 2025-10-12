@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "A FastAPI trading API server"
 authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
-packages = [{include = "trading_api", from = "src"}]
-include = ["trading_api/py.typed"]
+packages = [
+    {include = "trading_api", from = "src"},
+    {include = "external_packages"}
+]
+include = ["trading_api/py.typed", "external_packages/py.typed", "external_packages/fastws/py.typed"]
 
 [tool.poetry.dependencies]
 python = "^3.11"

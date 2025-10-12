@@ -1,0 +1,22 @@
+{
+  "include": [
+    "src",
+    "external_packages"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    ".venv",
+    "venv"
+  ],
+  "pythonVersion": "3.11",
+  "pythonPlatform": "Linux",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "extraPaths": [
+    ".",
+    "src",
+    "external_packages"
+  ]
+}
