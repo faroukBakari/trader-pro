@@ -20,7 +20,7 @@ class BroadcasterConfig:
     def get_interval() -> float:
         """Get broadcast interval in seconds."""
         try:
-            return float(os.getenv("BAR_BROADCASTER_INTERVAL", "2.0"))
+            return float(os.getenv("BAR_BROADCASTER_INTERVAL", "0.2"))
         except ValueError:
             return 2.0
 
@@ -33,7 +33,7 @@ class BroadcasterConfig:
     @staticmethod
     def get_resolutions() -> List[str]:
         """Get list of resolutions to broadcast."""
-        resolutions_env = os.getenv("BAR_BROADCASTER_RESOLUTIONS", "1")
+        resolutions_env = os.getenv("BAR_BROADCASTER_RESOLUTIONS", "1D")
         return [r.strip() for r in resolutions_env.split(",") if r.strip()]
 
 

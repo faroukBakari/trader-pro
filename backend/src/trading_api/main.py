@@ -1,11 +1,13 @@
 """Main FastAPI application with API versioning support."""
 
 import json
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, AsyncGenerator
 
 from fastapi import Depends, FastAPI
+from fastapi.routing import APIRoute
 
 from external_packages.fastws import Client
 from trading_api.plugins.fastws_adapter import FastWSAdapter
@@ -19,6 +21,17 @@ from .core.datafeed_service import DatafeedService
 from .core.versioning import APIVersion
 from .ws.datafeed import router as ws_datafeed_router
 
+# Configure logging for the application
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+
+# Set specific loggers to INFO level
+logging.getLogger("trading_api").setLevel(logging.INFO)
+logging.getLogger("uvicorn").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+
 # Global instances
 datafeed_service = DatafeedService()
 bar_broadcaster: BarBroadcaster | None = None
@@ -26,7 +39,6 @@ bar_broadcaster: BarBroadcaster | None = None
 
 def validate_response_models(app: FastAPI) -> None:
     """Validate that all routes have response_model defined for OpenAPI compliance"""
-    from fastapi.routing import APIRoute
 
     missing_models = []
 
@@ -94,6 +106,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "⏸️  Bar broadcaster disabled (set BAR_BROADCASTER_ENABLED=true to enable)"
         )
 
+    wsApp.setup(apiApp)
+
     yield
 
     # Shutdown: Stop bar broadcaster
@@ -137,17 +151,12 @@ wsApp = FastWSAdapter(
     max_connection_lifespan=3600.0,
 )
 
+wsApp.include_router(ws_datafeed_router)
+
 # Include version 1 routes
 apiApp.include_router(health_router, prefix="/api/v1", tags=["v1"])
 apiApp.include_router(versions_router, prefix="/api/v1", tags=["v1"])
 apiApp.include_router(datafeed_router, prefix="/api/v1", tags=["v1"])
-
-# Register WebSocket endpoints and AsyncAPI documentation
-# Note: WebSocket endpoints don't appear in OpenAPI/Swagger docs (/api/v1/docs)
-# They use AsyncAPI specification instead (see /api/v1/ws/asyncapi)
-# Note: No prefix here - the prefix applies to HTTP paths, not WebSocket message types
-wsApp.include_router(ws_datafeed_router)
-wsApp.setup(apiApp)
 
 
 # Register the WebSocket endpoint

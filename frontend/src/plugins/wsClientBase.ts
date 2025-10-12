@@ -126,9 +126,6 @@ export class WebSocketClientBase {
     }
   >()
 
-  private reconnectAttempts = 0
-  private isReconnecting = false
-  private reconnectTimer: number | null = null
   private readonly config: Required<WebSocketClientConfig>
   private referenceCount = 0
 
@@ -162,16 +159,16 @@ export class WebSocketClientBase {
       instance.log('Created new WebSocket instance for', url)
 
       // Auto-connect with retries
-      await instance.connectWithRetries()
+      // await instance.connectWithRetries()
     } else {
       // Update config if needed (merge with existing)
       instance.updateConfig(config)
       instance.log('Reusing existing WebSocket instance for', url)
 
       // Ensure connection is alive
-      if (!instance.isConnected()) {
-        await instance.connectWithRetries()
-      }
+      // if (!instance.isConnected()) {
+      //   await instance.connectWithRetries()
+      // }
     }
 
     instance.referenceCount++
@@ -210,12 +207,6 @@ export class WebSocketClientBase {
       // Clear all subscriptions
       this.subscriptions.clear()
 
-      // Force disconnect
-      if (this.reconnectTimer) {
-        clearTimeout(this.reconnectTimer)
-        this.reconnectTimer = null
-      }
-
       if (this.ws) {
         this.ws.close()
         this.ws = null
@@ -232,90 +223,47 @@ export class WebSocketClientBase {
   /**
    * Connect with retries (used during initialization)
    */
-  private async connectWithRetries(): Promise<void> {
-    const maxAttempts = this.config.maxReconnectAttempts
-    let attempt = 0
-
-    while (attempt < maxAttempts) {
-      try {
-        await this.connect()
-        return // Success
-      } catch (error) {
-        attempt++
-        if (attempt >= maxAttempts) {
-          throw new Error(`Failed to connect after ${maxAttempts} attempts: ${error}`)
-        }
-
-        const delay = this.config.reconnectDelay * Math.pow(2, attempt - 1)
-        this.log(`Connection attempt ${attempt}/${maxAttempts} failed, retrying in ${delay}ms...`)
-        await new Promise((resolve) => setTimeout(resolve, delay))
-      }
-    }
-  }
-
-  /**
-   * Connect to WebSocket server
-   */
   private async connect(): Promise<void> {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.log('Already connected')
-      return
-    }
+    try {
+      if (this.isConnected()) {
+        this.log('Already connected')
+        return
+      }
 
-    return new Promise((resolve, reject) => {
-      try {
-        this.log('Connecting to', this.config.url)
-        this.ws = new WebSocket(this.config.url)
+      return new Promise((resolve, reject) => {
+        try {
+          this.log('Connecting to', this.config.url)
+          this.ws = new WebSocket(this.config.url)
 
-        this.ws.onopen = () => {
-          this.log('Connected')
-          this.reconnectAttempts = 0
-          this.isReconnecting = false
-          resolve()
-        }
+          this.ws.onopen = () => {
+            this.log('Connected')
+            resolve()
+          }
 
-        this.ws.onmessage = (event) => {
-          this.handleMessage(event)
-        }
+          this.ws.onmessage = (event) => {
+            this.handleMessage(event)
+          }
 
-        this.ws.onerror = (error) => {
-          this.log('Error:', error)
+          this.ws.onerror = async (error) => {
+            this.log('Error:', error)
+            this.ws = null
+            await this.resubscribeAll()
+          }
+
+          this.ws.onclose = async (event) => {
+            this.log('Connection closed:', event)
+            this.ws = null
+            await this.resubscribeAll()
+          }
+        } catch (error) {
           reject(error)
         }
-
-        this.ws.onclose = (event) => {
-          this.log('Closed:', event.code, event.reason)
-          this.handleDisconnect()
-        }
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  /**
-   * Disconnect from WebSocket server
-   * Only closes connection if no more subscriptions exist
-   */
-  private async disconnect(): Promise<void> {
-    // Don't disconnect if there are active subscriptions
-    if (this.subscriptions.size > 0) {
-      this.log('Cannot disconnect: active subscriptions exist')
-      return
-    }
-
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-
-    if (this.ws) {
-      this.ws.close()
+      })
+    } catch (error) {
+      this.log('Connection error:', error)
       this.ws = null
+      await this.resubscribeAll()
     }
-
-    this.pendingRequests.clear()
-    this.log('Disconnected')
   }
 
   /**
@@ -353,9 +301,6 @@ export class WebSocketClientBase {
     callback: (data: TData) => void,
   ): Promise<string> {
     // Ensure connected
-    if (!this.isConnected()) {
-      await this.connect()
-    }
 
     // Generate unique subscription ID
     const subscriptionId = `${topic}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -374,33 +319,24 @@ export class WebSocketClientBase {
     this.subscriptions.set(subscriptionId, subscription as SubscriptionState<unknown>)
 
     // Send subscription request and wait for confirmation
-    try {
-      const response = await this.sendRequest<SubscriptionResponse>(
-        subscriptionType,
-        subscriptionParams,
-        5000, // 5 second timeout
-      )
+    while (true)
+      try {
+        const response = await this.sendRequest<SubscriptionResponse>(
+          subscription.subscriptionType,
+          subscription.subscriptionParams,
+          5000, // 5 second timeout
+        )
 
-      // Verify topic matches
-      if (response.topic !== topic) {
-        throw new Error(`Topic mismatch: expected "${topic}", got "${response.topic}"`)
+        if (response.status !== 'ok') {
+          throw new Error(response.message)
+        }
+
+        subscription.confirmed = true
+        this.log(`Subscription confirmed: ${topic}`, response)
+        return subscriptionId
+      } catch (error) {
+        this.log('Subscription error:', error)
       }
-
-      // Verify status is ok
-      if (response.status !== 'ok') {
-        throw new Error(`Subscription failed: ${response.message}`)
-      }
-
-      // Mark subscription as confirmed
-      subscription.confirmed = true
-      this.log(`Subscription confirmed: ${topic}`, response)
-
-      return subscriptionId
-    } catch (error) {
-      // Remove failed subscription
-      this.subscriptions.delete(subscriptionId)
-      throw error
-    }
   }
 
   /**
@@ -454,9 +390,7 @@ export class WebSocketClientBase {
     payload: unknown,
     timeout: number = 5000,
   ): Promise<TResponse> {
-    if (!this.isConnected()) {
-      throw new Error('WebSocket not connected')
-    }
+    await this.connect()
 
     return new Promise((resolve, reject) => {
       const message: WebSocketMessage = { type, payload }
@@ -495,6 +429,7 @@ export class WebSocketClientBase {
    */
   private handleMessage(event: MessageEvent): void {
     try {
+      // Wierd stuff about fastws implementation that encapsulates WebSocketMessage in another layer of WebSocketMessage
       const message: WebSocketMessage = JSON.parse(event.data)
       const { type, payload } = message
 
@@ -510,7 +445,7 @@ export class WebSocketClientBase {
 
       // Check if this is an update message for any subscriptions
       if (type.endsWith('.update')) {
-        this.routeUpdateMessage(type, payload)
+        this.routeUpdateMessage(type, payload as WebSocketMessage)
         return
       }
 
@@ -524,14 +459,14 @@ export class WebSocketClientBase {
    * Route update message to appropriate subscription callbacks
    * Filters by topic - only confirmed subscriptions with matching updateType receive the data
    */
-  private routeUpdateMessage(type: string, payload: unknown): void {
+  private routeUpdateMessage(type: string, data: WebSocketMessage): void {
     // Iterate through all confirmed subscriptions with matching update message type
     for (const subscription of Array.from(this.subscriptions.values())) {
       if (subscription.confirmed && subscription.updateMessageType === type) {
         // Call the callback with the payload
         // Topic filtering is implicit - each subscription only receives its own updates
         try {
-          subscription.callback(payload)
+          subscription.callback(data.payload)
         } catch (error) {
           this.log('Error in subscription callback:', error)
         }
@@ -540,51 +475,14 @@ export class WebSocketClientBase {
   }
 
   /**
-   * Handle WebSocket disconnect
-   */
-  private handleDisconnect(): void {
-    this.ws = null
-
-    if (!this.config.reconnect || this.isReconnecting) {
-      return
-    }
-
-    if (this.reconnectAttempts >= this.config.maxReconnectAttempts) {
-      this.log('Max reconnection attempts reached')
-      return
-    }
-
-    this.isReconnecting = true
-    this.reconnectAttempts++
-
-    const delay = this.config.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
-    this.log(
-      `Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.config.maxReconnectAttempts})`,
-    )
-
-    this.reconnectTimer = window.setTimeout(async () => {
-      try {
-        await this.connect()
-        await this.resubscribeAll()
-      } catch (error) {
-        this.log('Reconnection failed:', error)
-        this.isReconnecting = false
-        this.handleDisconnect()
-      }
-    }, delay)
-  }
-
-  /**
    * Resubscribe to all confirmed subscriptions after reconnect
    */
   private async resubscribeAll(): Promise<void> {
     this.log('Resubscribing to all active subscriptions...')
 
-    const subscriptionsToRestore = Array.from(this.subscriptions.values()).filter(
-      (sub) => sub.confirmed,
-    )
+    this.pendingRequests.clear()
 
-    for (const subscription of subscriptionsToRestore) {
+    for (const subscription of this.subscriptions.values()) {
       try {
         // Mark as unconfirmed for resubscription
         subscription.confirmed = false

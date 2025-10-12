@@ -27,7 +27,7 @@ async def send_subscribe(
     topic = bars_topic_builder(payload)
     client.subscribe(topic)
 
-    logger.debug(f"Client {client.uid} subscribed to topic: {topic}")
+    logger.info(f"Client {client.uid} subscribed to topic: {topic}")
 
     return SubscriptionResponse(
         status="ok",
@@ -45,7 +45,7 @@ async def send_unsubscribe(
     topic = bars_topic_builder(payload)
     client.unsubscribe(topic)
 
-    logger.debug(f"Client {client.uid} unsubscribed from topic: {topic}")
+    logger.info(f"Client {client.uid} unsubscribed from topic: {topic}")
 
     return SubscriptionResponse(
         status="ok",
