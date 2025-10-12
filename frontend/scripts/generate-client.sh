@@ -149,7 +149,7 @@ EOF
 generate_ws_types() {
     echo -e "${BLUE}🔧 Generating WebSocket types from AsyncAPI...${NC}"
 
-    if node "./scripts/generate-ws-types.cjs" "$ASYNCAPI_SPEC" "$WS_OUTPUT_DIR" > /dev/null 2>&1; then
+    if node "./scripts/generate-ws-types.mjs" "$ASYNCAPI_SPEC" "$WS_OUTPUT_DIR"; then
         echo -e "${GREEN}✅ WebSocket types generation successful${NC}"
         return 0
     else
