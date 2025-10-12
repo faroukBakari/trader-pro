@@ -57,9 +57,9 @@ cleanup() {
     fi
 
     # Also clean up any remaining uvicorn processes
-    pkill -TERM -f "uvicorn trading_api.main:app" 2>/dev/null || true
+    pkill -TERM -f "uvicorn trading_api.main:" 2>/dev/null || true
     sleep 1
-    pkill -KILL -f "uvicorn trading_api.main:app" 2>/dev/null || true
+    pkill -KILL -f "uvicorn trading_api.main:" 2>/dev/null || true
 }
 
 # Register cleanup on exit and signals
@@ -211,7 +211,7 @@ wait $SERVER_PID 2>/dev/null || true
 SERVER_STARTED=false
 
 # Force kill any remaining uvicorn processes
-pkill -9 -f "uvicorn trading_api.main:app" 2>/dev/null || true
+pkill -9 -f "uvicorn trading_api.main:" 2>/dev/null || true
 
 sleep 3
 

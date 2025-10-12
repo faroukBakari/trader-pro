@@ -5,7 +5,7 @@ Integration tests for WebSocket endpoints
 import pytest
 from fastapi.testclient import TestClient
 
-from trading_api.main import app
+from trading_api.main import apiApp, wsApp
 from trading_api.models.market.bars import Bar
 
 
@@ -13,18 +13,18 @@ class TestBarsWebSocketIntegration:
     """Integration tests for bars WebSocket endpoint"""
 
     def test_websocket_connection(self):
-        """Test basic WebSocket connection to /api/v1/ws/bars"""
-        client = TestClient(app)
+        """Test basic WebSocket connection to /api/v1/ws"""
+        client = TestClient(apiApp)
 
-        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+        with client.websocket_connect("/api/v1/ws") as websocket:
             # Connection successful if we get here
             assert websocket is not None
 
     def test_subscribe_to_bars(self):
         """Test subscribing to bar updates"""
-        client = TestClient(app)
+        client = TestClient(apiApp)
 
-        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+        with client.websocket_connect("/api/v1/ws") as websocket:
             # Send subscribe message
             subscribe_msg = {
                 "type": "bars.subscribe",
@@ -44,9 +44,9 @@ class TestBarsWebSocketIntegration:
 
     def test_subscribe_with_different_resolutions(self):
         """Test subscribing to different resolutions creates different topics"""
-        client = TestClient(app)
+        client = TestClient(apiApp)
 
-        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+        with client.websocket_connect("/api/v1/ws") as websocket:
             # Subscribe to 1-minute bars
             websocket.send_json(
                 {
@@ -69,9 +69,9 @@ class TestBarsWebSocketIntegration:
 
     def test_unsubscribe_from_bars(self):
         """Test unsubscribing from bar updates"""
-        client = TestClient(app)
+        client = TestClient(apiApp)
 
-        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+        with client.websocket_connect("/api/v1/ws") as websocket:
             # First subscribe
             websocket.send_json(
                 {
@@ -100,9 +100,9 @@ class TestBarsWebSocketIntegration:
 
     def test_multiple_symbols_subscription(self):
         """Test subscribing to multiple symbols"""
-        client = TestClient(app)
+        client = TestClient(apiApp)
 
-        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+        with client.websocket_connect("/api/v1/ws") as websocket:
             symbols = ["AAPL", "GOOGL", "MSFT"]
 
             for symbol in symbols:
@@ -119,9 +119,9 @@ class TestBarsWebSocketIntegration:
 
     def test_subscribe_without_resolution_uses_default(self):
         """Test that subscribing without resolution parameter uses default"""
-        client = TestClient(app)
+        client = TestClient(apiApp)
 
-        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+        with client.websocket_connect("/api/v1/ws") as websocket:
             # Subscribe without specifying resolution
             websocket.send_json(
                 {"type": "bars.subscribe", "payload": {"symbol": "AAPL", "params": {}}}
@@ -136,11 +136,11 @@ class TestBarsWebSocketIntegration:
         """Test that broadcast sends updates to subscribed clients"""
         import time
 
-        from trading_api.ws.bars import bars_adapter
+        from trading_api.ws.datafeed import bars_topic_builder
 
-        client = TestClient(app)
+        client = TestClient(apiApp)
 
-        with client.websocket_connect("/api/v1/ws/bars") as websocket:
+        with client.websocket_connect("/api/v1/ws") as websocket:
             # Subscribe to AAPL bars
             websocket.send_json(
                 {
@@ -161,8 +161,9 @@ class TestBarsWebSocketIntegration:
                 volume=1000000,
             )
 
-            await bars_adapter.broadcast(
-                symbol="AAPL", data=test_bar, params={"resolution": "1"}
+            await wsApp.publish(
+                topic=bars_topic_builder(symbol="AAPL", params={"resolution": "1"}),
+                data=test_bar,
             )
 
             # Receive the broadcast message

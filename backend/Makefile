@@ -2,6 +2,7 @@
 
 # Environment variables with fallback values
 BACKEND_PORT ?= 8000
+BACKEND_APP_NAME ?= app
 
 .PHONY: help install test test-cov lint lint-check format build clean dev health clients export-openapi docs-html
 
@@ -70,12 +71,12 @@ format:
 dev:
 	@echo "Starting backend development server with debugpy on http://localhost:$(BACKEND_PORT)"
 	@echo "Debug server listening on port 5678 (attach debugger to localhost:5678)"
-	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn trading_api.main:app --reload --host 0.0.0.0 --port $(BACKEND_PORT)
+	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --reload --host 0.0.0.0 --port $(BACKEND_PORT)
 
 # CI development server (background)
 dev-ci:
 	@echo "Starting backend server for CI..."
-	poetry run uvicorn trading_api.main:app --host 0.0.0.0 --port $(BACKEND_PORT) &
+	poetry run uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --host 0.0.0.0 --port $(BACKEND_PORT) &
 	sleep 10
 
 # Build

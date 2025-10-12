@@ -47,7 +47,7 @@ make dev
 make dev-no-debug
 
 # Manual start (inside Poetry shell)
-poetry run uvicorn trading_api.main:app --reload
+poetry run uvicorn "trading_api.main:$BACKEND_APP_NAME" --reload
 ```
 
 ### Run tests and quality checks
