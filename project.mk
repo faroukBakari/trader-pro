@@ -4,12 +4,13 @@
 BACKEND_PORT ?= 8000
 FRONTEND_PORT ?= 5173
 
-.PHONY: help setup install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration
+.PHONY: help setup install-all install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration
 
 # Default target
 help:
 	@echo "Project-wide targets:"
 	@echo "  setup             Full project setup (hooks + dependencies)"
+	@echo "  install-all       Install all project dependencies (backend + frontend)"
 	@echo "  install-hooks     Install Git hooks for pre-commit checks"
 	@echo "  uninstall-hooks   Remove Git hooks"
 	@echo "  dev-backend       Start backend development server"
@@ -48,21 +49,27 @@ uninstall-hooks:
 	git config --unset core.hooksPath || true
 	@echo "Git hooks removed."
 
-# Project setup
-setup: install-hooks
-	@echo "Setting up backend..."
-	@if ! command -v poetry >/dev/null 2>&1; then \
-		echo "Poetry not found. Please install Poetry: https://python-poetry.org/docs/#installation"; \
-		exit 1; \
-	fi
+# Install all dependencies
+install-all:
+	@echo "Installing all project dependencies..."
+	@echo ""
+	@echo "[1/2] Installing backend dependencies..."
+	@echo "========================================"
 	make -C backend install
 	@echo ""
-	@echo "Setting up frontend..."
-	@if ! command -v npm >/dev/null 2>&1; then \
-		echo "npm not found. Please install Node.js: https://nodejs.org/"; \
-		exit 1; \
-	fi
+	@echo "[2/2] Installing frontend dependencies..."
+	@echo "========================================="
 	make -C frontend install
+	@echo ""
+	@echo "✓ All dependencies installed successfully!"
+	@echo ""
+	@echo "Next steps:"
+	@echo "  make dev-backend    # Start backend server (port 8000)"
+	@echo "  make dev-frontend   # Start frontend server (port 5173)"
+	@echo "  make dev-fullstack  # Start both servers"
+
+# Project setup
+setup: install-hooks install-all
 	@echo ""
 	@echo "Project setup complete!"
 	@echo ""

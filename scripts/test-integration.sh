@@ -126,13 +126,13 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 cd ../frontend
 
 echo "📦 Installing frontend dependencies..."
-npm ci > /dev/null 2>&1
+make install-ci > /dev/null 2>&1
 
 echo "🧹 Cleaning generated client..."
 rm -rf src/clients/trader-client-generated
 
 echo "🧪 Running frontend tests (with mocks)..."
-if npm run test:unit run > /dev/null 2>&1; then
+if make test-run > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Frontend tests passed (using mocks)${NC}"
 else
     echo -e "${RED}❌ Frontend tests failed${NC}"
@@ -144,7 +144,7 @@ echo -e "${BLUE}Step 4: Client Generation from Live API${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 echo "🔧 Generating client from live API..."
-if npm run client:generate > /dev/null 2>&1; then
+if make client-generate > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Client generation successful${NC}"
 else
     echo -e "${RED}❌ Client generation failed${NC}"
@@ -181,7 +181,7 @@ echo -e "${BLUE}Step 5: Building Frontend with Generated Client${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 echo "🏗️  Building frontend..."
-if VITE_API_URL=$VITE_API_URL npm run build > /dev/null 2>&1; then
+if VITE_API_URL=$VITE_API_URL make build > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Frontend build successful${NC}"
 else
     echo -e "${RED}❌ Frontend build failed${NC}"
@@ -219,7 +219,7 @@ echo "🧹 Cleaning generated client..."
 rm -rf src/clients/trader-client-generated
 
 echo "🎭 Generating client without backend..."
-if npm run client:generate > /dev/null 2>&1; then
+if make client-generate > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Mock fallback generation successful${NC}"
 else
     echo -e "${RED}❌ Mock fallback generation failed${NC}"
@@ -237,7 +237,7 @@ fi
 echo -e "${GREEN}✅ Mock client type: $CLIENT_TYPE${NC}"
 
 echo "🏗️  Building frontend with mocks..."
-if npm run build > /dev/null 2>&1; then
+if make build > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Frontend build successful (with mocks)${NC}"
 else
     echo -e "${RED}❌ Frontend build failed (with mocks)${NC}"
