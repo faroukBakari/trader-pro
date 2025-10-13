@@ -17,13 +17,10 @@ export class BarsWebSocketClient implements BarWebSocketInterface {
   }
 
   async subscribe(payload: BarsSubscriptionRequest, onUpdate: (bar: Bar) => void): Promise<string> {
-    const topic = `bars:${payload.symbol}:${payload.resolution}`
-
     // Use base class subscribe with server confirmation
     const subscriptionId = await this.instance.subscribe<BarsSubscriptionRequest, Bar>(
       'bars',
       payload,
-      topic,
       onUpdate,
     )
     return subscriptionId
