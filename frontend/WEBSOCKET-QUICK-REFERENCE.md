@@ -7,7 +7,7 @@
 ### Create a WebSocket Client
 
 ```typescript
-import { BarsWebSocketClientFactory } from '@/plugins/barsClient'
+import { BarsWebSocketClientFactory } from '@/clients/ws-generated/client'
 
 // Initialize client
 const wsClient = BarsWebSocketClientFactory()
@@ -70,11 +70,11 @@ export interface Quote {
 }
 ```
 
-**2. Create factory** (`quotesClient.ts`):
+**2. Create factory** (auto-generated in `ws-generated/client.ts`):
 ```typescript
-import type { QuotesSubscriptionRequest, Quote } from './ws-types'
-import type { WebSocketInterface } from './wsClientBase'
-import { WebSocketClientBase } from './wsClientBase'
+import type { QuotesSubscriptionRequest, Quote } from '@/clients/ws-types-generated'
+import type { WebSocketInterface } from '@/plugins/wsClientBase'
+import { WebSocketClientBase } from '@/plugins/wsClientBase'
 
 export type QuotesWebSocketInterface = WebSocketInterface<
   QuotesSubscriptionRequest,
@@ -88,7 +88,7 @@ export function QuotesWebSocketClientFactory(): QuotesWebSocketInterface {
 
 **3. Use in service**:
 ```typescript
-import { QuotesWebSocketClientFactory } from '@/plugins/quotesClient'
+import { QuotesWebSocketClientFactory } from '@/clients/ws-generated/client'
 
 const wsClient = QuotesWebSocketClientFactory()
 
@@ -231,7 +231,7 @@ Examples:
 
 ```typescript
 import { vi } from 'vitest'
-import { BarsWebSocketClientFactory } from '@/plugins/barsClient'
+import { BarsWebSocketClientFactory } from '@/clients/ws-generated/client'
 
 describe('BarsWebSocketClient', () => {
   it('should subscribe to bars', async () => {

@@ -165,7 +165,7 @@ generate_ws_types() {
 generate_ws_client() {
     echo -e "${BLUE}🔧 Generating WebSocket client from AsyncAPI...${NC}"
 
-    if node "./scripts/generate-ws-client.mjs" "$ASYNCAPI_SPEC" "$WS_CLIENT_OUTPUT_DIR"; then
+    if node "./scripts/generate-ws-client.mjs" --from-file "$ASYNCAPI_SPEC"; then
         echo -e "${GREEN}✅ WebSocket client generation successful${NC}"
         return 0
     else

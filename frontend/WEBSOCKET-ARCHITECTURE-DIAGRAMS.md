@@ -190,11 +190,11 @@ Event: Client 2 calls dispose()
 ## 3. Subscription Flow Sequence
 
 ```
-┌──────────┐    ┌──────────────┐    ┌──────────────┐    ┌────────┐
-│ Service  │    │ BarsWSClient │    │ WSClientBase │    │ Server │
-└────┬─────┘    └──────┬───────┘    └──────┬───────┘    └───┬────┘
+┌──────────┐    ┌──────────────┐    ┌──────────────┐      ┌────────┐
+│ Service  │    │ BarsWSClient │    │ WSClientBase │      │ Server │
+└────┬─────┘    └──────┬───────┘    └──────┬───────┘      └───┬────┘
      │                 │                   │                  │
-     │ subscribeToBars('AAPL', '1', cb)   │                  │
+     │ subscribeToBars('AAPL', '1', cb)    │                  │
      ├────────────────>│                   │                  │
      │                 │                   │                  │
      │                 │ subscribe(        │                  │

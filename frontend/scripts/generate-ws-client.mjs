@@ -1,482 +1,358 @@
 #!/usr/bin/env node
-/**
- * WebSocket Client Generator
- *
- * Generates TypeScript client interfaces and classes from AsyncAPI specification.
- * Phase 1: Generate IBarDataSource interface with type-safe operations.
- *
- * Usage:
- *   node generate-ws-client.mjs <asyncapi-spec.json> <output-dir>
- */
 
 import fs from 'fs'
 import path from 'path'
+import { fileURLToPath } from 'url'
 
-// Colors for console output
-const colors = {
-  reset: '\x1b[0m',
-  blue: '\x1b[34m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  red: '\x1b[31m',
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+const DEFAULT_API_URL = 'http://localhost:8000/api/v1/ws/asyncapi.json'
+const OUTPUT_DIR = path.join(__dirname, '../src/clients')
+const WS_TYPES_OUTPUT = path.join(OUTPUT_DIR, 'ws-types-generated/index.ts')
+const WS_CLIENT_OUTPUT = path.join(OUTPUT_DIR, 'ws-generated/client.ts')
+
+const args = process.argv.slice(2)
+const fromFileIndex = args.indexOf('--from-file')
+const fromFile = fromFileIndex >= 0 && args[fromFileIndex + 1] ? args[fromFileIndex + 1] : null
+const dryRun = args.includes('--dry-run')
+const verbose = args.includes('--verbose')
+const positionalArgs = args.filter(
+  (arg, idx) =>
+    !arg.startsWith('--') &&
+    (idx === 0 ||
+      !args[idx - 1].startsWith('--') ||
+      args[idx - 1] === '--dry-run' ||
+      args[idx - 1] === '--verbose'),
+)
+const apiUrl = fromFile ? null : positionalArgs[0] || DEFAULT_API_URL
+
+function log(...messages) {
+  if (verbose) {
+    console.log('[Generator]', ...messages)
+  }
 }
 
-function log(color, message) {
-  console.log(`${colors[color]}${message}${colors.reset}`)
-}
-
-/**
- * Extract operations from AsyncAPI spec
- * Returns { send: [...], receive: [...] }
- */
-function extractOperations(spec) {
-  const operations = {
-    send: [],
-    receive: [],
+async function fetchAsyncAPI() {
+  if (fromFile) {
+    log('Reading AsyncAPI spec from file:', fromFile)
+    const content = fs.readFileSync(fromFile, 'utf-8')
+    return JSON.parse(content)
   }
 
+  log('Fetching AsyncAPI spec from:', apiUrl)
+  const response = await fetch(apiUrl)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch AsyncAPI spec: ${response.statusText}`)
+  }
+  return await response.json()
+}
+
+function extractTypeName(ref) {
+  if (!ref || typeof ref !== 'string') {
+    return null
+  }
+  return ref.split('/').pop()
+}
+
+function capitalize(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1)
+}
+
+function extractRoutes(spec) {
+  const routes = []
   const messages = spec.components?.messages || {}
-  const channels = spec.channels || {}
+  const routeGroups = new Map()
 
-  // Extract from channels
-  for (const channelDef of Object.values(channels)) {
-    // Publish operations (client -> server)
-    if (channelDef.publish?.message?.oneOf) {
-      channelDef.publish.message.oneOf.forEach((msgRef) => {
-        const msgId = msgRef.$ref.split('/').pop()
-        const message = messages[msgId]
-        if (message && !msgId.includes('.response')) {
-          operations.send.push({
-            id: msgId,
-            name: message.name || msgId,
-            title: message.title || msgId,
-            description: message.description || '',
-          })
-        }
-      })
+  for (const [messageId, message] of Object.entries(messages)) {
+    const parts = messageId.split('.')
+    if (parts.length < 2) continue
+
+    const routePrefix = parts[0]
+    const operation = parts[1]
+
+    // Skip response messages
+    if (operation === 'response' || messageId.includes('.response')) continue
+
+    if (!routeGroups.has(routePrefix)) {
+      routeGroups.set(routePrefix, {})
     }
 
-    // Subscribe operations (server -> client)
-    if (channelDef.subscribe?.message?.oneOf) {
-      channelDef.subscribe.message.oneOf.forEach((msgRef) => {
-        const msgId = msgRef.$ref.split('/').pop()
-        const message = messages[msgId]
-        if (message && msgId.includes('update')) {
-          operations.receive.push({
-            id: msgId,
-            name: message.name || msgId,
-            title: message.title || msgId,
-            description: message.description || '',
-          })
-        }
-      })
-    }
-  }
+    const group = routeGroups.get(routePrefix)
 
-  return operations
-}
+    if (operation === 'subscribe') {
+      const payloadRef = message.payload?.$ref
+      if (payloadRef) {
+        const wrapperTypeName = extractTypeName(payloadRef)
+        const wrapperSchema = spec.components.schemas[wrapperTypeName]
+        const payloadProp = wrapperSchema?.properties?.payload
 
-/**
- * Generate IBarDataSource interface
- */
-function generateDataSourceInterface(operations) {
-  log(
-    'blue',
-    `🔧 Generating IBarDataSource interface for ${operations.send.length} send operations and ${operations.receive.length} receive operations...`,
-  )
-  return `/**
- * Bar data source interface
- *
- * Abstract interface for subscribing to real-time bar data.
- * Can be implemented by WebSocket client, mock data source, or any other provider.
- */
-export interface IBarDataSource {
-  /**
-   * Subscribe to real-time bar updates for a symbol
-   *
-   * @param symbol - Trading symbol (e.g., 'AAPL', 'GOOGL')
-   * @param resolution - Time resolution ('1', '5', '15', '30', '60', 'D', 'W', 'M')
-   * @param onTick - Callback function called when new bar data arrives
-   * @returns Subscription ID for unsubscribing
-   */
-  subscribe(
-    symbol: string,
-    resolution: string,
-    onTick: (bar: Bar) => void,
-  ): Promise<string>
-
-  /**
-   * Unsubscribe from bar updates
-   *
-   * @param listenerGuid - Subscription ID returned from subscribe()
-   */
-  unsubscribe(listenerGuid: string): Promise<void>
-
-  /**
-   * Check if data source is connected and ready
-   */
-  isConnected(): boolean
-
-  /**
-   * Connect to data source (if not already connected)
-   */
-  connect(): Promise<void>
-
-  /**
-   * Disconnect from data source
-   */
-  disconnect(): Promise<void>
-}
-`
-}
-
-/**
- * Generate basic WebSocket client stub
- */
-function generateWebSocketClient(spec) {
-  log('blue', `🔧 Generating WebSocketBarDataSource class for ${spec.info.title}...`)
-  return `/**
- * WebSocket Bar Data Source
- *
- * Real-time bar data via WebSocket connection to trading API.
- * Implements IBarDataSource interface.
- */
-export class WebSocketBarDataSource implements IBarDataSource {
-  private ws: WebSocket | null = null
-  private subscriptions = new Map<
-    string,
-    {
-      symbol: string
-      resolution: string
-      callback: (bar: Bar) => void
-    }
-  >()
-  private messageHandlers = new Map<string, ((data: any) => void)[]>()
-  private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
-  private reconnectDelay = 1000
-  private isReconnecting = false
-
-  constructor(private config: WebSocketClientConfig) {}
-
-  async connect(): Promise<void> {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      return
-    }
-
-    return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(this.config.url)
-
-        this.ws.onopen = () => {
-          console.log('[WebSocket] Connected to', this.config.url)
-          this.reconnectAttempts = 0
-          this.isReconnecting = false
-          resolve()
-        }
-
-        this.ws.onmessage = (event) => {
-          this.handleMessage(event)
-        }
-
-        this.ws.onerror = (error) => {
-          console.error('[WebSocket] Error:', error)
-          reject(error)
-        }
-
-        this.ws.onclose = (event) => {
-          console.log('[WebSocket] Closed:', event.code, event.reason)
-          this.handleReconnect()
-        }
-      } catch (error) {
-        reject(error)
-      }
-    })
-  }
-
-  async disconnect(): Promise<void> {
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
-      this.subscriptions.clear()
-      this.messageHandlers.clear()
-    }
-  }
-
-  isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN
-  }
-
-  async subscribe(
-    symbol: string,
-    resolution: string,
-    onTick: (bar: Bar) => void,
-  ): Promise<string> {
-    // Ensure connected
-    if (!this.isConnected()) {
-      await this.connect()
-    }
-
-    // Generate unique subscription ID
-    const listenerGuid = \`\${symbol}_\${resolution}_\${Date.now()}\`
-
-    // Store subscription
-    this.subscriptions.set(listenerGuid, {
-      symbol,
-      resolution,
-      callback: onTick,
-    })
-
-    // Send subscribe message to server
-    const request: BarsSubscriptionRequest = {
-      symbol,
-      resolution,
-    }
-
-    await this.send('bars.subscribe', request)
-
-    // Register handler for updates
-    this.onMessage('bars.update', (bar: Bar) => {
-      // Call the callback for this subscription
-      const sub = this.subscriptions.get(listenerGuid)
-      if (sub && sub.symbol === symbol && sub.resolution === resolution) {
-        sub.callback(bar)
-      }
-    })
-
-    console.log(\`[WebSocket] Subscribed to \${symbol}:\${resolution}\`)
-    return listenerGuid
-  }
-
-  async unsubscribe(listenerGuid: string): Promise<void> {
-    const subscription = this.subscriptions.get(listenerGuid)
-    if (!subscription) {
-      return
-    }
-
-    // Send unsubscribe message to server
-    const request: BarsSubscriptionRequest = {
-      symbol: subscription.symbol,
-      resolution: subscription.resolution,
-    }
-
-    await this.send('bars.unsubscribe', request)
-
-    // Remove subscription
-    this.subscriptions.delete(listenerGuid)
-    console.log(
-      \`[WebSocket] Unsubscribed from \${subscription.symbol}:\${subscription.resolution}\`,
-    )
-  }
-
-  private async send<T>(type: string, payload: unknown): Promise<T> {
-    if (!this.isConnected()) {
-      throw new Error('WebSocket not connected')
-    }
-
-    return new Promise((resolve, reject) => {
-      const message = JSON.stringify({ type, payload })
-
-      // Set up response handler (for operations with responses)
-      const responseType = \`\${type}.response\`
-      const timeout = setTimeout(() => {
-        reject(new Error(\`Timeout waiting for \${responseType}\`))
-      }, 5000)
-
-      this.onMessage(responseType, (data: any) => {
-        clearTimeout(timeout)
-        resolve(data as T)
-      })
-
-      this.ws!.send(message)
-    })
-  }
-
-  private handleMessage(event: MessageEvent): void {
-    try {
-      const message = JSON.parse(event.data)
-      const { type, payload } = message
-
-      // Trigger all handlers for this message type
-      const handlers = this.messageHandlers.get(type) || []
-      handlers.forEach((handler) => handler(payload))
-    } catch (error) {
-      console.error('[WebSocket] Failed to parse message:', error)
-    }
-  }
-
-  private onMessage(type: string, handler: (data: any) => void): void {
-    if (!this.messageHandlers.has(type)) {
-      this.messageHandlers.set(type, [])
-    }
-    this.messageHandlers.get(type)!.push(handler)
-  }
-
-  private handleReconnect(): void {
-    if (this.isReconnecting) {
-      return
-    }
-
-    if (!this.config.reconnect) {
-      console.log('[WebSocket] Reconnection disabled')
-      return
-    }
-
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[WebSocket] Max reconnection attempts reached')
-      return
-    }
-
-    this.isReconnecting = true
-    this.reconnectAttempts++
-
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
-    console.log(
-      \`[WebSocket] Reconnecting in \${delay}ms (attempt \${this.reconnectAttempts}/\${this.maxReconnectAttempts})\`,
-    )
-
-    setTimeout(async () => {
-      try {
-        await this.connect()
-
-        // Re-subscribe to all active subscriptions
-        for (const [listenerGuid, sub] of Array.from(this.subscriptions.entries())) {
-          const request: BarsSubscriptionRequest = {
-            symbol: sub.symbol,
-            resolution: sub.resolution,
+        // Handle anyOf structure
+        if (payloadProp?.anyOf) {
+          const refItem = payloadProp.anyOf.find((item) => item.$ref)
+          if (refItem?.$ref) {
+            group.requestType = extractTypeName(refItem.$ref)
           }
-          await this.send('bars.subscribe', request)
-          console.log(\`[WebSocket] Re-subscribed to \${sub.symbol}:\${sub.resolution}\`)
+        } else if (payloadProp?.$ref) {
+          group.requestType = extractTypeName(payloadProp.$ref)
         }
-      } catch (error) {
-        console.error('[WebSocket] Reconnection failed:', error)
-        this.isReconnecting = false
-        this.handleReconnect()
       }
-    }, delay)
+    } else if (operation === 'update') {
+      const payloadRef = message.payload?.$ref
+      if (payloadRef) {
+        const wrapperTypeName = extractTypeName(payloadRef)
+        const wrapperSchema = spec.components.schemas[wrapperTypeName]
+        const payloadProp = wrapperSchema?.properties?.payload
+
+        // Handle anyOf structure
+        let updateWrapper = null
+        if (payloadProp?.anyOf) {
+          const refItem = payloadProp.anyOf.find((item) => item.$ref)
+          if (refItem?.$ref) {
+            updateWrapper = extractTypeName(refItem.$ref)
+          }
+        } else if (payloadProp?.$ref) {
+          updateWrapper = extractTypeName(payloadProp.$ref)
+        }
+
+        if (updateWrapper) {
+          const match = updateWrapper.match(/SubscriptionUpdate_(.+)_/)
+          if (match) {
+            group.dataModel = match[1]
+          }
+        }
+      }
+    }
+  }
+
+  for (const [routePrefix, group] of routeGroups) {
+    if (group.requestType && group.dataModel) {
+      routes.push({
+        routePrefix,
+        requestType: group.requestType,
+        dataModel: group.dataModel,
+      })
+      log(`Found route: ${routePrefix} (${group.requestType} -> ${group.dataModel})`)
+    }
+  }
+
+  return routes
+}
+
+function mapJsonSchemaTypeToTS(schema) {
+  if (!schema) return 'any'
+
+  if (schema.anyOf) {
+    return (
+      schema.anyOf
+        .map((s) => mapJsonSchemaTypeToTS(s))
+        .filter((t) => t !== 'null')
+        .join(' | ') || 'null'
+    )
+  }
+
+  switch (schema.type) {
+    case 'string':
+      if (schema.enum) {
+        return schema.enum.map((v) => `'${v}'`).join(' | ')
+      }
+      return 'string'
+    case 'number':
+    case 'integer':
+      return 'number'
+    case 'boolean':
+      return 'boolean'
+    case 'array':
+      return `${mapJsonSchemaTypeToTS(schema.items)}[]`
+    case 'object':
+      return 'object'
+    case 'null':
+      return 'null'
+    default:
+      return 'any'
   }
 }
-`
+
+function generateInterface(name, schema, indent = 0) {
+  const ind = '  '.repeat(indent)
+  let code = ''
+
+  if (schema.description) {
+    code += `${ind}/**\n${ind} * ${schema.description}\n${ind} */\n`
+  }
+
+  code += `${ind}export interface ${name} {\n`
+
+  const properties = schema.properties || {}
+  const required = schema.required || []
+
+  for (const [propName, propSchema] of Object.entries(properties)) {
+    const isRequired = required.includes(propName)
+    const optional = isRequired ? '' : '?'
+
+    if (propSchema.description) {
+      code += `${ind}  /**\n${ind}   * ${propSchema.description}\n${ind}   */\n`
+    }
+
+    let tsType
+    if (propSchema.$ref) {
+      tsType = extractTypeName(propSchema.$ref)
+    } else {
+      tsType = mapJsonSchemaTypeToTS(propSchema)
+    }
+
+    code += `${ind}  ${propName}${optional}: ${tsType}\n`
+  }
+
+  code += `${ind}}\n`
+  return code
 }
 
-/**
- * Generate configuration interface
- */
-function generateConfigInterface() {
-  return `/**
- * WebSocket client configuration
- */
-export interface WebSocketClientConfig {
-  /**
-   * WebSocket server URL
-   * @example 'ws://localhost:8000/api/v1/ws'
-   */
-  url: string
-
-  /**
-   * Enable automatic reconnection on disconnect
-   * @default true
-   */
-  reconnect?: boolean
-
-  /**
-   * Maximum number of reconnection attempts
-   * @default 5
-   */
-  maxReconnectAttempts?: number
-
-  /**
-   * Initial reconnection delay in milliseconds (uses exponential backoff)
-   * @default 1000
-   */
-  reconnectDelay?: number
-}
-`
-}
-
-/**
- * Main generation function
- */
-function generateClient(specPath, outputDir) {
-  try {
-    log('blue', '📖 Reading AsyncAPI specification...')
-    const spec = JSON.parse(fs.readFileSync(specPath, 'utf-8'))
-
-    log('blue', '🔍 Extracting operations...')
-    const operations = extractOperations(spec)
-
-    log(
-      'green',
-      `✅ Found ${operations.send.length} send operations, ${operations.receive.length} receive operations`,
-    )
-
-    // Generate header
-    let output = `/**
- * Auto-generated WebSocket Client from AsyncAPI specification
+function generateTypeDefinitions(spec) {
+  let code = `/**
+ * Auto-generated WebSocket Types from AsyncAPI specification
  *
  * DO NOT EDIT MANUALLY - This file is automatically generated
  *
- * Generated from: ${spec.info?.title || 'AsyncAPI Specification'}
- * Version: ${spec.info?.version || 'unknown'}
- * AsyncAPI: ${spec.asyncapi || 'unknown'}
+ * Generated from: ${spec.info?.title || 'Unknown'}
+ * Version: ${spec.info?.version || 'Unknown'}
+ * AsyncAPI: ${spec.asyncapi || 'Unknown'}
  *
  * Generated on: ${new Date().toISOString()}
  */
 
-import type { Bar, BarsSubscriptionRequest, SubscriptionResponse } from '../ws-types-generated'
-
 `
 
-    // Add configuration interface
-    log('blue', '🔧 Generating WebSocketClientConfig interface...')
-    output += generateConfigInterface()
-    output += '\n'
+  const schemas = spec.components?.schemas || {}
+  const relevantSchemas = [
+    'Bar',
+    'BarsSubscriptionRequest',
+    'SubscriptionResponse',
+    'SubscriptionUpdate',
+  ]
 
-    // Add data source interface
-    log('blue', '🔧 Generating IBarDataSource interface...')
-    output += generateDataSourceInterface(operations)
-    output += '\n'
+  for (const [name, schema] of Object.entries(schemas)) {
+    if (name.startsWith('_MsgWithPayload') || name.includes('external_packages')) {
+      continue
+    }
 
-    // Add WebSocket client implementation
-    log('blue', '🔧 Generating WebSocketBarDataSource class...')
-    output += generateWebSocketClient(spec)
+    if (!relevantSchemas.some((prefix) => name.startsWith(prefix))) {
+      continue
+    }
 
-    // Create output directory
-    fs.mkdirSync(outputDir, { recursive: true })
+    if (schema.type === 'object') {
+      code += generateInterface(name, schema)
+      code += '\n'
+    }
+  }
 
-    // Write to file
-    const outputPath = path.join(outputDir, 'client.ts')
-    fs.writeFileSync(outputPath, output)
+  return code
+}
 
-    log('green', `\n🎉 Success! Generated WebSocket client at: ${outputPath}`)
-    log('blue', `📁 Output directory: ${outputDir}`)
-    log('yellow', '\n📋 Generated:')
-    log('yellow', '  - WebSocketClientConfig interface')
-    log('yellow', '  - IBarDataSource interface')
-    log('yellow', '  - WebSocketBarDataSource class')
+function generateClientFactory(routePrefix, requestType, dataModel) {
+  const clientName = capitalize(routePrefix)
 
-    return true
+  return `/**
+ * Factory function for creating ${clientName} WebSocket client
+ *
+ * Generation variables extracted from AsyncAPI:
+ *   ⭐ Route Prefix: '${routePrefix}'
+ *   ⭐ Request Type: ${requestType}
+ *   ⭐ Data Model: ${dataModel}
+ *
+ * @returns WebSocket client for ${routePrefix} data
+ *
+ * @example
+ * const client = ${clientName}WebSocketClientFactory()
+ * await client.subscribe(
+ *   { symbol: 'AAPL', resolution: '1' },
+ *   (data: ${dataModel}) => console.log(data)
+ * )
+ */
+export function ${clientName}WebSocketClientFactory(): ${clientName}WebSocketInterface {
+  return new WebSocketClientBase<${requestType}, ${dataModel}>('${routePrefix}')
+}
+
+export type ${clientName}WebSocketInterface = WebSocketInterface<${requestType}, ${dataModel}>
+`
+}
+
+function generateClientFile(spec, routes) {
+  const route = routes[0]
+  if (!route) {
+    throw new Error('No routes found in AsyncAPI spec')
+  }
+
+  const { routePrefix, requestType, dataModel } = route
+
+  let code = `/**
+ * Auto-generated WebSocket Client from AsyncAPI specification
+ *
+ * DO NOT EDIT MANUALLY - This file is automatically generated
+ *
+ * Generated from: ${spec.info?.title || 'Unknown'}
+ * Version: ${spec.info?.version || 'Unknown'}
+ * AsyncAPI: ${spec.asyncapi || 'Unknown'}
+ *
+ * Generated on: ${new Date().toISOString()}
+ */
+
+import type { WebSocketInterface } from '../../plugins/wsClientBase'
+import { WebSocketClientBase } from '../../plugins/wsClientBase'
+import type { ${requestType}, ${dataModel} } from '../ws-types-generated'
+
+${generateClientFactory(routePrefix, requestType, dataModel)}
+`
+
+  return code
+}
+
+function writeFile(filePath, content) {
+  if (dryRun) {
+    console.log(`[DRY RUN] Would write to: ${filePath}`)
+    console.log(content)
+    return
+  }
+
+  const dir = path.dirname(filePath)
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true })
+  }
+
+  fs.writeFileSync(filePath, content, 'utf-8')
+  console.log(`✅ Generated: ${filePath}`)
+}
+
+async function main() {
+  try {
+    console.log('🚀 Starting WebSocket client generation...')
+    console.log()
+
+    const spec = await fetchAsyncAPI()
+    console.log(`📄 AsyncAPI spec: ${spec.info?.title} v${spec.info?.version}`)
+
+    const routes = extractRoutes(spec)
+    console.log(`📊 Found ${routes.length} route(s):`)
+    routes.forEach((r) => {
+      console.log(`   - ${r.routePrefix}: ${r.requestType} → ${r.dataModel}`)
+    })
+    console.log()
+
+    const typeDefs = generateTypeDefinitions(spec)
+    writeFile(WS_TYPES_OUTPUT, typeDefs)
+
+    const clientCode = generateClientFile(spec, routes)
+    writeFile(WS_CLIENT_OUTPUT, clientCode)
+
+    console.log()
+    console.log('✨ Generation complete!')
   } catch (error) {
-    log('red', `❌ Error generating client: ${error.message}`)
-    console.error(error)
-    return false
+    console.error(`❌ Generation failed: ${error.message}`)
+    if (verbose) {
+      console.error(error)
+    }
+    process.exit(1)
   }
 }
 
-// Main execution
-const args = process.argv.slice(2)
-
-if (args.length < 2) {
-  console.log('Usage: node generate-ws-client.mjs <asyncapi-spec.json> <output-dir>')
-  process.exit(1)
-}
-
-const [specPath, outputDir] = args
-
-if (!fs.existsSync(specPath)) {
-  log('red', `❌ AsyncAPI spec file not found: ${specPath}`)
-  process.exit(1)
-}
-
-const success = generateClient(specPath, outputDir)
-process.exit(success ? 0 : 1)
+main()

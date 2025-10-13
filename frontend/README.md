@@ -60,7 +60,41 @@ npm install        # Install dependencies
 
 ## API Integration
 
-The frontend connects to the FastAPI backend through the API service located in `src/services/api.ts`.
+The frontend connects to the FastAPI backend through auto-generated TypeScript clients.
+
+### Client Generation
+
+**Automatic Generation**: Both REST and WebSocket clients are automatically generated before development and build:
+
+```bash
+npm run dev    # Auto-generates clients, then starts dev server
+npm run build  # Auto-generates clients, then builds for production
+```
+
+**Manual Generation**:
+
+```bash
+# Generate REST API client (from OpenAPI spec)
+npm run client:generate
+
+# Generate WebSocket client (from AsyncAPI spec)
+npm run ws:generate
+
+# Or use Makefile
+make client-generate
+make ws-generate
+```
+
+**Documentation**:
+- **REST Client**: See [CLIENT-GENERATION.md](./CLIENT-GENERATION.md) for complete documentation
+- **WebSocket Client**: See [WS-CLIENT-AUTO-GENERATION.md](./WS-CLIENT-AUTO-GENERATION.md) for implementation details
+
+### Generated Files
+
+The following directories are auto-generated (gitignored):
+- `src/clients/trader-client-generated/` - REST API client
+- `src/clients/ws-generated/` - WebSocket client factories
+- `src/clients/ws-types-generated/` - WebSocket type definitions
 
 ### Environment Configuration
 
@@ -151,10 +185,11 @@ The frontend includes a robust WebSocket client implementation for real-time dat
 
 ### 🔑 Key Files
 
-- **Base Client**: `src/plugins/wsClientBase.ts` - Generic WebSocket client foundation
-- **Bars Client**: `src/plugins/barsClient.ts` - Domain-specific bars data client
-- **Types**: `src/plugins/ws-types.ts` - Type definitions
+- **Base Client**: `src/plugins/wsClientBase.ts` - Generic WebSocket client foundation (manual)
+- **Generated Client**: `src/clients/ws-generated/client.ts` - Auto-generated client factory (from AsyncAPI)
+- **Generated Types**: `src/clients/ws-types-generated/index.ts` - Auto-generated type definitions (from AsyncAPI)
 - **Integration**: `src/services/datafeedService.ts` - TradingView integration example
+- **Generator**: `scripts/generate-ws-client.mjs` - Auto-generation script
 
 ### ⭐ Key Features
 
