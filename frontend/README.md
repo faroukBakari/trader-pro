@@ -135,6 +135,38 @@ npm run lint
 npm run format
 ```
 
+## WebSocket Integration
+
+The frontend includes a robust WebSocket client implementation for real-time data streaming.
+
+### 📚 Documentation
+
+**Complete Documentation Package**: See [`WEBSOCKET-DOCUMENTATION-INDEX.md`](./WEBSOCKET-DOCUMENTATION-INDEX.md) for complete index
+
+**Quick Start**:
+- **New Developers**: Start with [`WEBSOCKET-IMPLEMENTATION-SUMMARY.md`](./WEBSOCKET-IMPLEMENTATION-SUMMARY.md)
+- **Quick Reference**: Use [`WEBSOCKET-QUICK-REFERENCE.md`](./WEBSOCKET-QUICK-REFERENCE.md) for daily coding
+- **Complete Pattern**: Read [`WEBSOCKET-CLIENT-PATTERN.md`](./WEBSOCKET-CLIENT-PATTERN.md) for deep dive
+- **Visual Diagrams**: See [`WEBSOCKET-ARCHITECTURE-DIAGRAMS.md`](./WEBSOCKET-ARCHITECTURE-DIAGRAMS.md)
+
+### 🔑 Key Files
+
+- **Base Client**: `src/plugins/wsClientBase.ts` - Generic WebSocket client foundation
+- **Bars Client**: `src/plugins/barsClient.ts` - Domain-specific bars data client
+- **Types**: `src/plugins/ws-types.ts` - Type definitions
+- **Integration**: `src/services/datafeedService.ts` - TradingView integration example
+
+### ⭐ Key Features
+
+- ✅ **Singleton pattern** - One connection per URL
+- ✅ **Auto-connection** - Automatic connection with exponential backoff retry
+- ✅ **Type safety** - Full TypeScript generics support
+- ✅ **Server confirmation** - Waits for subscription acknowledgment
+- ✅ **Topic-based routing** - Filters messages to relevant subscribers
+- ✅ **Reference counting** - Automatic cleanup when no longer needed
+- ✅ **Reconnection logic** - Automatic resubscription on reconnect
+- ✅ **Zero dependencies** - Uses native WebSocket API
+
 ## Recommended IDE Setup
 
 [VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
