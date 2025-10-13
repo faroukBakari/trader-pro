@@ -57,63 +57,53 @@ export class WebSocketClientBase {
     }
   }
 
-  static getInstance(): WebSocketClientBase {
-    const wsUrl = '/api/v1/ws' // TODO: Make configurable
-    const config: WebSocketClientConfig = { wsUrl }
-    console.log('[Datafeed] Initializing WebSocket client:', config)
-    let instance = WebSocketClientBase.instances.get(wsUrl)
+  private async __socketConnect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        console.log('Connecting to', this.config.wsUrl)
+        this.ws = new WebSocket(this.config.wsUrl)
 
-    if (!instance) {
-      instance = new WebSocketClientBase(config)
-      WebSocketClientBase.instances.set(wsUrl, instance)
-      instance.log('Created new WebSocket instance for', wsUrl)
-    } else {
-      instance.log('Reusing existing WebSocket instance for', wsUrl)
-    }
+        this.ws.onerror = async (error) => {
+          console.log('Error:', error)
+          reject(error)
+        }
 
-    return instance
-  }
+        this.ws.onclose = async (event) => {
+          console.log('Connection closed:', event)
+          reject(new Error('WebSocket closed'))
+        }
 
-  private async connect(): Promise<void> {
-    try {
-      if (this.isConnected()) {
-        this.log('Already connected')
-        return
-      }
+        this.ws.onopen = () => {
+          console.log('Connected')
 
-      return new Promise((resolve, reject) => {
-        try {
-          this.log('Connecting to', this.config.wsUrl)
-          this.ws = new WebSocket(this.config.wsUrl)
-
-          this.ws.onopen = () => {
-            this.log('Connected')
-            resolve()
-          }
-
-          this.ws.onmessage = (event) => {
+          this.ws!.onmessage = (event) => {
             this.handleMessage(event)
           }
 
-          this.ws.onerror = async (error) => {
-            this.log('Error:', error)
-            this.ws = null
-            setTimeout(async () => await this.resubscribeAll(), 0)
+          this.ws!.onerror = async (error) => {
+            console.log('Error:', error)
+            this.resubscribeAll()
           }
 
-          this.ws.onclose = async (event) => {
-            this.log('Connection closed:', event)
-            this.ws = null
-            setTimeout(async () => await this.resubscribeAll(), 0)
+          this.ws!.onclose = async (event) => {
+            console.log('Connection closed:', event)
+            this.resubscribeAll()
           }
-        } catch (error) {
-          reject(error)
+          resolve()
         }
-      })
-    } catch (error) {
-      this.log('Connection error:', error)
-      this.ws = null
-      setTimeout(async () => await this.resubscribeAll(), 0)
+      } catch (error) {
+        reject(error)
+      }
+    })
+  }
+
+  private async connect(): Promise<void> {
+    while (!this.isConnected()) {
+      try {
+        await this.__socketConnect()
+      } catch (error) {
+        this.log('Connection error:', error)
+      }
     }
   }
 
@@ -197,8 +187,31 @@ export class WebSocketClientBase {
     }
   }
 
+  private async __subscribe(subscription: SubscriptionState): Promise<SubscriptionResponse> {
+    while (true)
+      try {
+        subscription.confirmed = false
+
+        const response = await this.sendRequest<SubscriptionResponse>(
+          subscription.subscriptionType,
+          subscription.subscriptionParams,
+          5000, // 5 second timeout
+        )
+
+        if (response.status !== 'ok' && response.topic === subscription.topic) {
+          throw new Error(response.message)
+        }
+
+        subscription.confirmed = true
+        console.log(`Subscription confirmed: ${subscription.topic}`, response)
+        return response
+      } catch (error) {
+        console.log('Subscription error:', error)
+      }
+  }
+
   private async resubscribeAll(): Promise<void> {
-    this.log('Resubscribing to all active subscriptions...')
+    console.log('Resubscribing to all active subscriptions...')
 
     this.pendingRequests.forEach((pending) => {
       clearTimeout(pending.timeout)
@@ -207,25 +220,7 @@ export class WebSocketClientBase {
     this.pendingRequests.clear()
 
     for (const subscription of this.subscriptions.values()) {
-      try {
-        subscription.confirmed = false
-
-        const response = await this.sendRequest<SubscriptionResponse>(
-          subscription.subscriptionType,
-          subscription.subscriptionParams,
-          5000,
-        )
-
-        if (response.status === 'ok' && response.topic === subscription.topic) {
-          subscription.confirmed = true
-          this.log(`Resubscribed to ${subscription.topic}`)
-        } else {
-          throw new Error(`Resubscription failed: ${response.message}`)
-        }
-      } catch (error) {
-        this.log(`Failed to resubscribe to ${subscription.topic}:`, error)
-        this.subscriptions.delete(subscription.id)
-      }
+      await this.__subscribe(subscription)
     }
   }
 
@@ -249,7 +244,7 @@ export class WebSocketClientBase {
     // Create subscription state (unconfirmed)
     const subscription: SubscriptionState<TParams, TData> = {
       id: subscriptionId,
-      topic: topic,
+      topic,
       onUpdate,
       confirmed: false,
       subscriptionType: `${subscriptionType}.subscribe`,
@@ -305,5 +300,22 @@ export class WebSocketClientBase {
         this.subscriptions.delete(subscriptionId)
       }
     }
+  }
+
+  static getInstance(): WebSocketClientBase {
+    const wsUrl = '/api/v1/ws' // TODO: Make configurable
+    const config: WebSocketClientConfig = { wsUrl }
+    console.log('[Datafeed] Initializing WebSocket client:', config)
+    let instance = WebSocketClientBase.instances.get(wsUrl)
+
+    if (!instance) {
+      instance = new WebSocketClientBase(config)
+      WebSocketClientBase.instances.set(wsUrl, instance)
+      instance.log('Created new WebSocket instance for', wsUrl)
+    } else {
+      instance.log('Reusing existing WebSocket instance for', wsUrl)
+    }
+
+    return instance
   }
 }
