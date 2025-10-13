@@ -24,24 +24,15 @@ import type {
   Timezone,
 } from '@public/trading_terminal/charting_library'
 
-import { BarsWebSocketClient, type BarsWebSocketInterface } from '@/plugins/barsClient'
+import { BarsWebSocketClient, type BarsSubscriptionRequest } from '@/plugins/barsClient'
 import { TraderPlugin } from '@/plugins/traderPlugin'
 import type { AxiosPromise } from 'axios'
 
-export interface GetBarsResponse {
+interface GetBarsResponse {
   bars: Array<Bar>
   no_data?: boolean
 }
-
-export interface DatafeedHealthResponse {
-  status: string
-  message: string
-  symbols_loaded: number
-  bars_count: number
-  timestamp: string
-}
-
-export interface GetQuotesRequest {
+interface GetQuotesRequest {
   symbols: string[]
 }
 
@@ -60,7 +51,7 @@ export interface GetQuotesRequest {
  * @see https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi
  */
 
-export interface ApiClientInterface {
+interface ApiClientInterface {
   getConfig(): AxiosPromise<DatafeedConfiguration>
   resolveSymbol(symbol: string): AxiosPromise<LibrarySymbolInfo>
   searchSymbols(
@@ -77,6 +68,11 @@ export interface ApiClientInterface {
     countBack?: number | null,
   ): AxiosPromise<GetBarsResponse>
   getQuotes(getQuotesRequest: GetQuotesRequest): AxiosPromise<Array<QuoteData>>
+}
+
+interface WebSocketInterface {
+  subscribe(params: BarsSubscriptionRequest, onUpdate: (bar: Bar) => void): Promise<string>
+  unsubscribe(listenerGuid: string): Promise<void>
 }
 
 class ApiFallbackClient implements ApiClientInterface {
@@ -370,7 +366,7 @@ class ApiFallbackClient implements ApiClientInterface {
 export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private plugin: TraderPlugin<ApiClientInterface>
   private apiFallbackClient: ApiClientInterface = new ApiFallbackClient()
-  private barsWsClient: BarsWebSocketInterface | null = null
+  private wsClient: WebSocketInterface | null = null
   private readonly subscriptions = new Map<
     string,
     {
@@ -393,26 +389,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   >()
   constructor() {
     this.plugin = new TraderPlugin<ApiClientInterface>()
-    this.initializeWebSocketClient()
-  }
-
-  private async initializeWebSocketClient(): Promise<void> {
-    try {
-      // In dev mode, use relative path to leverage Vite proxy
-      // In production, use absolute WebSocket URL from env
-      const isDev = import.meta.env.DEV
-      const wsUrl = '/api/v1/ws'
-
-      console.log('[Datafeed] Initializing WebSocket client:', { wsUrl, isDev })
-      this.barsWsClient = await BarsWebSocketClient.create({
-        url: wsUrl,
-        debug: true,
-      })
-      console.log('[Datafeed] WebSocket client initialized successfully')
-    } catch (error) {
-      console.error('[Datafeed] Failed to initialize WebSocket client:', error)
-      this.barsWsClient = null
-    }
+    this.wsClient = new BarsWebSocketClient()
   }
   async _loadApiClient(mock: boolean = false): Promise<ApiClientInterface> {
     return mock
@@ -530,14 +507,14 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       listenerGuid,
     })
 
-    if (!this.barsWsClient) {
+    if (!this.wsClient) {
       console.error('[Datafeed] WebSocket client not initialized')
       return
     }
 
     // Subscribe to bars via WebSocket
-    this.barsWsClient
-      .subscribeToBars(symbolInfo.name, resolution, (bar) => {
+    this.wsClient
+      .subscribe({ symbol: symbolInfo.name, resolution }, (bar) => {
         console.debug('[Datafeed] Bar received from WebSocket:', {
           symbol: symbolInfo.name,
           resolution,
@@ -572,8 +549,8 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     const subscription = this.subscriptions.get(listenerGuid)
     if (subscription) {
       // Unsubscribe from WebSocket if we have a WebSocket subscription ID
-      if (subscription.wsSubscriptionId && this.barsWsClient) {
-        this.barsWsClient
+      if (subscription.wsSubscriptionId && this.wsClient) {
+        this.wsClient
           .unsubscribe(subscription.wsSubscriptionId)
           .then(() => {
             console.log(

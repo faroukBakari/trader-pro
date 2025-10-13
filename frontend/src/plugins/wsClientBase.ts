@@ -41,7 +41,7 @@ export interface WebSocketClientConfig {
    * WebSocket server URL
    * @example 'ws://localhost:8000/api/v1/ws'
    */
-  url: string
+  wsUrl: string
 
   /**
    * Enable automatic reconnection on disconnect
@@ -76,8 +76,8 @@ interface SubscriptionState<T> {
   id: string
   /** Topic for filtering messages */
   topic: string
-  /** Callback for data updates */
-  callback: (data: T) => void
+  /** onUpdate for data updates */
+  onUpdate: (data: T) => void
   /** Subscription confirmed by server */
   confirmed: boolean
   /** Original subscription payload for resubscription */
@@ -86,31 +86,6 @@ interface SubscriptionState<T> {
   updateMessageType: string
 }
 
-/**
- * Generic WebSocket Client Base Class (Singleton)
- *
- * Handles WebSocket connection, subscriptions with server confirmation,
- * and topic-based message routing.
- *
- * Uses singleton pattern to ensure only one WebSocket connection per URL.
- * Multiple subscriptions share the same connection.
- *
- * @example
- * ```typescript
- * class BarsClient extends WebSocketClientBase {
- *   async subscribeToBars(symbol: string, resolution: string, callback: (bar: Bar) => void) {
- *     const topic = `bars:${symbol}:${resolution}`
- *     return this.subscribe(
- *       'bars.subscribe',
- *       { symbol, resolution },
- *       topic,
- *       'bars.update',
- *       callback
- *     )
- *   }
- * }
- * ```
- */
 export class WebSocketClientBase {
   // Singleton instance per URL
   private static instances = new Map<string, WebSocketClientBase>()
@@ -127,7 +102,6 @@ export class WebSocketClientBase {
   >()
 
   private readonly config: Required<WebSocketClientConfig>
-  private referenceCount = 0
 
   /**
    * Private constructor - use getInstance() instead
@@ -138,7 +112,7 @@ export class WebSocketClientBase {
       maxReconnectAttempts: config.maxReconnectAttempts ?? 5,
       reconnectDelay: config.reconnectDelay ?? 1000,
       debug: config.debug ?? false,
-      ...config,
+      wsUrl: config.wsUrl,
     }
   }
 
@@ -149,80 +123,23 @@ export class WebSocketClientBase {
    * @param config - WebSocket client configuration
    * @returns Promise that resolves to singleton instance for the URL
    */
-  static async getInstance(config: WebSocketClientConfig): Promise<WebSocketClientBase> {
-    const url = config.url
-    let instance = WebSocketClientBase.instances.get(url)
+  static getInstance(): WebSocketClientBase {
+    const wsUrl = '/api/v1/ws' // TODO: Make configurable
+    const config: WebSocketClientConfig = { wsUrl }
+    console.log('[Datafeed] Initializing WebSocket client:', config)
+    let instance = WebSocketClientBase.instances.get(wsUrl)
 
     if (!instance) {
       instance = new WebSocketClientBase(config)
-      WebSocketClientBase.instances.set(url, instance)
-      instance.log('Created new WebSocket instance for', url)
-
-      // Auto-connect with retries
-      // await instance.connectWithRetries()
+      WebSocketClientBase.instances.set(wsUrl, instance)
+      instance.log('Created new WebSocket instance for', wsUrl)
     } else {
-      // Update config if needed (merge with existing)
-      instance.updateConfig(config)
-      instance.log('Reusing existing WebSocket instance for', url)
-
-      // Ensure connection is alive
-      // if (!instance.isConnected()) {
-      //   await instance.connectWithRetries()
-      // }
+      instance.log('Reusing existing WebSocket instance for', wsUrl)
     }
 
-    instance.referenceCount++
     return instance
   }
 
-  /**
-   * Update configuration (merge with existing)
-   */
-  private updateConfig(newConfig: Partial<WebSocketClientConfig>): void {
-    if (newConfig.reconnect !== undefined) {
-      this.config.reconnect = newConfig.reconnect
-    }
-    if (newConfig.maxReconnectAttempts !== undefined) {
-      this.config.maxReconnectAttempts = newConfig.maxReconnectAttempts
-    }
-    if (newConfig.reconnectDelay !== undefined) {
-      this.config.reconnectDelay = newConfig.reconnectDelay
-    }
-    if (newConfig.debug !== undefined) {
-      this.config.debug = newConfig.debug
-    }
-  }
-
-  /**
-   * Release reference to this instance
-   * Automatically disconnects when reference count reaches 0
-   */
-  async releaseInstance(): Promise<void> {
-    this.referenceCount--
-    this.log(`Reference count: ${this.referenceCount}`)
-
-    if (this.referenceCount <= 0) {
-      this.log('No more references, cleaning up...')
-
-      // Clear all subscriptions
-      this.subscriptions.clear()
-
-      if (this.ws) {
-        this.ws.close()
-        this.ws = null
-      }
-
-      this.pendingRequests.clear()
-
-      // Remove from instances map
-      WebSocketClientBase.instances.delete(this.config.url)
-      this.log('Cleanup complete')
-    }
-  }
-
-  /**
-   * Connect with retries (used during initialization)
-   */
   private async connect(): Promise<void> {
     try {
       if (this.isConnected()) {
@@ -232,8 +149,8 @@ export class WebSocketClientBase {
 
       return new Promise((resolve, reject) => {
         try {
-          this.log('Connecting to', this.config.url)
-          this.ws = new WebSocket(this.config.url)
+          this.log('Connecting to', this.config.wsUrl)
+          this.ws = new WebSocket(this.config.wsUrl)
 
           this.ws.onopen = () => {
             this.log('Connected')
@@ -266,39 +183,15 @@ export class WebSocketClientBase {
     }
   }
 
-  /**
-   * Check if connected
-   */
   isConnected(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
   }
 
-  /**
-   * Subscribe to a topic with server confirmation
-   *
-   * @param subscribeType - Subscription message type (e.g., 'bars.subscribe')
-   * @param subscriptionParams - Subscription request payload
-   * @param topic - Expected topic from server response
-   * @param updateMessageType - Update message type to listen for (e.g., 'bars.update')
-   * @param callback - Callback for data updates
-   * @returns Subscription ID for unsubscribing
-   *
-   * @example
-   * ```typescript
-   * const subId = await client.subscribe(
-   *   'bars.subscribe',
-   *   { symbol: 'AAPL', resolution: '1' },
-   *   'bars:AAPL:1',
-   *   'bars.update',
-   *   (bar) => console.log('New bar:', bar)
-   * )
-   * ```
-   */
   async subscribe<TPayload, TData>(
     subscriptionType: string,
     subscriptionParams: TPayload,
     topic: string,
-    callback: (data: TData) => void,
+    onUpdate: (data: TData) => void,
   ): Promise<string> {
     // Ensure connected
 
@@ -309,7 +202,7 @@ export class WebSocketClientBase {
     const subscription: SubscriptionState<TData> = {
       id: subscriptionId,
       topic: topic,
-      callback,
+      onUpdate,
       confirmed: false,
       subscriptionType: `${subscriptionType}.subscribe`,
       subscriptionParams: subscriptionParams,
@@ -339,41 +232,30 @@ export class WebSocketClientBase {
       }
   }
 
-  /**
-   * Unsubscribe from a topic
-   *
-   * @param subscriptionId - Subscription ID returned from subscribe()
-   * @param unsubscribeType - Unsubscribe message type (e.g., 'bars.unsubscribe')
-   * @param unsubscribePayload - Unsubscribe request payload
-   */
-  async unsubscribe<TPayload>(
-    subscriptionId: string,
-    unsubscribeType: string,
-    unsubscribePayload: TPayload,
-  ): Promise<void> {
+  async unsubscribe(subscriptionId: string): Promise<void> {
     const subscription = this.subscriptions.get(subscriptionId)
-    if (!subscription) {
-      this.log('Subscription not found:', subscriptionId)
-      return
-    }
+    if (subscription) {
+      const unsubscribeType = subscription.subscriptionType.replace('subscribe', 'unsubscribe')
+      const unsubscribePayload = subscription.subscriptionParams
 
-    try {
-      // Send unsubscribe request
-      const response = await this.sendRequest<SubscriptionResponse>(
-        unsubscribeType,
-        unsubscribePayload,
-        5000,
-      )
+      try {
+        // Send unsubscribe request
+        const response = await this.sendRequest<SubscriptionResponse>(
+          unsubscribeType,
+          unsubscribePayload,
+          5000,
+        )
 
-      // Verify status
-      if (response.status !== 'ok') {
-        this.log('Unsubscribe warning:', response.message)
+        // Verify status
+        if (response.status !== 'ok') {
+          this.log('Unsubscribe warning:', response.message)
+        }
+
+        this.log(`Unsubscribed from ${subscription.topic}`)
+      } finally {
+        // Always remove subscription from map
+        this.subscriptions.delete(subscriptionId)
       }
-
-      this.log(`Unsubscribed from ${subscription.topic}`)
-    } finally {
-      // Always remove subscription from map
-      this.subscriptions.delete(subscriptionId)
     }
   }
 
@@ -456,19 +338,19 @@ export class WebSocketClientBase {
   }
 
   /**
-   * Route update message to appropriate subscription callbacks
+   * Route update message to appropriate subscription onUpdates
    * Filters by topic - only confirmed subscriptions with matching updateType receive the data
    */
   private routeUpdateMessage(type: string, data: WebSocketMessage): void {
     // Iterate through all confirmed subscriptions with matching update message type
     for (const subscription of Array.from(this.subscriptions.values())) {
       if (subscription.confirmed && subscription.updateMessageType === type) {
-        // Call the callback with the payload
+        // Call the onUpdate with the payload
         // Topic filtering is implicit - each subscription only receives its own updates
         try {
-          subscription.callback(data.payload)
+          subscription.onUpdate(data.payload)
         } catch (error) {
-          this.log('Error in subscription callback:', error)
+          this.log('Error in subscription onUpdate:', error)
         }
       }
     }
