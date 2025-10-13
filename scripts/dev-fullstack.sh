@@ -135,7 +135,7 @@ fi
 # Step 3: Generate frontend client
 print_step "3. Generating frontend client from live API..."
 cd frontend
-if npm run client:generate; then
+if make client-generate; then
     print_success "Frontend client generated successfully"
 else
     print_error "Client generation failed"
@@ -152,7 +152,7 @@ OPENAPI_FILE="backend/openapi.json"
 # Generate initial client
 print_step "Generating initial frontend client..."
 cd frontend
-if npm run client:generate >/dev/null 2>&1; then
+if make client-generate >/dev/null 2>&1; then
     print_success "Initial client generated successfully"
 else
     print_warning "Initial client generation failed, continuing..."
@@ -182,7 +182,7 @@ fi
             if [ "$CURRENT_MTIME" != "$LAST_MTIME" ] && [ "$CURRENT_MTIME" != "0" ]; then
                 print_warning "OpenAPI file changed! Regenerating client..."
                 cd frontend
-                if npm run client:generate >/dev/null 2>&1; then
+                if make client-generate >/dev/null 2>&1; then
                     print_success "Frontend client regenerated successfully"
                 else
                     print_error "Failed to regenerate client"
@@ -206,7 +206,7 @@ print_step ""
 
 # Start frontend in background and capture PID
 cd frontend
-npm run dev &
+make dev &
 FRONTEND_PID=$!
 cd ..
 

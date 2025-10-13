@@ -23,20 +23,36 @@ FastAPI backend that powers the Trading Pro platform. It exposes a RESTful API f
 ## Quick Start
 
 ### Prerequisites
-- Python 3.11
-- [Poetry](https://python-poetry.org/) for dependency management
+- **Python 3.11+** (required by the project)
+  - Will be **automatically installed** if you have [pyenv](https://github.com/pyenv/pyenv)
+  - Or check version: `python3 --version`
+  - Manual install: `pyenv install 3.11 && pyenv local 3.11`
+- [Poetry](https://python-poetry.org/) for dependency management (auto-installed if missing)
 
 ### Install dependencies
 
 ```bash
 cd backend
-make install       # runs poetry install
+make install       # Validates Python 3.11+, offers to install if needed, then installs dependencies
 ```
 
-Alternatively, run Poetry manually:
+The `make install` command will:
+1. **Check Python version** - Validates Python 3.11+ is available
+2. **Auto-install Python** - If wrong version and pyenv is available, **offers to install Python 3.11.7** (with confirmation)
+3. **Install Poetry** - Automatically installs Poetry if missing
+4. **Install dependencies** - Runs `poetry install` to set up the project
+
+**Interactive prompts:**
+- If Python 3.11+ is not found and pyenv is available, you'll be asked: `"Would you like to install Python 3.11.7 via pyenv? [y/N]"`
+- Type `y` and press Enter to automatically install and activate Python 3.11.7
+- Type `n` to skip and see manual installation instructions
+
+Alternatively, check prerequisites manually:
 
 ```bash
-poetry install
+make ensure-python  # Check Python version
+make ensure-poetry  # Ensure Poetry is installed
+poetry install      # Install dependencies
 ```
 
 ### Run the API locally
