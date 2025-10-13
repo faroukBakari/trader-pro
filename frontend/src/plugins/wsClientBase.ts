@@ -27,65 +27,65 @@ interface SubscriptionState<TParams extends object = object, TData extends objec
   updateMessageType: string
 }
 
-export interface WebSocketInterface {
-  subscribe<TParams, TData>(params: TParams, onUpdate: (data: TData) => void): Promise<string>
+export interface WebSocketInterface<TParams extends object, TData extends object> {
+  subscribe(params: TParams, onUpdate: (data: TData) => void): Promise<string>
   unsubscribe(listenerGuid: string): Promise<void>
 }
 
-export class WebSocketClientBase {
-  // Singleton instance per URL
-  private static instances = new Map<string, WebSocketClientBase>()
-  private readonly config: Required<WebSocketClientConfig>
-  protected ws: WebSocket | null = null
+export class WebSocketClientBase<TParams extends object, TData extends object> {
+  private static readonly config = {
+    reconnect: true,
+    maxReconnectAttempts: 5,
+    reconnectDelay: 1000,
+    debug: false,
+    wsUrl: '/api/v1/ws', // TODO: make configurable
+  }
+  protected static ws: WebSocket | null = null
   protected subscriptions = new Map<string, SubscriptionState>()
   protected pendingRequests = new Map<
     string,
     {
-      resolve: (value: unknown) => void
+      resolve: (value: SubscriptionResponse) => void
       reject: (error: Error) => void
-      timeout: number
+      timeout: NodeJS.Timeout
     }
   >()
 
-  private constructor(config: WebSocketClientConfig) {
-    this.config = {
-      reconnect: config.reconnect ?? true,
-      maxReconnectAttempts: config.maxReconnectAttempts ?? 5,
-      reconnectDelay: config.reconnectDelay ?? 1000,
-      debug: config.debug ?? false,
-      wsUrl: config.wsUrl,
-    }
+  private topicType: string = ''
+
+  constructor(topicType: string) {
+    this.topicType = topicType
   }
 
   private async __socketConnect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        console.log('Connecting to', this.config.wsUrl)
-        this.ws = new WebSocket(this.config.wsUrl)
+        console.log('Connecting to', WebSocketClientBase.config.wsUrl)
+        WebSocketClientBase.ws = new WebSocket(WebSocketClientBase.config.wsUrl)
 
-        this.ws.onerror = async (error) => {
+        WebSocketClientBase.ws.onerror = async (error) => {
           console.log('Error:', error)
           reject(error)
         }
 
-        this.ws.onclose = async (event) => {
+        WebSocketClientBase.ws.onclose = async (event) => {
           console.log('Connection closed:', event)
           reject(new Error('WebSocket closed'))
         }
 
-        this.ws.onopen = () => {
+        WebSocketClientBase.ws.onopen = () => {
           console.log('Connected')
 
-          this.ws!.onmessage = (event) => {
+          WebSocketClientBase.ws!.onmessage = (event) => {
             this.handleMessage(event)
           }
 
-          this.ws!.onerror = async (error) => {
+          WebSocketClientBase.ws!.onerror = async (error) => {
             console.log('Error:', error)
             this.resubscribeAll()
           }
 
-          this.ws!.onclose = async (event) => {
+          WebSocketClientBase.ws!.onclose = async (event) => {
             console.log('Connection closed:', event)
             this.resubscribeAll()
           }
@@ -108,46 +108,14 @@ export class WebSocketClientBase {
   }
 
   private isConnected(): boolean {
-    return this.ws?.readyState === WebSocket.OPEN
+    return WebSocketClientBase.ws?.readyState === WebSocket.OPEN
   }
 
-  private async sendRequest<TResponse>(
-    type: string,
-    payload: object,
-    timeout: number = 5000,
-  ): Promise<TResponse> {
+  private async sendRequest(type: string, payload: object): Promise<void> {
     await this.connect()
-
-    return new Promise((resolve, reject) => {
-      const message: WebSocketMessage = { type, payload }
-      const messageStr = JSON.stringify(message)
-
-      // Expected response type
-      const responseType = `${type}.response`
-
-      // Set up timeout
-      const timeoutId = window.setTimeout(() => {
-        this.pendingRequests.delete(responseType)
-        reject(new Error(`Request timeout: ${type}`))
-      }, timeout)
-
-      // Register response handler
-      this.pendingRequests.set(responseType, {
-        resolve: (response: unknown) => {
-          clearTimeout(timeoutId)
-          resolve(response as TResponse)
-        },
-        reject: (error: Error) => {
-          clearTimeout(timeoutId)
-          reject(error)
-        },
-        timeout: timeoutId,
-      })
-
-      // Send message
-      this.ws!.send(messageStr)
-      this.log('Sent:', type, payload)
-    })
+    const message = JSON.stringify({ type, payload })
+    WebSocketClientBase.ws!.send(message)
+    this.log('Sent:', type, payload)
   }
 
   private handleMessage(event: MessageEvent): void {
@@ -157,21 +125,23 @@ export class WebSocketClientBase {
 
       this.log('Received:', type, payload)
 
-      const pendingRequest = this.pendingRequests.get(type)
-      if (pendingRequest) {
-        this.pendingRequests.delete(type)
-        pendingRequest.resolve(payload)
-        return
-      }
-
       if (type.endsWith('.update')) {
-        this.routeUpdateMessage(type, payload as WebSocketMessage)
-        return
+        const update = payload as WebSocketMessage
+        this.routeUpdateMessage(type, update)
+      } else {
+        const subResponse = payload as SubscriptionResponse
+        const requestId = `${type}-${subResponse.topic}`
+        const pendingRequest = this.pendingRequests.get(requestId)
+        if (pendingRequest) {
+          this.pendingRequests.delete(requestId)
+          pendingRequest.resolve(subResponse)
+          return
+        } else {
+          console.log('Unhandled message type:', type)
+        }
       }
-
-      this.log('Unhandled message type:', type)
     } catch (error) {
-      this.log('Failed to parse message:', error)
+      console.log('Failed to parse message:', error)
     }
   }
 
@@ -181,7 +151,7 @@ export class WebSocketClientBase {
         try {
           subscription.onUpdate(data.payload)
         } catch (error) {
-          this.log('Error in subscription onUpdate:', error)
+          console.log('Error in subscription onUpdate:', error)
         }
       }
     }
@@ -192,13 +162,34 @@ export class WebSocketClientBase {
       try {
         subscription.confirmed = false
 
-        const response = await this.sendRequest<SubscriptionResponse>(
-          subscription.subscriptionType,
-          subscription.subscriptionParams,
-          5000, // 5 second timeout
-        )
+        await this.sendRequest(subscription.subscriptionType, subscription.subscriptionParams)
 
-        if (response.status !== 'ok' && response.topic === subscription.topic) {
+        const response: SubscriptionResponse = await new Promise((resolve, reject) => {
+          // Expected response type
+          const responseType = `${subscription.subscriptionType}.response`
+          const requestId = `${responseType}-${subscription.topic}`
+
+          // Set up timeout
+          const timeout = setTimeout(() => {
+            this.pendingRequests.delete(requestId)
+            reject(new Error(`Request timeout: ${subscription.subscriptionType}`))
+          }, 5000)
+
+          // Register response handler
+          this.pendingRequests.set(requestId, {
+            resolve: (response: SubscriptionResponse) => {
+              clearTimeout(timeout)
+              resolve(response)
+            },
+            reject: (error: Error) => {
+              clearTimeout(timeout)
+              reject(error)
+            },
+            timeout,
+          })
+        })
+
+        if (response.status !== 'ok') {
           throw new Error(response.message)
         }
 
@@ -225,16 +216,12 @@ export class WebSocketClientBase {
   }
 
   protected log(...args: unknown[]): void {
-    if (this.config.debug) {
+    if (WebSocketClientBase.config.debug) {
       console.log('[WebSocketClient]', ...args)
     }
   }
 
-  async subscribe<TParams extends object, TData extends object>(
-    subscriptionType: string,
-    subscriptionParams: TParams,
-    onUpdate: (data: TData) => void,
-  ): Promise<string> {
+  async subscribe(subscriptionParams: TParams, onUpdate: (data: TData) => void): Promise<string> {
     const topic = `bars:${Object.keys(subscriptionParams)
       .sort()
       .map((key) => subscriptionParams[key as keyof TParams])
@@ -247,32 +234,16 @@ export class WebSocketClientBase {
       topic,
       onUpdate,
       confirmed: false,
-      subscriptionType: `${subscriptionType}.subscribe`,
+      subscriptionType: `${this.topicType}.subscribe`,
       subscriptionParams: subscriptionParams,
-      updateMessageType: `${subscriptionType}.update`,
+      updateMessageType: `${this.topicType}.update`,
     }
 
     this.subscriptions.set(subscriptionId, subscription as unknown as SubscriptionState)
 
     // Send subscription request and wait for confirmation
-    while (true)
-      try {
-        const response = await this.sendRequest<SubscriptionResponse>(
-          subscription.subscriptionType,
-          subscription.subscriptionParams,
-          5000, // 5 second timeout
-        )
-
-        if (response.status !== 'ok') {
-          throw new Error(response.message)
-        }
-
-        subscription.confirmed = true
-        this.log(`Subscription confirmed: ${topic}`, response)
-        return subscriptionId
-      } catch (error) {
-        this.log('Subscription error:', error)
-      }
+    await this.__subscribe(subscription as unknown as SubscriptionState)
+    return subscriptionId
   }
 
   async unsubscribe(subscriptionId: string): Promise<void> {
@@ -282,40 +253,10 @@ export class WebSocketClientBase {
       const unsubscribePayload = subscription.subscriptionParams
 
       try {
-        // Send unsubscribe request
-        const response = await this.sendRequest<SubscriptionResponse>(
-          unsubscribeType,
-          unsubscribePayload,
-          5000,
-        )
-
-        // Verify status
-        if (response.status !== 'ok') {
-          this.log('Unsubscribe warning:', response.message)
-        }
-
-        this.log(`Unsubscribed from ${subscription.topic}`)
+        await this.sendRequest(unsubscribeType, unsubscribePayload)
       } finally {
-        // Always remove subscription from map
         this.subscriptions.delete(subscriptionId)
       }
     }
-  }
-
-  static getInstance(): WebSocketClientBase {
-    const wsUrl = '/api/v1/ws' // TODO: Make configurable
-    const config: WebSocketClientConfig = { wsUrl }
-    console.log('[Datafeed] Initializing WebSocket client:', config)
-    let instance = WebSocketClientBase.instances.get(wsUrl)
-
-    if (!instance) {
-      instance = new WebSocketClientBase(config)
-      WebSocketClientBase.instances.set(wsUrl, instance)
-      instance.log('Created new WebSocket instance for', wsUrl)
-    } else {
-      instance.log('Reusing existing WebSocket instance for', wsUrl)
-    }
-
-    return instance
   }
 }
