@@ -15,7 +15,9 @@ router = OperationRouter(prefix="bars.", tags=["datafeed"])
 
 # Topic builder for bars: bars:SYMBOL:RESOLUTION
 def bars_topic_builder(params: BarsSubscriptionRequest) -> str:
-    return f"bars:{params.symbol}:{params.resolution}"
+    return ":".join(
+        ["bars"] + [str(getattr(params, attr)) for attr in sorted(vars(params))]
+    )
 
 
 @router.send("subscribe", reply="subscribe.response")  # type: ignore[misc]

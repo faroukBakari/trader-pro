@@ -171,11 +171,11 @@ class TestBarBroadcasterSubscriberCheck:
         """Test has_subscribers returns True when client is subscribed."""
         # Create mock client with topic
         mock_client = Mock()
-        mock_client.topics = {"bars:AAPL:1"}
+        mock_client.topics = {"bars:1:AAPL"}
 
         broadcaster.ws_app.connections = {"client1": mock_client}
 
-        assert broadcaster._has_subscribers("bars:AAPL:1") is True
+        assert broadcaster._has_subscribers("bars:1:AAPL") is True
 
     def test_has_subscribers_without_active_client(
         self, broadcaster: BarBroadcaster
@@ -183,7 +183,7 @@ class TestBarBroadcasterSubscriberCheck:
         """Test has_subscribers returns False when no client is subscribed."""
         broadcaster.ws_app.connections = {}
 
-        assert broadcaster._has_subscribers("bars:AAPL:1") is False
+        assert broadcaster._has_subscribers("bars:1:AAPL") is False
 
     def test_has_subscribers_with_different_topic(
         self, broadcaster: BarBroadcaster
@@ -191,11 +191,11 @@ class TestBarBroadcasterSubscriberCheck:
         """Test has_subscribers returns False for different topic."""
         # Create mock client subscribed to different topic
         mock_client = Mock()
-        mock_client.topics = {"bars:GOOGL:1"}
+        mock_client.topics = {"bars:1:GOOGL"}
 
         broadcaster.ws_app.connections = {"client1": mock_client}
 
-        assert broadcaster._has_subscribers("bars:AAPL:1") is False
+        assert broadcaster._has_subscribers("bars:1:AAPL") is False
 
     def test_has_subscribers_with_multiple_clients(
         self, broadcaster: BarBroadcaster
@@ -203,17 +203,17 @@ class TestBarBroadcasterSubscriberCheck:
         """Test has_subscribers with multiple clients."""
         # Client 1: subscribed to AAPL
         client1 = Mock()
-        client1.topics = {"bars:AAPL:1"}
+        client1.topics = {"bars:1:AAPL"}
 
         # Client 2: subscribed to GOOGL
         client2 = Mock()
-        client2.topics = {"bars:GOOGL:1"}
+        client2.topics = {"bars:1:GOOGL"}
 
         broadcaster.ws_app.connections = {"client1": client1, "client2": client2}
 
-        assert broadcaster._has_subscribers("bars:AAPL:1") is True
-        assert broadcaster._has_subscribers("bars:GOOGL:1") is True
-        assert broadcaster._has_subscribers("bars:MSFT:1") is False
+        assert broadcaster._has_subscribers("bars:1:AAPL") is True
+        assert broadcaster._has_subscribers("bars:1:GOOGL") is True
+        assert broadcaster._has_subscribers("bars:1:MSFT") is False
 
 
 class TestBarBroadcasterBroadcasting:
@@ -224,7 +224,7 @@ class TestBarBroadcasterBroadcasting:
         """Test broadcasting sends data when subscribers exist."""
         # Setup subscriber
         mock_client = Mock()
-        mock_client.topics = {"bars:AAPL:1"}
+        mock_client.topics = {"bars:1:AAPL"}
         broadcaster.ws_app.connections = {"client1": mock_client}
 
         # Broadcast
@@ -236,7 +236,7 @@ class TestBarBroadcasterBroadcasting:
 
         # Verify call arguments
         call_args = broadcaster.ws_app.publish.call_args  # type: ignore[attr-defined]
-        assert call_args.kwargs["topic"] == "bars:AAPL:1"
+        assert call_args.kwargs["topic"] == "bars:1:AAPL"
         assert call_args.kwargs["message_type"] == "bars.update"
         assert isinstance(call_args.kwargs["data"], SubscriptionUpdate)
 
@@ -278,7 +278,7 @@ class TestBarBroadcasterBroadcasting:
 
         # Subscribe to both symbols
         client = Mock()
-        client.topics = {"bars:AAPL:1", "bars:GOOGL:1"}
+        client.topics = {"bars:1:AAPL", "bars:1:GOOGL"}
         broadcaster.ws_app.connections = {"client1": client}
 
         # Broadcast
@@ -304,7 +304,7 @@ class TestBarBroadcasterBroadcasting:
 
         # Subscribe to all resolutions
         client = Mock()
-        client.topics = {"bars:AAPL:1", "bars:AAPL:5", "bars:AAPL:D"}
+        client.topics = {"bars:1:AAPL", "bars:5:AAPL", "bars:D:AAPL"}
         broadcaster.ws_app.connections = {"client1": client}
 
         # Broadcast
@@ -325,7 +325,7 @@ class TestBarBroadcasterBroadcasting:
 
         # Setup subscriber
         client = Mock()
-        client.topics = {"bars:AAPL:1"}
+        client.topics = {"bars:1:AAPL"}
         broadcaster.ws_app.connections = {"client1": client}
 
         # Broadcast
@@ -345,7 +345,7 @@ class TestBarBroadcasterBroadcasting:
 
         # Setup subscriber
         client = Mock()
-        client.topics = {"bars:AAPL:1"}
+        client.topics = {"bars:1:AAPL"}
         broadcaster.ws_app.connections = {"client1": client}
 
         # Broadcast (should not raise)
@@ -366,7 +366,7 @@ class TestBarBroadcasterLoop:
         """Test broadcast loop runs at configured interval."""
         # Setup subscriber
         client = Mock()
-        client.topics = {"bars:AAPL:1"}
+        client.topics = {"bars:1:AAPL"}
         broadcaster.ws_app.connections = {"client1": client}
 
         # Start broadcaster
@@ -389,7 +389,7 @@ class TestBarBroadcasterLoop:
         """Test broadcast loop continues running after errors."""
         # Setup subscriber
         client = Mock()
-        client.topics = {"bars:AAPL:1"}
+        client.topics = {"bars:1:AAPL"}
         broadcaster.ws_app.connections = {"client1": client}
 
         # Make first call fail, then succeed
@@ -442,7 +442,7 @@ class TestBarBroadcasterMetrics:
         """Test metrics accurately track broadcasts."""
         # Setup subscriber
         client = Mock()
-        client.topics = {"bars:AAPL:1"}
+        client.topics = {"bars:1:AAPL"}
         broadcaster.ws_app.connections = {"client1": client}
 
         # Do multiple broadcasts
@@ -477,7 +477,7 @@ class TestBarBroadcasterMetrics:
         """Test metrics track errors."""
         # Setup subscriber
         client = Mock()
-        client.topics = {"bars:AAPL:1"}
+        client.topics = {"bars:1:AAPL"}
         broadcaster.ws_app.connections = {"client1": client}
 
         # Make publish fail

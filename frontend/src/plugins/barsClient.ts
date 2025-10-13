@@ -1,33 +1,9 @@
-import type { Bar } from './ws-types'
+import type { Bar, BarsSubscriptionRequest } from './ws-types'
+import type { WebSocketInterface } from './wsClientBase'
 import { WebSocketClientBase } from './wsClientBase'
 
-export interface BarsSubscriptionRequest {
-  symbol: string
-  resolution: string
-}
-export interface BarWebSocketInterface {
-  subscribe(params: BarsSubscriptionRequest, onUpdate: (bar: Bar) => void): Promise<string>
-  unsubscribe(listenerGuid: string): Promise<void>
-}
-export class BarsWebSocketClient implements BarWebSocketInterface {
-  private instance: WebSocketClientBase
+export type BarsWebSocketInterface = WebSocketInterface<BarsSubscriptionRequest, Bar>
 
-  constructor() {
-    this.instance = WebSocketClientBase.getInstance()
-  }
-
-  async subscribe(payload: BarsSubscriptionRequest, onUpdate: (bar: Bar) => void): Promise<string> {
-    // Use base class subscribe with server confirmation
-    const subscriptionId = await this.instance.subscribe<BarsSubscriptionRequest, Bar>(
-      'bars',
-      payload,
-      onUpdate,
-    )
-    return subscriptionId
-  }
-
-  async unsubscribe(listenerGuid: string): Promise<void> {
-    // Use base class unsubscribe
-    await this.instance.unsubscribe(listenerGuid)
-  }
+export function BarsWebSocketClientFactory(): BarsWebSocketInterface {
+  return new WebSocketClientBase<BarsSubscriptionRequest, Bar>('bars')
 }

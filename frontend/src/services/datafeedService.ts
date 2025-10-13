@@ -24,7 +24,7 @@ import type {
   Timezone,
 } from '@public/trading_terminal/charting_library'
 
-import { BarsWebSocketClient, type BarsSubscriptionRequest } from '@/plugins/barsClient'
+import { BarsWebSocketClientFactory, type BarsWebSocketInterface } from '@/plugins/barsClient'
 import { TraderPlugin } from '@/plugins/traderPlugin'
 import type { AxiosPromise } from 'axios'
 
@@ -68,11 +68,6 @@ interface ApiClientInterface {
     countBack?: number | null,
   ): AxiosPromise<GetBarsResponse>
   getQuotes(getQuotesRequest: GetQuotesRequest): AxiosPromise<Array<QuoteData>>
-}
-
-interface WebSocketInterface {
-  subscribe(params: BarsSubscriptionRequest, onUpdate: (bar: Bar) => void): Promise<string>
-  unsubscribe(listenerGuid: string): Promise<void>
 }
 
 class ApiFallbackClient implements ApiClientInterface {
@@ -366,7 +361,7 @@ class ApiFallbackClient implements ApiClientInterface {
 export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private plugin: TraderPlugin<ApiClientInterface>
   private apiFallbackClient: ApiClientInterface = new ApiFallbackClient()
-  private wsClient: WebSocketInterface | null = null
+  private wsClient: BarsWebSocketInterface | null = null
   private readonly subscriptions = new Map<
     string,
     {
@@ -389,7 +384,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   >()
   constructor() {
     this.plugin = new TraderPlugin<ApiClientInterface>()
-    this.wsClient = new BarsWebSocketClient()
+    this.wsClient = BarsWebSocketClientFactory()
   }
   async _loadApiClient(mock: boolean = false): Promise<ApiClientInterface> {
     return mock
