@@ -465,6 +465,8 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
               periodParams.from * 1000,
             ).toISOString()} - ${new Date(periodParams.to * 1000).toISOString()}`,
           )
+          if (response.data.bars.length === 1)
+            response.data.bars = [...response.data.bars, ...response.data.bars]
           onResult(response.data.bars, { noData: response.data.no_data || false })
         })
         .catch((error) => {
