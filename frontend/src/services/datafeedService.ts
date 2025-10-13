@@ -24,7 +24,10 @@ import type {
   Timezone,
 } from '@public/trading_terminal/charting_library'
 
-import { BarsWebSocketClientFactory, type BarsWebSocketInterface } from '@/plugins/barsClient'
+import {
+  BarsWebSocketClientFactory,
+  type BarsWebSocketInterface,
+} from '@/clients/ws-generated/client'
 import { TraderPlugin } from '@/plugins/traderPlugin'
 import type { AxiosPromise } from 'axios'
 

@@ -174,6 +174,38 @@ const versions = await apiService.getVersions()
 const clientType = apiService.getClientType() // 'server' | 'mock' | 'unknown'
 ```
 
+## WebSocket Client Generation
+
+### Overview
+
+Similar to REST API client generation, WebSocket clients are also auto-generated from the backend AsyncAPI specification.
+
+**See**: [`WS-CLIENT-AUTO-GENERATION.md`](./WS-CLIENT-AUTO-GENERATION.md) for complete WebSocket client generation documentation.
+
+### Quick Summary
+
+- **Generator**: `scripts/generate-ws-client.mjs`
+- **Source**: AsyncAPI spec at `/api/v1/ws/asyncapi.json`
+- **Output**: 
+  - `src/clients/ws-types-generated/` - TypeScript interfaces
+  - `src/clients/ws-generated/` - Client factories
+- **Integration**: Runs automatically in `predev` and `prebuild` hooks
+- **Base Implementation**: `src/plugins/wsClientBase.ts` (manual, not generated)
+
+### Usage
+
+```typescript
+// Auto-generated from AsyncAPI spec
+import { BarsWebSocketClientFactory } from '@/clients/ws-generated/client'
+import type { Bar, BarsSubscriptionRequest } from '@/clients/ws-types-generated'
+
+const wsClient = BarsWebSocketClientFactory()
+await wsClient.subscribe(
+  { symbol: 'AAPL', resolution: '1' },
+  (bar: Bar) => console.log(bar)
+)
+```
+
 ## Backend Changes
 
 ### What Was Removed

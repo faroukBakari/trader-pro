@@ -10,7 +10,7 @@ define run-with-nvm
 	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; $(1)'
 endef
 
-.PHONY: help ensure-node ensure-node-ci install install-ci lint type-check test test-run build dev clean client-generate
+.PHONY: help ensure-node ensure-node-ci install install-ci lint type-check test test-run build dev clean client-generate ws-generate
 
 # Default target
 help:
@@ -20,6 +20,7 @@ help:
 	@echo "  install         Install frontend dependencies"
 	@echo "  install-ci      Install frontend dependencies for CI"
 	@echo "  client-generate Generate API client from live server or use mock"
+	@echo "  ws-generate     Generate WebSocket client from AsyncAPI spec"
 	@echo "  lint            Run frontend linting and formatting checks"
 	@echo "  type-check      Run TypeScript type checking"
 	@echo "  test            Run frontend tests in watch mode"
@@ -172,6 +173,11 @@ client-generate:
 	@echo "Generating API client..."
 	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-client.sh'
 
+# WebSocket client generation
+ws-generate:
+	@echo "Generating WebSocket client from AsyncAPI..."
+	$(call run-with-nvm,npm run ws:generate)
+
 # Linting and formatting
 lint:
 	@echo "Running frontend linting and formatting checks..."
@@ -200,11 +206,11 @@ build:
 dev:
 	@echo "Starting frontend development server..."
 	@echo "🧹 Cleaning generated client..."
-	rm -rf src/clients/trader-client-generated
+	rm -rf src/clients/trader-client-generated src/clients/ws-generated src/clients/ws-types-generated
 	$(call run-with-nvm,npm run dev)
 
 # Cleanup
 clean:
 	@echo "Cleaning frontend build artifacts..."
-	rm -rf dist/ node_modules/.vite src/clients/trader-client-generated
+	rm -rf dist/ node_modules/.vite src/clients/trader-client-generated src/clients/ws-generated src/clients/ws-types-generated
 	@echo "Frontend clean complete."
