@@ -10,7 +10,12 @@ organized by functionality:
 """
 
 # Import from common utilities
-from .common import BaseApiResponse, ErrorApiResponse, SubscriptionResponse
+from .common import (
+    BaseApiResponse,
+    ErrorApiResponse,
+    SubscriptionResponse,
+    SubscriptionUpdate,
+)
 
 # Import from market data domain
 from .market import (
@@ -24,6 +29,7 @@ from .market import (
     GetBarsResponse,
     GetQuotesRequest,
     QuoteData,
+    QuoteDataSubscriptionRequest,
     QuoteValues,
     SearchSymbolResultItem,
     SearchSymbolsRequest,
@@ -33,6 +39,7 @@ from .market import (
 __all__ = [
     # Common utilities
     "BaseApiResponse",
+    "SubscriptionUpdate",
     "ErrorApiResponse",
     "SubscriptionResponse",
     "BarsSubscriptionRequest",
@@ -50,4 +57,5 @@ __all__ = [
     "SearchSymbolResultItem",
     "SearchSymbolsRequest",
     "SymbolInfo",
+    "QuoteDataSubscriptionRequest",
 ]

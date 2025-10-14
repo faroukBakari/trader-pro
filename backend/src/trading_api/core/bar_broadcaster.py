@@ -10,8 +10,7 @@ import logging
 from typing import List
 
 from trading_api.core.datafeed_service import DatafeedService
-from trading_api.models.common import SubscriptionUpdate
-from trading_api.models.market.bars import Bar
+from trading_api.models import Bar, SubscriptionUpdate
 from trading_api.plugins.fastws_adapter import FastWSAdapter
 from trading_api.ws.datafeed import BarsSubscriptionRequest, bars_topic_builder
 

@@ -6,8 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from trading_api.main import apiApp, wsApp
-from trading_api.models.common import SubscriptionUpdate
-from trading_api.models.market.bars import Bar, BarsSubscriptionRequest
+from trading_api.models import Bar, BarsSubscriptionRequest, SubscriptionUpdate
 
 
 class TestBarsWebSocketIntegration:

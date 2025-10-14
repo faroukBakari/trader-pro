@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 BACKEND_APP_NAME ?= app
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install test test-cov lint lint-check format build clean dev health clients export-openapi docs-html
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install test test-cov lint lint-check format build clean dev health clients export-openapi docs-html generate-ws-routers
 
 # Default target
 help:
@@ -25,6 +25,7 @@ help:
 	@echo "  health            Check backend health"
 	@echo "  export-openapi    Export OpenAPI specification"
 	@echo "  docs-html         Generate static HTML documentation"
+	@echo "  generate-ws-routers Generate WebSocket router classes"
 
 # Ensure Python 3.11+ is available
 ensure-python:
@@ -234,6 +235,7 @@ dev-ci:
 build:
 	@echo "Building backend package..."
 	poetry build
+	@./scripts/generate-ws-routers.sh
 
 # Health check
 health:
@@ -249,7 +251,7 @@ health-ci:
 # Cleanup
 clean:
 	@echo "Cleaning backend build artifacts..."
-	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage clients/ openapi*.json
+	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage clients/ src/trading_api/ws/generated/ openapi*.json
 	@echo "Backend clean complete."
 
 # Export OpenAPI specification
@@ -261,3 +263,7 @@ export-openapi:
 docs-html:
 	@echo "Generating static HTML documentation..."
 	npx redoc-cli bundle openapi.json -o docs/api.html
+
+# Generate WebSocket router classes
+generate-ws-routers:
+	@./scripts/generate-ws-routers.sh
