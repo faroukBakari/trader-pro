@@ -163,9 +163,25 @@ ensure-poetry:
 	fi
 
 # Backend dependency management
-install: ensure-python ensure-poetry
+install: ensure-poetry
 	@echo "Installing backend dependencies..."
-	poetry install
+	@if [ -d ".venv" ] && [ -f ".venv/bin/python" ]; then \
+		VENV_PYTHON_VERSION=$$(.venv/bin/python --version 2>&1 | grep -oP '\d+\.\d+' | head -1); \
+		REQUIRED_VERSION="3.11"; \
+		if [ -n "$$VENV_PYTHON_VERSION" ] && [ "$$(printf '%s\n' "$$REQUIRED_VERSION" "$$VENV_PYTHON_VERSION" | sort -V | head -n1)" = "$$REQUIRED_VERSION" ]; then \
+			echo "✓ Found existing virtual environment with Python $$VENV_PYTHON_VERSION"; \
+			poetry install; \
+		else \
+			echo "⚠️  Existing venv has incompatible Python version ($$VENV_PYTHON_VERSION), recreating..."; \
+			rm -rf .venv; \
+			$(MAKE) ensure-python; \
+			poetry install; \
+		fi; \
+	else \
+		echo "No existing virtual environment found, checking Python..."; \
+		$(MAKE) ensure-python; \
+		poetry install; \
+	fi
 
 # CI-optimized install (non-interactive)
 install-ci: ensure-python-ci ensure-poetry
