@@ -222,7 +222,7 @@ export class WebSocketClientBase<TParams extends object, TData extends object> {
   }
 
   async subscribe(subscriptionParams: TParams, onUpdate: (data: TData) => void): Promise<string> {
-    const topic = `bars:${Object.keys(subscriptionParams)
+    const topic = `${this.topicType}:${Object.keys(subscriptionParams)
       .sort()
       .map((key) => subscriptionParams[key as keyof TParams])
       .join(':')}`
