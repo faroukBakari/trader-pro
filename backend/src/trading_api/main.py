@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, AsyncGenerator
 
-from fastapi import Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.routing import APIRoute
 
 from external_packages.fastws import Client
@@ -19,7 +19,9 @@ from .core.bar_broadcaster import BarBroadcaster
 from .core.config import BroadcasterConfig
 from .core.datafeed_service import DatafeedService
 from .core.versioning import APIVersion
-from .ws.datafeed import router as ws_datafeed_router
+from .ws.datafeed import ws_routers
+
+api_routers: list[APIRouter] = [health_router, versions_router, datafeed_router]
 
 # Configure logging for the application
 logging.basicConfig(
@@ -119,6 +121,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     print("🛑 FastAPI application shutdown complete")
 
 
+base_url = "/api/v1"
+
 apiApp = FastAPI(
     title="Trading API",
     description=(
@@ -127,9 +131,9 @@ apiApp = FastAPI(
         "backwards compatibility."
     ),
     version="1.0.0",
-    openapi_url="/api/v1/openapi.json",
-    docs_url="/api/v1/docs",
-    redoc_url="/api/v1/redoc",
+    openapi_url=f"{base_url}/openapi.json",
+    docs_url=f"{base_url}/docs",
+    redoc_url=f"{base_url}/redoc",
     openapi_tags=[
         {"name": "health", "description": "Health check operations"},
         {"name": "versioning", "description": "API version information"},
@@ -138,6 +142,7 @@ apiApp = FastAPI(
     lifespan=lifespan,
 )
 
+ws_url = f"{base_url}/ws"
 wsApp = FastWSAdapter(
     title="Trading WebSockets",
     description=(
@@ -145,22 +150,23 @@ wsApp = FastWSAdapter(
         "Read the documentation to subscribe to specific data feeds."
     ),
     version="1.0.0",
-    asyncapi_url="/api/v1/ws/asyncapi.json",
-    asyncapi_docs_url="/api/v1/ws/asyncapi",
+    asyncapi_url=f"{ws_url}/asyncapi.json",
+    asyncapi_docs_url=f"{ws_url}/asyncapi",
     heartbeat_interval=30.0,
     max_connection_lifespan=3600.0,
 )
 
-wsApp.include_router(ws_datafeed_router)
+# Include all WebSocket routers
+for ws_router in ws_routers:
+    wsApp.include_router(ws_router)
 
 # Include version 1 routes
-apiApp.include_router(health_router, prefix="/api/v1", tags=["v1"])
-apiApp.include_router(versions_router, prefix="/api/v1", tags=["v1"])
-apiApp.include_router(datafeed_router, prefix="/api/v1", tags=["v1"])
+for api_router in api_routers:
+    apiApp.include_router(api_router, prefix=base_url, tags=["v1"])
 
 
 # Register the WebSocket endpoint
-@apiApp.websocket("/api/v1/ws")
+@apiApp.websocket(ws_url)
 async def websocket_bars_endpoint(
     client: Annotated[Client, Depends(wsApp.manage)],
 ) -> None:
@@ -176,22 +182,12 @@ async def root() -> dict:
         "name": "Trading API",
         "version": "1.0.0",
         "current_api_version": APIVersion.get_latest().value,
-        "documentation": "/api/v1/docs",
-        "health": "/api/v1/health",
-        "versions": "/api/v1/versions",
-        "datafeed": "/api/v1/datafeed",
+        "documentation": f"{base_url}/docs",
+        "health": f"{base_url}/health",
+        "versions": f"{base_url}/versions",
+        "datafeed": f"{base_url}/datafeed",
         "websockets": {
-            "bars": {
-                "endpoint": "/api/v1/ws",
-                "docs": wsApp.asyncapi_docs_url,
-                "spec": wsApp.asyncapi_url,
-                "operations": [
-                    "bars.subscribe",
-                    "bars.unsubscribe",
-                    "bars.update",
-                ],
-                "note": "WebSocket endpoints use AsyncAPI spec, not OpenAPI/Swagger",
-            },
+            router.route: router.build_specs(ws_url, wsApp) for router in ws_routers
         },
     }
 

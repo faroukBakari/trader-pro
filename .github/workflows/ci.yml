@@ -45,6 +45,10 @@ jobs:
       working-directory: backend
       run: make install-ci
 
+    - name: Generate WebSocket routers
+      working-directory: backend
+      run: make generate-ws-routers
+
     - name: Install Git hooks
       run: |
         git config core.hooksPath .githooks
@@ -136,6 +140,10 @@ jobs:
     - name: Install backend dependencies
       working-directory: backend
       run: make install-ci
+
+    - name: Generate WebSocket routers
+      working-directory: backend
+      run: make generate-ws-routers
 
     - name: Install frontend dependencies
       working-directory: frontend

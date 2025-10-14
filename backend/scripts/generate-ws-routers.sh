@@ -40,18 +40,8 @@ else
 fi
 echo ""
 
-# Step 3: Sort imports with isort
-echo -e "${BLUE}📦 Step 3: Sorting imports (isort)...${NC}"
-if poetry run isort "$GENERATED_DIR"; then
-    echo -e "${GREEN}✅ Import sorting complete${NC}"
-else
-    echo -e "${RED}❌ Import sorting failed${NC}"
-    exit 1
-fi
-echo ""
-
-# Step 4: Format with ruff
-echo -e "${BLUE}✨ Step 4: Formatting with ruff...${NC}"
+# Step 3: Format with ruff
+echo -e "${BLUE}✨ Step 3: Formatting with ruff...${NC}"
 if poetry run ruff format "$GENERATED_DIR"; then
     echo -e "${GREEN}✅ Ruff formatting complete${NC}"
 else
@@ -60,8 +50,8 @@ else
 fi
 echo ""
 
-# Step 5: Auto-fix linter issues
-echo -e "${BLUE}🔧 Step 5: Auto-fixing linter issues...${NC}"
+# Step 4: Auto-fix linter issues
+echo -e "${BLUE}🔧 Step 4: Auto-fixing linter issues...${NC}"
 if poetry run ruff check "$GENERATED_DIR" --fix; then
     echo -e "${GREEN}✅ Auto-fixes applied${NC}"
 else
@@ -69,8 +59,8 @@ else
 fi
 echo ""
 
-# Step 6: Run flake8 linter
-echo -e "${BLUE}🔍 Step 6: Running flake8 linter...${NC}"
+# Step 5: Run flake8 linter
+echo -e "${BLUE}🔍 Step 5: Running flake8 linter...${NC}"
 if poetry run flake8 "$GENERATED_DIR"; then
     echo -e "${GREEN}✅ Flake8 checks passed${NC}"
 else
@@ -79,8 +69,8 @@ else
 fi
 echo ""
 
-# Step 7: Run final ruff linter checks
-echo -e "${BLUE}🔍 Step 7: Running ruff linter checks...${NC}"
+# Step 6: Run final ruff linter checks
+echo -e "${BLUE}🔍 Step 6: Running ruff linter checks...${NC}"
 if poetry run ruff check "$GENERATED_DIR"; then
     echo -e "${GREEN}✅ All ruff checks passed${NC}"
 else
@@ -90,12 +80,22 @@ else
 fi
 echo ""
 
-# Step 8: Run type checks
-echo -e "${BLUE}🔬 Step 8: Running type checks...${NC}"
+# Step 7: Run type checks
+echo -e "${BLUE}🔬 Step 7: Running type checks...${NC}"
 if poetry run mypy "$GENERATED_DIR"; then
     echo -e "${GREEN}✅ Type checks passed${NC}"
 else
     echo -e "${RED}❌ Type checks failed${NC}"
+    exit 1
+fi
+echo ""
+
+# Step 8: Sort imports with isort
+echo -e "${BLUE}📦 Step 8: Sorting imports (isort)...${NC}"
+if poetry run isort "$GENERATED_DIR"; then
+    echo -e "${GREEN}✅ Import sorting complete${NC}"
+else
+    echo -e "${RED}❌ Import sorting failed${NC}"
     exit 1
 fi
 echo ""
