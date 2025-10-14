@@ -7,7 +7,7 @@
 
 // Type definitions (fallback when generated types are not available)
 
-import { TraderPlugin } from '@/plugins/traderPlugin'
+import { ApiTraderPlugin } from '@/plugins/traderPlugin'
 export interface HealthResponse {
   status: string
   message?: string
@@ -112,10 +112,10 @@ class FallbackClient implements ClientInterface {
 
 // Main API service implementation
 export class ApiService {
-  private plugin: TraderPlugin<ClientInterface>
+  private plugin: ApiTraderPlugin<ClientInterface>
 
   constructor() {
-    this.plugin = new TraderPlugin<ClientInterface>()
+    this.plugin = new ApiTraderPlugin<ClientInterface>()
   }
 
   async _loadClient(): Promise<ClientInterface> {
@@ -144,6 +144,6 @@ export class ApiService {
 
   // Check if currently using mock client
   getClientType(): 'server' | 'mock' | 'unknown' {
-    return TraderPlugin.getClientType()
+    return ApiTraderPlugin.getApiClientType()
   }
 }

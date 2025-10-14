@@ -30,7 +30,7 @@ This document describes the intelligent client generation architecture that enab
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Automatic Client Generation                                 │
-│  (scripts/generate-client.sh)                               │
+│  (scripts/generate-api-client.sh)                               │
 └─────────────────────┬───────────────────────────────────────┘
                       │
                       ▼
@@ -67,7 +67,7 @@ This document describes the intelligent client generation architecture that enab
 ```
 frontend/
 ├── scripts/
-│   └── generate-client.sh          # Smart client generator
+│   └── generate-api-client.sh          # Smart client generator
 ├── src/
 │   └── services/
 │       ├── apiService.ts           # Smart service wrapper
@@ -83,7 +83,7 @@ frontend/
 
 ### 1. Client Generation Script
 
-**Location**: `frontend/scripts/generate-client.sh`
+**Location**: `frontend/scripts/generate-api-client.sh`
 
 **Responsibilities**:
 - Check if backend API is available
@@ -98,7 +98,7 @@ npm run build
 
 # Manual
 npm run client:generate
-./scripts/generate-client.sh
+./scripts/generate-api-client.sh
 ```
 
 ### 2. Smart Service Wrapper
@@ -144,7 +144,7 @@ generated/
     "build": "run-p type-check \"build-only {@}\" --",
     "prebuild": "npm run client:generate",
     "predev": "npm run client:generate",
-    "client:generate": "./scripts/generate-client.sh"
+    "client:generate": "./scripts/generate-api-client.sh"
   }
 }
 ```
@@ -158,7 +158,7 @@ generated/
 ```makefile
 client-generate:
 	@echo "Generating API client..."
-	./scripts/generate-client.sh
+	./scripts/generate-api-client.sh
 ```
 
 ### 3. Component Usage
@@ -386,8 +386,8 @@ const success = await testApiIntegration()
    ```bash
    cd frontend
    mkdir -p scripts
-   # Copy generate-client.sh from this project
-   chmod +x scripts/generate-client.sh
+   # Copy generate-api-client.sh from this project
+   chmod +x scripts/generate-api-client.sh
    ```
 
 3. **Update package.json**:
@@ -396,7 +396,7 @@ const success = await testApiIntegration()
      "scripts": {
        "prebuild": "npm run client:generate",
        "predev": "npm run client:generate",
-       "client:generate": "./scripts/generate-client.sh"
+       "client:generate": "./scripts/generate-api-client.sh"
      }
    }
    ```

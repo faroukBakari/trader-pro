@@ -181,7 +181,7 @@ Client generation happens automatically during:
 
 ### How It Works
 
-The generation script (`scripts/generate-client.sh`):
+The generation script (`scripts/generate-api-client.sh`):
 
 1. Checks if backend API is running at `http://localhost:8000`
 2. If available:
@@ -212,7 +212,7 @@ VITE_API_URL=http://api.example.com
 npm run client:generate
 
 # Or use the script directly
-./scripts/generate-client.sh
+./scripts/generate-api-client.sh
 ```
 
 ## Benefits

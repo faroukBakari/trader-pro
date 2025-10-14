@@ -16,7 +16,7 @@
     "lint": "eslint . --fix",
     "format": "prettier --write src/ --ignore-path .prettierignore",
     "fix-whitespace": "find src/ -name '*.ts' -o -name '*.vue' -o -name '*.sh' -o -name '*.md' | xargs sed -i 's/[[:space:]]*$//'",
-    "client:generate": "./scripts/generate-client.sh",
+    "client:generate": "./scripts/generate-api-client.sh",
     "ws:generate": "node scripts/generate-ws-client.mjs",
     "prebuild": "npm run client:generate && npm run ws:generate",
     "predev": "npm run client:generate && npm run ws:generate"

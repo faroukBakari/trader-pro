@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const DEFAULT_API_URL = 'http://localhost:8000/api/v1/ws/asyncapi.json'
+const DEFAULT_API_URL = `http://localhost:${process.env.BACKEND_PORT || 8000}/api/v1/ws/asyncapi.json`
 const OUTPUT_DIR = path.join(__dirname, '../src/clients')
 const WS_TYPES_OUTPUT = path.join(OUTPUT_DIR, 'ws-types-generated/index.ts')
 const WS_CLIENT_OUTPUT = path.join(OUTPUT_DIR, 'ws-generated/client.ts')
