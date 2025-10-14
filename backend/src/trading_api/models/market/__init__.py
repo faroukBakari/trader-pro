@@ -13,7 +13,12 @@ from .instruments import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from .quotes import GetQuotesRequest, QuoteData, QuoteValues
+from .quotes import (
+    GetQuotesRequest,
+    QuoteData,
+    QuoteDataSubscriptionRequest,
+    QuoteValues,
+)
 from .search import SearchSymbolsRequest
 
 __all__: list[str] = [
@@ -36,4 +41,5 @@ __all__: list[str] = [
     # Configuration and health
     "DatafeedConfiguration",
     "DatafeedHealthResponse",
+    "QuoteDataSubscriptionRequest",
 ]

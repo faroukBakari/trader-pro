@@ -44,6 +44,26 @@ class GetQuotesRequest(BaseModel):
     symbols: List[str] = Field(..., description="Symbol names")
 
 
+class QuoteDataSubscriptionRequest(BaseModel):
+    """
+    Request model for quote data subscription.
+
+    Matches TradingView's subscribeQuotes interface.
+    Supports subscribing to multiple symbols with different update frequencies.
+    """
+
+    symbols: List[str] = Field(
+        default_factory=list,
+        description="Symbols requiring slow updates (once per minute) - "
+        "e.g., watchlist items not currently visible",
+    )
+    fast_symbols: List[str] = Field(
+        default_factory=list,
+        description="Symbols requiring fast updates (at least every 10 seconds) - "
+        "e.g., currently visible or active symbols",
+    )
+
+
 __all__ = [
     "QuoteValues",
     "QuoteData",
