@@ -15,6 +15,7 @@ Successfully implemented automatic WebSocket client generation from AsyncAPI spe
 
 **Key Features**:
 - Fetches AsyncAPI spec from backend (`/api/v1/ws/asyncapi.json`)
+- **Graceful Fallback**: Exits successfully if backend unavailable (app uses fallback client)
 - Extracts 3 key variables per route:
   1. **Route Prefix**: Channel name (e.g., `'bars'`)
   2. **Request Type**: Subscribe message payload schema (e.g., `BarsSubscriptionRequest`)
@@ -26,7 +27,9 @@ Successfully implemented automatic WebSocket client generation from AsyncAPI spe
 
 ### Generated Files
 
-#### 1. Type Definitions (`src/clients/ws-types-generated/index.ts`)
+#### When Backend is Available
+
+**1. Type Definitions** (`src/clients/ws-types-generated/index.ts`)
 
 Generated interfaces:
 - `Bar` - OHLC bar data model
@@ -34,7 +37,7 @@ Generated interfaces:
 - `SubscriptionResponse` - Generic subscription response
 - `SubscriptionUpdate_Bar_` - Update message wrapper
 
-#### 2. Client Factory (`src/clients/ws-generated/client.ts`)
+**2. Client Factory** (`src/clients/ws-generated/client.ts`)
 
 Generated exports:
 ```typescript
@@ -43,6 +46,17 @@ export type BarsWebSocketInterface = WebSocketInterface<BarsSubscriptionRequest,
 ```
 
 Uses `WebSocketClientBase` from `src/plugins/wsClientBase.ts` (manual, not generated).
+
+#### When Backend is Unavailable
+
+**Fallback Behavior**:
+- Generator exits successfully (exit code 0)
+- No generated client files created
+- Application automatically uses `BarsWebSocketFallbackClient` from `datafeedService.ts`
+- Mock data generation with realistic bar updates
+- All features work for development/testing
+
+This pattern mirrors the REST API client generation (see `CLIENT-GENERATION.md`).
 
 ### Integration
 
@@ -84,6 +98,32 @@ import type { Bar } from '@/clients/ws-types-generated'
 - ❌ `src/plugins/ws-types.ts` - Replaced by generated types
 - ✅ `src/plugins/wsClientBase.ts` - **KEPT** (base implementation, not generated)
 
+### Fallback Implementation
+
+**File**: `src/services/datafeedService.ts`
+
+**Fallback Class**: `BarsWebSocketFallbackClient`
+
+The fallback client provides mock WebSocket functionality when the backend is unavailable:
+- Implements same `BarsWebSocketInterface` as generated client
+- Generates realistic bar updates using last bar data
+- Updates every 1 second with randomized OHLC values
+- Manages subscriptions with unique IDs
+- No network connection required
+
+**Usage** (automatic via plugin):
+```typescript
+// Plugin automatically selects client
+const client = await this.wsPlugin.getClientWithFallback(BarsWebSocketFallbackClient)
+
+// Same API whether using generated or fallback client
+await client.subscribe(params, (bar) => {
+  console.log('Bar update:', bar)
+})
+```
+
+This pattern matches the REST API fallback in `apiService.ts` (see `CLIENT-GENERATION.md`).
+
 ### Git Configuration
 
 Added to `.gitignore`:
@@ -100,6 +140,11 @@ frontend/src/clients/ws-types-generated/
 Clients are automatically generated before:
 - `npm run dev` - Development server
 - `npm run build` - Production build
+
+**Behavior**:
+- ✅ **Backend Running**: Generates clients from live AsyncAPI spec
+- ✅ **Backend Not Running**: Exits gracefully, app uses fallback client
+- ✅ **CI/CD**: Builds successfully without backend (uses fallback)
 
 ### Manual
 
