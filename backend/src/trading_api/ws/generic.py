@@ -1,15 +1,12 @@
-"""
-WebSocket adapter for real-time bar (OHLC) data subscriptions
-"""
-
 import logging
 from enum import Enum
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel
 
-from external_packages.fastws import Client, OperationRouter
+from external_packages.fastws import Client
 from trading_api.models import SubscriptionResponse, SubscriptionUpdate
+from trading_api.ws.router_interface import WsRouterInterface
 
 __TRequest = TypeVar("__TRequest", bound=BaseModel)
 __TData = TypeVar("__TData", bound=BaseModel)
@@ -17,7 +14,7 @@ __TData = TypeVar("__TData", bound=BaseModel)
 logger = logging.getLogger(__name__)
 
 
-class WsRouter(OperationRouter, Generic[__TRequest, __TData]):
+class WsRouter(WsRouterInterface, Generic[__TRequest, __TData]):
     def __init__(
         self,
         *,
@@ -67,10 +64,3 @@ class WsRouter(OperationRouter, Generic[__TRequest, __TData]):
         ) -> SubscriptionUpdate[__TData]:
             """Broadcast data updates to subscribed clients"""
             return payload
-
-        # Topic builder for bars: bars:SYMBOL:RESOLUTION
-
-    def topic_builder(self, params: BaseModel) -> str:
-        return ":".join(
-            [self.route] + [str(getattr(params, attr)) for attr in sorted(vars(params))]
-        )

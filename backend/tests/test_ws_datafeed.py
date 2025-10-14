@@ -164,6 +164,7 @@ class TestBarsWebSocketIntegration:
                     params=BarsSubscriptionRequest(symbol="AAPL", resolution="1")
                 ),
                 data=update,
+                message_type="bars.update",
             )
 
             # Receive the broadcast message

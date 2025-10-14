@@ -70,6 +70,15 @@ cleanup() {
         fi
     fi
 
+    if [ ! -z "$WS_WATCHER_PID" ] && is_process_running "$WS_WATCHER_PID"; then
+        print_step "Stopping WebSocket router watcher (PID: $WS_WATCHER_PID)..."
+        kill -TERM $WS_WATCHER_PID 2>/dev/null || true
+        sleep 1
+        if is_process_running "$WS_WATCHER_PID"; then
+            kill -KILL $WS_WATCHER_PID 2>/dev/null || true
+        fi
+    fi
+
     if [ ! -z "$WATCHER_PID" ] && is_process_running "$WATCHER_PID"; then
         print_step "Stopping OpenAPI watcher (PID: $WATCHER_PID)..."
         kill -TERM $WATCHER_PID 2>/dev/null || true
@@ -92,6 +101,7 @@ trap cleanup EXIT INT TERM
 BACKEND_PID=""
 FRONTEND_PID=""
 WATCHER_PID=""
+WS_WATCHER_PID=""
 
 print_step "🚀 Starting full-stack development environment..."
 
@@ -104,6 +114,16 @@ rm -rf frontend/src/clients/trader-client-generated
 print_step "🧹 Removing frontend build artifacts..."
 rm -rf frontend/dist frontend/node_modules/.vite
 print_success "Clean up complete - fresh start ready"
+
+# Step 0.5: Generate WebSocket routers initially
+print_step "0.5. Generating WebSocket routers..."
+cd backend
+if ./scripts/generate-ws-routers.sh >/dev/null 2>&1; then
+    print_success "WebSocket routers generated"
+else
+    print_warning "WebSocket router generation failed, continuing..."
+fi
+cd ..
 
 # Step 1: Start backend server in background
 print_step "1. Starting backend server..."
@@ -195,11 +215,21 @@ fi
 } &
 WATCHER_PID=$!
 
+# Step 4.5: Start WebSocket router watcher
+print_step "4.5. Starting WebSocket router watcher..."
+cd backend
+./scripts/watch-ws-routers.sh &
+WS_WATCHER_PID=$!
+cd ..
+print_success "WebSocket router watcher active (PID: $WS_WATCHER_PID)"
+
 print_step "5. Starting frontend development server..."
 print_step "🌐 Frontend will be available at: $FRONTEND_URL"
 print_step "🔧 Backend API is running at: $VITE_API_URL"
 print_step "👁️  OpenAPI file watcher is active"
 print_step "📄 Watching: backend/openapi.json for changes"
+print_step "🔄 WebSocket router watcher is active"
+print_step "📂 Watching: backend/src/trading_api/ws/*.py for changes"
 print_step ""
 print_warning "Press Ctrl+C to stop all servers and watchers"
 print_step ""

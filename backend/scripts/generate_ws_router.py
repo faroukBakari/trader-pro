@@ -36,7 +36,7 @@ def parse_router_specs(ws_dir: Path) -> list[RouterSpec]:
 
     # Find all .py files except generic.py and files in generated/
     for py_file in ws_dir.glob("*.py"):
-        if py_file.name in ("__init__.py", "generic.py"):
+        if py_file.name in ("__init__.py", "generic.py", "router_interface.py"):
             continue
 
         content = py_file.read_text()
@@ -61,17 +61,14 @@ def parse_router_specs(ws_dir: Path) -> list[RouterSpec]:
 def generate_router_code(spec: RouterSpec, template: str) -> str:
     """Generate concrete router code from template and spec."""
     lines = template.split("\n")
-    result_lines = []
+    result_lines = [
+        f"from trading_api.models import {spec.request_type}, {spec.data_type}"
+    ]
     for line in lines:
         if "TypeVar(" in line:
             continue
-        if line.strip() == "from typing import Generic, TypeVar":
-            result_lines.append(
-                f"from trading_api.models import {spec.request_type}, {spec.data_type}"
-            )
-            continue
-        if "class WsRouter(OperationRouter, Generic[__TRequest, __TData]):" in line:
-            result_lines.append(f"class {spec.class_name}(OperationRouter):")
+        if "class WsRouter(" in line:
+            result_lines.append(f"class {spec.class_name}(WsRouterInterface):")
             continue
         modified_line = line.replace("__TRequest", spec.request_type)
         modified_line = modified_line.replace("__TData", spec.data_type)

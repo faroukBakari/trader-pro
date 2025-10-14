@@ -25,7 +25,7 @@ class FastWSAdapter(FastWS):
         self,
         topic: str,
         data: BaseModel,
-        message_type: str = "bars.update",
+        message_type: str,
     ) -> None:
         """
         Publish data update to all subscribed clients
