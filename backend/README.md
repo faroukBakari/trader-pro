@@ -166,7 +166,7 @@ See `docs/websockets.md` (Bar Broadcasting Service section) for details.
 ## Client Generation
 
 - The OpenAPI specification is regenerated on application startup and saved to `backend/openapi.json`
-- Frontend consumers run `npm run client:generate` (defined in `frontend/package.json`) which uses `frontend/scripts/generate-client.sh`
+- Frontend consumers run `npm run client:generate` (defined in `frontend/package.json`) which uses `frontend/scripts/generate-api-client.sh`
 - For ad-hoc exports use `make export-openapi`
 
 ## Development Workflow

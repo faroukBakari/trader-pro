@@ -171,7 +171,7 @@ install-ci: ensure-node-ci
 # Client generation
 client-generate:
 	@echo "Generating API client..."
-	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-client.sh'
+	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-api-client.sh'
 
 # WebSocket client generation
 ws-generate:

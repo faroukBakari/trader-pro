@@ -8,7 +8,7 @@ Refactored the API client generation architecture to make the frontend self-suff
 
 ### ✅ New Files Created
 
-1. **`frontend/scripts/generate-client.sh`**
+1. **`frontend/scripts/generate-api-client.sh`**
    - Smart client generation script
    - Detects if API is available
    - Generates TypeScript client from live API
@@ -31,7 +31,7 @@ Refactored the API client generation architecture to make the frontend self-suff
    - "client:generate": "cd ../backend && make frontend-client"
    - "client:watch": "cd ../backend && make watch-client"
    - "dev:with-client": "npm run client:generate && npm run dev"
-   + "client:generate": "./scripts/generate-client.sh"
+   + "client:generate": "./scripts/generate-api-client.sh"
    + "prebuild": "npm run client:generate"
    + "predev": "npm run client:generate"
    ```
@@ -43,7 +43,7 @@ Refactored the API client generation architecture to make the frontend self-suff
    ```diff
    + client-generate:
    +     @echo "Generating API client..."
-   +     ./scripts/generate-client.sh
+   +     ./scripts/generate-api-client.sh
    ```
    - Added `client-generate` target
    - Updated help text
@@ -276,7 +276,7 @@ rm -rf src/services/generated/
 
 - ✅ `CLIENT-GENERATION.md` - Complete architecture guide
 - ✅ `frontend/src/services/README.md` - Updated service layer docs
-- ✅ `frontend/scripts/generate-client.sh` - Inline documentation
+- ✅ `frontend/scripts/generate-api-client.sh` - Inline documentation
 
 ### Updated Documentation
 

@@ -4,10 +4,10 @@
 # If the API is not available, it falls back to using the mock client implementation.
 #
 # Usage:
-#   ./scripts/generate-client.sh                    # Use default settings
-#   VITE_API_URL=http://api.example.com ./scripts/generate-client.sh    # Custom API URL
-#   TRADER_API_BASE_PATH="" ./scripts/generate-client.sh                 # Empty basePath (relative URLs)
-#   TRADER_API_BASE_PATH="/api" ./scripts/generate-client.sh             # Custom basePath
+#   ./scripts/generate-api-client.sh                    # Use default settings
+#   VITE_API_URL=http://api.example.com ./scripts/generate-api-client.sh    # Custom API URL
+#   TRADER_API_BASE_PATH="" ./scripts/generate-api-client.sh                 # Empty basePath (relative URLs)
+#   TRADER_API_BASE_PATH="/api" ./scripts/generate-api-client.sh             # Custom basePath
 #
 # Environment Variables:
 #   VITE_API_URL      - API server URL (default: http://localhost:8000)

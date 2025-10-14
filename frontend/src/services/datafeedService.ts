@@ -24,11 +24,7 @@ import type {
   Timezone,
 } from '@public/trading_terminal/charting_library'
 
-import {
-  BarsWebSocketClientFactory,
-  type BarsWebSocketInterface,
-} from '@/clients/ws-generated/client'
-import { TraderPlugin } from '@/plugins/traderPlugin'
+import { ApiTraderPlugin, WebSocketClientPlugin } from '@/plugins/traderPlugin'
 import type { AxiosPromise } from 'axios'
 
 interface GetBarsResponse {
@@ -37,6 +33,11 @@ interface GetBarsResponse {
 }
 interface GetQuotesRequest {
   symbols: string[]
+}
+
+interface BarsSubscriptionRequest {
+  symbol: string
+  resolution?: string
 }
 
 // documentation:
@@ -73,12 +74,59 @@ interface ApiClientInterface {
   getQuotes(getQuotesRequest: GetQuotesRequest): AxiosPromise<Array<QuoteData>>
 }
 
+function generateLast400DaysBars(): Bar[] {
+  const bars: Bar[] = []
+  const today = new Date()
+  today.setUTCHours(0, 0, 0, 0) // Set to midnight UTC
+  let currentPrice = 100 // Starting price
+
+  // Generate bars for the last 400 days
+  for (let i = 400; i >= 0; i--) {
+    const date = new Date(today)
+    date.setTime(date.getTime() - i * 24 * 60 * 60 * 1000) // Subtract i days
+
+    const timestamp = Math.floor(date.getTime() / 1000) // Convert to seconds
+
+    // Use date as seed for deterministic random generation
+    const seed = timestamp
+    const seededRandom = (offset: number) => {
+      const x = Math.sin(seed + offset) * 10000
+      return x - Math.floor(x)
+    }
+
+    // Generate realistic OHLC data
+    const volatility = 2
+    const open = currentPrice
+    const change = (seededRandom(1) - 0.5) * volatility
+    const close = open + change
+    const high = Math.max(open, close) + seededRandom(2) * volatility
+    const low = Math.min(open, close) - seededRandom(3) * volatility
+    const volume = Math.floor(seededRandom(4) * 1000000) + 500000
+
+    const bar: Bar = {
+      time: timestamp * 1000, // Convert to milliseconds
+      open: parseFloat(open.toFixed(2)),
+      high: parseFloat(high.toFixed(2)),
+      low: parseFloat(low.toFixed(2)),
+      close: parseFloat(close.toFixed(2)),
+      volume,
+    }
+
+    bars.push(bar)
+
+    // Update price for next bar (trend simulation)
+    currentPrice = close + (seededRandom(5) - 0.48) * 0.5
+  }
+
+  return bars
+}
+const sampleBars: Bar[] = generateLast400DaysBars()
+
 class ApiFallbackClient implements ApiClientInterface {
   /**
    * Available symbols loaded from JSON file
    */
   private readonly availableSymbols: LibrarySymbolInfo[]
-  private readonly sampleBars: Bar[] = this.generateLast400DaysBars()
   constructor() {
     // Load and parse symbols from JSON file
     this.availableSymbols = symbolsData.map((symbol) => ({
@@ -88,52 +136,6 @@ class ApiFallbackClient implements ApiClientInterface {
       format: symbol.format as SeriesFormat,
       data_status: symbol.data_status as 'streaming' | 'endofday' | 'delayed_streaming',
     }))
-  }
-  private generateLast400DaysBars(): Bar[] {
-    const bars: Bar[] = []
-    const today = new Date()
-    today.setUTCHours(0, 0, 0, 0) // Set to midnight UTC
-    let currentPrice = 100 // Starting price
-
-    // Generate bars for the last 400 days
-    for (let i = 400; i >= 0; i--) {
-      const date = new Date(today)
-      date.setTime(date.getTime() - i * 24 * 60 * 60 * 1000) // Subtract i days
-
-      const timestamp = Math.floor(date.getTime() / 1000) // Convert to seconds
-
-      // Use date as seed for deterministic random generation
-      const seed = timestamp
-      const seededRandom = (offset: number) => {
-        const x = Math.sin(seed + offset) * 10000
-        return x - Math.floor(x)
-      }
-
-      // Generate realistic OHLC data
-      const volatility = 2
-      const open = currentPrice
-      const change = (seededRandom(1) - 0.5) * volatility
-      const close = open + change
-      const high = Math.max(open, close) + seededRandom(2) * volatility
-      const low = Math.min(open, close) - seededRandom(3) * volatility
-      const volume = Math.floor(seededRandom(4) * 1000000) + 500000
-
-      const bar: Bar = {
-        time: timestamp * 1000, // Convert to milliseconds
-        open: parseFloat(open.toFixed(2)),
-        high: parseFloat(high.toFixed(2)),
-        low: parseFloat(low.toFixed(2)),
-        close: parseFloat(close.toFixed(2)),
-        volume,
-      }
-
-      bars.push(bar)
-
-      // Update price for next bar (trend simulation)
-      currentPrice = close + (seededRandom(5) - 0.48) * 0.5
-    }
-
-    return bars
   }
   async getConfig(): AxiosPromise<DatafeedConfiguration> {
     const configuration: DatafeedConfiguration = {
@@ -259,7 +261,7 @@ class ApiFallbackClient implements ApiClientInterface {
     }
 
     // Filter bars within the requested time range [from, to]
-    const filteredBars = this.sampleBars.filter((bar) => bar.time >= from && bar.time <= to)
+    const filteredBars = sampleBars.filter((bar) => bar.time >= from && bar.time <= to)
 
     console.log(`[Datafeed] Found ${filteredBars.length} bars in time range, need ${countBack}`)
 
@@ -296,7 +298,7 @@ class ApiFallbackClient implements ApiClientInterface {
       }
 
       // Generate realistic quote data based on the last bar
-      const lastBar = this.sampleBars[this.sampleBars.length - 1]
+      const lastBar = sampleBars[sampleBars.length - 1]
       if (!lastBar) {
         console.log(`[Datafeed] No historical data available for quotes: ${symbol}`)
         return {
@@ -361,9 +363,72 @@ class ApiFallbackClient implements ApiClientInterface {
   }
 }
 
+interface BarsWebSocketInterface {
+  subscribe(params: BarsSubscriptionRequest, onUpdate: (data: Bar) => void): Promise<string>
+  unsubscribe(listenerGuid: string): Promise<void>
+}
+
+class BarsWebSocketFallbackClient implements BarsWebSocketInterface {
+  private subscriptions = new Map<
+    string,
+    { params: BarsSubscriptionRequest; onUpdate: (data: Bar) => void }
+  >()
+  private intervalId: number
+
+  constructor() {
+    // Mock data updates every 3 seconds
+    this.intervalId = window.setInterval(() => {
+      this.subscriptions.forEach(({ onUpdate }) => {
+        onUpdate(this.mockLastBar(sampleBars[sampleBars.length - 1]))
+      })
+    }, 1000)
+  }
+
+  private mockLastBar(lastBar: Bar): Bar {
+    const range = lastBar.high - lastBar.low
+    const randomFactor = Math.random() // 0 to 1
+    const newClose = lastBar.low + range * randomFactor
+
+    // Ensure the new close doesn't exceed the original high/low bounds
+    const adjustedClose = Math.max(lastBar.low, Math.min(lastBar.high, newClose))
+
+    // Update high/low if the new close exceeds them
+    const newHigh = Math.max(lastBar.high, adjustedClose)
+    const newLow = Math.min(lastBar.low, adjustedClose)
+
+    return {
+      time: lastBar.time, // Same time to update existing bar
+      open: lastBar.open, // Keep original open
+      high: parseFloat(newHigh.toFixed(2)),
+      low: parseFloat(newLow.toFixed(2)),
+      close: parseFloat(adjustedClose.toFixed(2)),
+      volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000), // Add some volume
+    }
+  }
+
+  async subscribe(params: BarsSubscriptionRequest, onUpdate: (data: Bar) => void): Promise<string> {
+    const subscriptionId = `ws_${Date.now()}_${Math.random()}`
+    this.subscriptions.set(subscriptionId, { params, onUpdate })
+    return subscriptionId
+  }
+
+  async unsubscribe(listenerGuid: string): Promise<void> {
+    this.subscriptions.delete(listenerGuid)
+  }
+
+  destroy(): void {
+    if (this.intervalId) {
+      window.clearInterval(this.intervalId)
+    }
+    this.subscriptions.clear()
+  }
+}
+
 export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
-  private plugin: TraderPlugin<ApiClientInterface>
+  private apiPlugin: ApiTraderPlugin<ApiClientInterface>
+  private wsPlugin: WebSocketClientPlugin<BarsWebSocketInterface>
   private apiFallbackClient: ApiClientInterface = new ApiFallbackClient()
+  private wsFallbackClient: BarsWebSocketInterface = new BarsWebSocketFallbackClient()
   private wsClient: BarsWebSocketInterface | null = null
   private readonly subscriptions = new Map<
     string,
@@ -386,13 +451,19 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     }
   >()
   constructor() {
-    this.plugin = new TraderPlugin<ApiClientInterface>()
-    this.wsClient = BarsWebSocketClientFactory()
+    this.apiPlugin = new ApiTraderPlugin<ApiClientInterface>()
+    this.wsPlugin = new WebSocketClientPlugin<BarsWebSocketInterface>()
+  }
+
+  async _loadWsClient(mock: boolean = false): Promise<BarsWebSocketInterface> {
+    return mock
+      ? Promise.resolve(this.wsFallbackClient)
+      : this.wsPlugin.getClientWithFallback(BarsWebSocketFallbackClient)
   }
   async _loadApiClient(mock: boolean = false): Promise<ApiClientInterface> {
     return mock
       ? Promise.resolve(this.apiFallbackClient)
-      : this.plugin.getClientWithFallback(ApiFallbackClient)
+      : this.apiPlugin.getClientWithFallback(ApiFallbackClient)
   }
   onReady(callback: OnReadyCallback): void {
     console.log('[Datafeed] onReady called')
@@ -473,27 +544,6 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         })
     })
   }
-  private mockLastBar(lastBar: Bar): Bar {
-    const range = lastBar.high - lastBar.low
-    const randomFactor = Math.random() // 0 to 1
-    const newClose = lastBar.low + range * randomFactor
-
-    // Ensure the new close doesn't exceed the original high/low bounds
-    const adjustedClose = Math.max(lastBar.low, Math.min(lastBar.high, newClose))
-
-    // Update high/low if the new close exceeds them
-    const newHigh = Math.max(lastBar.high, adjustedClose)
-    const newLow = Math.min(lastBar.low, adjustedClose)
-
-    return {
-      time: lastBar.time, // Same time to update existing bar
-      open: lastBar.open, // Keep original open
-      high: parseFloat(newHigh.toFixed(2)),
-      low: parseFloat(newLow.toFixed(2)),
-      close: parseFloat(adjustedClose.toFixed(2)),
-      volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000), // Add some volume
-    }
-  }
   subscribeBars(
     symbolInfo: LibrarySymbolInfo,
     resolution: string,
@@ -507,65 +557,62 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       listenerGuid,
     })
 
-    if (!this.wsClient) {
-      console.error('[Datafeed] WebSocket client not initialized')
-      return
-    }
+    this._loadWsClient().then((wsClient) => {
+      wsClient
+        .subscribe({ symbol: symbolInfo.name, resolution }, (bar) => {
+          console.debug('[Datafeed] Bar received from WebSocket:', {
+            symbol: symbolInfo.name,
+            resolution,
+            listenerGuid,
+            bar,
+          })
+          onTick(bar)
+        })
+        .then((wsSubscriptionId) => {
+          console.log('[Datafeed] WebSocket subscription successful:', {
+            symbol: symbolInfo.name,
+            resolution,
+            listenerGuid,
+            wsSubscriptionId,
+          })
 
-    // Subscribe to bars via WebSocket
-    this.wsClient
-      .subscribe({ symbol: symbolInfo.name, resolution }, (bar) => {
-        console.debug('[Datafeed] Bar received from WebSocket:', {
-          symbol: symbolInfo.name,
-          resolution,
-          listenerGuid,
-          bar,
+          // Store subscription info with WebSocket subscription ID
+          this.subscriptions.set(listenerGuid, {
+            symbolInfo,
+            resolution,
+            onTick,
+            onResetCacheNeeded: onResetCacheNeededCallback,
+            wsSubscriptionId,
+          })
         })
-        onTick(bar)
-      })
-      .then((wsSubscriptionId) => {
-        console.log('[Datafeed] WebSocket subscription successful:', {
-          symbol: symbolInfo.name,
-          resolution,
-          listenerGuid,
-          wsSubscriptionId,
+        .catch((error) => {
+          console.error('[Datafeed] WebSocket subscription failed:', error)
         })
-
-        // Store subscription info with WebSocket subscription ID
-        this.subscriptions.set(listenerGuid, {
-          symbolInfo,
-          resolution,
-          onTick,
-          onResetCacheNeeded: onResetCacheNeededCallback,
-          wsSubscriptionId,
-        })
-      })
-      .catch((error) => {
-        console.error('[Datafeed] WebSocket subscription failed:', error)
-      })
+    })
   }
   unsubscribeBars(listenerGuid: string): void {
     console.log('[Datafeed] unsubscribeBars called:', { listenerGuid })
     const subscription = this.subscriptions.get(listenerGuid)
     if (subscription) {
-      // Unsubscribe from WebSocket if we have a WebSocket subscription ID
-      if (subscription.wsSubscriptionId && this.wsClient) {
-        this.wsClient
-          .unsubscribe(subscription.wsSubscriptionId)
-          .then(() => {
-            console.log(
-              `[Datafeed] WebSocket unsubscription successful for ${subscription.symbolInfo.name} (${listenerGuid})`,
-            )
-            this.subscriptions.delete(listenerGuid)
-          })
-          .catch((error) => {
-            console.error('[Datafeed] WebSocket unsubscription failed:', error)
-          })
-      }
-      this.subscriptions.delete(listenerGuid)
-      console.log(
-        `[Datafeed] Subscription removed for ${subscription.symbolInfo.name} (${listenerGuid})`,
-      )
+      this._loadWsClient().then((wsClient) => {
+        if (subscription.wsSubscriptionId && wsClient) {
+          wsClient
+            .unsubscribe(subscription.wsSubscriptionId)
+            .then(() => {
+              console.log(
+                `[Datafeed] WebSocket unsubscription successful for ${subscription.symbolInfo.name} (${listenerGuid})`,
+              )
+              this.subscriptions.delete(listenerGuid)
+            })
+            .catch((error) => {
+              console.error('[Datafeed] WebSocket unsubscription failed:', error)
+            })
+        }
+        this.subscriptions.delete(listenerGuid)
+        console.log(
+          `[Datafeed] Subscription removed for ${subscription.symbolInfo.name} (${listenerGuid})`,
+        )
+      })
     } else {
       console.log(`[Datafeed] No subscription found for listenerGuid: ${listenerGuid}`)
     }

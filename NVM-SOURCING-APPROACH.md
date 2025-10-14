@@ -54,7 +54,7 @@ build:
 **Usage in Shell Scripts:**
 ```bash
 #!/bin/bash
-# At the top of generate-client.sh or other scripts
+# At the top of generate-api-client.sh or other scripts
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/with-nvm.sh"
 # Rest of script...
@@ -124,7 +124,7 @@ All targets that run npm commands:
 
 ### Shell Scripts
 Scripts that run npm or node commands:
-- `frontend/scripts/generate-client.sh` → source wrapper at top
+- `frontend/scripts/generate-api-client.sh` → source wrapper at top
 - `frontend/scripts/generate-ws-client.mjs` → run via `with-nvm.sh node ...`
 - `frontend/scripts/generate-ws-types.mjs` → run via `with-nvm.sh node ...`
 
