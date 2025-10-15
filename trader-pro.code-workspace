@@ -87,7 +87,8 @@
     },
 
     // Terminal
-    "terminal.integrated.cwd": "."
+    "terminal.integrated.cwd": ".",
+    "makefile.configureOnOpen": false
   },
   "extensions": {
     "recommendations": [

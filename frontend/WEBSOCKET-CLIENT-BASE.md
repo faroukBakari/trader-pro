@@ -1,18 +1,98 @@
-# Generic WebSocket Client Base - Singleton with Auto-Connection
+# Generic WebSocket Client Base - Centralized Subscription Management
 
-**Date**: October 12, 2025
-**Status**: ✅ Complete and Production-Ready
+**Date**: October 15, 2025  
+**Status**: ✅ Complete and Production-Ready  
+**Latest Update**: Centralized subscription state management
 
 ## 🎯 Overview
 
-Implemented a **singleton WebSocket client base class** with:
+Implemented a **singleton WebSocket client base class** with **centralized subscription management**:
 - ✅ **Singleton pattern** - One WebSocket connection per URL shared across all instances
 - ✅ **Automatic connection** - Connects on creation with retry logic
 - ✅ **Server-confirmed subscriptions** - Waits for confirmation before registering listeners
+- ✅ **Centralized subscription state** - Single source of truth in base client ⭐ **NEW**
+- ✅ **Simplified service layer** - No duplicate subscription tracking needed ⭐ **NEW**
 - ✅ **Topic-based message filtering** - Each listener receives only relevant data
 - ✅ **Automatic reconnection** - Exponential backoff with resubscription
 - ✅ **Proper cleanup** - Reference counting with automatic disposal
 - ✅ **Type-safe operations** - Full TypeScript generics support
+
+## 🌟 Recent Improvement: Centralized State Management
+
+### The Problem (Before)
+
+Services duplicated subscription state, leading to potential sync issues:
+
+```typescript
+// ❌ OLD: Duplicate state tracking
+class DatafeedService {
+  private subscriptions = new Map<string, {...}>()  // Service tracks state
+  
+  subscribeBars(listenerGuid, symbol, callback) {
+    // Track subscription in service
+    this.subscriptions.set(listenerGuid, { symbol, callback })
+    
+    // AND track in base client
+    wsClient.subscribe(listenerGuid, params, callback)
+    
+    // Problem: Two sources of truth!
+  }
+}
+
+class WebSocketClientBase {
+  protected subscriptions = new Map<string, SubscriptionState>()  // Client also tracks
+}
+```
+
+### The Solution (Now)
+
+**Single source of truth** - Base client manages all subscription state:
+
+```typescript
+// ✅ NEW: Centralized subscription management
+class DatafeedService {
+  // No subscription Map needed!
+  
+  subscribeBars(listenerGuid, symbol, callback) {
+    // Just pass through - base client handles everything
+    return wsClient.subscribe(listenerGuid, { symbol }, callback)
+  }
+  
+  unsubscribeBars(listenerGuid) {
+    // Base client handles cleanup
+    return wsClient.unsubscribe(listenerGuid)
+  }
+}
+
+class WebSocketClientBase {
+  protected subscriptions = new Map<string, SubscriptionState>()  // Single source
+}
+```
+
+### Benefits
+
+1. **No Duplicate State** ✅
+   - Service layer simplified - no subscription Maps
+   - Impossible for state to desync
+   - Less memory usage
+
+2. **Simpler Service Code** ✅
+   - Services just call subscribe/unsubscribe
+   - No subscription lifecycle management
+   - No cleanup logic needed
+
+3. **Automatic Reconnection** ✅
+   - Base client has all subscription state
+   - Can resubscribe all on reconnect automatically
+   - Services don't need to track for reconnection
+
+4. **Better Type Safety** ✅
+   - Subscription state typed in one place
+   - No duplicate type definitions
+
+5. **Easier Testing** ✅
+   - Mock the base client interface only
+   - No need to mock service subscription management
 
 ## 🔑 Key Design Decisions
 
@@ -316,29 +396,30 @@ const client = new BarsWebSocketClient({
 ### Basic Usage
 
 ```typescript
-import { BarsWebSocketClient } from '@/clients/ws-generated/barsClient'
+import { BarsWebSocketClientFactory } from '@/clients/ws-generated/client'
 import type { Bar } from '@/clients/ws-types-generated'
 
-// Create client (automatically connects with retries)
-const client = await BarsWebSocketClient.create({
-  url: 'ws://localhost:8000/api/v1/ws',
-  reconnect: true,
-  debug: true,
-})
+// Get client instance (singleton)
+const client = BarsWebSocketClientFactory()
 
-// Subscribe to bars (client is already connected)
-const subscriptionId = await client.subscribeToBars('AAPL', '1', (bar: Bar) => {
-  console.log('New bar received:', bar)
-  console.log(`  Time: ${new Date(bar.time)}`)
-  console.log(`  OHLC: ${bar.open}, ${bar.high}, ${bar.low}, ${bar.close}`)
-  console.log(`  Volume: ${bar.volume}`)
-})
+// Subscribe with your own ID (e.g., from TradingView's listenerGuid)
+const subscriptionId = 'my-unique-id'
+await client.subscribe(
+  subscriptionId,                        // Your ID
+  { symbol: 'AAPL', resolution: '1' },   // Params
+  (bar: Bar) => {                        // Callback
+    console.log('New bar received:', bar)
+    console.log(`  Time: ${new Date(bar.time)}`)
+    console.log(`  OHLC: ${bar.open}, ${bar.high}, ${bar.low}, ${bar.close}`)
+    console.log(`  Volume: ${bar.volume}`)
+  }
+)
 
-// Later: unsubscribe
+// Unsubscribe using the same ID
 await client.unsubscribe(subscriptionId)
 
-// Cleanup when done
-await client.dispose()
+// ✅ No need to track subscription state in your service!
+// ✅ Base client manages everything internally
 ```
 
 ### Multiple Subscriptions (Single Client)
@@ -414,17 +495,15 @@ try {
 ### With DatafeedService
 
 ```typescript
-import { BarsWebSocketClient, type IBarDataSource } from '@/clients/ws-generated/barsClient'
+import { BarsWebSocketClientFactory } from '@/clients/ws-generated/client'
+import type { BarsWebSocketInterface } from '@/clients/ws-generated/client'
 
 class DatafeedService implements IBasicDataFeed {
-  private wsClient: IBarDataSource | null = null
+  private wsClient: BarsWebSocketInterface
 
-  async init(): Promise<void> {
-    // Create client (auto-connects)
-    this.wsClient = await BarsWebSocketClient.create({
-      url: import.meta.env.VITE_WS_URL || 'ws://localhost:8000/api/v1/ws',
-      reconnect: true,
-    })
+  constructor() {
+    // Get singleton client instance
+    this.wsClient = BarsWebSocketClientFactory()
   }
 
   async subscribeBars(
@@ -433,40 +512,29 @@ class DatafeedService implements IBasicDataFeed {
     onTick: SubscribeBarsCallback,
     listenerGuid: string,
   ): void {
-    if (!this.wsClient) {
-      throw new Error('WebSocket client not initialized')
-    }
-
-    // Subscribe to WebSocket updates
-    const subscriptionId = await this.wsClient.subscribeToBars(
-      symbolInfo.name,
-      resolution,
-      (bar) => {
-        // Forward to TradingView
-        onTick(bar)
-      },
+    // ✅ No subscription tracking needed - just pass through!
+    await this.wsClient.subscribe(
+      listenerGuid,                          // TradingView's unique ID
+      { symbol: symbolInfo.name, resolution },
+      (bar) => onTick(bar)                   // Forward to TradingView
     )
-
-    // Store subscription ID for cleanup
-    this.activeSubscriptions.set(listenerGuid, subscriptionId)
   }
 
   async unsubscribeBars(listenerGuid: string): void {
-    const subscriptionId = this.activeSubscriptions.get(listenerGuid)
-    if (subscriptionId && this.wsClient) {
-      await this.wsClient.unsubscribe(subscriptionId)
-      this.activeSubscriptions.delete(listenerGuid)
-    }
+    // ✅ Base client handles cleanup internally
+    await this.wsClient.unsubscribe(listenerGuid)
   }
 
-  async cleanup(): Promise<void> {
-    if (this.wsClient) {
-      await this.wsClient.dispose()
-      this.wsClient = null
-    }
-  }
+  // ✅ No cleanup() method needed - no state to manage!
 }
 ```
+
+**Key Differences from Old Implementation**:
+- ❌ **Removed**: `private subscriptions = new Map()` 
+- ❌ **Removed**: `activeSubscriptions.set()` / `activeSubscriptions.delete()`
+- ❌ **Removed**: `cleanup()` method to iterate and clean subscriptions
+- ✅ **Added**: Direct pass-through to base client
+- ✅ **Simpler**: Service has no subscription state management
 
 ## 🏗️ Architecture Benefits
 

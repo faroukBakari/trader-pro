@@ -81,6 +81,8 @@ export type QuotesWebSocketInterface = WebSocketInterface<QuoteDataSubscriptionR
 
 Uses `WebSocketClientBase` from `src/plugins/wsClientBase.ts` (manual, not generated).
 
+**Key Feature**: Base client provides **centralized subscription management** - services don't need to track subscription state!
+
 #### When Backend is Unavailable
 
 **Fallback Behavior**:
