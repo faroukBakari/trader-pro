@@ -909,6 +909,8 @@ For production environments, consider:
 - **Interactive Docs**: http://localhost:8000/api/v1/ws/asyncapi
 - **Architecture**: See `ARCHITECTURE.md` (Real-Time Architecture section)
 - **Backend README**: `backend/README.md`
+- **Router Generation**: `backend/docs/ws-router-generation.md` (backend code generation)
+- **Frontend Client Generation**: `frontend/WS-CLIENT-AUTO-GENERATION.md` (frontend type-safe clients)
 - **Redis Broadcasting**: `backend/docs/bar-broadcasting.md` (future scalable approach)
 
 ### Code References
@@ -918,6 +920,19 @@ For production environments, consider:
 - **Broadcaster**: `backend/src/trading_api/services/bar_broadcaster.py`
 - **Configuration**: `backend/src/trading_api/core/config.py`
 - **Tests**: `backend/tests/test_ws_datafeed.py`, `backend/tests/test_bar_broadcaster.py`
+
+### Frontend Integration
+- **Type Generator**: `frontend/scripts/generate-ws-types.mjs` - Auto-generates TypeScript types from AsyncAPI
+- **Client Generator**: `frontend/scripts/generate-ws-client.mjs` - Auto-generates client factories
+- **Base Client**: `frontend/src/plugins/wsClientBase.ts` - WebSocket client implementation
+- **Generated Types**: `frontend/src/clients/ws-types-generated/index.ts` - Auto-generated (do not edit)
+- **Generated Clients**: `frontend/src/clients/ws-generated/client.ts` - Auto-generated (do not edit)
+
+**Frontend Generation Flow**:
+1. Backend exposes AsyncAPI spec at `/api/v1/ws/asyncapi.json`
+2. Frontend `generate-ws-types.mjs` downloads spec → generates ALL TypeScript interfaces
+3. Frontend `generate-ws-client.mjs` downloads spec → generates client factories for ALL routes
+4. No hardcoded schema or route lists - fully automatic discovery!
 
 ### External Resources
 - **FastWS GitHub**: https://github.com/endrekrohn/fastws

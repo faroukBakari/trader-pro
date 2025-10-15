@@ -56,46 +56,38 @@ frontend/
 
 ### Task: Create New WebSocket Client
 
-**1. Define types** (`ws-types.ts`):
-```typescript
-export interface QuotesSubscriptionRequest {
-  symbol: string
-}
+When you add a new WebSocket route to the backend, the frontend client is **automatically generated**!
 
-export interface Quote {
-  symbol: string
-  bid: number
-  ask: number
-  last: number
-}
+**1. Backend**: Add new router (e.g., for quotes)
+```python
+# backend/src/trading_api/ws/quotes.py
+router = OperationRouter(prefix="quotes.", tags=["datafeed"])
+
+@router.send("subscribe", reply="subscribe.response")
+async def send_subscribe(payload: QuoteDataSubscriptionRequest, client: Client):
+    # Implementation
 ```
 
-**2. Create factory** (auto-generated in `ws-generated/client.ts`):
-```typescript
-import type { QuotesSubscriptionRequest, Quote } from '@/clients/ws-types-generated'
-import type { WebSocketInterface } from '@/plugins/wsClientBase'
-import { WebSocketClientBase } from '@/plugins/wsClientBase'
-
-export type QuotesWebSocketInterface = WebSocketInterface<
-  QuotesSubscriptionRequest,
-  Quote
->
-
-export function QuotesWebSocketClientFactory(): QuotesWebSocketInterface {
-  return new WebSocketClientBase<QuotesSubscriptionRequest, Quote>('quotes')
-}
+**2. Frontend**: Regenerate clients
+```bash
+npm run client:generate && npm run ws:generate
 ```
 
-**3. Use in service**:
+**3. Result**: New factory automatically available!
 ```typescript
+// Auto-generated in src/clients/ws-generated/client.ts
 import { QuotesWebSocketClientFactory } from '@/clients/ws-generated/client'
+import type { QuoteDataSubscriptionRequest, QuoteData } from '@/clients/ws-types-generated'
 
 const wsClient = QuotesWebSocketClientFactory()
 
 const subId = await wsClient.subscribe(
-  { symbol: 'AAPL' },
+  { symbols: ['AAPL'], fast_symbols: ['GOOGL'] },
   (quote) => console.log('New quote:', quote)
 )
+```
+
+**No manual code needed** - Types and client factory both auto-generated from AsyncAPI spec!
 ```
 
 ### Task: Handle Errors
