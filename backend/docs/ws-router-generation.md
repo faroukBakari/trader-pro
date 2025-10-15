@@ -1,10 +1,19 @@
+````markdown
 # WebSocket Router Code Generation
 
 ## Overview
 
-This project uses a code generation approach to create concrete (non-generic) WebSocket router classes from a generic template. This provides better IDE support, type checking, and eliminates generic type parameters at runtime.
+This project uses code generation for both backend routers and frontend clients to ensure type safety and consistency across the stack.
 
-## Architecture
+### Backend: Router Generation
+
+The backend uses a code generation approach to create concrete (non-generic) WebSocket router classes from a generic template. This provides better IDE support, type checking, and eliminates generic type parameters at runtime.
+
+### Frontend: Client Generation
+
+The frontend automatically generates TypeScript types and client factories from the AsyncAPI specification. See `frontend/WS-CLIENT-AUTO-GENERATION.md` for details.
+
+## Backend Architecture
 
 ```
 backend/src/trading_api/ws/
@@ -172,14 +181,79 @@ All generated code passes the same checks as the pre-commit hooks:
 Add to pre-commit hooks or CI pipeline:
 
 ```yaml
-- name: Generate WebSocket routers
+# Backend router generation
+- name: Generate WebSocket routers (backend)
   run: |
     cd backend
     make generate-ws-routers
     
 - name: Verify no uncommitted changes
   run: git diff --exit-code backend/src/trading_api/ws/generated/
+
+# Frontend client generation (in production build)
+- name: Generate WebSocket clients (frontend)
+  run: |
+    cd frontend
+    npm run client:generate && npm run ws:generate
 ```
+
+## Full-Stack Generation Flow
+
+When adding a new WebSocket route:
+
+1. **Define Models** (backend)
+   ```python
+   # trading_api/models/quotes.py
+   class QuoteDataSubscriptionRequest(BaseModel):
+       symbols: list[str] = []
+       fast_symbols: list[str] = []
+   
+   class QuoteData(BaseModel):
+       s: str
+       n: str
+       v: QuoteValues | dict
+   ```
+
+2. **Update Router Specs** (backend)
+   ```python
+   # scripts/generate_ws_router.py
+   ROUTER_SPECS = [
+       RouterSpec("BarWsRouter", "BarsSubscriptionRequest", "Bar"),
+       RouterSpec("QuoteWsRouter", "QuoteDataSubscriptionRequest", "QuoteData"),
+   ]
+   ```
+
+3. **Generate Backend Router** (backend)
+   ```bash
+   cd backend && make generate-ws-routers
+   ```
+
+4. **Use Generated Router** (backend)
+   ```python
+   # trading_api/ws/quotes.py
+   from .generated import QuoteWsRouter
+   
+   router = QuoteWsRouter(route="quotes", tags=["datafeed"])
+   ```
+
+5. **Generate Frontend Clients** (frontend)
+   ```bash
+   cd frontend && npm run client:generate && npm run ws:generate
+   ```
+
+6. **Use Generated Client** (frontend)
+   ```typescript
+   // Auto-generated types and factory available!
+   import { QuotesWebSocketClientFactory } from '@/clients/ws-generated/client'
+   import type { QuoteData } from '@/clients/ws-types-generated'
+   
+   const client = QuotesWebSocketClientFactory()
+   await client.subscribe({ symbols: ['AAPL'] }, (data: QuoteData) => {
+     console.log(data)
+   })
+   ```
+
+**Result**: Fully type-safe WebSocket communication from backend Python → AsyncAPI → Frontend TypeScript!
 
 ## Troubleshooting
 

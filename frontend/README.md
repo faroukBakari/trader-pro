@@ -182,20 +182,24 @@ The frontend includes a robust WebSocket client implementation for real-time dat
 - **Quick Reference**: Use [`WEBSOCKET-QUICK-REFERENCE.md`](./WEBSOCKET-QUICK-REFERENCE.md) for daily coding
 - **Complete Pattern**: Read [`WEBSOCKET-CLIENT-PATTERN.md`](./WEBSOCKET-CLIENT-PATTERN.md) for deep dive
 - **Visual Diagrams**: See [`WEBSOCKET-ARCHITECTURE-DIAGRAMS.md`](./WEBSOCKET-ARCHITECTURE-DIAGRAMS.md)
+- **Auto-Generation**: See [`WS-CLIENT-AUTO-GENERATION.md`](./WS-CLIENT-AUTO-GENERATION.md) for generation details
 
 ### 🔑 Key Files
 
 - **Base Client**: `src/plugins/wsClientBase.ts` - Generic WebSocket client foundation (manual)
-- **Generated Client**: `src/clients/ws-generated/client.ts` - Auto-generated client factory (from AsyncAPI)
+- **Generated Clients**: `src/clients/ws-generated/client.ts` - Auto-generated client factories (from AsyncAPI)
 - **Generated Types**: `src/clients/ws-types-generated/index.ts` - Auto-generated type definitions (from AsyncAPI)
 - **Integration**: `src/services/datafeedService.ts` - TradingView integration example
-- **Generator**: `scripts/generate-ws-client.mjs` - Auto-generation script
+- **Type Generator**: `scripts/generate-ws-types.mjs` - AsyncAPI → TypeScript types
+- **Client Generator**: `scripts/generate-ws-client.mjs` - AsyncAPI → Client factories
 
 ### ⭐ Key Features
 
+- ✅ **Automatic generation** - Types and clients generated from AsyncAPI spec
+- ✅ **No hardcoded lists** - All routes and types auto-discovered
 - ✅ **Singleton pattern** - One connection per URL
 - ✅ **Auto-connection** - Automatic connection with exponential backoff retry
-- ✅ **Type safety** - Full TypeScript generics support
+- ✅ **Full type safety** - TypeScript generics throughout
 - ✅ **Server confirmation** - Waits for subscription acknowledgment
 - ✅ **Topic-based routing** - Filters messages to relevant subscribers
 - ✅ **Reference counting** - Automatic cleanup when no longer needed
