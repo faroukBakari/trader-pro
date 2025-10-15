@@ -25,8 +25,8 @@ import type {
 } from '@public/trading_terminal/charting_library'
 
 import { ApiTraderPlugin, WebSocketClientPlugin } from '@/plugins/traderPlugin'
+import type { WebSocketInterface } from '@/plugins/wsClientBase'
 import type { AxiosPromise } from 'axios'
-
 interface GetBarsResponse {
   bars: Array<Bar>
   no_data?: boolean
@@ -363,10 +363,7 @@ class ApiFallbackClient implements ApiClientInterface {
   }
 }
 
-interface BarsWebSocketInterface {
-  subscribe(params: BarsSubscriptionRequest, onUpdate: (data: Bar) => void): Promise<string>
-  unsubscribe(listenerGuid: string): Promise<void>
-}
+export type BarsWebSocketInterface = WebSocketInterface<BarsSubscriptionRequest, Bar>
 
 class BarsWebSocketFallbackClient implements BarsWebSocketInterface {
   private subscriptions = new Map<
@@ -406,14 +403,17 @@ class BarsWebSocketFallbackClient implements BarsWebSocketInterface {
     }
   }
 
-  async subscribe(params: BarsSubscriptionRequest, onUpdate: (data: Bar) => void): Promise<string> {
-    const subscriptionId = `ws_${Date.now()}_${Math.random()}`
+  async subscribe(
+    subscriptionId: string,
+    params: BarsSubscriptionRequest,
+    onUpdate: (data: Bar) => void,
+  ): Promise<string> {
     this.subscriptions.set(subscriptionId, { params, onUpdate })
     return subscriptionId
   }
 
-  async unsubscribe(listenerGuid: string): Promise<void> {
-    this.subscriptions.delete(listenerGuid)
+  async unsubscribe(subscriptionId: string): Promise<void> {
+    this.subscriptions.delete(subscriptionId)
   }
 
   destroy(): void {
@@ -429,7 +429,6 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private wsPlugin: WebSocketClientPlugin<BarsWebSocketInterface>
   private apiFallbackClient: ApiClientInterface = new ApiFallbackClient()
   private wsFallbackClient: BarsWebSocketInterface = new BarsWebSocketFallbackClient()
-  private wsClient: BarsWebSocketInterface | null = null
   private readonly subscriptions = new Map<
     string,
     {
@@ -549,7 +548,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     resolution: string,
     onTick: SubscribeBarsCallback,
     listenerGuid: string,
-    onResetCacheNeededCallback?: () => void,
+    // onResetCacheNeededCallback?: () => void,
   ): void {
     console.log('[Datafeed] subscribeBars called:', {
       symbol: symbolInfo.name,
@@ -559,7 +558,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
 
     this._loadWsClient().then((wsClient) => {
       wsClient
-        .subscribe({ symbol: symbolInfo.name, resolution }, (bar) => {
+        .subscribe(listenerGuid, { symbol: symbolInfo.name, resolution }, (bar) => {
           console.debug('[Datafeed] Bar received from WebSocket:', {
             symbol: symbolInfo.name,
             resolution,
@@ -568,23 +567,6 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
           })
           onTick(bar)
         })
-        .then((wsSubscriptionId) => {
-          console.log('[Datafeed] WebSocket subscription successful:', {
-            symbol: symbolInfo.name,
-            resolution,
-            listenerGuid,
-            wsSubscriptionId,
-          })
-
-          // Store subscription info with WebSocket subscription ID
-          this.subscriptions.set(listenerGuid, {
-            symbolInfo,
-            resolution,
-            onTick,
-            onResetCacheNeeded: onResetCacheNeededCallback,
-            wsSubscriptionId,
-          })
-        })
         .catch((error) => {
           console.error('[Datafeed] WebSocket subscription failed:', error)
         })
@@ -592,30 +574,12 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   }
   unsubscribeBars(listenerGuid: string): void {
     console.log('[Datafeed] unsubscribeBars called:', { listenerGuid })
-    const subscription = this.subscriptions.get(listenerGuid)
-    if (subscription) {
-      this._loadWsClient().then((wsClient) => {
-        if (subscription.wsSubscriptionId && wsClient) {
-          wsClient
-            .unsubscribe(subscription.wsSubscriptionId)
-            .then(() => {
-              console.log(
-                `[Datafeed] WebSocket unsubscription successful for ${subscription.symbolInfo.name} (${listenerGuid})`,
-              )
-              this.subscriptions.delete(listenerGuid)
-            })
-            .catch((error) => {
-              console.error('[Datafeed] WebSocket unsubscription failed:', error)
-            })
-        }
-        this.subscriptions.delete(listenerGuid)
-        console.log(
-          `[Datafeed] Subscription removed for ${subscription.symbolInfo.name} (${listenerGuid})`,
-        )
+    this._loadWsClient().then((wsClient) => {
+      wsClient.unsubscribe(listenerGuid).catch((error) => {
+        console.error('[Datafeed] WebSocket unsubscription failed:', error)
       })
-    } else {
-      console.log(`[Datafeed] No subscription found for listenerGuid: ${listenerGuid}`)
-    }
+      console.log(`[Datafeed] Subscription removed for listenerGuid : (${listenerGuid})`)
+    })
   }
   getQuotes(
     symbols: string[],

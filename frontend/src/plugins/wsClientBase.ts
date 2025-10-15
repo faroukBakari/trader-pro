@@ -28,8 +28,12 @@ interface SubscriptionState<TParams extends object = object, TData extends objec
 }
 
 export interface WebSocketInterface<TParams extends object, TData extends object> {
-  subscribe(params: TParams, onUpdate: (data: TData) => void): Promise<string>
-  unsubscribe(listenerGuid: string): Promise<void>
+  subscribe(
+    subscriptionId: string,
+    params: TParams,
+    onUpdate: (data: TData) => void,
+  ): Promise<string>
+  unsubscribe(subscriptionId: string): Promise<void>
 }
 
 export class WebSocketClientBase<TParams extends object, TData extends object> {
@@ -221,12 +225,15 @@ export class WebSocketClientBase<TParams extends object, TData extends object> {
     }
   }
 
-  async subscribe(subscriptionParams: TParams, onUpdate: (data: TData) => void): Promise<string> {
+  async subscribe(
+    subscriptionId: string,
+    subscriptionParams: TParams,
+    onUpdate: (data: TData) => void,
+  ): Promise<string> {
     const topic = `${this.topicType}:${Object.keys(subscriptionParams)
       .sort()
       .map((key) => subscriptionParams[key as keyof TParams])
       .join(':')}`
-    const subscriptionId = `${topic}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
     // Create subscription state (unconfirmed)
     const subscription: SubscriptionState<TParams, TData> = {

@@ -144,47 +144,20 @@ This document describes the **WebSocket Client Pattern** implemented in the Trad
 
 ## Core Components
 
-### 1. WebSocketClientBase (`wsClientBase.ts`)
+## Pattern Components
 
-**Purpose**: Generic WebSocket client foundation with singleton management.
+### 1. Base Client (`wsClientBase.ts`)
 
-**Key Responsibilities**:
-- WebSocket connection lifecycle (connect, disconnect, reconnect)
-- Message serialization/deserialization
-- Request/response correlation (pendingRequests map)
-- Subscription management (subscriptions map)
-- Message routing to callbacks
-- Singleton instance management per URL
-- Reference counting for automatic cleanup
+**Responsibility**: Generic WebSocket connection and **centralized subscription management**
 
-**Type Parameters**:
-```typescript
-class WebSocketClientBase<TParams extends object, TData extends object>
-```
-- `TParams`: Subscription request parameters type
-- `TData`: Update data type
-
-**Key Methods**:
-```typescript
-// Protected - for derived classes
-protected async subscribe<TPayload, TData>(
-  subscribeType: string,      // e.g., 'bars.subscribe'
-  subscribePayload: TPayload, // e.g., { symbol: 'AAPL', resolution: '1' }
-  expectedTopic: string,      // e.g., 'bars:AAPL:1'
-  updateType: string,         // e.g., 'bars.update'
-  callback: (data: TData) => void
-): Promise<string>
-
-protected async unsubscribe<TPayload>(
-  subscriptionId: string,
-  unsubscribeType: string,    // e.g., 'bars.unsubscribe'
-  unsubscribePayload: TPayload
-): Promise<void>
-
-// Public
-isConnected(): boolean
-async dispose(): Promise<void>
-```
+**Key Features**:
+- Singleton pattern (one connection per URL)
+- Generic types: `WebSocketClientBase<TRequest, TData>`
+- Connection lifecycle management
+- Message routing
+- **Centralized subscription state** - single source of truth ⭐
+- Auto-reconnection with exponential backoff
+- **Services don't track subscriptions** - base client handles it all ⭐
 
 ### 2. BarsWebSocketClient (`barsClient.ts`)
 

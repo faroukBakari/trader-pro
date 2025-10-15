@@ -111,38 +111,44 @@ try {
 ```typescript
 const wsClient = BarsWebSocketClientFactory()
 
-// Subscribe to multiple symbols
+// Subscribe to multiple symbols with your own IDs
 const subs = await Promise.all([
-  wsClient.subscribe({ symbol: 'AAPL', resolution: '1' }, onAAPL),
-  wsClient.subscribe({ symbol: 'GOOGL', resolution: '5' }, onGOOGL),
-  wsClient.subscribe({ symbol: 'MSFT', resolution: 'D' }, onMSFT),
+  wsClient.subscribe('aapl-1m', { symbol: 'AAPL', resolution: '1' }, onAAPL),
+  wsClient.subscribe('googl-5m', { symbol: 'GOOGL', resolution: '5' }, onGOOGL),
+  wsClient.subscribe('msft-daily', { symbol: 'MSFT', resolution: 'D' }, onMSFT),
 ])
 
 // All share the same WebSocket connection!
+// Base client manages all subscription state internally
 ```
 
 ### Task: Cleanup
 
 ```typescript
-// Service level cleanup
+// ✅ NEW: Simplified - no subscription tracking needed!
 class MyService {
-  private subscriptions = new Set<string>()
   private wsClient = BarsWebSocketClientFactory()
+  // No subscriptions Map needed!
 
-  async cleanup() {
-    for (const subId of this.subscriptions) {
-      await this.wsClient.unsubscribe(subId)
-    }
-    this.subscriptions.clear()
+  async unsubscribeBars(listenerGuid: string) {
+    // Base client handles cleanup internally
+    await this.wsClient.unsubscribe(listenerGuid)
   }
 }
 
 // Component level cleanup (Vue)
 import { onUnmounted } from 'vue'
 
+const listenerGuid = 'my-subscription-id'
+
 onUnmounted(() => {
-  service.cleanup()
+  service.unsubscribeBars(listenerGuid)
 })
+
+// ❌ OLD WAY (no longer needed):
+// private subscriptions = new Set<string>()
+// this.subscriptions.add(subId)
+// this.subscriptions.forEach(id => unsubscribe(id))
 ```
 
 ## 🏗️ Architecture Quick View
