@@ -33,11 +33,13 @@ make install       # Validates Node.js version, offers to install if needed, the
 ```
 
 The `make install` command will:
+
 1. **Check Node.js version** - Validates Node.js 20.19+ or 22.12+ is available
 2. **Auto-install Node.js** - If wrong version and nvm is available, **offers to install Node.js 20.19.0** (with confirmation)
 3. **Install dependencies** - Runs `npm install` to set up the project
 
 **Interactive prompts:**
+
 - If Node.js version is incompatible and nvm is available, you'll be asked: `"Would you like to install Node.js 20.19.0 via nvm? [y/N]"`
 - Type `y` and press Enter to automatically install and activate Node.js 20.19.0
 - Type `n` to skip and see manual installation instructions
@@ -86,12 +88,22 @@ make ws-generate
 ```
 
 **Documentation**:
-- **REST Client**: See [CLIENT-GENERATION.md](./CLIENT-GENERATION.md) for complete documentation
-- **WebSocket Client**: See [WS-CLIENT-AUTO-GENERATION.md](./WS-CLIENT-AUTO-GENERATION.md) for implementation details
+
+- **Development Guide**: See `../docs/DEVELOPMENT.md`
+- **Client Generation**: See `../docs/CLIENT-GENERATION.md`
+- **WebSocket Clients**: See `../docs/WEBSOCKET-CLIENTS.md`
+- **Testing**: See `../docs/TESTING.md`
+
+### Frontend-Specific Docs
+
+- **WebSocket Pattern**: See `WEBSOCKET-CLIENT-PATTERN.md`
+- **WebSocket Quick Ref**: See `WEBSOCKET-QUICK-REFERENCE.md`
+- **Plugin Usage**: See `src/plugins/ws-plugin-usage.md`
 
 ### Generated Files
 
 The following directories are auto-generated (gitignored):
+
 - `src/clients/trader-client-generated/` - REST API client
 - `src/clients/ws-generated/` - WebSocket client factories
 - `src/clients/ws-types-generated/` - WebSocket type definitions
@@ -171,23 +183,32 @@ npm run format
 
 ## WebSocket Integration
 
-The frontend includes a robust WebSocket client implementation for real-time data streaming.
+The frontend includes real-time WebSocket clients for streaming market data.
 
-### 📚 Documentation
+### Documentation
 
-**Complete Documentation Package**: See [`WEBSOCKET-DOCUMENTATION-INDEX.md`](./WEBSOCKET-DOCUMENTATION-INDEX.md) for complete index
+- **WebSocket Clients**: See `../docs/WEBSOCKET-CLIENTS.md` for overview
+- **WebSocket Pattern**: See `WEBSOCKET-CLIENT-PATTERN.md` for implementation details
+- **Quick Reference**: See `WEBSOCKET-QUICK-REFERENCE.md` for daily usage
+- **Plugin Usage**: See `src/plugins/ws-plugin-usage.md` for integration patterns
 
-**Quick Start**:
-- **New Developers**: Start with [`WEBSOCKET-IMPLEMENTATION-SUMMARY.md`](./WEBSOCKET-IMPLEMENTATION-SUMMARY.md)
-- **Quick Reference**: Use [`WEBSOCKET-QUICK-REFERENCE.md`](./WEBSOCKET-QUICK-REFERENCE.md) for daily coding
-- **Complete Pattern**: Read [`WEBSOCKET-CLIENT-PATTERN.md`](./WEBSOCKET-CLIENT-PATTERN.md) for deep dive
-- **Visual Diagrams**: See [`WEBSOCKET-ARCHITECTURE-DIAGRAMS.md`](./WEBSOCKET-ARCHITECTURE-DIAGRAMS.md)
-- **Auto-Generation**: See [`WS-CLIENT-AUTO-GENERATION.md`](./WS-CLIENT-AUTO-GENERATION.md) for generation details
+### Basic Usage
 
-### 🔑 Key Files
+```typescript
+import { BarsWebSocketClientFactory } from '@/clients/ws-generated/client'
+import type { Bar } from '@/clients/ws-types-generated'
 
-- **Base Client**: `src/plugins/wsClientBase.ts` - Generic WebSocket client foundation (manual)
-- **Generated Clients**: `src/clients/ws-generated/client.ts` - Auto-generated client factories (from AsyncAPI)
+const client = BarsWebSocketClientFactory()
+await client.subscribe({ symbol: 'AAPL', resolution: '1' }, (bar: Bar) =>
+  console.log('New bar:', bar),
+)
+```
+
+### Key Files
+
+- **Base Client**: `src/plugins/wsClientBase.ts` - Core WebSocket implementation
+- **Generated Clients**: `src/clients/ws-generated/` - Auto-generated factories
+- **Generated Types**: `src/clients/ws-types-generated/` - TypeScript interfaces
 - **Generated Types**: `src/clients/ws-types-generated/index.ts` - Auto-generated type definitions (from AsyncAPI)
 - **Integration**: `src/services/datafeedService.ts` - TradingView integration example
 - **Type Generator**: `scripts/generate-ws-types.mjs` - AsyncAPI → TypeScript types

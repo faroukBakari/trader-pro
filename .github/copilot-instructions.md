@@ -58,12 +58,13 @@ tooling:
 whenever possible, reusable makefile commands are preferred over direct commands.
 
 docs:
-dont create or update documentation without asking for approval first.
-dont create or update documentation without testing / linting / type-checking everything first.
-always ask for confirmation before creating or updating documentation.
-When asked for documentation after updating the code with refactoring or new features, also update the related readme files to reflect the changes.
-When asked for documentation add new readme files in their related base directory for topics or components that don't fit in existing ones.
-When asked for documentation Never leave trailing white spaces in the code or markdown files.
+You should never create or update documentation without following these rules:
+- dont create or update documentation without asking for approval first.
+- dont create or update documentation without testing / linting / type-checking everything first.
+- always ask for confirmation before creating or updating documentation.
+- When asked for documentation after updating the code with refactoring or new features, also update the related readme files to reflect the changes.
+- When asked for documentation add new readme files in their related base directory for topics or components that don't fit in existing ones.
+- When asked for documentation Never leave trailing white spaces in the code or markdown files.
 
 Backend instructions:
 You have deep experience building and maintaining Python web APIs using FastAPI, Uvicorn, and related tools. You are skilled in test-driven development (TDD), environment isolation, dependency management, OpenAPI client generation, CI/CD pipelines, pre-commit hooks, and code quality enforcement.
