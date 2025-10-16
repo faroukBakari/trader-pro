@@ -47,6 +47,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 ### Technology Stack
 
 #### Backend Stack
+
 - **🐍 Framework**: FastAPI 0.104+ (ASGI-based async framework)
 - **� WebSocket**: FastWS 0.1.7 (AsyncAPI-documented WebSocket framework)
 - **�🔄 Runtime**: Python 3.11 with Uvicorn ASGI server
@@ -57,6 +58,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 - **📋 Documentation**: OpenAPI 3.0 + AsyncAPI 2.4.0 specifications
 
 #### Frontend Stack
+
 - **⚡ Framework**: Vue 3 with Composition API + TypeScript
 - **🔧 Build Tool**: Vite 7+ (fast ES build tool)
 - **📦 Dependencies**: npm with Node.js 20+
@@ -68,6 +70,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 - **📝 Code Quality**: ESLint + Prettier + pre-commit hooks
 
 #### Real-Time Infrastructure
+
 - **🔌 Protocol**: WebSocket (ws/wss) for real-time bidirectional communication
 - **📚 Framework**: FastWS with AsyncAPI 2.4.0 auto-documentation
 - **📊 Market Data**: Real-time bar (OHLC) data streaming with topic-based subscriptions
@@ -77,6 +80,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 - **🔐 Authentication**: Extensible auth_handler support (currently optional)
 
 #### DevOps & Infrastructure
+
 - **⚙️ CI/CD**: GitHub Actions with parallel job execution
 - **🧪 Testing**: Multi-tier testing (unit, integration, smoke, e2e)
 - **🔧 Development**: VS Code multi-root workspace configuration
@@ -89,6 +93,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 ### Backend Components
 
 #### 1. FastAPI Application Core
+
 ```python
 # src/trading_api/main.py
 - Application lifecycle management
@@ -99,6 +104,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 ```
 
 #### 2. API Layer (`src/trading_api/api/`)
+
 ```python
 health.py         # Health check endpoints
 versions.py       # API versioning management
@@ -106,6 +112,7 @@ datafeed.py       # Market data REST endpoints
 ```
 
 #### 2b. WebSocket Layer (`src/trading_api/ws/`)
+
 ```python
 __init__.py       # WebSocket module exports
 datafeed.py       # Real-time bar data operations (subscribe/unsubscribe/update)
@@ -114,11 +121,13 @@ datafeed.py       # Real-time bar data operations (subscribe/unsubscribe/update)
 ```
 
 #### 2c. Plugins (`src/trading_api/plugins/`)
+
 ```python
 fastws_adapter.py # FastWS integration adapter with publish() helper
 ```
 
 #### 3. Core Services (`src/trading_api/core/`)
+
 ```python
 versioning.py         # API version management
 datafeed_service.py   # Market data business logic
@@ -128,6 +137,7 @@ config.py             # Application configuration models
 ```
 
 #### 4. Models Package (`src/trading_api/models/`)
+
 ```python
 __init__.py           # Unified model exports
 common.py             # Shared primitives (BaseApiResponse, ErrorApiResponse, SubscriptionResponse)
@@ -140,6 +150,7 @@ market/               # TradingView datafeed contracts
 ```
 
 #### 5. Testing Infrastructure (`tests/`)
+
 ```python
 test_health.py        # Health endpoint tests
 test_versioning.py    # API versioning tests
@@ -149,6 +160,7 @@ test_versioning.py    # API versioning tests
 ### Frontend Components
 
 #### 1. Application Core (`src/`)
+
 ```typescript
 main.ts           # Application entry point
 App.vue           # Root component
@@ -157,6 +169,7 @@ stores/           # Pinia state management
 ```
 
 #### 2. Services Layer (`src/services/`)
+
 ```typescript
 apiService.ts     # Smart API service wrapper
 generated/        # Auto-generated TypeScript client
@@ -164,13 +177,14 @@ testIntegration.ts # Integration test utilities
 ```
 
 #### 3. UI Components (`src/components/`)
+
 ```vue
-ApiStatus.vue     # Backend connectivity status
-MarketData.vue    # Real-time market data display
-TradingChart.vue  # TradingView chart integration
+ApiStatus.vue # Backend connectivity status MarketData.vue # Real-time market
+data display TradingChart.vue # TradingView chart integration
 ```
 
 #### 4. Client Generation (`scripts/`)
+
 ```bash
 generate-api-client.sh # Intelligent client generation
 # Smart detection: live API or mock fallback
@@ -179,6 +193,7 @@ generate-api-client.sh # Intelligent client generation
 ## Data Flow Architecture
 
 ### REST API Data Flow
+
 ```
 ┌─────────────┐    HTTP/JSON    ┌─────────────┐    Pydantic     ┌─────────────┐
 │   Frontend  │ ─────────────► │   FastAPI   │ ─────────────► │  Business   │
@@ -195,6 +210,7 @@ generate-api-client.sh # Intelligent client generation
 ```
 
 ### Real-Time Data Flow (WebSocket)
+
 ```
 ┌─────────────┐   WebSocket     ┌─────────────┐   FastWS        ┌─────────────┐
 │   Frontend  │ ═══════════════►│  /api/v1/ws │ ═══════════════►│ FastWS      │
@@ -263,6 +279,7 @@ generate-api-client.sh # Intelligent client generation
 ```
 
 ### Benefits of Smart Client Generation
+
 - ✅ **Zero Configuration**: Works immediately after `git clone`
 - ✅ **Development Flexibility**: Frontend works with or without backend
 - ✅ **Type Safety**: Full TypeScript support when API is available
@@ -272,18 +289,21 @@ generate-api-client.sh # Intelligent client generation
 ## API Versioning Strategy
 
 ### Version Management
+
 ```
 Current: /api/v1/     (Stable - Production Ready)
 Planned: /api/v2/     (Breaking changes planned)
 ```
 
 ### Versioning Principles
+
 - **URL-based versioning**: `/api/v{major}/`
 - **Backwards compatibility**: No breaking changes within versions
 - **Deprecation strategy**: 6-month notice period
 - **Client awareness**: Version information in responses
 
 ### Version Lifecycle
+
 1. **🏗️ Development**: New version in development
 2. **🔬 Beta**: Available for testing
 3. **✅ Stable**: Production-ready, recommended
@@ -316,6 +336,7 @@ Planned: /api/v2/     (Breaking changes planned)
 ### Testing Independence
 
 **Backend Testing (Independent)**:
+
 ```python
 # Uses FastAPI TestClient - no HTTP server needed
 async def test_health_endpoint():
@@ -325,11 +346,12 @@ async def test_health_endpoint():
 ```
 
 **Frontend Testing (Independent)**:
+
 ```typescript
 // Uses mocks - no backend server needed
-const apiService = new ApiService()  // Uses mock implementation
-const health = await apiService.getHealth()
-expect(health.status).toBe('ok')
+const apiService = new ApiService(); // Uses mock implementation
+const health = await apiService.getHealth();
+expect(health.status).toBe("ok");
 ```
 
 ## Real-Time Architecture (WebSocket)
@@ -337,6 +359,7 @@ expect(health.status).toBe('ok')
 ### Current Implementation
 
 #### WebSocket Endpoint
+
 - **URL**: `ws://localhost:8000/api/v1/ws`
 - **Protocol**: WebSocket (RFC 6455) over HTTP upgrade
 - **Framework**: FastWS 0.1.7 (FastAPI WebSocket wrapper)
@@ -344,17 +367,22 @@ expect(health.status).toBe('ok')
 - **Interactive Docs**: AsyncAPI UI at `/api/v1/ws/asyncapi` (HTML)
 
 #### Message Format
+
 All WebSocket messages follow a structured JSON format:
+
 ```json
 {
   "type": "operation.name",
-  "payload": { /* operation-specific data */ }
+  "payload": {
+    /* operation-specific data */
+  }
 }
 ```
 
 #### Implemented Operations
 
 **1. Subscribe to Bar Updates (SEND)**
+
 ```json
 // Client → Server
 {
@@ -378,6 +406,7 @@ All WebSocket messages follow a structured JSON format:
 ```
 
 **2. Unsubscribe from Updates (SEND)**
+
 ```json
 // Client → Server
 {
@@ -401,6 +430,7 @@ All WebSocket messages follow a structured JSON format:
 ```
 
 **3. Bar Data Updates (RECEIVE)**
+
 ```json
 // Server → Client (Broadcast)
 {
@@ -421,11 +451,13 @@ All WebSocket messages follow a structured JSON format:
 **Topic Format**: `bars:{SYMBOL}:{RESOLUTION}`
 
 **Examples**:
+
 - `bars:AAPL:1` - Apple 1-minute bars
 - `bars:GOOGL:5` - Google 5-minute bars
 - `bars:MSFT:D` - Microsoft daily bars
 
 **Features**:
+
 - Multi-symbol subscriptions per client
 - Resolution-specific topics (1, 5, 15, 60, D, W, M)
 - Broadcast only to subscribed clients
@@ -434,6 +466,7 @@ All WebSocket messages follow a structured JSON format:
 #### Connection Management
 
 **Configuration** (from `main.py`):
+
 ```python
 wsApp = FastWSAdapter(
     heartbeat_interval=30.0,      # Client must send message every 30s
@@ -442,6 +475,7 @@ wsApp = FastWSAdapter(
 ```
 
 **Lifecycle**:
+
 1. **Connect**: Client initiates WebSocket handshake
 2. **Authenticate**: Optional auth_handler validation (currently disabled)
 3. **Subscribe**: Client subscribes to topics via `bars.subscribe`
@@ -450,6 +484,7 @@ wsApp = FastWSAdapter(
 6. **Disconnect**: Graceful cleanup on close or timeout
 
 **Error Handling**:
+
 - Invalid message format: WS_1003_UNSUPPORTED_DATA
 - Validation errors: WS_1003_UNSUPPORTED_DATA with reason
 - Heartbeat timeout: Connection closed with timeout reason
@@ -460,16 +495,19 @@ wsApp = FastWSAdapter(
 #### Core Components
 
 **1. FastWSAdapter** (`plugins/fastws_adapter.py`)
+
 - Inherits from FastWS base class
 - Provides `publish(topic, data, message_type)` helper
 - Manages connection lifecycle and broadcasting
 
 **2. OperationRouter** (`ws/datafeed.py`)
+
 - Defines WebSocket operations (subscribe, unsubscribe, update)
 - Prefix: `bars.` for all bar-related operations
 - Tags: `["datafeed"]` for AsyncAPI grouping
 
 **3. Message Models**
+
 - `BarsSubscriptionRequest` (`models/market/bars.py`): Typed subscription payload with symbol and resolution fields
 - `SubscriptionResponse` (`models/common.py`): Standard response format inheriting from BaseApiResponse
 - Pydantic validation for all messages
@@ -478,6 +516,7 @@ wsApp = FastWSAdapter(
 #### Integration Points
 
 **Main Application** (`main.py`):
+
 ```python
 # Create FastWS application
 wsApp = FastWSAdapter(...)
@@ -495,6 +534,7 @@ async def websocket_endpoint(client: Annotated[Client, Depends(wsApp.manage)]):
 ```
 
 **Publishing Updates**:
+
 ```python
 # From any async context (e.g., background task, external service)
 from trading_api.main import wsApp
@@ -510,6 +550,7 @@ await wsApp.publish(
 ### Testing Strategy
 
 #### Integration Tests (`tests/test_ws_datafeed.py`)
+
 - FastAPI TestClient with WebSocket support
 - Subscribe/unsubscribe operation testing
 - Multi-symbol and multi-resolution scenarios
@@ -517,18 +558,19 @@ await wsApp.publish(
 - Message format validation
 
 **Example Test Pattern**:
+
 ```python
 with client.websocket_connect("/api/v1/ws") as websocket:
     # Send subscribe message
     websocket.send_json({"type": "bars.subscribe", "payload": {...}})
-    
+
     # Verify response
     response = websocket.receive_json()
     assert response["type"] == "bars.subscribe.response"
-    
+
     # Trigger server-side broadcast
     await wsApp.publish(topic="bars:AAPL:1", data=bar)
-    
+
     # Verify update received
     update = websocket.receive_json()
     assert update["type"] == "bars.update"
@@ -537,6 +579,7 @@ with client.websocket_connect("/api/v1/ws") as websocket:
 ### Future Enhancements
 
 #### Planned Features
+
 1. **Authentication**: JWT token validation for private channels
 2. **Additional Channels**: Order book, trades, account updates
 3. **Rate Limiting**: Per-client message rate limits
@@ -545,6 +588,7 @@ with client.websocket_connect("/api/v1/ws") as websocket:
 6. **Client Library**: Auto-generated TypeScript WebSocket client
 
 #### Architecture Expansion
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Future WebSocket Channel Architecture                       │
@@ -572,8 +616,9 @@ with client.websocket_connect("/api/v1/ws") as websocket:
 ```
 
 ### Build System Features
+
 - **🧹 Intelligent Cleanup**: Auto-cleanup of generated files
-- **🔄 Environment Isolation**: Separate Python/Node environments  
+- **🔄 Environment Isolation**: Separate Python/Node environments
 - **🛠️ Makefile-driven**: Consistent commands across environments
 - **🪝 Git Hooks**: Automated code quality checks
 - **⚡ Parallel Execution**: Frontend + Backend independence
@@ -598,12 +643,14 @@ with client.websocket_connect("/api/v1/ws") as websocket:
 ## Security Architecture
 
 ### Current Security Measures
+
 - **🔐 CORS Configuration**: Proper cross-origin resource sharing
 - **🛡️ Input Validation**: Pydantic model validation
 - **📝 Type Safety**: MyPy + TypeScript static analysis
 - **🧪 Test Coverage**: Comprehensive test validation
 
 ### Planned Security Enhancements
+
 - **🔑 JWT Authentication**: Real JWT token validation
 - **🚫 Rate Limiting**: Per-endpoint and per-user limits
 - **🔒 HTTPS/WSS**: SSL/TLS encryption for production
@@ -612,11 +659,12 @@ with client.websocket_connect("/api/v1/ws") as websocket:
 ## Deployment Architecture
 
 ### Current Development Setup
+
 ```bash
 # Start Backend
 cd backend && make dev     # Port 8000
 
-# Start Frontend  
+# Start Frontend
 cd frontend && npm run dev # Port 5173
 
 # Full Stack
@@ -624,6 +672,7 @@ make -f project.mk dev-fullstack
 ```
 
 ### Production Deployment (Planned)
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Production Environment (Planned)                           │
@@ -648,6 +697,7 @@ make -f project.mk dev-fullstack
 ## Design Patterns & Best Practices
 
 ### Backend Design Patterns
+
 - **🏗️ Dependency Injection**: FastAPI's built-in DI system
 - **🔄 Repository Pattern**: Data access abstraction
 - **🎯 Service Layer**: Business logic separation
@@ -655,6 +705,7 @@ make -f project.mk dev-fullstack
 - **🛡️ Validation Layer**: Pydantic model validation
 
 ### Frontend Design Patterns
+
 - **🧩 Composition API**: Vue 3 modern component pattern
 - **🗂️ Store Pattern**: Pinia for state management
 - **🔌 Service Layer**: API abstraction with smart fallbacks
@@ -662,6 +713,7 @@ make -f project.mk dev-fullstack
 - **📱 Responsive Design**: Mobile-first UI approach
 
 ### Cross-Cutting Patterns
+
 - **🔄 Event-Driven**: WebSocket event handling (planned)
 - **📋 Contract-First**: OpenAPI/AsyncAPI specifications
 - **🧪 Test-Driven**: TDD development workflow
@@ -670,22 +722,26 @@ make -f project.mk dev-fullstack
 ## Performance Considerations
 
 ### Backend Performance
+
 - **⚡ ASGI Framework**: FastAPI with async/await support
 - **� In-memory Datafeed**: Cached symbols and pre-generated OHLC bars for quick responses
 - **🗜️ Response Optimization**: Pydantic serialization
 - **🧮 Lightweight Computation**: Deterministic generators for repeatable test data
 
 ### Real-Time Performance (Planned)
+
 - **�🔄 Connection Pooling**: Efficient WebSocket management
 - **📊 Streaming**: Real-time data with minimal latency
 
 ### Frontend Performance
+
 - **⚡ Vite Build**: Fast ES-based build system
 - **🔄 Code Splitting**: Dynamic imports and lazy loading
 - **📊 State Management**: Efficient reactive state with Pinia
 - **🎯 Component Optimization**: Vue 3 Composition API benefits
 
 ### WebSocket Performance (Planned)
+
 - **📡 Broadcasting**: Efficient multi-client data distribution
 - **💾 Memory Management**: Connection cleanup and limits
 - **🔄 Heartbeat System**: Connection health monitoring
@@ -694,11 +750,13 @@ make -f project.mk dev-fullstack
 ## Monitoring & Observability
 
 ### Current Monitoring
+
 - **🏥 Health Endpoints**: `/api/v1/health` with status checks
 - **📊 Version Tracking**: API version usage monitoring
 - **🧪 Test Reporting**: Comprehensive test coverage
 
 ### Planned Monitoring
+
 - **📈 Application Metrics**: Response times, error rates
 - **🔌 WebSocket Metrics**: Connection lifecycle, message throughput
 - **🧪 Error Tracking**: Centralized error collection
@@ -706,33 +764,51 @@ make -f project.mk dev-fullstack
 
 ## Documentation Strategy
 
-### API Documentation
-- **📖 OpenAPI 3.0**: Interactive REST API documentation
-- **🔌 AsyncAPI 3.0**: WebSocket API documentation
-- **🎯 Examples**: Working code examples and tutorials
-- **🔄 Version Docs**: Per-version documentation
+### Project Documentation
 
-### Development Documentation
-- **🏗️ Architecture**: This document (comprehensive overview)
-- **🧪 Testing**: Independent testing strategies
-- **⚙️ Setup**: VS Code workspace and development setup
-- **🚀 Deployment**: CI/CD and production deployment
+- **README.md** - Project overview and quick start
+- **ARCHITECTURE.md** - This file (system architecture)
+- **docs/DEVELOPMENT.md** - Development workflows and setup
+- **docs/TESTING.md** - Testing strategy and best practices
+- **docs/CLIENT-GENERATION.md** - API client auto-generation
+- **docs/WEBSOCKET-CLIENTS.md** - WebSocket implementation
+
+### Component Documentation
+
+- **backend/docs/** - Backend-specific documentation
+  - `websockets.md` - WebSocket API reference
+  - `bar-broadcasting.md` - Broadcaster implementation
+  - `versioning.md` - API versioning strategy
+- **frontend/** - Frontend-specific documentation
+  - `WEBSOCKET-CLIENT-PATTERN.md` - WebSocket pattern details
+  - `WEBSOCKET-QUICK-REFERENCE.md` - Quick reference guide
+  - `src/plugins/ws-plugin-usage.md` - Plugin usage guide
+
+### Configuration Documentation
+
+- **WORKSPACE-SETUP.md** - VS Code workspace configuration
+- **ENVIRONMENT-CONFIG.md** - Environment variables
+- **MAKEFILE-GUIDE.md** - Makefile commands reference
+- **HOOKS-SETUP.md** - Git hooks configuration
 
 ## Future Roadmap
 
 ### Short Term (Next 3 months)
+
 - **🔑 Authentication**: Complete JWT implementation
 - **🐳 Containerization**: Docker configuration
 - **📊 Real Data**: Integration with market data providers
 - **🧪 E2E Testing**: Comprehensive end-to-end test suite
 
 ### Medium Term (3-6 months)
+
 - **☁️ Cloud Deployment**: Kubernetes manifests
 - **📈 Monitoring**: Production monitoring and alerting
 - **📊 Analytics**: User behavior and performance analytics
 - **🔒 Security**: Enhanced security measures
 
 ### Long Term (6+ months)
+
 - **📱 Mobile App**: React Native or Flutter application
 - **🤖 AI Integration**: Trading algorithms and insights
 - **📊 Advanced Charts**: Custom charting solutions
@@ -748,7 +824,7 @@ The Trading Pro architecture represents a modern, scalable, and maintainable app
 ✅ **Test-Driven**: Comprehensive testing at all levels  
 ✅ **DevOps Friendly**: Automated CI/CD with parallel execution  
 ✅ **Developer Experience**: Zero-configuration setup with intelligent fallbacks  
-✅ **Production Ready**: Scalable architecture for production deployment  
+✅ **Production Ready**: Scalable architecture for production deployment
 
 The system is designed to evolve gracefully, with proper versioning strategies, comprehensive testing, and modern DevOps practices ensuring long-term maintainability and success.
 

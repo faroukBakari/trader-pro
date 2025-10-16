@@ -280,7 +280,7 @@ Server broadcasts:
                     │
                     ▼
      Loop through all subscriptions:
-     
+
      ┌─────────────────────────────────────────────────────┐
      │ Subscription 1:                                     │
      │   id: 'sub_123'                                     │
@@ -291,7 +291,7 @@ Server broadcasts:
      │                                                     │
      │ Action: Call callback(payload) ✅                   │
      └─────────────────────────────────────────────────────┘
-     
+
      ┌─────────────────────────────────────────────────────┐
      │ Subscription 2:                                     │
      │   id: 'sub_456'                                     │
@@ -302,7 +302,7 @@ Server broadcasts:
      │                                                     │
      │ Action: Call callback(payload) ✅                   │
      └─────────────────────────────────────────────────────┘
-     
+
      ┌─────────────────────────────────────────────────────┐
      │ Subscription 3:                                     │
      │   id: 'sub_789'                                     │
@@ -313,7 +313,7 @@ Server broadcasts:
      │                                                     │
      │ Action: Skip ⏭️                                     │
      └─────────────────────────────────────────────────────┘
-     
+
      ┌─────────────────────────────────────────────────────┐
      │ Subscription 4:                                     │
      │   id: 'sub_101'                                     │
@@ -736,7 +736,7 @@ Data Flow:
 These diagrams illustrate the key architectural patterns, data flows, and component interactions in the WebSocket client implementation. For more details, refer to:
 
 - [`WEBSOCKET-CLIENT-PATTERN.md`](./WEBSOCKET-CLIENT-PATTERN.md) - Comprehensive pattern documentation
-- [`WEBSOCKET-IMPLEMENTATION-SUMMARY.md`](./WEBSOCKET-IMPLEMENTATION-SUMMARY.md) - Implementation summary
+- [`../docs/WEBSOCKET-CLIENTS.md`](../docs/WEBSOCKET-CLIENTS.md) - WebSocket clients overview
 - [`WEBSOCKET-CLIENT-BASE.md`](./WEBSOCKET-CLIENT-BASE.md) - Base client deep dive
 
 ---

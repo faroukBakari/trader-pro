@@ -22,6 +22,7 @@ A modern full-stack trading platform with FastAPI backend and Vue.js frontend. F
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - Python 3.11 with Poetry
 - Node.js 20+ with npm
 - Git
@@ -30,6 +31,7 @@ A modern full-stack trading platform with FastAPI backend and Vue.js frontend. F
 ### Setup
 
 #### 1. Clone and Install Dependencies
+
 ```bash
 # Clone the repository
 git clone https://github.com/faroukBakari/trading-api.git
@@ -40,12 +42,14 @@ make -f project.mk install
 ```
 
 #### 2. Open in VS Code (Recommended)
+
 ```bash
 # Open the multi-root workspace for proper TypeScript/Python support
 code trader-pro.code-workspace
 ```
 
 **Why use the workspace file?**
+
 - ✅ Proper TypeScript resolution for frontend
 - ✅ Correct Python environment detection for backend
 - ✅ No `import.meta` errors
@@ -54,6 +58,7 @@ code trader-pro.code-workspace
 See [WORKSPACE-SETUP.md](./WORKSPACE-SETUP.md) for details.
 
 ### Development
+
 ```bash
 # Start backend (terminal 1)
 make -f project.mk dev-backend
@@ -71,7 +76,9 @@ See [ENVIRONMENT-CONFIG.md](./ENVIRONMENT-CONFIG.md) for environment variable co
 ## 🔧 Development
 
 ### Git Hooks
+
 Automatic code quality checks run on every commit:
+
 - **Backend**: Black, isort, Flake8, MyPy, pytest
 - **Frontend**: ESLint, Prettier, TypeScript, Vitest
 - **All files**: Whitespace, merge conflicts, syntax
@@ -85,6 +92,7 @@ git commit --no-verify
 ```
 
 ### Testing
+
 ```bash
 # Run all tests (auto-generates API clients for frontend)
 make -f project.mk test-all
@@ -99,6 +107,7 @@ cd frontend && npm run test:unit
 **Note**: Frontend tests automatically generate API clients from the backend's OpenAPI spec before running.
 
 ### Code Quality
+
 ```bash
 # Run all linters
 make -f project.mk lint-all
@@ -111,70 +120,72 @@ make -C backend lint-check
 make -C backend format
 ```
 
-## 📖 API Documentation
+## 📖 Documentation
 
-### REST API
-- **Interactive Docs (Swagger)**: http://localhost:${BACKEND_PORT:-8000}/api/v1/docs
-- **OpenAPI Spec**: http://localhost:${BACKEND_PORT:-8000}/api/v1/openapi.json
-- **ReDoc**: http://localhost:${BACKEND_PORT:-8000}/api/v1/redoc
+### Core Documentation
 
-### WebSocket API
-- **AsyncAPI Interactive UI**: http://localhost:${BACKEND_PORT:-8000}/api/v1/ws/asyncapi
-- **AsyncAPI Spec**: http://localhost:${BACKEND_PORT:-8000}/api/v1/ws/asyncapi.json
-- **WebSocket Endpoint**: ws://localhost:${BACKEND_PORT:-8000}/api/v1/ws
+- **[Architecture](ARCHITECTURE.md)** - System architecture and design
+- **[Development Guide](docs/DEVELOPMENT.md)** - Development workflows and setup
+- **[Testing Strategy](docs/TESTING.md)** - Testing approach and best practices
+- **[Client Generation](docs/CLIENT-GENERATION.md)** - API client auto-generation
+- **[WebSocket Clients](docs/WEBSOCKET-CLIENTS.md)** - Real-time WebSocket implementation
 
-### Available REST Endpoints
-- `GET /api/v1/health` - Health check with version info
-- `GET /api/v1/versions` - List all API versions
-- `GET /api/v1/version` - Current version details
-- `GET /api/v1/datafeed/*` - TradingView-compatible market data
-- `GET /` - Root API metadata
+### API Documentation
 
-### WebSocket Operations
-- `bars.subscribe` - Subscribe to real-time OHLC bar updates
-- `bars.unsubscribe` - Unsubscribe from bar updates
-- `bars.update` - Server broadcasts (receive-only)
+- **Interactive Docs**: http://localhost:${BACKEND_PORT:-8000}/api/v1/docs
+- **AsyncAPI Docs**: http://localhost:${BACKEND_PORT:-8000}/api/v1/ws/asyncapi
+- **Backend Details**: See [backend/docs/](backend/docs/)
 
-See [backend/docs/websockets.md](backend/docs/websockets.md) for complete WebSocket documentation.
+### Quick Links
+
+- REST API: http://localhost:${BACKEND_PORT:-8000}/api/v1/openapi.json
+- WebSocket: ws://localhost:${BACKEND_PORT:-8000}/api/v1/ws
+- Frontend: http://localhost:${FRONTEND_PORT:-5173}
 
 ## 🏃‍♂️ CI/CD
 
 The project uses GitHub Actions for continuous integration:
 
 ### Workflows
+
 - **Backend**: Python 3.11, Poetry, pytest, linting
 - **Frontend**: Node.js 20-22, npm, ESLint, Vitest, build
 - **Integration**: End-to-end API tests, frontend build against live API
 
 ### Quality Gates
+
 - All tests must pass
 - Code coverage reporting
 - Linting and formatting checks
 - Type checking (MyPy + TypeScript)
 - Build verification
 
-## 📁 Project Details
+## 📁 Technology Stack
 
-### Backend (`/backend`)
-- **Framework**: FastAPI + FastWS (WebSocket)
-- **Runtime**: Python 3.11
-- **Testing**: pytest, pytest-asyncio, httpx, WebSocket testing
-- **Code Quality**: Black, isort, Flake8, MyPy
-- **Documentation**: OpenAPI 3.0 + AsyncAPI 2.4.0
-- **Dependencies**: Poetry
+### Backend
 
-### Frontend (`/frontend`)
-- **Framework**: Vue 3 + TypeScript
-- **Build Tool**: Vite
-- **Testing**: Vitest + Vue Test Utils
-- **Code Quality**: ESLint, Prettier
-- **Dependencies**: npm
+- **Framework**: FastAPI 0.104+ (REST) + FastWS 0.1.7 (WebSocket)
+- **Runtime**: Python 3.11+ with Uvicorn ASGI server
+- **Dependencies**: Poetry for package management
+- **Testing**: pytest + pytest-asyncio + httpx TestClient
+- **Code Quality**: Black, isort, Flake8, MyPy + pre-commit hooks
 
-### Git Hooks (`/.githooks`)
-- **Centralized**: Single source of truth for all hooks
-- **Cross-platform**: Works on Windows, macOS, Linux
-- **Fast**: Only checks changed files
-- **Smart**: CI detection, easy bypass options
+### Frontend
+
+- **Framework**: Vue 3 + Composition API + TypeScript
+- **Build**: Vite 7+ (fast ES build tool)
+- **Dependencies**: npm with Node.js 20+
+- **Testing**: Vitest + Vue Test Utils + jsdom
+- **Code Quality**: ESLint + Prettier + pre-commit hooks
+
+### DevOps
+
+- **CI/CD**: GitHub Actions with parallel job execution
+- **Testing**: Multi-tier (unit, integration, smoke, e2e)
+- **Git Hooks**: Automated code quality and testing
+- **Workspace**: VS Code multi-root workspace support
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for complete technical details.
 
 ## 🤝 Contributing
 
@@ -187,6 +198,7 @@ The project uses GitHub Actions for continuous integration:
 7. Open a Pull Request
 
 ### Development Setup for Contributors
+
 ```bash
 # After cloning
 make -f project.mk setup    # Install all dependencies and hooks

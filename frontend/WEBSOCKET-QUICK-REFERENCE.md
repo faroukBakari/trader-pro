@@ -13,12 +13,9 @@ import { BarsWebSocketClientFactory } from '@/clients/ws-generated/client'
 const wsClient = BarsWebSocketClientFactory()
 
 // Subscribe to data
-const subscriptionId = await wsClient.subscribe(
-  { symbol: 'AAPL', resolution: '1' },
-  (bar) => {
-    console.log('New bar:', bar)
-  }
-)
+const subscriptionId = await wsClient.subscribe({ symbol: 'AAPL', resolution: '1' }, (bar) => {
+  console.log('New bar:', bar)
+})
 
 // Unsubscribe
 await wsClient.unsubscribe(subscriptionId)
@@ -26,13 +23,13 @@ await wsClient.unsubscribe(subscriptionId)
 
 ## 📚 Documentation Index
 
-| Document | Purpose |
-|----------|---------|
-| **[WEBSOCKET-IMPLEMENTATION-SUMMARY.md](./WEBSOCKET-IMPLEMENTATION-SUMMARY.md)** | ⭐ Start here - High-level overview |
-| **[WEBSOCKET-CLIENT-PATTERN.md](./WEBSOCKET-CLIENT-PATTERN.md)** | ⭐ Complete pattern documentation |
-| **[WEBSOCKET-ARCHITECTURE-DIAGRAMS.md](./WEBSOCKET-ARCHITECTURE-DIAGRAMS.md)** | Visual diagrams |
-| **[WEBSOCKET-CLIENT-BASE.md](./WEBSOCKET-CLIENT-BASE.md)** | Base client deep dive |
-| **[WEBSOCKET-SINGLETON-REFACTORING.md](./WEBSOCKET-SINGLETON-REFACTORING.md)** | Migration guide |
+| Document                                                                       | Purpose                             |
+| ------------------------------------------------------------------------------ | ----------------------------------- |
+| **[../docs/WEBSOCKET-CLIENTS.md](../docs/WEBSOCKET-CLIENTS.md)**               | ⭐ Start here - High-level overview |
+| **[WEBSOCKET-CLIENT-PATTERN.md](./WEBSOCKET-CLIENT-PATTERN.md)**               | ⭐ Complete pattern documentation   |
+| **[WEBSOCKET-ARCHITECTURE-DIAGRAMS.md](./WEBSOCKET-ARCHITECTURE-DIAGRAMS.md)** | Visual diagrams                     |
+| **[WEBSOCKET-CLIENT-BASE.md](./WEBSOCKET-CLIENT-BASE.md)**                     | Base client deep dive               |
+| **[WEBSOCKET-SINGLETON-REFACTORING.md](./WEBSOCKET-SINGLETON-REFACTORING.md)** | Migration guide                     |
 
 ## 🔑 Key Files
 
@@ -46,7 +43,7 @@ frontend/
 │   └── services/
 │       └── datafeedService.ts       ⭐ Usage example
 └── docs/
-    ├── WEBSOCKET-IMPLEMENTATION-SUMMARY.md
+    ├── ../docs/WEBSOCKET-CLIENTS.md
     ├── WEBSOCKET-CLIENT-PATTERN.md
     ├── WEBSOCKET-ARCHITECTURE-DIAGRAMS.md
     └── WEBSOCKET-CLIENT-BASE.md
@@ -59,6 +56,7 @@ frontend/
 When you add a new WebSocket route to the backend, the frontend client is **automatically generated**!
 
 **1. Backend**: Add new router (e.g., for quotes)
+
 ```python
 # backend/src/trading_api/ws/quotes.py
 router = OperationRouter(prefix="quotes.", tags=["datafeed"])
@@ -69,11 +67,13 @@ async def send_subscribe(payload: QuoteDataSubscriptionRequest, client: Client):
 ```
 
 **2. Frontend**: Regenerate clients
+
 ```bash
 npm run client:generate && npm run ws:generate
 ```
 
 **3. Result**: New factory automatically available!
+
 ```typescript
 // Auto-generated in src/clients/ws-generated/client.ts
 import { QuotesWebSocketClientFactory } from '@/clients/ws-generated/client'
@@ -81,14 +81,14 @@ import type { QuoteDataSubscriptionRequest, QuoteData } from '@/clients/ws-types
 
 const wsClient = QuotesWebSocketClientFactory()
 
-const subId = await wsClient.subscribe(
-  { symbols: ['AAPL'], fast_symbols: ['GOOGL'] },
-  (quote) => console.log('New quote:', quote)
+const subId = await wsClient.subscribe({ symbols: ['AAPL'], fast_symbols: ['GOOGL'] }, (quote) =>
+  console.log('New quote:', quote),
 )
 ```
 
 **No manual code needed** - Types and client factory both auto-generated from AsyncAPI spec!
-```
+
+````
 
 ### Task: Handle Errors
 
@@ -104,7 +104,7 @@ try {
     console.error('Subscription failed:', error)
   }
 }
-```
+````
 
 ### Task: Multiple Subscriptions
 
@@ -171,17 +171,18 @@ Native WebSocket API
 
 ## 🎨 Key Patterns
 
-| Pattern | Purpose | Benefit |
-|---------|---------|---------|
-| **Singleton** | One connection per URL | Resource efficiency |
-| **Factory** | Simple instantiation | Clean API |
-| **Repository** | Interface-based | Testability |
-| **Observer** | Callback subscriptions | Decoupled communication |
-| **Promise** | Async operations | Modern syntax |
+| Pattern        | Purpose                | Benefit                 |
+| -------------- | ---------------------- | ----------------------- |
+| **Singleton**  | One connection per URL | Resource efficiency     |
+| **Factory**    | Simple instantiation   | Clean API               |
+| **Repository** | Interface-based        | Testability             |
+| **Observer**   | Callback subscriptions | Decoupled communication |
+| **Promise**    | Async operations       | Modern syntax           |
 
 ## 🔄 Message Protocol
 
 **Subscribe Request** (Client → Server):
+
 ```json
 {
   "type": "bars.subscribe",
@@ -190,6 +191,7 @@ Native WebSocket API
 ```
 
 **Subscribe Response** (Server → Client):
+
 ```json
 {
   "type": "bars.subscribe.response",
@@ -198,6 +200,7 @@ Native WebSocket API
 ```
 
 **Data Update** (Server → Client):
+
 ```json
 {
   "type": "bars.update",
@@ -210,6 +213,7 @@ Native WebSocket API
 Format: `{domain}:{key1}:{key2}:...`
 
 Examples:
+
 - `bars:AAPL:1` - Apple, 1-minute bars
 - `bars:GOOGL:5` - Alphabet, 5-minute bars
 - `quotes:TSLA` - Tesla quotes
@@ -236,10 +240,7 @@ describe('BarsWebSocketClient', () => {
     const client = BarsWebSocketClientFactory()
     const callback = vi.fn()
 
-    const subId = await client.subscribe(
-      { symbol: 'AAPL', resolution: '1' },
-      callback
-    )
+    const subId = await client.subscribe({ symbol: 'AAPL', resolution: '1' }, callback)
 
     expect(subId).toBeDefined()
   })
@@ -266,18 +267,22 @@ class MockBarsClient implements BarsWebSocketInterface {
 ## 🚨 Common Issues
 
 ### Issue: Connection keeps closing
+
 **Cause**: No heartbeat messages
 **Solution**: Backend sends periodic updates or implement ping
 
 ### Issue: No updates received
+
 **Cause**: Subscription not confirmed
 **Solution**: Check server logs, verify topic matches
 
 ### Issue: Multiple connections
+
 **Cause**: Not using factory pattern
 **Solution**: Always use `BarsWebSocketClientFactory()`
 
 ### Issue: Memory leak
+
 **Cause**: Not unsubscribing
 **Solution**: Always call `unsubscribe()` in cleanup
 

@@ -294,7 +294,7 @@ The plugin handles errors gracefully:
 
 ## See Also
 
-- [WebSocket Implementation Summary](../WEBSOCKET-IMPLEMENTATION-SUMMARY.md) - High-level overview
+- [WebSocket Clients Guide](../../docs/WEBSOCKET-CLIENTS.md) - High-level overview
 - [WebSocket Client Pattern](../WEBSOCKET-CLIENT-PATTERN.md) - Complete pattern documentation
 - [WebSocket Architecture Diagrams](../WEBSOCKET-ARCHITECTURE-DIAGRAMS.md) - Visual diagrams
 ````
