@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { beforeAll } from 'vitest'
@@ -7,28 +7,25 @@ import { beforeAll } from 'vitest'
 const currentDir = dirname(fileURLToPath(import.meta.url))
 
 /**
- * Clear generated client files before running tests
- * This ensures tests run with consistent state and don't depend on generated artifacts
+ * Verify generated client files exist before running tests
+ * This ensures tests have the required API client generated
  */
 beforeAll(() => {
   const clientsDir = join(currentDir, 'clients')
+  const traderClientDir = join(clientsDir, 'trader-client-generated')
+  const wsClientDir = join(clientsDir, 'ws-types-generated')
 
-  try {
-    // Remove any directories or files matching *-generated pattern
-    const generatedPattern = /-generated$/
-
-    if (existsSync(clientsDir)) {
-      const entries = readdirSync(clientsDir, { withFileTypes: true })
-
-      for (const entry of entries) {
-        if (generatedPattern.test(entry.name)) {
-          const fullPath = join(clientsDir, entry.name)
-          console.log(`🧹 Clearing generated files: ${fullPath}`)
-          rmSync(fullPath, { recursive: true, force: true })
-        }
-      }
-    }
-  } catch (error) {
-    console.warn('⚠️ Failed to clear generated client files:', error)
+  if (!existsSync(traderClientDir)) {
+    throw new Error(
+      '❌ API client not generated! Run "npm run client:generate" before running tests.',
+    )
   }
+
+  if (!existsSync(wsClientDir)) {
+    throw new Error(
+      '❌ WebSocket client not generated! Run "npm run ws:generate" before running tests.',
+    )
+  }
+
+  console.log('✓ Generated clients verified')
 })

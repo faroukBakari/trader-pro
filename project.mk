@@ -4,19 +4,19 @@
 BACKEND_PORT ?= 8000
 FRONTEND_PORT ?= 5173
 
-.PHONY: help setup install-all install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration
+.PHONY: help setup install install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration
 
 # Default target
 help:
 	@echo "Project-wide targets:"
-	@echo "  setup             Full project setup (hooks + dependencies)"
-	@echo "  install-all       Install all project dependencies (backend + frontend)"
-	@echo "  install-hooks     Install Git hooks for pre-commit checks"
+	@echo "  install           Install Git hooks + all dependencies (backend + frontend)"
+	@echo "  setup             Same as install (alias for convenience)"
+	@echo "  install-hooks     Install Git hooks for pre-commit checks only"
 	@echo "  uninstall-hooks   Remove Git hooks"
 	@echo "  dev-backend       Start backend development server"
 	@echo "  dev-frontend      Start frontend development server"
 	@echo "  dev-fullstack     Start backend, generate client, then start frontend"
-	@echo "  test-all          Run all tests"
+	@echo "  test-all          Run all tests (auto-generates clients for frontend)"
 	@echo "  test-smoke        Run smoke tests with Playwright"
 	@echo "  test-integration  Run full integration test suite"
 	@echo "  lint-all          Run all linters"
@@ -50,14 +50,18 @@ uninstall-hooks:
 	@echo "Git hooks removed."
 
 # Install all dependencies
-install-all:
+install:
 	@echo "Installing all project dependencies..."
 	@echo ""
-	@echo "[1/2] Installing backend dependencies..."
+	@echo "[1/3] Installing Git hooks..."
+	@echo "========================================"
+	@$(MAKE) install-hooks
+	@echo ""
+	@echo "[2/3] Installing backend dependencies..."
 	@echo "========================================"
 	make -C backend install
 	@echo ""
-	@echo "[2/2] Installing frontend dependencies..."
+	@echo "[3/3] Installing frontend dependencies..."
 	@echo "========================================="
 	make -C frontend install
 	@echo ""
@@ -68,8 +72,8 @@ install-all:
 	@echo "  make dev-frontend   # Start frontend server (port 5173)"
 	@echo "  make dev-fullstack  # Start both servers"
 
-# Project setup
-setup: install-hooks install-all
+# Project setup (alias for install)
+setup: install
 	@echo ""
 	@echo "Project setup complete!"
 	@echo ""
@@ -98,11 +102,17 @@ dev-fullstack:
 # Testing
 test-all:
 	@echo "Running all tests..."
-	@echo "Backend tests:"
+	@echo ""
+	@echo "[1/2] Backend tests"
+	@echo "========================================"
 	make -C backend test
 	@echo ""
-	@echo "Frontend tests:"
+	@echo "[2/2] Frontend tests (with client generation)"
+	@echo "========================================"
+	@echo "Note: Client generation happens automatically before tests"
 	make -C frontend test-run
+	@echo ""
+	@echo "✓ All tests completed successfully!"
 
 # Smoke testing
 test-smoke:

@@ -183,6 +183,8 @@ install: ensure-poetry
 		$(MAKE) ensure-python; \
 		poetry install; \
 	fi
+	@echo ""
+	@echo "💡 Tip: Install Git hooks with: make -f ../project.mk install-hooks"
 
 # CI-optimized install (non-interactive)
 install-ci: ensure-python-ci ensure-poetry

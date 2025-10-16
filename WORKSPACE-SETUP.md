@@ -191,6 +191,7 @@ If you previously had `.vscode/settings.json`:
 ## 🎉 Next Steps
 
 1. Open the workspace file: `code trader-pro.code-workspace`
-2. Install recommended extensions when prompted
-3. Verify TypeScript is using workspace version
-4. Start coding without TypeScript errors! 🚀
+2. Install dependencies: `make -f project.mk install-all` (includes hooks)
+3. Install recommended extensions when prompted
+4. Verify TypeScript is using workspace version
+5. Start coding without TypeScript errors! 🚀

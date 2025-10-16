@@ -35,8 +35,8 @@ A modern full-stack trading platform with FastAPI backend and Vue.js frontend. F
 git clone https://github.com/faroukBakari/trading-api.git
 cd trading-api
 
-# Install Git hooks and dependencies
-make -f project.mk setup
+# Install dependencies (includes Git hooks)
+make -f project.mk install
 ```
 
 #### 2. Open in VS Code (Recommended)
@@ -86,15 +86,17 @@ git commit --no-verify
 
 ### Testing
 ```bash
-# Run all tests
+# Run all tests (auto-generates API clients for frontend)
 make -f project.mk test-all
 
 # Backend only
 make -C backend test
 
-# Frontend only
+# Frontend only (auto-generates clients)
 cd frontend && npm run test:unit
 ```
+
+**Note**: Frontend tests automatically generate API clients from the backend's OpenAPI spec before running.
 
 ### Code Quality
 ```bash

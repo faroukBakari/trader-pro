@@ -7,32 +7,10 @@
 
 // Type definitions (fallback when generated types are not available)
 
-import { ApiTraderPlugin } from '@/plugins/traderPlugin'
-export interface HealthResponse {
-  status: string
-  message?: string
-  timestamp: string
-  api_version: string
-  version_info: object
-}
+import type { APIMetadata, HealthResponse } from '@/plugins/apiAdapter';
+import { ApiAdapter } from '@/plugins/apiAdapter';
 
-export interface VersionInfo {
-  version: string
-  release_date: string
-  status: string
-  breaking_changes?: string[]
-  deprecation_notice?: string | null
-  sunset_date?: string | null
-}
-
-export interface APIMetadata {
-  current_version: string
-  available_versions: VersionInfo[]
-  documentation_url: string
-  support_contact: string
-}
-
-export interface ClientInterface {
+export interface ApiInterface {
   getHealthStatus(): Promise<{ status: number; data: HealthResponse }>
   getAPIVersions(): Promise<{ status: number; data: APIMetadata }>
 }
@@ -47,7 +25,7 @@ const MOCK_CONFIG = {
 }
 
 // Fallback implementation with mock data for development/testing
-class FallbackClient implements ClientInterface {
+class ApiFallback implements ApiInterface {
   async getHealthStatus(): Promise<{ status: number; data: HealthResponse }> {
     if (MOCK_CONFIG.enableLogs) {
       console.info('🎭 Using mock API response for health endpoint')
@@ -112,38 +90,39 @@ class FallbackClient implements ClientInterface {
 
 // Main API service implementation
 export class ApiService {
-  private plugin: ApiTraderPlugin<ClientInterface>
-
-  constructor() {
-    this.plugin = new ApiTraderPlugin<ClientInterface>()
+  private adapter: ApiInterface
+  private fallback: ApiInterface
+  private mock: boolean
+  constructor(mock: boolean = false) {
+    this.adapter = new ApiAdapter()
+    this.fallback = new ApiFallback()
+    this.mock = mock
   }
 
-  async _loadClient(): Promise<ClientInterface> {
-    return this.plugin.getClientWithFallback(FallbackClient)
+  _getClient(mock: boolean = this.mock): ApiInterface {
+    return mock ? this.fallback : this.adapter
   }
 
   async getHealthStatus(): Promise<HealthResponse> {
-    return this._loadClient().then(async (client) => {
-      const { status, data } = await client.getHealthStatus()
-      if (status !== 200) {
-        return Promise.reject(new Error(`Health check failed with status ${status}`))
-      }
-      return data
-    })
+    const { status, data } = await this._getClient().getHealthStatus()
+    if (status !== 200) {
+      return Promise.reject(new Error(`Health check failed with status ${status}`))
+    }
+    return data
   }
 
   async getAPIVersions(): Promise<APIMetadata> {
-    return this._loadClient().then(async (client) => {
-      const { status, data } = await client.getAPIVersions()
-      if (status !== 200) {
-        return Promise.reject(new Error(`Versions check failed with status ${status}`))
-      }
-      return data
-    })
+    const { status, data } = await this._getClient().getAPIVersions()
+    if (status !== 200) {
+      return Promise.reject(new Error(`Versions check failed with status ${status}`))
+    }
+    return data
   }
 
-  // Check if currently using mock client
-  getClientType(): 'server' | 'mock' | 'unknown' {
-    return ApiTraderPlugin.getApiClientType()
+  getClientType(): 'mock' | 'server' {
+    return this.mock ? 'mock' : 'server'
   }
 }
+
+export type { APIMetadata, HealthResponse } from '@/plugins/apiAdapter';
+
