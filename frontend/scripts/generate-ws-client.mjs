@@ -213,9 +213,14 @@ function writeFile(filePath, content) {
   }
 
   const dir = path.dirname(filePath)
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true })
+  
+  // Clean up existing directory before creating new one
+  if (fs.existsSync(dir)) {
+    console.log(`🧹 Cleaning existing directory: ${dir}`)
+    fs.rmSync(dir, { recursive: true, force: true })
   }
+  
+  fs.mkdirSync(dir, { recursive: true })
 
   fs.writeFileSync(filePath, content, 'utf-8')
   console.log(`✅ Generated: ${filePath}`)

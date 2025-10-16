@@ -182,7 +182,11 @@ function generateTypes(specPath, outputDir) {
 
     log('green', `✅ Generated ${interfaceCount} interfaces`)
 
-    // Create output directory
+    // Clean up and create output directory
+    if (fs.existsSync(outputDir)) {
+      log('blue', `🧹 Cleaning existing directory: ${outputDir}`)
+      fs.rmSync(outputDir, { recursive: true, force: true })
+    }
     fs.mkdirSync(outputDir, { recursive: true })
 
     // Write to file

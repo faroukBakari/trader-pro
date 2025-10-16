@@ -163,6 +163,8 @@ ensure-node-ci:
 install: ensure-node
 	@echo "Installing frontend dependencies..."
 	$(call run-with-nvm,npm install)
+	@echo ""
+	@echo "💡 Tip: Install Git hooks with: make -f ../project.mk install-hooks"
 
 install-ci: ensure-node-ci
 	@echo "Installing frontend dependencies for CI..."
@@ -179,23 +181,23 @@ ws-generate:
 	$(call run-with-nvm,npm run ws:generate)
 
 # Linting and formatting
-lint:
+lint: client-generate ws-generate
 	@echo "Running frontend linting and formatting checks..."
 	$(call run-with-nvm,npm run lint)
 
 # Type checking
-type-check:
+type-check: client-generate ws-generate
 	@echo "Running TypeScript type checking..."
 	$(call run-with-nvm,npm run type-check)
 
 # Testing
-test:
+test: client-generate ws-generate
 	@echo "Running frontend tests in watch mode..."
 	$(call run-with-nvm,npm run test:unit)
 
-test-run:
+test-run: client-generate ws-generate
 	@echo "Running frontend tests..."
-	$(call run-with-nvm,npm run test:unit run)
+	$(call run-with-nvm,npm run test:unit)
 
 # Build
 build:

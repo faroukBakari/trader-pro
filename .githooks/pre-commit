@@ -55,31 +55,19 @@ if [[ -n "$backend_files" ]]; then
         log_error "Poetry not found. Please install Poetry to run backend checks."
         failed_checks+=("poetry-missing")
     else
-        # Python formatting with Black
-        if ! run_check "Black formatting" "poetry run black --check --diff src/ tests/" "$repo_root/backend"; then
-            log_warning "Run 'cd backend && poetry run black src/ tests/' to fix formatting"
-            failed_checks+=("black")
+        # Format backend code (auto-fix with Black and isort)
+        if ! run_check "Backend formatting" "make format" "$repo_root/backend"; then
+            failed_checks+=("format")
         fi
 
-        # Import sorting with isort
-        if ! run_check "Import sorting" "poetry run isort --check-only --diff src/ tests/" "$repo_root/backend"; then
-            log_warning "Run 'cd backend && poetry run isort src/ tests/' to fix import order"
-            failed_checks+=("isort")
-        fi
-
-        # Linting with flake8
-        if ! run_check "Flake8 linting" "poetry run flake8 src/ tests/" "$repo_root/backend"; then
-            failed_checks+=("flake8")
-        fi
-
-        # Type checking with mypy
-        if ! run_check "MyPy type checking" "poetry run mypy src/" "$repo_root/backend"; then
-            failed_checks+=("mypy")
+        # Lint backend code (flake8 + mypy)
+        if ! run_check "Backend linting" "make lint-check" "$repo_root/backend"; then
+            failed_checks+=("lint-check")
         fi
 
         # Run tests (only if not in CI for speed)
         if ! is_ci; then
-            if ! run_check "Backend tests" "poetry run pytest tests/ -v" "$repo_root/backend"; then
+            if ! run_check "Backend tests" "make test" "$repo_root/backend"; then
                 failed_checks+=("backend-tests")
             fi
         fi
@@ -103,26 +91,20 @@ if [[ -n "$frontend_files" ]]; then
             npm install
         fi
 
-        # ESLint
-        if ! run_check "ESLint" "npm run lint" "$repo_root/frontend"; then
-            log_warning "Run 'cd frontend && npm run lint' to fix linting issues"
-            failed_checks+=("eslint")
+        # Linting (includes client generation)
+        if ! run_check "Frontend linting" "make lint" "$repo_root/frontend"; then
+            log_warning "Run 'cd frontend && make lint' to fix linting issues"
+            failed_checks+=("lint")
         fi
 
-        # Prettier formatting
-        if ! run_check "Prettier formatting" "npx prettier --check src/" "$repo_root/frontend"; then
-            log_warning "Run 'cd frontend && npm run format' to fix formatting"
-            failed_checks+=("prettier")
+        # TypeScript type checking (includes client generation)
+        if ! run_check "TypeScript type checking" "make type-check" "$repo_root/frontend"; then
+            failed_checks+=("type-check")
         fi
 
-        # TypeScript type checking
-        if ! run_check "TypeScript checking" "npm run type-check" "$repo_root/frontend"; then
-            failed_checks+=("typescript")
-        fi
-
-        # Run tests (only if not in CI for speed)
+        # Run tests (only if not in CI for speed, includes client generation)
         if ! is_ci; then
-            if ! run_check "Frontend tests" "rm -rf $repo_root/frontend/clients/* && npm run test:unit" "$repo_root/frontend"; then
+            if ! run_check "Frontend tests" "make test-run" "$repo_root/frontend"; then
                 failed_checks+=("frontend-tests")
             fi
         fi

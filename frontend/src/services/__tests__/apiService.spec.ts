@@ -5,7 +5,7 @@ describe('ApiService', () => {
   let apiService: ApiService
 
   beforeEach(() => {
-    apiService = new ApiService()
+    apiService = new ApiService(true)
     // Clear any cached client between tests
     vi.clearAllMocks()
   })
@@ -201,8 +201,8 @@ describe('ApiService', () => {
     })
 
     it('should handle multiple service instances independently', async () => {
-      const service1 = new ApiService()
-      const service2 = new ApiService()
+      const service1 = new ApiService(true)
+      const service2 = new ApiService(true)
 
       const [result1, result2] = await Promise.all([
         service1.getHealthStatus(),

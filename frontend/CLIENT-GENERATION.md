@@ -30,7 +30,7 @@ This document describes the intelligent client generation architecture that enab
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Automatic Client Generation                                 │
-│  (scripts/generate-api-client.sh)                               │
+│  (scripts/generate-api-client.sh)                           │
 └─────────────────────┬───────────────────────────────────────┘
                       │
                       ▼
@@ -42,23 +42,43 @@ This document describes the intelligent client generation architecture that enab
            ┌──────────┴──────────┐
            │                     │
            ▼                     ▼
-    ┌─────────────┐      ┌─────────────┐
-    │  API LIVE   │      │  NO API     │
-    └──────┬──────┘      └──────┬──────┘
+    ┌─────────────┐      ┌──────────────────┐
+    │  API LIVE   │      │  NO API          │
+    └──────┬──────┘      └──────┬───────────┘
            │                     │
-           ▼                     ▼
-┌──────────────────────┐ ┌──────────────────────┐
-│ Download OpenAPI     │ │ Setup Mock Fallback  │
-│ Generate TS Client   │ │                      │
-└──────────┬───────────┘ └──────┬───────────────┘
+           │                     ▼
+           │            ┌────────────────────┐
+           │            │ Start Backend      │
+           │            │ Automatically      │
+           │            │ (via make dev)     │
+           │            └────────┬───────────┘
+           │                     │
+           │                     ▼
+           │            ┌────────────────────┐
+           │            │ Wait for Ready     │
+           │            │ (max 30 seconds)   │
+           │            └────────┬───────────┘
            │                     │
            └──────────┬──────────┘
                       │
                       ▼
            ┌──────────────────────┐
+           │ Download OpenAPI     │
+           │ Generate TS Client   │
+           └──────────┬───────────┘
+                      │
+                      ▼
+           ┌──────────────────────┐
+           │  Cleanup Backend?    │
+           │  (only if we         │
+           │   started it)        │
+           └──────────┬───────────┘
+                      │
+                      ▼
+           ┌──────────────────────┐
            │  apiService.ts       │
-           │  Automatically uses  │
-           │  appropriate client  │
+           │  Uses generated      │
+           │  client              │
            └──────────────────────┘
 ```
 
@@ -87,8 +107,10 @@ frontend/
 
 **Responsibilities**:
 - Check if backend API is available
+- **Automatically start backend if not running** (using project-wide make command)
 - Download OpenAPI specification if available
 - Generate TypeScript client using openapi-generator
+- **Cleanup backend process if it was started by the script**
 
 **Usage**:
 ```bash
@@ -256,7 +278,12 @@ cd frontend
 npm run dev
 ```
 
-**Result**: Frontend uses mock data, all features work normally
+**Result**: 
+- Frontend detects backend is not running
+- **Automatically starts backend** using `make -f ../project.mk dev-backend`
+- Generates TypeScript client with full type safety
+- **Stops backend after generation** (cleanup)
+- Frontend runs with generated client
 
 ### Scenario 3: CI/CD Pipeline
 
@@ -291,8 +318,10 @@ VITE_API_URL=https://api.production.com npm run build
 ### 2. Developer Experience
 - ✅ Zero configuration
 - ✅ Works immediately after clone
+- ✅ **Automatic backend startup for client generation**
 - ✅ No manual client generation needed
 - ✅ Automatic type safety when possible
+- ✅ **Smart cleanup - only stops backend if script started it**
 
 ### 3. CI/CD Friendly
 - ✅ Frontend builds don't require backend
@@ -310,6 +339,25 @@ VITE_API_URL=https://api.production.com npm run build
 - ✅ No runtime errors
 
 ## Troubleshooting
+
+### Backend Auto-Start Issues
+
+**Symptoms**: Client generation fails to start backend automatically
+
+**Solutions**:
+```bash
+# Check backend startup logs
+cat /tmp/backend-client-gen.log
+
+# Ensure backend dependencies are installed
+cd ../backend && make install
+
+# Try starting backend manually
+cd ../backend && make dev
+
+# If backend starts manually, retry client generation
+cd ../frontend && npm run client:generate
+```
 
 ### Client Not Generated
 
