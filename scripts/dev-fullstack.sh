@@ -179,12 +179,14 @@ else
 fi
 cd ..
 
-# Get initial file modification time
+# Get initial file modification time and content
 if [ -f "$OPENAPI_FILE" ]; then
     INITIAL_MTIME=$(stat -c %Y "$OPENAPI_FILE" 2>/dev/null || echo "0")
+    LAST_CONTENT=$(cat "$OPENAPI_FILE" 2>/dev/null || echo "")
     print_success "Watching OpenAPI file: $OPENAPI_FILE"
 else
     INITIAL_MTIME="0"
+    LAST_CONTENT=""
     print_warning "OpenAPI file not found, will watch for creation"
 fi
 
@@ -199,16 +201,28 @@ fi
         if [ -f "$OPENAPI_FILE" ]; then
             CURRENT_MTIME=$(stat -c %Y "$OPENAPI_FILE" 2>/dev/null || echo "0")
 
+            # Only check content if modification time changed
             if [ "$CURRENT_MTIME" != "$LAST_MTIME" ] && [ "$CURRENT_MTIME" != "0" ]; then
-                print_warning "OpenAPI file changed! Regenerating client..."
-                cd frontend
-                if make client-generate >/dev/null 2>&1; then
-                    print_success "Frontend client regenerated successfully"
+                CURRENT_CONTENT=$(cat "$OPENAPI_FILE" 2>/dev/null || echo "")
+                
+                # Compare actual content, not just timestamps
+                if [ "$CURRENT_CONTENT" != "$LAST_CONTENT" ]; then
+                    print_warning "OpenAPI file changed! Regenerating client..."
+                    cd frontend
+                    if SKIP_SPEC_GENERATION=true make client-generate >/dev/null 2>&1; then
+                        print_success "Frontend client regenerated successfully"
+                    else
+                        print_error "Failed to regenerate client"
+                    fi
+                    cd ..
+                    
+                    # Update both timestamp and content
+                    LAST_MTIME="$CURRENT_MTIME"
+                    LAST_CONTENT="$CURRENT_CONTENT"
                 else
-                    print_error "Failed to regenerate client"
+                    # Content unchanged, just update timestamp to avoid repeated checks
+                    LAST_MTIME="$CURRENT_MTIME"
                 fi
-                cd ..
-                LAST_MTIME="$CURRENT_MTIME"
             fi
         fi
     done

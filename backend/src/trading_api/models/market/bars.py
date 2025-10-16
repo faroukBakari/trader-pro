@@ -18,7 +18,7 @@ class Bar(BaseModel):
     high: float = Field(..., description="High price")
     low: float = Field(..., description="Low price")
     close: float = Field(..., description="Close price")
-    volume: Optional[int] = Field(None, description="Volume")
+    volume: int = Field(default=0, description="Volume")
 
 
 class GetBarsRequest(BaseModel):

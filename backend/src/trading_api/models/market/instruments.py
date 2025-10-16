@@ -5,7 +5,7 @@ This module contains models related to financial instruments,
 symbols, exchanges, and symbol metadata.
 """
 
-from typing import List, Literal, Optional
+from typing import List, Literal
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +18,7 @@ class SymbolInfo(BaseModel):
     type: str = Field(..., description="Symbol type (stock, crypto, forex, etc.)")
     session: str = Field(..., description="Trading session hours")
     timezone: str = Field(..., description="Symbol timezone")
-    ticker: Optional[str] = Field(None, description="Symbol ticker")
+    ticker: str = Field(default="", description="Symbol ticker")
     exchange: str = Field(..., description="Exchange name")
     listed_exchange: str = Field(..., description="Listed exchange")
     format: str = Field(..., description="Price format")
@@ -39,7 +39,7 @@ class SearchSymbolResultItem(BaseModel):
     symbol: str = Field(..., description="Symbol name")
     description: str = Field(..., description="Symbol description")
     exchange: str = Field(..., description="Exchange name")
-    ticker: Optional[str] = Field(None, description="Symbol ticker")
+    ticker: str = Field(default="", description="Symbol ticker")
     type: str = Field(..., description="Symbol type")
 
 

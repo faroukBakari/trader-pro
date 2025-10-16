@@ -1,4 +1,4 @@
-import symbolsData from '@debug/symbols.json'
+import symbolsData from '@debug/symbols.json';
 import type {
   Bar,
   DatafeedConfiguration,
@@ -11,8 +11,6 @@ import type {
   OnReadyCallback,
   PeriodParams,
   QuoteData,
-  QuoteErrorData,
-  QuoteOkData,
   QuotesCallback,
   QuotesErrorCallback,
   ResolutionString,
@@ -21,19 +19,14 @@ import type {
   SearchSymbolsCallback,
   SeriesFormat,
   SubscribeBarsCallback,
-  Timezone,
-} from '@public/trading_terminal/charting_library'
+  Timezone
+} from '@public/trading_terminal/charting_library';
 
-import { ApiTraderPlugin, WebSocketClientPlugin } from '@/plugins/traderPlugin'
-import type { WebSocketInterface } from '@/plugins/wsClientBase'
-import type { AxiosPromise } from 'axios'
-interface GetBarsResponse {
-  bars: Array<Bar>
-  no_data?: boolean
-}
-interface GetQuotesRequest {
-  symbols: string[]
-}
+import type { GetBarsResponse, GetQuotesRequest, RequestPromise } from '@/plugins/apiAdapter';
+import { ApiAdapter } from '@/plugins/apiAdapter';
+
+import { WebSocketClientPlugin } from '@/plugins/traderPlugin';
+import type { WebSocketInterface } from '@/plugins/wsClientBase';
 
 interface BarsSubscriptionRequest {
   symbol: string
@@ -55,23 +48,23 @@ interface BarsSubscriptionRequest {
  * @see https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi
  */
 
-interface ApiClientInterface {
-  getConfig(): AxiosPromise<DatafeedConfiguration>
-  resolveSymbol(symbol: string): AxiosPromise<LibrarySymbolInfo>
+interface ApiInterface {
+  getConfig(): RequestPromise<DatafeedConfiguration>
+  resolveSymbol(symbol: string): RequestPromise<LibrarySymbolInfo>
   searchSymbols(
     userInput: string,
     exchange?: string,
     symbolType?: string,
     maxResults?: number,
-  ): AxiosPromise<Array<SearchSymbolResultItem>>
+  ): RequestPromise<Array<SearchSymbolResultItem>>
   getBars(
     symbol: string,
     resolution: string,
     fromTime: number,
     toTime: number,
     countBack?: number | null,
-  ): AxiosPromise<GetBarsResponse>
-  getQuotes(getQuotesRequest: GetQuotesRequest): AxiosPromise<Array<QuoteData>>
+  ): RequestPromise<GetBarsResponse>
+  getQuotes(getQuotesRequest: GetQuotesRequest): RequestPromise<Array<QuoteData>>
 }
 
 function generateLast400DaysBars(): Bar[] {
@@ -122,7 +115,7 @@ function generateLast400DaysBars(): Bar[] {
 }
 const sampleBars: Bar[] = generateLast400DaysBars()
 
-class ApiFallbackClient implements ApiClientInterface {
+class ApiFallback implements ApiInterface {
   /**
    * Available symbols loaded from JSON file
    */
@@ -137,7 +130,7 @@ class ApiFallbackClient implements ApiClientInterface {
       data_status: symbol.data_status as 'streaming' | 'endofday' | 'delayed_streaming',
     }))
   }
-  async getConfig(): AxiosPromise<DatafeedConfiguration> {
+  async getConfig(): RequestPromise<DatafeedConfiguration> {
     const configuration: DatafeedConfiguration = {
       // Supported time intervals/resolutions
       supported_resolutions: ['1D'] as unknown as ResolutionString[],
@@ -169,9 +162,9 @@ class ApiFallbackClient implements ApiClientInterface {
       statusText: 'OK',
       headers: {},
       config: {},
-    }) as AxiosPromise<DatafeedConfiguration>
+    }) as RequestPromise<DatafeedConfiguration>
   }
-  async resolveSymbol(symbolName: string): AxiosPromise<LibrarySymbolInfo> {
+  async resolveSymbol(symbolName: string): RequestPromise<LibrarySymbolInfo> {
     console.log('[Datafeed] resolveSymbol called:', { symbolName })
 
     // Search for the symbol in our available symbols
@@ -186,14 +179,14 @@ class ApiFallbackClient implements ApiClientInterface {
       data: symbolInfo!,
       status: symbolInfo ? 200 : 404,
       statusText: symbolInfo ? 'OK' : 'Not Found',
-    }) as AxiosPromise<LibrarySymbolInfo>
+    }) as RequestPromise<LibrarySymbolInfo>
   }
   async searchSymbols(
     userInput: string,
     exchange?: string,
     symbolType?: string,
     maxResults?: number,
-  ): AxiosPromise<Array<SearchSymbolResultItem>> {
+  ): RequestPromise<Array<SearchSymbolResultItem>> {
     // Filter symbols based on user input and filters
     let filteredSymbols = this.availableSymbols
 
@@ -238,7 +231,7 @@ class ApiFallbackClient implements ApiClientInterface {
       data: results,
       status: 200,
       statusText: 'OK',
-    }) as AxiosPromise<Array<SearchSymbolResultItem>>
+    }) as RequestPromise<Array<SearchSymbolResultItem>>
   }
   async getBars(
     symbolName: string,
@@ -246,7 +239,7 @@ class ApiFallbackClient implements ApiClientInterface {
     from: number,
     to: number,
     countBack?: number | null,
-  ): AxiosPromise<GetBarsResponse> {
+  ): RequestPromise<GetBarsResponse> {
     if (resolution !== '1D') {
       throw new Error('Only 1D resolution is supported in fallback client')
     }
@@ -273,12 +266,12 @@ class ApiFallbackClient implements ApiClientInterface {
       },
       status: 200,
       statusText: 'OK',
-    }) as AxiosPromise<GetBarsResponse>
+    }) as RequestPromise<GetBarsResponse>
   }
   async getQuotes(
     getQuotesRequest: GetQuotesRequest,
-  ): AxiosPromise<Array<QuoteOkData | QuoteErrorData>> {
-    const quoteData: (QuoteOkData | QuoteErrorData)[] = getQuotesRequest.symbols.map((symbol) => {
+  ): RequestPromise<Array<QuoteData>> {
+    const quoteData: QuoteData[] = getQuotesRequest.symbols.map((symbol) => {
       // Check if symbol exists in our available symbols
       const symbolExists = this.availableSymbols.some(
         (availableSymbol) =>
@@ -359,7 +352,7 @@ class ApiFallbackClient implements ApiClientInterface {
       data: quoteData,
       status: 200,
       statusText: 'OK',
-    }) as AxiosPromise<Array<QuoteData>>
+    }) as RequestPromise<Array<QuoteData>>
   }
 }
 
@@ -425,10 +418,14 @@ class BarsWebSocketFallbackClient implements BarsWebSocketInterface {
 }
 
 export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
-  private apiPlugin: ApiTraderPlugin<ApiClientInterface>
+  private apiAdapter: ApiInterface
+  private apiFallback: ApiInterface
+
   private wsPlugin: WebSocketClientPlugin<BarsWebSocketInterface>
-  private apiFallbackClient: ApiClientInterface = new ApiFallbackClient()
   private wsFallbackClient: BarsWebSocketInterface = new BarsWebSocketFallbackClient()
+
+  private mock: boolean
+
   private readonly subscriptions = new Map<
     string,
     {
@@ -449,9 +446,12 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       intervalId?: number
     }
   >()
-  constructor() {
-    this.apiPlugin = new ApiTraderPlugin<ApiClientInterface>()
+
+  constructor(mock: boolean = false) {
+    this.apiAdapter = new ApiAdapter()
+    this.apiFallback = new ApiFallback()
     this.wsPlugin = new WebSocketClientPlugin<BarsWebSocketInterface>()
+    this.mock = mock
   }
 
   async _loadWsClient(mock: boolean = false): Promise<BarsWebSocketInterface> {
@@ -459,21 +459,18 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       ? Promise.resolve(this.wsFallbackClient)
       : this.wsPlugin.getClientWithFallback(BarsWebSocketFallbackClient)
   }
-  async _loadApiClient(mock: boolean = false): Promise<ApiClientInterface> {
-    return mock
-      ? Promise.resolve(this.apiFallbackClient)
-      : this.apiPlugin.getClientWithFallback(ApiFallbackClient)
+
+  _getClient(mock: boolean = this.mock): ApiInterface {
+    return mock ? this.apiFallback : this.apiAdapter
   }
   onReady(callback: OnReadyCallback): void {
     console.log('[Datafeed] onReady called')
 
-    this._loadApiClient().then((client) => {
-      client.getConfig().then((response) => {
-        // Handle both AxiosResponse (generated client) and direct data (fallback client)
-        const config = 'data' in response ? response.data : response
-        console.log('[Datafeed] Configuration loaded:', config)
-        callback(config)
-      })
+    this._getClient().getConfig().then((response) => {
+      // Handle both AxiosResponse (generated client) and direct data (fallback client)
+      const config = 'data' in response ? response.data : response
+      console.log('[Datafeed] Configuration loaded:', config)
+      callback(config)
     })
   }
   searchSymbols(
@@ -482,13 +479,11 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     symbolType: string,
     onResult: SearchSymbolsCallback,
   ): void {
-    this._loadApiClient().then((client) => {
-      client.searchSymbols(userInput, exchange, symbolType, 30).then((response) => {
-        console.log(
-          `[Datafeed] searchSymbols found ${response.data.length} symbols for input "${userInput}"`,
-        )
-        onResult(response.data)
-      })
+    this._getClient().searchSymbols(userInput, exchange, symbolType, 30).then((response) => {
+      console.log(
+        `[Datafeed] searchSymbols found ${response.data.length} symbols for input "${userInput}"`,
+      )
+      onResult(response.data)
     })
   }
   resolveSymbol(
@@ -496,19 +491,17 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onResolve: ResolveCallback,
     onError: DatafeedErrorCallback,
   ): void {
-    this._loadApiClient().then((client) => {
-      client.resolveSymbol(symbolName).then((response) => {
-        console.log(
-          `[Datafeed] resolveSymbol found ${response.data ? 'a' : 'no'} symbol for input "${symbolName}"`,
-        )
-        if (response.data) {
-          console.log('[Datafeed] Symbol resolved:', response.data)
-          onResolve(response.data)
-        } else {
-          console.log('[Datafeed] Symbol not found:', symbolName)
-          onError('unknown_symbol')
-        }
-      })
+    this._getClient().resolveSymbol(symbolName).then((response) => {
+      console.log(
+        `[Datafeed] resolveSymbol found ${response.data ? 'a' : 'no'} symbol for input "${symbolName}"`,
+      )
+      if (response.data) {
+        console.log('[Datafeed] Symbol resolved:', response.data)
+        onResolve(response.data)
+      } else {
+        console.log('[Datafeed] Symbol not found:', symbolName)
+        onError('unknown_symbol')
+      }
     })
   }
   getBars(
@@ -518,30 +511,28 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onResult: HistoryCallback,
     onError: DatafeedErrorCallback,
   ): void {
-    this._loadApiClient().then((client) => {
-      client
-        .getBars(
-          symbolInfo.name,
-          resolution,
-          periodParams.from * 1000,
-          periodParams.to * 1000,
-          periodParams.countBack,
+    this._getClient()
+      .getBars(
+        symbolInfo.name,
+        resolution,
+        periodParams.from * 1000,
+        periodParams.to * 1000,
+        periodParams.countBack,
+      )
+      .then((response) => {
+        console.log(
+          `[Datafeed] getBars returned ${response.data.bars.length} bars for ${symbolInfo.name} in range ${new Date(
+            periodParams.from * 1000,
+          ).toISOString()} - ${new Date(periodParams.to * 1000).toISOString()}`,
         )
-        .then((response) => {
-          console.log(
-            `[Datafeed] getBars returned ${response.data.bars.length} bars for ${symbolInfo.name} in range ${new Date(
-              periodParams.from * 1000,
-            ).toISOString()} - ${new Date(periodParams.to * 1000).toISOString()}`,
-          )
-          if (response.data.bars.length === 1)
-            response.data.bars = [...response.data.bars, ...response.data.bars]
-          onResult(response.data.bars, { noData: response.data.no_data || false })
-        })
-        .catch((error) => {
-          console.error('[Datafeed] Error in getBars:', error)
-          onError(error instanceof Error ? error.message : 'Unknown error occurred')
-        })
-    })
+        if (response.data.bars.length === 1)
+          response.data.bars = [...response.data.bars, ...response.data.bars]
+        onResult(response.data.bars, { noData: response.data.no_data || false })
+      })
+      .catch((error) => {
+        console.error('[Datafeed] Error in getBars:', error)
+        onError(error instanceof Error ? error.message : 'Unknown error occurred')
+      })
   }
   subscribeBars(
     symbolInfo: LibrarySymbolInfo,
@@ -588,20 +579,18 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   ): void {
     console.debug('[Datafeed] getQuotes called:', { symbols })
 
-    this._loadApiClient().then((client) =>
-      client
-        .getQuotes({ symbols })
-        .then((response) => {
-          console.debug(
-            `[Datafeed] getQuotes returned ${response.data.length} quotes for ${symbols.length} requested symbols`,
-          )
-          onDataCallback(response.data)
-        })
-        .catch((error) => {
-          console.error('[Datafeed] Error in getQuotes:', error)
-          onErrorCallback(error instanceof Error ? error.message : 'Unknown error occurred')
-        }),
-    )
+    this._getClient()
+      .getQuotes({ symbols })
+      .then((response) => {
+        console.debug(
+          `[Datafeed] getQuotes returned ${response.data.length} quotes for ${symbols.length} requested symbols`,
+        )
+        onDataCallback(response.data)
+      })
+      .catch((error) => {
+        console.error('[Datafeed] Error in getQuotes:', error)
+        onErrorCallback(error instanceof Error ? error.message : 'Unknown error occurred')
+      })
   }
   subscribeQuotes(
     symbols: string[],
