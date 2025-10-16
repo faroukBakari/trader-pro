@@ -7,12 +7,12 @@
 
 // Type definitions (fallback when generated types are not available)
 
-import type { APIMetadata, HealthResponse } from '@/plugins/apiAdapter';
+import type { APIMetadata, HealthResponse, RequestPromise } from '@/plugins/apiAdapter';
 import { ApiAdapter } from '@/plugins/apiAdapter';
 
 export interface ApiInterface {
-  getHealthStatus(): Promise<{ status: number; data: HealthResponse }>
-  getAPIVersions(): Promise<{ status: number; data: APIMetadata }>
+  getHealthStatus(): RequestPromise<HealthResponse>
+  getAPIVersions(): RequestPromise<APIMetadata>
 }
 
 // Configuration for mock behavior
@@ -26,7 +26,7 @@ const MOCK_CONFIG = {
 
 // Fallback implementation with mock data for development/testing
 class ApiFallback implements ApiInterface {
-  async getHealthStatus(): Promise<{ status: number; data: HealthResponse }> {
+  async getHealthStatus(): RequestPromise<HealthResponse> {
     if (MOCK_CONFIG.enableLogs) {
       console.info('🎭 Using mock API response for health endpoint')
     }
@@ -51,7 +51,7 @@ class ApiFallback implements ApiInterface {
     }
   }
 
-  async getAPIVersions(): Promise<{ status: number; data: APIMetadata }> {
+  async getAPIVersions(): RequestPromise<APIMetadata> {
     if (MOCK_CONFIG.enableLogs) {
       console.info('🎭 Using mock API response for versions endpoint')
     }

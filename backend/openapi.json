@@ -490,16 +490,10 @@
             "description": "Close price"
           },
           "volume": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "integer",
             "title": "Volume",
-            "description": "Volume"
+            "description": "Volume",
+            "default": 0
           }
         },
         "type": "object",
@@ -516,128 +510,46 @@
       "DatafeedConfiguration": {
         "properties": {
           "supported_resolutions": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
             "title": "Supported Resolutions",
-            "description": "Supported resolutions",
-            "default": [
-              "5",
-              "1D",
-              "1W"
-            ]
+            "description": "Supported resolutions"
           },
           "supports_marks": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "boolean",
             "title": "Supports Marks",
             "description": "Supports marks",
             "default": false
           },
           "supports_timescale_marks": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "boolean",
             "title": "Supports Timescale Marks",
             "description": "Supports timescale marks",
             "default": false
           },
           "supports_time": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "boolean",
             "title": "Supports Time",
             "description": "Supports time",
             "default": false
           },
           "exchanges": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/Exchange"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "items": {
+              "$ref": "#/components/schemas/Exchange"
+            },
+            "type": "array",
             "title": "Exchanges",
-            "description": "Available exchanges",
-            "default": [
-              {
-                "value": "",
-                "name": "All Exchanges",
-                "desc": ""
-              },
-              {
-                "value": "NASDAQ",
-                "name": "NASDAQ",
-                "desc": "NASDAQ"
-              },
-              {
-                "value": "NYSE",
-                "name": "NYSE",
-                "desc": "NYSE"
-              }
-            ]
+            "description": "Available exchanges"
           },
           "symbols_types": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/DatafeedSymbolType"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "items": {
+              "$ref": "#/components/schemas/DatafeedSymbolType"
+            },
+            "type": "array",
             "title": "Symbols Types",
-            "description": "Available symbol types",
-            "default": [
-              {
-                "name": "All types",
-                "value": ""
-              },
-              {
-                "name": "Stock",
-                "value": "stock"
-              },
-              {
-                "name": "Crypto",
-                "value": "crypto"
-              },
-              {
-                "name": "Forex",
-                "value": "forex"
-              }
-            ]
+            "description": "Available symbol types"
           }
         },
         "type": "object",
@@ -975,16 +887,10 @@
             "description": "Exchange name"
           },
           "ticker": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Ticker",
-            "description": "Symbol ticker"
+            "description": "Symbol ticker",
+            "default": ""
           },
           "type": {
             "type": "string",
@@ -1030,16 +936,10 @@
             "description": "Symbol timezone"
           },
           "ticker": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Ticker",
-            "description": "Symbol ticker"
+            "description": "Symbol ticker",
+            "default": ""
           },
           "exchange": {
             "type": "string",

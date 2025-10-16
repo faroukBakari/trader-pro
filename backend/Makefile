@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 BACKEND_APP_NAME ?= app
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install test test-cov lint lint-check format build clean dev health clients export-openapi docs-html generate-ws-routers
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install test test-cov lint lint-check format build clean dev health clients export-openapi export-openapi-offline docs-html generate-ws-routers
 
 # Default target
 help:
@@ -23,7 +23,8 @@ help:
 	@echo "  dev-no-debug      Start backend development server without debugpy"
 	@echo "  clean             Clean build artifacts"
 	@echo "  health            Check backend health"
-	@echo "  export-openapi    Export OpenAPI specification"
+	@echo "  export-openapi    Export OpenAPI specification (requires running server)"
+	@echo "  export-openapi-offline Export OpenAPI/AsyncAPI specs (offline, no server needed)"
 	@echo "  docs-html         Generate static HTML documentation"
 	@echo "  generate-ws-routers Generate WebSocket router classes"
 
@@ -260,6 +261,11 @@ clean:
 export-openapi:
 	@echo "Exporting OpenAPI specification..."
 	curl -s http://localhost:$(BACKEND_PORT)/api/v1/openapi.json -o openapi.json
+
+# Export OpenAPI specification offline (without running server)
+export-openapi-offline:
+	@echo "Exporting OpenAPI and AsyncAPI specifications (offline)..."
+	poetry run python scripts/export_openapi.py
 
 # Generate static HTML documentation
 docs-html:

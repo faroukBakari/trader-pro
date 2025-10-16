@@ -5,7 +5,7 @@ This module contains models related to datafeed configuration,
 health checks, and system status.
 """
 
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel, Field
 
@@ -15,25 +15,25 @@ from .instruments import DatafeedSymbolType, Exchange
 class DatafeedConfiguration(BaseModel):
     """Datafeed configuration model matching DatafeedConfiguration interface"""
 
-    supported_resolutions: Optional[List[str]] = Field(
-        default=["5", "1D", "1W"], description="Supported resolutions"
+    supported_resolutions: List[str] = Field(
+        default_factory=lambda: ["5", "1D", "1W"], description="Supported resolutions"
     )
-    supports_marks: Optional[bool] = Field(default=False, description="Supports marks")
-    supports_timescale_marks: Optional[bool] = Field(
+    supports_marks: bool = Field(default=False, description="Supports marks")
+    supports_timescale_marks: bool = Field(
         default=False, description="Supports timescale marks"
     )
-    supports_time: Optional[bool] = Field(default=False, description="Supports time")
+    supports_time: bool = Field(default=False, description="Supports time")
 
-    exchanges: Optional[List[Exchange]] = Field(
-        default=[
+    exchanges: List[Exchange] = Field(
+        default_factory=lambda: [
             Exchange(value="", name="All Exchanges", desc=""),
             Exchange(value="NASDAQ", name="NASDAQ", desc="NASDAQ"),
             Exchange(value="NYSE", name="NYSE", desc="NYSE"),
         ],
         description="Available exchanges",
     )
-    symbols_types: Optional[List[DatafeedSymbolType]] = Field(
-        default=[
+    symbols_types: List[DatafeedSymbolType] = Field(
+        default_factory=lambda: [
             DatafeedSymbolType(name="All types", value=""),
             DatafeedSymbolType(name="Stock", value="stock"),
             DatafeedSymbolType(name="Crypto", value="crypto"),

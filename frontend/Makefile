@@ -175,28 +175,31 @@ client-generate:
 	@echo "Generating API client..."
 	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-api-client.sh'
 
-# WebSocket client generation
+# WebSocket client generation (included in client-generate now, kept for backward compatibility)
 ws-generate:
-	@echo "Generating WebSocket client from AsyncAPI..."
-	$(call run-with-nvm,npm run ws:generate)
+	@echo "WebSocket client generation is now included in client-generate"
 
 # Linting and formatting
-lint: client-generate ws-generate
+lint:
 	@echo "Running frontend linting and formatting checks..."
+	@$(MAKE) client-generate
 	$(call run-with-nvm,npm run lint)
 
 # Type checking
-type-check: client-generate ws-generate
+type-check:
 	@echo "Running TypeScript type checking..."
+	@$(MAKE) client-generate
 	$(call run-with-nvm,npm run type-check)
 
 # Testing
-test: client-generate ws-generate
+test:
 	@echo "Running frontend tests in watch mode..."
+	@$(MAKE) client-generate
 	$(call run-with-nvm,npm run test:unit)
 
-test-run: client-generate ws-generate
+test-run:
 	@echo "Running frontend tests..."
+	@$(MAKE) client-generate
 	$(call run-with-nvm,npm run test:unit)
 
 # Build

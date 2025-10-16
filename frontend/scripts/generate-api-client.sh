@@ -1,32 +1,28 @@
 #!/bin/bash
 # Frontend API Client Generator
-# This script attempts to generate the TypeScript client from a live API server.
-# If the API is not available, it falls back to using the mock client implementation.
+# This script generates the TypeScript client from backend OpenAPI/AsyncAPI specifications.
+# The specifications are generated offline (without running the server).
 #
 # Usage:
 #   ./scripts/generate-api-client.sh                    # Use default settings
-#   VITE_API_URL=http://api.example.com ./scripts/generate-api-client.sh    # Custom API URL
 #   TRADER_API_BASE_PATH="" ./scripts/generate-api-client.sh                 # Empty basePath (relative URLs)
 #   TRADER_API_BASE_PATH="/api" ./scripts/generate-api-client.sh             # Custom basePath
 #
 # Environment Variables:
-#   VITE_API_URL      - API server URL (default: http://localhost:8000)
-#   BACKEND_PORT      - Backend port when using localhost (default: 8000)
 #   TRADER_API_BASE_PATH - BasePath for generated client (default: auto-detected from OpenAPI spec)
 
 set -e
 
 # Configuration
-API_URL="${VITE_API_URL:-http://localhost:${BACKEND_PORT:-8000}}"
 OUTPUT_DIR="./src/clients/trader-client-generated"
 WS_TYPES_OUTPUT_DIR="./src/clients/ws-types-generated"
 WS_CLIENT_OUTPUT_DIR="./src/clients/ws-generated"
-OPENAPI_SPEC="openapi.json"
-ASYNCAPI_SPEC="asyncapi.json"
+BACKEND_DIR="../backend"
+OPENAPI_SPEC="$BACKEND_DIR/openapi.json"
+ASYNCAPI_SPEC="$BACKEND_DIR/asyncapi.json"
 CLIENT_PACKAGE_NAME="@trading-api/client"
 BASE_PATH="${TRADER_API_BASE_PATH:-}"  # Use same env var as frontend
-BACKEND_PID=""
-BACKEND_STARTED_BY_SCRIPT=false
+SKIP_SPEC_GENERATION="${SKIP_SPEC_GENERATION:-false}"  # Skip backend spec regeneration if true
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -49,108 +45,28 @@ mkdir -p "$WS_CLIENT_OUTPUT_DIR"
 echo -e "${GREEN}✅ Cleanup complete${NC}"
 echo ""
 
-# Function to check if API server is available
-check_api_available() {
-    local health_url="$API_URL/api/v1/health"
-    echo -e "${BLUE}📡 Checking API server at: $health_url${NC}"
-
-    if curl -sf "$health_url" > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ API server is available${NC}"
-        return 0
-    else
-        echo -e "${YELLOW}⚠️  API server is not available${NC}"
+# Function to export specifications from backend
+export_backend_specs() {
+    echo -e "${BLUE}� Generating backend API specifications (offline mode)...${NC}"
+    
+    if ! (cd "$BACKEND_DIR" && make export-openapi-offline > /dev/null 2>&1); then
+        echo -e "${RED}❌ Failed to generate backend specifications${NC}"
         return 1
     fi
-}
-
-# Function to start backend server
-start_backend_server() {
-    echo ""
-    echo -e "${BLUE}🚀 Starting backend server for client generation...${NC}"
-    echo -e "${BLUE}   Using project-wide command: make -f ../project.mk dev-backend${NC}"
-    echo ""
     
-    # Start backend in background using project-wide makefile
-    cd ..
-    make -f project.mk dev-backend > /tmp/backend-client-gen.log 2>&1 &
-    BACKEND_PID=$!
-    cd frontend
-    
-    BACKEND_STARTED_BY_SCRIPT=true
-    
-    echo -e "${BLUE}⏳ Waiting for backend to be ready (PID: $BACKEND_PID)...${NC}"
-    
-    # Wait for backend to be ready (max 30 seconds)
-    local max_attempts=30
-    local attempt=0
-    
-    while [ $attempt -lt $max_attempts ]; do
-        if check_api_available > /dev/null 2>&1; then
-            echo -e "${GREEN}✅ Backend server is ready!${NC}"
-            return 0
-        fi
-        
-        sleep 1
-        attempt=$((attempt + 1))
-        
-        # Show progress every 5 seconds
-        if [ $((attempt % 5)) -eq 0 ]; then
-            echo -e "${BLUE}   Still waiting... ($attempt/$max_attempts seconds)${NC}"
-        fi
-    done
-    
-    echo -e "${RED}❌ Backend server failed to start within $max_attempts seconds${NC}"
-    return 1
-}
-
-# Function to cleanup backend server if we started it
-cleanup_backend_server() {
-    if [ "$BACKEND_STARTED_BY_SCRIPT" = true ] && [ -n "$BACKEND_PID" ]; then
-        echo ""
-        echo -e "${BLUE}🧹 Cleaning up backend server (PID: $BACKEND_PID)...${NC}"
-        
-        # Kill the entire process group
-        pkill -P $BACKEND_PID 2>/dev/null || true
-        kill $BACKEND_PID 2>/dev/null || true
-        
-        # Wait a bit and force kill if necessary
-        sleep 2
-        kill -9 $BACKEND_PID 2>/dev/null || true
-        
-        echo -e "${GREEN}✅ Backend server stopped${NC}"
-    fi
-}
-
-# Trap to ensure cleanup on exit
-trap cleanup_backend_server EXIT INT TERM
-
-# Function to download OpenAPI specification
-download_openapi_spec() {
-    # Downloading from server
-    local openapi_url="$API_URL/api/v1/openapi.json"
-    echo -e "${BLUE}📥 Downloading OpenAPI specification from: $openapi_url${NC}"
-
-    if curl -sf "$openapi_url" -o "$OPENAPI_SPEC"; then
-        echo -e "${GREEN}✅ OpenAPI specification downloaded${NC}"
-        return 0
-    else
-        echo -e "${RED}❌ Failed to download OpenAPI specification${NC}"
+    # Verify files were created
+    if [ ! -f "$OPENAPI_SPEC" ]; then
+        echo -e "${RED}❌ OpenAPI specification not found at: $OPENAPI_SPEC${NC}"
         return 1
     fi
-}
-
-# Function to download AsyncAPI specification
-download_asyncapi_spec() {
-    local asyncapi_url="$API_URL/api/v1/ws/asyncapi.json"
-    echo -e "${BLUE}📥 Downloading AsyncAPI specification from: $asyncapi_url${NC}"
-
-    if curl -sf "$asyncapi_url" -o "$ASYNCAPI_SPEC"; then
-        echo -e "${GREEN}✅ AsyncAPI specification downloaded${NC}"
-        return 0
-    else
-        echo -e "${YELLOW}⚠️  Failed to download AsyncAPI specification${NC}"
+    
+    if [ ! -f "$ASYNCAPI_SPEC" ]; then
+        echo -e "${RED}❌ AsyncAPI specification not found at: $ASYNCAPI_SPEC${NC}"
         return 1
     fi
+    
+    echo -e "${GREEN}✅ Backend specifications generated${NC}"
+    return 0
 }
 
 # Function to generate TypeScript client
@@ -244,38 +160,32 @@ main() {
     local rest_client_generated=false
     local ws_types_generated=false
     local ws_client_generated=false
-    local backend_was_running=false
 
-    # Check if backend is already running
-    if check_api_available; then
-        backend_was_running=true
-    else
-        # Backend not running, try to start it
-        if ! start_backend_server; then
-            echo ""
-            echo -e "${RED}═══════════════════════════════════════════════════${NC}"
-            echo -e "${RED}❌ Failed to start backend server${NC}"
-            echo -e "${RED}═══════════════════════════════════════════════════${NC}"
-            echo ""
-            echo -e "${BLUE}💡 Please check the backend logs at: /tmp/backend-client-gen.log${NC}"
-            echo ""
-            exit 1
-        fi
+    # Export backend specifications offline
+    if ! export_backend_specs; then
+        echo ""
+        echo -e "${RED}═══════════════════════════════════════════════════${NC}"
+        echo -e "${RED}❌ Failed to export backend specifications${NC}"
+        echo -e "${RED}═══════════════════════════════════════════════════${NC}"
+        echo ""
+        exit 1
     fi
 
     echo ""
     
-    # Try to generate REST client
-    if download_openapi_spec; then
+    # Generate REST client from OpenAPI spec
+    if [ -f "$OPENAPI_SPEC" ]; then
         echo ""
         if generate_client; then
             rest_client_generated=true
         fi
+    else
+        echo -e "${RED}❌ OpenAPI specification not found${NC}"
     fi
 
-    # Try to generate WebSocket types and client
+    # Generate WebSocket types and client from AsyncAPI spec
     echo ""
-    if download_asyncapi_spec; then
+    if [ -f "$ASYNCAPI_SPEC" ]; then
         echo ""
         if generate_ws_types; then
             ws_types_generated=true
@@ -285,12 +195,14 @@ main() {
         if generate_ws_client; then
             ws_client_generated=true
         fi
+    else
+        echo -e "${YELLOW}⚠️  AsyncAPI specification not found${NC}"
     fi
 
     # Report success
     if [ "$rest_client_generated" = true ] || [ "$ws_types_generated" = true ]; then
         echo ""
-        echo -e "${GREEN}🎉 Success! Generated client(s) from live API${NC}"
+        echo -e "${GREEN}🎉 Success! Generated client(s) from API specifications${NC}"
         
         if [ "$rest_client_generated" = true ]; then
             echo -e "${GREEN}📁 REST Client: $OUTPUT_DIR${NC}"
@@ -304,32 +216,20 @@ main() {
             echo -e "${GREEN}   - Import: import { Bar, SubscriptionRequest, WS_OPERATIONS } from '@/clients/ws-types-generated'${NC}"
         fi
         
-        if [ "$backend_was_running" = false ]; then
-            echo ""
-            echo -e "${BLUE}ℹ️  Backend was started for client generation and will be stopped${NC}"
-        fi
-        
         echo ""
-
-        # Cleanup
-        rm -f "$OPENAPI_SPEC" "$ASYNCAPI_SPEC"
         exit 0
     fi
 
     echo ""
     echo -e "${RED}═══════════════════════════════════════════════════${NC}"
-    echo -e "${RED}❌ Failed to generate client from API${NC}"
+    echo -e "${RED}❌ Failed to generate client from API specifications${NC}"
     echo -e "${RED}═══════════════════════════════════════════════════${NC}"
     echo ""
     echo -e "${BLUE}ℹ️  Reasons this might happen:${NC}"
-    echo -e "   • OpenAPI/AsyncAPI spec download failed"
+    echo -e "   • Backend specification export failed"
     echo -e "   • Client generation tools failed"
-    echo -e "   • Network connectivity issues"
+    echo -e "   • Missing dependencies"
     echo ""
-    if [ "$backend_was_running" = false ]; then
-        echo -e "${BLUE}💡 Backend logs available at: /tmp/backend-client-gen.log${NC}"
-        echo ""
-    fi
     exit 1
 }
 
