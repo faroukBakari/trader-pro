@@ -27,12 +27,14 @@ smoke-tests/
 ## Running Tests
 
 ### Quick Run
+
 ```bash
 # From the smoke-tests directory
 ./run-tests.sh
 ```
 
 ### Manual Setup
+
 ```bash
 # Install dependencies
 npm install
@@ -56,11 +58,22 @@ npm run test:report
 ## Test Configuration
 
 The tests are configured to:
-- Automatically start the full-stack development environment using `../scripts/dev-fullstack.sh`
+
+- Use `make -f ../project.mk dev-fullstack` to start the full-stack environment
 - Wait up to 2 minutes for the backend and frontend to be ready
-- Run against `http://localhost:5173` (frontend)
+- Run against `http://localhost:5173` (frontend) and `http://localhost:8000` (backend)
 - Test against multiple browsers (Chrome, Firefox, Safari)
 - Generate HTML reports for test results
+
+**Environment Startup Sequence:**
+
+1. Port availability check (ports 8000 and 5173)
+2. Backend starts with Uvicorn --reload
+3. Health check waits for backend ready (max 60s)
+4. Client generation (OpenAPI + AsyncAPI)
+5. Frontend starts with Vite
+6. File watchers monitor for spec changes
+7. Tests run against running services
 
 ## Test Scenarios
 
@@ -76,6 +89,7 @@ The tests are configured to:
 ## Test Data Requirements
 
 The tests expect certain data-testid attributes in the frontend components:
+
 - `api-status`: Main API status component
 - `health-status`: Health status display
 - `version-info`: Version information display
@@ -97,16 +111,19 @@ These tests can be integrated into CI/CD pipelines to validate deployments:
 ## Troubleshooting
 
 ### Tests Fail to Start
+
 - Ensure Poetry is installed for backend dependencies
 - Ensure Node.js/npm is installed for frontend dependencies
 - Check that ports 8000 (backend) and 5173 (frontend) are available
 
 ### Tests Timeout
+
 - The full-stack environment takes time to start (up to 2 minutes)
 - Increase timeout in `playwright.config.ts` if needed
 - Check that both backend and frontend start successfully manually
 
 ### Browser Issues
+
 - Run `npx playwright install` to ensure browsers are available
 - Use `npm run test:headed` to see what's happening in the browser
 - Use `npm run test:debug` for interactive debugging
