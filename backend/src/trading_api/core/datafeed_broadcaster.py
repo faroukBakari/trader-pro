@@ -11,7 +11,12 @@ from typing import List
 
 from trading_api.core.datafeed_service import DatafeedService
 from trading_api.plugins.fastws_adapter import FastWSAdapter
-from trading_api.ws.datafeed import BarsSubscriptionRequest, bars_topic_builder
+from trading_api.ws.datafeed import (
+    BarsSubscriptionRequest,
+    QuoteDataSubscriptionRequest,
+    bars_topic_builder,
+    quotes_topic_builder,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,7 @@ class DataFeedBroadcaster:
         interval: float = 2.0,
         symbols: List[str] | None = None,
         resolutions: List[str] | None = None,
+        symbols_for_quotes: List[str] | None = None,
     ) -> None:
         """
         Initialize the bar broadcaster.
@@ -39,22 +45,31 @@ class DataFeedBroadcaster:
             ws_app: FastWSAdapter instance for publishing updates
             datafeed_service: DatafeedService instance for generating bar data
             interval: Broadcast interval in seconds (default: 2.0)
-            symbols: List of symbols to broadcast (default: ["AAPL", "GOOGL", "MSFT"])
-            resolutions: List of resolutions to broadcast (default: ["1"])
+            symbols: List of symbols to broadcast bars for (default: ["AAPL", "GOOGL", "MSFT"])
+            resolutions: List of resolutions to broadcast (default: ["1D"])
+            symbols_for_quotes: List of symbols to broadcast quotes for (default: same as symbols)
         """
         self.ws_app = ws_app
         self.datafeed_service = datafeed_service
         self.interval = interval
         self.symbols = symbols or ["AAPL", "GOOGL", "MSFT"]
         self.resolutions = resolutions or ["1D"]
+        self.symbols_for_quotes = (
+            symbols_for_quotes if symbols_for_quotes is not None else self.symbols
+        )
 
         self._task: asyncio.Task[None] | None = None
         self._running = False
 
-        # Metrics
+        # Bar metrics
         self._broadcasts_sent = 0
         self._broadcasts_skipped = 0
         self._errors = 0
+
+        # Quote metrics
+        self._quote_broadcasts_sent = 0
+        self._quote_broadcasts_skipped = 0
+        self._quote_errors = 0
 
     @property
     def is_running(self) -> bool:
@@ -69,9 +84,13 @@ class DataFeedBroadcaster:
             "interval": self.interval,
             "symbols": self.symbols,
             "resolutions": self.resolutions,
+            "symbols_for_quotes": self.symbols_for_quotes,
             "broadcasts_sent": self._broadcasts_sent,
             "broadcasts_skipped": self._broadcasts_skipped,
             "errors": self._errors,
+            "quote_broadcasts_sent": self._quote_broadcasts_sent,
+            "quote_broadcasts_skipped": self._quote_broadcasts_skipped,
+            "quote_errors": self._quote_errors,
         }
 
     def start(self) -> None:
@@ -121,13 +140,14 @@ class DataFeedBroadcaster:
         """
         Main broadcasting loop.
 
-        Continuously generates and broadcasts bar data at the configured interval.
+        Continuously generates and broadcasts bar and quote data at the configured interval.
         Only broadcasts to topics with active subscribers to minimize overhead.
         """
         try:
             while self._running:
                 try:
                     await self._broadcast_bars()
+                    await self._broadcast_quotes()
                     await asyncio.sleep(self.interval)
 
                 except asyncio.CancelledError:
@@ -184,3 +204,57 @@ class DataFeedBroadcaster:
                 except Exception as e:
                     self._errors += 1
                     logger.error(f"Failed to broadcast to {topic}: {e}", exc_info=True)
+
+    async def _broadcast_quotes(self) -> None:
+        """
+        Generate and broadcast quotes for all configured symbols.
+
+        Only broadcasts if there are active subscribers for the topic.
+        """
+        if not self.symbols_for_quotes:
+            return
+
+        # Generate quote data for all symbols at once
+        quote_data_list = self.datafeed_service.get_quotes(self.symbols_for_quotes)
+
+        if not quote_data_list:
+            logger.warning("Failed to generate quotes")
+            return
+
+        # Broadcast each quote to its subscribers
+        for quote_data in quote_data_list:
+            # Skip error responses
+            if quote_data.s != "ok":
+                logger.warning(f"Error in quote data for {quote_data.n}")
+                continue
+
+            # Build topic identifier for this symbol
+            topic = quotes_topic_builder(
+                QuoteDataSubscriptionRequest(
+                    symbols=[quote_data.n],
+                    fast_symbols=[],
+                )
+            )
+
+            # Only broadcast if someone is listening
+            if not self._has_subscribers(topic):
+                self._quote_broadcasts_skipped += 1
+                logger.debug(f"No subscribers for {topic}, skipping")
+                continue
+
+            try:
+                # Broadcast to all subscribed clients
+                await self.ws_app.publish(
+                    topic=topic,
+                    data=quote_data,
+                    message_type="quotes.update",
+                )
+
+                self._quote_broadcasts_sent += 1
+                logger.debug(f"Broadcasted quote to {topic}")
+
+            except Exception as e:
+                self._quote_errors += 1
+                logger.error(
+                    f"Failed to broadcast quote to {topic}: {e}", exc_info=True
+                )
