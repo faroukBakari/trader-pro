@@ -27,21 +27,37 @@ This automatically:
 
 ## Development Workflows
 
-### Full-Stack Development
+### Full-Stack Development (Recommended)
 
 ```bash
-# Terminal 1: Backend
-make -f project.mk dev-backend
-
-# Terminal 2: Frontend
-make -f project.mk dev-frontend
+# One command starts everything
+make -f project.mk dev-fullstack
 ```
 
-- **Backend**: http://localhost:8000
-- **Frontend**: http://localhost:5173
-- **API Docs**: http://localhost:8000/docs
+**What it does:**
 
-### Backend-Only Development
+1. Checks ports 8000 and 5173 are available
+2. Cleans generated files for fresh start
+3. Generates WebSocket routers
+4. Starts backend server (with Uvicorn --reload)
+5. Waits for backend health check (max 60s)
+6. Generates frontend clients (OpenAPI + AsyncAPI)
+7. Sets up file watchers for spec changes
+8. Starts WebSocket router watcher
+9. Starts frontend dev server
+10. Monitors all processes, handles Ctrl+C cleanup
+
+**Features:**
+
+- ✅ Port conflict prevention
+- ✅ Hot reload: backend changes → spec regen → client regen
+- ✅ File watchers for automatic client updates
+- ✅ Graceful cleanup on exit
+- ✅ Process monitoring and error detection
+
+### Component Development
+
+For working on backend or frontend separately:
 
 ```bash
 cd backend
@@ -151,11 +167,27 @@ See `ENVIRONMENT-CONFIG.md` for full details.
 
 ## Client Generation
 
-Clients auto-generate before dev/build. Manual generation:
+### Automatic Generation
+
+Clients are automatically generated during `make dev-fullstack`:
+
+1. Backend starts and generates specs on startup
+2. Script waits for backend to be ready
+3. Runs `make generate-openapi-client` (REST API client)
+4. Runs `make generate-asyncapi-types` (WebSocket types)
+5. File watchers monitor specs for changes
+
+### Manual Generation
 
 ```bash
+# From project root
+make -f project.mk generate-openapi-client
+make -f project.mk generate-asyncapi-types
+
+# Or from frontend directory
 cd frontend
-make client-generate
+make generate-openapi-client
+make generate-asyncapi-types
 ```
 
 See `docs/CLIENT-GENERATION.md` for details.
@@ -237,6 +269,23 @@ make build     # Production build
 ```
 
 ## Troubleshooting
+
+### Port Already in Use
+
+```bash
+# Check what's using the ports
+lsof -Pi :8000 -sTCP:LISTEN
+lsof -Pi :5173 -sTCP:LISTEN
+
+# Kill processes using the ports
+kill -9 $(lsof -t -i:8000)
+kill -9 $(lsof -t -i:5173)
+
+# Or use different ports
+export BACKEND_PORT=8001
+export FRONTEND_PORT=3000
+make -f project.mk dev-fullstack
+```
 
 ### Python Version Issues
 

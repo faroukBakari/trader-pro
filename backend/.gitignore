@@ -6,4 +6,8 @@ __pycache__
 .env
 htmlcov
 openapi.json
+asyncapi.json
 **/generated
+.ruff_cache
+coverage.xml
+.openapi-checksum

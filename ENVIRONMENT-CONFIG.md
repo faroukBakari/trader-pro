@@ -78,14 +78,14 @@ This configuration allows the frontend to work with backend and frontend on:
 ### Development with Custom Ports
 
 ```bash
-# Start backend on port 9000
+# Set custom ports
 export BACKEND_PORT=9000
-
-# Update frontend API URL
+export FRONTEND_PORT=3001
 export VITE_API_URL=http://localhost:9000
+export FRONTEND_URL=http://localhost:3001
 
-# Start development
-./scripts/dev-fullstack.sh
+# Start development (will check port availability first)
+make -f project.mk dev-fullstack
 ```
 
 ### Production Configuration
@@ -110,18 +110,45 @@ export FRONTEND_URL=http://localhost:3000
 
 ## Component Integration
 
+### Port Availability Checking
+
+Both backend and frontend Makefiles check port availability before starting:
+
+**Backend (backend/Makefile)**:
+
+```makefile
+dev:
+	@if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
+		echo "Error: Port $(BACKEND_PORT) already in use"; \
+		exit 1; \
+	fi
+	poetry run uvicorn ...
+```
+
+**Frontend (frontend/Makefile)**:
+
+```makefile
+dev:
+	@if lsof -Pi :$(FRONTEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
+		echo "Error: Port $(FRONTEND_PORT) already in use"; \
+		exit 1; \
+	fi
+	npm run dev
+```
+
+**dev-fullstack Script**:
+Checks both ports before starting anything, preventing partial startup failures.
+
 ### Cleanup System
 
 The project includes comprehensive cleanup to ensure fresh starts:
 
 **Automatic Cleanup (on dev start)**:
 
-- `dev-fullstack`: Cleans all generated files before starting
-- `dev-backend`: Cleans backend OpenAPI files
-- `dev-frontend`: Cleans frontend generated client
-- Client generation is handled via Makefiles:
-  - `make generate-openapi-client` - Generate REST API client
-  - `make generate-asyncapi-types` - Generate WebSocket types
+- `dev-fullstack`: Cleans all generated files (specs, clients, build artifacts) before starting
+- `dev-backend`: No cleanup (specs regenerate on startup)
+- `dev-frontend`: No cleanup (relies on explicit generation)
+- File watchers automatically regenerate clients when specs change
 
 **Manual Cleanup Commands**:
 
@@ -129,11 +156,10 @@ The project includes comprehensive cleanup to ensure fresh starts:
 - `make -f project.mk clean-all`: Full cleanup (includes build artifacts)
 - Individual: `make -C backend clean`, `make -C frontend clean`
 
-**Files Cleaned**:
+**Files Cleaned by dev-fullstack**:
 
-- Backend: `openapi*.json`
-- Frontend: `src/services/generated/`, `dist/`, `node_modules/.vite`
-- Tests: `smoke-tests/test-results`, `smoke-tests/playwright-report`
+- Backend: `backend/openapi.json`, `backend/asyncapi.json`
+- Frontend: `frontend/src/clients/*-generated/`, `frontend/dist`, `frontend/node_modules/.vite`
 
 ### Backend (FastAPI)
 

@@ -25,11 +25,24 @@ Located in `project.mk` at the repository root:
 # View all available targets
 make -f project.mk help
 
-# Common workflows
+# Setup and Installation
 make -f project.mk setup        # Full project setup (hooks + dependencies)
 make -f project.mk install-all  # Install all dependencies (backend + frontend)
+
+# Development
+make -f project.mk dev-fullstack  # Start full-stack dev environment (recommended)
+make -f project.mk dev-backend    # Start backend only
+make -f project.mk dev-frontend   # Start frontend only
+
+# Code Generation
+make -f project.mk generate-ws-routers        # Generate WebSocket routers
+make -f project.mk generate-openapi-client    # Generate REST API client
+make -f project.mk generate-asyncapi-types    # Generate WebSocket types
+
+# Testing and Quality
 make -f project.mk test-all     # Run all tests
 make -f project.mk lint-all     # Run all linters
+make -f project.mk format-all   # Format all code
 make -f project.mk build-all    # Build everything
 ```
 
@@ -46,7 +59,7 @@ make ensure-python-ci  # Check Python 3.11+ (CI mode, auto-installs without prom
 make ensure-poetry     # Ensure Poetry is installed (auto-installs if needed)
 make install          # Install dependencies (auto-installs Python & Poetry if needed)
 make install-ci       # Install dependencies for CI (non-interactive)
-make dev          # Start development server
+make dev          # Start development server (checks port first)
 make dev-ci       # Start server in background for CI
 
 # Testing
@@ -81,7 +94,7 @@ make ensure-node     # Check Node.js 20.19+/22.12+ (offers auto-install with con
 make ensure-node-ci  # Check Node.js 20.19+/22.12+ (CI mode, auto-installs without prompts)
 make install        # Install dependencies (auto-installs Node.js if needed)
 make install-ci     # Install dependencies for CI (npm ci)
-make dev            # Start development server
+make dev            # Start development server (checks port first)
 
 # Testing
 make test         # Run tests in watch mode
@@ -117,10 +130,13 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) uses these Makefiles ex
 ## Benefits
 
 1. **Developer Experience**: Same commands work locally and in CI
-2. **Maintainability**: Changes to build process are centralized in Makefiles
-3. **Discoverability**: `make help` shows available commands at each level
-4. **Consistency**: No mixing of `npm run`, `poetry run`, and custom scripts in CI
-5. **Flexibility**: Easy to add new targets or modify existing ones
+2. **Port Safety**: Automatic port checking prevents conflicts
+3. **Hot Reload**: Full regeneration chain on code changes
+4. **Maintainability**: Changes to build process are centralized in Makefiles
+5. **Discoverability**: `make help` shows available commands at each level
+6. **Consistency**: No mixing of `npm run`, `poetry run`, and custom scripts in CI
+7. **Flexibility**: Easy to add new targets or modify existing ones
+8. **Orchestration**: `dev-fullstack` handles complex startup sequences
 
 ## Best Practices
 
@@ -145,6 +161,7 @@ my-target:
 ### Updating CI
 
 When adding new build steps, update both:
+
 1. The appropriate Makefile
 2. The CI workflow to use the new make target
 

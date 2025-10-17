@@ -241,51 +241,69 @@ generate-asyncapi-types.sh # AsyncAPI WebSocket types generation
 
 ## Client Generation Architecture
 
-### Smart Client Generation Strategy
+### Development Workflow Strategy
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Frontend Build Process                                      │
+│  dev-fullstack Script Orchestration                          │
 └─────────────────────┬───────────────────────────────────────┘
                       │
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Check Backend Availability                                 │
-│  (make generate-openapi-client / generate-asyncapi-types)  │
+│  1. Port Check → 2. Backend Start → 3. Wait Ready           │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Backend Startup (Uvicorn --reload)                         │
+│  • FastAPI lifespan generates openapi.json                  │
+│  • FastWS lifespan generates asyncapi.json                  │
+│  • Files written to backend/ directory                      │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│  4. Generate Clients (After Backend Ready)                  │
+│  • make generate-openapi-client (REST API)                  │
+│  • make generate-asyncapi-types (WebSocket)                 │
+│  • Generates to frontend/src/clients/*-generated/           │
 └─────────────────────┬───────────────────────────────────────┘
                       │
           ┌───────────┴───────────┐
           │                       │
           ▼                       ▼
-  ┌─────────────┐         ┌─────────────┐
-  │  API LIVE   │         │  NO API     │
-  └──────┬──────┘         └──────┬──────┘
-         │                       │
-         ▼                       ▼
-┌─────────────────┐      ┌─────────────────┐
-│ 1. Download     │      │ 1. Setup Mock   │
-│    OpenAPI spec │      │    Fallback     │
-│ 2. Generate     │      │ 2. Type-safe    │
-│    TypeScript   │      │    Mock API     │
-│ 3. Type Safety  │      │ 3. Dev Mode     │
-└─────────────────┘      └─────────────────┘
-         │                       │
-         └───────────┬───────────┘
-                     │
-                     ▼
-            ┌─────────────────┐
-            │ Frontend Ready  │
-            │ (Always Works!) │
-            └─────────────────┘
+  ┌─────────────────┐     ┌─────────────────┐
+  │  File Watchers  │     │  Frontend Start │
+  │  • OpenAPI      │     │  • Vite Dev     │
+  │  • AsyncAPI     │     │  • Port 5173    │
+  │  • WS Routers   │     │  • HMR Active   │
+  └────────┬────────┘     └─────────────────┘
+           │
+           ▼
+  ┌─────────────────┐
+  │  Hot Reload     │
+  │  • Backend code │
+  │    changes      │
+  │  • Uvicorn      │
+  │    restarts     │
+  │  • Specs regen  │
+  │  • Watchers     │
+  │    detect       │
+  │  • Clients      │
+  │    regenerate   │
+  └─────────────────┘
 ```
 
-### Benefits of Smart Client Generation
+### Benefits of Current Client Generation
 
-- ✅ **Zero Configuration**: Works immediately after `git clone`
-- ✅ **Development Flexibility**: Frontend works with or without backend
-- ✅ **Type Safety**: Full TypeScript support when API is available
-- ✅ **Graceful Degradation**: Mock fallbacks for offline development
-- ✅ **CI/CD Friendly**: Parallel builds without dependencies
+- ✅ **Automatic Sync**: Changes to backend models → spec regeneration → client regeneration
+- ✅ **Hot Reload Integration**: Uvicorn --reload triggers full regeneration chain
+- ✅ **File-Based Watching**: Efficient monitoring of spec files (not polling servers)
+- ✅ **Type Safety**: Full TypeScript support with auto-generated types
+- ✅ **Developer Experience**: One command (`make dev-fullstack`) starts everything
+- ✅ **Port Safety**: Pre-flight checks prevent port conflicts
+- ✅ **Sequential Startup**: Proper initialization order prevents race conditions
+- ✅ **Graceful Cleanup**: Ctrl+C stops all processes cleanly
 
 ## API Versioning Strategy
 
@@ -616,6 +634,32 @@ with client.websocket_connect("/api/v1/ws") as websocket:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+#### Full-Stack Development Script
+
+The `scripts/dev-fullstack.sh` orchestrates the complete development environment:
+
+**Startup Sequence:**
+
+1. **Port Availability Check** - Ensures ports 8000 and 5173 are free
+2. **Cleanup** - Removes generated files for fresh start
+3. **WebSocket Router Generation** - Pre-generates WS routers
+4. **Backend Start** - Starts backend with Uvicorn --reload
+5. **Health Check** - Waits for backend to be ready (max 60s)
+6. **Client Generation** - Generates OpenAPI/AsyncAPI clients
+7. **File Watchers** - Monitors OpenAPI/AsyncAPI specs for changes
+8. **WebSocket Router Watcher** - Auto-regenerates WS routers on changes
+9. **Frontend Start** - Starts Vite dev server
+10. **Process Monitoring** - Monitors all processes, handles cleanup
+
+**Key Features:**
+
+- ✅ **Port Checking**: Prevents "address already in use" errors
+- ✅ **Hot Reload**: Uvicorn reload triggers spec regeneration
+- ✅ **File Watchers**: Auto-regenerate clients on spec changes
+- ✅ **Process Management**: Graceful cleanup on Ctrl+C
+- ✅ **Reference Counting**: Tracks WebSocket router changes
+- ✅ **Sequential Start**: Ensures proper initialization order
+
 ### Build System Features
 
 - **🧹 Intelligent Cleanup**: Auto-cleanup of generated files
@@ -662,14 +706,20 @@ with client.websocket_connect("/api/v1/ws") as websocket:
 ### Current Development Setup
 
 ```bash
-# Start Backend
-cd backend && make dev     # Port 8000
-
-# Start Frontend
-cd frontend && npm run dev # Port 5173
-
-# Full Stack
+# Recommended: Full Stack (One Command)
 make -f project.mk dev-fullstack
+# → Starts backend, waits for ready, generates clients, starts frontend
+# → Sets up file watchers for hot reload
+# → Monitors processes and handles cleanup
+
+# Alternative: Manual (Separate Terminals)
+# Terminal 1: Backend
+make -f project.mk dev-backend     # Port 8000
+
+# Terminal 2: Frontend (after backend is ready)
+make -f project.mk generate-openapi-client
+make -f project.mk generate-asyncapi-types
+make -f project.mk dev-frontend    # Port 5173
 ```
 
 ### Production Deployment (Planned)
