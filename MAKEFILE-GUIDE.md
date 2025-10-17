@@ -26,7 +26,8 @@ Located in `project.mk` at the repository root:
 make -f project.mk help
 
 # Common workflows
-make -f project.mk setup        # Full project setup
+make -f project.mk setup        # Full project setup (hooks + dependencies)
+make -f project.mk install-all  # Install all dependencies (backend + frontend)
 make -f project.mk test-all     # Run all tests
 make -f project.mk lint-all     # Run all linters
 make -f project.mk build-all    # Build everything
@@ -40,8 +41,11 @@ Located in `backend/Makefile`:
 cd backend
 
 # Development
-make install      # Install dependencies
-make install-ci   # Install dependencies for CI (non-interactive)
+make ensure-python     # Check Python 3.11+ (offers auto-install with confirmation)
+make ensure-python-ci  # Check Python 3.11+ (CI mode, auto-installs without prompts)
+make ensure-poetry     # Ensure Poetry is installed (auto-installs if needed)
+make install          # Install dependencies (auto-installs Python & Poetry if needed)
+make install-ci       # Install dependencies for CI (non-interactive)
 make dev          # Start development server
 make dev-ci       # Start server in background for CI
 
@@ -73,9 +77,11 @@ Located in `frontend/Makefile`:
 cd frontend
 
 # Development
-make install      # Install dependencies
-make install-ci   # Install dependencies for CI (npm ci)
-make dev          # Start development server
+make ensure-node     # Check Node.js 20.19+/22.12+ (offers auto-install with confirmation)
+make ensure-node-ci  # Check Node.js 20.19+/22.12+ (CI mode, auto-installs without prompts)
+make install        # Install dependencies (auto-installs Node.js if needed)
+make install-ci     # Install dependencies for CI (npm ci)
+make dev            # Start development server
 
 # Testing
 make test         # Run tests in watch mode
@@ -147,11 +153,31 @@ When adding new build steps, update both:
 ### Conditional Execution
 
 ```makefile
+# Old pattern - just check and fail
 install:
 	@if ! command -v poetry >/dev/null 2>&1; then \
 		echo "Poetry not found!"; \
 		exit 1; \
 	fi
+	poetry install
+
+# New pattern - validate and auto-install with confirmation
+ensure-python:
+	@PYTHON_VERSION=$$(python3 --version | grep -oP '\d+\.\d+' | head -1); \
+	if [ "$$(printf '%s\n' "3.11" "$$PYTHON_VERSION" | sort -V | head -n1)" != "3.11" ]; then \
+		if command -v pyenv >/dev/null 2>&1; then \
+			echo "Install Python 3.11.7? [y/N]"; \
+			read -r REPLY; \
+			[ "$$REPLY" = "y" ] && pyenv install 3.11.7 && pyenv local 3.11.7; \
+		fi; \
+	fi
+
+ensure-poetry:
+	@if ! command -v poetry >/dev/null 2>&1; then \
+		pipx install poetry || pip3 install --user poetry; \
+	fi
+
+install: ensure-python ensure-poetry
 	poetry install
 ```
 

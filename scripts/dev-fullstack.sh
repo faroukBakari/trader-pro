@@ -70,6 +70,15 @@ cleanup() {
         fi
     fi
 
+    if [ ! -z "$WS_WATCHER_PID" ] && is_process_running "$WS_WATCHER_PID"; then
+        print_step "Stopping WebSocket router watcher (PID: $WS_WATCHER_PID)..."
+        kill -TERM $WS_WATCHER_PID 2>/dev/null || true
+        sleep 1
+        if is_process_running "$WS_WATCHER_PID"; then
+            kill -KILL $WS_WATCHER_PID 2>/dev/null || true
+        fi
+    fi
+
     if [ ! -z "$WATCHER_PID" ] && is_process_running "$WATCHER_PID"; then
         print_step "Stopping OpenAPI watcher (PID: $WATCHER_PID)..."
         kill -TERM $WATCHER_PID 2>/dev/null || true
@@ -92,6 +101,7 @@ trap cleanup EXIT INT TERM
 BACKEND_PID=""
 FRONTEND_PID=""
 WATCHER_PID=""
+WS_WATCHER_PID=""
 
 print_step "🚀 Starting full-stack development environment..."
 
@@ -100,15 +110,25 @@ print_step "0. Cleaning up generated files..."
 print_step "🧹 Removing backend generated files..."
 rm -f backend/openapi*.json
 print_step "🧹 Removing frontend generated client..."
-rm -rf frontend/src/clients/trader-api-generated
+rm -rf frontend/src/clients/trader-client-generated
 print_step "🧹 Removing frontend build artifacts..."
 rm -rf frontend/dist frontend/node_modules/.vite
 print_success "Clean up complete - fresh start ready"
 
+# Step 0.5: Generate WebSocket routers initially
+print_step "0.5. Generating WebSocket routers..."
+cd backend
+if ./scripts/generate-ws-routers.sh >/dev/null 2>&1; then
+    print_success "WebSocket routers generated"
+else
+    print_warning "WebSocket router generation failed, continuing..."
+fi
+cd ..
+
 # Step 1: Start backend server in background
 print_step "1. Starting backend server..."
 cd backend
-poetry run uvicorn trading_api.main:app --reload --host 0.0.0.0 --port $BACKEND_PORT &
+make dev &
 BACKEND_PID=$!
 cd ..
 
@@ -135,7 +155,7 @@ fi
 # Step 3: Generate frontend client
 print_step "3. Generating frontend client from live API..."
 cd frontend
-if npm run client:generate; then
+if make client-generate; then
     print_success "Frontend client generated successfully"
 else
     print_error "Client generation failed"
@@ -152,19 +172,21 @@ OPENAPI_FILE="backend/openapi.json"
 # Generate initial client
 print_step "Generating initial frontend client..."
 cd frontend
-if npm run client:generate >/dev/null 2>&1; then
+if make client-generate >/dev/null 2>&1; then
     print_success "Initial client generated successfully"
 else
     print_warning "Initial client generation failed, continuing..."
 fi
 cd ..
 
-# Get initial file modification time
+# Get initial file modification time and content
 if [ -f "$OPENAPI_FILE" ]; then
     INITIAL_MTIME=$(stat -c %Y "$OPENAPI_FILE" 2>/dev/null || echo "0")
+    LAST_CONTENT=$(cat "$OPENAPI_FILE" 2>/dev/null || echo "")
     print_success "Watching OpenAPI file: $OPENAPI_FILE"
 else
     INITIAL_MTIME="0"
+    LAST_CONTENT=""
     print_warning "OpenAPI file not found, will watch for creation"
 fi
 
@@ -179,34 +201,56 @@ fi
         if [ -f "$OPENAPI_FILE" ]; then
             CURRENT_MTIME=$(stat -c %Y "$OPENAPI_FILE" 2>/dev/null || echo "0")
 
+            # Only check content if modification time changed
             if [ "$CURRENT_MTIME" != "$LAST_MTIME" ] && [ "$CURRENT_MTIME" != "0" ]; then
-                print_warning "OpenAPI file changed! Regenerating client..."
-                cd frontend
-                if npm run client:generate >/dev/null 2>&1; then
-                    print_success "Frontend client regenerated successfully"
+                CURRENT_CONTENT=$(cat "$OPENAPI_FILE" 2>/dev/null || echo "")
+                
+                # Compare actual content, not just timestamps
+                if [ "$CURRENT_CONTENT" != "$LAST_CONTENT" ]; then
+                    print_warning "OpenAPI file changed! Regenerating client..."
+                    cd frontend
+                    if SKIP_SPEC_GENERATION=true make client-generate >/dev/null 2>&1; then
+                        print_success "Frontend client regenerated successfully"
+                    else
+                        print_error "Failed to regenerate client"
+                    fi
+                    cd ..
+                    
+                    # Update both timestamp and content
+                    LAST_MTIME="$CURRENT_MTIME"
+                    LAST_CONTENT="$CURRENT_CONTENT"
                 else
-                    print_error "Failed to regenerate client"
+                    # Content unchanged, just update timestamp to avoid repeated checks
+                    LAST_MTIME="$CURRENT_MTIME"
                 fi
-                cd ..
-                LAST_MTIME="$CURRENT_MTIME"
             fi
         fi
     done
 } &
 WATCHER_PID=$!
 
+# Step 4.5: Start WebSocket router watcher
+print_step "4.5. Starting WebSocket router watcher..."
+cd backend
+./scripts/watch-ws-routers.sh &
+WS_WATCHER_PID=$!
+cd ..
+print_success "WebSocket router watcher active (PID: $WS_WATCHER_PID)"
+
 print_step "5. Starting frontend development server..."
 print_step "🌐 Frontend will be available at: $FRONTEND_URL"
 print_step "🔧 Backend API is running at: $VITE_API_URL"
 print_step "👁️  OpenAPI file watcher is active"
 print_step "📄 Watching: backend/openapi.json for changes"
+print_step "🔄 WebSocket router watcher is active"
+print_step "📂 Watching: backend/src/trading_api/ws/*.py for changes"
 print_step ""
 print_warning "Press Ctrl+C to stop all servers and watchers"
 print_step ""
 
 # Start frontend in background and capture PID
 cd frontend
-npm run dev &
+make dev &
 FRONTEND_PID=$!
 cd ..
 

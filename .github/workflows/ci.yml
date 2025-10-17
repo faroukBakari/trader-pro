@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10"]
+        python-version: ["3.11"]
 
     steps:
     - uses: actions/checkout@v4
@@ -45,6 +45,10 @@ jobs:
       working-directory: backend
       run: make install-ci
 
+    - name: Generate WebSocket routers
+      working-directory: backend
+      run: make generate-ws-routers
+
     - name: Install Git hooks
       run: |
         git config core.hooksPath .githooks
@@ -67,12 +71,18 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    needs: [backend]
     strategy:
       matrix:
         node-version: ["22"]
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
 
     - name: Set up Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v4
@@ -81,9 +91,28 @@ jobs:
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Install backend dependencies (for offline spec generation)
+      working-directory: backend
+      run: make install-ci
+
+    - name: Generate WebSocket routers
+      working-directory: backend
+      run: make generate-ws-routers
+
     - name: Install frontend dependencies
       working-directory: frontend
       run: make install-ci
+
+    - name: Generate frontend client from backend specs (offline)
+      working-directory: frontend
+      run: make client-generate
 
     - name: Install Git hooks
       run: |
@@ -93,14 +122,20 @@ jobs:
     - name: Run frontend linting
       working-directory: frontend
       run: make lint
+      env:
+        CI: true
 
     - name: Run frontend type checking
       working-directory: frontend
       run: make type-check
+      env:
+        CI: true
 
     - name: Run frontend tests
       working-directory: frontend
       run: make test-run
+      env:
+        CI: true
 
     - name: Build frontend
       working-directory: frontend
@@ -137,9 +172,30 @@ jobs:
       working-directory: backend
       run: make install-ci
 
+    - name: Generate WebSocket routers
+      working-directory: backend
+      run: make generate-ws-routers
+
     - name: Install frontend dependencies
       working-directory: frontend
       run: make install-ci
+
+    - name: Generate frontend client from backend specs (offline)
+      working-directory: frontend
+      run: make client-generate
+
+    - name: Verify client generation
+      working-directory: frontend
+      run: |
+        if [ ! -f "src/clients/trader-client-generated/index.ts" ]; then
+          echo "❌ Client generation failed - no trader-client-generated/index.ts file"
+          exit 1
+        fi
+        if [ ! -f "src/clients/ws-types-generated/index.ts" ]; then
+          echo "❌ WebSocket types generation failed - no ws-types-generated/index.ts file"
+          exit 1
+        fi
+        echo "✅ REST client and WebSocket types generated successfully from backend specs"
 
     - name: Start backend server
       working-directory: backend
@@ -150,27 +206,6 @@ jobs:
     - name: Test API endpoints
       working-directory: backend
       run: make health-ci
-
-    - name: Generate frontend client from live API
-      working-directory: frontend
-      run: npm run client:generate
-      env:
-        VITE_API_URL: http://localhost:${{ env.BACKEND_PORT }}
-        BACKEND_PORT: ${{ env.BACKEND_PORT }}
-
-    - name: Verify client generation
-      working-directory: frontend
-      run: |
-        if [ ! -f "src/clients/trader-api-generated/.client-type" ]; then
-          echo "❌ Client generation failed - no .client-type file"
-          exit 1
-        fi
-        CLIENT_TYPE=$(cat src/clients/trader-api-generated/.client-type)
-        if [ "$CLIENT_TYPE" != "server" ]; then
-          echo "❌ Expected 'server' client but got '$CLIENT_TYPE'"
-          exit 1
-        fi
-        echo "✅ Client generated successfully from live API"
 
     - name: Build frontend against live API
       working-directory: frontend

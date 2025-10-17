@@ -9,6 +9,7 @@ declare module '*.vue' {
 
 interface ImportMetaEnv {
   readonly VITE_API_URL: string
+  readonly TRADER_API_BASE_PATH: string
   readonly BACKEND_PORT: string
 }
 

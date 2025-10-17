@@ -10,6 +10,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '@clients': fileURLToPath(new URL('./src/clients', import.meta.url)),
       '@public': fileURLToPath(new URL('./public', import.meta.url)),
       '@debug': fileURLToPath(new URL('./debug_data', import.meta.url)),
     },
@@ -21,6 +22,7 @@ export default defineConfig({
         target: process.env.VITE_API_URL || 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
+        ws: true, // Enable WebSocket proxying
       },
     },
   },

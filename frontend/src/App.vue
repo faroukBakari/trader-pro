@@ -7,9 +7,9 @@ import { RouterView } from 'vue-router'
     <header>
       <div class="header-content">
         <router-link to="/" class="logo">
-          <h1>TraderPRO Backend</h1>
+          <!-- <h1>TraderPRO Backend</h1> -->
         </router-link>
-        <p>Monitor your TraderPRO backend status</p>
+        <!-- <p>Monitor your TraderPRO backend status</p> -->
       </div>
     </header>
 

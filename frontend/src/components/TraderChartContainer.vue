@@ -119,7 +119,6 @@ onMounted(() => {
       // Trading functionality
       ...(props.enableTrading && {
         broker_factory: (host: IBrokerConnectionAdapterHost) => {
-          console.log('Creating mock broker terminal with host:', host)
           return new brokerTerminalService(host, datafeed)
         },
         broker_config: {

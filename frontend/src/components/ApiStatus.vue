@@ -53,7 +53,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { apiService, type HealthResponse, type APIMetadata } from '@/services/apiService'
+import { ApiService, type HealthResponse, type APIMetadata } from '@/services/apiService'
 
 // Health check state
 const healthData = ref<HealthResponse | null>(null)
@@ -64,6 +64,7 @@ const healthError = ref<string | null>(null)
 const versionsData = ref<APIMetadata | null>(null)
 const versionsLoading = ref(false)
 const versionsError = ref<string | null>(null)
+const apiService = new ApiService()
 
 // Client type state
 const clientType = ref<'server' | 'mock' | 'unknown'>('unknown')

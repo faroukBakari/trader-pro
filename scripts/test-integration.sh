@@ -5,6 +5,12 @@
 set -e
 
 # Environment configuration
+# Generate random free port for backend
+get_free_port() {
+    python3 -c "import socket; s=socket.socket(); s.bind(('', 0)); print(s.getsockname()[1]); s.close()"
+}
+
+export BACKEND_PORT="${BACKEND_PORT:-$(get_free_port)}"
 export BACKEND_PORT="${BACKEND_PORT:-8000}"
 export VITE_API_URL="${VITE_API_URL:-http://localhost:$BACKEND_PORT}"
 
@@ -26,7 +32,9 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "🧹 Cleaning backend generated files..."
 rm -f backend/openapi*.json
 echo "🧹 Cleaning frontend generated client..."
-rm -rf frontend/src/clients/trader-api-generated
+rm -rf frontend/src/clients/trader-client-generated
+echo "🧹 Cleaning frontend generated WebSocket clients..."
+rm -rf frontend/src/clients/ws-generated frontend/src/clients/ws-types-generated
 echo "🧹 Cleaning frontend build artifacts..."
 rm -rf frontend/dist frontend/node_modules/.vite
 echo -e "${GREEN}✅ Clean up complete${NC}"
@@ -51,9 +59,9 @@ cleanup() {
     fi
 
     # Also clean up any remaining uvicorn processes
-    pkill -TERM -f "uvicorn trading_api.main:app" 2>/dev/null || true
+    pkill -TERM -f "uvicorn trading_api.main:" 2>/dev/null || true
     sleep 1
-    pkill -KILL -f "uvicorn trading_api.main:app" 2>/dev/null || true
+    pkill -KILL -f "uvicorn trading_api.main:" 2>/dev/null || true
 }
 
 # Register cleanup on exit and signals
@@ -106,8 +114,8 @@ done
 
 echo "🩺 Testing API endpoints..."
 if curl -sf http://localhost:$BACKEND_PORT/api/v1/health > /dev/null 2>&1 && \
-   curl -sf http://localhost:$BACKEND_PORT/api/v1/version > /dev/null 2>&1 && \
-   curl -sf http://localhost:$BACKEND_PORT/api/v1/versions > /dev/null 2>&1; then
+    curl -sf http://localhost:$BACKEND_PORT/api/v1/version > /dev/null 2>&1 && \
+    curl -sf http://localhost:$BACKEND_PORT/api/v1/versions > /dev/null 2>&1; then
     echo -e "${GREEN}✅ All API endpoints responding${NC}"
 else
     echo -e "${RED}❌ Some API endpoints failed${NC}"
@@ -120,13 +128,13 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 cd ../frontend
 
 echo "📦 Installing frontend dependencies..."
-npm ci > /dev/null 2>&1
+make install-ci > /dev/null 2>&1
 
-echo "🧹 Cleaning generated client..."
-rm -rf src/clients/trader-api-generated
+echo "🧹 Cleaning generated clients..."
+rm -rf src/clients/trader-client-generated src/clients/ws-generated src/clients/ws-types-generated
 
 echo "🧪 Running frontend tests (with mocks)..."
-if npm run test:unit run > /dev/null 2>&1; then
+if make test-run > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Frontend tests passed (using mocks)${NC}"
 else
     echo -e "${RED}❌ Frontend tests failed${NC}"
@@ -137,52 +145,81 @@ echo ""
 echo -e "${BLUE}Step 4: Client Generation from Live API${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-echo "🔧 Generating client from live API..."
-if npm run client:generate > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ Client generation successful${NC}"
+echo "🔧 Generating REST API client from live API..."
+if make client-generate > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ REST API client generation successful${NC}"
 else
-    echo -e "${RED}❌ Client generation failed${NC}"
+    echo -e "${RED}❌ REST API client generation failed${NC}"
     exit 1
 fi
 
-echo "🔍 Verifying generated client..."
-if [ ! -f "src/clients/trader-api-generated/.client-type" ]; then
-    echo -e "${RED}❌ No .client-type file found${NC}"
+echo "🔍 Verifying generated REST API client..."
+if [ ! -f "src/clients/trader-client-generated/index.ts" ]; then
+    echo -e "${RED}❌ No trader-client-generated/index.ts file found${NC}"
     exit 1
 fi
 
-CLIENT_TYPE=$(cat src/clients/trader-api-generated/.client-type)
-if [ "$CLIENT_TYPE" != "server" ]; then
-    echo -e "${RED}❌ Expected 'server' client but got '$CLIENT_TYPE'${NC}"
-    exit 1
-fi
+echo -e "${GREEN}✅ Generated REST API client type: server${NC}"
 
-echo -e "${GREEN}✅ Generated client type: $CLIENT_TYPE${NC}"
-
-echo "📝 Checking generated files..."
-REQUIRED_FILES=(
-    "src/clients/trader-api-generated/api.ts"
-    "src/clients/trader-api-generated/base.ts"
-    "src/clients/trader-api-generated/configuration.ts"
-    "src/clients/trader-api-generated/client-config.ts"
-    "src/clients/trader-api-generated/index.ts"
+echo "📝 Checking generated REST API files..."
+REQUIRED_REST_FILES=(
+    "src/clients/trader-client-generated/api.ts"
+    "src/clients/trader-client-generated/base.ts"
+    "src/clients/trader-client-generated/configuration.ts"
+    "src/clients/trader-client-generated/index.ts"
 )
 
-for file in "${REQUIRED_FILES[@]}"; do
+for file in "${REQUIRED_REST_FILES[@]}"; do
     if [ ! -f "$file" ]; then
         echo -e "${RED}❌ Required file missing: $file${NC}"
         exit 1
     fi
 done
 
-echo -e "${GREEN}✅ All required files present${NC}"
+echo -e "${GREEN}✅ All required REST API files present${NC}"
+
+echo "🔧 Generating WebSocket client from live API..."
+if make ws-generate > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ WebSocket client generation successful${NC}"
+else
+    echo -e "${RED}❌ WebSocket client generation failed${NC}"
+    exit 1
+fi
+
+echo "🔍 Verifying generated WebSocket client..."
+if [ ! -f "src/clients/ws-generated/client.ts" ]; then
+    echo -e "${RED}❌ No ws-generated/client.ts file found${NC}"
+    exit 1
+fi
+
+if [ ! -f "src/clients/ws-types-generated/index.ts" ]; then
+    echo -e "${RED}❌ No ws-types-generated/index.ts file found${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✅ Generated WebSocket client type: server${NC}"
+
+echo "📝 Checking generated WebSocket files..."
+REQUIRED_WS_FILES=(
+    "src/clients/ws-generated/client.ts"
+    "src/clients/ws-types-generated/index.ts"
+)
+
+for file in "${REQUIRED_WS_FILES[@]}"; do
+    if [ ! -f "$file" ]; then
+        echo -e "${RED}❌ Required file missing: $file${NC}"
+        exit 1
+    fi
+done
+
+echo -e "${GREEN}✅ All required WebSocket files present${NC}"
 
 echo ""
 echo -e "${BLUE}Step 5: Building Frontend with Generated Client${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 echo "🏗️  Building frontend..."
-if VITE_API_URL=$VITE_API_URL npm run build > /dev/null 2>&1; then
+if VITE_API_URL=$VITE_API_URL make build > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Frontend build successful${NC}"
 else
     echo -e "${RED}❌ Frontend build failed${NC}"
@@ -212,36 +249,51 @@ wait $SERVER_PID 2>/dev/null || true
 SERVER_STARTED=false
 
 # Force kill any remaining uvicorn processes
-pkill -9 -f "uvicorn trading_api.main:app" 2>/dev/null || true
+pkill -9 -f "uvicorn trading_api.main:" 2>/dev/null || true
 
 sleep 3
 
-echo "🧹 Cleaning generated client..."
-rm -rf src/clients/trader-api-generated
+echo "🧹 Cleaning generated clients..."
+rm -rf src/clients/trader-client-generated src/clients/ws-generated src/clients/ws-types-generated
 
-echo "🎭 Generating client without backend..."
-if npm run client:generate > /dev/null 2>&1; then
-    echo -e "${GREEN}✅ Mock fallback generation successful${NC}"
+echo "🎭 Generating REST API client without backend..."
+if make client-generate > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ REST API mock fallback generation successful${NC}"
 else
-    echo -e "${RED}❌ Mock fallback generation failed${NC}"
+    echo -e "${RED}❌ REST API mock fallback generation failed${NC}"
     exit 1
 fi
 
-if [ ! -f "src/clients/trader-api-generated/.client-type" ]; then
-    echo -e "${RED}❌ No .client-type file found${NC}"
+REST_CLIENT_TYPE="mock"
+if [ -f "src/clients/trader-client-generated/index.ts" ]; then
+    REST_CLIENT_TYPE="server"
+    echo -e "${RED}❌ trader-client-generated/index.ts file found${NC}"
+    echo -e "${RED}❌ Expected 'mock' client but got '$REST_CLIENT_TYPE'${NC}"
     exit 1
 fi
 
-CLIENT_TYPE=$(cat src/clients/trader-api-generated/.client-type)
-if [ "$CLIENT_TYPE" != "mock" ]; then
-    echo -e "${RED}❌ Expected 'mock' client but got '$CLIENT_TYPE'${NC}"
+echo -e "${GREEN}✅ REST API mock client type: $REST_CLIENT_TYPE${NC}"
+
+echo "🎭 Generating WebSocket client without backend..."
+if make ws-generate > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ WebSocket mock fallback generation successful${NC}"
+else
+    echo -e "${RED}❌ WebSocket mock fallback generation failed${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}✅ Mock client type: $CLIENT_TYPE${NC}"
+WS_CLIENT_TYPE="mock"
+if [ -f "src/clients/ws-generated/client.ts" ] || [ -f "src/clients/ws-types-generated/index.ts" ]; then
+    WS_CLIENT_TYPE="server"
+    echo -e "${RED}❌ ws-generated or ws-types-generated files found${NC}"
+    echo -e "${RED}❌ Expected 'mock' client but got '$WS_CLIENT_TYPE'${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✅ WebSocket mock client type: $WS_CLIENT_TYPE${NC}"
 
 echo "🏗️  Building frontend with mocks..."
-if npm run build > /dev/null 2>&1; then
+if make build > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Frontend build successful (with mocks)${NC}"
 else
     echo -e "${RED}❌ Frontend build failed (with mocks)${NC}"
@@ -257,8 +309,10 @@ echo "Summary:"
 echo "  ✅ Backend tests: passed"
 echo "  ✅ Backend server: started and healthy"
 echo "  ✅ Frontend tests: passed (with mocks)"
-echo "  ✅ Client generation: successful (from live API)"
-echo "  ✅ Frontend build: successful (with generated client)"
-echo "  ✅ Mock fallback: successful"
+echo "  ✅ REST API client generation: successful (from live API)"
+echo "  ✅ WebSocket client generation: successful (from live API)"
+echo "  ✅ Frontend build: successful (with generated clients)"
+echo "  ✅ REST API mock fallback: successful"
+echo "  ✅ WebSocket mock fallback: successful"
 echo "  ✅ Frontend build: successful (with mocks)"
 echo ""

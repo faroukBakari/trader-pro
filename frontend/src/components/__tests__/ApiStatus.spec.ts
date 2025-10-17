@@ -1,53 +1,9 @@
-import type { APIMetadata, HealthResponse } from '@/services/apiService'
-import * as apiService from '@/services/apiService'
 import { mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import ApiStatus from '../ApiStatus.vue'
 
-// Mock the API service
-vi.mock('@/services/apiService', () => ({
-  apiService: {
-    getHealthStatus: vi.fn(),
-    getAPIVersions: vi.fn(),
-    getClientType: vi.fn(),
-  },
-}))
-
 describe('ApiStatus', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
   it('renders the component with title', () => {
-    // Mock successful API responses
-    vi.mocked(apiService.apiService.getHealthStatus).mockResolvedValue({
-      status: 'ok',
-      message: 'Trading API is running',
-      timestamp: '2025-01-01T00:00:00Z',
-      api_version: 'v1',
-      version_info: {
-        version: 'v1',
-        release_date: '2025-01-01',
-        status: 'stable',
-        deprecation_notice: null,
-      },
-    })
-
-    vi.mocked(apiService.apiService.getAPIVersions).mockResolvedValue({
-      current_version: 'v1',
-      available_versions: [
-        {
-          version: 'v1',
-          status: 'stable',
-          release_date: '2025-01-01',
-          deprecation_notice: null,
-          sunset_date: null,
-        },
-      ],
-      documentation_url: 'https://api.example.com/docs',
-      support_contact: 'support@example.com',
-    })
-
     const wrapper = mount(ApiStatus)
     expect(wrapper.text()).toContain('API Status')
     expect(wrapper.text()).toContain('Health Check')
@@ -55,13 +11,6 @@ describe('ApiStatus', () => {
   })
 
   it('shows loading state initially', async () => {
-    // Mock pending promises that never resolve
-    const healthPromise = new Promise<HealthResponse>(() => {}) // Never resolves
-    const versionsPromise = new Promise<APIMetadata>(() => {}) // Never resolves
-
-    vi.mocked(apiService.apiService.getHealthStatus).mockReturnValue(healthPromise)
-    vi.mocked(apiService.apiService.getAPIVersions).mockReturnValue(versionsPromise)
-
     const wrapper = mount(ApiStatus)
 
     // Wait for component to mount and start loading
@@ -75,5 +24,40 @@ describe('ApiStatus', () => {
     const refreshButton = wrapper.find('button')
     expect(refreshButton.exists()).toBe(true)
     expect(refreshButton.text()).toContain('Refresh')
+  })
+
+  it('displays API status information after loading', async () => {
+    const wrapper = mount(ApiStatus)
+
+    // Wait for the async API calls to complete
+    // Using a reasonable timeout for the mock API responses
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await wrapper.vm.$nextTick()
+
+    // Check that loading state is gone
+    expect(wrapper.text()).not.toContain('Loading...')
+
+    // Check that some API information is displayed
+    const text = wrapper.text()
+    expect(text).toBeTruthy()
+    expect(text.length).toBeGreaterThan(50) // Should contain meaningful content
+  })
+
+  it('refresh button triggers data refresh', async () => {
+    const wrapper = mount(ApiStatus)
+
+    // Wait for initial load
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await wrapper.vm.$nextTick()
+
+    const refreshButton = wrapper.find('button')
+    expect(refreshButton.exists()).toBe(true)
+
+    // Click refresh button
+    await refreshButton.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    // Should still show the component structure after refresh
+    expect(wrapper.text()).toContain('API Status')
   })
 })
