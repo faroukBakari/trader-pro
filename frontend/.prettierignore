@@ -7,7 +7,7 @@ coverage/
 node_modules/
 
 # Generated files
-src/clients/trader-api-generated/
+src/clients/trader-client-generated/
 
 # External libraries and dependencies
 public/

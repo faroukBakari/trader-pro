@@ -3,7 +3,7 @@
 [![CI](https://github.com/faroukBakari/trading-api/actions/workflows/ci.yml/badge.svg)](https://github.com/faroukBakari/trading-api/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/faroukBakari/trading-api/branch/main/graph/badge.svg)](https://codecov.io/gh/faroukBakari/trading-api)
 
-A FastAPI-based trading API with Vue.js frontend, built with modern development practices.
+A modern full-stack trading platform with FastAPI backend and Vue.js frontend. Features REST API for traditional request/response operations and WebSocket streaming for real-time market data updates.
 
 ## 🏗️ Project Structure
 
@@ -22,7 +22,8 @@ A FastAPI-based trading API with Vue.js frontend, built with modern development 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Python 3.10+ with Poetry
+
+- Python 3.11 with Poetry
 - Node.js 20+ with npm
 - Git
 - **VS Code**: Recommended for best TypeScript/Python experience
@@ -30,22 +31,25 @@ A FastAPI-based trading API with Vue.js frontend, built with modern development 
 ### Setup
 
 #### 1. Clone and Install Dependencies
+
 ```bash
 # Clone the repository
 git clone https://github.com/faroukBakari/trading-api.git
 cd trading-api
 
-# Install Git hooks and dependencies
-make -f project.mk setup
+# Install dependencies (includes Git hooks)
+make -f project.mk install
 ```
 
 #### 2. Open in VS Code (Recommended)
+
 ```bash
 # Open the multi-root workspace for proper TypeScript/Python support
 code trader-pro.code-workspace
 ```
 
 **Why use the workspace file?**
+
 - ✅ Proper TypeScript resolution for frontend
 - ✅ Correct Python environment detection for backend
 - ✅ No `import.meta` errors
@@ -54,6 +58,7 @@ code trader-pro.code-workspace
 See [WORKSPACE-SETUP.md](./WORKSPACE-SETUP.md) for details.
 
 ### Development
+
 ```bash
 # Start backend (terminal 1)
 make -f project.mk dev-backend
@@ -71,7 +76,9 @@ See [ENVIRONMENT-CONFIG.md](./ENVIRONMENT-CONFIG.md) for environment variable co
 ## 🔧 Development
 
 ### Git Hooks
+
 Automatic code quality checks run on every commit:
+
 - **Backend**: Black, isort, Flake8, MyPy, pytest
 - **Frontend**: ESLint, Prettier, TypeScript, Vitest
 - **All files**: Whitespace, merge conflicts, syntax
@@ -85,18 +92,22 @@ git commit --no-verify
 ```
 
 ### Testing
+
 ```bash
-# Run all tests
+# Run all tests (auto-generates API clients for frontend)
 make -f project.mk test-all
 
 # Backend only
 make -C backend test
 
-# Frontend only
+# Frontend only (auto-generates clients)
 cd frontend && npm run test:unit
 ```
 
+**Note**: Frontend tests automatically generate API clients from the backend's OpenAPI spec before running.
+
 ### Code Quality
+
 ```bash
 # Run all linters
 make -f project.mk lint-all
@@ -109,53 +120,72 @@ make -C backend lint-check
 make -C backend format
 ```
 
-## 📖 API Documentation
+## 📖 Documentation
 
-- **Interactive Docs**: http://localhost:${BACKEND_PORT:-8000}/docs
-- **OpenAPI Spec**: http://localhost:${BACKEND_PORT:-8000}/openapi.json
-- **ReDoc**: http://localhost:${BACKEND_PORT:-8000}/redoc
+### Core Documentation
 
-### Available Endpoints
-- `GET /health` - Health check
-- `GET /api/v1/version` - API version info
-- `GET /` - Root API metadata
+- **[Architecture](ARCHITECTURE.md)** - System architecture and design
+- **[Development Guide](docs/DEVELOPMENT.md)** - Development workflows and setup
+- **[Testing Strategy](docs/TESTING.md)** - Testing approach and best practices
+- **[Client Generation](docs/CLIENT-GENERATION.md)** - API client auto-generation
+- **[WebSocket Clients](docs/WEBSOCKET-CLIENTS.md)** - Real-time WebSocket implementation
+
+### API Documentation
+
+- **Interactive Docs**: http://localhost:${BACKEND_PORT:-8000}/api/v1/docs
+- **AsyncAPI Docs**: http://localhost:${BACKEND_PORT:-8000}/api/v1/ws/asyncapi
+- **Backend Details**: See [backend/docs/](backend/docs/)
+
+### Quick Links
+
+- REST API: http://localhost:${BACKEND_PORT:-8000}/api/v1/openapi.json
+- WebSocket: ws://localhost:${BACKEND_PORT:-8000}/api/v1/ws
+- Frontend: http://localhost:${FRONTEND_PORT:-5173}
 
 ## 🏃‍♂️ CI/CD
 
 The project uses GitHub Actions for continuous integration:
 
 ### Workflows
-- **Backend**: Python 3.10-3.11, Poetry, pytest, linting
+
+- **Backend**: Python 3.11, Poetry, pytest, linting
 - **Frontend**: Node.js 20-22, npm, ESLint, Vitest, build
 - **Integration**: End-to-end API tests, frontend build against live API
 
 ### Quality Gates
+
 - All tests must pass
 - Code coverage reporting
 - Linting and formatting checks
 - Type checking (MyPy + TypeScript)
 - Build verification
 
-## 📁 Project Details
+## 📁 Technology Stack
 
-### Backend (`/backend`)
-- **Framework**: FastAPI
-- **Testing**: pytest, pytest-asyncio, httpx
-- **Code Quality**: Black, isort, Flake8, MyPy
-- **Dependencies**: Poetry
+### Backend
 
-### Frontend (`/frontend`)
-- **Framework**: Vue 3 + TypeScript
-- **Build Tool**: Vite
-- **Testing**: Vitest + Vue Test Utils
-- **Code Quality**: ESLint, Prettier
-- **Dependencies**: npm
+- **Framework**: FastAPI 0.104+ (REST) + FastWS 0.1.7 (WebSocket)
+- **Runtime**: Python 3.11+ with Uvicorn ASGI server
+- **Dependencies**: Poetry for package management
+- **Testing**: pytest + pytest-asyncio + httpx TestClient
+- **Code Quality**: Black, isort, Flake8, MyPy + pre-commit hooks
 
-### Git Hooks (`/.githooks`)
-- **Centralized**: Single source of truth for all hooks
-- **Cross-platform**: Works on Windows, macOS, Linux
-- **Fast**: Only checks changed files
-- **Smart**: CI detection, easy bypass options
+### Frontend
+
+- **Framework**: Vue 3 + Composition API + TypeScript
+- **Build**: Vite 7+ (fast ES build tool)
+- **Dependencies**: npm with Node.js 20+
+- **Testing**: Vitest + Vue Test Utils + jsdom
+- **Code Quality**: ESLint + Prettier + pre-commit hooks
+
+### DevOps
+
+- **CI/CD**: GitHub Actions with parallel job execution
+- **Testing**: Multi-tier (unit, integration, smoke, e2e)
+- **Git Hooks**: Automated code quality and testing
+- **Workspace**: VS Code multi-root workspace support
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for complete technical details.
 
 ## 🤝 Contributing
 
@@ -168,6 +198,7 @@ The project uses GitHub Actions for continuous integration:
 7. Open a Pull Request
 
 ### Development Setup for Contributors
+
 ```bash
 # After cloning
 make -f project.mk setup    # Install all dependencies and hooks

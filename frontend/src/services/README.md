@@ -13,7 +13,6 @@ src/services/
 │   ├── api/               # Generated API classes
 │   ├── models/            # Generated TypeScript types
 │   ├── client-config.ts   # Pre-configured client instance
-│   ├── .client-type       # Marker: 'server' or 'mock'
 │   └── ...
 └── __tests__/
     └── apiService.spec.ts  # Unit tests with mocking examples
@@ -88,11 +87,9 @@ npm run client:generate
 1. **Live API Available**: Script checks if backend is running at `http://localhost:8000`
    - ✅ Downloads OpenAPI spec from live API
    - ✅ Generates TypeScript client with full type safety
-   - ✅ Creates `.client-type: server` marker
    - ✅ App uses generated client
 
 2. **No Live API**: Backend not running or not accessible
-   - ✅ Creates `.client-type: mock` marker
    - ✅ App automatically uses mock data
    - ✅ Development continues seamlessly
 
@@ -113,16 +110,6 @@ When using the fallback (mock) implementation:
 - 🎭 **Realistic Data**: Returns data that matches the real API structure
 - ⏱️ **Network Simulation**: Includes realistic network delays (100-150ms)
 - 📊 **Multiple Scenarios**: Provides both stable (v1) and planned (v2) API versions
-- 🔧 **Configurable**: Mock behavior can be customized for testing
-- 📝 **Logging**: Optional console logs to indicate when mocks are being used
-
-```typescript
-import { MOCK_CONFIG } from '@/services/apiService'
-
-// Customize mock behavior
-MOCK_CONFIG.networkDelay.health = 50 // Faster for testing
-MOCK_CONFIG.enableLogs = false // Quiet during tests
-```
 
 ### Generated Client (Advanced)
 
@@ -144,11 +131,7 @@ The service uses mock data implementation, making it easy to test:
 
 ```typescript
 import { vi } from 'vitest'
-import { apiService, MOCK_CONFIG } from '../apiService'
-
-// Customize mock behavior for testing
-MOCK_CONFIG.enableLogs = false
-MOCK_CONFIG.networkDelay.health = 0 // No delay for faster tests
+import { apiService } from '../apiService'
 
 // Test the mock responses
 const health = await apiService.getHealth()
@@ -198,7 +181,7 @@ Client generation happens automatically during:
 
 ### How It Works
 
-The generation script (`scripts/generate-client.sh`):
+The generation script (`scripts/generate-api-client.sh`):
 
 1. Checks if backend API is running at `http://localhost:8000`
 2. If available:
@@ -229,7 +212,7 @@ VITE_API_URL=http://api.example.com
 npm run client:generate
 
 # Or use the script directly
-./scripts/generate-client.sh
+./scripts/generate-api-client.sh
 ```
 
 ## Benefits

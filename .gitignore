@@ -164,6 +164,10 @@ openapi.json
 openapi-3.0.json
 .openapi-checksum
 
+# Auto-generated WebSocket clients
+frontend/src/clients/ws-generated/
+frontend/src/clients/ws-types-generated/
+
 # Node.js dependencies
 node_modules/
 npm-debug.log*

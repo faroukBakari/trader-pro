@@ -1,0 +1,841 @@
+{
+  "asyncapi": "2.4.0",
+  "info": {
+    "title": "Trading WebSockets",
+    "version": "1.0.0",
+    "description": "Real-time trading data streaming. Read the documentation to subscribe to specific data feeds."
+  },
+  "channels": {
+    "/": {
+      "subscribe": {
+        "operationId": "processMessage",
+        "summary": "The API user can receive a given message from the server.",
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/components/messages/bars.subscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/bars.unsubscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/bars.update"
+            },
+            {
+              "$ref": "#/components/messages/quotes.subscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/quotes.unsubscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/quotes.update"
+            }
+          ]
+        }
+      },
+      "publish": {
+        "operationId": "sendMessage",
+        "summary": "The API user can send a given message to the server.",
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/components/messages/bars.subscribe"
+            },
+            {
+              "$ref": "#/components/messages/bars.unsubscribe"
+            },
+            {
+              "$ref": "#/components/messages/quotes.subscribe"
+            },
+            {
+              "$ref": "#/components/messages/quotes.unsubscribe"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Bar": {
+        "description": "OHLC bar model matching Bar interface",
+        "properties": {
+          "time": {
+            "description": "Bar timestamp in milliseconds",
+            "title": "Time",
+            "type": "integer"
+          },
+          "open": {
+            "description": "Open price",
+            "title": "Open",
+            "type": "number"
+          },
+          "high": {
+            "description": "High price",
+            "title": "High",
+            "type": "number"
+          },
+          "low": {
+            "description": "Low price",
+            "title": "Low",
+            "type": "number"
+          },
+          "close": {
+            "description": "Close price",
+            "title": "Close",
+            "type": "number"
+          },
+          "volume": {
+            "default": 0,
+            "description": "Volume",
+            "title": "Volume",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "time",
+          "open",
+          "high",
+          "low",
+          "close"
+        ],
+        "title": "Bar",
+        "type": "object"
+      },
+      "BarsSubscriptionRequest": {
+        "properties": {
+          "symbol": {
+            "description": "Symbol to subscribe to",
+            "title": "Symbol",
+            "type": "string"
+          },
+          "resolution": {
+            "default": "1",
+            "description": "Time resolution: '1', '5', '15', '30', '60' (minutes), 'D' (day), 'W' (week), 'M' (month)",
+            "title": "Resolution",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol"
+        ],
+        "title": "BarsSubscriptionRequest",
+        "type": "object"
+      },
+      "QuoteData": {
+        "description": "Quote data model matching QuoteData interface",
+        "properties": {
+          "s": {
+            "description": "Status",
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "S",
+            "type": "string"
+          },
+          "n": {
+            "description": "Symbol name",
+            "title": "N",
+            "type": "string"
+          },
+          "v": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteValues"
+              },
+              {
+                "type": "object"
+              }
+            ],
+            "description": "Quote values or error",
+            "title": "V"
+          }
+        },
+        "required": [
+          "s",
+          "n",
+          "v"
+        ],
+        "title": "QuoteData",
+        "type": "object"
+      },
+      "QuoteDataSubscriptionRequest": {
+        "description": "Request model for quote data subscription.\n\nMatches TradingView's subscribeQuotes interface.\nSupports subscribing to multiple symbols with different update frequencies.",
+        "properties": {
+          "symbols": {
+            "description": "Symbols requiring slow updates (once per minute) - e.g., watchlist items not currently visible",
+            "items": {
+              "type": "string"
+            },
+            "title": "Symbols",
+            "type": "array"
+          },
+          "fast_symbols": {
+            "description": "Symbols requiring fast updates (at least every 10 seconds) - e.g., currently visible or active symbols",
+            "items": {
+              "type": "string"
+            },
+            "title": "Fast Symbols",
+            "type": "array"
+          }
+        },
+        "title": "QuoteDataSubscriptionRequest",
+        "type": "object"
+      },
+      "QuoteValues": {
+        "description": "Quote values model matching DatafeedQuoteValues interface",
+        "properties": {
+          "lp": {
+            "description": "Last price",
+            "title": "Lp",
+            "type": "number"
+          },
+          "ask": {
+            "description": "Ask price",
+            "title": "Ask",
+            "type": "number"
+          },
+          "bid": {
+            "description": "Bid price",
+            "title": "Bid",
+            "type": "number"
+          },
+          "spread": {
+            "description": "Spread",
+            "title": "Spread",
+            "type": "number"
+          },
+          "open_price": {
+            "description": "Open price",
+            "title": "Open Price",
+            "type": "number"
+          },
+          "high_price": {
+            "description": "High price",
+            "title": "High Price",
+            "type": "number"
+          },
+          "low_price": {
+            "description": "Low price",
+            "title": "Low Price",
+            "type": "number"
+          },
+          "prev_close_price": {
+            "description": "Previous close price",
+            "title": "Prev Close Price",
+            "type": "number"
+          },
+          "volume": {
+            "description": "Volume",
+            "title": "Volume",
+            "type": "integer"
+          },
+          "ch": {
+            "description": "Change",
+            "title": "Ch",
+            "type": "number"
+          },
+          "chp": {
+            "description": "Change percent",
+            "title": "Chp",
+            "type": "number"
+          },
+          "short_name": {
+            "description": "Short name",
+            "title": "Short Name",
+            "type": "string"
+          },
+          "exchange": {
+            "description": "Exchange",
+            "title": "Exchange",
+            "type": "string"
+          },
+          "description": {
+            "description": "Description",
+            "title": "Description",
+            "type": "string"
+          },
+          "original_name": {
+            "description": "Original name",
+            "title": "Original Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lp",
+          "ask",
+          "bid",
+          "spread",
+          "open_price",
+          "high_price",
+          "low_price",
+          "prev_close_price",
+          "volume",
+          "ch",
+          "chp",
+          "short_name",
+          "exchange",
+          "description",
+          "original_name"
+        ],
+        "title": "QuoteValues",
+        "type": "object"
+      },
+      "SubscriptionResponse": {
+        "description": "Generic subscription response",
+        "properties": {
+          "status": {
+            "description": "Status",
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "message": {
+            "description": "Status message",
+            "title": "Message",
+            "type": "string"
+          },
+          "topic": {
+            "description": "Subscription topic",
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "topic"
+        ],
+        "title": "SubscriptionResponse",
+        "type": "object"
+      },
+      "SubscriptionUpdate_Bar_": {
+        "properties": {
+          "topic": {
+            "description": "Update type",
+            "title": "Topic",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Bar",
+            "description": "Update payload"
+          }
+        },
+        "required": [
+          "topic",
+          "payload"
+        ],
+        "title": "SubscriptionUpdate[Bar]",
+        "type": "object"
+      },
+      "SubscriptionUpdate_QuoteData_": {
+        "properties": {
+          "topic": {
+            "description": "Update type",
+            "title": "Topic",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/QuoteData",
+            "description": "Update payload"
+          }
+        },
+        "required": [
+          "topic",
+          "payload"
+        ],
+        "title": "SubscriptionUpdate[QuoteData]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_subscribe___BarsSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "bars.subscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BarsSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['bars.subscribe'], BarsSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_subscribe___QuoteDataSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "quotes.subscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteDataSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['quotes.subscribe'], QuoteDataSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_unsubscribe___BarsSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "bars.unsubscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BarsSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['bars.unsubscribe'], BarsSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_unsubscribe___QuoteDataSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "quotes.unsubscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QuoteDataSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['quotes.unsubscribe'], QuoteDataSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_update___SubscriptionUpdate_Bar__": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "bars.update",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionUpdate_Bar_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['bars.update'], SubscriptionUpdate[Bar]]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_update___SubscriptionUpdate_QuoteData__": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "quotes.update",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionUpdate_QuoteData_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['quotes.update'], SubscriptionUpdate[QuoteData]]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__bars__subscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "bars.subscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['bars.subscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__bars__unsubscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "bars.unsubscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['bars.unsubscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__quotes__subscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "quotes.subscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['quotes.subscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__quotes__unsubscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "quotes.unsubscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['quotes.unsubscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      }
+    },
+    "messages": {
+      "bars.subscribe": {
+        "messageId": "bars.subscribe",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_subscribe___BarsSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/bars.subscribe.response"
+        },
+        "tags": [
+          {
+            "name": "datafeed"
+          }
+        ]
+      },
+      "bars.subscribe.response": {
+        "messageId": "bars.subscribe.response",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__bars__subscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "datafeed"
+          }
+        ]
+      },
+      "bars.unsubscribe": {
+        "messageId": "bars.unsubscribe",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_unsubscribe___BarsSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/bars.unsubscribe.response"
+        },
+        "tags": [
+          {
+            "name": "datafeed"
+          }
+        ]
+      },
+      "bars.unsubscribe.response": {
+        "messageId": "bars.unsubscribe.response",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__bars__unsubscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "datafeed"
+          }
+        ]
+      },
+      "bars.update": {
+        "messageId": "bars.update",
+        "name": "update",
+        "title": "Update",
+        "description": "Broadcast data updates to subscribed clients",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_update___SubscriptionUpdate_Bar__"
+        },
+        "tags": [
+          {
+            "name": "datafeed"
+          }
+        ]
+      },
+      "quotes.subscribe": {
+        "messageId": "quotes.subscribe",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_subscribe___QuoteDataSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/quotes.subscribe.response"
+        },
+        "tags": [
+          {
+            "name": "datafeed"
+          }
+        ]
+      },
+      "quotes.subscribe.response": {
+        "messageId": "quotes.subscribe.response",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__quotes__subscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "datafeed"
+          }
+        ]
+      },
+      "quotes.unsubscribe": {
+        "messageId": "quotes.unsubscribe",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_unsubscribe___QuoteDataSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/quotes.unsubscribe.response"
+        },
+        "tags": [
+          {
+            "name": "datafeed"
+          }
+        ]
+      },
+      "quotes.unsubscribe.response": {
+        "messageId": "quotes.unsubscribe.response",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__quotes__unsubscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "datafeed"
+          }
+        ]
+      },
+      "quotes.update": {
+        "messageId": "quotes.update",
+        "name": "update",
+        "title": "Update",
+        "description": "Broadcast data updates to subscribed clients",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_update___SubscriptionUpdate_QuoteData__"
+        },
+        "tags": [
+          {
+            "name": "datafeed"
+          }
+        ]
+      }
+    }
+  },
+  "defaultContentType": "application/json"
+}

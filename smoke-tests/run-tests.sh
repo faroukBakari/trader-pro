@@ -36,6 +36,7 @@ print_step "🧪 Running Trader Pro Smoke Tests"
 # Check if node_modules exists, if not install dependencies
 if [ ! -d "node_modules" ]; then
     print_step "Installing smoke test dependencies..."
+    # Smoke tests have their own package.json, not using frontend Makefile
     npm install
 fi
 
@@ -47,6 +48,7 @@ print_step "Starting smoke tests..."
 print_warning "This will start the full-stack environment and run tests against it"
 
 # Run the tests
+# Note: Smoke tests use their own package.json, not frontend Makefile
 if npm test; then
     print_success "All smoke tests passed!"
 

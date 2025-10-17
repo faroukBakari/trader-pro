@@ -4,12 +4,18 @@ version = "0.1.0"
 description = "A FastAPI trading API server"
 authors = ["Your Name <your.email@example.com>"]
 readme = "README.md"
-packages = [{include = "trading_api", from = "src"}]
+packages = [
+    {include = "trading_api", from = "src"},
+    {include = "external_packages"}
+]
+include = ["trading_api/py.typed", "external_packages/py.typed", "external_packages/fastws/py.typed"]
+
 
 [tool.poetry.dependencies]
-python = "^3.8.1"
+python = "^3.11"
 fastapi = "^0.104.1"
 uvicorn = {extras = ["standard"], version = "^0.24.0"}
+pyyaml = "^6.0.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"
@@ -23,6 +29,8 @@ isort = "^5.12.0"
 flake8 = "^6.1.0"
 mypy = "^1.7.1"
 pre-commit = "^3.5.0"
+debugpy = "^1.8.0"
+asyncapi = "^0.14.1"
 
 [build-system]
 requires = ["poetry-core"]
@@ -30,17 +38,29 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 88
-target-version = ['py38']
+target-version = ['py311']
 
 [tool.isort]
 profile = "black"
 line_length = 88
 
 [tool.mypy]
-python_version = "3.8"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+
+# FastAPI specific mypy plugin
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

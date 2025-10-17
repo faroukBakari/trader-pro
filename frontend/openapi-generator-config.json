@@ -1,0 +1,22 @@
+{
+  "npmName": "@trader-pro/client",
+  "supportsES6": true,
+  "typescriptThreePlus": true,
+  "withInterfaces": true,
+  "withSeparateModelsAndApi": true,
+  "apiPackage": "api",
+  "modelPackage": "models",
+  "useSingleRequestParameter": false,
+  "stringEnums": true,
+  "enumNameSuffix": "",
+  "removeOperationIdPrefix": true,
+  "generateAliasAsModel": false,
+  "nullSafeAdditionalProps": false,
+  "sortParamsByRequiredFlag": true,
+  "sortModelPropertiesByRequiredFlag": true,
+  "ensureUniqueParams": true,
+  "allowUnicodeIdentifiers": false,
+  "prependFormOrBodyParameters": true,
+  "legacyDiscriminatorBehavior": false,
+  "basePath": ""
+}

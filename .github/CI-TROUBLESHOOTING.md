@@ -138,7 +138,7 @@ npm run test:unit run
 npm run build
 
 # Test integration
-cd backend && poetry run uvicorn trading_api.main:app --port 8000 &
+cd backend && poetry run uvicorn "trading_api.main:$BACKEND_APP_NAME" --port 8000 &
 sleep 5
 curl -f http://localhost:8000/api/v1/health
 curl -f http://localhost:8000/api/v1/version
