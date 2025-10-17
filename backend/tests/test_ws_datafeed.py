@@ -2,11 +2,20 @@
 Integration tests for WebSocket endpoints
 """
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
 from trading_api.main import apiApp, wsApp
-from trading_api.models import Bar, BarsSubscriptionRequest, SubscriptionUpdate
+from trading_api.models import Bar, BarsSubscriptionRequest
+
+
+def build_topic(symbol: str, resolution: str) -> str:
+    """Build standardized topic string matching backend format"""
+    params = {"resolution": resolution, "symbol": symbol}
+    serialized = json.dumps(params, sort_keys=True, separators=(",", ":"))
+    return f"bars:{serialized}"
 
 
 class TestBarsWebSocketIntegration:
@@ -38,7 +47,10 @@ class TestBarsWebSocketIntegration:
             # Verify response structure
             assert response["type"] == "bars.subscribe.response"
             assert response["payload"]["status"] == "ok"
-            assert response["payload"]["topic"] == "bars:1:AAPL"
+            assert (
+                response["payload"]["topic"]
+                == 'bars:{"resolution":"1","symbol":"AAPL"}'
+            )
             assert "Subscribed" in response["payload"]["message"]
 
     def test_subscribe_with_different_resolutions(self):
@@ -54,7 +66,10 @@ class TestBarsWebSocketIntegration:
                 }
             )
             response1 = websocket.receive_json()
-            assert response1["payload"]["topic"] == "bars:1:AAPL"
+            assert (
+                response1["payload"]["topic"]
+                == 'bars:{"resolution":"1","symbol":"AAPL"}'
+            )
 
             # Subscribe to daily bars
             websocket.send_json(
@@ -64,7 +79,10 @@ class TestBarsWebSocketIntegration:
                 }
             )
             response2 = websocket.receive_json()
-            assert response2["payload"]["topic"] == "bars:D:AAPL"
+            assert (
+                response2["payload"]["topic"]
+                == 'bars:{"resolution":"D","symbol":"AAPL"}'
+            )
 
     def test_unsubscribe_from_bars(self):
         """Test unsubscribing from bar updates"""
@@ -93,7 +111,10 @@ class TestBarsWebSocketIntegration:
             # Verify unsubscribe response
             assert unsubscribe_response["type"] == "bars.unsubscribe.response"
             assert unsubscribe_response["payload"]["status"] == "ok"
-            assert unsubscribe_response["payload"]["topic"] == "bars:5:GOOGL"
+            assert (
+                unsubscribe_response["payload"]["topic"]
+                == 'bars:{"resolution":"5","symbol":"GOOGL"}'
+            )
             assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
     def test_multiple_symbols_subscription(self):
@@ -112,7 +133,10 @@ class TestBarsWebSocketIntegration:
                 )
                 response = websocket.receive_json()
                 assert response["payload"]["status"] == "ok"
-                assert response["payload"]["topic"] == f"bars:1:{symbol}"
+                assert (
+                    response["payload"]["topic"]
+                    == f'bars:{{"resolution":"1","symbol":"{symbol}"}}'
+                )
 
     def test_subscribe_without_resolution_uses_default(self):
         """Test that subscribing without resolution parameter uses default"""
@@ -126,7 +150,10 @@ class TestBarsWebSocketIntegration:
             response = websocket.receive_json()
 
             # Should use default resolution "1"
-            assert response["payload"]["topic"] == "bars:1:AAPL"
+            assert (
+                response["payload"]["topic"]
+                == 'bars:{"resolution":"1","symbol":"AAPL"}'
+            )
 
     @pytest.mark.asyncio
     async def test_broadcast_to_subscribed_clients(self):
@@ -158,12 +185,11 @@ class TestBarsWebSocketIntegration:
                 volume=1000000,
             )
 
-            update = SubscriptionUpdate[Bar](type="bars.update", payload=test_bar)
             await wsApp.publish(
                 topic=bars_topic_builder(
                     params=BarsSubscriptionRequest(symbol="AAPL", resolution="1")
                 ),
-                data=update,
+                data=test_bar,
                 message_type="bars.update",
             )
 
@@ -173,14 +199,13 @@ class TestBarsWebSocketIntegration:
             # Verify the update message
             assert update_msg["type"] == "bars.update"
 
-            # The payload should contain the nested structure with type and payload
-            # Because SubscriptionUpdate[Bar] gets returned by the handler
+            # The payload is SubscriptionUpdate with topic and payload fields
             assert "payload" in update_msg
-            inner_payload = update_msg["payload"]
+            subscription_update = update_msg["payload"]
 
-            # The inner payload should have type and payload fields from SubscriptionUpdate
-            assert inner_payload["type"] == "bars.update"
-            bar_data = inner_payload["payload"]
+            # Verify SubscriptionUpdate structure
+            assert subscription_update["topic"] == build_topic("AAPL", "1")
+            bar_data = subscription_update["payload"]
 
             # Now verify the actual bar data
             assert bar_data["time"] == test_bar.time

@@ -16,7 +16,6 @@ set -e
 # Configuration
 OUTPUT_DIR="./src/clients/trader-client-generated"
 WS_TYPES_OUTPUT_DIR="./src/clients/ws-types-generated"
-WS_CLIENT_OUTPUT_DIR="./src/clients/ws-generated"
 BACKEND_DIR="../backend"
 OPENAPI_SPEC="$BACKEND_DIR/openapi.json"
 ASYNCAPI_SPEC="$BACKEND_DIR/asyncapi.json"
@@ -38,10 +37,8 @@ echo ""
 echo -e "${BLUE}🧹 Cleaning previous generated clients...${NC}"
 rm -rf "$OUTPUT_DIR"
 rm -rf "$WS_TYPES_OUTPUT_DIR"
-rm -rf "$WS_CLIENT_OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 mkdir -p "$WS_TYPES_OUTPUT_DIR"
-mkdir -p "$WS_CLIENT_OUTPUT_DIR"
 echo -e "${GREEN}✅ Cleanup complete${NC}"
 echo ""
 
@@ -140,26 +137,12 @@ generate_ws_types() {
     fi
 }
 
-# Function to generate WebSocket client
-generate_ws_client() {
-    echo -e "${BLUE}🔧 Generating WebSocket client from AsyncAPI...${NC}"
-
-    if node "./scripts/generate-ws-client.mjs" --from-file "$ASYNCAPI_SPEC"; then
-        echo -e "${GREEN}✅ WebSocket client generation successful${NC}"
-        return 0
-    else
-        echo -e "${RED}❌ WebSocket client generation failed${NC}"
-        return 1
-    fi
-}
-
 # Main execution
 main() {
     echo ""
 
     local rest_client_generated=false
     local ws_types_generated=false
-    local ws_client_generated=false
 
     # Export backend specifications offline
     if ! export_backend_specs; then
@@ -183,17 +166,12 @@ main() {
         echo -e "${RED}❌ OpenAPI specification not found${NC}"
     fi
 
-    # Generate WebSocket types and client from AsyncAPI spec
+    # Generate WebSocket types from AsyncAPI spec
     echo ""
     if [ -f "$ASYNCAPI_SPEC" ]; then
         echo ""
         if generate_ws_types; then
             ws_types_generated=true
-        fi
-        
-        echo ""
-        if generate_ws_client; then
-            ws_client_generated=true
         fi
     else
         echo -e "${YELLOW}⚠️  AsyncAPI specification not found${NC}"

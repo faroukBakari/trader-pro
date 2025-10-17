@@ -10,14 +10,13 @@ import logging
 from typing import List
 
 from trading_api.core.datafeed_service import DatafeedService
-from trading_api.models import Bar, SubscriptionUpdate
 from trading_api.plugins.fastws_adapter import FastWSAdapter
 from trading_api.ws.datafeed import BarsSubscriptionRequest, bars_topic_builder
 
 logger = logging.getLogger(__name__)
 
 
-class BarBroadcaster:
+class DataFeedBroadcaster:
     """
     Background task that periodically broadcasts mocked bar data.
 
@@ -172,16 +171,10 @@ class BarBroadcaster:
                     continue
 
                 try:
-                    # Wrap bar data in SubscriptionUpdate envelope
-                    update = SubscriptionUpdate[Bar](
-                        type="bar_update",
-                        payload=mocked_bar,
-                    )
-
                     # Broadcast to all subscribed clients
                     await self.ws_app.publish(
                         topic=topic,
-                        data=update,
+                        data=mocked_bar,
                         message_type="bars.update",
                     )
 

@@ -42,7 +42,6 @@ Frontend Build → Export Backend Specs → Generate Clients → Build/Dev
 │ Frontend: Generate TypeScript Clients   │
 │ • REST Client (OpenAPI spec)            │
 │ • WebSocket Types (AsyncAPI spec)       │
-│ • WebSocket Client Factories            │
 └─────────────────────────────────────────┘
 ```
 
@@ -79,40 +78,35 @@ const health = await healthApi.getHealth();
 
 ## WebSocket Client
 
-### Generation Commands
+### Generation Command
 
-The WebSocket client generation has two parts:
+WebSocket types are automatically generated from AsyncAPI specification:
 
 ```bash
-# 1. Generate types from AsyncAPI
+# Generate types from AsyncAPI
 node scripts/generate-ws-types.mjs
-
-# 2. Generate client factories
-node scripts/generate-ws-client.mjs
 ```
 
-Both run automatically during `make client-generate`.
+This runs automatically during `make client-generate`.
 
 ### Generated Files
 
 ```
 frontend/src/clients/
-├── ws-types-generated/     # TypeScript interfaces
-│   └── index.ts            # Bar, BarsSubscriptionRequest, etc.
-└── ws-generated/           # Client factories
-    └── client.ts           # BarsWebSocketClientFactory(), etc.
+└── ws-types-generated/     # TypeScript interfaces
+    └── index.ts            # Bar, BarsSubscriptionRequest, etc.
 ```
 
 ### Usage
 
 ```typescript
-import { BarsWebSocketClientFactory } from "@/clients/ws-generated/client";
+import { WebSocketClientBase } from "@/plugins/wsClientBase";
 import type {
   Bar,
   BarsSubscriptionRequest,
 } from "@/clients/ws-types-generated";
 
-const client = BarsWebSocketClientFactory();
+const client = new WebSocketClientBase<BarsSubscriptionRequest, Bar>("bars");
 await client.subscribe({ symbol: "AAPL", resolution: "1" }, (bar: Bar) =>
   console.log("New bar:", bar)
 );

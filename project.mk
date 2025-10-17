@@ -91,7 +91,7 @@ dev-backend:
 dev-frontend:
 	@echo "Starting frontend development server..."
 	@echo "🧹 Cleaning frontend generated files..."
-	rm -rf frontend/src/clients/trader-client-generated
+	rm -rf frontend/src/clients/trader-client-generated frontend/src/clients/ws-types-generated
 	make -C frontend dev
 
 # Full-stack development
@@ -161,7 +161,7 @@ clean-all:
 	make -C frontend clean
 	@echo "🧹 Cleaning project-level generated files..."
 	rm -f backend/openapi*.json
-	rm -rf frontend/src/clients/trader-client-generated
+	rm -rf frontend/src/clients/trader-client-generated frontend/src/clients/ws-types-generated
 	@echo "🧹 Cleaning smoke test artifacts..."
 	rm -rf smoke-tests/test-results smoke-tests/playwright-report
 	@echo "Clean complete."
@@ -172,7 +172,7 @@ clean-generated:
 	@echo "🧹 Removing backend OpenAPI files..."
 	rm -f backend/openapi*.json
 	@echo "🧹 Removing frontend generated client..."
-	rm -rf frontend/src/clients/trader-client-generated
+	rm -rf frontend/src/clients/trader-client-generated frontend/src/clients/ws-types-generated
 	@echo "🧹 Removing frontend build cache..."
 	rm -rf frontend/node_modules/.vite
 	@echo "🧹 Removing test artifacts..."

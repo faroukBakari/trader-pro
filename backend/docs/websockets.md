@@ -20,27 +20,29 @@ ws://localhost:8000/api/v1/ws
 
 ```javascript
 // JavaScript/TypeScript
-const ws = new WebSocket('ws://localhost:8000/api/v1/ws');
+const ws = new WebSocket("ws://localhost:8000/api/v1/ws");
 
 ws.onopen = () => {
-  console.log('Connected to Trading API WebSocket');
+  console.log("Connected to Trading API WebSocket");
 
   // Subscribe to Apple 1-minute bars
-  ws.send(JSON.stringify({
-    type: 'bars.subscribe',
-    payload: {
-      symbol: 'AAPL',
-      params: { resolution: '1' }
-    }
-  }));
+  ws.send(
+    JSON.stringify({
+      type: "bars.subscribe",
+      payload: {
+        symbol: "AAPL",
+        params: { resolution: "1" },
+      },
+    })
+  );
 };
 
 ws.onmessage = (event) => {
   const message = JSON.parse(event.data);
-  console.log('Received:', message);
+  console.log("Received:", message);
 
-  if (message.type === 'bars.update') {
-    console.log('New bar:', message.payload);
+  if (message.type === "bars.update") {
+    console.log("New bar:", message.payload);
   }
 };
 ```
@@ -61,8 +63,8 @@ All WebSocket messages follow a consistent envelope format:
 
 ```typescript
 interface WebSocketMessage<T> {
-  type: string;      // Operation identifier (e.g., "bars.subscribe")
-  payload?: T;       // Operation-specific data (optional)
+  type: string; // Operation identifier (e.g., "bars.subscribe")
+  payload?: T; // Operation-specific data (optional)
 }
 ```
 
@@ -86,6 +88,7 @@ FastWS defines two operation categories:
 Subscribe to real-time OHLC bar updates for a specific symbol and resolution.
 
 **Request**:
+
 ```json
 {
   "type": "bars.subscribe",
@@ -99,6 +102,7 @@ Subscribe to real-time OHLC bar updates for a specific symbol and resolution.
 ```
 
 **Response**:
+
 ```json
 {
   "type": "bars.subscribe.response",
@@ -112,12 +116,14 @@ Subscribe to real-time OHLC bar updates for a specific symbol and resolution.
 ```
 
 **Parameters**:
+
 - `symbol` (string, required): Symbol ticker (e.g., "AAPL", "GOOGL", "MSFT")
 - `params.resolution` (string, optional): Time resolution. Default: "1"
   - Intraday: "1", "5", "15", "30", "60" (minutes)
   - Daily+: "D" (day), "W" (week), "M" (month)
 
 **Returns**:
+
 - `status` (string): "ok" or "error"
 - `symbol` (string): Echo of subscribed symbol
 - `message` (string): Human-readable status message
@@ -132,6 +138,7 @@ Subscribe to real-time OHLC bar updates for a specific symbol and resolution.
 Remove subscription to bar updates for a symbol/resolution pair.
 
 **Request**:
+
 ```json
 {
   "type": "bars.unsubscribe",
@@ -145,6 +152,7 @@ Remove subscription to bar updates for a symbol/resolution pair.
 ```
 
 **Response**:
+
 ```json
 {
   "type": "bars.unsubscribe.response",
@@ -165,6 +173,7 @@ Remove subscription to bar updates for a symbol/resolution pair.
 Real-time OHLC bar data broadcast to subscribed clients.
 
 **Message**:
+
 ```json
 {
   "type": "bars.update",
@@ -180,6 +189,7 @@ Real-time OHLC bar data broadcast to subscribed clients.
 ```
 
 **Payload** (Bar model):
+
 - `time` (integer): Unix timestamp in milliseconds
 - `open` (float): Opening price
 - `high` (float): Highest price
@@ -194,6 +204,7 @@ Real-time OHLC bar data broadcast to subscribed clients.
 Internal topic structure: `bars:{SYMBOL}:{RESOLUTION}`
 
 **Examples**:
+
 - `bars:AAPL:1` → Apple Inc., 1-minute bars
 - `bars:GOOGL:5` → Alphabet Inc., 5-minute bars
 - `bars:MSFT:D` → Microsoft Corp., daily bars
@@ -211,20 +222,22 @@ Internal topic structure: `bars:{SYMBOL}:{RESOLUTION}`
 ```javascript
 // Subscribe to multiple symbols and resolutions
 const subscriptions = [
-  { symbol: 'AAPL', resolution: '1' },
-  { symbol: 'AAPL', resolution: 'D' },
-  { symbol: 'GOOGL', resolution: '5' },
-  { symbol: 'MSFT', resolution: '15' }
+  { symbol: "AAPL", resolution: "1" },
+  { symbol: "AAPL", resolution: "D" },
+  { symbol: "GOOGL", resolution: "5" },
+  { symbol: "MSFT", resolution: "15" },
 ];
 
-subscriptions.forEach(sub => {
-  ws.send(JSON.stringify({
-    type: 'bars.subscribe',
-    payload: {
-      symbol: sub.symbol,
-      params: { resolution: sub.resolution }
-    }
-  }));
+subscriptions.forEach((sub) => {
+  ws.send(
+    JSON.stringify({
+      type: "bars.subscribe",
+      payload: {
+        symbol: sub.symbol,
+        params: { resolution: sub.resolution },
+      },
+    })
+  );
 });
 
 // Each subscription creates a unique topic:
@@ -255,15 +268,18 @@ wsApp = FastWSAdapter(
 ### Lifecycle Phases
 
 1. **Connection**
+
    - Client initiates WebSocket handshake to `/api/v1/ws`
    - Server accepts connection (auto_ws_accept=True)
    - Unique client ID (UUID) assigned
 
 2. **Authentication** (Optional)
+
    - Current: No authentication required
    - Future: JWT token validation via auth_handler
 
 3. **Active Session**
+
    - Client sends subscribe/unsubscribe messages
    - Server broadcasts updates to subscribed topics
    - Heartbeat monitoring ensures client is responsive
@@ -281,6 +297,7 @@ wsApp = FastWSAdapter(
 Clients must send at least one message every 30 seconds to maintain the connection. Any valid operation (subscribe, unsubscribe) counts as heartbeat activity.
 
 **Timeout Behavior**:
+
 ```json
 // Connection closed with WebSocket error
 {
@@ -290,15 +307,18 @@ Clients must send at least one message every 30 seconds to maintain the connecti
 ```
 
 **Best Practice**:
+
 ```javascript
 // Send periodic ping via subscribe/unsubscribe to keep connection alive
 setInterval(() => {
   if (ws.readyState === WebSocket.OPEN) {
     // Re-subscribe to existing subscription as heartbeat
-    ws.send(JSON.stringify({
-      type: 'bars.subscribe',
-      payload: { symbol: 'AAPL', params: { resolution: '1' } }
-    }));
+    ws.send(
+      JSON.stringify({
+        type: "bars.subscribe",
+        payload: { symbol: "AAPL", params: { resolution: "1" } },
+      })
+    );
   }
 }, 25000); // 25 seconds (before 30s timeout)
 ```
@@ -310,12 +330,13 @@ setInterval(() => {
 All connections are automatically closed after 1 hour. Clients should implement reconnection logic.
 
 **Reconnection Strategy**:
+
 ```javascript
 function connectWebSocket() {
-  const ws = new WebSocket('ws://localhost:8000/api/v1/ws');
+  const ws = new WebSocket("ws://localhost:8000/api/v1/ws");
 
   ws.onclose = (event) => {
-    console.log('Disconnected:', event.code, event.reason);
+    console.log("Disconnected:", event.code, event.reason);
     // Reconnect after 5 seconds
     setTimeout(() => {
       connectWebSocket();
@@ -332,12 +353,12 @@ function connectWebSocket() {
 
 FastWS uses standard WebSocket close codes:
 
-| Code | Reason | Description |
-|------|--------|-------------|
-| 1003 | Unsupported Data | Invalid message format or validation error |
-| 1003 | Could not validate payload | Pydantic validation failed |
-| 1003 | No matching type | Unknown operation type |
-| 1003 | Connection timed out | Heartbeat interval exceeded |
+| Code | Reason                     | Description                                |
+| ---- | -------------------------- | ------------------------------------------ |
+| 1003 | Unsupported Data           | Invalid message format or validation error |
+| 1003 | Could not validate payload | Pydantic validation failed                 |
+| 1003 | No matching type           | Unknown operation type                     |
+| 1003 | Connection timed out       | Heartbeat interval exceeded                |
 
 ### Common Error Scenarios
 
@@ -346,15 +367,18 @@ FastWS uses standard WebSocket close codes:
 **Cause**: Message is not valid JSON or missing required fields
 
 **Example**:
+
 ```javascript
 // ❌ Wrong
 ws.send("not json");
 
 // ✅ Correct
-ws.send(JSON.stringify({
-  type: 'bars.subscribe',
-  payload: { symbol: 'AAPL', params: {} }
-}));
+ws.send(
+  JSON.stringify({
+    type: "bars.subscribe",
+    payload: { symbol: "AAPL", params: {} },
+  })
+);
 ```
 
 #### 2. Unknown Operation
@@ -362,18 +386,23 @@ ws.send(JSON.stringify({
 **Cause**: Operation type not registered in FastWS
 
 **Example**:
+
 ```javascript
 // ❌ Wrong
-ws.send(JSON.stringify({
-  type: 'unknown.operation',
-  payload: {}
-}));
+ws.send(
+  JSON.stringify({
+    type: "unknown.operation",
+    payload: {},
+  })
+);
 
 // ✅ Correct - Use documented operations
-ws.send(JSON.stringify({
-  type: 'bars.subscribe',
-  payload: { symbol: 'AAPL', params: {} }
-}));
+ws.send(
+  JSON.stringify({
+    type: "bars.subscribe",
+    payload: { symbol: "AAPL", params: {} },
+  })
+);
 ```
 
 #### 3. Validation Error
@@ -381,33 +410,38 @@ ws.send(JSON.stringify({
 **Cause**: Payload doesn't match Pydantic model schema
 
 **Example**:
+
 ```javascript
 // ❌ Wrong - missing required 'symbol' field
-ws.send(JSON.stringify({
-  type: 'bars.subscribe',
-  payload: { params: {} }
-}));
+ws.send(
+  JSON.stringify({
+    type: "bars.subscribe",
+    payload: { params: {} },
+  })
+);
 
 // ✅ Correct
-ws.send(JSON.stringify({
-  type: 'bars.subscribe',
-  payload: { symbol: 'AAPL', params: {} }
-}));
+ws.send(
+  JSON.stringify({
+    type: "bars.subscribe",
+    payload: { symbol: "AAPL", params: {} },
+  })
+);
 ```
 
 ### Client-Side Error Handling
 
 ```javascript
 ws.onerror = (error) => {
-  console.error('WebSocket error:', error);
+  console.error("WebSocket error:", error);
 };
 
 ws.onclose = (event) => {
-  console.log('Closed:', event.code, event.reason);
+  console.log("Closed:", event.code, event.reason);
 
   if (event.code === 1003) {
     // Protocol error - check message format
-    console.error('Protocol violation:', event.reason);
+    console.error("Protocol violation:", event.reason);
   }
 };
 
@@ -416,11 +450,11 @@ ws.onmessage = (event) => {
     const message = JSON.parse(event.data);
 
     // Check for error responses
-    if (message.payload?.status === 'error') {
-      console.error('Operation failed:', message.payload.message);
+    if (message.payload?.status === "error") {
+      console.error("Operation failed:", message.payload.message);
     }
   } catch (err) {
-    console.error('Failed to parse message:', err);
+    console.error("Failed to parse message:", err);
   }
 };
 ```
@@ -462,6 +496,7 @@ def test_subscribe_to_bars():
 ### Test Coverage
 
 Current test suite covers:
+
 - ✅ Basic WebSocket connection
 - ✅ Subscribe operation
 - ✅ Unsubscribe operation
@@ -485,11 +520,13 @@ poetry run pytest tests/test_ws_datafeed.py -v
 ### Interactive Documentation
 
 Visit the AsyncAPI UI in your browser:
+
 ```
 http://localhost:8000/api/v1/ws/asyncapi
 ```
 
 This provides:
+
 - Complete operation reference
 - Message schemas
 - Payload examples
@@ -498,11 +535,13 @@ This provides:
 ### AsyncAPI Specification
 
 Raw AsyncAPI 2.4.0 JSON specification:
+
 ```
 http://localhost:8000/api/v1/ws/asyncapi.json
 ```
 
 Use this for:
+
 - Code generation
 - Contract testing
 - Third-party integrations
@@ -515,6 +554,7 @@ Use this for:
 FastWS is an open-source WebSocket framework built on top of FastAPI, similar to how FastAPI uses OpenAPI for REST APIs.
 
 **Key Features**:
+
 - AsyncAPI specification generation
 - Operation-based routing (similar to HTTP routes)
 - Automatic message validation via Pydantic
@@ -612,6 +652,7 @@ async def websocket_endpoint(
 ### Scalability
 
 For production deployments:
+
 1. Use multiple Uvicorn workers
 2. Implement Redis pub/sub for cross-worker broadcasting
 3. Add WebSocket sticky sessions in load balancer
@@ -643,17 +684,20 @@ For production deployments:
 ### Planned Features (v2)
 
 1. **Additional Channels**
+
    - `quotes.*` - Real-time quote snapshots
    - `trades.*` - Individual trade updates
    - `orderbook.*` - Order book depth updates
 
 2. **Private Channels** (Authenticated)
+
    - `account.*` - Account balance updates
    - `positions.*` - Position changes
    - `orders.*` - Order status updates
    - `notifications.*` - User-specific alerts
 
 3. **Client Features**
+
    - Auto-reconnection with exponential backoff
    - Message queuing during disconnection
    - Subscription state persistence
@@ -672,6 +716,7 @@ For production deployments:
 **Symptoms**: WebSocket closes right after opening
 
 **Solutions**:
+
 - Verify endpoint URL: `ws://localhost:8000/api/v1/ws`
 - Check backend is running: `make dev`
 - Review server logs for errors
@@ -682,19 +727,21 @@ For production deployments:
 **Symptoms**: Subscribe succeeds but no `bars.update` messages
 
 **Possible Causes**:
+
 1. Not subscribed to correct topic
 2. No server-side data being broadcasted
 3. WebSocket connection silently dropped
 
 **Solutions**:
+
 ```javascript
 // Verify subscription response
-const response = await waitForMessage(ws, 'bars.subscribe.response');
-console.log('Subscribed to:', response.payload.topic);
+const response = await waitForMessage(ws, "bars.subscribe.response");
+console.log("Subscribed to:", response.payload.topic);
 
 // Monitor connection state
 ws.onclose = (event) => {
-  console.log('Connection closed:', event.code, event.reason);
+  console.log("Connection closed:", event.code, event.reason);
 };
 ```
 
@@ -705,13 +752,16 @@ ws.onclose = (event) => {
 **Cause**: Heartbeat timeout (no messages sent)
 
 **Solution**: Implement heartbeat keep-alive
+
 ```javascript
 setInterval(() => {
   if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'bars.subscribe',
-      payload: { symbol: 'AAPL', params: { resolution: '1' } }
-    }));
+    ws.send(
+      JSON.stringify({
+        type: "bars.subscribe",
+        payload: { symbol: "AAPL", params: { resolution: "1" } },
+      })
+    );
   }
 }, 25000);
 ```
@@ -723,6 +773,7 @@ The Trading API includes an optional background service that automatically gener
 ### Overview
 
 The **BarBroadcaster** service:
+
 - Runs as a background task within the FastAPI application
 - Generates realistic bar variations using `DatafeedService.mock_last_bar()`
 - Broadcasts updates only to topics with active subscribers (minimal overhead)
@@ -760,6 +811,7 @@ make dev
 ```
 
 You'll see startup logs:
+
 ```
 📡 Bar broadcaster started: symbols=['AAPL', 'GOOGL', 'MSFT'], interval=2.0s
 ```
@@ -798,6 +850,7 @@ if bar_broadcaster:
 ```
 
 **Metrics include**:
+
 - `is_running`: Boolean indicating if broadcaster is active
 - `interval`: Current broadcast interval in seconds
 - `symbols`: List of symbols being broadcast
@@ -816,6 +869,7 @@ The broadcaster is designed to be efficient:
 4. **Metrics Tracking**: Monitor performance in real-time
 
 **Typical Performance**:
+
 - CPU overhead: < 1% on modern hardware
 - Memory: ~10MB for service
 - Latency: < 5ms from generation to broadcast
@@ -862,6 +916,7 @@ The broadcaster is designed to be efficient:
 The broadcaster is thoroughly tested:
 
 **Unit Tests** (`tests/test_bar_broadcaster.py`):
+
 - Lifecycle management (start/stop)
 - Subscriber checking logic
 - Broadcasting behavior
@@ -869,11 +924,13 @@ The broadcaster is thoroughly tested:
 - Metrics tracking
 
 **Integration Tests** (`tests/test_ws_datafeed.py`):
+
 - End-to-end WebSocket broadcasting
 - Message format validation
 - Subscription filtering
 
 Run tests:
+
 ```bash
 cd backend
 pytest tests/test_bar_broadcaster.py -v
@@ -885,17 +942,20 @@ pytest tests/test_ws_datafeed.py -v
 For production environments, consider:
 
 1. **Disable for Production Data**: Turn off broadcaster when using real market data
+
    ```bash
    export BAR_BROADCASTER_ENABLED=false
    ```
 
 2. **Resource Scaling**: Adjust interval based on number of clients
+
    ```bash
    # More clients = longer interval to reduce load
    export BAR_BROADCASTER_INTERVAL=5.0
    ```
 
 3. **Monitoring**: Track metrics to ensure performance
+
    - broadcasts_sent should increase steadily
    - broadcasts_skipped is OK (means no subscribers)
    - errors should be 0 or very low
@@ -905,6 +965,7 @@ For production environments, consider:
 ## Resources
 
 ### Documentation
+
 - **AsyncAPI Spec**: http://localhost:8000/api/v1/ws/asyncapi.json
 - **Interactive Docs**: http://localhost:8000/api/v1/ws/asyncapi
 - **Architecture**: See `ARCHITECTURE.md` (Real-Time Architecture section)
@@ -914,6 +975,7 @@ For production environments, consider:
 - **Redis Broadcasting**: `backend/docs/bar-broadcasting.md` (future scalable approach)
 
 ### Code References
+
 - **Main App**: `backend/src/trading_api/main.py`
 - **FastWS Adapter**: `backend/src/trading_api/plugins/fastws_adapter.py`
 - **Operations**: `backend/src/trading_api/ws/datafeed.py`
@@ -922,19 +984,19 @@ For production environments, consider:
 - **Tests**: `backend/tests/test_ws_datafeed.py`, `backend/tests/test_bar_broadcaster.py`
 
 ### Frontend Integration
+
 - **Type Generator**: `frontend/scripts/generate-ws-types.mjs` - Auto-generates TypeScript types from AsyncAPI
-- **Client Generator**: `frontend/scripts/generate-ws-client.mjs` - Auto-generates client factories
 - **Base Client**: `frontend/src/plugins/wsClientBase.ts` - WebSocket client implementation
 - **Generated Types**: `frontend/src/clients/ws-types-generated/index.ts` - Auto-generated (do not edit)
-- **Generated Clients**: `frontend/src/clients/ws-generated/client.ts` - Auto-generated (do not edit)
 
 **Frontend Generation Flow**:
+
 1. Backend exposes AsyncAPI spec at `/api/v1/ws/asyncapi.json`
 2. Frontend `generate-ws-types.mjs` downloads spec → generates ALL TypeScript interfaces
-3. Frontend `generate-ws-client.mjs` downloads spec → generates client factories for ALL routes
-4. No hardcoded schema or route lists - fully automatic discovery!
+3. No hardcoded schema lists - fully automatic discovery!
 
 ### External Resources
+
 - **FastWS GitHub**: https://github.com/endrekrohn/fastws
 - **FastWS Docs**: See `backend/external_packages/fastws/README.md`
 - **AsyncAPI Spec**: https://www.asyncapi.com/docs/reference/specification/v2.4.0

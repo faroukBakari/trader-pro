@@ -42,7 +42,7 @@ T = TypeVar("T", bound=BaseModel)
 class SubscriptionUpdate(BaseModel, Generic[T]):
     """Generic subscription update with typed payload"""
 
-    type: str = Field(..., description="Update type")
+    topic: str = Field(..., description="Update type")
     payload: T = Field(..., description="Update payload")
 
 

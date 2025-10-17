@@ -1,9 +1,11 @@
 # NVM Sourcing Strategy
 
 ## Problem
+
 The `make dev` and other npm-related commands fail because they don't source nvm, causing Node.js 18.16.0 to be used instead of 20.19.0.
 
 ## Root Cause
+
 - Only `install` and `install-ci` targets source nvm
 - All other targets (`dev`, `build`, `lint`, `type-check`, `test`, etc.) run `npm` directly
 - Shell scripts don't source nvm before running npm commands
@@ -11,9 +13,11 @@ The `make dev` and other npm-related commands fail because they don't source nvm
 ## Proposed Solution: Create a Helper Script
 
 ### Approach 1: Wrapper Script (Recommended)
+
 Create a helper script that all Makefile targets and shell scripts can use.
 
 **File: `frontend/scripts/with-nvm.sh`**
+
 ```bash
 #!/bin/bash
 # Helper script to run commands with the correct Node.js version via nvm
@@ -22,7 +26,7 @@ Create a helper script that all Makefile targets and shell scripts can use.
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 if [ -s "$NVM_DIR/nvm.sh" ]; then
     . "$NVM_DIR/nvm.sh"
-    
+
     # Use version from .nvmrc if it exists
     if [ -f ".nvmrc" ]; then
         nvm use >/dev/null 2>&1 || true
@@ -34,6 +38,7 @@ exec "$@"
 ```
 
 **Benefits:**
+
 - ✅ Single source of truth for nvm sourcing
 - ✅ DRY - no repetition across Makefile targets
 - ✅ Easy to maintain
@@ -41,6 +46,7 @@ exec "$@"
 - ✅ Handles .nvmrc automatically
 
 **Usage in Makefile:**
+
 ```makefile
 dev:
 	@echo "Starting frontend development server..."
@@ -52,6 +58,7 @@ build:
 ```
 
 **Usage in Shell Scripts:**
+
 ```bash
 #!/bin/bash
 # At the top of generate-api-client.sh or other scripts
@@ -63,9 +70,11 @@ source "$SCRIPT_DIR/with-nvm.sh"
 ---
 
 ### Approach 2: Makefile Function (Alternative)
+
 Define a Make function that wraps npm commands.
 
 **In frontend/Makefile:**
+
 ```makefile
 # Helper to run npm with correct Node.js version
 define run-with-nvm
@@ -82,10 +91,12 @@ build:
 ```
 
 **Benefits:**
+
 - ✅ Keeps everything in Makefile
 - ✅ No external script file needed
 
 **Drawbacks:**
+
 - ❌ Doesn't help shell scripts
 - ❌ More verbose Makefile
 - ❌ Harder to debug
@@ -93,9 +104,11 @@ build:
 ---
 
 ### Approach 3: Update All Targets Individually (Not Recommended)
+
 Wrap each npm command with the nvm sourcing logic.
 
 **Drawbacks:**
+
 - ❌ Lots of repetition
 - ❌ Error-prone
 - ❌ Hard to maintain
@@ -105,6 +118,7 @@ Wrap each npm command with the nvm sourcing logic.
 ## Recommended Implementation
 
 **Use Approach 1 (Wrapper Script)** because:
+
 1. Works for both Makefile targets AND shell scripts
 2. Single point of maintenance
 3. Easy to understand and debug
@@ -113,7 +127,9 @@ Wrap each npm command with the nvm sourcing logic.
 ## Files That Need Updates
 
 ### Frontend Makefile
+
 All targets that run npm commands:
+
 - `client-generate` → use wrapper
 - `lint` → use wrapper
 - `type-check` → use wrapper
@@ -123,12 +139,15 @@ All targets that run npm commands:
 - `dev` → use wrapper
 
 ### Shell Scripts
+
 Scripts that run npm or node commands:
+
 - `frontend/scripts/generate-api-client.sh` → source wrapper at top
-- `frontend/scripts/generate-ws-client.mjs` → run via `with-nvm.sh node ...`
+- `frontend/scripts/generate-ws-types.mjs` → run via `with-nvm.sh node ...`
 - `frontend/scripts/generate-ws-types.mjs` → run via `with-nvm.sh node ...`
 
 ### Project-Level Scripts
+
 - `scripts/dev-fullstack.sh` → use wrapper for frontend commands
 - `scripts/test-integration.sh` → use wrapper if it runs frontend tests
 

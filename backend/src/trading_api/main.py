@@ -15,8 +15,8 @@ from trading_api.plugins.fastws_adapter import FastWSAdapter
 from .api.datafeed import router as datafeed_router
 from .api.health import router as health_router
 from .api.versions import router as versions_router
-from .core.bar_broadcaster import BarBroadcaster
 from .core.config import BroadcasterConfig
+from .core.datafeed_broadcaster import DataFeedBroadcaster
 from .core.datafeed_service import DatafeedService
 from .core.versioning import APIVersion
 from .ws.datafeed import ws_routers
@@ -36,7 +36,7 @@ logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
 # Global instances
 datafeed_service = DatafeedService()
-bar_broadcaster: BarBroadcaster | None = None
+datafeed_broadcaster: DataFeedBroadcaster | None = None
 
 
 def validate_response_models(app: FastAPI) -> None:
@@ -69,7 +69,7 @@ def validate_response_models(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Handle application startup and shutdown events."""
-    global bar_broadcaster
+    global datafeed_broadcaster
 
     # Startup: Validate all routes have response models
     validate_response_models(app)
@@ -90,14 +90,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Startup: Start bar broadcaster if enabled
     if BroadcasterConfig.get_enabled():
-        bar_broadcaster = BarBroadcaster(
+        datafeed_broadcaster = DataFeedBroadcaster(
             ws_app=wsApp,
             datafeed_service=datafeed_service,
             interval=BroadcasterConfig.get_interval(),
             symbols=BroadcasterConfig.get_symbols(),
             resolutions=BroadcasterConfig.get_resolutions(),
         )
-        bar_broadcaster.start()
+        datafeed_broadcaster.start()
         print(
             f"📡 Bar broadcaster started: "
             f"symbols={BroadcasterConfig.get_symbols()}, "
@@ -113,8 +113,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # Shutdown: Stop bar broadcaster
-    if bar_broadcaster:
-        bar_broadcaster.stop()
+    if datafeed_broadcaster:
+        datafeed_broadcaster.stop()
         print("📡 Bar broadcaster stopped")
 
     # Shutdown: Cleanup is handled by FastAPIAdapter

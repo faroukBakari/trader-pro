@@ -315,9 +315,9 @@
       },
       "SubscriptionUpdate_Bar_": {
         "properties": {
-          "type": {
+          "topic": {
             "description": "Update type",
-            "title": "Type",
+            "title": "Topic",
             "type": "string"
           },
           "payload": {
@@ -326,7 +326,7 @@
           }
         },
         "required": [
-          "type",
+          "topic",
           "payload"
         ],
         "title": "SubscriptionUpdate[Bar]",
@@ -334,9 +334,9 @@
       },
       "SubscriptionUpdate_QuoteData_": {
         "properties": {
-          "type": {
+          "topic": {
             "description": "Update type",
-            "title": "Type",
+            "title": "Topic",
             "type": "string"
           },
           "payload": {
@@ -345,7 +345,7 @@
           }
         },
         "required": [
-          "type",
+          "topic",
           "payload"
         ],
         "title": "SubscriptionUpdate[QuoteData]",

@@ -10,7 +10,7 @@ define run-with-nvm
 	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; $(1)'
 endef
 
-.PHONY: help ensure-node ensure-node-ci install install-ci lint type-check test test-run build dev clean client-generate ws-generate
+.PHONY: help ensure-node ensure-node-ci install install-ci lint type-check test test-run build dev clean client-generate
 
 # Default target
 help:
@@ -19,8 +19,7 @@ help:
 	@echo "  ensure-node-ci  Ensure Node.js 20.19+/22.12+ is installed (CI mode, no prompts)"
 	@echo "  install         Install frontend dependencies"
 	@echo "  install-ci      Install frontend dependencies for CI"
-	@echo "  client-generate Generate API client from live server or use mock"
-	@echo "  ws-generate     Generate WebSocket client from AsyncAPI spec"
+	@echo "  client-generate Generate API client and WebSocket types from AsyncAPI spec"
 	@echo "  lint            Run frontend linting and formatting checks"
 	@echo "  type-check      Run TypeScript type checking"
 	@echo "  test            Run frontend tests in watch mode"
@@ -172,12 +171,8 @@ install-ci: ensure-node-ci
 
 # Client generation
 client-generate:
-	@echo "Generating API client..."
+	@echo "Generating API client and WebSocket types..."
 	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-api-client.sh'
-
-# WebSocket client generation (included in client-generate now, kept for backward compatibility)
-ws-generate:
-	@echo "WebSocket client generation is now included in client-generate"
 
 # Linting and formatting
 lint:
@@ -211,11 +206,11 @@ build:
 dev:
 	@echo "Starting frontend development server..."
 	@echo "🧹 Cleaning generated client..."
-	rm -rf src/clients/trader-client-generated src/clients/ws-generated src/clients/ws-types-generated
+	rm -rf src/clients/trader-client-generated src/clients/ws-types-generated
 	$(call run-with-nvm,npm run dev)
 
 # Cleanup
 clean:
 	@echo "Cleaning frontend build artifacts..."
-	rm -rf dist/ node_modules/.vite src/clients/trader-client-generated src/clients/ws-generated src/clients/ws-types-generated
+	rm -rf dist/ node_modules/.vite src/clients/trader-client-generated src/clients/ws-types-generated
 	@echo "Frontend clean complete."

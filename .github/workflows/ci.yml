@@ -195,7 +195,7 @@ jobs:
           echo "❌ WebSocket types generation failed - no ws-types-generated/index.ts file"
           exit 1
         fi
-        echo "✅ Client and WebSocket types generated successfully from backend specs"
+        echo "✅ REST client and WebSocket types generated successfully from backend specs"
 
     - name: Start backend server
       working-directory: backend
