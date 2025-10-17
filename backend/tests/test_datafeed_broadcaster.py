@@ -10,7 +10,7 @@ import pytest
 
 from trading_api.core.datafeed_broadcaster import DataFeedBroadcaster
 from trading_api.core.datafeed_service import DatafeedService
-from trading_api.models import Bar
+from trading_api.models import Bar, QuoteData, QuoteValues
 from trading_api.plugins.fastws_adapter import FastWSAdapter
 from trading_api.ws.router_interface import buildTopicParams
 
@@ -19,6 +19,12 @@ def build_topic(symbol: str, resolution: str) -> str:
     """Helper to build topic string matching backend format."""
     params = {"resolution": resolution, "symbol": symbol}
     return f"bars:{buildTopicParams(params)}"
+
+
+def build_quote_topic(symbols: list[str]) -> str:
+    """Helper to build quote topic string matching backend format."""
+    params = {"fast_symbols": [], "symbols": symbols}
+    return f"quotes:{buildTopicParams(params)}"
 
 
 @pytest.fixture
@@ -44,6 +50,30 @@ def mock_datafeed_service() -> Any:
         volume=1000000,
     )
     service.mock_last_bar = Mock(return_value=mock_bar)
+
+    # Mock quote data with realistic values
+    mock_quote = QuoteData(
+        s="ok",
+        n="AAPL",
+        v=QuoteValues(
+            lp=150.5,
+            ask=150.6,
+            bid=150.4,
+            spread=0.2,
+            open_price=150.0,
+            high_price=151.0,
+            low_price=149.5,
+            prev_close_price=149.0,
+            volume=1000000,
+            ch=0.5,
+            chp=0.33,
+            short_name="AAPL",
+            exchange="DEMO",
+            description="Demo quotes for AAPL",
+            original_name="AAPL",
+        ),
+    )
+    service.get_quotes = Mock(return_value=[mock_quote])
     return service
 
 
@@ -508,3 +538,308 @@ class TestBarBroadcasterMetrics:
 
         assert metrics["broadcasts_sent"] == 0
         assert metrics["errors"] == 1
+
+
+class TestQuoteBroadcasting:
+    """Test quote broadcasting functionality."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_quotes_with_subscriber(
+        self, broadcaster: DataFeedBroadcaster
+    ) -> None:
+        """Test broadcasting quotes sends data when subscribers exist."""
+        # Setup subscriber
+        mock_client = Mock()
+        mock_client.topics = {build_quote_topic(["AAPL"])}
+        broadcaster.ws_app.connections = {"client1": mock_client}
+
+        # Broadcast
+        await broadcaster._broadcast_quotes()
+
+        # Verify publish was called
+        assert broadcaster.ws_app.publish.called  # type: ignore[attr-defined]
+        assert broadcaster.ws_app.publish.call_count == 1  # type: ignore[attr-defined]
+
+        # Verify call arguments
+        call_args = broadcaster.ws_app.publish.call_args  # type: ignore[attr-defined]
+        assert call_args.kwargs["topic"] == build_quote_topic(["AAPL"])
+        assert call_args.kwargs["message_type"] == "quotes.update"
+        assert isinstance(call_args.kwargs["data"], QuoteData)
+
+        # Verify metrics
+        assert broadcaster._quote_broadcasts_sent == 1
+        assert broadcaster._quote_broadcasts_skipped == 0
+
+    @pytest.mark.asyncio
+    async def test_broadcast_quotes_without_subscriber(
+        self, broadcaster: DataFeedBroadcaster
+    ) -> None:
+        """Test broadcasting quotes skips when no subscribers exist."""
+        # No subscribers
+        broadcaster.ws_app.connections = {}
+
+        # Broadcast
+        await broadcaster._broadcast_quotes()
+
+        # Verify publish was NOT called
+        assert not broadcaster.ws_app.publish.called  # type: ignore[attr-defined]
+
+        # Verify metrics
+        assert broadcaster._quote_broadcasts_sent == 0
+        assert broadcaster._quote_broadcasts_skipped == 1
+
+    @pytest.mark.asyncio
+    async def test_broadcast_quotes_multiple_symbols(
+        self,
+        mock_ws_app: Any,
+        mock_datafeed_service: Any,
+    ) -> None:
+        """Test broadcasting quotes for multiple symbols."""
+        # Mock multiple quotes
+        mock_datafeed_service.get_quotes.return_value = [  # type: ignore[attr-defined]
+            QuoteData(
+                s="ok",
+                n="AAPL",
+                v=QuoteValues(
+                    lp=150.5,
+                    ask=150.6,
+                    bid=150.4,
+                    spread=0.2,
+                    open_price=150.0,
+                    high_price=151.0,
+                    low_price=149.5,
+                    prev_close_price=149.0,
+                    volume=1000000,
+                    ch=0.5,
+                    chp=0.33,
+                    short_name="AAPL",
+                    exchange="DEMO",
+                    description="Demo quotes for AAPL",
+                    original_name="AAPL",
+                ),
+            ),
+            QuoteData(
+                s="ok",
+                n="GOOGL",
+                v=QuoteValues(
+                    lp=120.0,
+                    ask=120.1,
+                    bid=119.9,
+                    spread=0.2,
+                    open_price=119.5,
+                    high_price=120.5,
+                    low_price=119.0,
+                    prev_close_price=118.5,
+                    volume=800000,
+                    ch=0.5,
+                    chp=0.42,
+                    short_name="GOOGL",
+                    exchange="DEMO",
+                    description="Demo quotes for GOOGL",
+                    original_name="GOOGL",
+                ),
+            ),
+        ]
+
+        broadcaster = DataFeedBroadcaster(
+            ws_app=mock_ws_app,
+            datafeed_service=mock_datafeed_service,
+            symbols_for_quotes=["AAPL", "GOOGL"],
+        )
+
+        # Subscribe to both symbols
+        client = Mock()
+        client.topics = {build_quote_topic(["AAPL"]), build_quote_topic(["GOOGL"])}
+        broadcaster.ws_app.connections = {"client1": client}
+
+        # Broadcast
+        await broadcaster._broadcast_quotes()
+
+        # Should publish twice (once per symbol)
+        assert broadcaster.ws_app.publish.call_count == 2  # type: ignore[attr-defined]
+        assert broadcaster._quote_broadcasts_sent == 2
+
+    @pytest.mark.asyncio
+    async def test_broadcast_quotes_handles_get_quotes_error(
+        self, broadcaster: DataFeedBroadcaster
+    ) -> None:
+        """Test broadcasting handles get_quotes service errors."""
+        # Mock datafeed to return empty list
+        broadcaster.datafeed_service.get_quotes.return_value = []  # type: ignore[attr-defined]
+
+        # Setup subscriber
+        client = Mock()
+        client.topics = {build_quote_topic(["AAPL"])}
+        broadcaster.ws_app.connections = {"client1": client}
+
+        # Broadcast
+        await broadcaster._broadcast_quotes()
+
+        # Should not publish
+        assert not broadcaster.ws_app.publish.called  # type: ignore[attr-defined]
+        assert broadcaster._quote_broadcasts_sent == 0
+
+    @pytest.mark.asyncio
+    async def test_broadcast_quotes_handles_error_status(
+        self, broadcaster: DataFeedBroadcaster
+    ) -> None:
+        """Test broadcasting skips quotes with error status."""
+        # Mock datafeed to return error
+        broadcaster.datafeed_service.get_quotes.return_value = [  # type: ignore[attr-defined]
+            QuoteData(s="error", n="AAPL", v={"error": "Symbol not found"})
+        ]
+
+        # Setup subscriber
+        client = Mock()
+        client.topics = {build_quote_topic(["AAPL"])}
+        broadcaster.ws_app.connections = {"client1": client}
+
+        # Broadcast
+        await broadcaster._broadcast_quotes()
+
+        # Should not publish
+        assert not broadcaster.ws_app.publish.called  # type: ignore[attr-defined]
+        assert broadcaster._quote_broadcasts_sent == 0
+
+    @pytest.mark.asyncio
+    async def test_broadcast_quotes_handles_publish_error(
+        self, broadcaster: DataFeedBroadcaster
+    ) -> None:
+        """Test broadcasting handles publish errors gracefully."""
+        # Make publish raise an error
+        broadcaster.ws_app.publish.side_effect = Exception("Publish failed")  # type: ignore[attr-defined]
+
+        # Setup subscriber
+        client = Mock()
+        client.topics = {build_quote_topic(["AAPL"])}
+        broadcaster.ws_app.connections = {"client1": client}
+
+        # Broadcast (should not raise)
+        await broadcaster._broadcast_quotes()
+
+        # Verify error was tracked
+        assert broadcaster._quote_errors == 1
+        assert broadcaster._quote_broadcasts_sent == 0
+
+    @pytest.mark.asyncio
+    async def test_broadcast_quotes_with_no_symbols_configured(
+        self,
+        mock_ws_app: Any,
+        mock_datafeed_service: Any,
+    ) -> None:
+        """Test broadcasting quotes with empty symbols list does nothing."""
+        broadcaster = DataFeedBroadcaster(
+            ws_app=mock_ws_app,
+            datafeed_service=mock_datafeed_service,
+            symbols_for_quotes=[],
+        )
+
+        # Verify symbols_for_quotes is actually empty
+        assert broadcaster.symbols_for_quotes == []
+
+        # Reset mock call counts after initialization
+        mock_datafeed_service.get_quotes.reset_mock()  # type: ignore[attr-defined]
+        mock_ws_app.publish.reset_mock()  # type: ignore[attr-defined]
+
+        # Broadcast
+        await broadcaster._broadcast_quotes()
+
+        # Should not call get_quotes or publish
+        assert not mock_datafeed_service.get_quotes.called  # type: ignore[attr-defined]
+        assert not broadcaster.ws_app.publish.called  # type: ignore[attr-defined]
+
+
+class TestBroadcasterWithBothBarsAndQuotes:
+    """Test broadcaster with both bar and quote broadcasting."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_loop_runs_both_bars_and_quotes(
+        self,
+        mock_ws_app: Any,
+        mock_datafeed_service: Any,
+    ) -> None:
+        """Test broadcast loop runs both bar and quote broadcasts."""
+        broadcaster = DataFeedBroadcaster(
+            ws_app=mock_ws_app,
+            datafeed_service=mock_datafeed_service,
+            interval=0.1,
+            symbols=["AAPL"],
+            resolutions=["1"],
+            symbols_for_quotes=["AAPL"],
+        )
+
+        # Setup subscribers for both bars and quotes
+        client = Mock()
+        client.topics = {build_topic("AAPL", "1"), build_quote_topic(["AAPL"])}
+        broadcaster.ws_app.connections = {"client1": client}
+
+        # Start broadcaster
+        broadcaster.start()
+
+        # Wait for a few broadcasts
+        await asyncio.sleep(0.35)
+
+        # Stop broadcaster
+        broadcaster.stop()
+
+        # Verify both types of broadcasts occurred
+        assert broadcaster._broadcasts_sent >= 2
+        assert broadcaster._quote_broadcasts_sent >= 2
+
+        # Verify publish was called for both types
+        call_count = broadcaster.ws_app.publish.call_count  # type: ignore[attr-defined]
+        assert call_count >= 4  # At least 2 bar + 2 quote broadcasts
+
+    @pytest.mark.asyncio
+    async def test_metrics_include_both_bar_and_quote_data(
+        self,
+        mock_ws_app: Any,
+        mock_datafeed_service: Any,
+    ) -> None:
+        """Test metrics include both bar and quote statistics."""
+        broadcaster = DataFeedBroadcaster(
+            ws_app=mock_ws_app,
+            datafeed_service=mock_datafeed_service,
+            symbols=["AAPL"],
+            symbols_for_quotes=["AAPL", "GOOGL"],
+        )
+
+        metrics = broadcaster.metrics
+
+        assert "broadcasts_sent" in metrics
+        assert "broadcasts_skipped" in metrics
+        assert "errors" in metrics
+        assert "quote_broadcasts_sent" in metrics
+        assert "quote_broadcasts_skipped" in metrics
+        assert "quote_errors" in metrics
+        assert metrics["symbols_for_quotes"] == ["AAPL", "GOOGL"]
+
+    def test_initialization_with_different_symbols_for_quotes(
+        self,
+        mock_ws_app: Any,
+        mock_datafeed_service: Any,
+    ) -> None:
+        """Test broadcaster can have different symbols for bars vs quotes."""
+        broadcaster = DataFeedBroadcaster(
+            ws_app=mock_ws_app,
+            datafeed_service=mock_datafeed_service,
+            symbols=["AAPL", "GOOGL"],
+            symbols_for_quotes=["MSFT", "TSLA", "NVDA"],
+        )
+
+        assert broadcaster.symbols == ["AAPL", "GOOGL"]
+        assert broadcaster.symbols_for_quotes == ["MSFT", "TSLA", "NVDA"]
+
+    def test_initialization_symbols_for_quotes_defaults_to_symbols(
+        self,
+        mock_ws_app: Any,
+        mock_datafeed_service: Any,
+    ) -> None:
+        """Test symbols_for_quotes defaults to symbols if not specified."""
+        broadcaster = DataFeedBroadcaster(
+            ws_app=mock_ws_app,
+            datafeed_service=mock_datafeed_service,
+            symbols=["AAPL", "GOOGL"],
+        )
+
+        assert broadcaster.symbols_for_quotes == ["AAPL", "GOOGL"]
