@@ -110,9 +110,11 @@ jobs:
       working-directory: frontend
       run: make install-ci
 
-    - name: Generate frontend client from backend specs (offline)
+    - name: Generate frontend clients from backend specs (offline)
       working-directory: frontend
-      run: make client-generate
+      run: |
+        make generate-openapi-client
+        make generate-asyncapi-types
 
     - name: Install Git hooks
       run: |
@@ -180,9 +182,11 @@ jobs:
       working-directory: frontend
       run: make install-ci
 
-    - name: Generate frontend client from backend specs (offline)
+    - name: Generate frontend clients from backend specs (offline)
       working-directory: frontend
-      run: make client-generate
+      run: |
+        make generate-openapi-client
+        make generate-asyncapi-types
 
     - name: Verify client generation
       working-directory: frontend
