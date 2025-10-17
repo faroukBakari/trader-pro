@@ -225,6 +225,18 @@ format:
 # Development server
 dev:
 	@echo "Starting backend development server with debugpy on http://localhost:$(BACKEND_PORT)"
+	@echo "🔍 Checking if backend port is available..."
+	@if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
+		echo "❌ Error: Backend port $(BACKEND_PORT) is already in use!"; \
+		echo ""; \
+		echo "Process using port $(BACKEND_PORT):"; \
+		lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN; \
+		echo ""; \
+		echo "Please stop the existing server or use a different port:"; \
+		echo "  export BACKEND_PORT=<new_port>"; \
+		exit 1; \
+	fi
+	@echo "✅ Port $(BACKEND_PORT) is available"
 	@echo "Debug server listening on port 5678 (attach debugger to localhost:5678)"
 	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --reload --host 0.0.0.0 --port $(BACKEND_PORT) --log-level info
 

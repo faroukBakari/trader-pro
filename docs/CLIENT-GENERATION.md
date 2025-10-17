@@ -45,15 +45,16 @@ Frontend Build → Export Backend Specs → Generate Clients → Build/Dev
 └─────────────────────────────────────────┘
 ```
 
-## REST API Client
+### REST API Client
 
 ### Generation Command
 
 ```bash
-cd frontend
-make client-generate
-# Or
-npm run client:generate
+# From project root
+make generate-openapi-client
+
+# Or from frontend directory
+make generate-openapi-client
 ```
 
 ### Generated Files
@@ -83,11 +84,12 @@ const health = await healthApi.getHealth();
 WebSocket types are automatically generated from AsyncAPI specification:
 
 ```bash
-# Generate types from AsyncAPI
-node scripts/generate-ws-types.mjs
-```
+# From project root
+make generate-asyncapi-types
 
-This runs automatically during `make client-generate`.
+# Or from frontend directory
+make generate-asyncapi-types
+```
 
 ### Generated Files
 
@@ -120,8 +122,8 @@ Client generation runs automatically before build and dev:
 
 ```json
 {
-  "prebuild": "npm run client:generate",
-  "predev": "npm run client:generate"
+  # Client generation is now handled by Makefiles
+  # Run: make generate-openapi-client && make generate-asyncapi-types
 }
 ```
 
@@ -137,8 +139,7 @@ frontend:
       working-directory: backend
 
     - name: Generate clients
-      run: make client-generate
-      working-directory: frontend
+      run: make generate-openapi-client && make generate-asyncapi-types
 ```
 
 ## Offline vs Live Mode
@@ -178,16 +179,16 @@ export SKIP_SPEC_GENERATION="true"
 
 ## CI-Aware Behavior
 
-The frontend Makefile adapts to CI environments:
+Client generation is now handled explicitly via Makefile targets:
 
 ```makefile
-lint:
-ifeq ($(CI),true)
-	@echo "CI mode: Skipping client generation"
-else
-	@$(MAKE) client-generate
-endif
-	npm run lint
+# Generate OpenAPI client
+generate-openapi-client:
+	cd frontend && ./scripts/generate-openapi-client.sh
+
+# Generate AsyncAPI types
+generate-asyncapi-types:
+	cd frontend && ./scripts/generate-asyncapi-types.sh
 ```
 
 ## Troubleshooting
@@ -203,9 +204,10 @@ make export-openapi-offline
 ### Client Generation Fails
 
 ```bash
-cd frontend
-rm -rf src/clients/*-generated
-make client-generate --verbose
+# Clean and regenerate
+rm -rf frontend/src/clients/*-generated
+make generate-openapi-client
+make generate-asyncapi-types
 ```
 
 ### Type Errors After Generation

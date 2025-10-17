@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 FRONTEND_PORT ?= 5173
 
-.PHONY: help setup install install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration
+.PHONY: help setup install install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration generate-ws-routers generate-openapi-client generate-asyncapi-types
 
 # Default target
 help:
@@ -26,6 +26,11 @@ help:
 	@echo "Cleanup targets:"
 	@echo "  clean-generated   Clean only generated files (quick cleanup)"
 	@echo "  clean-all         Clean all build artifacts (full cleanup)"
+	@echo ""
+	@echo "Code generation targets:"
+	@echo "  generate-ws-routers       Generate WebSocket router classes (backend)"
+	@echo "  generate-openapi-client   Generate TypeScript REST client (frontend)"
+	@echo "  generate-asyncapi-types   Generate TypeScript WebSocket types (frontend)"
 	@echo ""
 	@echo "Other targets:"
 	@echo "  health            Check project health"
@@ -90,8 +95,6 @@ dev-backend:
 
 dev-frontend:
 	@echo "Starting frontend development server..."
-	@echo "🧹 Cleaning frontend generated files..."
-	rm -rf frontend/src/clients/*
 	make -C frontend dev
 
 # Full-stack development
@@ -187,3 +190,16 @@ health:
 	@echo ""
 	@echo "Frontend health:"
 	@curl -f http://localhost:$(FRONTEND_PORT) 2>/dev/null >/dev/null && echo "Frontend running" || echo "Frontend not running"
+
+# Code generation targets
+generate-ws-routers:
+	@echo "Generating WebSocket routers..."
+	make -C backend generate-ws-routers
+
+generate-openapi-client:
+	@echo "Generating OpenAPI client..."
+	make -C frontend generate-openapi-client
+
+generate-asyncapi-types:
+	@echo "Generating AsyncAPI types..."
+	make -C frontend generate-asyncapi-types

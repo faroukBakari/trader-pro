@@ -77,7 +77,8 @@ npm run build  # Auto-generates clients, then builds for production
 
 ```bash
 # Generate REST API client and WebSocket types
-npm run client:generate
+make generate-openapi-client
+make generate-asyncapi-types
 
 # Or use Makefile
 make client-generate

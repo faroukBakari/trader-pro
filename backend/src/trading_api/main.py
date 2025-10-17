@@ -74,11 +74,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup: Validate all routes have response models
     validate_response_models(app)
 
+    # Backend directory for spec files
+    backend_dir = Path(__file__).parent.parent.parent
+
     # Startup: Generate openapi.json file for file-based watching
     openapi_schema = app.openapi()
-
-    # Write to file in the backend directory
-    backend_dir = Path(__file__).parent.parent.parent
     openapi_file = backend_dir / "openapi.json"
 
     try:
@@ -87,6 +87,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         print(f"📝 Generated OpenAPI spec: {openapi_file}")
     except Exception as e:
         print(f"⚠️  Failed to generate OpenAPI file: {e}")
+
+    # Startup: Generate asyncapi.json file for file-based watching
+    asyncapi_schema = wsApp.asyncapi()
+    asyncapi_file = backend_dir / "asyncapi.json"
+
+    try:
+        with open(asyncapi_file, "w") as f:
+            json.dump(asyncapi_schema, f, indent=2)
+        print(f"📝 Generated AsyncAPI spec: {asyncapi_file}")
+    except Exception as e:
+        print(f"⚠️  Failed to generate AsyncAPI file: {e}")
 
     # Startup: Start bar broadcaster if enabled
     if BroadcasterConfig.get_enabled():
