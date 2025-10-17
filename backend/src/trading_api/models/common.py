@@ -37,6 +37,7 @@ class SubscriptionResponse(BaseModel):
 
 
 T = TypeVar("T", bound=BaseModel)
+XX = TypeVar("XX", bound=BaseModel)
 
 
 class SubscriptionUpdate(BaseModel, Generic[T]):

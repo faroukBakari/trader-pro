@@ -10,7 +10,7 @@ define run-with-nvm
 	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; $(1)'
 endef
 
-.PHONY: help ensure-node ensure-node-ci install install-ci lint type-check test test-run build dev clean client-generate
+.PHONY: help ensure-node ensure-node-ci install install-ci lint type-check test test-run build dev clean generate-openapi-client generate-asyncapi-types
 
 # Default target
 help:
@@ -19,7 +19,8 @@ help:
 	@echo "  ensure-node-ci  Ensure Node.js 20.19+/22.12+ is installed (CI mode, no prompts)"
 	@echo "  install         Install frontend dependencies"
 	@echo "  install-ci      Install frontend dependencies for CI"
-	@echo "  client-generate Generate API client and WebSocket types from AsyncAPI spec"
+	@echo "  generate-openapi-client   Generate REST client from OpenAPI spec"
+	@echo "  generate-asyncapi-types   Generate WebSocket types from AsyncAPI spec"
 	@echo "  lint            Run frontend linting and formatting checks"
 	@echo "  type-check      Run TypeScript type checking"
 	@echo "  test            Run frontend tests in watch mode"
@@ -170,31 +171,39 @@ install-ci: ensure-node-ci
 	$(call run-with-nvm,npm ci)
 
 # Client generation
-client-generate:
-	@echo "Generating API client and WebSocket types..."
-	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-api-client.sh'
+generate-openapi-client:
+	@echo "Generating REST client from OpenAPI spec..."
+	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-openapi-client.sh'
+
+generate-asyncapi-types:
+	@echo "Generating WebSocket types from AsyncAPI spec..."
+	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-asyncapi-types.sh'
 
 # Linting and formatting
 lint:
 	@echo "Running frontend linting and formatting checks..."
-	@$(MAKE) client-generate
+	@$(MAKE) generate-openapi-client
+	@$(MAKE) generate-asyncapi-types
 	$(call run-with-nvm,npm run lint)
 
 # Type checking
 type-check:
 	@echo "Running TypeScript type checking..."
-	@$(MAKE) client-generate
+	@$(MAKE) generate-openapi-client
+	@$(MAKE) generate-asyncapi-types
 	$(call run-with-nvm,npm run type-check)
 
 # Testing
 test:
 	@echo "Running frontend tests in watch mode..."
-	@$(MAKE) client-generate
+	@$(MAKE) generate-openapi-client
+	@$(MAKE) generate-asyncapi-types
 	$(call run-with-nvm,npm run test:unit)
 
 test-run:
 	@echo "Running frontend tests..."
-	@$(MAKE) client-generate
+	@$(MAKE) generate-openapi-client
+	@$(MAKE) generate-asyncapi-types
 	$(call run-with-nvm,npm run test:unit)
 
 # Build
@@ -212,5 +221,5 @@ dev:
 # Cleanup
 clean:
 	@echo "Cleaning frontend build artifacts..."
-	rm -rf dist/ node_modules/.vite src/clients/trader-client-generated src/clients/ws-types-generated
+	rm -rf dist/ node_modules/.vite src/clients/*
 	@echo "Frontend clean complete."

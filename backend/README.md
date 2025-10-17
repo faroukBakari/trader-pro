@@ -23,6 +23,7 @@ FastAPI backend that powers the Trading Pro platform. It exposes a RESTful API f
 ## Quick Start
 
 ### Prerequisites
+
 - **Python 3.11+** (required by the project)
   - Will be **automatically installed** if you have [pyenv](https://github.com/pyenv/pyenv)
   - Or check version: `python3 --version`
@@ -37,12 +38,14 @@ make install       # Validates Python 3.11+, offers to install if needed, then i
 ```
 
 The `make install` command will:
+
 1. **Check Python version** - Validates Python 3.11+ is available
 2. **Auto-install Python** - If wrong version and pyenv is available, **offers to install Python 3.11.7** (with confirmation)
 3. **Install Poetry** - Automatically installs Poetry if missing
 4. **Install dependencies** - Runs `poetry install` to set up the project
 
 **Interactive prompts:**
+
 - If Python 3.11+ is not found and pyenv is available, you'll be asked: `"Would you like to install Python 3.11.7 via pyenv? [y/N]"`
 - Type `y` and press Enter to automatically install and activate Python 3.11.7
 - Type `n` to skip and see manual installation instructions
@@ -82,37 +85,39 @@ make format            # black + isort
 The backend publishes OpenAPI and AsyncAPI documentation at startup. After running the dev server, visit:
 
 ### REST API Documentation
+
 - Root metadata: `http://127.0.0.1:8000/`
 - Interactive docs (Swagger UI): `http://127.0.0.1:8000/api/v1/docs`
 - ReDoc: `http://127.0.0.1:8000/api/v1/redoc`
 - Raw OpenAPI JSON: `http://127.0.0.1:8000/api/v1/openapi.json`
 
 ### WebSocket API Documentation
+
 - AsyncAPI Interactive UI: `http://127.0.0.1:8000/api/v1/ws/asyncapi`
 - Raw AsyncAPI JSON: `http://127.0.0.1:8000/api/v1/ws/asyncapi.json`
 - WebSocket endpoint: `ws://127.0.0.1:8000/api/v1/ws`
 
 ### Key REST Endpoints
 
-| Path | Method | Description |
-| ---- | ------ | ----------- |
-| `/api/v1/health` | GET | Service health heartbeat including version metadata |
-| `/api/v1/versions` | GET | List of supported API versions |
-| `/api/v1/version` | GET | Details about the active API version |
-| `/api/v1/datafeed/config` | GET | TradingView configuration contract |
-| `/api/v1/datafeed/search` | GET | Symbol search |
-| `/api/v1/datafeed/resolve/{symbol}` | GET | Symbol metadata |
-| `/api/v1/datafeed/bars` | GET | Historical OHLC data |
-| `/api/v1/datafeed/quotes` | POST | Latest quote snapshot for multiple symbols |
-| `/api/v1/datafeed/health` | GET | Datafeed service diagnostics |
+| Path                                | Method | Description                                         |
+| ----------------------------------- | ------ | --------------------------------------------------- |
+| `/api/v1/health`                    | GET    | Service health heartbeat including version metadata |
+| `/api/v1/versions`                  | GET    | List of supported API versions                      |
+| `/api/v1/version`                   | GET    | Details about the active API version                |
+| `/api/v1/datafeed/config`           | GET    | TradingView configuration contract                  |
+| `/api/v1/datafeed/search`           | GET    | Symbol search                                       |
+| `/api/v1/datafeed/resolve/{symbol}` | GET    | Symbol metadata                                     |
+| `/api/v1/datafeed/bars`             | GET    | Historical OHLC data                                |
+| `/api/v1/datafeed/quotes`           | POST   | Latest quote snapshot for multiple symbols          |
+| `/api/v1/datafeed/health`           | GET    | Datafeed service diagnostics                        |
 
 ### WebSocket Operations
 
-| Operation | Type | Description |
-| --------- | ---- | ----------- |
-| `bars.subscribe` | SEND | Subscribe to real-time bar updates for a symbol |
-| `bars.unsubscribe` | SEND | Unsubscribe from bar updates |
-| `bars.update` | RECEIVE | Real-time OHLC bar data broadcast |
+| Operation          | Type    | Description                                     |
+| ------------------ | ------- | ----------------------------------------------- |
+| `bars.subscribe`   | SEND    | Subscribe to real-time bar updates for a symbol |
+| `bars.unsubscribe` | SEND    | Unsubscribe from bar updates                    |
+| `bars.update`      | RECEIVE | Real-time OHLC bar data broadcast               |
 
 See `docs/websockets.md` for detailed WebSocket documentation.
 
@@ -139,12 +144,12 @@ make dev
 
 ### Environment Variables
 
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `BAR_BROADCASTER_ENABLED` | `true` | Enable/disable broadcaster |
-| `BAR_BROADCASTER_INTERVAL` | `2.0` | Broadcast interval in seconds |
-| `BAR_BROADCASTER_SYMBOLS` | `AAPL,GOOGL,MSFT` | Comma-separated symbols |
-| `BAR_BROADCASTER_RESOLUTIONS` | `1` | Comma-separated resolutions |
+| Variable                      | Default           | Description                   |
+| ----------------------------- | ----------------- | ----------------------------- |
+| `BAR_BROADCASTER_ENABLED`     | `true`            | Enable/disable broadcaster    |
+| `BAR_BROADCASTER_INTERVAL`    | `2.0`             | Broadcast interval in seconds |
+| `BAR_BROADCASTER_SYMBOLS`     | `AAPL,GOOGL,MSFT` | Comma-separated symbols       |
+| `BAR_BROADCASTER_RESOLUTIONS` | `1`               | Comma-separated resolutions   |
 
 ### Features
 
@@ -166,7 +171,7 @@ See `docs/websockets.md` (Bar Broadcasting Service section) for details.
 ## Client Generation
 
 - The OpenAPI specification is regenerated on application startup and saved to `backend/openapi.json`
-- Frontend consumers run `npm run client:generate` (defined in `frontend/package.json`) which uses `frontend/scripts/generate-api-client.sh`
+- Frontend consumers run `npm run client:generate` (defined in `frontend/package.json`) which uses `frontend/scripts/generate-client.sh`
 - For ad-hoc exports use `make export-openapi`
 
 ## Development Workflow

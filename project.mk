@@ -85,13 +85,13 @@ setup: install
 dev-backend:
 	@echo "Starting backend development server..."
 	@echo "🧹 Cleaning backend generated files..."
-	rm -f backend/openapi*.json
+	rm -f backend/openapi.json backend/asyncapi.json
 	make -C backend dev
 
 dev-frontend:
 	@echo "Starting frontend development server..."
 	@echo "🧹 Cleaning frontend generated files..."
-	rm -rf frontend/src/clients/trader-client-generated frontend/src/clients/ws-types-generated
+	rm -rf frontend/src/clients/*
 	make -C frontend dev
 
 # Full-stack development
@@ -160,8 +160,8 @@ clean-all:
 	@echo "🧹 Cleaning frontend..."
 	make -C frontend clean
 	@echo "🧹 Cleaning project-level generated files..."
-	rm -f backend/openapi*.json
-	rm -rf frontend/src/clients/trader-client-generated frontend/src/clients/ws-types-generated
+	rm -f backend/openapi.json backend/asyncapi.json
+	rm -rf frontend/src/clients/*
 	@echo "🧹 Cleaning smoke test artifacts..."
 	rm -rf smoke-tests/test-results smoke-tests/playwright-report
 	@echo "Clean complete."
@@ -169,10 +169,10 @@ clean-all:
 # Clean only generated files (lighter cleanup)
 clean-generated:
 	@echo "Cleaning generated files..."
-	@echo "🧹 Removing backend OpenAPI files..."
-	rm -f backend/openapi*.json
-	@echo "🧹 Removing frontend generated client..."
-	rm -rf frontend/src/clients/trader-client-generated frontend/src/clients/ws-types-generated
+	@echo "🧹 Removing backend spec files..."
+	rm -f backend/openapi.json backend/asyncapi.json
+	@echo "🧹 Removing frontend generated clients..."
+	rm -rf frontend/src/clients/*
 	@echo "🧹 Removing frontend build cache..."
 	rm -rf frontend/node_modules/.vite
 	@echo "🧹 Removing test artifacts..."

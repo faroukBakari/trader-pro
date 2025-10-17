@@ -108,9 +108,9 @@ print_step "🚀 Starting full-stack development environment..."
 # Step 0: Clean up generated files for fresh start
 print_step "0. Cleaning up generated files..."
 print_step "🧹 Removing backend generated files..."
-rm -f backend/openapi*.json
-print_step "🧹 Removing frontend generated client..."
-rm -rf frontend/src/clients/trader-client-generated
+rm -f backend/openapi.json backend/asyncapi.json
+print_step "🧹 Removing frontend generated clients..."
+rm -rf frontend/src/clients/*
 print_step "🧹 Removing frontend build artifacts..."
 rm -rf frontend/dist frontend/node_modules/.vite
 print_success "Clean up complete - fresh start ready"
@@ -153,10 +153,10 @@ if [ $timeout -eq 0 ]; then
 fi
 
 # Step 3: Generate frontend client
-print_step "3. Generating frontend client from live API..."
+print_step "3. Generating frontend clients..."
 cd frontend
-if make client-generate; then
-    print_success "Frontend client generated successfully"
+if make generate-openapi-client && make generate-asyncapi-types; then
+    print_success "Frontend clients generated successfully"
 else
     print_error "Client generation failed"
     exit 1
@@ -170,10 +170,10 @@ print_step "4. Setting up OpenAPI file watching..."
 OPENAPI_FILE="backend/openapi.json"
 
 # Generate initial client
-print_step "Generating initial frontend client..."
+print_step "Generating initial frontend clients..."
 cd frontend
-if make client-generate >/dev/null 2>&1; then
-    print_success "Initial client generated successfully"
+if make generate-openapi-client >/dev/null 2>&1 && make generate-asyncapi-types >/dev/null 2>&1; then
+    print_success "Initial clients generated successfully"
 else
     print_warning "Initial client generation failed, continuing..."
 fi
@@ -209,10 +209,10 @@ fi
                 if [ "$CURRENT_CONTENT" != "$LAST_CONTENT" ]; then
                     print_warning "OpenAPI file changed! Regenerating client..."
                     cd frontend
-                    if SKIP_SPEC_GENERATION=true make client-generate >/dev/null 2>&1; then
-                        print_success "Frontend client regenerated successfully"
+                    if SKIP_SPEC_GENERATION=true make generate-openapi-client >/dev/null 2>&1; then
+                        print_success "Frontend REST client regenerated successfully"
                     else
-                        print_error "Failed to regenerate client"
+                        print_error "Failed to regenerate REST client"
                     fi
                     cd ..
                     

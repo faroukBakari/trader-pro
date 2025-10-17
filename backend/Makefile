@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 BACKEND_APP_NAME ?= app
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install test test-cov lint lint-check format build clean dev health clients export-openapi export-openapi-offline docs-html generate-ws-routers
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install test test-cov lint lint-check format build clean dev health export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
 
 # Default target
 help:
@@ -23,8 +23,8 @@ help:
 	@echo "  dev-no-debug      Start backend development server without debugpy"
 	@echo "  clean             Clean build artifacts"
 	@echo "  health            Check backend health"
-	@echo "  export-openapi    Export OpenAPI specification (requires running server)"
-	@echo "  export-openapi-offline Export OpenAPI/AsyncAPI specs (offline, no server needed)"
+	@echo "  export-openapi-spec   Export OpenAPI specification (offline)"
+	@echo "  export-asyncapi-spec  Export AsyncAPI specification (offline)"
 	@echo "  docs-html         Generate static HTML documentation"
 	@echo "  generate-ws-routers Generate WebSocket router classes"
 
@@ -254,18 +254,18 @@ health-ci:
 # Cleanup
 clean:
 	@echo "Cleaning backend build artifacts..."
-	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage clients/ src/trading_api/ws/generated/ openapi*.json
+	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage clients/ src/trading_api/ws/generated/ openapi.json asyncapi.json
 	@echo "Backend clean complete."
 
-# Export OpenAPI specification
-export-openapi:
-	@echo "Exporting OpenAPI specification..."
-	curl -s http://localhost:$(BACKEND_PORT)/api/v1/openapi.json -o openapi.json
+# Export OpenAPI specification (offline)
+export-openapi-spec:
+	@echo "Exporting OpenAPI specification (offline)..."
+	poetry run python scripts/export_openapi_spec.py
 
-# Export OpenAPI specification offline (without running server)
-export-openapi-offline:
-	@echo "Exporting OpenAPI and AsyncAPI specifications (offline)..."
-	poetry run python scripts/export_openapi.py
+# Export AsyncAPI specification (offline)
+export-asyncapi-spec:
+	@echo "Exporting AsyncAPI specification (offline)..."
+	poetry run python scripts/export_asyncapi_spec.py
 
 # Generate static HTML documentation
 docs-html:
