@@ -37,11 +37,12 @@ regenerate_routers() {
     fi
 }
 
-# Initial generation
+# Initial setup
 print_info "Starting WebSocket router watcher..."
 print_info "Monitoring: $WS_DIR"
 print_info "Monitoring: $MODELS_DIR"
-regenerate_routers
+# Don't regenerate on startup - let the dev server handle initial generation
+# regenerate_routers
 
 # Check if inotifywait is available
 if command -v inotifywait >/dev/null 2>&1; then

@@ -69,17 +69,15 @@ const versions: APIMetadata = await apiService.getVersions()
 
 ### Smart Client Generation
 
-The API client is **automatically generated** when you run the development server or build:
+The API client is **automatically generated** when you run the development server (via make dev-fullstack):
 
 ```bash
-# Development (auto-generates client if API is available)
-npm run dev
-
-# Build (auto-generates client if API is available)
-npm run build
+# Development (auto-generates clients before startup)
+make dev-fullstack
 
 # Manual generation
-npm run client:generate
+make generate-openapi-client
+make generate-asyncapi-types
 ```
 
 **How it works:**
@@ -175,23 +173,18 @@ The API client is automatically generated from the backend's OpenAPI specificati
 
 Client generation happens automatically during:
 
-- `npm run dev` - Before starting dev server
-- `npm run build` - Before building for production
-- `npm run client:generate` - Manual generation
+- `make dev-fullstack` - Before starting dev server
+- Makefiles explicitly call generation targets after backend is ready
 
 ### How It Works
 
-The generation script (`scripts/generate-client.sh`):
+The generation process (via Makefiles):
 
-1. Checks if backend API is running at `http://localhost:8000`
-2. If available:
-   - Downloads OpenAPI spec
-   - Generates TypeScript client
-   - Creates type-safe API classes
-3. If not available:
-   - Sets up mock fallback
-   - App uses mock data
-   - Development continues normally
+1. Backend starts and generates OpenAPI/AsyncAPI specs on startup
+2. Makefile targets wait for specs to be available
+3. `make generate-openapi-client` - Generates REST client from openapi.json
+4. `make generate-asyncapi-types` - Generates WebSocket types from asyncapi.json
+5. Frontend starts with fully generated clients
 
 ### Custom API URL
 
@@ -199,7 +192,8 @@ Set the API URL via environment variable:
 
 ```bash
 # Development
-VITE_API_URL=http://api.example.com npm run client:generate
+# Generation now happens automatically via make dev-fullstack
+# Or manually: make generate-openapi-client && make generate-asyncapi-types
 
 # Or in .env file
 VITE_API_URL=http://api.example.com
@@ -208,11 +202,9 @@ VITE_API_URL=http://api.example.com
 ### Manual Generation
 
 ```bash
-# Generate client (checks for live API)
-npm run client:generate
-
-# Or use the script directly
-./scripts/generate-client.sh
+# Generate clients manually
+make generate-openapi-client
+make generate-asyncapi-types
 ```
 
 ## Benefits

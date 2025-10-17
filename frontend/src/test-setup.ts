@@ -17,13 +17,13 @@ beforeAll(() => {
 
   if (!existsSync(traderClientDir)) {
     throw new Error(
-      '❌ API client not generated! Run "npm run client:generate" before running tests.',
+      '❌ API client not generated! Run client generation before running tests.',
     )
   }
 
   if (!existsSync(wsClientDir)) {
     throw new Error(
-      '❌ WebSocket types not generated! Run "npm run client:generate" before running tests.',
+      '❌ WebSocket types not generated! Run client generation before running tests.',
     )
   }
 

@@ -15,10 +15,7 @@
     "type-check": "vue-tsc --build",
     "lint": "eslint . --fix",
     "format": "prettier --write src/ --ignore-path .prettierignore",
-    "fix-whitespace": "find src/ -name '*.ts' -o -name '*.vue' -o -name '*.sh' -o -name '*.md' | xargs sed -i 's/[[:space:]]*$//'",
-    "client:generate": "./scripts/generate-client.sh",
-    "prebuild": "npm run client:generate",
-    "predev": "npm run client:generate"
+    "fix-whitespace": "find src/ -name '*.ts' -o -name '*.vue' -o -name '*.sh' -o -name '*.md' | xargs sed -i 's/[[:space:]]*$//'"
   },
   "dependencies": {
     "@types/vue": "^1.0.31",

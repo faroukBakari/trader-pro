@@ -214,8 +214,17 @@ build:
 # Development server
 dev:
 	@echo "Starting frontend development server..."
-	@echo "🧹 Cleaning generated client..."
-	rm -rf src/clients/trader-client-generated src/clients/ws-types-generated
+	@echo "🔍 Checking if frontend port is available..."
+	@if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then \
+		echo "❌ Error: Frontend port 5173 is already in use!"; \
+		echo ""; \
+		echo "Process using port 5173:"; \
+		lsof -Pi :5173 -sTCP:LISTEN; \
+		echo ""; \
+		echo "Please stop the existing server or change the port in vite.config.ts"; \
+		exit 1; \
+	fi
+	@echo "✅ Port 5173 is available"
 	$(call run-with-nvm,npm run dev)
 
 # Cleanup

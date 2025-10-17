@@ -202,7 +202,7 @@ Add to pre-commit hooks or CI pipeline:
 - name: Generate WebSocket types (frontend)
   run: |
     cd frontend
-    npm run client:generate
+    make generate-openapi-client && make generate-asyncapi-types
 ```
 
 ## Full-Stack Generation Flow
@@ -251,7 +251,7 @@ When adding a new WebSocket route:
 5. **Generate Frontend Types** (frontend)
 
    ```bash
-   cd frontend && npm run client:generate
+   make -f ../project.mk generate-openapi-client && make -f ../project.mk generate-asyncapi-types
    ```
 
 6. **Use Generated Types** (frontend)

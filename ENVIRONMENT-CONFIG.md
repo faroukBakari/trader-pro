@@ -17,10 +17,12 @@ The project uses environment variables to avoid hardcoded values and make it eas
 ### Frontend Configuration
 
 - **`FRONTEND_PORT`** (default: `5173`)
+
   - Port on which the Vite development server runs
   - Used by: Vite config, development scripts
 
 - **`VITE_API_URL`** (default: `http://localhost:8000`)
+
   - Base URL for API requests from the frontend
   - Used by: Vite proxy configuration, client generation
   - **Important**: Must start with `VITE_` to be accessible in frontend code
@@ -32,6 +34,7 @@ The project uses environment variables to avoid hardcoded values and make it eas
 ## Configuration Files
 
 ### `.env` (Git-tracked defaults)
+
 ```bash
 # Global Environment Configuration
 BACKEND_PORT=8000
@@ -42,7 +45,9 @@ NODE_ENV=development
 ```
 
 ### `.env.example` (Template for custom configurations)
+
 Copy this file to `.env.local` for custom configurations:
+
 ```bash
 cp .env.example .env.local
 ```
@@ -64,6 +69,7 @@ The frontend client generation uses an efficient file-based approach:
 4. **Efficient**: No more server spam - only regenerates when schema actually changes
 
 This configuration allows the frontend to work with backend and frontend on:
+
 - Same domain (production)
 - Different ports (development with proxy)
 
@@ -105,40 +111,50 @@ export FRONTEND_URL=http://localhost:3000
 ## Component Integration
 
 ### Cleanup System
+
 The project includes comprehensive cleanup to ensure fresh starts:
 
 **Automatic Cleanup (on dev start)**:
+
 - `dev-fullstack`: Cleans all generated files before starting
 - `dev-backend`: Cleans backend OpenAPI files
 - `dev-frontend`: Cleans frontend generated client
-- `client:generate`: Cleans previous client before generating
+- Client generation is handled via Makefiles:
+  - `make generate-openapi-client` - Generate REST API client
+  - `make generate-asyncapi-types` - Generate WebSocket types
 
 **Manual Cleanup Commands**:
+
 - `make -f project.mk clean-generated`: Quick cleanup (generated files only)
 - `make -f project.mk clean-all`: Full cleanup (includes build artifacts)
 - Individual: `make -C backend clean`, `make -C frontend clean`
 
 **Files Cleaned**:
+
 - Backend: `openapi*.json`
 - Frontend: `src/services/generated/`, `dist/`, `node_modules/.vite`
 - Tests: `smoke-tests/test-results`, `smoke-tests/playwright-report`
 
 ### Backend (FastAPI)
+
 - No hardcoded servers in OpenAPI spec
 - Uses `BACKEND_PORT` for uvicorn startup
 - Makefile targets respect environment variables
 
 ### Frontend (Vue/Vite)
+
 - Vite proxy forwards `/api/*` to `VITE_API_URL`
 - Generated client uses empty `basePath` for relative URLs
 - Frontend runs on `FRONTEND_PORT`
 
 ### Client Generation
+
 - Fetches OpenAPI spec from `VITE_API_URL/api/v1/openapi.json`
 - Generated client configured with empty `basePath`
 - Falls back to mock client if backend unavailable
 
 ### Scripts and CI
+
 - All development scripts use environment variables
 - CI/CD pipelines configure appropriate values
 - Smoke tests use `FRONTEND_URL` for base URL

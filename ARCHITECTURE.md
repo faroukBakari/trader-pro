@@ -186,7 +186,8 @@ data display TradingChart.vue # TradingView chart integration
 #### 4. Client Generation (`scripts/`)
 
 ```bash
-generate-client.sh # Intelligent client generation
+generate-openapi-client.sh # OpenAPI REST client generation
+generate-asyncapi-types.sh # AsyncAPI WebSocket types generation
 # Smart detection: live API or mock fallback
 ```
 
@@ -250,7 +251,7 @@ generate-client.sh # Intelligent client generation
                       ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Check Backend Availability                                 │
-│  (scripts/generate-client.sh)                               │
+│  (make generate-openapi-client / generate-asyncapi-types)  │
 └─────────────────────┬───────────────────────────────────────┘
                       │
           ┌───────────┴───────────┐
