@@ -76,15 +76,11 @@ npm run build  # Auto-generates clients, then builds for production
 **Manual Generation**:
 
 ```bash
-# Generate REST API client (from OpenAPI spec)
+# Generate REST API client and WebSocket types
 npm run client:generate
-
-# Generate WebSocket client (from AsyncAPI spec)
-npm run ws:generate
 
 # Or use Makefile
 make client-generate
-make ws-generate
 ```
 
 **Documentation**:
@@ -105,7 +101,6 @@ make ws-generate
 The following directories are auto-generated (gitignored):
 
 - `src/clients/trader-client-generated/` - REST API client
-- `src/clients/ws-generated/` - WebSocket client factories
 - `src/clients/ws-types-generated/` - WebSocket type definitions
 
 ### Environment Configuration
@@ -195,10 +190,10 @@ The frontend includes real-time WebSocket clients for streaming market data.
 ### Basic Usage
 
 ```typescript
-import { BarsWebSocketClientFactory } from '@/clients/ws-generated/client'
-import type { Bar } from '@/clients/ws-types-generated'
+import { WebSocketClientBase } from '@/plugins/wsClientBase'
+import type { Bar, BarsSubscriptionRequest } from '@/clients/ws-types-generated'
 
-const client = BarsWebSocketClientFactory()
+const client = new WebSocketClientBase<BarsSubscriptionRequest, Bar>('bars')
 await client.subscribe({ symbol: 'AAPL', resolution: '1' }, (bar: Bar) =>
   console.log('New bar:', bar),
 )
@@ -207,17 +202,14 @@ await client.subscribe({ symbol: 'AAPL', resolution: '1' }, (bar: Bar) =>
 ### Key Files
 
 - **Base Client**: `src/plugins/wsClientBase.ts` - Core WebSocket implementation
-- **Generated Clients**: `src/clients/ws-generated/` - Auto-generated factories
-- **Generated Types**: `src/clients/ws-types-generated/` - TypeScript interfaces
 - **Generated Types**: `src/clients/ws-types-generated/index.ts` - Auto-generated type definitions (from AsyncAPI)
 - **Integration**: `src/services/datafeedService.ts` - TradingView integration example
 - **Type Generator**: `scripts/generate-ws-types.mjs` - AsyncAPI → TypeScript types
-- **Client Generator**: `scripts/generate-ws-client.mjs` - AsyncAPI → Client factories
 
 ### ⭐ Key Features
 
-- ✅ **Automatic generation** - Types and clients generated from AsyncAPI spec
-- ✅ **No hardcoded lists** - All routes and types auto-discovered
+- ✅ **Automatic type generation** - Types generated from AsyncAPI spec
+- ✅ **No hardcoded lists** - All types auto-discovered
 - ✅ **Singleton pattern** - One connection per URL
 - ✅ **Auto-connection** - Automatic connection with exponential backoff retry
 - ✅ **Full type safety** - TypeScript generics throughout

@@ -7,6 +7,7 @@ import logging
 from pydantic import BaseModel
 
 from external_packages.fastws import FastWS, Message
+from trading_api.models.common import SubscriptionUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,10 @@ class FastWSAdapter(FastWS):
         # Create message with data model directly as payload
         message = Message(
             type=message_type,
-            payload=data.model_dump(),
+            payload=SubscriptionUpdate(
+                topic=topic,
+                payload=data,
+            ).model_dump(),
         )
 
         await self.server_send(message, topic=topic)

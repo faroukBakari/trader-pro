@@ -23,7 +23,7 @@ beforeAll(() => {
 
   if (!existsSync(wsClientDir)) {
     throw new Error(
-      '❌ WebSocket client not generated! Run "npm run ws:generate" before running tests.',
+      '❌ WebSocket types not generated! Run "npm run client:generate" before running tests.',
     )
   }
 

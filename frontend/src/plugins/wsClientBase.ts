@@ -1,14 +1,15 @@
-export interface WebSocketClientConfig {
-  wsUrl: string
-  reconnect?: boolean
-  maxReconnectAttempts?: number
-  reconnectDelay?: number
-  debug?: boolean
-}
+// interface WebSocketClientBaseConfig {
+//   wsUrl: string
+//   reconnect?: boolean
+//   maxReconnectAttempts?: number
+//   reconnectDelay?: number
+//   debug?: boolean
+// }
 
-interface WebSocketMessage<TParams extends object = object> {
-  type: string
-  payload: TParams
+
+interface DataFeed<TBackendData extends object = object> {
+  topic: string
+  payload: TBackendData
 }
 
 interface SubscriptionResponse {
@@ -17,35 +18,48 @@ interface SubscriptionResponse {
   topic: string
 }
 
+interface WebSocketMessage<TBackendData extends object = object> {
+  type: string
+  payload: DataFeed<TBackendData> | SubscriptionResponse
+}
+
 interface SubscriptionState<TParams extends object = object, TData extends object = object> {
-  id: string
   topic: string
-  onUpdate: (data: TData) => void
+  subscriptionParams: TParams
   confirmed: boolean
   subscriptionType: string
-  subscriptionParams: TParams
-  updateMessageType: string
+  listeners: Map<string, (data: TData) => void>
 }
 
-export interface WebSocketInterface<TParams extends object, TData extends object> {
-  subscribe(
-    subscriptionId: string,
-    params: TParams,
-    onUpdate: (data: TData) => void,
-  ): Promise<string>
-  unsubscribe(subscriptionId: string): Promise<void>
+function buildTopicParams(obj: unknown): string {
+  if (obj === null || obj === undefined) {
+    return ''
+  }
+
+  if (typeof obj !== 'object') {
+    return JSON.stringify(obj)
+  }
+
+  if (Array.isArray(obj)) {
+    return `[${obj.map(buildTopicParams).join(',')}]`
+  }
+
+  const objRecord = obj as Record<string, unknown>
+  const sortedKeys = Object.keys(objRecord).sort()
+  const pairs = sortedKeys.map(key => `${JSON.stringify(key)}:${buildTopicParams(objRecord[key])}`)
+  return `{${pairs.join(',')}}`
 }
 
-export class WebSocketClientBase<TParams extends object, TData extends object> {
-  private static readonly config = {
+export class WebSocketBase {
+  private readonly config = {
     reconnect: true,
     maxReconnectAttempts: 5,
     reconnectDelay: 1000,
-    debug: false,
+    debug: true,
     wsUrl: '/api/v1/ws', // TODO: make configurable
   }
-  protected static ws: WebSocket | null = null
-  protected subscriptions = new Map<string, SubscriptionState>()
+  protected ws: WebSocket | null = null
+  protected wsCnxPromise: Promise<void> | null = null
   protected pendingRequests = new Map<
     string,
     {
@@ -54,51 +68,64 @@ export class WebSocketClientBase<TParams extends object, TData extends object> {
       timeout: NodeJS.Timeout
     }
   >()
+  protected subscriptions = new Map<string, SubscriptionState>()
 
-  private topicType: string = ''
+  // dont defaut to identity dataMapper to detect types missmatch (data => data as unknown as TData)
+  private static instance: WebSocketBase | null = null
 
-  constructor(topicType: string) {
-    this.topicType = topicType
+  private constructor() { }
+
+  static getInstance(): WebSocketBase {
+    if (!WebSocketBase.instance) {
+      WebSocketBase.instance = new WebSocketBase()
+    }
+    return WebSocketBase.instance
   }
 
   private async __socketConnect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        console.log('Connecting to', WebSocketClientBase.config.wsUrl)
-        WebSocketClientBase.ws = new WebSocket(WebSocketClientBase.config.wsUrl)
+    if (!this.wsCnxPromise) {
+      this.wsCnxPromise = new Promise((resolve, reject) => {
+        try {
+          console.log('Connecting to', this.config.wsUrl)
+          this.ws = new WebSocket(this.config.wsUrl)
 
-        WebSocketClientBase.ws.onerror = async (error) => {
-          console.log('Error:', error)
+          this.ws.onerror = async (error) => {
+            console.log('Error:', error)
+            reject(error)
+          }
+
+          this.ws.onclose = async (event) => {
+            console.log('Connection closed:', event)
+            reject(new Error('WebSocket closed'))
+          }
+
+          this.ws.onopen = () => {
+            console.log('Connected')
+
+            this.ws!.onmessage = (event) => {
+              this.handleMessage(event)
+            }
+
+            this.ws!.onerror = async (error) => {
+              console.log('Error:', error)
+              setTimeout(() => this.resubscribeAll(), 0)
+            }
+
+            this.ws!.onclose = async (event) => {
+              console.log('Connection closed:', event)
+              setTimeout(() => this.resubscribeAll(), 0)
+            }
+            setTimeout(() => (this.wsCnxPromise = null), 0)
+            resolve()
+          }
+        } catch (error) {
+          setTimeout(() => (this.wsCnxPromise = null), 0)
           reject(error)
         }
+      })
+    }
 
-        WebSocketClientBase.ws.onclose = async (event) => {
-          console.log('Connection closed:', event)
-          reject(new Error('WebSocket closed'))
-        }
-
-        WebSocketClientBase.ws.onopen = () => {
-          console.log('Connected')
-
-          WebSocketClientBase.ws!.onmessage = (event) => {
-            this.handleMessage(event)
-          }
-
-          WebSocketClientBase.ws!.onerror = async (error) => {
-            console.log('Error:', error)
-            this.resubscribeAll()
-          }
-
-          WebSocketClientBase.ws!.onclose = async (event) => {
-            console.log('Connection closed:', event)
-            this.resubscribeAll()
-          }
-          resolve()
-        }
-      } catch (error) {
-        reject(error)
-      }
-    })
+    return this.wsCnxPromise
   }
 
   private async connect(): Promise<void> {
@@ -106,20 +133,21 @@ export class WebSocketClientBase<TParams extends object, TData extends object> {
       try {
         await this.__socketConnect()
       } catch (error) {
-        this.log('Connection error:', error)
+        console.log('Connection error:', error)
+        await new Promise(resolve => setTimeout(resolve, 2000))
       }
     }
   }
 
   private isConnected(): boolean {
-    return WebSocketClientBase.ws?.readyState === WebSocket.OPEN
+    return this.ws?.readyState === WebSocket.OPEN
   }
 
   private async sendRequest(type: string, payload: object): Promise<void> {
     await this.connect()
     const message = JSON.stringify({ type, payload })
-    WebSocketClientBase.ws!.send(message)
-    this.log('Sent:', type, payload)
+    this.ws!.send(message)
+    console.log('Sent:', type, payload)
   }
 
   private handleMessage(event: MessageEvent): void {
@@ -127,57 +155,83 @@ export class WebSocketClientBase<TParams extends object, TData extends object> {
       const message: WebSocketMessage = JSON.parse(event.data)
       const { type, payload } = message
 
-      this.log('Received:', type, payload)
-
       if (type.endsWith('.update')) {
-        const update = payload as WebSocketMessage
-        this.routeUpdateMessage(type, update)
+        const update = payload as DataFeed
+        this.routeUpdateMessage(update)
       } else {
-        const subResponse = payload as SubscriptionResponse
-        const requestId = `${type}-${subResponse.topic}`
-        const pendingRequest = this.pendingRequests.get(requestId)
-        if (pendingRequest) {
-          this.pendingRequests.delete(requestId)
-          pendingRequest.resolve(subResponse)
-          return
+        console.log('Received:', type, payload)
+        if (type.endsWith('.response')) {
+          if (type.replace(/.response$/, '').endsWith('.subscribe')) {
+            const subResponse = payload as SubscriptionResponse
+            const requestId = `${type.replace(/.response$/, '')}-${subResponse.topic}`
+            const pendingRequest = this.pendingRequests.get(requestId)
+            if (pendingRequest) {
+              this.pendingRequests.delete(requestId)
+              pendingRequest.resolve(subResponse)
+            } else {
+              console.error('Cannot find request Id:', requestId)
+            }
+          }
         } else {
-          console.log('Unhandled message type:', type)
+          console.error('Unknown message type:', type)
         }
       }
     } catch (error) {
-      console.log('Failed to parse message:', error)
+      console.error('Failed to parse message:', error)
     }
   }
 
-  private routeUpdateMessage(type: string, data: WebSocketMessage): void {
+  private routeUpdateMessage(data: DataFeed): void {
     for (const subscription of Array.from(this.subscriptions.values())) {
-      if (subscription.confirmed && subscription.updateMessageType === type) {
+      if (subscription.confirmed && subscription.topic === data.topic) {
         try {
-          subscription.onUpdate(data.payload)
+          for (const onUpdate of subscription.listeners.values()) {
+            onUpdate(data.payload)
+          }
         } catch (error) {
-          console.log('Error in subscription onUpdate:', error)
+          console.error('Error in subscription onUpdate:', error)
         }
       }
     }
   }
 
-  private async __subscribe(subscription: SubscriptionState): Promise<SubscriptionResponse> {
+  async subscribe(
+    topic: string,
+    subscriptionType: string,
+    subscriptionParams: object,
+    listenerId: string,
+    onUpdate: (TbackendData: object) => void
+  ): Promise<SubscriptionState> {
+
+    let subscription = this.subscriptions.get(topic)
+    if (subscription) {
+      subscription?.listeners.set(listenerId, onUpdate)
+      return subscription;
+    }
+
+    subscription = {
+      topic,
+      subscriptionParams,
+      subscriptionType,
+      confirmed: false,
+      listeners: new Map<string, (data: object) => void>([[listenerId, onUpdate]]),
+    }
+
+    this.subscriptions.set(topic, subscription)
+
     while (true)
       try {
         subscription.confirmed = false
 
-        await this.sendRequest(subscription.subscriptionType, subscription.subscriptionParams)
-
         const response: SubscriptionResponse = await new Promise((resolve, reject) => {
           // Expected response type
-          const responseType = `${subscription.subscriptionType}.response`
-          const requestId = `${responseType}-${subscription.topic}`
+          const requestId = `${subscription.subscriptionType}-${subscription.topic}`
 
           // Set up timeout
           const timeout = setTimeout(() => {
             this.pendingRequests.delete(requestId)
-            reject(new Error(`Request timeout: ${subscription.subscriptionType}`))
-          }, 5000)
+            reject(new Error(`Request timeout: ${requestId}`))
+          }, 15000)
 
           // Register response handler
           this.pendingRequests.set(requestId, {
@@ -191,6 +245,14 @@ export class WebSocketClientBase<TParams extends object, TData extends object> {
             },
             timeout,
           })
+
+          // Send request after registering the handler
+          this.sendRequest(subscription.subscriptionType, subscription.subscriptionParams)
+            .catch((error) => {
+              this.pendingRequests.delete(requestId)
+              clearTimeout(timeout)
+              reject(error)
+            })
         })
 
         if (response.status !== 'ok') {
@@ -199,14 +261,17 @@ export class WebSocketClientBase<TParams extends object, TData extends object> {
 
         subscription.confirmed = true
         console.log(`Subscription confirmed: ${subscription.topic}`, response)
-        return response
+        return subscription
       } catch (error) {
-        console.log('Subscription error:', error)
+        console.error('Subscription error:', error)
+        await new Promise(resolve => setTimeout(resolve, 2000))
       }
   }
 
   private async resubscribeAll(): Promise<void> {
     console.log('Resubscribing to all active subscriptions...')
+
+    await new Promise(resolve => setTimeout(resolve, 2000))
 
     this.pendingRequests.forEach((pending) => {
       clearTimeout(pending.timeout)
@@ -215,55 +280,111 @@ export class WebSocketClientBase<TParams extends object, TData extends object> {
     this.pendingRequests.clear()
 
     for (const subscription of this.subscriptions.values()) {
-      await this.__subscribe(subscription)
+      subscription.confirmed = false
+
+      const response: SubscriptionResponse = await new Promise((resolve, reject) => {
+        const requestId = `${subscription.subscriptionType}-${subscription.topic}`
+
+        const timeout = setTimeout(() => {
+          this.pendingRequests.delete(requestId)
+          reject(new Error(`Request timeout: ${requestId}`))
+        }, 15000)
+
+        this.pendingRequests.set(requestId, {
+          resolve: (response: SubscriptionResponse) => {
+            clearTimeout(timeout)
+            resolve(response)
+          },
+          reject: (error: Error) => {
+            clearTimeout(timeout)
+            reject(error)
+          },
+          timeout,
+        })
+
+        this.sendRequest(subscription.subscriptionType, subscription.subscriptionParams)
+          .catch((error) => {
+            this.pendingRequests.delete(requestId)
+            clearTimeout(timeout)
+            reject(error)
+          })
+      })
+
+      if (response.status === 'ok') {
+        subscription.confirmed = true
+        console.log(`Resubscription confirmed: ${subscription.topic}`, response)
+      } else {
+        console.error(`Resubscription failed: ${subscription.topic}`, response)
+      }
     }
   }
 
-  protected log(...args: unknown[]): void {
-    if (WebSocketClientBase.config.debug) {
-      console.log('[WebSocketClient]', ...args)
+  async unsubscribe(listenerId: string, topic?: string | undefined): Promise<void> {
+    for (const subscription of this.subscriptions.values()) {
+      if (subscription.topic === topic && subscription.listeners.has(listenerId)) {
+        subscription.listeners.delete(listenerId)
+        if (subscription.listeners.size === 0) {
+          try {
+            const unsubscribeType = subscription.subscriptionType.replace('subscribe', 'unsubscribe')
+            const unsubscribePayload = subscription.subscriptionParams
+            await this.sendRequest(unsubscribeType, unsubscribePayload)
+          } finally {
+            this.subscriptions.delete(topic)
+          }
+        }
+      }
     }
+  }
+}
+
+export class WebSocketClient<TParams extends object, TBackendData extends object, TData extends object> {
+  protected ws: WebSocketBase
+  protected listeners: Map<string, Set<string>>
+
+  private wsRoute: string = ''
+  private dataMapper: ((data: TBackendData) => TData)
+
+  // dont defaut to identity dataMapper to detect types missmatch (data => data as unknown as TData)
+  constructor(wsRoute: string, dataMapper: ((data: TBackendData) => TData)) {
+    this.wsRoute = wsRoute
+    this.dataMapper = dataMapper
+    this.ws = WebSocketBase.getInstance()
+    this.listeners = new Map<string, Set<string>>()
   }
 
   async subscribe(
-    subscriptionId: string,
+    listenerId: string,
     subscriptionParams: TParams,
     onUpdate: (data: TData) => void,
   ): Promise<string> {
-    const topic = `${this.topicType}:${Object.keys(subscriptionParams)
-      .sort()
-      .map((key) => subscriptionParams[key as keyof TParams])
-      .join(':')}`
+    const topic = `${this.wsRoute}:${buildTopicParams(subscriptionParams)}`
 
-    // Create subscription state (unconfirmed)
-    const subscription: SubscriptionState<TParams, TData> = {
-      id: subscriptionId,
-      topic,
-      onUpdate,
-      confirmed: false,
-      subscriptionType: `${this.topicType}.subscribe`,
-      subscriptionParams: subscriptionParams,
-      updateMessageType: `${this.topicType}.update`,
+    if (this.listeners.has(listenerId)) {
+      this.listeners.get(listenerId)!.add(topic)
+    } else {
+      this.listeners.set(listenerId, new Set([topic]))
     }
 
-    this.subscriptions.set(subscriptionId, subscription as unknown as SubscriptionState)
 
-    // Send subscription request and wait for confirmation
-    await this.__subscribe(subscription as unknown as SubscriptionState)
-    return subscriptionId
+    await this.ws.subscribe(
+      topic,
+      this.wsRoute + '.subscribe',
+      subscriptionParams,
+      listenerId,
+      (backendData: object) => {
+        onUpdate(this.dataMapper(backendData as TBackendData))
+      }
+    )
+
+    return topic
   }
 
-  async unsubscribe(subscriptionId: string): Promise<void> {
-    const subscription = this.subscriptions.get(subscriptionId)
-    if (subscription) {
-      const unsubscribeType = subscription.subscriptionType.replace('subscribe', 'unsubscribe')
-      const unsubscribePayload = subscription.subscriptionParams
-
-      try {
-        await this.sendRequest(unsubscribeType, unsubscribePayload)
-      } finally {
-        this.subscriptions.delete(subscriptionId)
-      }
+  async unsubscribe(listenerId: string, topic?: string | undefined): Promise<void> {
+    if (!this.listeners.has(listenerId)) {
+      return
     }
+    this.listeners.delete(listenerId)
+    await this.ws.unsubscribe(listenerId, topic)
+
   }
 }

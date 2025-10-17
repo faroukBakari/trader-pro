@@ -1,10 +1,10 @@
 # WebSocket Client Implementation
 
-**Status**: ✅ Implemented | **Pattern**: Auto-Generated Clients
+**Status**: ✅ Implemented | **Pattern**: Manual Client Usage with Auto-Generated Types
 
 ## Overview
 
-WebSocket clients are automatically generated from the backend AsyncAPI specification, providing type-safe real-time data streaming.
+WebSocket types are automatically generated from the backend AsyncAPI specification. Clients use `WebSocketClientBase` directly with these generated types for type-safe real-time data streaming.
 
 ## Architecture
 
@@ -18,14 +18,13 @@ Client Layer (Generated Factories)
 Base Layer (WebSocketClientBase)
 ```
 
-## Auto-Generated Clients
+## Auto-Generated Types
 
 ### Generation Process
 
 ```bash
 # Runs automatically via make client-generate
 node scripts/generate-ws-types.mjs      # → ws-types-generated/
-node scripts/generate-ws-client.mjs     # → ws-generated/
 ```
 
 ### Generated Structure
@@ -44,10 +43,6 @@ export interface BarsSubscriptionRequest {
   symbol;
   resolution;
 }
-
-// ws-generated/client.ts
-export function BarsWebSocketClientFactory(): BarsWebSocketInterface;
-export function QuotesWebSocketClientFactory(): QuotesWebSocketInterface;
 ```
 
 ## Usage
@@ -55,10 +50,13 @@ export function QuotesWebSocketClientFactory(): QuotesWebSocketInterface;
 ### Basic Subscription
 
 ```typescript
-import { BarsWebSocketClientFactory } from "@/clients/ws-generated/client";
-import type { Bar } from "@/clients/ws-types-generated";
+import { WebSocketClientBase } from "@/plugins/wsClientBase";
+import type {
+  Bar,
+  BarsSubscriptionRequest,
+} from "@/clients/ws-types-generated";
 
-const client = BarsWebSocketClientFactory();
+const client = new WebSocketClientBase<BarsSubscriptionRequest, Bar>("bars");
 
 // Subscribe to real-time bars
 await client.subscribe({ symbol: "AAPL", resolution: "1" }, (bar: Bar) => {
@@ -106,14 +104,20 @@ await client.dispose();
 ### DatafeedService
 
 ```typescript
-import { BarsWebSocketClientFactory } from "@/clients/ws-generated/client";
-import type { BarsWebSocketInterface } from "@/clients/ws-generated/client";
+import { WebSocketClientBase } from "@/plugins/wsClientBase";
+import type {
+  Bar,
+  BarsSubscriptionRequest,
+} from "@/clients/ws-types-generated";
 
 export class DatafeedService {
-  private wsClient: BarsWebSocketInterface | null = null;
+  private wsClient: WebSocketClientBase<BarsSubscriptionRequest, Bar> | null =
+    null;
 
   constructor() {
-    this.wsClient = BarsWebSocketClientFactory();
+    this.wsClient = new WebSocketClientBase<BarsSubscriptionRequest, Bar>(
+      "bars"
+    );
   }
 
   async subscribeBars(symbolInfo, resolution, onTick, subscribeUID) {
@@ -229,17 +233,23 @@ Abstract interface for different data sources (live/fallback).
 
 ## Adding New Channels
 
-**No manual coding required!**
+**Types are automatically generated!**
 
 1. Add new WebSocket router in backend
 2. Run `make client-generate` in frontend
-3. New client factory automatically available
+3. New types automatically available
 
 ```typescript
-// Automatically generated when backend adds 'trades' channel
-import { TradesWebSocketClientFactory } from "@/clients/ws-generated/client";
+// Types automatically generated when backend adds 'trades' channel
+import { WebSocketClientBase } from "@/plugins/wsClientBase";
+import type {
+  Trade,
+  TradesSubscriptionRequest,
+} from "@/clients/ws-types-generated";
 
-const client = TradesWebSocketClientFactory();
+const client = new WebSocketClientBase<TradesSubscriptionRequest, Trade>(
+  "trades"
+);
 ```
 
 ## Testing
@@ -249,7 +259,9 @@ const client = TradesWebSocketClientFactory();
 ```typescript
 describe("WebSocket Client", () => {
   it("subscribes to bar updates", async () => {
-    const client = BarsWebSocketClientFactory();
+    const client = new WebSocketClientBase<BarsSubscriptionRequest, Bar>(
+      "bars"
+    );
     const callback = vi.fn();
 
     await client.subscribe({ symbol: "AAPL", resolution: "1" }, callback);
