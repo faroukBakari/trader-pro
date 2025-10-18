@@ -104,7 +104,7 @@ if [[ -n "$frontend_files" ]]; then
 
         # Run tests (only if not in CI for speed, includes client generation)
         if ! is_ci; then
-            if ! run_check "Frontend tests" "make test-run" "$repo_root/frontend"; then
+            if ! run_check "Frontend tests" "make test" "$repo_root/frontend"; then
                 failed_checks+=("frontend-tests")
             fi
         fi

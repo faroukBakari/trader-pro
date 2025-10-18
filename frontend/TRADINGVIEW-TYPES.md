@@ -34,65 +34,75 @@ import type {
 ### Core Data Types
 
 #### `Bar`
+
 Represents a single candlestick (OHLC) data point:
+
 ```typescript
 interface Bar {
-  time: number      // Unix timestamp in SECONDS (not milliseconds!)
-  open: number      // Opening price
-  high: number      // High price
-  low: number       // Low price
-  close: number     // Closing price
-  volume?: number   // Optional trading volume
+  time: number // Unix timestamp in SECONDS (not milliseconds!)
+  open: number // Opening price
+  high: number // High price
+  low: number // Low price
+  close: number // Closing price
+  volume?: number // Optional trading volume
 }
 ```
 
 **Important**: `time` must be in seconds, not milliseconds. Use `Date.now() / 1000` or `Math.floor(Date.now() / 1000)`.
 
 #### `ResolutionString`
+
 Type alias for resolution format:
+
 ```typescript
 type ResolutionString = string
 ```
+
 Examples: `"1"` (1 minute), `"5"`, `"15"`, `"60"` (1 hour), `"1D"` (1 day), `"1W"` (1 week), `"1M"` (1 month)
 
 ### Configuration Types
 
 #### `DatafeedConfiguration`
+
 Returned by `onReady()` to configure the datafeed:
+
 ```typescript
 interface DatafeedConfiguration {
-  supported_resolutions?: ResolutionString[]  // List of available resolutions
-  supports_marks?: boolean                    // Whether marks on bars are supported
-  supports_timescale_marks?: boolean          // Whether timescale marks are supported
-  supports_time?: boolean                     // Whether server time is provided
+  supported_resolutions?: ResolutionString[] // List of available resolutions
+  supports_marks?: boolean // Whether marks on bars are supported
+  supports_timescale_marks?: boolean // Whether timescale marks are supported
+  supports_time?: boolean // Whether server time is provided
 }
 ```
 
 #### `LibrarySymbolInfo`
+
 Complete symbol metadata:
+
 ```typescript
 interface LibrarySymbolInfo {
-  name: string                  // Symbol name (e.g., "AAPL")
-  full_name?: string            // Full name including exchange (e.g., "NASDAQ:AAPL")
-  description: string           // Human-readable description
-  type: string                  // Symbol type: "stock", "forex", "crypto", etc.
-  session: string               // Trading hours (e.g., "24x7", "0930-1600")
-  timezone: string              // IANA timezone (e.g., "America/New_York", "Etc/UTC")
-  ticker: string                // Unique ticker identifier
-  exchange: string              // Exchange name
-  listed_exchange: string       // Listed exchange name
-  format: 'price' | 'volume'    // Price display format
-  minmov: number                // Minimum price movement (tick size numerator)
-  pricescale: number            // Price scale (tick size denominator)
-  has_intraday?: boolean        // Whether intraday data is available
-  has_daily?: boolean           // Whether daily data is available
-  supported_resolutions?: ResolutionString[]  // Resolutions for this symbol
-  volume_precision?: number     // Decimal places for volume
+  name: string // Symbol name (e.g., "AAPL")
+  full_name?: string // Full name including exchange (e.g., "NASDAQ:AAPL")
+  description: string // Human-readable description
+  type: string // Symbol type: "stock", "forex", "crypto", etc.
+  session: string // Trading hours (e.g., "24x7", "0930-1600")
+  timezone: string // IANA timezone (e.g., "America/New_York", "Etc/UTC")
+  ticker: string // Unique ticker identifier
+  exchange: string // Exchange name
+  listed_exchange: string // Listed exchange name
+  format: 'price' | 'volume' // Price display format
+  minmov: number // Minimum price movement (tick size numerator)
+  pricescale: number // Price scale (tick size denominator)
+  has_intraday?: boolean // Whether intraday data is available
+  has_daily?: boolean // Whether daily data is available
+  supported_resolutions?: ResolutionString[] // Resolutions for this symbol
+  volume_precision?: number // Decimal places for volume
   data_status?: 'streaming' | 'endofday' | 'delayed_streaming'
 }
 ```
 
 **Price format example**: For a price like `123.45`:
+
 - `minmov = 1`
 - `pricescale = 100`
 - Tick size = `minmov / pricescale = 1 / 100 = 0.01`
@@ -100,22 +110,26 @@ interface LibrarySymbolInfo {
 ### Request/Response Types
 
 #### `PeriodParams`
+
 Parameters for historical data requests:
+
 ```typescript
 interface PeriodParams {
-  from: number              // Start time (Unix timestamp in SECONDS)
-  to: number                // End time (Unix timestamp in SECONDS)
+  from: number // Start time (Unix timestamp in SECONDS)
+  to: number // End time (Unix timestamp in SECONDS)
   firstDataRequest: boolean // Whether this is the first request
-  countBack?: number        // Number of bars to return (countBack mode)
+  countBack?: number // Number of bars to return (countBack mode)
 }
 ```
 
 #### `HistoryMetadata`
+
 Metadata returned with historical bars:
+
 ```typescript
 interface HistoryMetadata {
-  noData: boolean    // Whether there is no data available
-  nextTime?: number  // Next bar time if partial data (Unix timestamp in SECONDS)
+  noData: boolean // Whether there is no data available
+  nextTime?: number // Next bar time if partial data (Unix timestamp in SECONDS)
 }
 ```
 
@@ -142,13 +156,13 @@ interface IDatafeedChartApi {
     userInput: string,
     exchange: string,
     symbolType: string,
-    onResult: SearchSymbolsCallback
+    onResult: SearchSymbolsCallback,
   ): void
 
   resolveSymbol(
     symbolName: string,
     onResolve: ResolveCallback,
-    onError: DatafeedErrorCallback
+    onError: DatafeedErrorCallback,
   ): void
 
   getBars(
@@ -156,7 +170,7 @@ interface IDatafeedChartApi {
     resolution: ResolutionString,
     periodParams: PeriodParams,
     onResult: HistoryCallback,
-    onError: DatafeedErrorCallback
+    onError: DatafeedErrorCallback,
   ): void
 
   subscribeBars(
@@ -164,7 +178,7 @@ interface IDatafeedChartApi {
     resolution: ResolutionString,
     onTick: SubscribeBarsCallback,
     listenerGuid: string,
-    onResetCacheNeededCallback: () => void
+    onResetCacheNeededCallback: () => void,
   ): void
 
   unsubscribeBars(listenerGuid: string): void
@@ -199,7 +213,7 @@ const datafeed: IDatafeedChartApi = {
   resolveSymbol: (
     symbolName: string,
     onResolve: ResolveCallback,
-    _onError: DatafeedErrorCallback
+    _onError: DatafeedErrorCallback,
   ) => {
     const symbolInfo: LibrarySymbolInfo = {
       name: symbolName,
@@ -217,11 +231,11 @@ const datafeed: IDatafeedChartApi = {
     resolution: ResolutionString,
     periodParams: PeriodParams,
     onResult: HistoryCallback,
-    onError: DatafeedErrorCallback
+    onError: DatafeedErrorCallback,
   ) => {
     try {
       const bars: Bar[] = // ... fetch or generate bars
-      onResult(bars, { noData: bars.length === 0 })
+        onResult(bars, { noData: bars.length === 0 })
     } catch (error) {
       onError(error.message)
     }
@@ -234,22 +248,25 @@ const datafeed: IDatafeedChartApi = {
 ## Common Pitfalls
 
 ### ❌ Wrong: Milliseconds for time
+
 ```typescript
 const bar: Bar = {
-  time: Date.now(),  // WRONG! This is milliseconds
+  time: Date.now(), // WRONG! This is milliseconds
   // ...
 }
 ```
 
 ### ✅ Correct: Seconds for time
+
 ```typescript
 const bar: Bar = {
-  time: Math.floor(Date.now() / 1000),  // Correct: seconds
+  time: Math.floor(Date.now() / 1000), // Correct: seconds
   // ...
 }
 ```
 
 ### ❌ Wrong: Missing required fields
+
 ```typescript
 const symbolInfo: LibrarySymbolInfo = {
   name: 'AAPL',
@@ -258,6 +275,7 @@ const symbolInfo: LibrarySymbolInfo = {
 ```
 
 ### ✅ Correct: All required fields
+
 ```typescript
 const symbolInfo: LibrarySymbolInfo = {
   name: 'AAPL',
@@ -277,6 +295,7 @@ const symbolInfo: LibrarySymbolInfo = {
 ## Type Sources
 
 These type definitions are based on:
+
 - **Official Documentation**: https://www.tradingview.com/charting-library-docs/latest/api/
 - **TypeScript Definitions**: `/public/charting_library/datafeed-api.d.ts`
 - **API Reference**: `IDatafeedChartApi` interface documentation
@@ -293,11 +312,13 @@ These type definitions are based on:
 ## File Organization Benefits
 
 ### Before (Single File)
+
 - ❌ `TraderChartContainer.vue`: ~500 lines
 - ❌ Types mixed with component logic
 - ❌ Types not reusable
 
 ### After (Separated)
+
 - ✅ `TraderChartContainer.vue`: ~370 lines (26% smaller)
 - ✅ `tradingview.ts`: ~234 lines (reusable types)
 - ✅ Clear separation of concerns
@@ -308,20 +329,21 @@ These type definitions are based on:
 To add real-time data streaming:
 
 1. Implement `subscribeBars` to accept real-time updates:
+
    ```typescript
    subscribeBars: (
      symbolInfo: LibrarySymbolInfo,
      resolution: ResolutionString,
      onTick: SubscribeBarsCallback,
      listenerGuid: string,
-     onResetCacheNeededCallback: () => void
+     onResetCacheNeededCallback: () => void,
    ) => {
      // Store subscription
      const subscription = {
        symbolInfo,
        resolution,
        onTick,
-       guid: listenerGuid
+       guid: listenerGuid,
      }
 
      // Connect to WebSocket or polling mechanism
@@ -330,6 +352,7 @@ To add real-time data streaming:
    ```
 
 2. Call `onTick` callback when new data arrives:
+
    ```typescript
    function handleNewTick(bar: Bar) {
      subscription.onTick(bar)
@@ -346,10 +369,12 @@ To add real-time data streaming:
 ## Working with TradingView Charting Library in the Frontend
 
 ### Overview
+
 - **Purpose**: Help a developer quickly run, integrate, extend, and debug the TradingView Charting Library located at `frontend/public/charting_library` in the project.
 - **Primary resources**: Official docs, tutorials, tutorial code, and examples — links provided below. Use your MCP web-search server to locate additional pages, follow internal links, and retrieve sample code as needed.
 
 ### Direct Links to Use
+
 - **TradingView GitHub organization**: https://github.com/tradingview
 - **Charting Library Tutorials**: https://www.tradingview.com/charting-library-docs/latest/tutorials/
 - **Charting Library tutorial code repo**: https://github.com/tradingview/charting-library-tutorial
@@ -358,17 +383,20 @@ To add real-time data streaming:
 - **Full API reference**: https://www.tradingview.com/charting-library-docs/latest/api/
 
 ### Recommended Dev Workflow
+
 - Use the matching example from `charting-library-examples` for your framework (React, Vue, Next.js, Svelte, plain HTML, etc.) and adapt container and lifecycle handling.
 - Keep the tutorial repo open as a runnable reference for Datafeed and streaming patterns.
 - During integration, run the chart in debug mode and log Datafeed lifecycle events to trace `getBars` and subscribe/unsubscribe calls.
 - Maintain a local copy of the exact Charting Library release used by examples to avoid API mismatches.
 
 ### Debugging and Common Pitfalls
+
 - **Missing bars or gaps**: Check timezone, resolution mapping, and bar-end timestamps returned by `getBars`.
 - **No live updates**: Verify `subscribeBars` is called with the same symbol/resolution used by `resolveSymbol` and that your stream forwards tick aggregation correctly.
 - **Version mismatch**: Ensure example code and Charting Library version align; overwrite or symlink `frontend/public/charting_library` in examples during local testing.
 
 ### Action Items for You
+
 - **Verify the Charting Library directory** at `frontend/public/charting_library` and list top-level files to confirm the release.
 - **Clone the tutorial repo** https://github.com/tradingview/charting-library-tutorial and the examples repo https://github.com/tradingview/charting-library-examples for runnable references.
 - **Use your MCP web-search server** to search the provided documentation pages, follow internal links for deeper examples, and copy the Datafeed and Broker patterns you need.
@@ -376,6 +404,7 @@ To add real-time data streaming:
 - **Add a debug overlay or console logger** for Datafeed calls and Broker events to speed troubleshooting.
 
 ### Helpful Reference Priorities
+
 1. **Start with Getting started** to confirm hosting and embedding steps: https://www.tradingview.com/charting-library-docs/latest/getting_started/
 2. **Use Tutorials** to implement Datafeed and Broker features step-by-step: https://www.tradingview.com/charting-library-docs/latest/tutorials/
 3. **Consult the API reference** for exact interfaces and TypeScript definitions: https://www.tradingview.com/charting-library-docs/latest/api/
@@ -383,22 +412,31 @@ To add real-time data streaming:
 5. **Use the examples repo** to bootstrap framework-specific integrations: https://github.com/tradingview/charting-library-examples
 
 ### Notes
+
 - Bold labels above highlight key steps and files to check.
 - Use your MCP web-search server to locate any additional pages inside the TradingView docs or GitHub repos, and follow internal links in those pages to find code snippets, changelogs, and versioned artifacts as needed.
 
 ## Trading Features Integration
 
-### Enable Trading Features for TradingView Charting Library
+### Broker Terminal Service
 
-Explore these library docs and feel free to follow links for more details:
+For complete documentation on the broker implementation, see **[BROKER-TERMINAL-SERVICE.md](./BROKER-TERMINAL-SERVICE.md)**.
+
+This includes:
+
+- Full architecture and implementation details
+- TradingView integration patterns
+- Order and position management
+- Testing strategies
+- Future enhancements roadmap
+
+### TradingView Trading Documentation
+
+Official TradingView documentation:
+
 - **Trading concepts**: https://www.tradingview.com/charting-library-docs/latest/trading_terminal/trading-concepts/
 - **IBrokerTerminal API**: https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IBrokerTerminal/
-
-### Broker Terminal Implementation Examples
-
-Explore these broker terminal implementations examples:
-- **Terminal Web Implementation**: https://github.com/FarmaanElahi/terminal-web/blob/main/components/chart/terminal/broker_terminal.ts
-- **Binance Broker Sample**: https://github.com/TargetHit/tradingview-binance/blob/master/broker-sample/src/broker.ts
+- **IBrokerWithoutRealtime API**: https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IBrokerWithoutRealtime/
 
 ## References
 

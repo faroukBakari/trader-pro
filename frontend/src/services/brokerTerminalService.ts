@@ -36,7 +36,7 @@ import { OrderStatus, OrderType, Side, StandardFormatterName } from '@public/tra
  * - Manages orders, positions, and executions using official TradingView types
  * - Follows reference implementation patterns
  */
-export class brokerTerminalService implements IBrokerWithoutRealtime {
+export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly host: IBrokerConnectionAdapterHost
   private readonly datafeed: IDatafeedQuotesApi
 
@@ -58,36 +58,6 @@ export class brokerTerminalService implements IBrokerWithoutRealtime {
     this.datafeed = datafeed
     this.balance = host.factory.createWatchedValue(this.startingBalance)
     this.equity = host.factory.createWatchedValue(this.startingBalance)
-
-    console.log('Mock Broker Service initialized with TradingView types')
-    this.initializeBrokerData()
-  }
-
-  private initializeBrokerData(): void {
-    // Create broker position using actual TradingView Position type
-    const brokerPosition: Position = {
-      id: 'AAPL-POS-1',
-      symbol: 'AAPL',
-      qty: 100,
-      side: Side.Buy,
-      avgPrice: 150.0,
-    }
-    this._positions.set(brokerPosition.id, brokerPosition)
-
-    // Create broker order using actual TradingView Order type
-    const brokerOrder: Order = {
-      id: 'ORDER-1',
-      symbol: 'TSLA',
-      type: OrderType.Limit,
-      side: Side.Buy,
-      qty: 50,
-      status: OrderStatus.Working,
-      limitPrice: 200.0,
-      updateTime: Date.now(),
-    }
-    this._orders.set(brokerOrder.id, brokerOrder)
-
-    console.log('Sample trading data initialized')
   }
 
   // IBrokerTerminal interface implementation
@@ -221,10 +191,13 @@ export class brokerTerminalService implements IBrokerWithoutRealtime {
 
     this._orders.set(orderId, newOrder)
 
+    // Notify TradingView that the order was created
+    this.host.orderUpdate(newOrder)
+
     // Simulate order execution after a short delay
     setTimeout(() => {
       this.simulateOrderExecution(orderId)
-    }, 1000)
+    }, 200)
 
     console.log(`[Broker] Mock order placed: ${orderId}`, newOrder)
     return { orderId }
@@ -244,6 +217,9 @@ export class brokerTerminalService implements IBrokerWithoutRealtime {
     }
     this._orders.set(orderId, filledOrder)
 
+    // Notify TradingView that the order was filled
+    this.host.orderUpdate(filledOrder)
+
     // Create execution record
     const execution: Execution = {
       symbol: order.symbol,
@@ -253,6 +229,7 @@ export class brokerTerminalService implements IBrokerWithoutRealtime {
       time: Date.now(),
     }
     this._executions.push(execution)
+    this.host.executionUpdate(execution)
 
     // Update or create position
     this.updatePosition(order)
@@ -265,14 +242,35 @@ export class brokerTerminalService implements IBrokerWithoutRealtime {
     const existingPosition = this._positions.get(positionId)
 
     if (existingPosition) {
-      // Update existing position
-      const totalQty = existingPosition.qty + (order.side === Side.Buy ? order.qty : -order.qty)
-      const updatedPosition: Position = {
-        ...existingPosition,
-        qty: Math.abs(totalQty),
-        side: totalQty >= 0 ? Side.Buy : Side.Sell,
+      // Calculate net position considering both existing position side and order side
+      // For long positions (Buy side): qty is positive
+      // For short positions (Sell side): qty is negative
+      const existingQty = existingPosition.side === Side.Buy ? existingPosition.qty : -existingPosition.qty
+      const orderQty = order.side === Side.Buy ? order.qty : -order.qty
+      const totalQty = existingQty + orderQty
+
+      // If position is completely closed, remove it
+      if (totalQty === 0) {
+        this._positions.delete(positionId)
+        // Notify TradingView that the position was closed
+        // TradingView expects a position update with 0 qty to close it
+        const closedPosition: Position = {
+          ...existingPosition,
+          qty: 0,
+          side: existingPosition.side,
+        }
+        this.host.positionUpdate(closedPosition)
+      } else {
+        // Update existing position
+        const updatedPosition: Position = {
+          ...existingPosition,
+          qty: Math.abs(totalQty),
+          side: totalQty > 0 ? Side.Buy : Side.Sell,
+        }
+        this._positions.set(positionId, updatedPosition)
+        // Notify TradingView that the position was updated
+        this.host.positionUpdate(updatedPosition)
       }
-      this._positions.set(positionId, updatedPosition)
     } else {
       // Create new position
       const newPosition: Position = {
@@ -283,12 +281,17 @@ export class brokerTerminalService implements IBrokerWithoutRealtime {
         avgPrice: order.avgPrice || order.limitPrice || 100.0,
       }
       this._positions.set(positionId, newPosition)
+      // Notify TradingView that the position was created
+      this.host.positionUpdate(newPosition)
     }
   }
 
   async modifyOrder(order: Order): Promise<void> {
     if (this._orders.has(order.id)) {
-      this._orders.set(order.id, { ...order, updateTime: Date.now() })
+      const updatedOrder = { ...order, updateTime: Date.now() }
+      this._orders.set(order.id, updatedOrder)
+      // Notify TradingView that the order was modified
+      this.host.orderUpdate(updatedOrder)
       console.log(`Order modified: ${order.id}`)
     }
   }
@@ -302,6 +305,8 @@ export class brokerTerminalService implements IBrokerWithoutRealtime {
         updateTime: Date.now(),
       }
       this._orders.set(orderId, cancelledOrder)
+      // Notify TradingView that the order was cancelled
+      this.host.orderUpdate(cancelledOrder)
       console.log(`Order cancelled: ${orderId}`)
     }
   }

@@ -72,7 +72,7 @@ make test     # Run tests
 cd frontend
 make install  # One-time setup
 make dev      # Start dev server
-make test-run # Run tests
+make test # Run tests
 ```
 
 **Note**: Frontend works standalone with mock data when backend unavailable.
@@ -92,7 +92,7 @@ make -f project.mk test-all
 cd backend && make test
 
 # Frontend only
-cd frontend && make test-run
+cd frontend && make test
 
 # Integration tests
 make -f project.mk test-integration
@@ -264,7 +264,7 @@ make lint      # Check code quality
 # Frontend (frontend/Makefile)
 make install   # Install dependencies
 make dev       # Start dev server
-make test-run  # Run tests once
+make test  # Run tests once
 make build     # Production build
 ```
 

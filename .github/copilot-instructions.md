@@ -61,8 +61,11 @@ Adhere to this structured process for all major tasks:
 
 ### 6. External/Internal References 🔗
 
-**General Rule:** Always check existing models and available `makefile` commands first.
-
+**General Rule:**
+Always check existing models and available `makefile` commands first.
 | Context | Internal References | External References |
 | :--- | :--- | :--- |
 | **TradingView API / Models** | `frontend/public/trading_terminal/charting_library.d.ts`, `datafeed-api.d.ts`, `broker-api.d.ts` | https://www.tradingview.com/charting-library-docs/latest/api/ |
+
+**Topic Specific References:** 
+PLAYWRIGHT MCP usage: refer to frontend/TRADER_TERMINAL_UI_USAGE.md

@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 BACKEND_APP_NAME ?= app
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install test test-cov lint lint-check format build clean dev health export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-cov lint lint-check lint-response-models format build clean dev dev-no-debug dev-ci health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
 
 # Default target
 help:
@@ -239,6 +239,23 @@ dev:
 	@echo "✅ Port $(BACKEND_PORT) is available"
 	@echo "Debug server listening on port 5678 (attach debugger to localhost:5678)"
 	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --reload --host 0.0.0.0 --port $(BACKEND_PORT) --log-level info
+
+# Development server without debugger
+dev-no-debug:
+	@echo "Starting backend development server on http://localhost:$(BACKEND_PORT)"
+	@echo "🔍 Checking if backend port is available..."
+	@if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
+		echo "❌ Error: Backend port $(BACKEND_PORT) is already in use!"; \
+		echo ""; \
+		echo "Process using port $(BACKEND_PORT):"; \
+		lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN; \
+		echo ""; \
+		echo "Please stop the existing server or use a different port:"; \
+		echo "  export BACKEND_PORT=<new_port>"; \
+		exit 1; \
+	fi
+	@echo "✅ Port $(BACKEND_PORT) is available"
+	poetry run uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --reload --host 0.0.0.0 --port $(BACKEND_PORT) --log-level info
 
 # CI development server (background)
 dev-ci:

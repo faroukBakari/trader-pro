@@ -72,7 +72,7 @@ Backend tests use FastAPI's TestClient:
 
 ```bash
 cd frontend
-make test-run  # Run once
+make test  # Run once
 make test      # Watch mode
 ```
 
@@ -167,7 +167,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: make install-ci
-      - run: make test-run
+      - run: make test
       - run: make lint
 
   integration:
