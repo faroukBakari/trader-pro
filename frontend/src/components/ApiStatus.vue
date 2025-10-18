@@ -28,19 +28,36 @@
         <div v-if="versionsLoading" class="loading">Loading...</div>
         <div v-else-if="versionsError" class="error">Error: {{ versionsError }}</div>
         <div v-else-if="versionsData" class="success">
-          <p>Current: {{ versionsData.current_version }}</p>
-          <ul>
-            <li v-for="version in versionsData.available_versions" :key="version.version">
-              {{ version.version }} - {{ version.status }}
-              <span v-if="version.deprecation_notice" class="deprecated">(deprecated)</span>
-              <span v-if="version.sunset_date" class="sunset"
-                >sunset: {{ new Date(version.sunset_date).toLocaleDateString() }}</span
-              >
-            </li>
-          </ul>
+          <div class="card-content">
+            <p>Current: {{ versionsData.current_version }}</p>
+            <ul>
+              <li v-for="version in versionsData.available_versions" :key="version.version">
+                {{ version.version }} - {{ version.status }}
+                <span v-if="version.deprecation_notice" class="deprecated">(deprecated)</span>
+                <span v-if="version.sunset_date" class="sunset"
+                  >sunset: {{ new Date(version.sunset_date).toLocaleDateString() }}</span
+                >
+              </li>
+            </ul>
+          </div>
           <p class="docs-link">
             <a :href="versionsData.documentation_url" target="_blank" rel="noopener"
-              >📚 API Documentation</a
+              >📚 REST API Documentation</a
+            >
+          </p>
+        </div>
+      </div>
+
+      <div class="status-item">
+        <h4>WebSocket API</h4>
+        <div class="success">
+          <div class="card-content">
+            <p>Protocol: AsyncAPI 2.4.0</p>
+            <p>Endpoint: /api/v1/ws</p>
+          </div>
+          <p class="docs-link">
+            <a :href="websocketDocsUrl" target="_blank" rel="noopener"
+              >📡 WebSocket Documentation</a
             >
           </p>
         </div>
@@ -68,6 +85,9 @@ const apiService = new ApiService()
 
 // Client type state
 const clientType = ref<'server' | 'mock' | 'unknown'>('unknown')
+
+// WebSocket docs URL
+const websocketDocsUrl = ref(`/api/v1/ws/asyncapi`)
 
 const fetchHealth = async () => {
   healthLoading.value = true
@@ -108,7 +128,7 @@ onMounted(() => {
 
 <style scoped>
 .api-status {
-  max-width: 800px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
 }
@@ -145,7 +165,7 @@ onMounted(() => {
 
 .status-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 20px;
   margin: 20px 0;
 }
@@ -155,11 +175,23 @@ onMounted(() => {
   border-radius: 8px;
   padding: 15px;
   background: #f9f9f9;
+  display: flex;
+  flex-direction: column;
 }
 
 .status-item h4 {
   margin-top: 0;
   color: #333;
+}
+
+.status-item .success {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.card-content {
+  flex: 1;
 }
 
 .loading {
@@ -230,9 +262,16 @@ button:disabled {
   cursor: not-allowed;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   .status-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 1025px) and (max-width: 1400px) {
+  .api-status {
+    max-width: 100%;
+    padding: 20px 40px;
   }
 }
 </style>

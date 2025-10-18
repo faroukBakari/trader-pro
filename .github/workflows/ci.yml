@@ -106,6 +106,12 @@ jobs:
       working-directory: backend
       run: make generate-ws-routers
 
+    - name: Export backend API specs
+      working-directory: backend
+      run: |
+        make export-openapi-spec
+        make export-asyncapi-spec
+
     - name: Install frontend dependencies
       working-directory: frontend
       run: make install-ci
@@ -177,6 +183,12 @@ jobs:
     - name: Generate WebSocket routers
       working-directory: backend
       run: make generate-ws-routers
+
+    - name: Export backend API specs
+      working-directory: backend
+      run: |
+        make export-openapi-spec
+        make export-asyncapi-spec
 
     - name: Install frontend dependencies
       working-directory: frontend

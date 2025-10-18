@@ -8,6 +8,7 @@ describe('ApiStatus', () => {
     expect(wrapper.text()).toContain('API Status')
     expect(wrapper.text()).toContain('Health Check')
     expect(wrapper.text()).toContain('API Versions')
+    expect(wrapper.text()).toContain('WebSocket API')
   })
 
   it('shows loading state initially', async () => {

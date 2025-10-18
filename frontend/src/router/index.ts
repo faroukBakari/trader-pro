@@ -5,8 +5,7 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      name: 'api-status',
-      component: () => import('../views/ApiStatusView.vue'),
+      redirect: '/chart',
     },
     {
       path: '/chart',
