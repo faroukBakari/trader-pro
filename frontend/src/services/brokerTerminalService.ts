@@ -156,20 +156,22 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async symbolInfo(symbol: string): Promise<InstrumentInfo> {
+    const mintick = await this.host.getSymbolMinTick(symbol);
+    const pipSize = mintick; // Pip size can differ from minTick
+    const accountCurrencyRate = 1; // Account currency rate
+    const pointValue = 1; // USD value of 1 point of price
+
     return {
-      description: `Mock instrument for ${symbol}`,
-      currency: 'USD',
-      type: 'stock',
-      minTick: 0.01,
-      pipSize: 1,
-      pipValue: 1,
       qty: {
         min: 1,
-        max: 1000000,
+        max: 1e12,
         step: 1,
-        default: 100,
       },
-    }
+      pipValue: pipSize * pointValue * accountCurrencyRate || 1,
+      pipSize: pipSize,
+      minTick: mintick,
+      description: '',
+    };
   }
 
   async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
