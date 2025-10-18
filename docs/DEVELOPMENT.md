@@ -5,7 +5,7 @@
 ### Prerequisites
 
 - **Python**: 3.11+ with Poetry
-- **Node.js**: 20.19+ or 22.12+ with npm
+- **Node.js**: 22.20+ with npm
 - **Git**: For version control
 - **VS Code**: Recommended (open `trader-pro.code-workspace`)
 
@@ -298,7 +298,7 @@ make ensure-python  # Offers to install Python 3.11+ via pyenv
 
 ```bash
 cd frontend
-make ensure-node  # Offers to install Node.js 20.19+ via nvm
+make ensure-node  # Offers to install Node.js 22.20+ via nvm
 ```
 
 ### Backend Won't Start

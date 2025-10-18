@@ -6,8 +6,22 @@ NVM_SH := $(HOME)/.nvm/nvm.sh
 export NVM_DIR := $(HOME)/.nvm
 
 # Function to run commands with nvm sourced
-define run-with-nvm
+define ensure-node-version
 	@bash -c ' \
+	NODE_VERSION=$$(node --version 2>&1 | grep -oP "\d+\.\d+\.\d+" | head -1 || echo ""); \
+	NODE_MAJOR=$$(echo $$NODE_VERSION | cut -d. -f1); \
+	NODE_MINOR=$$(echo $$NODE_VERSION | cut -d. -f2); \
+	VALID=0; \
+	if [ "$$NODE_MAJOR" -gt 22 ]; then \
+		VALID=1; \
+	elif [ "$$NODE_MAJOR" -eq 22 ] && [ "$$NODE_MINOR" -ge 20 ]; then \
+		VALID=1; \
+	fi; \
+	if [ "$$VALID" -eq 1 ]; then \
+		echo "✓ Node.js $$NODE_VERSION detected (meets requirement 22.20+)"; \
+		$(1); \
+		exit $$?; \
+	fi; \
 	export NVM_DIR="$(NVM_DIR)"; \
 	if [ ! -s "$(NVM_SH)" ]; then \
 		echo "❌ Error: nvm not found at $(NVM_SH)"; \
@@ -29,7 +43,7 @@ define run-with-nvm
 		exit 1; \
 	}; \
 	if ! nvm use 2>/dev/null; then \
-		REQUIRED_VERSION=$$(cat .nvmrc 2>/dev/null || echo "20.19.0"); \
+		REQUIRED_VERSION=$$(cat .nvmrc 2>/dev/null || echo "22.20.0"); \
 		echo "❌ Error: Failed to activate Node.js version from .nvmrc ($$REQUIRED_VERSION)"; \
 		echo ""; \
 		echo "The required Node.js version is not installed."; \
@@ -44,13 +58,12 @@ define run-with-nvm
 	$(1)'
 endef
 
-.PHONY: help ensure-node ensure-node-ci install install-ci lint type-check test build dev clean generate-openapi-client generate-asyncapi-types
+.PHONY: help ensure-node install install-ci lint type-check test build dev clean generate-openapi-client generate-asyncapi-types
 
 # Default target
 help:
 	@echo "Frontend targets:"
-	@echo "  ensure-node     Ensure Node.js 20.19+/22.12+ is installed (offers auto-install)"
-	@echo "  ensure-node-ci  Ensure Node.js 20.19+/22.12+ is installed (CI mode, no prompts)"
+	@echo "  ensure-node     Ensure Node.js 22.20+ is installed (offers auto-install)"
 	@echo "  install         Install frontend dependencies"
 	@echo "  install-ci      Install frontend dependencies for CI"
 	@echo "  generate-openapi-client   Generate REST client from OpenAPI spec"
@@ -62,15 +75,15 @@ help:
 	@echo "  dev             Start frontend development server"
 	@echo "  clean           Clean build artifacts"
 
-# Ensure Node.js 20.19+ or 22.12+ is available
+# Ensure Node.js 22.20+ is available
 ensure-node:
 	@echo "Checking Node.js version..."
 	@bash -c ' \
 	export NVM_DIR="$$HOME/.nvm"; \
 	[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"; \
 	NODE_VERSION=$$(node --version 2>&1 | grep -oP "\d+\.\d+\.\d+" | head -1 || echo ""); \
-	REQUIRED_MIN="20.19.0"; \
-	NODE_TO_INSTALL="20.19.0"; \
+	REQUIRED_MIN="22.20.0"; \
+	NODE_TO_INSTALL="22.20.0"; \
 	if [ -z "$$NODE_VERSION" ]; then \
 		echo "❌ Node.js not found!"; \
 		echo ""; \
@@ -85,7 +98,7 @@ ensure-node:
 				exit 0; \
 			fi; \
 		fi; \
-		echo "Please install Node.js 20.19+ or 22.12+:"; \
+		echo "Please install Node.js 22.20+:"; \
 		echo "  - Using nvm (recommended): nvm install $$NODE_TO_INSTALL && nvm use $$NODE_TO_INSTALL"; \
 		echo "  - Download from: https://nodejs.org/"; \
 		exit 1; \
@@ -95,16 +108,14 @@ ensure-node:
 	VALID=0; \
 	if [ "$$NODE_MAJOR" -gt 22 ]; then \
 		VALID=1; \
-	elif [ "$$NODE_MAJOR" -eq 22 ] && [ "$$NODE_MINOR" -ge 12 ]; then \
-		VALID=1; \
-	elif [ "$$NODE_MAJOR" -eq 20 ] && [ "$$NODE_MINOR" -ge 19 ]; then \
+	elif [ "$$NODE_MAJOR" -eq 22 ] && [ "$$NODE_MINOR" -ge 20 ]; then \
 		VALID=1; \
 	fi; \
 	if [ "$$VALID" -eq 0 ]; then \
-		echo "❌ Node.js $$NODE_VERSION detected (requires 20.19+ or 22.12+)"; \
+		echo "❌ Node.js $$NODE_VERSION detected (requires 22.20+)"; \
 		echo ""; \
 		if command -v nvm >/dev/null 2>&1 || [ "$$(type nvm 2>/dev/null)" ]; then \
-			INSTALLED_VALID=$$(nvm list 2>/dev/null | grep -oE "v(20\\.(19|[2-9][0-9])|2[3-9]\\.[0-9]+|[3-9][0-9]\\.[0-9]+)\\.[0-9]+" | head -1 | cut -c2-); \
+			INSTALLED_VALID=$$(nvm list 2>/dev/null | grep -oE "v(22\\.(2[0-9]|[3-9][0-9])|2[3-9]\\.[0-9]+|[3-9][0-9]\\.[0-9]+)\\.[0-9]+" | head -1 | cut -c2-); \
 			if [ -n "$$INSTALLED_VALID" ]; then \
 				echo "✓ Found existing valid Node.js version: $$INSTALLED_VALID - activating it..."; \
 				nvm use $$INSTALLED_VALID && \
@@ -129,79 +140,25 @@ ensure-node:
 			echo "nvm not found. Install it for automatic Node.js version management:"; \
 			echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash"; \
 			echo ""; \
-			echo "Or install Node.js manually:"; \
+			echo "Or install Node.js 22.20+ manually:"; \
 			echo "  Download from: https://nodejs.org/"; \
 		fi; \
 		exit 1; \
 	else \
-		echo "✓ Node.js $$NODE_VERSION detected (meets requirement 20.19+/22.12+)"; \
-	fi \
-	'
-
-# Ensure Node.js 20.19+ or 22.12+ is available (CI mode - no interactive prompts)
-ensure-node-ci:
-	@echo "Checking Node.js version (CI mode)..."
-	@bash -c ' \
-	export NVM_DIR="$$HOME/.nvm"; \
-	[ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"; \
-	NODE_VERSION=$$(node --version 2>&1 | grep -oP "\d+\.\d+\.\d+" | head -1 || echo ""); \
-	NODE_TO_INSTALL="20.19.0"; \
-	if [ -z "$$NODE_VERSION" ]; then \
-		echo "❌ Node.js not found!"; \
-		if command -v nvm >/dev/null 2>&1 || [ "$$(type nvm 2>/dev/null)" ]; then \
-			echo "Installing Node.js $$NODE_TO_INSTALL via nvm..."; \
-			nvm install $$NODE_TO_INSTALL && \
-			nvm use $$NODE_TO_INSTALL && \
-			echo "✓ Node.js $$NODE_TO_INSTALL installed and activated!" && \
-			exit 0; \
-		fi; \
-		echo "❌ Cannot auto-install Node.js in CI without nvm"; \
-		exit 1; \
-	fi; \
-	NODE_MAJOR=$$(echo $$NODE_VERSION | cut -d. -f1); \
-	NODE_MINOR=$$(echo $$NODE_VERSION | cut -d. -f2); \
-	VALID=0; \
-	if [ "$$NODE_MAJOR" -gt 22 ]; then \
-		VALID=1; \
-	elif [ "$$NODE_MAJOR" -eq 22 ] && [ "$$NODE_MINOR" -ge 12 ]; then \
-		VALID=1; \
-	elif [ "$$NODE_MAJOR" -eq 20 ] && [ "$$NODE_MINOR" -ge 19 ]; then \
-		VALID=1; \
-	fi; \
-	if [ "$$VALID" -eq 0 ]; then \
-		echo "❌ Node.js $$NODE_VERSION detected (requires 20.19+ or 22.12+)"; \
-		if command -v nvm >/dev/null 2>&1 || [ "$$(type nvm 2>/dev/null)" ]; then \
-			INSTALLED_VALID=$$(nvm list 2>/dev/null | grep -oE "v(20\\.(19|[2-9][0-9])|2[3-9]\\.[0-9]+|[3-9][0-9]\\.[0-9]+)\\.[0-9]+" | head -1 | cut -c2-); \
-			if [ -n "$$INSTALLED_VALID" ]; then \
-				echo "✓ Activating existing Node.js version: $$INSTALLED_VALID"; \
-				nvm use $$INSTALLED_VALID && \
-				echo "✓ Node.js $$INSTALLED_VALID activated!" && \
-				exit 0; \
-			else \
-				echo "Installing Node.js $$NODE_TO_INSTALL via nvm..."; \
-				nvm install $$NODE_TO_INSTALL && \
-				nvm use $$NODE_TO_INSTALL && \
-				echo "✓ Node.js $$NODE_TO_INSTALL installed and activated!" && \
-				exit 0; \
-			fi; \
-		fi; \
-		echo "❌ Cannot auto-install Node.js in CI without nvm"; \
-		exit 1; \
-	else \
-		echo "✓ Node.js $$NODE_VERSION detected (meets requirement 20.19+/22.12+)"; \
+		echo "✓ Node.js $$NODE_VERSION detected (meets requirement 22.20+)"; \
 	fi \
 	'
 
 # Dependency management
 install: ensure-node
 	@echo "Installing frontend dependencies..."
-	$(call run-with-nvm,npm install)
+	$(call ensure-node-version,npm install)
 	@echo ""
 	@echo "💡 Tip: Install Git hooks with: make -f ../project.mk install-hooks"
 
-install-ci: ensure-node-ci
+install-ci:
 	@echo "Installing frontend dependencies for CI..."
-	$(call run-with-nvm,npm ci)
+	@npm ci
 
 # Client generation
 generate-openapi-client:
@@ -217,26 +174,26 @@ lint:
 	@echo "Running frontend linting and formatting checks..."
 	@$(MAKE) generate-openapi-client
 	@$(MAKE) generate-asyncapi-types
-	$(call run-with-nvm,npm run lint)
+	$(call ensure-node-version,npm run lint)
 
 # Type checking
 type-check:
 	@echo "Running TypeScript type checking..."
 	@$(MAKE) generate-openapi-client
 	@$(MAKE) generate-asyncapi-types
-	$(call run-with-nvm,npm run type-check)
+	$(call ensure-node-version,npm run type-check)
 
 # Testing
 test:
 	@echo "Running frontend tests..."
 	@$(MAKE) generate-openapi-client
 	@$(MAKE) generate-asyncapi-types
-	$(call run-with-nvm,npm run test:run)
+	$(call ensure-node-version,npm run test:run)
 
 # Build
 build:
 	@echo "Building frontend for production..."
-	$(call run-with-nvm,npm run build)
+	$(call ensure-node-version,npm run build)
 
 # Development server
 dev:
@@ -252,7 +209,7 @@ dev:
 		exit 1; \
 	fi
 	@echo "✅ Port 5173 is available"
-	$(call run-with-nvm,npm run dev)
+	$(call ensure-node-version,npm run dev)
 
 # Cleanup
 clean:
