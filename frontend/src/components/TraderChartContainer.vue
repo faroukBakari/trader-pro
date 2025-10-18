@@ -105,8 +105,23 @@ onMounted(() => {
       library_path: props.libraryPath,
 
       locale: getLanguageFromURL() || 'en',
-      enabled_features: ['use_localstorage_for_settings'],
-      disabled_features: ['study_templates'],
+      theme: 'dark',
+      // enabled_features: ['use_localstorage_for_settings'],
+      disabled_features: ['study_templates', 'adaptive_logo'], // , 'use_localstorage_for_settings'
+
+      // System color scheme overrides
+      overrides: {
+        'paneProperties.backgroundGradientStartColor': '#131722',
+        'paneProperties.backgroundGradientEndColor': '#131722',
+        // 'paneProperties.background': '#181818',
+        // 'paneProperties.backgroundType': 'solid',
+        // 'paneProperties.vertGridProperties.color': '#282828',
+        // 'paneProperties.horzGridProperties.color': '#282828',
+        // 'paneProperties.crossHairProperties.color': 'rgba(84, 84, 84, 0.65)',
+        // 'scalesProperties.backgroundColor': '#222222',
+        // 'scalesProperties.lineColor': 'rgba(84, 84, 84, 0.48)',
+        // 'scalesProperties.textColor': 'rgba(235, 235, 235, 0.64)',
+      },
       // enabled_features: ['study_templates'], // Removed since we're disabling study_templates
       // charts_storage_url: props.chartsStorageUrl,
       // charts_storage_api_version: props.chartsStorageApiVersion as AvailableSaveloadVersions,
@@ -192,36 +207,36 @@ onUnmounted(() => {
 <style scoped>
 .trader-chart-container {
   margin: 0 auto;
-  padding: 20px;
-  border: 1px solid #ddd;
+  padding: 10px;
+  border: 1px solid rgba(84, 84, 84, 0.48);
   border-radius: 8px;
-  background: #f9f9f9;
+  background: #181818;
 }
 
 .trader-chart-container h3 {
   margin-top: 0;
-  color: #333;
+  color: rgba(235, 235, 235, 0.64);
   text-align: center;
 }
 
 .chart-wrapper {
-  background: #fff;
+  background: transparent;
   border-radius: 4px;
   overflow: hidden;
 }
 
 .TVChartContainer {
   width: 100%;
-  height: 600px;
+  height: 800px;
 }
 
 @media (max-width: 768px) {
   .trader-chart-container {
-    padding: 15px;
+    padding: 10px;
   }
 
   .TVChartContainer {
-    height: 300px;
+    height: 400px;
   }
 }
 </style>
