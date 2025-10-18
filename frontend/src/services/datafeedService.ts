@@ -539,8 +539,7 @@ class QuotesWsFallback implements QuoteWsInterface {
   }
 }
 
-
-
+// TODO: add unit tests based on fallback specs
 export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private apiAdapter: ApiInterface
   private apiFallback: ApiInterface

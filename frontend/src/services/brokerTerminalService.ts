@@ -10,22 +10,26 @@ import type {
   AccountManagerInfo,
   AccountMetainfo,
   ActionMetaInfo,
-  ConnectionStatus,
+  ConnectionStatus as ConnectionStatusType,
+  DatafeedQuoteValues,
+  DefaultContextMenuActionsParams,
   Execution,
   IBrokerConnectionAdapterHost,
   IBrokerWithoutRealtime, // IBrokerTerminal,
   IDatafeedQuotesApi,
   InstrumentInfo,
   INumberFormatter,
+  IsTradableResult,
   IWatchedValue,
   Order,
+  PlacedOrder,
   PlaceOrderResult,
   Position,
   PreOrder,
-  TradeContext,
+  TradeContext
 } from '@public/trading_terminal'
 
-import { OrderStatus, OrderType, Side, StandardFormatterName } from '@public/trading_terminal'
+import { ConnectionStatus, OrderStatus, Side, StandardFormatterName } from '@public/trading_terminal'
 
 /**
  * Mock Broker Terminal Service using actual TradingView types
@@ -37,11 +41,11 @@ import { OrderStatus, OrderType, Side, StandardFormatterName } from '@public/tra
  * - Follows reference implementation patterns
  */
 export class BrokerTerminalService implements IBrokerWithoutRealtime {
-  private readonly host: IBrokerConnectionAdapterHost
-  private readonly datafeed: IDatafeedQuotesApi
+  private readonly _host: IBrokerConnectionAdapterHost
+  private readonly _quotesProvider: IDatafeedQuotesApi
 
   // Private data management using actual TradingView types
-  private readonly _orders = new Map<string, Order>()
+  private readonly _orderById = new Map<string, Order>()
   private readonly _positions = new Map<string, Position>()
   private readonly _executions: Execution[] = []
   private readonly balance: IWatchedValue<number>
@@ -54,8 +58,8 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly startingBalance = 100000
 
   constructor(host: IBrokerConnectionAdapterHost, datafeed: IDatafeedQuotesApi) {
-    this.host = host
-    this.datafeed = datafeed
+    this._host = host
+    this._quotesProvider = datafeed
     this.balance = host.factory.createWatchedValue(this.startingBalance)
     this.equity = host.factory.createWatchedValue(this.startingBalance)
   }
@@ -144,7 +148,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async orders(): Promise<Order[]> {
-    return Array.from(this._orders.values())
+    return Array.from(this._orderById.values())
   }
 
   async positions(): Promise<Position[]> {
@@ -156,7 +160,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async symbolInfo(symbol: string): Promise<InstrumentInfo> {
-    const mintick = await this.host.getSymbolMinTick(symbol);
+    const mintick = await this._host.getSymbolMinTick(symbol);
     const pipSize = mintick; // Pip size can differ from minTick
     const accountCurrencyRate = 1; // Account currency rate
     const pointValue = 1; // USD value of 1 point of price
@@ -175,155 +179,167 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
-    console.log('[Broker] Attempting to place order:', order)
-
     const orderId = `ORDER-${this.orderCounter++}`
 
-    const newOrder: Order = {
+    const newOrder: PlacedOrder = {
       id: orderId,
       symbol: order.symbol,
-      type: order.type || OrderType.Market,
-      side: order.side || Side.Buy,
-      qty: order.qty || 100,
+      type: order.type,
+      side: order.side,
+      qty: order.qty,
       status: OrderStatus.Working,
       limitPrice: order.limitPrice,
       stopPrice: order.stopPrice,
-      updateTime: Date.now(),
+      takeProfit: order.takeProfit,
+      stopLoss: order.stopLoss,
     }
 
-    this._orders.set(orderId, newOrder)
+    this._orderById.set(orderId, newOrder)
+    this._host.orderUpdate(newOrder)
+    await this.simulateOrderExecution(orderId)
+    console.log(`Order created: ${orderId}`)
 
-    // Notify TradingView that the order was created
-    this.host.orderUpdate(newOrder)
-
-    // Simulate order execution after a short delay
-    setTimeout(() => {
-      this.simulateOrderExecution(orderId)
-    }, 200)
-
-    console.log(`[Broker] Mock order placed: ${orderId}`, newOrder)
-    return { orderId }
+    return Promise.resolve({ orderId }); // Match reference implementation
   }
 
-  private simulateOrderExecution(orderId: string): void {
-    const order = this._orders.get(orderId)
+  private async simulateOrderExecution(orderId: string): Promise<void> {
+    const order = this._orderById.get(orderId)
     if (!order) return
 
-    // Mark order as filled
-    const filledOrder: Order = {
-      ...order,
-      status: OrderStatus.Filled,
-      filledQty: order.qty,
-      avgPrice: order.limitPrice || 100.0, // Use limit price or default
-      updateTime: Date.now(),
+    if (!order.limitPrice) {
+      // Get current market price from quotes provider as fallback
+      try {
+        const quote: DatafeedQuoteValues = await new Promise((resolve, reject) => {
+          this._quotesProvider.getQuotes([order.symbol], (quotes) => {
+            if (quotes && quotes.length > 0 && quotes[0].s === 'ok') {
+              resolve(quotes[0].v)
+            } else {
+              reject(new Error('No quote available'))
+            }
+          }, (error) => {
+            reject(error)
+          })
+        })
+
+        // Use bid/ask price based on order side for market execution
+        const executionPrice = order.side === Side.Buy ? quote.ask : quote.bid
+        order.limitPrice = executionPrice
+      } catch (error) {
+        console.warn('Failed to get quote, using default price:', error)
+        // Fallback to a default price if quote fetch fails
+        order.limitPrice = 100
+      }
     }
-    this._orders.set(orderId, filledOrder)
 
-    // Notify TradingView that the order was filled
-    this.host.orderUpdate(filledOrder)
+    // Simulate order execution delay
+    await new Promise(resolve => setTimeout(resolve, 200))
 
-    // Create execution record
-    const execution: Execution = {
-      symbol: order.symbol,
-      price: filledOrder.avgPrice || 100.0,
-      qty: order.qty,
-      side: order.side,
-      time: Date.now(),
+    if (order.limitPrice) {
+      // Create execution record
+      const execution: Execution = {
+        symbol: order.symbol,
+        price: order.limitPrice,
+        qty: order.qty,
+        side: order.side,
+        time: Date.now(),
+      }
+      this._executions.push(execution)
+      this._host.executionUpdate(execution)
+      this.updatePosition(execution)
+
+      // Mark order as filled
+      const filledOrder: Order = {
+        ...order,
+        status: OrderStatus.Filled,
+        filledQty: order.qty,
+        avgPrice: order.limitPrice, // Use limit price or default
+        updateTime: Date.now(),
+      }
+      this._orderById.set(orderId, filledOrder)
+
+      // Notify TradingView that the order was filled
+      this._host.orderUpdate(filledOrder)
+
+      console.log(`Order executed: ${orderId}`, execution)
     }
-    this._executions.push(execution)
-    this.host.executionUpdate(execution)
-
-    // Update or create position
-    this.updatePosition(order)
-
-    console.log(`Order executed: ${orderId}`, execution)
   }
 
-  private updatePosition(order: Order): void {
-    const positionId = `${order.symbol}-POS`
+  private updatePosition(execution: Execution): void {
+    const positionId = `${execution.symbol}-POS`
     const existingPosition = this._positions.get(positionId)
 
     if (existingPosition) {
-      // Calculate net position considering both existing position side and order side
-      // For long positions (Buy side): qty is positive
-      // For short positions (Sell side): qty is negative
-      const existingQty = existingPosition.side === Side.Buy ? existingPosition.qty : -existingPosition.qty
-      const orderQty = order.side === Side.Buy ? order.qty : -order.qty
-      const totalQty = existingQty + orderQty
+      const newPositionQty = Math.abs((existingPosition.side * existingPosition.qty) + (execution.side * execution.qty))
 
-      // If position is completely closed, remove it
-      if (totalQty === 0) {
-        this._positions.delete(positionId)
-        // Notify TradingView that the position was closed
-        // TradingView expects a position update with 0 qty to close it
-        const closedPosition: Position = {
-          ...existingPosition,
-          qty: 0,
-          side: existingPosition.side,
-        }
-        this.host.positionUpdate(closedPosition)
+      if (newPositionQty > 0) {
+        const newPositionSide = (existingPosition.side * existingPosition.qty) + (execution.side * execution.qty) > 0 ? Side.Buy : Side.Sell
+        existingPosition.avgPrice = ((existingPosition.side * existingPosition.avgPrice * existingPosition.qty) + (execution.side * execution.price * execution.qty)) / newPositionQty
+        existingPosition.side = newPositionSide
       } else {
-        // Update existing position
-        const updatedPosition: Position = {
-          ...existingPosition,
-          qty: Math.abs(totalQty),
-          side: totalQty > 0 ? Side.Buy : Side.Sell,
-        }
-        this._positions.set(positionId, updatedPosition)
-        // Notify TradingView that the position was updated
-        this.host.positionUpdate(updatedPosition)
+        this._positions.delete(positionId)
       }
+
+      existingPosition.qty = newPositionQty
+      this._host.positionUpdate(existingPosition)
     } else {
       // Create new position
       const newPosition: Position = {
         id: positionId,
-        symbol: order.symbol,
-        qty: order.qty,
-        side: order.side,
-        avgPrice: order.avgPrice || order.limitPrice || 100.0,
+        symbol: execution.symbol,
+        qty: execution.qty,
+        side: execution.side,
+        avgPrice: execution.price,
       }
       this._positions.set(positionId, newPosition)
-      // Notify TradingView that the position was created
-      this.host.positionUpdate(newPosition)
+      this._host.positionUpdate(newPosition)
     }
   }
 
-  async modifyOrder(order: Order): Promise<void> {
-    if (this._orders.has(order.id)) {
-      const updatedOrder = { ...order, updateTime: Date.now() }
-      this._orders.set(order.id, updatedOrder)
-      // Notify TradingView that the order was modified
-      this.host.orderUpdate(updatedOrder)
-      console.log(`Order modified: ${order.id}`)
-    }
+  async modifyOrder(order: Order, confirmId?: string): Promise<void> {
+    const originalOrder = this._orderById.get(confirmId ?? order.id)
+    if (!originalOrder) return
+
+    // Only update specific fields, not entire order
+    originalOrder.qty = order.qty
+    originalOrder.limitPrice = order.limitPrice
+    originalOrder.stopPrice = order.stopPrice
+
+    this._host.orderUpdate(originalOrder)
+    await this.simulateOrderExecution(originalOrder.id)
+    console.log(`Order modified: ${originalOrder.id}`)
   }
 
   async cancelOrder(orderId: string): Promise<void> {
-    const order = this._orders.get(orderId)
+    const order = this._orderById.get(orderId)
     if (order) {
       const cancelledOrder: Order = {
         ...order,
         status: OrderStatus.Canceled,
         updateTime: Date.now(),
       }
-      this._orders.set(orderId, cancelledOrder)
+      this._orderById.set(orderId, cancelledOrder)
       // Notify TradingView that the order was cancelled
-      this.host.orderUpdate(cancelledOrder)
+      this._host.orderUpdate(cancelledOrder)
       console.log(`Order cancelled: ${orderId}`)
     }
   }
 
-  async chartContextMenuActions(context: TradeContext): Promise<ActionMetaInfo[]> {
-    return this.host.defaultContextMenuActions(context)
+  // Fix chartContextMenuActions
+  async chartContextMenuActions(
+    context: TradeContext,
+    options?: DefaultContextMenuActionsParams
+  ): Promise<ActionMetaInfo[]> {
+    return this._host.defaultContextMenuActions(context, options)
   }
 
-  async isTradable(): Promise<boolean> {
-    // All symbols are tradable in our mock
+  // Fix isTradable signature
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async isTradable(symbol: string): Promise<boolean | IsTradableResult> {
     return true
   }
 
   async formatter(symbol: string, alignToMinMove: boolean): Promise<INumberFormatter> {
-    return this.host.defaultFormatter(symbol, alignToMinMove)
+    return this._host.defaultFormatter(symbol, alignToMinMove)
   }
 
   currentAccount(): AccountId {
@@ -338,7 +354,8 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   //   console.log('Mock realtime subscription stopped for symbol:', symbol)
   // }
 
-  connectionStatus(): ConnectionStatus {
-    return 1 // Connected status
+  // Fix connectionStatus
+  connectionStatus(): ConnectionStatusType {
+    return ConnectionStatus.Connected
   }
 }

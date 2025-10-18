@@ -2,7 +2,7 @@
 
 ## Problem
 
-The `make dev` and other npm-related commands fail because they don't source nvm, causing Node.js 18.16.0 to be used instead of 20.19.0.
+The `make dev` and other npm-related commands fail because they don't source nvm, causing the wrong Node.js version to be used instead of 22.20.0.
 
 ## Root Cause
 
@@ -77,17 +77,17 @@ Define a Make function that wraps npm commands.
 
 ```makefile
 # Helper to run npm with correct Node.js version
-define run-with-nvm
+define ensure-node-version
 	@bash -c 'export NVM_DIR="$$HOME/.nvm"; [ -s "$$NVM_DIR/nvm.sh" ] && . "$$NVM_DIR/nvm.sh"; nvm use 2>/dev/null || true; $(1)'
 endef
 
 dev:
 	@echo "Starting frontend development server..."
-	$(call run-with-nvm,npm run dev)
+	$(call ensure-node-version,npm run dev)
 
 build:
 	@echo "Building frontend for production..."
-	$(call run-with-nvm,npm run build)
+	$(call ensure-node-version,npm run build)
 ```
 
 **Benefits:**
@@ -173,16 +173,16 @@ Scripts that run npm or node commands:
 cd frontend
 
 # Test each command
-make ensure-node    # Should activate Node 20.19.0
-make dev            # Should use Node 20.19.0
-make build          # Should use Node 20.19.0
-make lint           # Should use Node 20.19.0
-make type-check     # Should use Node 20.19.0
-make test       # Should use Node 20.19.0
-make client-generate # Should use Node 20.19.0
+make ensure-node    # Should activate Node 22.20.0
+make dev            # Should use Node 22.20.0
+make build          # Should use Node 22.20.0
+make lint           # Should use Node 22.20.0
+make type-check     # Should use Node 22.20.0
+make test       # Should use Node 22.20.0
+make client-generate # Should use Node 22.20.0
 
 # Verify Node version in each
-./scripts/with-nvm.sh node --version  # Should show v20.19.0
+./scripts/with-nvm.sh node --version  # Should show v22.20.0
 ```
 
 ## Alternative: Global Solution (Optional Enhancement)

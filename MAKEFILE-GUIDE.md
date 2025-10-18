@@ -90,8 +90,7 @@ Located in `frontend/Makefile`:
 cd frontend
 
 # Development
-make ensure-node     # Check Node.js 20.19+/22.12+ (offers auto-install with confirmation)
-make ensure-node-ci  # Check Node.js 20.19+/22.12+ (CI mode, auto-installs without prompts)
+make ensure-node     # Check Node.js 22.20+ (offers auto-install with confirmation)
 make install        # Install dependencies (auto-installs Node.js if needed)
 make install-ci     # Install dependencies for CI (npm ci)
 make dev            # Start development server (checks port first)

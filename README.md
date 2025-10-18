@@ -24,7 +24,7 @@ A modern full-stack trading platform with FastAPI backend and Vue.js frontend. F
 ### Prerequisites
 
 - Python 3.11 with Poetry
-- Node.js 20+ with npm
+- Node.js 22.20+ with npm
 - Git
 - **VS Code**: Recommended for best TypeScript/Python experience
 
@@ -174,7 +174,7 @@ The project uses GitHub Actions for continuous integration:
 
 - **Framework**: Vue 3 + Composition API + TypeScript
 - **Build**: Vite 7+ (fast ES build tool)
-- **Dependencies**: npm with Node.js 20+
+- **Dependencies**: npm with Node.js 22.20+
 - **Testing**: Vitest + Vue Test Utils + jsdom
 - **Code Quality**: ESLint + Prettier + pre-commit hooks
 
