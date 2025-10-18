@@ -5,6 +5,9 @@
 
 set -e
 
+# Create a new process group so we can track all child processes
+set -m
+
 # Environment configuration
 export BACKEND_PORT="${BACKEND_PORT:-8000}"
 export VITE_API_URL="${VITE_API_URL:-http://localhost:$BACKEND_PORT}"
@@ -50,8 +53,55 @@ FRONTEND_PID=""
 OPENAPI_WATCHER_PID=""
 ASYNCAPI_WATCHER_PID=""
 WS_WATCHER_PID=""
+SCRIPT_PGID=$$  # Store our process group ID
 
 print_step "🚀 Starting full-stack development environment..."
+
+# Helper function to get all processes in our process group
+get_process_group_pids() {
+    # Get all PIDs in our process group, excluding the current script
+    ps -o pid= -g "$SCRIPT_PGID" 2>/dev/null | grep -v "^[[:space:]]*$$[[:space:]]*$" || true
+}
+
+# Helper function to get all descendant PIDs of a given PID (recursive)
+get_descendant_pids() {
+    local parent_pid=$1
+    local pids=""
+    
+    # Get direct children
+    local children=$(pgrep -P "$parent_pid" 2>/dev/null || true)
+    
+    for child in $children; do
+        # Add this child
+        pids="$pids $child"
+        # Recursively get this child's descendants
+        local descendants=$(get_descendant_pids "$child")
+        pids="$pids $descendants"
+    done
+    
+    echo "$pids"
+}
+
+# Helper function to safely kill a process and all its descendants
+kill_process_tree() {
+    local pid=$1
+    local signal=${2:-TERM}
+    
+    if [ -z "$pid" ]; then
+        return
+    fi
+    
+    # Get all descendant PIDs
+    local all_pids=$(get_descendant_pids "$pid")
+    all_pids="$all_pids $pid"
+    
+    # Kill all descendants and the parent
+    for p in $all_pids; do
+        if is_process_running "$p"; then
+            kill -"$signal" "$p" 2>/dev/null || true
+        fi
+    done
+}
 
 # Step 0: Check ports availability before doing anything
 print_step "0. Checking port availability..."
@@ -80,67 +130,60 @@ print_success "Ports $BACKEND_PORT and $FRONTEND_PORT are available"
 cleanup() {
     print_step "🛑 Shutting down full-stack development environment..."
 
-    # Kill all child processes in our process group
+    # First, kill tracked PIDs and their descendants using SIGTERM
     if [ ! -z "$FRONTEND_PID" ]; then
         print_step "Stopping frontend server and its children (PID: $FRONTEND_PID)..."
-        # Kill the entire process group
-        pkill -P $FRONTEND_PID 2>/dev/null || true
-        kill -TERM $FRONTEND_PID 2>/dev/null || true
+        kill_process_tree "$FRONTEND_PID" "TERM"
     fi
 
     if [ ! -z "$BACKEND_PID" ]; then
         print_step "Stopping backend server and its children (PID: $BACKEND_PID)..."
-        # Kill the entire process group
-        pkill -P $BACKEND_PID 2>/dev/null || true
-        kill -TERM $BACKEND_PID 2>/dev/null || true
+        kill_process_tree "$BACKEND_PID" "TERM"
     fi
 
     if [ ! -z "$WS_WATCHER_PID" ]; then
         print_step "Stopping WebSocket router watcher (PID: $WS_WATCHER_PID)..."
-        pkill -P $WS_WATCHER_PID 2>/dev/null || true
-        kill -TERM $WS_WATCHER_PID 2>/dev/null || true
+        kill_process_tree "$WS_WATCHER_PID" "TERM"
     fi
 
     if [ ! -z "$OPENAPI_WATCHER_PID" ]; then
         print_step "Stopping OpenAPI watcher (PID: $OPENAPI_WATCHER_PID)..."
-        kill -TERM $OPENAPI_WATCHER_PID 2>/dev/null || true
+        kill_process_tree "$OPENAPI_WATCHER_PID" "TERM"
     fi
 
     if [ ! -z "$ASYNCAPI_WATCHER_PID" ]; then
         print_step "Stopping AsyncAPI watcher (PID: $ASYNCAPI_WATCHER_PID)..."
-        kill -TERM $ASYNCAPI_WATCHER_PID 2>/dev/null || true
+        kill_process_tree "$ASYNCAPI_WATCHER_PID" "TERM"
     fi
 
-    ##############################
-
+    # Wait for graceful shutdown
     sleep 2
 
-    # Kill all child processes in our process group
-    if is_process_running "$FRONTEND_PID"; then
-        kill -KILL $FRONTEND_PID 2>/dev/null || true
+    # Now kill any remaining processes in our process group (including orphaned/daemon processes)
+    print_step "Cleaning up any remaining processes in process group..."
+    local remaining_pids=$(get_process_group_pids)
+    
+    if [ ! -z "$remaining_pids" ]; then
+        print_step "Found remaining processes, sending SIGTERM..."
+        for pid in $remaining_pids; do
+            if is_process_running "$pid"; then
+                kill -TERM "$pid" 2>/dev/null || true
+            fi
+        done
+        
+        sleep 2
+        
+        # Force kill any stubborn processes
+        remaining_pids=$(get_process_group_pids)
+        if [ ! -z "$remaining_pids" ]; then
+            print_step "Force killing stubborn processes..."
+            for pid in $remaining_pids; do
+                if is_process_running "$pid"; then
+                    kill -KILL "$pid" 2>/dev/null || true
+                fi
+            done
+        fi
     fi
-
-    if is_process_running "$BACKEND_PID"; then
-        kill -KILL $BACKEND_PID 2>/dev/null || true
-    fi
-
-    if is_process_running "$WS_WATCHER_PID"; then
-        kill -KILL $WS_WATCHER_PID 2>/dev/null || true
-    fi
-
-    if is_process_running "$OPENAPI_WATCHER_PID"; then
-        kill -KILL $OPENAPI_WATCHER_PID 2>/dev/null || true
-    fi
-
-    if is_process_running "$ASYNCAPI_WATCHER_PID"; then
-        kill -KILL $ASYNCAPI_WATCHER_PID 2>/dev/null || true
-    fi
-
-    ##############################
-
-    # Clean up any remaining uvicorn and vite processes
-    pkill -f "uvicorn trading_api.main:" 2>/dev/null || true
-    pkill -f "vite" 2>/dev/null || true
 
     print_success "All processes stopped. Environment cleaned up."
     exit 0
