@@ -5,7 +5,7 @@
       <h2>Page Not Found</h2>
       <p>The page you are looking for doesn't exist or has been moved.</p>
       <div class="actions">
-        <router-link to="/" class="btn btn-primary">Go to API Status</router-link>
+        <router-link to="/" class="btn btn-primary">Go to Chart</router-link>
         <button @click="goBack" class="btn btn-secondary">Go Back</button>
       </div>
     </div>

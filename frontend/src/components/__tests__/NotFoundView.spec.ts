@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { createRouter, createWebHistory } from 'vue-router'
 import NotFoundView from '@/views/NotFoundView.vue'
+import { mount } from '@vue/test-utils'
+import { describe, expect, it } from 'vitest'
+import { createRouter, createWebHistory } from 'vue-router'
 
 // Create a simple mock router
 const router = createRouter({
@@ -23,7 +23,7 @@ describe('NotFoundView', () => {
     expect(wrapper.text()).toContain('404')
     expect(wrapper.text()).toContain('Page Not Found')
     expect(wrapper.text()).toContain("The page you are looking for doesn't exist or has been moved")
-    expect(wrapper.text()).toContain('Go to API Status')
+    expect(wrapper.text()).toContain('Go to Chart')
     expect(wrapper.text()).toContain('Go Back')
   })
 
@@ -50,7 +50,7 @@ describe('NotFoundView', () => {
     expect(actionButtons.exists()).toBe(true)
 
     // Check that there are action elements (router-link and button)
-    expect(actionButtons.html()).toContain('Go to API Status')
+    expect(actionButtons.html()).toContain('Go to Chart')
     expect(actionButtons.html()).toContain('Go Back')
   })
 })

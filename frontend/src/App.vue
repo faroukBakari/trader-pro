@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
+import ApiStatus from '@/components/ApiStatus.vue'
 </script>
 
 <template>
@@ -16,6 +17,10 @@ import { RouterView } from 'vue-router'
     <main>
       <RouterView />
     </main>
+
+    <footer>
+      <ApiStatus />
+    </footer>
   </div>
 </template>
 
@@ -24,6 +29,9 @@ import { RouterView } from 'vue-router'
   max-width: 1000px;
   margin: 0 auto;
   padding: 0 20px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 header {
@@ -57,7 +65,13 @@ header {
 }
 
 main {
-  min-height: calc(100vh - 200px);
+  flex: 1;
+}
+
+footer {
+  margin-top: auto;
+  padding: 2rem 0;
+  border-top: 2px solid #e0e0e0;
 }
 
 @media (max-width: 768px) {
