@@ -10,6 +10,6 @@ import TraderChartContainer from '@/components/TraderChartContainer.vue'
 
 <style scoped>
 main {
-  padding: 20px;
+  padding: 0;
 }
 </style>

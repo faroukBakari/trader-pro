@@ -26,7 +26,7 @@ import ApiStatus from '@/components/ApiStatus.vue'
 
 <style scoped>
 #app-container {
-  max-width: 1000px;
+  max-width: 1600px;
   margin: 0 auto;
   padding: 0 20px;
   min-height: 100vh;
@@ -69,9 +69,9 @@ main {
 }
 
 footer {
-  margin-top: auto;
-  padding: 2rem 0;
-  border-top: 2px solid #e0e0e0;
+  margin-top: 1rem;
+  padding: 0.5rem 0;
+  border-top: 1px solid #e0e0e0;
 }
 
 @media (max-width: 768px) {

@@ -130,11 +130,11 @@ onMounted(() => {
 .api-status {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 10px;
 }
 
 .client-type-indicator {
-  margin-bottom: 20px;
+  margin-bottom: 10px;
 }
 
 .client-type {
@@ -166,14 +166,14 @@ onMounted(() => {
 .status-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-  margin: 20px 0;
+  gap: 10px;
+  margin: 10px 0;
 }
 
 .status-item {
   border: 1px solid #ddd;
   border-radius: 8px;
-  padding: 15px;
+  padding: 10px;
   background: #f9f9f9;
   display: flex;
   flex-direction: column;
