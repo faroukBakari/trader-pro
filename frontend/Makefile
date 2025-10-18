@@ -7,10 +7,44 @@ export NVM_DIR := $(HOME)/.nvm
 
 # Function to run commands with nvm sourced
 define run-with-nvm
-	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; $(1)'
+	@bash -c ' \
+	export NVM_DIR="$(NVM_DIR)"; \
+	if [ ! -s "$(NVM_SH)" ]; then \
+		echo "❌ Error: nvm not found at $(NVM_SH)"; \
+		echo ""; \
+		echo "Please install nvm:"; \
+		echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash"; \
+		echo ""; \
+		echo "Then restart your shell or run:"; \
+		echo "  source ~/.nvm/nvm.sh"; \
+		exit 1; \
+	fi; \
+	. "$(NVM_SH)" || { \
+		echo "❌ Error: Failed to source nvm from $(NVM_SH)"; \
+		echo ""; \
+		echo "Please check your nvm installation:"; \
+		echo "  1. Verify nvm.sh exists: ls -la $(NVM_SH)"; \
+		echo "  2. Try sourcing manually: source $(NVM_SH)"; \
+		echo "  3. Reinstall nvm if needed"; \
+		exit 1; \
+	}; \
+	if ! nvm use 2>/dev/null; then \
+		REQUIRED_VERSION=$$(cat .nvmrc 2>/dev/null || echo "20.19.0"); \
+		echo "❌ Error: Failed to activate Node.js version from .nvmrc ($$REQUIRED_VERSION)"; \
+		echo ""; \
+		echo "The required Node.js version is not installed."; \
+		echo ""; \
+		echo "Please install it with:"; \
+		echo "  nvm install $$REQUIRED_VERSION"; \
+		echo "  nvm use $$REQUIRED_VERSION"; \
+		echo ""; \
+		echo "Or run: make ensure-node"; \
+		exit 1; \
+	fi; \
+	$(1)'
 endef
 
-.PHONY: help ensure-node ensure-node-ci install install-ci lint type-check test test-run build dev clean generate-openapi-client generate-asyncapi-types
+.PHONY: help ensure-node ensure-node-ci install install-ci lint type-check test build dev clean generate-openapi-client generate-asyncapi-types
 
 # Default target
 help:
@@ -23,8 +57,7 @@ help:
 	@echo "  generate-asyncapi-types   Generate WebSocket types from AsyncAPI spec"
 	@echo "  lint            Run frontend linting and formatting checks"
 	@echo "  type-check      Run TypeScript type checking"
-	@echo "  test            Run frontend tests in watch mode"
-	@echo "  test-run        Run frontend tests once (for CI)"
+	@echo "  test            Run frontend tests once"
 	@echo "  build           Build frontend for production"
 	@echo "  dev             Start frontend development server"
 	@echo "  clean           Clean build artifacts"
@@ -195,16 +228,10 @@ type-check:
 
 # Testing
 test:
-	@echo "Running frontend tests in watch mode..."
-	@$(MAKE) generate-openapi-client
-	@$(MAKE) generate-asyncapi-types
-	$(call run-with-nvm,npm run test:unit)
-
-test-run:
 	@echo "Running frontend tests..."
 	@$(MAKE) generate-openapi-client
 	@$(MAKE) generate-asyncapi-types
-	$(call run-with-nvm,npm run test:unit)
+	$(call run-with-nvm,npm run test:run)
 
 # Build
 build:

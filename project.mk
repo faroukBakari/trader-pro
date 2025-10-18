@@ -113,7 +113,7 @@ test-all:
 	@echo "[2/2] Frontend tests (with client generation)"
 	@echo "========================================"
 	@echo "Note: Client generation happens automatically before tests"
-	make -C frontend test-run
+	make -C frontend test
 	@echo ""
 	@echo "✓ All tests completed successfully!"
 

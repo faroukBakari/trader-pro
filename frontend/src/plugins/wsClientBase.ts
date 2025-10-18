@@ -55,9 +55,10 @@ export class WebSocketBase {
     reconnect: true,
     maxReconnectAttempts: 5,
     reconnectDelay: 1000,
-    debug: true,
+    debug: false,
     wsUrl: '/api/v1/ws', // TODO: make configurable
   }
+  protected logger: Console
   protected ws: WebSocket | null = null
   protected wsCnxPromise: Promise<void> | null = null
   protected pendingRequests = new Map<
@@ -73,7 +74,9 @@ export class WebSocketBase {
   // dont defaut to identity dataMapper to detect types missmatch (data => data as unknown as TData)
   private static instance: WebSocketBase | null = null
 
-  private constructor() { }
+  private constructor() {
+    this.logger = this.config.debug ? console : { log: () => { }, error: () => { } } as Console
+  }
 
   static getInstance(): WebSocketBase {
     if (!WebSocketBase.instance) {
@@ -86,33 +89,33 @@ export class WebSocketBase {
     if (!this.wsCnxPromise) {
       this.wsCnxPromise = new Promise((resolve, reject) => {
         try {
-          console.log('Connecting to', this.config.wsUrl)
+          this.logger.log('Connecting to', this.config.wsUrl)
           this.ws = new WebSocket(this.config.wsUrl)
 
           this.ws.onerror = async (error) => {
-            console.log('Error:', error)
+            this.logger.log('Error:', error)
             reject(error)
           }
 
           this.ws.onclose = async (event) => {
-            console.log('Connection closed:', event)
+            this.logger.log('Connection closed:', event)
             reject(new Error('WebSocket closed'))
           }
 
           this.ws.onopen = () => {
-            console.log('Connected')
+            this.logger.log('Connected')
 
             this.ws!.onmessage = (event) => {
               this.handleMessage(event)
             }
 
             this.ws!.onerror = async (error) => {
-              console.log('Error:', error)
+              this.logger.log('Error:', error)
               setTimeout(() => this.resubscribeAll(), 0)
             }
 
             this.ws!.onclose = async (event) => {
-              console.log('Connection closed:', event)
+              this.logger.log('Connection closed:', event)
               setTimeout(() => this.resubscribeAll(), 0)
             }
             setTimeout(() => (this.wsCnxPromise = null), 0)
@@ -133,7 +136,7 @@ export class WebSocketBase {
       try {
         await this.__socketConnect()
       } catch (error) {
-        console.log('Connection error:', error)
+        this.logger.log('Connection error:', error)
         await new Promise(resolve => setTimeout(resolve, 2000))
       }
     }
@@ -147,7 +150,7 @@ export class WebSocketBase {
     await this.connect()
     const message = JSON.stringify({ type, payload })
     this.ws!.send(message)
-    console.log('Sent:', type, payload)
+    this.logger.log('Sent:', type, payload)
   }
 
   private handleMessage(event: MessageEvent): void {
@@ -159,7 +162,7 @@ export class WebSocketBase {
         const update = payload as DataFeed
         this.routeUpdateMessage(update)
       } else {
-        console.log('Received:', type, payload)
+        this.logger.log('Received:', type, payload)
         if (type.endsWith('.response')) {
           if (type.replace(/.response$/, '').endsWith('.subscribe')) {
             const subResponse = payload as SubscriptionResponse
@@ -169,15 +172,15 @@ export class WebSocketBase {
               this.pendingRequests.delete(requestId)
               pendingRequest.resolve(subResponse)
             } else {
-              console.error('Cannot find request Id:', requestId)
+              this.logger.error('Cannot find request Id:', requestId)
             }
           }
         } else {
-          console.error('Unknown message type:', type)
+          this.logger.error('Unknown message type:', type)
         }
       }
     } catch (error) {
-      console.error('Failed to parse message:', error)
+      this.logger.error('Failed to parse message:', error)
     }
   }
 
@@ -189,7 +192,7 @@ export class WebSocketBase {
             onUpdate(data.payload)
           }
         } catch (error) {
-          console.error('Error in subscription onUpdate:', error)
+          this.logger.error('Error in subscription onUpdate:', error)
         }
       }
     }
@@ -260,16 +263,16 @@ export class WebSocketBase {
         }
 
         subscription.confirmed = true
-        console.log(`Subscription confirmed: ${subscription.topic}`, response)
+        this.logger.log(`Subscription confirmed: ${subscription.topic}`, response)
         return subscription
       } catch (error) {
-        console.error('Subscription error:', error)
+        this.logger.error('Subscription error:', error)
         await new Promise(resolve => setTimeout(resolve, 2000))
       }
   }
 
   private async resubscribeAll(): Promise<void> {
-    console.log('Resubscribing to all active subscriptions...')
+    this.logger.log('Resubscribing to all active subscriptions...')
 
     await new Promise(resolve => setTimeout(resolve, 2000))
 
@@ -312,9 +315,9 @@ export class WebSocketBase {
 
       if (response.status === 'ok') {
         subscription.confirmed = true
-        console.log(`Resubscription confirmed: ${subscription.topic}`, response)
+        this.logger.log(`Resubscription confirmed: ${subscription.topic}`, response)
       } else {
-        console.error(`Resubscription failed: ${subscription.topic}`, response)
+        this.logger.error(`Resubscription failed: ${subscription.topic}`, response)
       }
     }
   }

@@ -311,7 +311,7 @@
       {
         "label": "frontend-test",
         "type": "shell",
-        "command": "make test-run",
+        "command": "make test",
         "options": {
           "cwd": "./frontend"
         },

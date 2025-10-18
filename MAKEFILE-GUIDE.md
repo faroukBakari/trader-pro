@@ -98,7 +98,7 @@ make dev            # Start development server (checks port first)
 
 # Testing
 make test         # Run tests in watch mode
-make test-run     # Run tests once (for CI)
+make test     # Run tests once (for CI)
 
 # Code Quality
 make lint         # Run ESLint and Prettier checks
@@ -123,7 +123,7 @@ The GitHub Actions workflow (`.github/workflows/ci.yml`) uses these Makefiles ex
 - run: make install-ci
 - run: make lint
 - run: make type-check
-- run: make test-run
+- run: make test
 - run: make build
 ```
 

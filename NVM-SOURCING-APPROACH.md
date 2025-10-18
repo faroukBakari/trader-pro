@@ -134,7 +134,7 @@ All targets that run npm commands:
 - `lint` → use wrapper
 - `type-check` → use wrapper
 - `test` → use wrapper
-- `test-run` → use wrapper
+- `test` → use wrapper
 - `build` → use wrapper
 - `dev` → use wrapper
 
@@ -163,7 +163,7 @@ Scripts that run npm or node commands:
    - `make build`
    - `make lint`
    - `make type-check`
-   - `make test-run`
+   - `make test`
    - `make client-generate`
 6. ✅ Update documentation
 
@@ -178,7 +178,7 @@ make dev            # Should use Node 20.19.0
 make build          # Should use Node 20.19.0
 make lint           # Should use Node 20.19.0
 make type-check     # Should use Node 20.19.0
-make test-run       # Should use Node 20.19.0
+make test       # Should use Node 20.19.0
 make client-generate # Should use Node 20.19.0
 
 # Verify Node version in each
