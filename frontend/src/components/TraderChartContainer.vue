@@ -151,6 +151,7 @@ onMounted(() => {
             // supportDOM: false,
             supportOrdersHistory: false,
             // supportEquity: true,
+            supportModifyOrderPreview: true,
           },
         },
       }),
