@@ -1,8 +1,10 @@
 /**
- * Mock Broker Terminal Service for testing TradingView Trading Platform
+ * Broker Terminal Service for TradingView Trading Platform
  *
- * Refactored to use actual TradingView library types instead of custom interfaces.
- * Following patterns from reference implementation for proper type management.
+ * This service acts as an adapter between TradingView's broker interface
+ * and our broker client implementations (fallback mock or real backend).
+ * It delegates broker operations to the injected client while managing
+ * TradingView-specific concerns like host notifications and UI configuration.
  */
 
 import type {
@@ -15,14 +17,13 @@ import type {
   DefaultContextMenuActionsParams,
   Execution,
   IBrokerConnectionAdapterHost,
-  IBrokerWithoutRealtime, // IBrokerTerminal,
+  IBrokerWithoutRealtime,
   IDatafeedQuotesApi,
   InstrumentInfo,
   INumberFormatter,
   IsTradableResult,
   IWatchedValue,
   Order,
-  PlacedOrder,
   PlaceOrderResult,
   Position,
   PreOrder,
@@ -31,40 +32,310 @@ import type {
 
 import { ConnectionStatus, OrderStatus, Side, StandardFormatterName } from '@public/trading_terminal'
 
+// ============================================================================
+// BROKER CLIENT INTERFACE
+// ============================================================================
+
 /**
- * Mock Broker Terminal Service using actual TradingView types
+ * Broker client interface
+ * Contract that all broker clients (fallback, real backend) must implement
  *
- * Features:
- * - Uses private readonly properties for data management
- * - Implements proper IBrokerTerminal interface
- * - Manages orders, positions, and executions using official TradingView types
- * - Follows reference implementation patterns
+ * This interface defines the core broker operations that both the mock fallback client
+ * and the real backend client must support. It ensures type-safe communication and
+ * allows for seamless switching between mock and real implementations.
  */
-export class BrokerTerminalService implements IBrokerWithoutRealtime {
+export interface IBrokerClient {
+  // Order operations
+  placeOrder(order: PreOrder): Promise<PlaceOrderResult>
+  modifyOrder(order: Order, confirmId?: string): Promise<void>
+  cancelOrder(orderId: string): Promise<void>
+  getOrders(): Promise<Order[]>
+
+  // Position operations
+  getPositions(): Promise<Position[]>
+
+  // Execution operations
+  getExecutions(symbol: string): Promise<Execution[]>
+
+  // Account operations
+  getAccountInfo(): Promise<AccountMetainfo>
+}
+
+// ============================================================================
+// FALLBACK CLIENT (MOCK IMPLEMENTATION)
+// ============================================================================
+
+/**
+ * Fallback broker client with mock implementation
+ * Implements the broker interface contract for offline development
+ *
+ * This client provides a complete mock implementation of broker functionality,
+ * simulating order execution, position management, and trade history.
+ * It uses private members and methods to encapsulate the mock logic,
+ * following the same patterns as the original brokerTerminalService.
+ */
+class BrokerFallbackClient implements IBrokerClient {
   private readonly _host: IBrokerConnectionAdapterHost
   private readonly _quotesProvider: IDatafeedQuotesApi
 
-  // Private data management using actual TradingView types
+  // Private state management
   private readonly _orderById = new Map<string, Order>()
   private readonly _positions = new Map<string, Position>()
   private readonly _executions: Execution[] = []
-  private readonly balance: IWatchedValue<number>
-  private readonly equity: IWatchedValue<number>
 
   // Counters and account info
   private orderCounter = 1
   private readonly accountId: AccountId = 'DEMO-001' as AccountId
   private readonly accountName = 'Demo Trading Account'
-  private readonly startingBalance = 100000
 
   constructor(host: IBrokerConnectionAdapterHost, datafeed: IDatafeedQuotesApi) {
     this._host = host
     this._quotesProvider = datafeed
+  }
+
+  // Public API methods (interface contract)
+
+  async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
+    const orderId = `ORDER-${this.orderCounter++}`
+
+    const newOrder: Order = {
+      id: orderId,
+      symbol: order.symbol,
+      type: order.type,
+      side: order.side,
+      qty: order.qty,
+      status: OrderStatus.Working,
+      limitPrice: order.limitPrice,
+      stopPrice: order.stopPrice,
+      takeProfit: order.takeProfit,
+      stopLoss: order.stopLoss,
+    }
+
+    this._orderById.set(orderId, newOrder)
+    this._host.orderUpdate(newOrder)
+
+    // Simulate execution asynchronously
+    await this.simulateOrderExecution(orderId)
+
+    console.log(`[FallbackClient] Order created: ${orderId}`)
+
+    return { orderId }
+  }
+
+  async modifyOrder(order: Order, confirmId?: string): Promise<void> {
+    const originalOrder = this._orderById.get(confirmId ?? order.id)
+    if (!originalOrder) {
+      console.warn(`[FallbackClient] Order not found: ${confirmId ?? order.id}`)
+      return
+    }
+
+    // Only update specific fields, not entire order
+    originalOrder.qty = order.qty
+    originalOrder.limitPrice = order.limitPrice
+    originalOrder.stopPrice = order.stopPrice
+
+    this._host.orderUpdate(originalOrder)
+
+    // Re-simulate execution for modified order
+    await this.simulateOrderExecution(originalOrder.id)
+
+    console.log(`[FallbackClient] Order modified: ${originalOrder.id}`)
+  }
+
+  async cancelOrder(orderId: string): Promise<void> {
+    const order = this._orderById.get(orderId)
+    if (!order) {
+      console.warn(`[FallbackClient] Order not found: ${orderId}`)
+      return
+    }
+
+    const cancelledOrder: Order = {
+      ...order,
+      status: OrderStatus.Canceled,
+      updateTime: Date.now(),
+    }
+
+    this._orderById.set(orderId, cancelledOrder)
+    this._host.orderUpdate(cancelledOrder)
+
+    console.log(`[FallbackClient] Order cancelled: ${orderId}`)
+  }
+
+  async getOrders(): Promise<Order[]> {
+    return Array.from(this._orderById.values())
+  }
+
+  async getPositions(): Promise<Position[]> {
+    return Array.from(this._positions.values())
+  }
+
+  async getExecutions(symbol: string): Promise<Execution[]> {
+    return this._executions.filter((exec) => exec.symbol === symbol)
+  }
+
+  async getAccountInfo(): Promise<AccountMetainfo> {
+    return {
+      id: this.accountId as AccountId,
+      name: this.accountName,
+    }
+  }
+
+  // Private methods (mock logic)
+
+  private async simulateOrderExecution(orderId: string): Promise<void> {
+    const order = this._orderById.get(orderId)
+    if (!order) return
+
+    // Determine execution price
+    if (!order.limitPrice) {
+      try {
+        const quote: DatafeedQuoteValues = await new Promise((resolve, reject) => {
+          this._quotesProvider.getQuotes(
+            [order.symbol],
+            (quotes) => {
+              if (quotes && quotes.length > 0 && quotes[0].s === 'ok') {
+                resolve(quotes[0].v)
+              } else {
+                reject(new Error('No quote available'))
+              }
+            },
+            (error) => {
+              reject(error)
+            }
+          )
+        })
+
+        // Use bid/ask price based on order side for market execution
+        order.limitPrice = order.side === Side.Buy ? quote.ask : quote.bid
+      } catch (error) {
+        console.warn('[FallbackClient] Failed to get quote, using default price:', error)
+        // Fallback to a default price if quote fetch fails
+        order.limitPrice = 100
+      }
+    }
+
+    // Simulate execution delay
+    await new Promise((resolve) => setTimeout(resolve, 200))
+
+    if (order.limitPrice) {
+      // Create execution record
+      const execution: Execution = {
+        symbol: order.symbol,
+        price: order.limitPrice,
+        qty: order.qty,
+        side: order.side,
+        time: Date.now(),
+      }
+
+      this._executions.push(execution)
+      this._host.executionUpdate(execution)
+
+      // Update position
+      this.updatePosition(execution)
+
+      // Mark order as filled
+      const filledOrder: Order = {
+        ...order,
+        status: OrderStatus.Filled,
+        filledQty: order.qty,
+        avgPrice: order.limitPrice,
+        updateTime: Date.now(),
+      }
+
+      this._orderById.set(orderId, filledOrder)
+      this._host.orderUpdate(filledOrder)
+
+      console.log(`[FallbackClient] Order executed: ${orderId}`, execution)
+    }
+  }
+
+  private updatePosition(execution: Execution): void {
+    const positionId = `${execution.symbol}-POS`
+    const existingPosition = this._positions.get(positionId)
+
+    if (existingPosition) {
+      // Calculate new position quantity considering sides
+      const newPositionQty = Math.abs(
+        existingPosition.side * existingPosition.qty + execution.side * execution.qty
+      )
+
+      if (newPositionQty > 0) {
+        // Determine new position side
+        const newPositionSide =
+          existingPosition.side * existingPosition.qty + execution.side * execution.qty > 0
+            ? Side.Buy
+            : Side.Sell
+
+        // Calculate new average price
+        existingPosition.avgPrice =
+          (existingPosition.side * existingPosition.avgPrice * existingPosition.qty +
+            execution.side * execution.price * execution.qty) /
+          newPositionQty
+
+        existingPosition.side = newPositionSide
+        existingPosition.qty = newPositionQty
+        this._host.positionUpdate(existingPosition)
+      } else {
+        // Position closed - set qty to 0 before notification
+        existingPosition.qty = 0
+        this._host.positionUpdate(existingPosition)
+        this._positions.delete(positionId)
+      }
+    } else {
+      // Create new position
+      const newPosition: Position = {
+        id: positionId,
+        symbol: execution.symbol,
+        qty: execution.qty,
+        side: execution.side,
+        avgPrice: execution.price,
+      }
+
+      this._positions.set(positionId, newPosition)
+      this._host.positionUpdate(newPosition)
+    }
+  }
+}
+
+// ============================================================================
+// BROKER TERMINAL SERVICE
+// ============================================================================
+
+/**
+ * Broker Terminal Service using client delegation pattern
+ *
+ * Features:
+ * - Delegates broker operations to IBrokerClient interface
+ * - Manages TradingView host notifications
+ * - Provides account manager UI configuration
+ * - Supports both mock (fallback) and real backend clients
+ */
+export class BrokerTerminalService implements IBrokerWithoutRealtime {
+  private readonly _host: IBrokerConnectionAdapterHost
+  private readonly _quotesProvider: IDatafeedQuotesApi
+  private readonly _client: IBrokerClient
+
+  // UI state (managed by service, not client)
+  private readonly balance: IWatchedValue<number>
+  private readonly equity: IWatchedValue<number>
+  private readonly startingBalance = 100000
+
+  constructor(
+    host: IBrokerConnectionAdapterHost,
+    datafeed: IDatafeedQuotesApi,
+    client?: IBrokerClient // Optional: defaults to fallback
+  ) {
+    this._host = host
+    this._quotesProvider = datafeed
+    this._client = client ?? new BrokerFallbackClient(host, datafeed)
+
+    // Initialize UI state
     this.balance = host.factory.createWatchedValue(this.startingBalance)
     this.equity = host.factory.createWatchedValue(this.startingBalance)
   }
 
-  // IBrokerTerminal interface implementation
+  // IBrokerWithoutRealtime interface implementation
+
   accountManagerInfo(): AccountManagerInfo {
     return {
       accountTitle: 'Mock Trading Account',
@@ -139,31 +410,27 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async accountsMetainfo(): Promise<AccountMetainfo[]> {
-    return [
-      {
-        id: this.accountId as AccountId, // TradingView uses complex AccountId type
-        name: this.accountName,
-      },
-    ]
+    const accountInfo = await this._client.getAccountInfo()
+    return [accountInfo]
   }
 
   async orders(): Promise<Order[]> {
-    return Array.from(this._orderById.values())
+    return this._client.getOrders()
   }
 
   async positions(): Promise<Position[]> {
-    return Array.from(this._positions.values())
+    return this._client.getPositions()
   }
 
   async executions(symbol: string): Promise<Execution[]> {
-    return this._executions.filter((exec) => exec.symbol === symbol)
+    return this._client.getExecutions(symbol)
   }
 
   async symbolInfo(symbol: string): Promise<InstrumentInfo> {
-    const mintick = await this._host.getSymbolMinTick(symbol);
-    const pipSize = mintick; // Pip size can differ from minTick
-    const accountCurrencyRate = 1; // Account currency rate
-    const pointValue = 1; // USD value of 1 point of price
+    const mintick = await this._host.getSymbolMinTick(symbol)
+    const pipSize = mintick // Pip size can differ from minTick
+    const accountCurrencyRate = 1 // Account currency rate
+    const pointValue = 1 // USD value of 1 point of price
 
     return {
       qty: {
@@ -175,152 +442,44 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
       pipSize: pipSize,
       minTick: mintick,
       description: '',
-    };
+    }
   }
 
   async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
-    const orderId = `ORDER-${this.orderCounter++}`
+    // Delegate to client
+    const result = await this._client.placeOrder(order)
 
-    const newOrder: PlacedOrder = {
-      id: orderId,
-      symbol: order.symbol,
-      type: order.type,
-      side: order.side,
-      qty: order.qty,
-      status: OrderStatus.Working,
-      limitPrice: order.limitPrice,
-      stopPrice: order.stopPrice,
-      takeProfit: order.takeProfit,
-      stopLoss: order.stopLoss,
+    // Notify TradingView host about updates
+    const orders = await this._client.getOrders()
+    const placedOrder = orders.find((o) => o.id === result.orderId)
+    if (placedOrder) {
+      this._host.orderUpdate(placedOrder)
     }
 
-    this._orderById.set(orderId, newOrder)
-    this._host.orderUpdate(newOrder)
-    await this.simulateOrderExecution(orderId)
-    console.log(`Order created: ${orderId}`)
-
-    return Promise.resolve({ orderId }); // Match reference implementation
-  }
-
-  private async simulateOrderExecution(orderId: string): Promise<void> {
-    const order = this._orderById.get(orderId)
-    if (!order) return
-
-    if (!order.limitPrice) {
-      // Get current market price from quotes provider as fallback
-      try {
-        const quote: DatafeedQuoteValues = await new Promise((resolve, reject) => {
-          this._quotesProvider.getQuotes([order.symbol], (quotes) => {
-            if (quotes && quotes.length > 0 && quotes[0].s === 'ok') {
-              resolve(quotes[0].v)
-            } else {
-              reject(new Error('No quote available'))
-            }
-          }, (error) => {
-            reject(error)
-          })
-        })
-
-        // Use bid/ask price based on order side for market execution
-        const executionPrice = order.side === Side.Buy ? quote.ask : quote.bid
-        order.limitPrice = executionPrice
-      } catch (error) {
-        console.warn('Failed to get quote, using default price:', error)
-        // Fallback to a default price if quote fetch fails
-        order.limitPrice = 100
-      }
-    }
-
-    // Simulate order execution delay
-    await new Promise(resolve => setTimeout(resolve, 200))
-
-    if (order.limitPrice) {
-      // Create execution record
-      const execution: Execution = {
-        symbol: order.symbol,
-        price: order.limitPrice,
-        qty: order.qty,
-        side: order.side,
-        time: Date.now(),
-      }
-      this._executions.push(execution)
-      this._host.executionUpdate(execution)
-      this.updatePosition(execution)
-
-      // Mark order as filled
-      const filledOrder: Order = {
-        ...order,
-        status: OrderStatus.Filled,
-        filledQty: order.qty,
-        avgPrice: order.limitPrice, // Use limit price or default
-        updateTime: Date.now(),
-      }
-      this._orderById.set(orderId, filledOrder)
-
-      // Notify TradingView that the order was filled
-      this._host.orderUpdate(filledOrder)
-
-      console.log(`Order executed: ${orderId}`, execution)
-    }
-  }
-
-  private updatePosition(execution: Execution): void {
-    const positionId = `${execution.symbol}-POS`
-    const existingPosition = this._positions.get(positionId)
-
-    if (existingPosition) {
-      const newPositionQty = Math.abs((existingPosition.side * existingPosition.qty) + (execution.side * execution.qty))
-
-      if (newPositionQty > 0) {
-        const newPositionSide = (existingPosition.side * existingPosition.qty) + (execution.side * execution.qty) > 0 ? Side.Buy : Side.Sell
-        existingPosition.avgPrice = ((existingPosition.side * existingPosition.avgPrice * existingPosition.qty) + (execution.side * execution.price * execution.qty)) / newPositionQty
-        existingPosition.side = newPositionSide
-      } else {
-        this._positions.delete(positionId)
-      }
-
-      existingPosition.qty = newPositionQty
-      this._host.positionUpdate(existingPosition)
-    } else {
-      // Create new position
-      const newPosition: Position = {
-        id: positionId,
-        symbol: execution.symbol,
-        qty: execution.qty,
-        side: execution.side,
-        avgPrice: execution.price,
-      }
-      this._positions.set(positionId, newPosition)
-      this._host.positionUpdate(newPosition)
-    }
+    return result
   }
 
   async modifyOrder(order: Order, confirmId?: string): Promise<void> {
-    const originalOrder = this._orderById.get(confirmId ?? order.id)
-    if (!originalOrder) return
+    // Delegate to client
+    await this._client.modifyOrder(order, confirmId)
 
-    // Only update specific fields, not entire order
-    originalOrder.qty = order.qty
-    originalOrder.limitPrice = order.limitPrice
-    originalOrder.stopPrice = order.stopPrice
-
-    this._host.orderUpdate(originalOrder)
-    await this.simulateOrderExecution(originalOrder.id)
-    console.log(`Order modified: ${originalOrder.id}`)
+    // Notify TradingView host about updates
+    const orders = await this._client.getOrders()
+    const modifiedOrder = orders.find((o) => o.id === (confirmId ?? order.id))
+    if (modifiedOrder) {
+      this._host.orderUpdate(modifiedOrder)
+    }
   }
 
   async cancelOrder(orderId: string): Promise<void> {
-    const order = this._orderById.get(orderId)
-    if (order) {
-      const cancelledOrder: Order = {
-        ...order,
-        status: OrderStatus.Canceled,
-        updateTime: Date.now(),
-      }
-      this._orderById.set(orderId, cancelledOrder)
-      // Notify TradingView that the order was cancelled
+    // Delegate to client
+    await this._client.cancelOrder(orderId)
+
+    // Notify TradingView host about updates
+    const orders = await this._client.getOrders()
+    const cancelledOrder = orders.find((o) => o.id === orderId)
+    if (cancelledOrder) {
       this._host.orderUpdate(cancelledOrder)
-      console.log(`Order cancelled: ${orderId}`)
     }
   }
 
@@ -343,16 +502,11 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   currentAccount(): AccountId {
-    return this.accountId
+    // Get account ID from client
+    // For now, return a default value synchronously
+    // In a real implementation, this could be cached from accountsMetainfo()
+    return 'DEMO-001' as AccountId
   }
-
-  // subscribeRealtime(symbol: string): void {
-  //   console.log('Mock realtime subscription started for symbol:', symbol)
-  // }
-
-  // unsubscribeRealtime(symbol: string): void {
-  //   console.log('Mock realtime subscription stopped for symbol:', symbol)
-  // }
 
   // Fix connectionStatus
   connectionStatus(): ConnectionStatusType {
