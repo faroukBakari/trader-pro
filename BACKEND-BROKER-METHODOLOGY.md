@@ -222,52 +222,92 @@ class AccountMetainfo(BaseModel):
 
 **File**: `backend/src/trading_api/api/broker.py`
 
-Create REST endpoints with **empty implementations** (pass only):
+Create REST endpoints with **empty implementations** (NotImplementedError stubs). All routes MUST include `summary` and `operation_id` parameters:
 
 ```python
 from fastapi import APIRouter
 from typing import List
+from pydantic import BaseModel
 from trading_api.models.broker import (
     PreOrder, PlacedOrder, Position, Execution,
     PlaceOrderResult, AccountMetainfo
 )
 
-router = APIRouter(prefix="/api/v1/broker", tags=["broker"])
+class SuccessResponse(BaseModel):
+    """Generic success response for operations that don't return data"""
+    success: bool = True
 
-@router.post("/orders", response_model=PlaceOrderResult)
-async def place_order(order: PreOrder) -> PlaceOrderResult:
-    """Place a new order"""
-    pass  # 👈 Empty stub
+router = APIRouter(prefix="/broker", tags=["broker"])  # Note: /broker only, main.py adds /api/v1
 
-@router.put("/orders/{order_id}", response_model=None)
-async def modify_order(order_id: str, order: PlacedOrder) -> None:
+@router.post(
+    "/orders",
+    response_model=PlaceOrderResult,
+    summary="Place a new order",
+    operation_id="placeOrder",
+)
+async def placeOrder(order: PreOrder) -> PlaceOrderResult:
+    """Place a new order in the trading system"""
+    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
+
+@router.put(
+    "/orders/{order_id}",
+    response_model=SuccessResponse,
+    summary="Modify an existing order",
+    operation_id="modifyOrder",
+)
+async def modifyOrder(order_id: str, order: PreOrder) -> SuccessResponse:
     """Modify an existing order"""
-    pass  # 👈 Empty stub
+    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
 
-@router.delete("/orders/{order_id}", response_model=None)
-async def cancel_order(order_id: str) -> None:
+@router.delete(
+    "/orders/{order_id}",
+    response_model=SuccessResponse,
+    summary="Cancel an order",
+    operation_id="cancelOrder",
+)
+async def cancelOrder(order_id: str) -> SuccessResponse:
     """Cancel an order"""
-    pass  # 👈 Empty stub
+    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
 
-@router.get("/orders", response_model=List[PlacedOrder])
-async def get_orders() -> List[PlacedOrder]:
+@router.get(
+    "/orders",
+    response_model=List[PlacedOrder],
+    summary="Get all orders",
+    operation_id="getOrders",
+)
+async def getOrders() -> List[PlacedOrder]:
     """Get all orders"""
-    pass  # 👈 Empty stub
+    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
 
-@router.get("/positions", response_model=List[Position])
-async def get_positions() -> List[Position]:
+@router.get(
+    "/positions",
+    response_model=List[Position],
+    summary="Get all positions",
+    operation_id="getPositions",
+)
+async def getPositions() -> List[Position]:
     """Get all positions"""
-    pass  # 👈 Empty stub
+    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
 
-@router.get("/executions/{symbol}", response_model=List[Execution])
-async def get_executions(symbol: str) -> List[Execution]:
-    """Get executions for a symbol"""
-    pass  # 👈 Empty stub
+@router.get(
+    "/executions/{symbol}",
+    response_model=List[Execution],
+    summary="Get executions for a symbol",
+    operation_id="getExecutions",
+)
+async def getExecutions(symbol: str) -> List[Execution]:
+    """Get execution history for a specific symbol"""
+    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
 
-@router.get("/account", response_model=AccountMetainfo)
-async def get_account_info() -> AccountMetainfo:
-    """Get account information"""
-    pass  # 👈 Empty stub
+@router.get(
+    "/account",
+    response_model=AccountMetainfo,
+    summary="Get account information",
+    operation_id="getAccountInfo",
+)
+async def getAccountInfo() -> AccountMetainfo:
+    """Get account metadata"""
+    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
 ```
 
 ---
