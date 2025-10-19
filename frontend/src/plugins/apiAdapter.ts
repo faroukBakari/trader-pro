@@ -1,3 +1,6 @@
+// this api adapter wraps the generated openapi client to provide type conversions and a cleaner interface
+// do not import generated client models but import frontend ones. For api requests/responses, use the types defined here.
+// we need to be able te detect breaking changes in the api, so we keep the types separate.
 import { Configuration, V1Api } from '@clients/trader-client-generated/';
 import type {
   Bar,
