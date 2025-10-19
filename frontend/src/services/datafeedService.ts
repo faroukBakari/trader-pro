@@ -22,7 +22,7 @@ import type {
   Timezone
 } from '@public/trading_terminal/charting_library';
 
-import type { ApiResponse, GetBarsResponse, GetQuotesRequest } from '@/plugins/apiAdapter';
+import type { ApiPromise, GetBarsResponse, GetQuotesRequest } from '@/plugins/apiAdapter';
 import { ApiAdapter } from '@/plugins/apiAdapter';
 import { WsAdapter, type BarsSubscriptionRequest, type QuoteDataSubscriptionRequest } from '@/plugins/wsAdapter';
 
@@ -42,8 +42,6 @@ import type { WebSocketInterface } from '@/plugins/wsAdapter';
  *
  * @see https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi
  */
-
-type ApiPromise<T> = Promise<ApiResponse<T>>
 
 interface ApiInterface {
   getConfig(): ApiPromise<DatafeedConfiguration>
