@@ -9,9 +9,10 @@ This module provides REST API endpoints for broker operations:
 
 from typing import List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from trading_api.core.broker_service import BrokerService
 from trading_api.models.broker import (
     AccountMetainfo,
     Execution,
@@ -31,6 +32,8 @@ class SuccessResponse(BaseModel):
 
 router = APIRouter(prefix="/broker", tags=["broker"])
 
+broker_service = BrokerService()
+
 
 @router.post(
     "/orders",
@@ -48,7 +51,10 @@ async def placeOrder(order: PreOrder) -> PlaceOrderResult:
     Returns:
         PlaceOrderResult: Result containing the generated order ID
     """
-    raise NotImplementedError("Broker API not yet implemented")
+    try:
+        return await broker_service.place_order(order)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.put(
@@ -68,7 +74,11 @@ async def modifyOrder(order_id: str, order: PreOrder) -> SuccessResponse:
     Returns:
         SuccessResponse: Success confirmation
     """
-    raise NotImplementedError("Broker API not yet implemented")
+    try:
+        await broker_service.modify_order(order_id, order)
+        return SuccessResponse()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.delete(
@@ -87,7 +97,11 @@ async def cancelOrder(order_id: str) -> SuccessResponse:
     Returns:
         SuccessResponse: Success confirmation
     """
-    raise NotImplementedError("Broker API not yet implemented")
+    try:
+        await broker_service.cancel_order(order_id)
+        return SuccessResponse()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get(
@@ -103,7 +117,7 @@ async def getOrders() -> List[PlacedOrder]:
     Returns:
         List[PlacedOrder]: List of all orders
     """
-    raise NotImplementedError("Broker API not yet implemented")
+    return await broker_service.get_orders()
 
 
 @router.get(
@@ -119,7 +133,7 @@ async def getPositions() -> List[Position]:
     Returns:
         List[Position]: List of all open positions
     """
-    raise NotImplementedError("Broker API not yet implemented")
+    return await broker_service.get_positions()
 
 
 @router.get(
@@ -138,7 +152,7 @@ async def getExecutions(symbol: str) -> List[Execution]:
     Returns:
         List[Execution]: List of trade executions for the specified symbol
     """
-    raise NotImplementedError("Broker API not yet implemented")
+    return await broker_service.get_executions(symbol)
 
 
 @router.get(
@@ -154,4 +168,4 @@ async def getAccountInfo() -> AccountMetainfo:
     Returns:
         AccountMetainfo: Account metadata including ID and name
     """
-    raise NotImplementedError("Broker API not yet implemented")
+    return await broker_service.get_account_info()
