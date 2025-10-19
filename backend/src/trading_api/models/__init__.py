@@ -5,9 +5,22 @@ This package contains all Pydantic models used throughout the trading API,
 organized by functionality:
 - common/: Shared base models and utilities
 - market/: Market data, instruments, quotes, and bars
-- trading/: Orders, positions, and trading operations
-- account/: User accounts, authentication, and balances
+- broker/: Orders, positions, executions, and account operations
 """
+
+# Import from broker domain
+from .broker import (
+    AccountMetainfo,
+    Execution,
+    OrderStatus,
+    OrderType,
+    PlacedOrder,
+    PlaceOrderResult,
+    Position,
+    PreOrder,
+    Side,
+    StopType,
+)
 
 # Import from common utilities
 from .common import (
@@ -58,4 +71,15 @@ __all__ = [
     "SearchSymbolsRequest",
     "SymbolInfo",
     "QuoteDataSubscriptionRequest",
+    # Broker models
+    "OrderStatus",
+    "OrderType",
+    "Side",
+    "StopType",
+    "PreOrder",
+    "PlacedOrder",
+    "PlaceOrderResult",
+    "Position",
+    "Execution",
+    "AccountMetainfo",
 ]

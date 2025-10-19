@@ -12,6 +12,7 @@ from fastapi.routing import APIRoute
 from external_packages.fastws import Client
 from trading_api.plugins.fastws_adapter import FastWSAdapter
 
+from .api.broker import router as broker_router
 from .api.datafeed import router as datafeed_router
 from .api.health import router as health_router
 from .api.versions import router as versions_router
@@ -21,7 +22,12 @@ from .core.datafeed_service import DatafeedService
 from .core.versioning import APIVersion
 from .ws.datafeed import ws_routers
 
-api_routers: list[APIRouter] = [health_router, versions_router, datafeed_router]
+api_routers: list[APIRouter] = [
+    health_router,
+    versions_router,
+    datafeed_router,
+    broker_router,
+]
 
 # Configure logging for the application
 logging.basicConfig(
@@ -149,6 +155,10 @@ apiApp = FastAPI(
         {"name": "health", "description": "Health check operations"},
         {"name": "versioning", "description": "API version information"},
         {"name": "datafeed", "description": "Market data and symbols operations"},
+        {
+            "name": "broker",
+            "description": "Broker operations (orders, positions, executions)",
+        },
     ],
     lifespan=lifespan,
 )
