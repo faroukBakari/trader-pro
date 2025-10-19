@@ -30,6 +30,7 @@ import type {
   TradeContext
 } from '@public/trading_terminal'
 
+import { ApiAdapter, type ApiPromise } from '@/plugins/apiAdapter'
 import { ConnectionStatus, OrderStatus, Side, StandardFormatterName } from '@public/trading_terminal'
 
 // ============================================================================
@@ -44,21 +45,21 @@ import { ConnectionStatus, OrderStatus, Side, StandardFormatterName } from '@pub
  * and the real backend client must support. It ensures type-safe communication and
  * allows for seamless switching between mock and real implementations.
  */
-export interface IBrokerClient {
+export interface ApiInterface {
   // Order operations
-  placeOrder(order: PreOrder): Promise<PlaceOrderResult>
-  modifyOrder(order: Order, confirmId?: string): Promise<void>
-  cancelOrder(orderId: string): Promise<void>
-  getOrders(): Promise<Order[]>
+  placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult>
+  modifyOrder(order: Order, confirmId?: string): ApiPromise<void>
+  cancelOrder(orderId: string): ApiPromise<void>
+  getOrders(): ApiPromise<Order[]>
 
   // Position operations
-  getPositions(): Promise<Position[]>
+  getPositions(): ApiPromise<Position[]>
 
   // Execution operations
-  getExecutions(symbol: string): Promise<Execution[]>
+  getExecutions(symbol: string): ApiPromise<Execution[]>
 
   // Account operations
-  getAccountInfo(): Promise<AccountMetainfo>
+  getAccountInfo(): ApiPromise<AccountMetainfo>
 }
 
 // ============================================================================
@@ -74,7 +75,7 @@ export interface IBrokerClient {
  * It uses private members and methods to encapsulate the mock logic,
  * following the same patterns as the original brokerTerminalService.
  */
-class BrokerFallbackClient implements IBrokerClient {
+class BrokerFallbackClient implements ApiInterface {
   private readonly _host: IBrokerConnectionAdapterHost
   private readonly _quotesProvider: IDatafeedQuotesApi
 
@@ -95,7 +96,7 @@ class BrokerFallbackClient implements IBrokerClient {
 
   // Public API methods (interface contract)
 
-  async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
+  async placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult> {
     const orderId = `ORDER-${this.orderCounter++}`
 
     const newOrder: Order = {
@@ -119,14 +120,20 @@ class BrokerFallbackClient implements IBrokerClient {
 
     console.log(`[FallbackClient] Order created: ${orderId}`)
 
-    return { orderId }
+    return {
+      status: 200,
+      data: { orderId },
+    }
   }
 
-  async modifyOrder(order: Order, confirmId?: string): Promise<void> {
+  async modifyOrder(order: Order, confirmId?: string): ApiPromise<void> {
     const originalOrder = this._orderById.get(confirmId ?? order.id)
     if (!originalOrder) {
       console.warn(`[FallbackClient] Order not found: ${confirmId ?? order.id}`)
-      return
+      return {
+        status: 404,
+        data: undefined as void,
+      }
     }
 
     // Only update specific fields, not entire order
@@ -140,13 +147,21 @@ class BrokerFallbackClient implements IBrokerClient {
     await this.simulateOrderExecution(originalOrder.id)
 
     console.log(`[FallbackClient] Order modified: ${originalOrder.id}`)
+
+    return {
+      status: 200,
+      data: undefined as void,
+    }
   }
 
-  async cancelOrder(orderId: string): Promise<void> {
+  async cancelOrder(orderId: string): ApiPromise<void> {
     const order = this._orderById.get(orderId)
     if (!order) {
       console.warn(`[FallbackClient] Order not found: ${orderId}`)
-      return
+      return {
+        status: 404,
+        data: undefined as void,
+      }
     }
 
     const cancelledOrder: Order = {
@@ -159,24 +174,41 @@ class BrokerFallbackClient implements IBrokerClient {
     this._host.orderUpdate(cancelledOrder)
 
     console.log(`[FallbackClient] Order cancelled: ${orderId}`)
-  }
 
-  async getOrders(): Promise<Order[]> {
-    return Array.from(this._orderById.values())
-  }
-
-  async getPositions(): Promise<Position[]> {
-    return Array.from(this._positions.values())
-  }
-
-  async getExecutions(symbol: string): Promise<Execution[]> {
-    return this._executions.filter((exec) => exec.symbol === symbol)
-  }
-
-  async getAccountInfo(): Promise<AccountMetainfo> {
     return {
-      id: this.accountId as AccountId,
-      name: this.accountName,
+      status: 200,
+      data: undefined as void,
+    }
+  }
+
+  async getOrders(): ApiPromise<Order[]> {
+    return {
+      status: 200,
+      data: Array.from(this._orderById.values()),
+    }
+  }
+
+  async getPositions(): ApiPromise<Position[]> {
+    return {
+      status: 200,
+      data: Array.from(this._positions.values()),
+    }
+  }
+
+  async getExecutions(symbol: string): ApiPromise<Execution[]> {
+    return {
+      status: 200,
+      data: this._executions.filter((exec) => exec.symbol === symbol),
+    }
+  }
+
+  async getAccountInfo(): ApiPromise<AccountMetainfo> {
+    return {
+      status: 200,
+      data: {
+        id: this.accountId as AccountId,
+        name: this.accountName,
+      },
     }
   }
 
@@ -305,7 +337,7 @@ class BrokerFallbackClient implements IBrokerClient {
  * Broker Terminal Service using client delegation pattern
  *
  * Features:
- * - Delegates broker operations to IBrokerClient interface
+ * - Delegates broker operations to ApiInterface interface
  * - Manages TradingView host notifications
  * - Provides account manager UI configuration
  * - Supports both mock (fallback) and real backend clients
@@ -313,7 +345,13 @@ class BrokerFallbackClient implements IBrokerClient {
 export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly _host: IBrokerConnectionAdapterHost
   private readonly _quotesProvider: IDatafeedQuotesApi
-  private readonly _client: IBrokerClient
+
+  // Client adapters
+  private readonly apiFallback: ApiInterface
+  private readonly apiAdapter: ApiAdapter
+
+  // Mock flag
+  private mock: boolean
 
   // UI state (managed by service, not client)
   private readonly balance: IWatchedValue<number>
@@ -323,15 +361,27 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   constructor(
     host: IBrokerConnectionAdapterHost,
     datafeed: IDatafeedQuotesApi,
-    client?: IBrokerClient // Optional: defaults to fallback
+    mock: boolean = true // Default to fallback for safety
   ) {
     this._host = host
     this._quotesProvider = datafeed
-    this._client = client ?? new BrokerFallbackClient(host, datafeed)
+    this.mock = mock
+
+    // Initialize clients
+    this.apiFallback = new BrokerFallbackClient(host, datafeed)
+    this.apiAdapter = new ApiAdapter()
 
     // Initialize UI state
     this.balance = host.factory.createWatchedValue(this.startingBalance)
     this.equity = host.factory.createWatchedValue(this.startingBalance)
+  }
+
+  /**
+   * Get broker client based on mock flag
+   * Same pattern as datafeedService._getApiAdapter()
+   */
+  private _getApiAdapter(mock: boolean = this.mock): ApiInterface {
+    return mock ? this.apiFallback : this.apiAdapter
   }
 
   // IBrokerWithoutRealtime interface implementation
@@ -410,20 +460,23 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async accountsMetainfo(): Promise<AccountMetainfo[]> {
-    const accountInfo = await this._client.getAccountInfo()
-    return [accountInfo]
+    const response = await this._getApiAdapter().getAccountInfo()
+    return [response.data]
   }
 
   async orders(): Promise<Order[]> {
-    return this._client.getOrders()
+    const response = await this._getApiAdapter().getOrders()
+    return response.data
   }
 
   async positions(): Promise<Position[]> {
-    return this._client.getPositions()
+    const response = await this._getApiAdapter().getPositions()
+    return response.data
   }
 
   async executions(symbol: string): Promise<Execution[]> {
-    return this._client.getExecutions(symbol)
+    const response = await this._getApiAdapter().getExecutions(symbol)
+    return response.data
   }
 
   async symbolInfo(symbol: string): Promise<InstrumentInfo> {
@@ -447,11 +500,12 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
     // Delegate to client
-    const result = await this._client.placeOrder(order)
+    const response = await this._getApiAdapter().placeOrder(order)
+    const result = response.data
 
     // Notify TradingView host about updates
-    const orders = await this._client.getOrders()
-    const placedOrder = orders.find((o) => o.id === result.orderId)
+    const ordersResponse = await this._getApiAdapter().getOrders()
+    const placedOrder = ordersResponse.data.find((o) => o.id === result.orderId)
     if (placedOrder) {
       this._host.orderUpdate(placedOrder)
     }
@@ -461,11 +515,11 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   async modifyOrder(order: Order, confirmId?: string): Promise<void> {
     // Delegate to client
-    await this._client.modifyOrder(order, confirmId)
+    await this._getApiAdapter().modifyOrder(order, confirmId)
 
     // Notify TradingView host about updates
-    const orders = await this._client.getOrders()
-    const modifiedOrder = orders.find((o) => o.id === (confirmId ?? order.id))
+    const ordersResponse = await this._getApiAdapter().getOrders()
+    const modifiedOrder = ordersResponse.data.find((o) => o.id === (confirmId ?? order.id))
     if (modifiedOrder) {
       this._host.orderUpdate(modifiedOrder)
     }
@@ -473,11 +527,11 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   async cancelOrder(orderId: string): Promise<void> {
     // Delegate to client
-    await this._client.cancelOrder(orderId)
+    await this._getApiAdapter().cancelOrder(orderId)
 
     // Notify TradingView host about updates
-    const orders = await this._client.getOrders()
-    const cancelledOrder = orders.find((o) => o.id === orderId)
+    const ordersResponse = await this._getApiAdapter().getOrders()
+    const cancelledOrder = ordersResponse.data.find((o) => o.id === orderId)
     if (cancelledOrder) {
       this._host.orderUpdate(cancelledOrder)
     }
