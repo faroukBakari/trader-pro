@@ -342,6 +342,9 @@ class BrokerFallbackClient implements ApiInterface {
  * - Provides account manager UI configuration
  * - Supports both mock (fallback) and real backend clients
  */
+
+// TODO: study interface IBrokerConnectionAdapterHost as there are some asyncapi calls to wire up
+// Reverse engineer from TradingView docs and existing implementations and the need for realtime broker
 export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly _host: IBrokerConnectionAdapterHost
   private readonly _quotesProvider: IDatafeedQuotesApi
@@ -503,7 +506,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     const response = await this._getApiAdapter().placeOrder(order)
     const result = response.data
 
-    // Notify TradingView host about updates
+    // Notify TradingView host about order updates
     const ordersResponse = await this._getApiAdapter().getOrders()
     const placedOrder = ordersResponse.data.find((o) => o.id === result.orderId)
     if (placedOrder) {

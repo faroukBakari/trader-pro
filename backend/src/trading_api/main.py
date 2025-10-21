@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Annotated, AsyncGenerator
 
 from fastapi import APIRouter, Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from external_packages.fastws import Client
@@ -161,6 +162,15 @@ apiApp = FastAPI(
         },
     ],
     lifespan=lifespan,
+)
+
+# Add CORS middleware to allow frontend tests to connect
+apiApp.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 ws_url = f"{base_url}/ws"

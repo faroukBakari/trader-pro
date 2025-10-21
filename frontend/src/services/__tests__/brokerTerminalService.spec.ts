@@ -1,3 +1,7 @@
+/**
+ * @vitest-environment node
+ */
+
 import type {
   Execution,
   IBrokerConnectionAdapterHost,
