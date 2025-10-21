@@ -231,3 +231,273 @@ async def test_get_account_info_endpoint():
         data = response.json()
         assert "id" in data
         assert "name" in data
+
+
+@pytest.mark.asyncio
+async def test_close_position_endpoint():
+    """Test closing a position (full close)"""
+    async with AsyncClient(app=apiApp, base_url="http://test") as client:
+        # First place an order to create a position
+        order_response = await client.post(
+            "/api/v1/broker/orders",
+            json={
+                "symbol": "AAPL",
+                "type": 2,  # MARKET
+                "side": 1,  # BUY
+                "qty": 100,
+            },
+        )
+        assert order_response.status_code == 200
+
+        # Wait for order execution and position creation
+        import asyncio
+
+        await asyncio.sleep(0.3)
+
+        # Get positions to find position ID
+        positions_response = await client.get("/api/v1/broker/positions")
+        positions = positions_response.json()
+        assert len(positions) > 0
+        position_id = positions[0]["id"]
+
+        # Close the position
+        close_response = await client.delete(f"/api/v1/broker/positions/{position_id}")
+        assert close_response.status_code == 200
+        data = close_response.json()
+        assert data["success"] is True
+
+        # Verify position is removed
+        positions_response = await client.get("/api/v1/broker/positions")
+        positions_after = positions_response.json()
+        assert len(positions_after) == 0
+
+
+@pytest.mark.asyncio
+async def test_close_position_partial_endpoint():
+    """Test partially closing a position"""
+    async with AsyncClient(app=apiApp, base_url="http://test") as client:
+        # Reset broker state
+        await client.post("/api/v1/broker/debug/reset")
+
+        # Place order to create position
+        order_response = await client.post(
+            "/api/v1/broker/orders",
+            json={
+                "symbol": "AAPL",
+                "type": 2,  # MARKET
+                "side": 1,  # BUY
+                "qty": 100,
+            },
+        )
+        assert order_response.status_code == 200
+
+        # Wait for execution
+        import asyncio
+
+        await asyncio.sleep(0.3)
+
+        # Get position ID
+        positions_response = await client.get("/api/v1/broker/positions")
+        positions = positions_response.json()
+        position_id = positions[0]["id"]
+        original_qty = positions[0]["qty"]
+
+        # Partially close position (50 units)
+        close_response = await client.delete(
+            f"/api/v1/broker/positions/{position_id}?amount=50"
+        )
+        assert close_response.status_code == 200
+
+        # Verify position quantity reduced
+        positions_response = await client.get("/api/v1/broker/positions")
+        positions_after = positions_response.json()
+        assert len(positions_after) == 1
+        assert positions_after[0]["qty"] == original_qty - 50
+
+
+@pytest.mark.asyncio
+async def test_edit_position_brackets_endpoint():
+    """Test editing position brackets (stop-loss, take-profit)"""
+    async with AsyncClient(app=apiApp, base_url="http://test") as client:
+        # Reset and create position
+        await client.post("/api/v1/broker/debug/reset")
+
+        order_response = await client.post(
+            "/api/v1/broker/orders",
+            json={
+                "symbol": "AAPL",
+                "type": 2,  # MARKET
+                "side": 1,  # BUY
+                "qty": 100,
+            },
+        )
+        assert order_response.status_code == 200
+
+        # Wait for execution
+        import asyncio
+
+        await asyncio.sleep(0.3)
+
+        # Get position ID
+        positions_response = await client.get("/api/v1/broker/positions")
+        positions = positions_response.json()
+        position_id = positions[0]["id"]
+
+        # Edit position brackets
+        brackets_response = await client.put(
+            f"/api/v1/broker/positions/{position_id}/brackets",
+            json={
+                "brackets": {
+                    "stopLoss": 90.0,
+                    "takeProfit": 110.0,
+                    "trailingStopPips": 5.0,
+                },
+                "customFields": None,
+            },
+        )
+        assert brackets_response.status_code == 200
+        data = brackets_response.json()
+        assert data["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_leverage_info_endpoint():
+    """Test getting leverage information for a symbol"""
+    async with AsyncClient(app=apiApp, base_url="http://test") as client:
+        response = await client.get(
+            "/api/v1/broker/leverage/info",
+            params={"symbol": "AAPL", "orderType": 1, "side": 1},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "title" in data
+        assert "leverage" in data
+        assert "min" in data
+        assert "max" in data
+        assert "step" in data
+        assert data["leverage"] == 10.0  # Default leverage
+        assert data["min"] == 1.0
+        assert data["max"] == 100.0
+        assert data["step"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_set_leverage_endpoint():
+    """Test setting leverage for a symbol"""
+    async with AsyncClient(app=apiApp, base_url="http://test") as client:
+        response = await client.put(
+            "/api/v1/broker/leverage/set",
+            json={
+                "symbol": "AAPL",
+                "orderType": 1,
+                "side": 1,
+                "leverage": 20.0,
+                "customFields": None,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "leverage" in data
+        assert data["leverage"] == 20.0
+
+        # Verify leverage was persisted
+        info_response = await client.get(
+            "/api/v1/broker/leverage/info",
+            params={"symbol": "AAPL", "orderType": 1, "side": 1},
+        )
+        info_data = info_response.json()
+        assert info_data["leverage"] == 20.0
+
+
+@pytest.mark.asyncio
+async def test_set_leverage_invalid_range_endpoint():
+    """Test setting leverage with invalid value"""
+    async with AsyncClient(app=apiApp, base_url="http://test") as client:
+        # Test leverage too high
+        response = await client.put(
+            "/api/v1/broker/leverage/set",
+            json={
+                "symbol": "AAPL",
+                "orderType": 1,
+                "side": 1,
+                "leverage": 150.0,
+                "customFields": None,
+            },
+        )
+
+        assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_preview_leverage_endpoint():
+    """Test previewing leverage changes"""
+    async with AsyncClient(app=apiApp, base_url="http://test") as client:
+        # Test moderate leverage
+        response = await client.post(
+            "/api/v1/broker/leverage/preview",
+            json={
+                "symbol": "AAPL",
+                "orderType": 1,
+                "side": 1,
+                "leverage": 25.0,
+                "customFields": None,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "infos" in data or data.get("infos") is None
+        assert "warnings" in data or data.get("warnings") is None
+        assert "errors" in data or data.get("errors") is None
+
+        # Should have info about margin requirement
+        if data.get("infos"):
+            assert any("Margin requirement" in info for info in data["infos"])
+
+        # Should have warning about moderate leverage
+        if data.get("warnings"):
+            assert any("leverage" in warning.lower() for warning in data["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_preview_leverage_high_leverage_warning():
+    """Test leverage preview shows warning for high leverage"""
+    async with AsyncClient(app=apiApp, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/broker/leverage/preview",
+            json={
+                "symbol": "AAPL",
+                "orderType": 1,
+                "side": 1,
+                "leverage": 75.0,
+                "customFields": None,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("warnings") is not None
+        assert any("High leverage" in warning for warning in data["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_preview_leverage_invalid_range():
+    """Test leverage preview shows error for invalid range"""
+    async with AsyncClient(app=apiApp, base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/broker/leverage/preview",
+            json={
+                "symbol": "AAPL",
+                "orderType": 1,
+                "side": 1,
+                "leverage": 150.0,
+                "customFields": None,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("errors") is not None
+        assert any("cannot exceed" in error.lower() for error in data["errors"])
