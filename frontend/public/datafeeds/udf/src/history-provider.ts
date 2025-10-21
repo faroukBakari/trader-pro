@@ -3,7 +3,7 @@ import {
 	HistoryMetadata,
 	LibrarySymbolInfo,
 	PeriodParams,
-} from '../../../charting_library/datafeed-api';
+} from '../../../trading_terminal/datafeed-api';
 
 import {
 	getErrorMessage,

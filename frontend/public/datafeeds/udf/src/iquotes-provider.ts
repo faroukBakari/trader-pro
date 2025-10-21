@@ -1,4 +1,4 @@
-import { QuoteData } from '../../../charting_library/datafeed-api';
+import { QuoteData } from '../../../trading_terminal/datafeed-api';
 
 import {
 	UdfOkResponse,

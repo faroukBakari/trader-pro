@@ -13,17 +13,22 @@ with a real broker API.
 
 import asyncio
 import time
+import uuid
 from typing import Dict, List
 
 from trading_api.models.broker import (
     AccountMetainfo,
     Execution,
+    OrderPreviewResult,
+    OrderPreviewSection,
+    OrderPreviewSectionRow,
     OrderStatus,
     OrderType,
     PlacedOrder,
     PlaceOrderResult,
     Position,
     PreOrder,
+    Side,
 )
 
 
@@ -160,6 +165,150 @@ class BrokerService:
             AccountMetainfo: Account metadata including ID and name
         """
         return AccountMetainfo(id=self._account_id, name=self._account_name)
+
+    async def preview_order(self, order: PreOrder) -> OrderPreviewResult:
+        """
+        Preview order costs and requirements without placing it
+
+        Args:
+            order: Order to preview
+
+        Returns:
+            OrderPreviewResult: Estimated costs, fees, and requirements
+        """
+        # Calculate order value and costs
+        # For limit/stop orders, use specified price; for market, use last known price
+        estimated_price = order.limitPrice or order.stopPrice or 100.0  # Mock price
+        order_value = order.qty * estimated_price
+
+        # Calculate mock fees (0.1% commission)
+        commission = order_value * 0.001
+
+        # Calculate margin requirement (assuming 2:1 leverage = 50% margin)
+        margin_required = order_value * 0.5
+
+        # Build preview sections
+        sections = []
+
+        # Section 1: Order Details
+        order_type_map = {
+            OrderType.MARKET: "Market",
+            OrderType.LIMIT: "Limit",
+            OrderType.STOP: "Stop",
+            OrderType.STOP_LIMIT: "Stop Limit",
+        }
+
+        order_details_rows = [
+            OrderPreviewSectionRow(title="Symbol", value=order.symbol),
+            OrderPreviewSectionRow(
+                title="Side", value="Buy" if order.side == Side.BUY else "Sell"
+            ),
+            OrderPreviewSectionRow(title="Quantity", value=f"{order.qty:.2f}"),
+            OrderPreviewSectionRow(
+                title="Order Type", value=order_type_map.get(order.type, "Unknown")
+            ),
+        ]
+
+        if order.limitPrice:
+            order_details_rows.append(
+                OrderPreviewSectionRow(
+                    title="Limit Price", value=f"${order.limitPrice:.2f}"
+                )
+            )
+        if order.stopPrice:
+            order_details_rows.append(
+                OrderPreviewSectionRow(
+                    title="Stop Price", value=f"${order.stopPrice:.2f}"
+                )
+            )
+
+        sections.append(
+            OrderPreviewSection(header="Order Details", rows=order_details_rows)
+        )
+
+        # Section 2: Cost Analysis
+        cost_section = OrderPreviewSection(
+            header="Cost Analysis",
+            rows=[
+                OrderPreviewSectionRow(
+                    title="Estimated Price", value=f"${estimated_price:.2f}"
+                ),
+                OrderPreviewSectionRow(
+                    title="Order Value", value=f"${order_value:.2f}"
+                ),
+                OrderPreviewSectionRow(title="Commission", value=f"${commission:.2f}"),
+                OrderPreviewSectionRow(
+                    title="Margin Required", value=f"${margin_required:.2f}"
+                ),
+                OrderPreviewSectionRow(
+                    title="Total Cost", value=f"${order_value + commission:.2f}"
+                ),
+            ],
+        )
+        sections.append(cost_section)
+
+        # Section 3: Bracket Orders (if applicable)
+        if order.takeProfit or order.stopLoss or order.guaranteedStop:
+            bracket_rows = []
+
+            if order.takeProfit:
+                potential_profit = abs((order.takeProfit - estimated_price) * order.qty)
+                bracket_rows.append(
+                    OrderPreviewSectionRow(
+                        title="Take Profit",
+                        value=f"${order.takeProfit:.2f} (+${potential_profit:.2f})",
+                    )
+                )
+
+            if order.stopLoss:
+                potential_loss = abs((order.stopLoss - estimated_price) * order.qty)
+                bracket_rows.append(
+                    OrderPreviewSectionRow(
+                        title="Stop Loss",
+                        value=f"${order.stopLoss:.2f} (-${potential_loss:.2f})",
+                    )
+                )
+
+            if order.guaranteedStop:
+                bracket_rows.append(
+                    OrderPreviewSectionRow(
+                        title="Guaranteed Stop", value=f"${order.guaranteedStop:.2f}"
+                    )
+                )
+
+            if order.trailingStopPips:
+                bracket_rows.append(
+                    OrderPreviewSectionRow(
+                        title="Trailing Stop",
+                        value=f"{order.trailingStopPips:.1f} pips",
+                    )
+                )
+
+            if bracket_rows:
+                sections.append(
+                    OrderPreviewSection(header="Risk Management", rows=bracket_rows)
+                )
+
+        # Generate unique confirmation ID
+        confirm_id = str(uuid.uuid4())
+
+        # Add warnings/validation
+        warnings: list[str] = []
+        errors: list[str] = []
+
+        # Example validation: check for risky orders
+        if order.type == OrderType.MARKET:
+            warnings.append("Market orders execute immediately at current market price")
+
+        if order.qty > 1000:
+            warnings.append("Large order size may experience slippage")
+
+        return OrderPreviewResult(
+            sections=sections,
+            confirmId=confirm_id,
+            warnings=warnings if warnings else None,
+            errors=errors if errors else None,
+        )
 
     async def _simulate_execution(self, order_id: str) -> None:
         """

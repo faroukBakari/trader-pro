@@ -1,10 +1,10 @@
-import { LibrarySymbolInfo, ResolutionString, SubscribeBarsCallback } from '../../../charting_library/datafeed-api';
+import { LibrarySymbolInfo, ResolutionString, SubscribeBarsCallback } from '../../../trading_terminal/datafeed-api';
 
 import {
 	getErrorMessage,
 	logMessage,
 } from './helpers';
-import { IDataPulseProvider, IHistoryProvider, GetBarsResult } from './provider-interfaces';
+import { GetBarsResult, IDataPulseProvider, IHistoryProvider } from './provider-interfaces';
 
 interface DataSubscriber {
 	symbolInfo: LibrarySymbolInfo;
@@ -54,7 +54,7 @@ export class DataPulseProvider implements IDataPulseProvider {
 		}
 
 		this._requestsPending = 0;
-		 
+
 		for (const listenerGuid in this._subscribers) {
 			this._requestsPending += 1;
 			this._updateDataForSubscriber(listenerGuid)

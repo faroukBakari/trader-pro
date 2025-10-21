@@ -114,3 +114,31 @@ class PlaceOrderResult(BaseModel):
     orderId: str = Field(..., description="Order ID (mainly for debugging)")
 
     model_config = {"use_enum_values": True}
+
+
+class OrderPreviewSectionRow(BaseModel):
+    """Single row in order preview section table (matching TradingView OrderPreviewSectionRow)"""
+
+    title: str = Field(..., description="Description of the item")
+    value: str = Field(..., description="Formatted value of the item")
+
+
+class OrderPreviewSection(BaseModel):
+    """Single section in order preview (matching TradingView OrderPreviewSection)"""
+
+    rows: list[OrderPreviewSectionRow] = Field(..., description="Section rows")
+    header: Optional[str] = Field(None, description="Optional section title")
+
+
+class OrderPreviewResult(BaseModel):
+    """
+    Order preview result (matching TradingView OrderPreviewResult)
+    Shows estimated costs, fees, margin before placing order
+    """
+
+    sections: list[OrderPreviewSection] = Field(..., description="Preview sections")
+    confirmId: Optional[str] = Field(None, description="Confirmation ID for placeOrder")
+    warnings: Optional[list[str]] = Field(None, description="Warning messages")
+    errors: Optional[list[str]] = Field(None, description="Error messages")
+
+    model_config = {"use_enum_values": True}

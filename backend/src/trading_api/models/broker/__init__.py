@@ -11,6 +11,9 @@ This package contains Pydantic models for broker operations:
 from .account import AccountMetainfo
 from .executions import Execution
 from .orders import (
+    OrderPreviewResult,
+    OrderPreviewSection,
+    OrderPreviewSectionRow,
     OrderStatus,
     OrderType,
     PlacedOrder,
@@ -31,6 +34,9 @@ __all__ = [
     "PreOrder",
     "PlacedOrder",
     "PlaceOrderResult",
+    "OrderPreviewResult",
+    "OrderPreviewSection",
+    "OrderPreviewSectionRow",
     # Position models
     "Position",
     # Execution models
