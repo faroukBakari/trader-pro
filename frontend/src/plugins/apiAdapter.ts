@@ -4,10 +4,6 @@
 // for speed and simplicity, we allow typecasting. Not casting of complex objects.
 // only simple enum/string/number conversions are done here.
 // the best approach is to implement mappers that insure type safety, at runtime (but can be time consuming)
-import type {
-  PreOrder as PreOrder_Backend,
-  QuoteData as QuoteData_Backend,
-} from '@clients/trader-client-generated';
 import { Configuration, V1Api } from '@clients/trader-client-generated/';
 import type {
   AccountMetainfo,
@@ -31,6 +27,10 @@ import type {
   SearchSymbolResultItem,
 } from '@public/trading_terminal/charting_library';
 import { AxiosError } from 'axios';
+import {
+  mapPreOrder,
+  mapQuoteData,
+} from './mappers';
 export interface HealthResponse {
   status: string
   message?: string
@@ -79,82 +79,6 @@ export class ApiError extends Error {
   }
 }
 
-// Type-safe mappers for API responses
-// Mappers can import backend types for type safety (not exposed outside this file)
-const apiMappers = {
-  /**
-   * Maps backend QuoteData to frontend discriminated union (QuoteOkData | QuoteErrorData)
-   * Uses discriminant property 's' to determine the correct type
-   */
-  mapQuoteData: (quote: QuoteData_Backend): QuoteData => {
-    // Type-safe mapping using backend types
-    if (quote.s === 'error') {
-      // Map to QuoteErrorData
-      return {
-        s: 'error' as const,
-        n: quote.n,
-        v: quote.v,
-      }
-    } else {
-      // Map to QuoteOkData
-      return {
-        s: 'ok' as const,
-        n: quote.n,
-        v: {
-          ch: quote.v.ch,
-          chp: quote.v.chp,
-          short_name: quote.v.short_name,
-          exchange: quote.v.exchange,
-          description: quote.v.description,
-          lp: quote.v.lp,
-          ask: quote.v.ask,
-          bid: quote.v.bid,
-          open_price: quote.v.open_price,
-          high_price: quote.v.high_price,
-          low_price: quote.v.low_price,
-          prev_close_price: quote.v.prev_close_price,
-          volume: quote.v.volume,
-        },
-      }
-    }
-  },
-
-  /**
-   * Maps frontend PreOrder to backend PreOrder_Backend
-   * Handles enum type conversions for type, side, and stopType
-   */
-  mapPreOrder: (order: PreOrder): PreOrder_Backend => {
-    return {
-      symbol: order.symbol,
-      type: order.type as unknown as PreOrder_Backend['type'],
-      side: order.side as unknown as PreOrder_Backend['side'],
-      qty: order.qty,
-      limitPrice: order.limitPrice ?? null,
-      stopPrice: order.stopPrice ?? null,
-      takeProfit: order.takeProfit ?? null,
-      stopLoss: order.stopLoss ?? null,
-      guaranteedStop: order.guaranteedStop ?? null,
-      trailingStopPips: order.trailingStopPips ?? null,
-      stopType: order.stopType ? (order.stopType as unknown as PreOrder_Backend['stopType']) : null,
-    }
-  },
-}
-
-/**
- * Decorator for automatic API error handling
- * Wraps async methods with try-catch and delegates errors to handleError method
- *
- * @param endpoint - Static endpoint string or function that computes endpoint from method arguments
- *
- * @example
- * ```typescript
- * @HandleApiError('/health')
- * async getHealthStatus() { ... }
- *
- * @HandleApiError((args) => `/symbols/${args[0]}`)
- * async resolveSymbol(symbol: string) { ... }
- * ```
- */
 function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
   return function (
     _target: unknown,
@@ -286,12 +210,12 @@ export class ApiAdapter {
 
     return {
       status: response.status,
-      data: response.data.map(apiMappers.mapQuoteData),
+      data: response.data.map(mapQuoteData),
     }
   }
   @ApiErrorHandler('/orders')
   async placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult> {
-    const response = await this.rawApi.placeOrder(apiMappers.mapPreOrder(order))
+    const response = await this.rawApi.placeOrder(mapPreOrder(order))
 
     return {
       status: response.status,
@@ -300,7 +224,7 @@ export class ApiAdapter {
   }
   @ApiErrorHandler('/orders/preview')
   async previewOrder(order: PreOrder): ApiPromise<OrderPreviewResult> {
-    const response = await this.rawApi.previewOrder(apiMappers.mapPreOrder(order))
+    const response = await this.rawApi.previewOrder(mapPreOrder(order))
 
     return {
       status: response.status,
@@ -311,7 +235,7 @@ export class ApiAdapter {
   @ApiErrorHandler((...args) => `/orders/${(args[1] as string | undefined) ?? (args[0] as Order).id}`)
   async modifyOrder(order: Order, confirmId?: string): ApiPromise<void> {
     const orderId = confirmId ?? order.id
-    const response = await this.rawApi.modifyOrder(apiMappers.mapPreOrder(order), orderId)
+    const response = await this.rawApi.modifyOrder(mapPreOrder(order), orderId)
 
     return {
       status: response.status,

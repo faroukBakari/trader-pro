@@ -1,3 +1,7 @@
+import type { ApiPromise, GetBarsResponse, GetQuotesRequest } from '@/plugins/apiAdapter';
+import { ApiAdapter } from '@/plugins/apiAdapter';
+import type { WsAdapterType } from '@/plugins/wsAdapter';
+import { WsAdapter, WsFallback } from '@/plugins/wsAdapter';
 import symbolsData from '@debug/symbols.json';
 import type {
   Bar,
@@ -22,11 +26,6 @@ import type {
   Timezone
 } from '@public/trading_terminal/charting_library';
 
-import type { ApiPromise, GetBarsResponse, GetQuotesRequest } from '@/plugins/apiAdapter';
-import { ApiAdapter } from '@/plugins/apiAdapter';
-import { WsAdapter, type BarsSubscriptionRequest, type QuoteDataSubscriptionRequest } from '@/plugins/wsAdapter';
-
-import type { WebSocketInterface } from '@/plugins/wsAdapter';
 
 // documentation:
 // - https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/
@@ -34,40 +33,6 @@ import type { WebSocketInterface } from '@/plugins/wsAdapter';
 // - https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/trading-platform-methods
 // - https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/additional-methods
 
-/**
- * Datafeed Service
- *
- * This class implements the IDatafeedChartApi interface required.
- * All methods are left blank for custom implementation.
- *
- * @see https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi
- */
-
-interface ApiInterface {
-  getConfig(): ApiPromise<DatafeedConfiguration>
-  resolveSymbol(symbol: string): ApiPromise<LibrarySymbolInfo>
-  searchSymbols(
-    userInput: string,
-    exchange?: string,
-    symbolType?: string,
-    maxResults?: number,
-  ): ApiPromise<Array<SearchSymbolResultItem>>
-  getBars(
-    symbol: string,
-    resolution: string,
-    fromTime: number,
-    toTime: number,
-    countBack?: number | null,
-  ): ApiPromise<GetBarsResponse>
-  getQuotes(getQuotesRequest: GetQuotesRequest): ApiPromise<Array<QuoteData>>
-}
-
-type BarWsInterface = WebSocketInterface<BarsSubscriptionRequest, Bar>
-type QuoteWsInterface = WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>
-interface WsInterface {
-  bars: BarWsInterface
-  quotes: QuoteWsInterface
-}
 
 function generateLast400DaysBars(): Bar[] {
   const bars: Bar[] = []
@@ -117,10 +82,103 @@ function generateLast400DaysBars(): Bar[] {
 }
 const mockedBars: Bar[] = generateLast400DaysBars()
 
+function mockLastBar(): Bar {
+  const lastBar = mockedBars[mockedBars.length - 1]
+  const range = lastBar.high - lastBar.low
+  const randomFactor = Math.random() // 0 to 1
+  const newClose = lastBar.low + range * randomFactor
+
+  // Ensure the new close doesn't exceed the original high/low bounds
+  const adjustedClose = Math.max(lastBar.low, Math.min(lastBar.high, newClose))
+
+  // Update high/low if the new close exceeds them
+  const newHigh = Math.max(lastBar.high, adjustedClose)
+  const newLow = Math.min(lastBar.low, adjustedClose)
+
+  return {
+    time: lastBar.time, // Same time to update existing bar
+    open: lastBar.open, // Keep original open
+    high: parseFloat(newHigh.toFixed(2)),
+    low: parseFloat(newLow.toFixed(2)),
+    close: parseFloat(adjustedClose.toFixed(2)),
+    volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000), // Add some volume
+  }
+}
+
+function mockQuoteData(symbol: string): QuoteData {
+  const lastBar = mockedBars[mockedBars.length - 1]
+
+  let currentPrice = lastBar.close
+
+  // Simulate price fluctuation within the bar's range with some momentum
+  const range = lastBar.high - lastBar.low
+  const volatility = range * 0.002 // 0.2% of range
+  const momentum = (Math.random() - 0.5) * volatility
+  const newPrice = currentPrice + momentum
+
+  // Keep price roughly within bar's range but allow some deviation
+  const minPrice = lastBar.low * 0.995
+  const maxPrice = lastBar.high * 1.005
+  currentPrice = Math.max(minPrice, Math.min(maxPrice, newPrice))
+
+  // Calculate bid/ask spread (0.1% of price)
+  const spreadValue = currentPrice * 0.001
+  const bid = currentPrice - spreadValue / 2
+  const ask = currentPrice + spreadValue / 2
+
+  // Calculate daily statistics
+  const change = currentPrice - lastBar.open
+  const changePercent = lastBar.open > 0 ? (change / lastBar.open) * 100 : 0
+
+  // Track intraday high/low
+  const currentHigh = Math.max(lastBar.high, currentPrice)
+  const currentLow = Math.min(lastBar.low, currentPrice)
+
+  const quoteValues: DatafeedQuoteValues = {
+    lp: parseFloat(currentPrice.toFixed(2)),
+    ask: parseFloat(ask.toFixed(2)),
+    bid: parseFloat(bid.toFixed(2)),
+    spread: parseFloat(spreadValue.toFixed(2)),
+    open_price: parseFloat(lastBar.open.toFixed(2)),
+    high_price: parseFloat(currentHigh.toFixed(2)),
+    low_price: parseFloat(currentLow.toFixed(2)),
+    prev_close_price: parseFloat((lastBar.open * 0.995).toFixed(2)),
+    volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000),
+    ch: parseFloat(change.toFixed(2)),
+    chp: parseFloat(changePercent.toFixed(2)),
+    short_name: symbol,
+    exchange: 'DEMO',
+    description: `Demo quotes for ${symbol}`,
+    original_name: symbol,
+  }
+
+  return {
+    s: 'ok',
+    n: symbol,
+    v: quoteValues,
+  }
+}
+
+interface ApiInterface {
+  getConfig(): ApiPromise<DatafeedConfiguration>
+  resolveSymbol(symbol: string): ApiPromise<LibrarySymbolInfo>
+  searchSymbols(
+    userInput: string,
+    exchange?: string,
+    symbolType?: string,
+    maxResults?: number,
+  ): ApiPromise<Array<SearchSymbolResultItem>>
+  getBars(
+    symbol: string,
+    resolution: string,
+    fromTime: number,
+    toTime: number,
+    countBack?: number | null,
+  ): ApiPromise<GetBarsResponse>
+  getQuotes(getQuotesRequest: GetQuotesRequest): ApiPromise<Array<QuoteData>>
+}
+
 class ApiFallback implements ApiInterface {
-  /**
-   * Available symbols loaded from JSON file
-   */
   private readonly availableSymbols: LibrarySymbolInfo[]
   constructor() {
     this.availableSymbols = symbolsData.map((symbol) => ({
@@ -267,81 +325,7 @@ class ApiFallback implements ApiInterface {
   async getQuotes(
     getQuotesRequest: GetQuotesRequest,
   ): ApiPromise<Array<QuoteData>> {
-    const quoteData: QuoteData[] = getQuotesRequest.symbols.map((symbol) => {
-      // Check if symbol exists in our available symbols
-      const symbolExists = this.availableSymbols.some(
-        (availableSymbol) =>
-          availableSymbol.name === symbol ||
-          availableSymbol.ticker === symbol ||
-          availableSymbol.name.toLowerCase() === symbol.toLowerCase() ||
-          (availableSymbol.ticker && availableSymbol.ticker.toLowerCase() === symbol.toLowerCase()),
-      )
-
-      if (!symbolExists) {
-        console.log(`[Datafeed] Symbol not found for quotes: ${symbol}`)
-        return {
-          s: 'error',
-          n: symbol,
-          v: { error: 'Symbol not found' },
-        }
-      }
-
-      // Generate realistic quote data based on the last bar
-      const lastBar = mockedBars[mockedBars.length - 1]
-      if (!lastBar) {
-        console.log(`[Datafeed] No historical data available for quotes: ${symbol}`)
-        return {
-          s: 'error',
-          n: symbol,
-          v: { error: 'No data available' },
-        }
-      }
-
-      // Create realistic quote values based on the last bar
-      const basePrice = Math.max(lastBar.close, 0.01) // Ensure positive price
-      const spread = Math.max(basePrice * 0.001, 0.01) // 0.1% spread, minimum 0.01
-
-      // Generate some variation for real-time feel
-      const variation = (Math.random() - 0.5) * basePrice * 0.005 // 0.5% max variation
-      const currentPrice = Math.max(basePrice + variation, 0.01) // Ensure positive
-
-      const bid = Math.max(currentPrice - spread / 2, 0.01) // Ensure positive bid
-      const ask = Math.max(currentPrice + spread / 2, bid + 0.01) // Ensure ask > bid
-
-      const change = currentPrice - lastBar.open
-      const changePercent = lastBar.open > 0 ? (change / lastBar.open) * 100 : 0
-
-      const quoteValues: DatafeedQuoteValues = {
-        // Price data - ensure all prices are positive numbers
-        lp: Number(currentPrice.toFixed(2)), // Last price
-        ask: Number(ask.toFixed(2)), // Ask price
-        bid: Number(bid.toFixed(2)), // Bid price
-        spread: Number((ask - bid).toFixed(2)), // Spread
-
-        // Daily statistics
-        open_price: Number(Math.max(lastBar.open, 0.01).toFixed(2)),
-        high_price: Number(Math.max(lastBar.high, currentPrice, 0.01).toFixed(2)),
-        low_price: Number(Math.max(Math.min(lastBar.low, currentPrice), 0.01).toFixed(2)),
-        prev_close_price: Number(Math.max(lastBar.close * 0.995, 0.01).toFixed(2)),
-        volume: Math.max(lastBar.volume || 0, 0),
-
-        // Changes
-        ch: Number(change.toFixed(2)),
-        chp: Number(changePercent.toFixed(2)),
-
-        // Symbol information
-        short_name: symbol,
-        exchange: 'DEMO',
-        description: `Demo quotes for ${symbol}`,
-        original_name: symbol,
-      }
-
-      return {
-        s: 'ok',
-        n: symbol,
-        v: quoteValues,
-      }
-    })
+    const quoteData: QuoteData[] = getQuotesRequest.symbols.map(mockQuoteData)
 
     console.debug(`[Datafeed] Generated quotes for ${quoteData.length} symbols`)
     return Promise.resolve({
@@ -351,199 +335,12 @@ class ApiFallback implements ApiInterface {
   }
 }
 
-class BarsWsFallback implements BarWsInterface {
-  private subscriptions = new Map<
-    string,
-    { params: BarsSubscriptionRequest; onUpdate: (data: Bar) => void }
-  >()
-  private intervalId: NodeJS.Timeout
-
-  constructor() {
-    // Mock data updates every 3 seconds
-    this.intervalId = setInterval(() => {
-      this.subscriptions.forEach(({ onUpdate }) => {
-        onUpdate(this.mockLastBar(mockedBars[mockedBars.length - 1]))
-      })
-    }, 1000)
-  }
-
-  private mockLastBar(lastBar: Bar): Bar {
-    const range = lastBar.high - lastBar.low
-    const randomFactor = Math.random() // 0 to 1
-    const newClose = lastBar.low + range * randomFactor
-
-    // Ensure the new close doesn't exceed the original high/low bounds
-    const adjustedClose = Math.max(lastBar.low, Math.min(lastBar.high, newClose))
-
-    // Update high/low if the new close exceeds them
-    const newHigh = Math.max(lastBar.high, adjustedClose)
-    const newLow = Math.min(lastBar.low, adjustedClose)
-
-    return {
-      time: lastBar.time, // Same time to update existing bar
-      open: lastBar.open, // Keep original open
-      high: parseFloat(newHigh.toFixed(2)),
-      low: parseFloat(newLow.toFixed(2)),
-      close: parseFloat(adjustedClose.toFixed(2)),
-      volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000), // Add some volume
-    }
-  }
-
-  async subscribe(
-    subscriptionId: string,
-    params: BarsSubscriptionRequest,
-    onUpdate: (data: Bar) => void,
-  ): Promise<string> {
-    this.subscriptions.set(subscriptionId, { params, onUpdate })
-    return subscriptionId
-  }
-
-  async unsubscribe(subscriptionId: string): Promise<void> {
-    this.subscriptions.delete(subscriptionId)
-  }
-
-  destroy(): void {
-    if (this.intervalId) {
-      window.clearInterval(this.intervalId)
-    }
-    this.subscriptions.clear()
-  }
-}
-
-class QuotesWsFallback implements QuoteWsInterface {
-  private subscriptions = new Map<
-    string,
-    { params: QuoteDataSubscriptionRequest; onUpdate: (data: QuoteData) => void }
-  >()
-  private intervalId: NodeJS.Timeout
-  private lastPrices = new Map<string, number>()
-
-  constructor() {
-    // Mock quote updates every 2 seconds for fast symbols, 10 seconds for slow
-    this.intervalId = setInterval(() => {
-      this.subscriptions.forEach(({ params, onUpdate }) => {
-        const allSymbols = [
-          ...(params.symbols || []),
-          ...(params.fast_symbols || []),
-        ]
-
-        allSymbols.forEach((symbol) => {
-          const quoteData = this.mockQuoteData(symbol)
-          onUpdate(quoteData)
-        })
-      })
-    }, 2000)
-  }
-
-  private mockQuoteData(symbol: string): QuoteData {
-    const lastBar = mockedBars[mockedBars.length - 1]
-    if (!lastBar) {
-      return {
-        s: 'error',
-        n: symbol,
-        v: { error: 'No data available' },
-      }
-    }
-
-    // Get or initialize last price for this symbol
-    let currentPrice = this.lastPrices.get(symbol)
-    if (!currentPrice) {
-      currentPrice = lastBar.close
-      this.lastPrices.set(symbol, currentPrice)
-    }
-
-    // Simulate price fluctuation within the bar's range with some momentum
-    const range = lastBar.high - lastBar.low
-    const volatility = range * 0.002 // 0.2% of range
-    const momentum = (Math.random() - 0.5) * volatility
-    const newPrice = currentPrice + momentum
-
-    // Keep price roughly within bar's range but allow some deviation
-    const minPrice = lastBar.low * 0.995
-    const maxPrice = lastBar.high * 1.005
-    currentPrice = Math.max(minPrice, Math.min(maxPrice, newPrice))
-    this.lastPrices.set(symbol, currentPrice)
-
-    // Calculate bid/ask spread (0.1% of price)
-    const spreadValue = currentPrice * 0.001
-    const bid = currentPrice - spreadValue / 2
-    const ask = currentPrice + spreadValue / 2
-
-    // Calculate daily statistics
-    const change = currentPrice - lastBar.open
-    const changePercent = lastBar.open > 0 ? (change / lastBar.open) * 100 : 0
-
-    // Track intraday high/low
-    const currentHigh = Math.max(lastBar.high, currentPrice)
-    const currentLow = Math.min(lastBar.low, currentPrice)
-
-    const quoteValues: DatafeedQuoteValues = {
-      lp: parseFloat(currentPrice.toFixed(2)),
-      ask: parseFloat(ask.toFixed(2)),
-      bid: parseFloat(bid.toFixed(2)),
-      spread: parseFloat(spreadValue.toFixed(2)),
-      open_price: parseFloat(lastBar.open.toFixed(2)),
-      high_price: parseFloat(currentHigh.toFixed(2)),
-      low_price: parseFloat(currentLow.toFixed(2)),
-      prev_close_price: parseFloat((lastBar.open * 0.995).toFixed(2)),
-      volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000),
-      ch: parseFloat(change.toFixed(2)),
-      chp: parseFloat(changePercent.toFixed(2)),
-      short_name: symbol,
-      exchange: 'DEMO',
-      description: `Demo quotes for ${symbol}`,
-      original_name: symbol,
-    }
-
-    return {
-      s: 'ok',
-      n: symbol,
-      v: quoteValues,
-    }
-  }
-
-  async subscribe(
-    subscriptionId: string,
-    params: QuoteDataSubscriptionRequest,
-    onUpdate: (data: QuoteData) => void,
-  ): Promise<string> {
-    this.subscriptions.set(subscriptionId, { params, onUpdate })
-    return subscriptionId
-  }
-
-  async unsubscribe(subscriptionId: string): Promise<void> {
-    this.subscriptions.delete(subscriptionId)
-    // Clean up price tracking for symbols that are no longer subscribed
-    const remainingSymbols = new Set<string>()
-    this.subscriptions.forEach(({ params }) => {
-      ;[...(params.symbols || []), ...(params.fast_symbols || [])].forEach((sym) =>
-        remainingSymbols.add(sym),
-      )
-    })
-    // Remove prices for unsubscribed symbols
-    this.lastPrices.forEach((_, symbol) => {
-      if (!remainingSymbols.has(symbol)) {
-        this.lastPrices.delete(symbol)
-      }
-    })
-  }
-
-  destroy(): void {
-    if (this.intervalId) {
-      window.clearInterval(this.intervalId)
-    }
-    this.subscriptions.clear()
-    this.lastPrices.clear()
-  }
-}
-
-// TODO: add unit tests based on fallback specs
 export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private apiAdapter: ApiInterface
   private apiFallback: ApiInterface
 
-  private wsAdapter: WsInterface
-  private wsFallback: WsInterface
+  private wsAdapter: WsAdapterType
+  private wsFallback: WsAdapterType
 
   private mock: boolean
 
@@ -551,14 +348,14 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     this.apiAdapter = new ApiAdapter()
     this.apiFallback = new ApiFallback()
     this.wsAdapter = new WsAdapter()
-    this.wsFallback = {
-      bars: new BarsWsFallback(),
-      quotes: new QuotesWsFallback(),
-    }
+    this.wsFallback = new WsFallback({
+      barsMocker: () => mockLastBar(),
+      quotesMocker: () => mockQuoteData('DEMO:SYMBOL'),
+    })
     this.mock = mock
   }
 
-  _getWsAdapter(mock: boolean = this.mock): WsInterface {
+  _getWsAdapter(mock: boolean = this.mock): WsAdapterType {
     return mock ? this.wsFallback : this.wsAdapter
   }
   _getApiAdapter(mock: boolean = this.mock): ApiInterface {

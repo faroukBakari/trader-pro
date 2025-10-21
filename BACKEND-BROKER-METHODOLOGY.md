@@ -420,11 +420,17 @@ make dev  # Start backend server
 **Architecture Pattern**: Never import generated backend models outside the adapter. The adapter layer:
 
 - Detects breaking changes at compile time through targeted type casting
-- Converts backend types to frontend types
+- Converts backend types to frontend types via **mapper functions**
 - Provides clean, consolidated interface for all API operations
 - Applies type casting only to enum/literal/alias fields, not entire objects
-- Uses type-safe mapper functions with backend types (suffixed `_Backend`)
-- Keeps backend type imports isolated to mapper functions
+
+**Mapper Functions Pattern**: For complex type transformations, create dedicated mapper functions in `frontend/src/plugins/mappers.ts`:
+
+- **Type-Safe**: Import backend types (suffixed `_Backend`) only in mapper layer
+- **Reusable**: Share mappers across REST API and WebSocket clients
+- **Isolated**: Backend types never leak outside mappers
+- **Maintainable**: Centralized transformation logic in one file
+- **Runtime Validation**: Handle enum conversions and null/undefined properly
 
 **Step 2.4.1: Generate OpenAPI Client**
 
@@ -473,19 +479,32 @@ const response = await this.rawApi.createResource({
   status: resource.status as unknown as BackendResourceType["status"],
 });
 
-// ✅ CORRECT: Type-safe mapper function
-import type { ResourceData as ResourceData_Backend } from "@clients/trader-client-generated";
+// ✅ CORRECT: Inline mapper within adapter (simple transformations)
+const response = await this.rawApi.createResource({
+  ...resource,
+  type: resource.type as unknown as BackendResourceType["type"],
+  metadata: resource.metadata ?? null,
+});
 
-const apiMappers = {
-  mapResourceData: (data: FrontendResourceData): ResourceData_Backend => {
-    return {
-      name: data.name,
-      type: data.type as unknown as ResourceData_Backend["type"],
-      value: data.value,
-      metadata: data.metadata ?? null,
-    };
-  },
-};
+// ✅ BETTER: Dedicated mapper in mappers.ts (complex/reusable transformations)
+// File: frontend/src/plugins/mappers.ts
+import type { ResourceData as ResourceData_Backend } from "@clients/trader-client-generated";
+import type { FrontendResourceData } from "@/types";
+
+export function mapResourceData(
+  data: FrontendResourceData
+): ResourceData_Backend {
+  return {
+    name: data.name,
+    type: data.type as unknown as ResourceData_Backend["type"],
+    value: data.value,
+    metadata: data.metadata ?? null,
+  };
+}
+
+// Usage in ApiAdapter:
+import { mapResourceData } from "@/plugins/mappers";
+const response = await this.rawApi.createResource(mapResourceData(resource));
 
 // ❌ INCORRECT: Casting entire object
 const response = await this.rawApi.createResource(
@@ -519,18 +538,25 @@ import type {
 export type ApiResponse<T> = { status: number; data: T };
 export type ApiPromise<T> = Promise<ApiResponse<T>>;
 
-// Type-safe mappers (can import backend types)
-const apiMappers = {
-  mapResourceRequest: (data: FrontendResourceRequest): ResourceRequest_Backend => {
-    return {
-      name: data.name,
-      type: data.type as unknown as ResourceRequest_Backend["type"],
-      value: data.value,
-      metadata: data.metadata ?? null,
-    };
-  },
-  // Add more mappers as needed
-};
+/**
+ * Mapper Decision Guide:
+ *
+ * 1. Simple transformations (1-2 field mappings):
+ *    - Inline in ApiAdapter method
+ *    - Example: { ...data, status: data.status as unknown as Backend["status"] }
+ *
+ * 2. Complex transformations (3+ fields, logic, reuse across REST + WebSocket):
+ *    - Create in mappers.ts
+ *    - Example: mapQuoteData(), mapPreOrder()
+ *
+ * 3. Backend type imports:
+ *    - Mappers: CAN import backend types (ResourceData_Backend)
+ *    - ApiAdapter: CANNOT import backend types directly
+ *    - Services: NEVER import backend types
+ */
+
+// Import mappers from centralized file (for complex transformations)
+import { mapQuoteData, mapPreOrder } from '@/plugins/mappers';
 
 export class ApiAdapter {
   private rawApi: V1Api;
@@ -546,16 +572,28 @@ export class ApiAdapter {
   // SERVICE A METHODS
   // ======================================================================
 
+  // Example 1: Simple inline transformation (1-2 fields)
   async createResource(data: FrontendResourceRequest): ApiPromise<FrontendResourceResponse> {
-    const response = await this.rawApi.createResource(
-      apiMappers.mapResourceRequest(data)
-    );
+    const response = await this.rawApi.createResource({
+      ...data,
+      type: data.type as unknown as ResourceRequest_Backend["type"],
+    });
     return {
       status: response.status,
       data: response.data as FrontendResourceResponse,
     };
   }
 
+  // Example 2: Complex transformation using mapper from mappers.ts
+  async getQuotes(symbols: string[]): ApiPromise<QuoteData[]> {
+    const response = await this.rawApi.getQuotes({ symbols });
+    return {
+      status: response.status,
+      data: response.data.map(mapQuoteData),  // 👈 Reusable mapper
+    };
+  }
+
+  // Example 3: Array mapping with inline transformation
   async getResources(): ApiPromise<FrontendResourceResponse[]> {
     const response = await this.rawApi.getResources();
     return {
@@ -580,9 +618,24 @@ export class ApiAdapter {
 
 **Real-world examples**:
 
-- **Broker service**: `placeOrder`, `getPositions`, `closePosition`, `leverageInfo`
-- **Datafeed service**: `resolveSymbol`, `getBars`, `searchSymbols`, `getQuotes`
+- **Broker service**: `placeOrder` (uses `mapPreOrder` from mappers.ts), `getPositions`, `closePosition`
+- **Datafeed service**: `getQuotes` (uses `mapQuoteData` from mappers.ts), `resolveSymbol`, `getBars`
 - Both consolidated in single `ApiAdapter` class
+
+**When to Create Mappers** (`frontend/src/plugins/mappers.ts`):
+
+1. ✅ **Complex transformations** - 3+ field mappings with logic
+2. ✅ **Reusable across REST + WebSocket** - Used by both `ApiAdapter` and `WsAdapter`
+3. ✅ **Nested object transformations** - Multiple levels of structure mapping
+4. ✅ **Conditional logic** - Different mapping based on status/type
+5. ✅ **Backend → Frontend direction** - QuoteData_Backend → QuoteData (TradingView)
+6. ✅ **Frontend → Backend direction** - PreOrder (TradingView) → PreOrder_Backend
+
+**When to Use Inline Mapping** (within `ApiAdapter` methods):
+
+1. ✅ **Simple enum/literal casting** - 1-2 fields only
+2. ✅ **Single-use transformations** - Not shared elsewhere
+3. ✅ **Trivial null handling** - `data.field ?? null`
 
 **Type Alignment Adjustment Loop**:
 

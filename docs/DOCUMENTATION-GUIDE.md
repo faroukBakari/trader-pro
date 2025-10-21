@@ -36,18 +36,18 @@ Complete index of all project documentation with descriptions and reading paths.
 | File                                     | Purpose                                    |
 | ---------------------------------------- | ------------------------------------------ |
 | **backend/README.md**                    | Backend overview, setup, and API reference |
-| **backend/docs/websockets.md**           | WebSocket API reference and patterns       |
-| **backend/docs/bar-broadcasting.md**     | Bar broadcaster implementation details     |
-| **backend/docs/versioning.md**           | API versioning strategy and lifecycle      |
-| **backend/docs/ws-router-generation.md** | WebSocket router auto-generation           |
+| **backend/docs/WEBSOCKETS.md**           | WebSocket API reference and patterns       |
+| **backend/docs/BAR-BROADCASTING.md**     | Bar broadcaster implementation details     |
+| **backend/docs/VERSIONING.md**           | API versioning strategy and lifecycle      |
+| **backend/docs/WS-ROUTER-GENERATION.md** | WebSocket router auto-generation           |
 
 ### backend/examples/ (Implementation Examples)
 
 | File                                        | Purpose                     |
 | ------------------------------------------- | --------------------------- |
-| **backend/examples/fastws-integration.md**  | FastWS integration examples |
-| **backend/examples/versioning-examples.md** | API versioning examples     |
-| **backend/examples/vue-integration.md**     | Vue.js integration examples |
+| **backend/examples/FASTWS-INTEGRATION.md**  | FastWS integration examples |
+| **backend/examples/VERSIONING-EXAMPLES.md** | API versioning examples     |
+| **backend/examples/VUE-INTEGRATION.md**     | Vue.js integration examples |
 
 ---
 
@@ -73,11 +73,13 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### frontend/src/ (Component Documentation)
 
-| File                                          | Purpose                            |
-| --------------------------------------------- | ---------------------------------- |
-| **frontend/src/plugins/ws-plugin-usage.md**   | WebSocket plugin integration guide |
-| **frontend/src/services/README.md**           | Services layer overview            |
-| **frontend/src/services/**tests**/README.md** | Testing guide for services         |
+| File                                          | Purpose                                             |
+| --------------------------------------------- | --------------------------------------------------- |
+| **frontend/src/plugins/WS-PLUGIN-USAGE.md**   | WebSocket plugin integration guide                  |
+| **frontend/src/plugins/mappers.ts**           | Type-safe data transformations (backend ↔ frontend) |
+| **frontend/src/plugins/wsAdapter.ts**         | Centralized WebSocket clients wrapper               |
+| **frontend/src/services/README.md**           | Services layer overview                             |
+| **frontend/src/services/**tests**/README.md** | Testing guide for services                          |
 
 ### frontend/src/clients/trader-client-generated/
 
@@ -119,9 +121,9 @@ Complete index of all project documentation with descriptions and reading paths.
 
 1. **backend/README.md** - Backend overview
 2. **BACKEND-BROKER-METHODOLOGY.md** - TDD implementation workflow
-3. **backend/docs/websockets.md** - WebSocket API patterns
+3. **backend/docs/WEBSOCKETS.md** - WebSocket API patterns
 4. **docs/TESTING.md** - Testing strategies
-5. **backend/docs/versioning.md** - API versioning approach
+5. **backend/docs/VERSIONING.md** - API versioning approach
 
 ### Frontend Developers
 
@@ -167,15 +169,15 @@ Complete index of all project documentation with descriptions and reading paths.
 ### API & Client Generation
 
 - **docs/CLIENT-GENERATION.md** - Client auto-generation
-- **backend/docs/versioning.md** - API versioning
+- **backend/docs/VERSIONING.md** - API versioning
 - **frontend/src/clients/trader-client-generated/README.md** - Generated client usage
 
 ### WebSocket & Real-Time
 
 - **docs/WEBSOCKET-CLIENTS.md** - WebSocket overview
-- **backend/docs/websockets.md** - Backend WebSocket API
+- **backend/docs/WEBSOCKETS.md** - Backend WebSocket API
 - **frontend/WEBSOCKET-CLIENT-PATTERN.md** - Frontend patterns
-- **backend/docs/bar-broadcasting.md** - Broadcasting service
+- **backend/docs/BAR-BROADCASTING.md** - Broadcasting service
 
 ### Testing
 
@@ -193,7 +195,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 - **MAKEFILE-GUIDE.md** - Makefile commands
 - **.github/CI-TROUBLESHOOTING.md** - CI/CD issues
-- **backend/docs/ws-router-generation.md** - Router generation
+- **backend/docs/WS-ROUTER-GENERATION.md** - Router generation
 
 ### Code Quality
 

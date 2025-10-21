@@ -340,7 +340,16 @@ export class WebSocketBase {
   }
 }
 
-export class WebSocketClient<TParams extends object, TBackendData extends object, TData extends object> {
+export interface WebSocketInterface<TParams extends object, TData extends object> {
+  subscribe(
+    subscriptionId: string,
+    params: TParams,
+    onUpdate: (data: TData) => void
+  ): Promise<string>
+  unsubscribe(subscriptionId: string): Promise<void>
+}
+
+export class WebSocketClient<TParams extends object, TBackendData extends object, TData extends object> implements WebSocketInterface<TParams, TData> {
   protected ws: WebSocketBase
   protected listeners: Map<string, Set<string>>
 
@@ -389,5 +398,42 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     this.listeners.delete(listenerId)
     await this.ws.unsubscribe(listenerId, topic)
 
+  }
+}
+
+export class WebSocketFallback<TParams extends object, TData extends object> implements WebSocketInterface<TParams, TData> {
+  private subscriptions = new Map<
+    string,
+    { params: TParams; onUpdate: (data: TData) => void }
+  >()
+  private intervalId: NodeJS.Timeout
+
+  constructor(mockData: () => TData) {
+    // Mock data updates every 3 seconds
+    this.intervalId = setInterval(() => {
+      this.subscriptions.forEach(({ onUpdate }) => {
+        onUpdate(mockData())
+      })
+    }, 1000)
+  }
+
+  async subscribe(
+    subscriptionId: string,
+    params: TParams,
+    onUpdate: (data: TData) => void,
+  ): Promise<string> {
+    this.subscriptions.set(subscriptionId, { params, onUpdate })
+    return subscriptionId
+  }
+
+  async unsubscribe(subscriptionId: string): Promise<void> {
+    this.subscriptions.delete(subscriptionId)
+  }
+
+  destroy(): void {
+    if (this.intervalId) {
+      window.clearInterval(this.intervalId)
+    }
+    this.subscriptions.clear()
   }
 }
