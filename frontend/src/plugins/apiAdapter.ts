@@ -12,8 +12,15 @@ import { Configuration, V1Api } from '@clients/trader-client-generated/';
 import type {
   AccountMetainfo,
   Bar,
+  Brackets,
+  CustomInputFieldsValues,
   DatafeedConfiguration,
   Execution,
+  LeverageInfo,
+  LeverageInfoParams,
+  LeveragePreviewResult,
+  LeverageSetParams,
+  LeverageSetResult,
   LibrarySymbolInfo,
   Order,
   OrderPreviewResult,
@@ -370,5 +377,30 @@ export class ApiAdapter {
       status: response.status,
       data: response.data as AccountMetainfo,
     }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async closePosition(_positionId: string, _amount?: number): ApiPromise<void> {
+    throw new ApiError('closePosition not implemented in backend API', 501, '/positions/close')
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async editPositionBrackets(_positionId: string, _brackets: Brackets, _customFields?: CustomInputFieldsValues): ApiPromise<void> {
+    throw new ApiError('editPositionBrackets not implemented in backend API', 501, '/positions/brackets')
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async leverageInfo(_leverageInfoParams: LeverageInfoParams): ApiPromise<LeverageInfo> {
+    throw new ApiError('leverageInfo not implemented in backend API', 501, '/leverage/info')
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async setLeverage(_leverageSetParams: LeverageSetParams): ApiPromise<LeverageSetResult> {
+    throw new ApiError('setLeverage not implemented in backend API', 501, '/leverage/set')
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async previewLeverage(_leverageSetParams: LeverageSetParams): ApiPromise<LeveragePreviewResult> {
+    throw new ApiError('previewLeverage not implemented in backend API', 501, '/leverage/preview')
   }
 }

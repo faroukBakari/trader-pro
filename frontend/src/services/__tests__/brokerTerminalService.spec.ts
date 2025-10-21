@@ -10,7 +10,7 @@ import type {
 } from '@public/trading_terminal'
 import { OrderStatus, OrderType, Side } from '@public/trading_terminal'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BrokerTerminalService, resetApiFallbackState } from '../brokerTerminalService'
+import { addTestPosition, BrokerTerminalService, resetApiFallbackState } from '../brokerTerminalService'
 
 /**
  * Test suite for BrokerTerminalService
@@ -22,6 +22,9 @@ import { BrokerTerminalService, resetApiFallbackState } from '../brokerTerminalS
  * - Order cancellation
  * - Account info retrieval
  * - Service configuration (mock vs backend)
+ * - Position closing (full and partial)
+ * - Position bracket editing
+ * - Leverage operations
  *
  * NOTE: The ApiFallback no longer simulates order execution or position management.
  * It only stores order records and returns them when queried.
@@ -573,6 +576,79 @@ describe('BrokerTerminalService', () => {
     it('should report connected status', () => {
       const status = brokerService.connectionStatus()
       expect(status).toBe(1) // ConnectionStatus.Connected
+    })
+  })
+
+  describe('Position Closing', () => {
+    it('should close position fully', async () => {
+      addTestPosition('AAPL-POS-1', 'AAPL', 100, Side.Buy, 150.0)
+
+      await brokerService.closePosition('AAPL-POS-1')
+
+      const positions = await brokerService.positions()
+      expect(positions.length).toBe(0)
+    })
+
+    it('should close position partially', async () => {
+      addTestPosition('AAPL-POS-2', 'AAPL', 100, Side.Buy, 150.0)
+
+      await brokerService.closePosition('AAPL-POS-2', 40)
+
+      const positions = await brokerService.positions()
+      expect(positions[0].qty).toBe(60)
+    })
+  })
+
+  describe('Position Bracket Editing', () => {
+    it('should edit position brackets', async () => {
+      addTestPosition('AAPL-POS-3', 'AAPL', 100, Side.Buy, 150.0)
+
+      await brokerService.editPositionBrackets('AAPL-POS-3', {
+        stopLoss: 140.0,
+        takeProfit: 160.0,
+      })
+
+      const positions = await brokerService.positions()
+      expect(positions[0].stopLoss).toBe(140.0)
+      expect(positions[0].takeProfit).toBe(160.0)
+    })
+  })
+
+  describe('Leverage Operations', () => {
+    it('should return leverage info', async () => {
+      const leverageInfo = await brokerService.leverageInfo({
+        symbol: 'AAPL',
+        orderType: OrderType.Market,
+        side: Side.Buy,
+      })
+
+      expect(leverageInfo.title).toBe('Leverage for AAPL')
+      expect(leverageInfo.leverage).toBe(10)
+      expect(leverageInfo.min).toBe(1)
+      expect(leverageInfo.max).toBe(100)
+      expect(leverageInfo.step).toBe(1)
+    })
+
+    it('should set leverage', async () => {
+      const result = await brokerService.setLeverage({
+        symbol: 'AAPL',
+        orderType: OrderType.Market,
+        side: Side.Buy,
+        leverage: 20,
+      })
+
+      expect(result.leverage).toBe(20)
+    })
+
+    it('should preview leverage', async () => {
+      const preview = await brokerService.previewLeverage({
+        symbol: 'AAPL',
+        orderType: OrderType.Market,
+        side: Side.Buy,
+        leverage: 10,
+      })
+
+      expect(preview.infos).toBeDefined()
     })
   })
 })

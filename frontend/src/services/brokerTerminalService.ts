@@ -12,7 +12,9 @@ import type {
   AccountManagerInfo,
   AccountMetainfo,
   ActionMetaInfo,
+  Brackets,
   ConnectionStatus as ConnectionStatusType,
+  CustomInputFieldsValues,
   DefaultContextMenuActionsParams,
   Execution,
   IBrokerConnectionAdapterHost,
@@ -22,12 +24,17 @@ import type {
   INumberFormatter,
   IsTradableResult,
   IWatchedValue,
+  LeverageInfo,
+  LeverageInfoParams,
+  LeveragePreviewResult,
+  LeverageSetParams,
+  LeverageSetResult,
   Order,
   OrderPreviewResult,
   PlaceOrderResult,
   Position,
   PreOrder,
-  TradeContext
+  TradeContext,
 } from '@public/trading_terminal'
 
 import { ApiAdapter, type ApiPromise } from '@/plugins/apiAdapter'
@@ -56,6 +63,15 @@ export interface ApiInterface {
   getPositions(): ApiPromise<Position[]>
   getExecutions(symbol: string): ApiPromise<Execution[]>
   getAccountInfo(): ApiPromise<AccountMetainfo>
+
+  // Position operations
+  closePosition(positionId: string, amount?: number): ApiPromise<void>
+  editPositionBrackets(positionId: string, brackets: Brackets, customFields?: CustomInputFieldsValues): ApiPromise<void>
+
+  // Leverage operations
+  leverageInfo(leverageInfoParams: LeverageInfoParams): ApiPromise<LeverageInfo>
+  setLeverage(leverageSetParams: LeverageSetParams): ApiPromise<LeverageSetResult>
+  previewLeverage(leverageSetParams: LeverageSetParams): ApiPromise<LeveragePreviewResult>
 }
 
 // Private state management
@@ -73,6 +89,20 @@ export function resetApiFallbackState(): void {
   _orderById.clear()
   _positions.clear()
   _executions.length = 0
+}
+
+/**
+ * Add a test position to fallback state
+ * ONLY use this in test environments
+ */
+export function addTestPosition(positionId: string, symbol: string, qty: number, side: number, avgPrice: number = 150.0): void {
+  _positions.set(positionId, {
+    id: positionId,
+    symbol,
+    qty,
+    side,
+    avgPrice,
+  })
 }
 
 class ApiFallback implements ApiInterface {
@@ -278,6 +308,105 @@ class ApiFallback implements ApiInterface {
       },
     }
   }
+
+  async closePosition(positionId: string, amount?: number): ApiPromise<void> {
+    const position = _positions.get(positionId)
+    if (!position) {
+      console.warn(`[FallbackClient] Position not found: ${positionId}`)
+      return {
+        status: 404,
+        data: undefined as void,
+      }
+    }
+
+    if (amount !== undefined) {
+      if (amount >= position.qty) {
+        _positions.delete(positionId)
+        console.log(`[FallbackClient] Position fully closed: ${positionId}`)
+      } else {
+        position.qty -= amount
+        console.log(`[FallbackClient] Position partially closed: ${positionId}, reduced by ${amount}, remaining: ${position.qty}`)
+      }
+    } else {
+      _positions.delete(positionId)
+      console.log(`[FallbackClient] Position fully closed: ${positionId}`)
+    }
+
+    return {
+      status: 200,
+      data: undefined as void,
+    }
+  }
+
+  async editPositionBrackets(positionId: string, brackets: Brackets, customFields?: CustomInputFieldsValues): ApiPromise<void> {
+    const position = _positions.get(positionId)
+    if (!position) {
+      console.warn(`[FallbackClient] Position not found: ${positionId}`)
+      return {
+        status: 404,
+        data: undefined as void,
+      }
+    }
+
+    position.stopLoss = brackets.stopLoss
+    position.takeProfit = brackets.takeProfit
+
+    console.log(`[FallbackClient] Position brackets edited: ${positionId}`, brackets, customFields)
+
+    return {
+      status: 200,
+      data: undefined as void,
+    }
+  }
+
+  async leverageInfo(leverageInfoParams: LeverageInfoParams): ApiPromise<LeverageInfo> {
+    return {
+      status: 200,
+      data: {
+        title: `Leverage for ${leverageInfoParams.symbol}`,
+        leverage: 10,
+        min: 1,
+        max: 100,
+        step: 1,
+      },
+    }
+  }
+
+  async setLeverage(leverageSetParams: LeverageSetParams): ApiPromise<LeverageSetResult> {
+    console.log(`[FallbackClient] Leverage set: ${leverageSetParams.symbol} = ${leverageSetParams.leverage}x`)
+
+    return {
+      status: 200,
+      data: {
+        leverage: leverageSetParams.leverage,
+      },
+    }
+  }
+
+  async previewLeverage(leverageSetParams: LeverageSetParams): ApiPromise<LeveragePreviewResult> {
+    const warnings: string[] = []
+    const infos: string[] = []
+    const errors: string[] = []
+
+    infos.push(`Setting leverage to ${leverageSetParams.leverage}x for ${leverageSetParams.symbol}`)
+
+    if (leverageSetParams.leverage > 50) {
+      warnings.push('High leverage increases risk significantly')
+    }
+
+    if (leverageSetParams.leverage < 1 || leverageSetParams.leverage > 100) {
+      errors.push('Leverage must be between 1x and 100x')
+    }
+
+    return {
+      status: 200,
+      data: {
+        infos: infos.length > 0 ? infos : undefined,
+        warnings: warnings.length > 0 ? warnings : undefined,
+        errors: errors.length > 0 ? errors : undefined,
+      },
+    }
+  }
 }
 
 
@@ -480,28 +609,26 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     return ConnectionStatus.Connected
   }
 
-  // // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // async closePosition?(positionId: string, amount?: number): Promise<void> {
-  //   throw new Error('Method not implemented.')
-  // }
+  async closePosition(positionId: string, amount?: number): Promise<void> {
+    await this._getApiAdapter().closePosition(positionId, amount)
+  }
 
-  // // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // editPositionBrackets?(positionId: string, brackets: Brackets, customFields?: CustomInputFieldsValues): Promise<void> {
-  //   throw new Error('Method not implemented.')
-  // }
+  async editPositionBrackets(positionId: string, brackets: Brackets, customFields?: CustomInputFieldsValues): Promise<void> {
+    await this._getApiAdapter().editPositionBrackets(positionId, brackets, customFields)
+  }
 
-  // // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // async leverageInfo(leverageInfoParams: LeverageInfoParams): Promise<LeverageInfo> {
-  //   throw new Error('Method not implemented.')
-  // }
+  async leverageInfo(leverageInfoParams: LeverageInfoParams): Promise<LeverageInfo> {
+    const response = await this._getApiAdapter().leverageInfo(leverageInfoParams)
+    return response.data
+  }
 
-  // // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // async setLeverage(leverageInfo: LeverageSetParams): Promise<LeverageSetResult> {
-  //   throw new Error('Method not implemented.')
-  // }
+  async setLeverage(leverageSetParams: LeverageSetParams): Promise<LeverageSetResult> {
+    const response = await this._getApiAdapter().setLeverage(leverageSetParams)
+    return response.data
+  }
 
-  // // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  // previewLeverage?(leverageSetParams: LeverageSetParams): Promise<LeveragePreviewResult> {
-  //   throw new Error('Method not implemented.')
-  // }
+  async previewLeverage(leverageSetParams: LeverageSetParams): Promise<LeveragePreviewResult> {
+    const response = await this._getApiAdapter().previewLeverage(leverageSetParams)
+    return response.data
+  }
 }
