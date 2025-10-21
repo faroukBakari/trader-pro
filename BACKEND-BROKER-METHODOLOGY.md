@@ -1,15 +1,23 @@
-# Backend Broker Terminal Service - Incremental Implementation Methodology
+# Backend Service Implementation Methodology (TDD with Dual-Client Architecture)
 
-**Version**: 1.0.0  
-**Date**: October 19, 2025  
-**Status**: 🚧 In Progress  
-**Branch**: `backend-broker`
+**Template Version**: 2.0  
+**Status**: Generic Reusable Template  
+**Original Implementation**: Broker Terminal Service  
+**Applicable To**: Any backend service implementation (broker, datafeed, notifications, user management, etc.)
 
 ---
 
 ## Overview
 
-This document outlines the incremental, test-driven approach for implementing the backend broker terminal service. The methodology ensures that all tests pass at each step, the interface contract is clearly defined, and the implementation can be safely rolled back at any point.
+This document outlines a **generic, incremental, test-driven approach** for implementing backend services integrated with frontend clients. The methodology applies to any service (broker, datafeed, notifications, etc.) and ensures:
+
+- All tests pass at each step
+- Interface contracts are clearly defined before implementation
+- Implementation can be safely rolled back at any point
+- Type safety across the full stack
+- Breaking changes are detected at compile time
+
+**Use this template for**: Trading services, data services, user services, notification services, or any backend API with frontend integration.
 
 ---
 
@@ -58,103 +66,98 @@ This approach validates that:
 
 **Goal**: Consolidate interface and mock logic into service file, ensure all tests pass.
 
-**Design Constraint**: For simplicity and implementation speed, the `ApiInterface` interface and `BrokerFallbackClient` class are **co-located within the service file** (`frontend/src/services/brokerTerminalService.ts`). This reduces file management overhead and keeps related code together during rapid iteration.
+**Design Pattern**: Co-locate the interface contract and fallback implementation within the service file for rapid iteration. This reduces file management overhead while maintaining clean separation of concerns.
 
 ### Step 1.1: Consolidate Interface and Fallback Client
 
-**File**: `frontend/src/services/brokerTerminalService.ts`
+**Location Pattern**: `frontend/src/services/{serviceName}Service.ts`
 
-The service file now contains three main sections:
+The service file should contain three main sections:
 
-1. **ApiInterface Interface** - Contract definition
-2. **BrokerFallbackClient Class** - Mock implementation with private state/methods
-3. **BrokerTerminalService Class** - TradingView adapter using delegation
+1. **ApiInterface** - Contract definition with all operations
+2. **ApiFallback** - Mock implementation with private state management
+3. **ServiceAdapter** - External library/framework adapter using delegation
+
+**Architecture Pattern**:
 
 ```typescript
 // ============================================================================
-// BROKER CLIENT INTERFACE
+// INTERFACE CONTRACT
 // ============================================================================
 
 export interface ApiInterface {
-  // Order operations
-  placeOrder(order: PreOrder): Promise<PlaceOrderResult>;
-  modifyOrder(order: Order, confirmId?: string): Promise<void>;
-  cancelOrder(orderId: string): Promise<void>;
-  getOrders(): Promise<Order[]>;
-
-  // Position operations
-  getPositions(): Promise<Position[]>;
-
-  // Execution operations
-  getExecutions(symbol: string): Promise<Execution[]>;
-
-  // Account operations
-  getAccountInfo(): Promise<AccountMetainfo>;
+  // Define all service operations
+  // Pattern: {action}{Resource}(params): Promise<Result>
+  createResource(data: ResourceData): ApiPromise<ResourceResult>
+  updateResource(id: string, data: ResourceData): ApiPromise<void>
+  deleteResource(id: string): ApiPromise<void>
+  getResources(filter?: FilterParams): ApiPromise<Resource[]>
+  getResourceDetails(id: string): ApiPromise<ResourceDetails>
 }
 
 // ============================================================================
 // FALLBACK CLIENT (MOCK IMPLEMENTATION)
 // ============================================================================
 
-class BrokerFallbackClient implements ApiInterface {
-  // Private state management
-  private readonly _orderById = new Map<string, Order>()
-  private readonly _positions = new Map<string, Position>()
-  private readonly _executions: Execution[] = []
-  private orderCounter = 1
+class ApiFallback implements ApiInterface {
+  // Private state management (in-memory storage)
+  private readonly _resourcesById = new Map<string, Resource>()
+  private _counter = 1
 
-  // All mock logic methods (private)
-  private async simulateOrderExecution(orderId: string): Promise<void> { ... }
-  private updatePosition(execution: Execution): void { ... }
+  // Private helper methods for simulation
+  private async simulateAsync(delay: number = 100): Promise<void> { ... }
+  private generateId(prefix: string): string { ... }
 
-  // Public API methods (interface contract)
-  async placeOrder(order: PreOrder): Promise<PlaceOrderResult> { ... }
-  async modifyOrder(order: Order, confirmId?: string): Promise<void> { ... }
-  async cancelOrder(orderId: string): Promise<void> { ... }
-  async getOrders(): Promise<Order[]> { ... }
-  async getPositions(): Promise<Position[]> { ... }
-  async getExecutions(symbol: string): Promise<Execution[]> { ... }
-  async getAccountInfo(): Promise<AccountMetainfo> { ... }
+  // Public API methods implementing interface contract
+  async createResource(data: ResourceData): ApiPromise<ResourceResult> {
+    const id = this.generateId('RESOURCE')
+    const resource = { id, ...data, status: 'active' }
+    this._resourcesById.set(id, resource)
+    return { status: 200, data: { id } }
+  }
+  // ... implement all interface methods
 }
 
 // ============================================================================
-// BROKER TERMINAL SERVICE
+// SERVICE ADAPTER (EXTERNAL LIBRARY INTEGRATION)
 // ============================================================================
 
-export class BrokerTerminalService implements IBrokerWithoutRealtime {
-  private readonly _client: ApiInterface;
+export class ServiceAdapter implements ExternalLibraryInterface {
+  private readonly _client: ApiInterface
+  private readonly mock: boolean
 
   constructor(
-    host: IBrokerConnectionAdapterHost,
-    datafeed: IDatafeedQuotesApi,
-    client?: ApiInterface // Optional: defaults to fallback
+    externalDeps: ExternalDependencies,
+    mock: boolean = true
   ) {
-    this._host = host;
-    this._quotesProvider = datafeed;
-    this._client = client ?? new BrokerFallbackClient(host, datafeed);
+    // Initialize dual-client system
+    const apiFallback = new ApiFallback()
+    const apiAdapter = new ApiAdapter() // Real backend client
+    this._client = mock ? apiFallback : apiAdapter
   }
 
-  // All methods delegate to client
-  async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
-    const result = await this._client.placeOrder(order);
-    // Notify TradingView host about updates
-    const orders = await this._client.getOrders();
-    const placedOrder = orders.find((o) => o.id === result.orderId);
-    if (placedOrder) {
-      this._host.orderUpdate(placedOrder);
-    }
-    return result;
+  // Delegate to client and handle external library concerns
+  async externalLibraryMethod(params: ExternalParams): Promise<ExternalResult> {
+    const response = await this._client.createResource(this.mapParams(params))
+    this.notifyExternalLibrary(response.data)
+    return this.mapToExternalFormat(response.data)
   }
-  // ... similar for all other methods
 }
 ```
+
+**Example from broker implementation**:
+
+- `ApiInterface` defines broker operations (place/modify/cancel orders, get positions)
+- `ApiFallback` maintains in-memory maps for orders, positions, executions
+- `BrokerTerminalService` adapts to TradingView's `IBrokerWithoutRealtime` interface
 
 **Verification**:
 
 ```bash
 cd frontend
 make test      # All tests pass
-make lint      # No lint errors
+make lint      # No linting errors
+npm run type-check  # No TypeScript errors
 ```
 
 ---
@@ -165,199 +168,242 @@ make lint      # No lint errors
 
 ### Step 2.1: Create Backend Models
 
-**File**: `backend/src/trading_api/models/broker/__init__.py`
+**Location Pattern**: `backend/src/{api_name}/models/{service_name}/`
 
-Create Pydantic models matching TradingView types:
+**Model Design Guidelines**:
+
+1. **Match Frontend Types**: Pydantic models should mirror frontend TypeScript types
+2. **Use Enums**: Define enums for constrained values (matches frontend)
+3. **Optional Fields**: Use `Optional[T]` with defaults for nullable fields
+4. **Validation**: Add Pydantic validators for business logic
+5. **Documentation**: Include docstrings for all models
+
+**Model Structure Pattern**:
 
 ```python
-from pydantic import BaseModel, Field
-from typing import Optional, Literal
+from pydantic import BaseModel, Field, validator
+from typing import Optional, List
 from enum import IntEnum
+from datetime import datetime
 
-class OrderStatus(IntEnum):
-    CANCELED = 1
-    FILLED = 2
+# Pattern 1: Enums for constrained values
+class ResourceStatus(IntEnum):
+    """Status enum matching frontend constants"""
+    PENDING = 1
+    ACTIVE = 2
     INACTIVE = 3
-    PLACING = 4
-    REJECTED = 5
-    WORKING = 6
+    DELETED = 4
 
-class OrderType(IntEnum):
-    LIMIT = 1
-    MARKET = 2
-    STOP = 3
-    STOP_LIMIT = 4
+class ResourceType(IntEnum):
+    """Type enum matching frontend constants"""
+    TYPE_A = 1
+    TYPE_B = 2
 
-class Side(IntEnum):
-    BUY = 1
-    SELL = -1
+# Pattern 2: Request models (from client)
+class ResourceRequest(BaseModel):
+    """Request to create/update resource"""
+    name: str = Field(..., min_length=1, max_length=100)
+    type: ResourceType
+    value: float = Field(..., gt=0)
+    metadata: Optional[dict] = None
 
-class PreOrder(BaseModel):
-    """Order request from client"""
-    symbol: str
-    type: OrderType
-    side: Side
-    qty: float
-    limitPrice: Optional[float] = None
-    stopPrice: Optional[float] = None
-    # ... match TradingView PreOrder fields
+    @validator('name')
+    def validate_name(cls, v):
+        if v.strip() != v:
+            raise ValueError('Name cannot have leading/trailing spaces')
+        return v
 
-class PlacedOrder(BaseModel):
-    """Complete order with status"""
-    id: str
-    symbol: str
-    type: OrderType
-    side: Side
-    qty: float
-    status: OrderStatus
-    limitPrice: Optional[float] = None
-    stopPrice: Optional[float] = None
-    filledQty: Optional[float] = None
-    avgPrice: Optional[float] = None
-    updateTime: Optional[int] = None
-    # ... match TradingView PlacedOrder fields
-
-class Position(BaseModel):
-    """Position data"""
-    id: str
-    symbol: str
-    qty: float
-    side: Side
-    avgPrice: float
-    # ... match TradingView PositionBase fields
-
-class Execution(BaseModel):
-    """Trade execution record"""
-    symbol: str
-    price: float
-    qty: float
-    side: Side
-    time: int
-    # ... match TradingView Execution fields
-
-class PlaceOrderResult(BaseModel):
-    """Result of placing an order"""
-    orderId: str
-
-class AccountMetainfo(BaseModel):
-    """Account metadata"""
+# Pattern 3: Response models (to client)
+class ResourceResponse(BaseModel):
+    """Complete resource with server-generated fields"""
     id: str
     name: str
+    type: ResourceType
+    value: float
+    status: ResourceStatus
+    metadata: Optional[dict] = None
+    createdAt: int  # Unix timestamp
+    updatedAt: Optional[int] = None
+
+# Pattern 4: Result models (operation outcomes)
+class ResourceOperationResult(BaseModel):
+    """Result of resource operation"""
+    id: str
+    success: bool = True
+    message: Optional[str] = None
+
+# Pattern 5: List/query models
+class ResourceList(BaseModel):
+    """Paginated list of resources"""
+    items: List[ResourceResponse]
+    total: int
+    page: int
+    pageSize: int
 ```
+
+**Real-world example (broker service)**:
+
+- `PreOrder` (request) → `PlacedOrder` (response)
+- `OrderStatus`, `OrderType`, `Side` (enums)
+- `PlaceOrderResult` (operation result)
+- `Position`, `Execution` (domain models)
 
 ---
 
 ### Step 2.2: Create REST API Endpoints (Empty Stubs)
 
-**File**: `backend/src/trading_api/api/broker.py`
+**Location Pattern**: `backend/src/{api_name}/api/{service_name}.py`
 
-Create REST endpoints with **empty implementations** (NotImplementedError stubs). All routes MUST include `summary` and `operation_id` parameters:
+**Endpoint Design Guidelines**:
+
+1. **CRUD Operations**: Follow RESTful patterns (POST, GET, PUT/PATCH, DELETE)
+2. **Route Parameters**: Include `summary` and `operation_id` for OpenAPI generation
+3. **Response Models**: Always define explicit response models
+4. **Error Handling**: Let FastAPI handle validation errors automatically
+5. **Empty Stubs**: Start with `NotImplementedError` to establish contract
+
+**Endpoint Pattern**:
 
 ```python
-from fastapi import APIRouter
-from typing import List
+from fastapi import APIRouter, HTTPException, Query, Path
+from typing import List, Optional
 from pydantic import BaseModel
-from trading_api.models.broker import (
-    PreOrder, PlacedOrder, Position, Execution,
-    PlaceOrderResult, AccountMetainfo
+from {api_name}.models.{service_name} import (
+    ResourceRequest,
+    ResourceResponse,
+    ResourceOperationResult,
+    # ... import all models
 )
 
 class SuccessResponse(BaseModel):
-    """Generic success response for operations that don't return data"""
+    """Generic success response for operations without data"""
     success: bool = True
+    message: str = "Operation completed successfully"
 
-router = APIRouter(prefix="/broker", tags=["broker"])  # Note: /broker only, main.py adds /api/v1
+# Router configuration
+# Note: Prefix should NOT include version (/api/v1 added by main.py)
+router = APIRouter(prefix="/{service}", tags=["{service}"])
+
+# ============================================================================
+# CREATE Operation (POST)
+# ============================================================================
 
 @router.post(
-    "/orders",
-    response_model=PlaceOrderResult,
-    summary="Place a new order",
-    operation_id="placeOrder",
+    "/resources",
+    response_model=ResourceOperationResult,
+    summary="Create a new resource",
+    operation_id="createResource",
+    status_code=201,
 )
-async def placeOrder(order: PreOrder) -> PlaceOrderResult:
-    """Place a new order in the trading system"""
-    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
+async def createResource(resource: ResourceRequest) -> ResourceOperationResult:
+    """Create a new resource in the system"""
+    raise NotImplementedError("Service API not yet implemented")  # 👈 Empty stub
+
+# ============================================================================
+# READ Operations (GET)
+# ============================================================================
+
+@router.get(
+    "/resources",
+    response_model=List[ResourceResponse],
+    summary="Get all resources",
+    operation_id="getResources",
+)
+async def getResources(
+    status: Optional[int] = Query(None, description="Filter by status"),
+    limit: int = Query(100, ge=1, le=1000),
+) -> List[ResourceResponse]:
+    """Get list of resources with optional filters"""
+    raise NotImplementedError("Service API not yet implemented")
+
+@router.get(
+    "/resources/{resource_id}",
+    response_model=ResourceResponse,
+    summary="Get resource by ID",
+    operation_id="getResource",
+)
+async def getResource(
+    resource_id: str = Path(..., description="Resource identifier")
+) -> ResourceResponse:
+    """Get detailed information for a specific resource"""
+    raise NotImplementedError("Service API not yet implemented")
+
+# ============================================================================
+# UPDATE Operation (PUT)
+# ============================================================================
 
 @router.put(
-    "/orders/{order_id}",
+    "/resources/{resource_id}",
     response_model=SuccessResponse,
-    summary="Modify an existing order",
-    operation_id="modifyOrder",
+    summary="Update an existing resource",
+    operation_id="updateResource",
 )
-async def modifyOrder(order_id: str, order: PreOrder) -> SuccessResponse:
-    """Modify an existing order"""
-    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
+async def updateResource(
+    resource_id: str,
+    resource: ResourceRequest
+) -> SuccessResponse:
+    """Update an existing resource"""
+    raise NotImplementedError("Service API not yet implemented")
+
+# ============================================================================
+# DELETE Operation (DELETE)
+# ============================================================================
 
 @router.delete(
-    "/orders/{order_id}",
+    "/resources/{resource_id}",
     response_model=SuccessResponse,
-    summary="Cancel an order",
-    operation_id="cancelOrder",
+    summary="Delete a resource",
+    operation_id="deleteResource",
 )
-async def cancelOrder(order_id: str) -> SuccessResponse:
-    """Cancel an order"""
-    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
+async def deleteResource(resource_id: str) -> SuccessResponse:
+    """Delete a resource"""
+    raise NotImplementedError("Service API not yet implemented")
 
-@router.get(
-    "/orders",
-    response_model=List[PlacedOrder],
-    summary="Get all orders",
-    operation_id="getOrders",
-)
-async def getOrders() -> List[PlacedOrder]:
-    """Get all orders"""
-    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
+# ============================================================================
+# CUSTOM Operations (service-specific actions)
+# ============================================================================
 
-@router.get(
-    "/positions",
-    response_model=List[Position],
-    summary="Get all positions",
-    operation_id="getPositions",
+@router.post(
+    "/resources/{resource_id}/actions/custom",
+    response_model=SuccessResponse,
+    summary="Perform custom action on resource",
+    operation_id="customAction",
 )
-async def getPositions() -> List[Position]:
-    """Get all positions"""
-    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
-
-@router.get(
-    "/executions/{symbol}",
-    response_model=List[Execution],
-    summary="Get executions for a symbol",
-    operation_id="getExecutions",
-)
-async def getExecutions(symbol: str) -> List[Execution]:
-    """Get execution history for a specific symbol"""
-    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
-
-@router.get(
-    "/account",
-    response_model=AccountMetainfo,
-    summary="Get account information",
-    operation_id="getAccountInfo",
-)
-async def getAccountInfo() -> AccountMetainfo:
-    """Get account metadata"""
-    raise NotImplementedError("Broker API not yet implemented")  # 👈 Empty stub
+async def customAction(
+    resource_id: str,
+    params: dict
+) -> SuccessResponse:
+    """Perform service-specific action"""
+    raise NotImplementedError("Service API not yet implemented")
 ```
+
+**Real-world examples**:
+
+- **Broker**: POST `/orders`, PUT `/orders/{id}`, DELETE `/orders/{id}`, GET `/positions`
+- **Datafeed**: GET `/symbols/{symbol}`, GET `/history`, POST `/quotes`
+- **User**: POST `/users`, GET `/users/{id}`, PUT `/users/{id}/profile`
 
 ---
 
 ### Step 2.3: Register Router in Main App
 
-**File**: `backend/src/trading_api/main.py`
+**Location Pattern**: `backend/src/{api_name}/main.py`
 
 ```python
-from trading_api.api import broker as broker_api
+from {api_name}.api import {service_name} as {service_name}_api
 
-# Register broker router
-apiApp.include_router(broker_api.router)
+# Register service router
+apiApp.include_router({service_name}_api.router)
 ```
 
 **Verification**:
 
 ```bash
 cd backend
-make dev  # Start backend
-# Backend starts successfully, exports openapi.json with broker endpoints
+make dev  # Start backend server
+# Server starts successfully
+# OpenAPI spec exported to backend/openapi.json
+# Service endpoints visible in /docs
 ```
 
 ---
@@ -366,366 +412,283 @@ make dev  # Start backend
 
 **Architecture Summary**:
 
-- **Consolidated Adapter**: Both datafeed and broker API methods are consolidated in a single `ApiAdapter` class (`frontend/src/plugins/apiAdapter.ts`)
+- **Consolidated Adapter**: All backend API operations consolidated in single `ApiAdapter` class
+- **Location**: `frontend/src/plugins/apiAdapter.ts`
 - **Single Source of Truth**: All backend API interactions go through one adapter file
-- **No Separate Broker Adapter**: Unlike the initial design, we don't create a separate `BrokerApiAdapter` file
+- **No Service-Specific Adapters**: Consolidate multiple services in same adapter (not separate files)
 
-**Architecture Pattern**: Never import generated backend models outside the adapter. Always use an adapter layer to:
+**Architecture Pattern**: Never import generated backend models outside the adapter. The adapter layer:
 
-- Detect breaking changes at compile time through targeted type casting
-- Convert backend types to frontend types
-- Provide clean, consolidated interface for all API operations
-- Apply type casting only to enum/literal/alias fields, not entire objects
-- Use type-safe mapper functions that can import backend types for validation (rename backend types with a \_Backend suffix)
-- Keep backend type imports isolated to mapper functions (not ApiAdapter methods)
+- Detects breaking changes at compile time through targeted type casting
+- Converts backend types to frontend types
+- Provides clean, consolidated interface for all API operations
+- Applies type casting only to enum/literal/alias fields, not entire objects
+- Uses type-safe mapper functions with backend types (suffixed `_Backend`)
+- Keeps backend type imports isolated to mapper functions
 
 **Step 2.4.1: Generate OpenAPI Client**
 
 ```bash
-# Generate OpenAPI client
+# Generate TypeScript client from backend OpenAPI spec
 cd frontend
 make generate-openapi-client
 
-# Generated client will have methods like:
-# - placeOrder(order: PreOrder): Promise<PlaceOrderResult>
-# - modifyOrder(orderId: string, order: PlacedOrder): Promise<void>
-# - etc.
+# Generated client structure:
+# - frontend/src/clients/trader-client-generated/
+# - API methods matching backend operation_id values
+# - Type definitions matching backend Pydantic models
 ```
 
-**Step 2.4.2: Add Broker Methods to API Adapter**
+**Step 2.4.2: Add Service Methods to API Adapter**
 
-**Existing Source File**: `frontend/src/plugins/apiAdapter.ts`
+**Location**: `frontend/src/plugins/apiAdapter.ts`
 
-This adapter wraps the generated OpenAPI client and converts backend models to types. **Never import generated models outside this file.**
+**CRITICAL**: The `ApiAdapter` class can optionally implement service-specific `ApiInterface` interfaces to enable type checking against frontend service contracts.
 
-**CRITICAL**: The `ApiAdapter` class must implement the `ApiInterface` interface (defined in `brokerTerminalService.ts`) to enable direct usage without a wrapper class. The broker methods' signatures must match the interface exactly.
-
-**IMPORTANT Design Constraints**:
+**Design Constraints**:
 
 1. **API Versioning Constraint**:
 
-   - All API endpoints are available under `V1Api` from `@clients/trader-client-generated/`
-   - **DO NOT** import individual API modules (e.g., `BrokerApi`, `DatafeedApi`) directly
-   - Use `V1Api` for all API calls to support version upgrade handling
-   - Broker methods are consolidated inside the `ApiAdapter` class (not a separate `BrokerApiAdapter`)
+   - Use versioned API class (e.g., `V1Api`) from generated client
+   - **DO NOT** import individual API modules directly
+   - Supports version upgrade handling through single entry point
 
 2. **Type Casting Safety Constraint**:
-
-   - **Rule of thumb**: Unsafe type casting (`as unknown as`) is **ONLY** reserved for literal/alias/enum typed members
+   - **Rule**: Unsafe casting (`as unknown as`) **ONLY** for literal/alias/enum fields
    - **DO NOT** cast entire objects or complex types blindly
-   - Cast only specific enum/literal fields that differ between backend and frontend (e.g., `Side`, `OrderType`, `OrderStatus`)
-   - This ensures type mismatches on complex objects are caught at compile time
-   - The best approach is to implement type-safe mappers with runtime validation
-   - **Mapper Functions**: Can import backend types for type safety (not exposed outside apiAdapter)
-   - **ApiAdapter Methods**: Never import or use backend types directly - only in mappers
-   - Example of **correct** casting in ApiAdapter method:
-     ```typescript
-     const response = await this.rawApi.placeOrder({
-       ...order,
-       type: order.type as unknown as GeneratedPreOrder["type"], // ✅ Cast enum only
-       side: order.side as unknown as GeneratedPreOrder["side"], // ✅ Cast enum only
-     });
-     ```
-   - Example of **correct** mapper function:
+   - Cast only specific enum/literal fields that differ between backend and frontend
+   - Ensures type mismatches on complex objects caught at compile time
+   - Use type-safe mappers with runtime validation
+   - **Mapper Functions**: Can import backend types (not exposed outside)
+   - **Adapter Methods**: Never import/use backend types directly
 
-     ```typescript
-     import type { QuoteData as BackendQuoteData } from "@clients/trader-client-generated";
+**Pattern**: This adapter wraps the generated OpenAPI client. Never import generated models outside this file.
+**Type Casting Examples**:
 
-     const apiMappers = {
-       mapQuoteData: (quote: BackendQuoteData): QuoteData => {
-         // Type-safe mapping with backend types
-         if (quote.s === "error") {
-           return { s: "error" as const, n: quote.n, v: quote.v };
-         }
-         return { s: "ok" as const, n: quote.n, v: { ...quote.v } };
-       },
-     };
-     ```
+```typescript
+// ✅ CORRECT: Cast enum/literal only
+const response = await this.rawApi.createResource({
+  ...resource,
+  type: resource.type as unknown as BackendResourceType["type"],
+  status: resource.status as unknown as BackendResourceType["status"],
+});
 
-   - Example of **incorrect** casting:
-     ```typescript
-     const response = await this.rawApi.placeOrder(
-       order as unknown as GeneratedPreOrder
-     ); // ❌ Casting entire object
-     ```
+// ✅ CORRECT: Type-safe mapper function
+import type { ResourceData as ResourceData_Backend } from "@clients/trader-client-generated";
+
+const apiMappers = {
+  mapResourceData: (data: FrontendResourceData): ResourceData_Backend => {
+    return {
+      name: data.name,
+      type: data.type as unknown as ResourceData_Backend["type"],
+      value: data.value,
+      metadata: data.metadata ?? null,
+    };
+  },
+};
+
+// ❌ INCORRECT: Casting entire object
+const response = await this.rawApi.createResource(
+  resource as unknown as BackendResource
+);
+```
+
+**Adapter Implementation Pattern**:
 
 ```typescript
 /**
- * API Adapter (Consolidated Datafeed + Broker)
+ * API Adapter (Consolidated Multi-Service)
  *
- * This adapter wraps the generated OpenAPI client to provide type conversions
- * and a cleaner interface. Do NOT import generated client models but import
- * TradingView types. For API requests/responses, use the adapter types defined here.
- *
- * Rule: Never import backend models outside this file to detect breaking changes.
- * Constraint: Use V1Api (not individual API classes) for version upgrade handling.
- * Type Casting Rule: Use type-safe mappers with backend types; only cast enums in mappers.
+ * Wraps generated OpenAPI client for type conversion and clean interface.
+ * Rule: Never import backend models outside this file.
+ * Constraint: Use versioned API (V1Api) for all calls.
+ * Type Casting: Only cast enums/literals, never entire objects.
  */
 
 import type {
-  PreOrder as PreOrder_Backend,
-  QuoteData as QuoteData_Backend,
-} from "@clients/trader-client-generated";
-import { Configuration, V1Api } from "@clients/trader-client-generated/";
+  ResourceRequest as ResourceRequest_Backend,
+  AnotherType as AnotherType_Backend,
+} from "@clients/{generated-client-name}";
+import { Configuration, V1Api } from "@clients/{generated-client-name}/";
 import type {
-  AccountMetainfo,
-  Execution,
-  Order,
-  PlaceOrderResult,
-  Position,
-  PreOrder,
-  QuoteData,
-} from "@public/trading_terminal/charting_library";
+  FrontendResourceRequest,
+  FrontendResourceResponse,
+  // ... import frontend types
+} from "@/types" or "@external/library";
 
 export type ApiResponse<T> = { status: number; data: T };
-type ApiPromise<T> = Promise<ApiResponse<T>>;
+export type ApiPromise<T> = Promise<ApiResponse<T>>;
 
-// Type-safe mappers for API requests/responses
-// Mappers can import backend types for type safety (not exposed outside this file)
+// Type-safe mappers (can import backend types)
 const apiMappers = {
-  mapQuoteData: (quote: QuoteData_Backend): QuoteData => {
-    if (quote.s === "error") {
-      return { s: "error" as const, n: quote.n, v: quote.v };
-    }
-    return { s: "ok" as const, n: quote.n, v: { ...quote.v } };
-  },
-
-  mapPreOrder: (order: PreOrder): PreOrder_Backend => {
+  mapResourceRequest: (data: FrontendResourceRequest): ResourceRequest_Backend => {
     return {
-      symbol: order.symbol,
-      type: order.type as unknown as PreOrder_Backend["type"],
-      side: order.side as unknown as PreOrder_Backend["side"],
-      qty: order.qty,
-      limitPrice: order.limitPrice ?? null,
-      stopPrice: order.stopPrice ?? null,
-      stopType: order.stopType
-        ? (order.stopType as unknown as PreOrder_Backend["stopType"])
-        : null,
+      name: data.name,
+      type: data.type as unknown as ResourceRequest_Backend["type"],
+      value: data.value,
+      metadata: data.metadata ?? null,
     };
   },
-
-  ...
-
+  // Add more mappers as needed
 };
 
 export class ApiAdapter {
   private rawApi: V1Api;
 
-  // ========================================================================
-  // DATAFEED METHODS (for existing datafeed functionality)
-  // ========================================================================
-  // These methods can keep ApiResponse wrapper if needed by datafeedService
-  // ... existing datafeed methods ...
+  constructor() {
+    const apiConfig = new Configuration({
+      basePath: import.meta.env.API_BASE_PATH || '',
+    });
+    this.rawApi = new V1Api(apiConfig);
+  }
 
-  ...
+  // ======================================================================
+  // SERVICE A METHODS
+  // ======================================================================
 
-  async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
-    const response = await this.rawApi.placeOrder(
-      apiMappers.mapPreOrder(order)
+  async createResource(data: FrontendResourceRequest): ApiPromise<FrontendResourceResponse> {
+    const response = await this.rawApi.createResource(
+      apiMappers.mapResourceRequest(data)
     );
-    return response.data as PlaceOrderResult;
+    return {
+      status: response.status,
+      data: response.data as FrontendResourceResponse,
+    };
   }
 
-  async modifyOrder(order: Order, confirmId?: string): Promise<void> {
-    await this.rawApi.modifyOrder(apiMappers.mapPreOrder(order), order.id);
-    // Returns void to match interface
+  async getResources(): ApiPromise<FrontendResourceResponse[]> {
+    const response = await this.rawApi.getResources();
+    return {
+      status: response.status,
+      data: response.data.map(item => ({
+        ...item,
+        status: item.status as unknown as FrontendResourceResponse["status"],
+      })),
+    };
   }
 
-  async cancelOrder(orderId: string): Promise<void> {
-    await this.rawApi.cancelOrder(orderId);
-    // Returns void to match interface
-  }
+  // ======================================================================
+  // SERVICE B METHODS
+  // ======================================================================
 
-  async getOrders(): Promise<Order[]> {
-    const response = await this.rawApi.getOrders();
-    // Note: Full cast due to union type mismatch (BracketOrder fields)
-    return response.data as unknown as Order[];
+  async otherServiceOperation(params: OtherParams): ApiPromise<OtherResult> {
+    const response = await this.rawApi.otherServiceOperation(params);
+    return { status: response.status, data: response.data as OtherResult };
   }
-
-  async getPositions(): Promise<Position[]> {
-    const response = await this.rawApi.getPositions();
-    return response.data.map((position) => ({
-      ...position,
-      side: position.side as unknown as Position["side"],
-    }));
-  }
-
-  async getExecutions(symbol: string): Promise<Execution[]> {
-    const response = await this.rawApi.getExecutions(symbol);
-    return response.data.map((execution) => ({
-      ...execution,
-      side: execution.side as unknown as Execution["side"],
-    }));
-  }
-
-  async getAccountInfo(): Promise<AccountMetainfo> {
-    const response = await this.rawApi.getAccountInfo();
-    return response.data as AccountMetainfo;
-  }
-
 }
 ```
 
-**Adjustment Loop**: If types don't match:
+**Real-world examples**:
 
-- Adjust backend API signatures
-- Regenerate OpenAPI spec: restart `make dev`
-- Regenerate client: `make generate-openapi-client`
-- Update adapter type conversions in `apiAdapter.ts` (consolidated file)
-- Apply targeted enum/literal casting only where needed
-- Repeat until interface matches perfectly
+- **Broker service**: `placeOrder`, `getPositions`, `closePosition`, `leverageInfo`
+- **Datafeed service**: `resolveSymbol`, `getBars`, `searchSymbols`, `getQuotes`
+- Both consolidated in single `ApiAdapter` class
 
-**Benefits of Adapter Pattern with Type Casting Constraints**:
+**Type Alignment Adjustment Loop**:
 
-1. ✅ **Breaking Change Detection**: Type mismatches on complex objects caught at compile time
-2. ✅ **Targeted Type Casting**: Only enum/literal/alias fields require unsafe casting, not entire objects
-3. ✅ **Compile-Time Validation**: Structural changes to objects (new fields, removed fields) trigger TypeScript errors
+If frontend types don't match backend:
+
+1. Adjust backend API model signatures
+2. Regenerate OpenAPI spec: restart `make dev` (backend)
+3. Regenerate TypeScript client: `make generate-openapi-client` (frontend)
+4. Update adapter type conversions in `apiAdapter.ts`
+5. Apply targeted enum/literal casting only where needed
+6. Repeat until interface matches perfectly
+
+**Benefits of This Architecture**:
+
+1. ✅ **Breaking Change Detection**: Compile-time errors for structural mismatches
+2. ✅ **Targeted Type Casting**: Only enum/literal fields need unsafe casting
+3. ✅ **Compile-Time Validation**: Object structure changes trigger TypeScript errors
 4. ✅ **Isolation**: Generated models never leak into application code
-5. ✅ **Clean Interface**: Adapter provides consistent API surface across datafeed and broker operations
-6. ✅ **Consolidated Architecture**: Single `ApiAdapter` class handles all backend API interactions
-7. ✅ **Maintainability**: All type conversions in one place (`apiAdapter.ts`)
-8. ✅ **Explicit Safety**: Developers can immediately see which fields have type discrepancies (enums/literals)
+5. ✅ **Clean Interface**: Consistent API surface across all services
+6. ✅ **Consolidated Architecture**: Single adapter class for all backend APIs
+7. ✅ **Maintainability**: All type conversions in one place
+8. ✅ **Explicit Safety**: Developers see which fields have type discrepancies
 
 ---
 
-## Phase 3: Frontend Integration & TDD setup
+## Phase 3: Frontend Integration & TDD Setup
 
-**Goal**: Use real backend client in frontend, run tests against stub backend to see failures (TDD Red phase).
+**Goal**: Wire frontend service to use real backend client, run tests against stub backend to see failures (TDD Red phase).
 
-**Note**: Backend client adapter was already created in Step 2.4.2 (broker methods added to consolidated `ApiAdapter` class). However, there's a return type mismatch that needs to be resolved first.
+**Note**: Backend client adapter was created in Step 2.4.2 (service methods added to consolidated `ApiAdapter`). The `ApiAdapter` returns `ApiPromise<T>` which wraps responses with HTTP status codes.
 
-**Critical Issue**: The `ApiAdapter` returns `ApiPromise<T>` (which is `Promise<{status: number, data: T}>`), but the current `ApiInterface` in `brokerTerminalService.ts` expects unwrapped `Promise<T>`. We need to align these return types before integration.
+### Step 3.1: Align ApiInterface with ApiPromise Return Types
 
-### Step 3.1: Adjust ApiInterface and BrokerFallbackClient for ApiPromise Return Types
+**Goal**: Update service `ApiInterface` and fallback client to use `ApiPromise<T>` return types, matching the `ApiAdapter` signature.
 
-**Goal**: Update `ApiInterface` and `BrokerFallbackClient` to use `ApiPromise<T>` return types, matching the `ApiAdapter` signature.
+**Location**: `frontend/src/services/{serviceName}Service.ts`
 
-**Files to modify**:
+**Changes Pattern**:
 
-- `frontend/src/services/brokerTerminalService.ts` (ApiInterface + BrokerFallbackClient + BrokerTerminalService)
-
-**Changes**:
-
-1. **Import ApiPromise type** from apiAdapter:
+1. **Import ApiPromise type** from adapter:
 
 ```typescript
 import { ApiAdapter, type ApiPromise } from "@/plugins/apiAdapter";
 ```
 
-2. **Update ApiInterface** to return `ApiPromise<T>` instead of `Promise<T>`:
+2. **Update ApiInterface** to return `ApiPromise<T>`:
 
 ```typescript
 export interface ApiInterface {
-  // Order operations
-  placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult>;
-  modifyOrder(order: Order, confirmId?: string): ApiPromise<void>;
-  cancelOrder(orderId: string): ApiPromise<void>;
-  getOrders(): ApiPromise<Order[]>;
-
-  // Position operations
-  getPositions(): ApiPromise<Position[]>;
-
-  // Execution operations
-  getExecutions(symbol: string): ApiPromise<Execution[]>;
-
-  // Account operations
-  getAccountInfo(): ApiPromise<AccountMetainfo>;
+  // All operations return ApiPromise<T> = Promise<{status: number, data: T}>
+  createResource(data: ResourceRequest): ApiPromise<ResourceResult>;
+  updateResource(id: string, data: ResourceRequest): ApiPromise<void>;
+  deleteResource(id: string): ApiPromise<void>;
+  getResources(): ApiPromise<Resource[]>;
+  getResourceDetails(id: string): ApiPromise<ResourceDetails>;
 }
 ```
 
-3. **Update BrokerFallbackClient** to wrap responses in `ApiResponse` format (example methods):
+3. **Update ApiFallback** to wrap responses:
 
 ```typescript
-class BrokerFallbackClient implements ApiInterface {
-  // ... existing private state and methods ...
+class ApiFallback implements ApiInterface {
+  // ... existing private state ...
 
-  // Example: placeOrder now returns ApiPromise<T>
-  async placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult> {
-    const orderId = `ORDER-${this.orderCounter++}`;
-    // ... existing order creation logic ...
-    await this.simulateOrderExecution(orderId);
+  async createResource(data: ResourceRequest): ApiPromise<ResourceResult> {
+    const id = this.generateId("RESOURCE");
+    const resource = { id, ...data, status: "active" };
+    this._resourcesById.set(id, resource);
 
     // Wrap in ApiResponse format
     return {
       status: 200,
-      data: { orderId },
+      data: { id },
     };
   }
 
-  // Example: getOrders now returns ApiPromise<T>
-  async getOrders(): ApiPromise<Order[]> {
+  async getResources(): ApiPromise<Resource[]> {
     return {
       status: 200,
-      data: Array.from(this._orderById.values()),
+      data: Array.from(this._resourcesById.values()),
     };
   }
 
-  // Apply same pattern to all other methods:
-  // modifyOrder, cancelOrder, getPositions, getExecutions, getAccountInfo
-  // All return { status: 200, data: <result> }
+  // Apply pattern to all methods: return { status: 200, data: <result> }
 }
 ```
 
-4. **Update BrokerTerminalService** to unwrap `.data` from all API responses:
+4. **Update ServiceAdapter** to unwrap `.data`:
 
 ```typescript
-export class BrokerTerminalService implements IBrokerWithoutRealtime {
-  // ... existing constructor and private methods ...
+export class ServiceAdapter implements ExternalLibraryInterface {
+  // ... existing setup ...
 
-  async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
-    const response = await this._getApiAdapter().placeOrder(order);
-    const result = response.data; // Unwrap data
+  async externalMethod(params: ExternalParams): Promise<ExternalResult> {
+    const response = await this._getApiAdapter().createResource(params);
+    const result = response.data; // 👈 Unwrap data
 
-    const ordersResponse = await this._getApiAdapter().getOrders();
-    const placedOrder = ordersResponse.data.find(
-      (o) => o.id === result.orderId
-    );
-    if (placedOrder) {
-      this._host.orderUpdate(placedOrder);
-    }
-    return result;
+    // Additional logic (notifications, transformations, etc.)
+    this.notifyExternalLibrary(result);
+
+    return this.mapToExternalFormat(result);
   }
 
-  async modifyOrder(order: Order, confirmId?: string): Promise<void> {
-    await this._getApiAdapter().modifyOrder(order, confirmId);
-
-    const ordersResponse = await this._getApiAdapter().getOrders();
-    const updatedOrder = ordersResponse.data.find(
-      (o) => o.id === (confirmId ?? order.id)
-    );
-    if (updatedOrder) {
-      this._host.orderUpdate(updatedOrder);
-    }
-  }
-
-  async cancelOrder(orderId: string): Promise<void> {
-    await this._getApiAdapter().cancelOrder(orderId);
-
-    const ordersResponse = await this._getApiAdapter().getOrders();
-    const cancelledOrder = ordersResponse.data.find((o) => o.id === orderId);
-    if (cancelledOrder) {
-      this._host.orderUpdate(cancelledOrder);
-    }
-  }
-
-  async orders(): Promise<Order[]> {
-    const response = await this._getApiAdapter().getOrders();
-    return response.data;
-  }
-
-  async positions(): Promise<Position[]> {
-    const response = await this._getApiAdapter().getPositions();
-    return response.data;
-  }
-
-  async executions(symbol: string): Promise<Execution[]> {
-    const response = await this._getApiAdapter().getExecutions(symbol);
-    return response.data;
-  }
-
-  async accountsMetainfo(): Promise<AccountMetainfo[]> {
-    const response = await this._getApiAdapter().getAccountInfo();
-    return [response.data];
+  async getResources(): Promise<Resource[]> {
+    const response = await this._getApiAdapter().getResources();
+    return response.data; // 👈 Unwrap data
   }
 }
 ```
@@ -734,239 +697,155 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
 ```bash
 cd frontend
-npm run type-check  # Should pass - ApiAdapter now matches ApiInterface
-make lint          # Should pass
-make test          # All tests should still pass with fallback client
+npm run type-check  # Should pass - ApiAdapter matches ApiInterface
+make lint           # Should pass
+make test           # All tests should still pass with fallback client
 ```
 
 **Key Benefits**:
 
-1. ✅ **Type Alignment**: `ApiAdapter` now complies with `ApiInterface` without type errors
-2. ✅ **Consistent Pattern**: Both fallback and backend clients use same `ApiPromise<T>` return type
-3. ✅ **HTTP Status Awareness**: Status codes available for error handling (future enhancement)
-4. ✅ **No Breaking Changes**: TradingView interface still receives unwrapped data
-5. ✅ **Clean Separation**: Service layer handles unwrapping, clients provide wrapped responses
+1. ✅ **Type Alignment**: `ApiAdapter` complies with `ApiInterface` without type errors
+2. ✅ **Consistent Pattern**: Both fallback and backend clients use same return type
+3. ✅ **HTTP Status Awareness**: Status codes available for error handling
+4. ✅ **No Breaking Changes**: External library interface receives unwrapped data
+5. ✅ **Clean Separation**: Service adapter handles unwrapping, clients provide wrapped responses
 
 ---
 
-### Step 3.2: Update Frontend Service to Use Smart Client Selection (Backend / Fallback)
+### Step 3.2: Update Frontend Service to Use Smart Client Selection
 
-**File**: `frontend/src/services/brokerTerminalService.ts`
+**Location**: `frontend/src/services/{serviceName}Service.ts`
 
-After completing Step 3.0, the service file structure should look like this:
+**Pattern**: Dual-client system with smart selection based on environment/configuration.
 
 ```typescript
 import { ApiAdapter, type ApiPromise } from "@/plugins/apiAdapter";
 
 // ============================================================================
-// BROKER CLIENT INTERFACE
+// CLIENT INTERFACE
 // ============================================================================
 
 export interface ApiInterface {
-  // All methods now return ApiPromise<T> = Promise<{status: number, data: T}>
-  placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult>;
-  modifyOrder(order: Order, confirmId?: string): ApiPromise<void>;
-  cancelOrder(orderId: string): ApiPromise<void>;
-  getOrders(): ApiPromise<Order[]>;
-  getPositions(): ApiPromise<Position[]>;
-  getExecutions(symbol: string): ApiPromise<Execution[]>;
-  getAccountInfo(): ApiPromise<AccountMetainfo>;
+  // All methods return ApiPromise<T>
+  createResource(data: ResourceRequest): ApiPromise<ResourceResult>;
+  // ... all service operations
 }
 
 // ============================================================================
-// FALLBACK CLIENT (MOCK IMPLEMENTATION)
+// FALLBACK CLIENT
 // ============================================================================
 
-class BrokerFallbackClient implements ApiInterface {
-  // ... existing fallback implementation
-  // All methods now return {status: 200, data: T} format (see Step 3.0)
+class ApiFallback implements ApiInterface {
+  // All methods return {status: 200, data: T} format
 }
 
 // ============================================================================
-// BROKER TERMINAL SERVICE
+// SERVICE ADAPTER
 // ============================================================================
 
-export class BrokerTerminalService implements IBrokerWithoutRealtime {
-  private readonly _host: IBrokerConnectionAdapterHost;
-  private readonly _quotesProvider: IDatafeedQuotesApi;
+export class ServiceAdapter implements ExternalLibraryInterface {
+  private readonly _externalDeps: ExternalDependencies;
 
   // Client adapters
   private readonly apiFallback: ApiInterface;
-  private readonly apiAdapter: ApiAdapter;
+  private readonly apiAdapter: ApiInterface;
 
-  // Mock flag
+  // Mode flag
   private mock: boolean;
 
   constructor(
-    host: IBrokerConnectionAdapterHost,
-    datafeed: IDatafeedQuotesApi,
+    externalDeps: ExternalDependencies,
     mock: boolean = true // 👈 Default to fallback for safety
   ) {
-    this._host = host;
-    this._quotesProvider = datafeed;
+    this._externalDeps = externalDeps;
     this.mock = mock;
 
-    // Initialize clients
-    this.apiFallback = new BrokerFallbackClient(host, datafeed);
+    // Initialize both clients
+    this.apiFallback = new ApiFallback();
     this.apiAdapter = new ApiAdapter();
   }
 
   /**
-   * Get broker client based on mock flag
-   * Same pattern as datafeedService._getApiAdapter()
+   * Get API client based on mock flag
+   * Pattern: Same as datafeedService._getApiAdapter()
    */
   private _getApiAdapter(mock: boolean = this.mock): ApiInterface {
     return mock ? this.apiFallback : this.apiAdapter;
   }
 
   // All methods unwrap .data from ApiResponse
-  async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
-    const response = await this._getApiAdapter().placeOrder(order);
+  async externalMethod(params: ExternalParams): Promise<ExternalResult> {
+    const response = await this._getApiAdapter().createResource(params);
     const result = response.data; // 👈 Unwrap data
 
-    const ordersResponse = await this._getApiAdapter().getOrders();
-    const placedOrder = ordersResponse.data.find(
-      (o) => o.id === result.orderId
-    );
-    if (placedOrder) {
-      this._host.orderUpdate(placedOrder);
-    }
-    return result;
-  }
-
-  async modifyOrder(order: Order, confirmId?: string): Promise<void> {
-    await this._getApiAdapter().modifyOrder(order, confirmId);
-
-    const ordersResponse = await this._getApiAdapter().getOrders();
-    const updatedOrder = ordersResponse.data.find(
-      (o) => o.id === (confirmId ?? order.id)
-    );
-    if (updatedOrder) {
-      this._host.orderUpdate(updatedOrder);
-    }
-  }
-
-  async cancelOrder(orderId: string): Promise<void> {
-    await this._getApiAdapter().cancelOrder(orderId);
-
-    const ordersResponse = await this._getApiAdapter().getOrders();
-    const cancelledOrder = ordersResponse.data.find((o) => o.id === orderId);
-    if (cancelledOrder) {
-      this._host.orderUpdate(cancelledOrder);
-    }
-  }
-
-  async orders(): Promise<Order[]> {
-    const response = await this._getApiAdapter().getOrders();
-    return response.data; // 👈 Unwrap data
-  }
-
-  async positions(): Promise<Position[]> {
-    const response = await this._getApiAdapter().getPositions();
-    return response.data; // 👈 Unwrap data
-  }
-
-  async executions(symbol: string): Promise<Execution[]> {
-    const response = await this._getApiAdapter().getExecutions(symbol);
-    return response.data; // 👈 Unwrap data
-  }
-
-  async accountsMetainfo(): Promise<AccountMetainfo[]> {
-    const response = await this._getApiAdapter().getAccountInfo();
-    return [response.data]; // 👈 Unwrap data
+    // Handle external library concerns
+    this.notifyExternalLibrary(result);
+    return this.mapToExternalFormat(result);
   }
 }
 ```
 
-**Key Design Points**:
+**Configuration Pattern**:
 
-1. ✅ **Type Alignment**: `ApiAdapter` now complies with `ApiInterface` through `ApiPromise<T>` return types
-2. ✅ **Fallback Pattern**: Uses same `_getApiAdapter(mock)` pattern for smart client selection
-3. ✅ **Response Unwrapping**: All service methods extract `.data` from `ApiResponse` before returning
-4. ✅ **Type Safety**: TypeScript ensures both clients match `ApiInterface` contract at compile time
-5. ✅ **Fallback Preserved**: Mock client is always available (default: `mock = true`)
-6. ✅ **Clean Separation**: Clients return wrapped `ApiResponse`, service unwraps for TradingView
-7. ✅ **Consistent Pattern**: Same architecture as `datafeedService.ts`
+```typescript
+// Environment-based selection
+const useMock = import.meta.env.VITE_USE_MOCK_{SERVICE} !== 'false'
+const service = new ServiceAdapter(deps, useMock)
 
-**Benefits of ApiPromise Pattern**:
-
-- **Compile-Time Validation**: If backend API changes break the interface, TypeScript fails in `apiAdapter.ts`
-- **HTTP Status Awareness**: Status codes available for error handling in future
-- **No Duplication**: No separate wrapper class needed
-- **Consistent Architecture**: Same pattern for both datafeed and broker
-- **Clean Contracts**: Both fallback and backend clients implement identical interface
+// Or explicit selection
+const service = new ServiceAdapter(deps, false) // Use backend
+```
 
 ---
 
 ### Step 3.3: Run Frontend Tests Against Backend Stubs (TDD Red Phase) 🔴
 
-**Goal**: Run frontend tests with backend client enabled to see them FAIL. This is the TDD "Red" phase.
+**Goal**: Run frontend tests with backend client enabled to see them **FAIL**. This is the TDD "Red" phase.
 
-**Note**: At this point, `ApiAdapter` and `BrokerFallbackClient` both implement `ApiInterface` with `ApiPromise<T>` return types. The `BrokerTerminalService` unwraps the `.data` property before returning to TradingView.
-
-**File**: `frontend/src/services/brokerTerminalService.test.ts`
-
-Update tests to use backend client with mock flag (inverted logic: `mock = false` means use backend):
+**Test Pattern**: `frontend/src/services/__tests__/{serviceName}Service.test.ts`
 
 ```typescript
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { BrokerTerminalService } from "./brokerTerminalService";
-import type {
-  IBrokerConnectionAdapterHost,
-  PreOrder,
-  OrderType,
-  Side,
-} from "@public/trading_terminal/charting_library";
+import { ServiceAdapter } from "./{serviceName}Service";
+import type { ExternalDependencies } from "@external/library";
 
-// Feature flag to switch between fallback and backend client
-// mock = true (default) → use fallback
-// mock = false → use backend API
-const USE_MOCK = import.meta.env.VITE_USE_MOCK_BROKER !== "false";
+// Feature flag to switch between fallback and backend
+const USE_MOCK = import.meta.env.VITE_USE_MOCK_{SERVICE} !== "false";
 
-describe("BrokerTerminalService", () => {
-  let service: BrokerTerminalService;
-  let mockHost: IBrokerConnectionAdapterHost;
+describe("ServiceAdapter", () => {
+  let service: ServiceAdapter;
+  let mockDeps: ExternalDependencies;
 
   beforeEach(() => {
-    mockHost = {
-      orderUpdate: vi.fn(),
-      positionUpdate: vi.fn(),
-      executionUpdate: vi.fn(),
-      // ... other required methods
+    mockDeps = {
+      // Mock external dependencies
+      notify: vi.fn(),
+      // ...
     };
 
     // Use backend client when USE_MOCK = false
-    service = new BrokerTerminalService(mockHost, mockDatafeed, USE_MOCK);
+    service = new ServiceAdapter(mockDeps, USE_MOCK);
   });
 
-  it("should place order successfully", async () => {
-    const order: PreOrder = {
-      symbol: "AAPL",
-      type: 1, // OrderType.Limit
-      side: 1, // Side.Buy
-      qty: 100,
-      limitPrice: 150.0,
+  it("should create resource successfully", async () => {
+    const data = {
+      name: "Test Resource",
+      type: 1,
+      value: 100.0,
     };
 
-    const result = await service.placeOrder(order);
+    const result = await service.createResource(data);
 
     // With backend stubs returning NotImplementedError, this will FAIL
-    expect(result.orderId).toBeDefined();
-    expect(result.orderId).toMatch(/^ORDER-\d+$/);
+    expect(result.id).toBeDefined();
+    expect(result.id).toMatch(/^RESOURCE-\d+$/);
   });
 
-  it("should get orders list", async () => {
-    const orders = await service.orders();
+  it("should get resources list", async () => {
+    const resources = await service.getResources();
 
     // With backend stubs, this will FAIL
-    expect(Array.isArray(orders)).toBe(true);
-  });
-
-  it("should get positions list", async () => {
-    const positions = await service.positions();
-
-    // With backend stubs, this will FAIL
-    expect(Array.isArray(positions)).toBe(true);
+    expect(Array.isArray(resources)).toBe(true);
   });
 
   // ... all other tests
@@ -982,66 +861,29 @@ cd frontend
 make test
 
 # Run tests with backend client (should FAIL - TDD Red phase)
+# Terminal 1: Start backend with stub endpoints
 cd backend
-make dev &  # Start backend with stub endpoints
+make dev &
 
+# Terminal 2: Run tests against backend
 cd frontend
-VITE_USE_MOCK_BROKER=false make test  # Tests will FAIL ❌
+VITE_USE_MOCK_{SERVICE}=false make test  # Tests will FAIL ❌
 
 # Expected output:
-# ❌ Error: NotImplementedError: Broker API not yet implemented
-# ❌ Failed: should place order successfully
-# ❌ Failed: should get orders list
-# ❌ Failed: should get positions list
+# ❌ Error: NotImplementedError: Service API not yet implemented
+# ❌ Failed: should create resource successfully
+# ❌ Failed: should get resources list
+# ❌ Failed: should update resource
 ```
 
 **Verification**: Frontend tests **MUST FAIL** at this point. This confirms:
 
 1. ✅ Frontend is wired to backend API correctly
 2. ✅ `ApiAdapter` is properly integrated and returns `ApiPromise<T>`
-3. ✅ `BrokerTerminalService` correctly unwraps `.data` from responses
+3. ✅ `ServiceAdapter` correctly unwraps `.data` from responses
 4. ✅ Backend stubs are returning errors as expected
 5. ✅ We're in TDD "Red" phase - tests fail before implementation
 6. ✅ Ready to implement backend logic to make tests pass (TDD "Green" phase)
-   const positions = await service.getPositions();
-
-   // With backend stubs, this will FAIL
-   expect(Array.isArray(positions)).toBe(true);
-   });
-
-// ... all other tests
-});
-
-````
-
-**Run Tests (Expected to FAIL)**:
-
-```bash
-cd frontend
-
-# Run tests with fallback client (should pass)
-make test
-
-# Run tests with backend client (should FAIL - TDD Red phase)
-cd backend
-make dev &  # Start backend with stub endpoints
-
-cd frontend
-VITE_USE_MOCK_BROKER=false make test  # Tests will FAIL ❌
-
-# Expected output:
-# ❌ Error: NotImplementedError: Broker API not yet implemented
-# ❌ Failed: should place order successfully
-# ❌ Failed: should get orders list
-# ❌ Failed: should get positions list
-````
-
-**Verification**: Frontend tests **MUST FAIL** at this point. This confirms:
-
-1. ✅ Frontend is wired to backend API correctly
-2. ✅ Backend stubs are returning errors as expected
-3. ✅ We're in TDD "Red" phase - tests fail before implementation
-4. ✅ Ready to implement backend logic to make tests pass (TDD "Green" phase)
 
 ---
 
@@ -1049,131 +891,138 @@ VITE_USE_MOCK_BROKER=false make test  # Tests will FAIL ❌
 
 **Goal**: Implement actual backend logic to make frontend tests pass (TDD Green phase).
 
-### Step 4.1: Create Broker Service (Mock Logic)
+### Step 4.1: Create Service Layer
 
-**File**: `backend/src/trading_api/core/broker_service.py`
+**Location Pattern**: `backend/src/{api_name}/core/{service_name}_service.py`
 
-Copy mock logic from frontend fallback client to backend (this will make frontend tests pass):
+**Service Design Guidelines**:
+
+1. **State Management**: Use in-memory storage (Dict, List) for development/testing
+2. **Async Operations**: Use `async/await` for all public methods
+3. **ID Generation**: Generate unique IDs with prefixes (e.g., `RESOURCE-{counter}`)
+4. **Error Handling**: Raise `ValueError` for business logic errors
+5. **Private Methods**: Use `_` prefix for internal helpers
+
+**Service Pattern**:
 
 ```python
+import asyncio
+import time
 from typing import Dict, List, Optional
-from trading_api.models.broker import (
-    PreOrder, PlacedOrder, Position, Execution,
-    PlaceOrderResult, OrderStatus, Side
+from {api_name}.models.{service_name} import (
+    ResourceRequest,
+    ResourceResponse,
+    ResourceOperationResult,
+    ResourceStatus,
+    # ... import all models
 )
 
-class BrokerService:
-    """Mock broker service for development"""
+class {ServiceName}Service:
+    """Service implementation for {service_name}"""
 
-    def __init__(self):
-        self._orders: Dict[str, PlacedOrder] = {}
-        self._positions: Dict[str, Position] = {}
-        self._executions: List[Execution] = []
-        self._order_counter = 1
+    def __init__(self) -> None:
+        # In-memory state (replace with DB in production)
+        self._resources: Dict[str, ResourceResponse] = {}
+        self._counter = 1
 
-    async def place_order(self, order: PreOrder) -> PlaceOrderResult:
-        """Place a new order"""
-        order_id = f"ORDER-{self._order_counter}"
-        self._order_counter += 1
+    async def create_resource(self, request: ResourceRequest) -> ResourceOperationResult:
+        """
+        Create a new resource
 
-        placed_order = PlacedOrder(
-            id=order_id,
-            symbol=order.symbol,
-            type=order.type,
-            side=order.side,
-            qty=order.qty,
-            status=OrderStatus.WORKING,
-            limitPrice=order.limitPrice,
-            stopPrice=order.stopPrice,
+        Args:
+            request: Resource creation request
+
+        Returns:
+            ResourceOperationResult: Result with generated resource ID
+        """
+        resource_id = f"RESOURCE-{self._counter}"
+        self._counter += 1
+
+        resource = ResourceResponse(
+            id=resource_id,
+            name=request.name,
+            type=request.type,
+            value=request.value,
+            status=ResourceStatus.ACTIVE,
+            metadata=request.metadata,
+            createdAt=int(time.time() * 1000),
         )
 
-        self._orders[order_id] = placed_order
+        self._resources[resource_id] = resource
 
-        # Simulate execution after delay
-        await self._simulate_execution(order_id)
+        # Optional: Simulate async processing
+        asyncio.create_task(self._process_async(resource_id))
 
-        return PlaceOrderResult(orderId=order_id)
+        return ResourceOperationResult(id=resource_id, success=True)
 
-    async def _simulate_execution(self, order_id: str) -> None:
-        """Private: Simulate order execution"""
-        import asyncio
-        await asyncio.sleep(0.2)  # Small delay
-
-        order = self._orders.get(order_id)
-        if not order:
-            return
-
-        # Create execution
-        execution = Execution(
-            symbol=order.symbol,
-            price=order.limitPrice or 100.0,
-            qty=order.qty,
-            side=order.side,
-            time=int(time.time() * 1000)
-        )
-        self._executions.append(execution)
-
-        # Update order status
-        order.status = OrderStatus.FILLED
-        order.filledQty = order.qty
-        order.avgPrice = execution.price
-
-        # Update position
-        self._update_position(execution)
-
-    def _update_position(self, execution: Execution) -> None:
-        """Private: Update position from execution"""
-        position_id = f"{execution.symbol}-POS"
-        existing = self._positions.get(position_id)
-
-        if existing:
-            # Update existing position logic
-            # ... (similar to frontend fallback)
+    async def _process_async(self, resource_id: str) -> None:
+        """Private: Simulate async background processing"""
+        await asyncio.sleep(0.1)  # Small delay
+        # Update resource or trigger side effects
+        if resource := self._resources.get(resource_id):
+            # Perform processing...
             pass
-        else:
-            # Create new position
-            self._positions[position_id] = Position(
-                id=position_id,
-                symbol=execution.symbol,
-                qty=execution.qty,
-                side=execution.side,
-                avgPrice=execution.price
-            )
 
-    # ... implement all other methods
-    async def get_orders(self) -> List[PlacedOrder]:
-        return list(self._orders.values())
+    async def get_resources(self, status: Optional[int] = None) -> List[ResourceResponse]:
+        """Get all resources with optional filtering"""
+        resources = list(self._resources.values())
+        if status is not None:
+            resources = [r for r in resources if r.status == status]
+        return resources
 
-    async def get_positions(self) -> List[Position]:
-        return list(self._positions.values())
+    async def get_resource(self, resource_id: str) -> ResourceResponse:
+        """Get resource by ID"""
+        if resource_id not in self._resources:
+            raise ValueError(f"Resource not found: {resource_id}")
+        return self._resources[resource_id]
 
-    async def get_executions(self, symbol: str) -> List[Execution]:
-        return [e for e in self._executions if e.symbol == symbol]
+    async def update_resource(self, resource_id: str, request: ResourceRequest) -> None:
+        """Update existing resource"""
+        if resource_id not in self._resources:
+            raise ValueError(f"Resource not found: {resource_id}")
+
+        existing = self._resources[resource_id]
+        existing.name = request.name
+        existing.value = request.value
+        existing.metadata = request.metadata
+        existing.updatedAt = int(time.time() * 1000)
+
+    async def delete_resource(self, resource_id: str) -> None:
+        """Delete resource"""
+        if resource_id not in self._resources:
+            raise ValueError(f"Resource not found: {resource_id}")
+        del self._resources[resource_id]
 ```
+
+**Real-world example (broker service)**:
+
+- In-memory maps: `_orders`, `_positions`, `_executions`
+- Async processing: `_simulate_execution()` with delay
+- Business logic: `_update_position()` from executions
 
 ---
 
 ### Step 4.2: Wire Service to API Endpoints
 
-**File**: `backend/src/trading_api/api/broker.py`
+**Location Pattern**: `backend/src/{api_name}/api/{service_name}.py`
 
 Replace `NotImplementedError` stubs with actual service calls:
 
 ```python
-from trading_api.core.broker_service import BrokerService
+from {api_name}.core.{service_name}_service import {ServiceName}Service
 
 # Create singleton service instance
-broker_service = BrokerService()
+service_instance = {ServiceName}Service()
 
-@router.post("/orders", response_model=PlaceOrderResult)
-async def place_order(order: PreOrder) -> PlaceOrderResult:
-    """Place a new order"""
-    return await broker_service.place_order(order)  # 👈 Real implementation
+@router.post("/resources", response_model=ResourceOperationResult)
+async def createResource(resource: ResourceRequest) -> ResourceOperationResult:
+    """Create a new resource"""
+    return await service_instance.create_resource(resource)  # 👈 Real implementation
 
-@router.get("/orders", response_model=List[PlacedOrder])
-async def get_orders() -> List[PlacedOrder]:
-    """Get all orders"""
-    return await broker_service.get_orders()  # 👈 Real implementation
+@router.get("/resources", response_model=List[ResourceResponse])
+async def getResources(status: Optional[int] = None) -> List[ResourceResponse]:
+    """Get all resources"""
+    return await service_instance.get_resources(status)  # 👈 Real implementation
 
 # ... wire all other endpoints
 ```
@@ -1186,7 +1035,7 @@ async def get_orders() -> List[PlacedOrder]:
 
 ### Step 5.1: Run Frontend Tests with Backend Implementation
 
-After implementing the backend logic (Phase 4), run frontend tests with backend client to verify they pass:
+After implementing the backend logic (Phase 4), run frontend tests with backend client:
 
 **Verification (TDD Green Phase)** 🟢:
 
@@ -1197,22 +1046,20 @@ make dev
 
 # Terminal 2: Run frontend tests with backend client
 cd frontend
-VITE_USE_MOCK_BROKER=false make test
+VITE_USE_MOCK_{SERVICE}=false make test
 
 # Expected output:
 # ✅ All tests should now PASS
-# ✅ should place order successfully
-# ✅ should get orders list
-# ✅ should get positions list
-# ✅ should modify order
-# ✅ should cancel order
-# ✅ should get executions
-# ✅ should get account info
+# ✅ should create resource successfully
+# ✅ should get resources list
+# ✅ should update resource
+# ✅ should delete resource
+# ✅ should handle errors correctly
 ```
 
 **Success Criteria**:
 
-1. ✅ All frontend tests pass with `VITE_USE_MOCK_BROKER=false`
+1. ✅ All frontend tests pass with mock=false (backend client)
 2. ✅ Frontend tests still pass with fallback client (without flag)
 3. ✅ Backend tests pass (`cd backend && make test`)
 4. ✅ No type errors (`npm run type-check`)
@@ -1220,67 +1067,83 @@ VITE_USE_MOCK_BROKER=false make test
 
 ### Step 5.2: Write Backend Unit Tests
 
-**File**: `backend/tests/test_broker_service.py`
+**Location Pattern**: `backend/tests/test_{service_name}_service.py`
+
+**Test Pattern**:
 
 ```python
 import pytest
-from trading_api.core.broker_service import BrokerService
-from trading_api.models.broker import PreOrder, OrderType, Side, OrderStatus
+from {api_name}.core.{service_name}_service import {ServiceName}Service
+from {api_name}.models.{service_name} import ResourceRequest, ResourceStatus
+
+@pytest.fixture
+async def service():
+    """Fixture to create fresh service instance"""
+    return {ServiceName}Service()
 
 @pytest.mark.asyncio
-async def test_place_order_creates_working_order():
-    service = BrokerService()
-
-    order = PreOrder(
-        symbol="AAPL",
-        type=OrderType.LIMIT,
-        side=Side.BUY,
-        qty=100,
-        limitPrice=150.0
+async def test_create_resource(service):
+    """Test resource creation"""
+    request = ResourceRequest(
+        name="Test Resource",
+        type="STANDARD",
+        value=100.0,
+        metadata={"key": "value"}
     )
 
-    result = await service.place_order(order)
-    assert result.orderId.startswith("ORDER-")
+    result = await service.create_resource(request)
 
-    orders = await service.get_orders()
-    assert len(orders) == 1
-    assert orders[0].status in [OrderStatus.WORKING, OrderStatus.FILLED]
+    assert result.success
+    assert result.id.startswith("RESOURCE-")
 
 @pytest.mark.asyncio
-async def test_order_execution_creates_position():
-    service = BrokerService()
+async def test_get_resources(service):
+    """Test getting resources list"""
+    # Create test data
+    request = ResourceRequest(name="Test", type="STANDARD", value=100.0)
+    await service.create_resource(request)
 
-    order = PreOrder(
-        symbol="AAPL",
-        type=OrderType.MARKET,
-        side=Side.BUY,
-        qty=100
-    )
+    resources = await service.get_resources()
 
-    await service.place_order(order)
-
-    # Wait for execution
-    import asyncio
-    await asyncio.sleep(0.3)
-
-    positions = await service.get_positions()
-    assert len(positions) == 1
-    assert positions[0].symbol == "AAPL"
-    assert positions[0].qty == 100
-    assert positions[0].side == Side.BUY
+    assert len(resources) > 0
+    assert resources[0].status == ResourceStatus.ACTIVE
 
 @pytest.mark.asyncio
-async def test_cancel_order():
-    service = BrokerService()
-    order = PreOrder(symbol="AAPL", type=OrderType.LIMIT, side=Side.BUY, qty=100)
-    result = await service.place_order(order)
+async def test_update_resource(service):
+    """Test resource update"""
+    # Create resource
+    request = ResourceRequest(name="Original", type="STANDARD", value=100.0)
+    result = await service.create_resource(request)
 
-    await service.cancel_order(result.orderId)
+    # Update it
+    update_request = ResourceRequest(name="Updated", type="STANDARD", value=200.0)
+    await service.update_resource(result.id, update_request)
 
-    orders = await service.get_orders()
-    cancelled = next(o for o in orders if o.id == result.orderId)
-    assert cancelled.status == OrderStatus.CANCELED
+    # Verify
+    resource = await service.get_resource(result.id)
+    assert resource.name == "Updated"
+    assert resource.value == 200.0
+
+@pytest.mark.asyncio
+async def test_delete_resource(service):
+    """Test resource deletion"""
+    # Create resource
+    request = ResourceRequest(name="Test", type="STANDARD", value=100.0)
+    result = await service.create_resource(request)
+
+    # Delete it
+    await service.delete_resource(result.id)
+
+    # Verify it's gone
+    with pytest.raises(ValueError, match="Resource not found"):
+        await service.get_resource(result.id)
 ```
+
+**Real-world example (broker tests)**:
+
+- File: `backend/tests/test_api_broker.py`
+- Tests cover: place_order, get_orders, get_positions, get_executions, modify_order, cancel_order
+- Uses TestClient with FastAPI app for integration testing
 
 **Verification**:
 
@@ -1293,107 +1156,189 @@ make test  # All backend tests should pass
 
 ### Step 5.3: Write Backend API Integration Tests
 
-**File**: `backend/tests/test_api_broker.py`
+**Location Pattern**: `backend/tests/test_api_{service_name}.py`
 
 ```python
 import pytest
 from httpx import AsyncClient
-from trading_api.main import apiApp
+from {api_name}.main import apiApp
 
 @pytest.mark.asyncio
-async def test_place_order_endpoint():
+async def test_create_resource_endpoint():
     async with AsyncClient(app=apiApp, base_url="http://test") as client:
-        response = await client.post("/api/v1/broker/orders", json={
-            "symbol": "AAPL",
-            "type": 1,  # LIMIT
-            "side": 1,  # BUY
-            "qty": 100,
-            "limitPrice": 150.0
+        response = await client.post("/api/v1/{service}/resources", json={
+            "name": "Test Resource",
+            "type": "STANDARD",
+            "value": 100.0,
+            "metadata": {"key": "value"}
         })
 
         assert response.status_code == 200
         data = response.json()
-        assert "orderId" in data
-        assert data["orderId"].startswith("ORDER-")
+        assert data["success"] is True
+        assert data["id"].startswith("RESOURCE-")
 
 @pytest.mark.asyncio
-async def test_get_orders_endpoint():
+async def test_get_resources_endpoint():
     async with AsyncClient(app=apiApp, base_url="http://test") as client:
-        # First place an order
-        await client.post("/api/v1/broker/orders", json={
-            "symbol": "AAPL",
-            "type": 2,  # MARKET
-            "side": 1,  # BUY
-            "qty": 50
+        # First create a resource
+        await client.post("/api/v1/{service}/resources", json={
+            "name": "Test",
+            "type": "STANDARD",
+            "value": 100.0
         })
 
-        # Then get orders
-        response = await client.get("/api/v1/broker/orders")
+        # Then get resources
+        response = await client.get("/api/v1/{service}/resources")
         assert response.status_code == 200
-        orders = response.json()
-        assert len(orders) >= 1
+        resources = response.json()
+        assert len(resources) >= 1
 ```
 
 **Verification**:
 
 ```bash
 cd backend
-make test  # All tests pass including new broker tests
+make test  # All tests pass including new service tests
 ```
 
 ---
 
-## Phase 6: Full Stack Validation 🚀
+## Phase 6: Full Stack Validation (TDD Refactor Phase) ✅
 
-### Step 6.1: Manual E2E Testing
+**Goal**: Validate the complete implementation across all layers and test modes.
 
-```bash
-# Terminal 1: Start backend
-cd backend
-make dev
+### Step 6.1: Manual Full Stack Testing
 
-# Terminal 2: Start frontend
-cd frontend
-make dev
+**Manual validation patterns** (adjust to your service features):
 
-# Browser: Open http://localhost:5173
-# - Place orders from TradingView UI
-# - Verify orders appear in Order Panel
-# - Verify positions update correctly
-# - Verify executions are recorded
-```
+**With Backend Implementation**:
+
+1. Start backend: `cd backend && make dev`
+2. Start frontend: `cd frontend && VITE_USE_MOCK_{SERVICE}=false make dev`
+3. Open browser: `http://localhost:5173`
+4. Exercise core service features:
+   - Create resources (check IDs, status, values)
+   - Update resources (verify changes persist)
+   - Delete resources (confirm removal)
+   - List/filter resources (check results)
+   - Error scenarios (invalid IDs, bad data)
+5. Monitor backend logs for API calls
+6. Check browser DevTools network tab
+
+**With Fallback Client**:
+
+1. Start frontend only: `cd frontend && make dev`
+2. Open browser: `http://localhost:5173`
+3. Exercise same features as above
+4. Verify fallback client simulates expected behavior
+5. No backend errors (since no backend running)
 
 ---
 
-### Step 6.2: Smoke Tests (Optional)
+### Step 6.2: Smoke Tests
+
+**Smoke test pattern**: `smoke-tests/tests/{service_name}.spec.ts`
+
+```typescript
+import { test, expect } from "@playwright/test";
+
+test("service features end-to-end", async ({ page }) => {
+  // Navigate to service UI
+  await page.goto("http://localhost:5173");
+
+  // Test resource creation
+  await page.click('[data-testid="create-resource-btn"]');
+  await page.fill('[data-testid="resource-name"]', "Test Resource");
+  await page.click('[data-testid="submit-btn"]');
+
+  // Verify creation success
+  await expect(page.locator('[data-testid="resource-list"]')).toContainText(
+    "Test Resource"
+  );
+
+  // Test resource update
+  await page.click('[data-testid="edit-resource-btn"]');
+  await page.fill('[data-testid="resource-name"]', "Updated Resource");
+  await page.click('[data-testid="submit-btn"]');
+
+  // Verify update
+  await expect(page.locator('[data-testid="resource-list"]')).toContainText(
+    "Updated Resource"
+  );
+
+  // Test resource deletion
+  await page.click('[data-testid="delete-resource-btn"]');
+  await page.click('[data-testid="confirm-btn"]');
+
+  // Verify deletion
+  await expect(page.locator('[data-testid="resource-list"]')).not.toContainText(
+    "Updated Resource"
+  );
+});
+```
+
+**Run smoke tests**:
 
 ```bash
-cd smoke-tests
-npm test  # Playwright E2E tests
+# With backend
+cd backend && make dev  # Terminal 1
+cd frontend && VITE_USE_MOCK_{SERVICE}=false make dev  # Terminal 2
+cd smoke-tests && npm test  # Terminal 3
+
+# With fallback
+cd frontend && make dev  # Terminal 1
+cd smoke-tests && npm test  # Terminal 2
 ```
+
+**Real-world example (broker smoke tests)**:
+
+- File: `smoke-tests/tests/broker.spec.ts`
+- Tests: place order, modify order, cancel order, view positions
+- Uses Playwright with TradingView Trading Terminal UI
+
+### Step 6.3: Success Criteria
+
+✅ **All must pass**:
+
+1. **Frontend tests**: `cd frontend && make test` (both with/without backend)
+2. **Backend tests**: `cd backend && make test`
+3. **Type checks**: `cd frontend && npm run type-check`
+4. **Linters**: `make lint` (root), `cd frontend && make lint`, `cd backend && make lint`
+5. **Smoke tests**: `cd smoke-tests && npm test` (both modes)
+6. **Manual testing**: Core features work as expected
+7. **Documentation**: README files updated with new features
 
 ---
 
 ## Implementation Checklist
 
-| Phase     | Step                         | File(s)                                               | Verification          | Status |
-| --------- | ---------------------------- | ----------------------------------------------------- | --------------------- | ------ |
-| **1.1**   | Consolidate in service       | `frontend/src/services/brokerTerminalService.ts`      | `make test`           | ✅     |
-| **2.1**   | Backend models               | `backend/src/trading_api/models/broker/`              | `make lint`           | ⏳     |
-| **2.2**   | API stubs                    | `backend/src/trading_api/api/broker.py`               | `make dev`            | ⏳     |
-| **2.3**   | Register router              | `backend/src/trading_api/main.py`                     | Backend starts        | ⏳     |
-| **2.4.1** | Generate OpenAPI client      | Auto-generated                                        | Generation success    | ✅     |
-| **2.4.2** | Add broker to adapter        | `frontend/src/plugins/apiAdapter.ts` (consolidated)   | `npm run type-check`  | ✅     |
-| **3.1**   | Adjust for ApiPromise types  | `frontend/src/services/brokerTerminalService.ts`      | Type check passes     | ⏳     |
-| **3.2**   | Wire backend client          | `frontend/src/services/brokerTerminalService.ts`      | `make test`           | ⏳     |
-| **3.3**   | Run tests (Red phase) 🔴     | `frontend/src/services/brokerTerminalService.test.ts` | Tests FAIL (expected) | ⏳     |
-| **4.1**   | Broker service               | `backend/src/trading_api/core/broker_service.py`      | N/A                   | ⏳     |
-| **4.2**   | Wire endpoints               | `backend/src/trading_api/api/broker.py`               | N/A                   | ⏳     |
-| **4.3**   | Backend unit tests           | `backend/tests/test_broker_service.py`                | `make test`           | ⏳     |
-| **4.4**   | Backend API tests            | `backend/tests/test_api_broker.py`                    | `make test`           | ⏳     |
-| **5.1**   | Verify tests pass (Green) 🟢 | Frontend + Backend tests                              | All tests pass        | ⏳     |
-| **6.1**   | E2E manual testing           | Browser testing                                       | Visual verification   | ⏳     |
-| **6.2**   | Smoke tests                  | `smoke-tests/`                                        | `npm test`            | ⏳     |
+Use this checklist to track implementation progress for any service:
+
+| Phase     | Step                         | Location Pattern                                               | Verification          | Status |
+| --------- | ---------------------------- | -------------------------------------------------------------- | --------------------- | ------ |
+| **1.1**   | Consolidate in service       | `frontend/src/services/{serviceName}Service.ts`                | `make test`           | ⏳     |
+| **2.1**   | Backend models               | `backend/src/{api_name}/models/{service_name}/`                | `make lint`           | ⏳     |
+| **2.2**   | API stubs                    | `backend/src/{api_name}/api/{service_name}.py`                 | `make dev`            | ⏳     |
+| **2.3**   | Register router              | `backend/src/{api_name}/main.py`                               | Backend starts        | ⏳     |
+| **2.4.1** | Generate OpenAPI client      | Auto-generated                                                 | Generation success    | ⏳     |
+| **2.4.2** | Add to adapter               | `frontend/src/plugins/apiAdapter.ts` (consolidated)            | `npm run type-check`  | ⏳     |
+| **3.1**   | Adjust for ApiPromise types  | `frontend/src/services/{serviceName}Service.ts`                | Type check passes     | ⏳     |
+| **3.2**   | Wire backend client          | `frontend/src/services/{serviceName}Service.ts`                | `make test`           | ⏳     |
+| **3.3**   | Run tests (Red phase) 🔴     | `frontend/src/services/__tests__/{serviceName}Service.test.ts` | Tests FAIL (expected) | ⏳     |
+| **4.1**   | Service layer                | `backend/src/{api_name}/core/{service_name}_service.py`        | N/A                   | ⏳     |
+| **4.2**   | Wire endpoints               | `backend/src/{api_name}/api/{service_name}.py`                 | N/A                   | ⏳     |
+| **4.3**   | Backend unit tests           | `backend/tests/test_{service_name}_service.py`                 | `make test`           | ⏳     |
+| **4.4**   | Backend API tests            | `backend/tests/test_api_{service_name}.py`                     | `make test`           | ⏳     |
+| **5.1**   | Verify tests pass (Green) 🟢 | Frontend + Backend tests                                       | All tests pass        | ⏳     |
+| **6.1**   | E2E manual testing           | Browser testing                                                | Visual verification   | ⏳     |
+| **6.2**   | Smoke tests                  | `smoke-tests/tests/{service_name}.spec.ts`                     | `npm test`            | ⏳     |
+
+**Status Legend**:
+
+- ⏳ = Not started / In Progress
+- ✅ = Completed
+- ❌ = Blocked / Failed
 
 ---
 
@@ -1407,8 +1352,26 @@ npm test  # Playwright E2E tests
 6. ✅ **Fallback Preserved**: Mock client always available
 7. ✅ **Type-Safe**: TypeScript + Pydantic ensure type alignment
 8. ✅ **Breaking Change Detection**: Targeted type casting on enums/literals catches structural API mismatches at compile time
-9. ✅ **Consolidated Architecture**: Single `ApiAdapter` class handles both datafeed and broker operations
+9. ✅ **Consolidated Architecture**: Single `ApiAdapter` class handles multiple service operations
 10. ✅ **Maintainable**: All backend API conversions centralized in one file
+11. ✅ **Reusable**: Generic patterns applicable to any service implementation
+
+---
+
+## Generic Placeholder Reference
+
+When implementing a new service, replace these placeholders:
+
+| Placeholder       | Example (Broker)    | Description                        |
+| ----------------- | ------------------- | ---------------------------------- |
+| `{service_name}`  | `broker`            | Lowercase service name             |
+| `{serviceName}`   | `brokerTerminal`    | camelCase service name             |
+| `{ServiceName}`   | `BrokerService`     | PascalCase service class name      |
+| `{SERVICE}`       | `BROKER`            | Uppercase for env vars             |
+| `{api_name}`      | `trading_api`       | Backend API package name           |
+| `{resource}`      | `order`, `position` | Generic resource type              |
+| `{Resource}`      | `Order`, `Position` | PascalCase resource type           |
+| `ExternalLibrary` | `TradingView`       | Third-party library/framework name |
 
 ---
 
@@ -1419,9 +1382,11 @@ npm test  # Playwright E2E tests
 - Interface mismatches trigger adjustment loop in Phase 2.4
 - Frontend always works (via fallback client) throughout implementation
 - Type casting rule: Only use `as unknown as` for literal/alias/enum fields, never entire objects
-- Broker and datafeed methods are consolidated in `ApiAdapter` class for consistency
+- Service methods should be consolidated in `ApiAdapter` class for consistency
+- This methodology is generic and can be applied to any backend service implementation
 
 ---
 
-**Last Updated**: October 19, 2025  
-**Maintained by**: Development Team
+**Document Version**: 2.0 (Generic Template)  
+**Last Updated**: October 21, 2025  
+**Original Implementation**: Broker Terminal Service

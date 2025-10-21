@@ -1,8 +1,8 @@
 # Broker Terminal Service - Implementation Documentation
 
-**Version**: 1.0.0  
-**Last Updated**: October 18, 2025  
-**Status**: ✅ Mock Implementation - Production Ready for Development
+**Version**: 2.0.0  
+**Last Updated**: October 21, 2025  
+**Status**: ✅ Full Implementation - Backend Integration Complete
 
 ## Table of Contents
 
@@ -24,18 +24,20 @@ The **BrokerTerminalService** is a TypeScript class that implements the TradingV
 
 ### Purpose
 
-- **Development Environment**: Provides a realistic trading interface without requiring a real broker connection
+- **Production Trading**: Full-featured broker implementation with backend integration
+- **Smart Client Selection**: Seamlessly switches between mock fallback and real backend
 - **TradingView Integration**: Enables full Trading Terminal features (order panels, position tracking, account management)
 - **Type Safety**: Uses official TradingView TypeScript types for compile-time validation
-- **Testing**: Facilitates frontend testing of trading workflows without backend dependencies
+- **Flexible Testing**: Supports both fallback mock and real backend testing
 
 ### Key Characteristics
 
-- 🎯 **Mock Implementation**: Simulates broker behavior with local state management
+- 🔌 **Dual Mode**: Smart client selection (fallback mock or real backend)
 - 🛡️ **Type-Safe**: Uses official TradingView types from `@public/trading_terminal`
-- 🔄 **Real-Time Updates**: Simulates order execution and position updates
-- 📊 **Account Management**: Tracks balance, equity, orders, and positions
+- 🔄 **Backend Integration**: Full REST API integration via ApiAdapter
+- 📊 **Advanced Features**: Order preview, position management, leverage control
 - ⚡ **Event-Driven**: Follows TradingView's event-based architecture
+- 🧪 **Test-Friendly**: ApiInterface pattern enables seamless testing
 
 ## Architecture
 
@@ -58,20 +60,24 @@ The **BrokerTerminalService** is a TypeScript class that implements the TradingV
 ┌─────────────────────────────────────────────────────────────────┐
 │              BrokerTerminalService                              │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │  State Management                                         │  │
-│  │  • Map<string, Order>     - Active orders                │  │
-│  │  • Map<string, Position>  - Open positions               │  │
-│  │  • Execution[]            - Trade history                │  │
-│  │  • IWatchedValue<number>  - Balance & Equity             │  │
+│  │  Client Selection (_getApiAdapter)                        │  │
+│  │  • mock = true  → ApiFallback (mock implementation)      │  │
+│  │  • mock = false → ApiAdapter (real backend)              │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │  Core Operations                                          │  │
+│  │  Core Operations (delegates to ApiInterface)             │  │
+│  │  • previewOrder()         - Preview order costs          │  │
 │  │  • placeOrder()           - Create new orders            │  │
 │  │  • modifyOrder()          - Update existing orders       │  │
 │  │  • cancelOrder()          - Cancel orders                │  │
 │  │  • orders()               - Query orders                 │  │
 │  │  • positions()            - Query positions              │  │
 │  │  • executions()           - Query trade history          │  │
+│  │  • closePosition()        - Close positions              │  │
+│  │  • editPositionBrackets() - Update SL/TP                │  │
+│  │  • leverageInfo()         - Get leverage settings        │  │
+│  │  • setLeverage()          - Update leverage              │  │
+│  │  • previewLeverage()      - Preview leverage changes     │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │  Account Information                                      │  │
@@ -86,21 +92,31 @@ The **BrokerTerminalService** is a TypeScript class that implements the TradingV
 │  │  • isTradable()           - Trading availability         │  │
 │  │  • formatter()            - Price formatting             │  │
 │  └───────────────────────────────────────────────────────────┘  │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │  Simulation Engine                                        │  │
-│  │  • simulateOrderExecution()  - 3s delay → fill order     │  │
-│  │  • updatePosition()          - Create/update positions   │  │
-│  │  • initializeBrokerData()    - Sample data generation   │  │
-│  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
-                         │
-                         │ IDatafeedQuotesApi
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    DatafeedService                              │
-│  • Market data (quotes, bars)                                   │
-│  • Symbol search and resolution                                 │
-└─────────────────────────────────────────────────────────────────┘
+         │                                          │
+         │ ApiInterface                             │ IDatafeedQuotesApi
+         ▼                                          ▼
+┌──────────────────────┐              ┌──────────────────────────┐
+│   ApiFallback        │              │    DatafeedService       │
+│   (Mock Client)      │              │  • Market data           │
+│  • Local state       │              │  • Symbol search         │
+│  • Instant execution │              └──────────────────────────┘
+└──────────────────────┘
+         │ ApiInterface
+         ▼
+┌──────────────────────┐
+│   ApiAdapter         │
+│   (Backend Client)   │
+│  • REST API calls    │
+│  • Type conversion   │
+│  • Error handling    │
+└──────────┬───────────┘
+           │ HTTP/REST
+           ▼
+┌──────────────────────┐
+│  Backend Broker API  │
+│  /api/v1/broker/*    │
+└──────────────────────┘
 ```
 
 ### Component Integration
@@ -112,7 +128,9 @@ The BrokerTerminalService integrates with TradingView through the `broker_factor
 const widgetOptions: TradingTerminalWidgetOptions = {
   // ... other options
   broker_factory: (host: IBrokerConnectionAdapterHost) => {
-    return new BrokerTerminalService(host, datafeed)
+    // Smart client selection via mock flag
+    const useMock = import.meta.env.VITE_USE_MOCK_BROKER !== 'false'
+    return new BrokerTerminalService(host, datafeed, useMock)
   },
   broker_config: {
     configFlags: {
@@ -135,12 +153,14 @@ const widgetOptions: TradingTerminalWidgetOptions = {
 
 #### Order Management
 
+- ✅ **Preview Orders**: Cost, fee, and margin preview before placement
 - ✅ **Place Orders**: Market and Limit orders with full type validation
 - ✅ **Modify Orders**: Update order parameters (price, quantity, etc.)
 - ✅ **Cancel Orders**: Cancel working orders
 - ✅ **Order Status Tracking**: Working, Filled, Canceled states
 - ✅ **Order Types**: Market, Limit, Stop, Stop-Limit
 - ✅ **Order Sides**: Buy and Sell
+- ✅ **Backend Integration**: Full REST API communication
 
 #### Position Management
 
@@ -149,6 +169,9 @@ const widgetOptions: TradingTerminalWidgetOptions = {
 - ✅ **Long/Short Positions**: Proper side management
 - ✅ **Position Consolidation**: Combines fills for same symbol
 - ✅ **Position Reversals**: Automatic side switching on net position changes
+- ✅ **Close Position**: Full or partial position closing
+- ✅ **Position Brackets**: Stop-loss and take-profit management
+- ✅ **Backend Synchronization**: Real-time sync with backend state
 
 #### Execution Tracking
 
@@ -179,15 +202,22 @@ const widgetOptions: TradingTerminalWidgetOptions = {
 - ✅ **Pip Configuration**: Pip size and value for forex-style calculations
 - ✅ **Tradability Checks**: All symbols tradable in mock mode
 
+#### Leverage Management
+
+- ✅ **Leverage Info**: Get current leverage settings and constraints
+- ✅ **Set Leverage**: Update leverage for symbols
+- ✅ **Preview Leverage**: Preview leverage changes with warnings
+- ✅ **Validation**: Min/max leverage enforcement
+
 ### ⏳ Partially Implemented
 
-#### Order Execution Simulation
+#### Backend Integration (In Progress)
 
-- ✅ **Timed Execution**: 3-second delay before filling orders
-- ✅ **Status Updates**: Automatic transition from Working → Filled
-- ⚠️ **Price Simulation**: Uses limit price or default (not market price)
-- ⚠️ **Partial Fills**: Not currently simulated
-- ⚠️ **Reject Scenarios**: No rejection simulation
+- ✅ **REST API Communication**: Full implementation via ApiAdapter
+- ✅ **Type Conversion**: Enum casting in adapter layer
+- ✅ **Error Handling**: HTTP error mapping
+- ⚠️ **WebSocket Updates**: Real-time position/order updates (planned)
+- ⚠️ **Optimistic Updates**: UI updates before backend confirmation (planned)
 
 ### ❌ Not Implemented (Future)
 
@@ -197,13 +227,13 @@ const widgetOptions: TradingTerminalWidgetOptions = {
 - ❌ **P&L Calculation**: Real-time profit/loss updates
 - ❌ **Mark-to-Market**: Position value updates based on market prices
 - ❌ **Real-Time Balance**: Dynamic balance updates from P&L
+- ❌ **WebSocket Notifications**: Real-time order/position updates from backend
 
 #### Advanced Order Types
 
 - ❌ **Bracket Orders**: Stop-loss and take-profit attached to orders
 - ❌ **Trailing Stops**: Dynamic stop-loss updates
 - ❌ **OCO Orders**: One-cancels-other order pairs
-- ❌ **Position Brackets**: Attached SL/TP to positions
 
 #### Advanced Features
 
@@ -215,27 +245,61 @@ const widgetOptions: TradingTerminalWidgetOptions = {
 
 ## TradingView Integration
 
+### Architecture Pattern
+
+The service uses a **delegation pattern** with smart client selection:
+
+```typescript
+export interface ApiInterface {
+  // Contract that both ApiFallback and ApiAdapter implement
+  previewOrder(order: PreOrder): ApiPromise<OrderPreviewResult>
+  placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult>
+  // ... all broker operations
+}
+
+class ApiFallback implements ApiInterface {
+  // Mock implementation with local state
+}
+
+class ApiAdapter implements ApiInterface {
+  // Real backend via REST API
+}
+```
+
 ### IBrokerWithoutRealtime Interface
 
 The service implements the `IBrokerWithoutRealtime` interface from TradingView's Broker API:
 
 ```typescript
 export class BrokerTerminalService implements IBrokerWithoutRealtime {
-  // Core broker methods
+  private readonly apiFallback: ApiInterface
+  private readonly apiAdapter: ApiInterface
+  private readonly mock: boolean
+
+  private _getApiAdapter(mock: boolean = this.mock): ApiInterface {
+    return mock ? this.apiFallback : this.apiAdapter
+  }
+  // Core broker methods (all delegate to ApiInterface client)
   accountManagerInfo(): AccountManagerInfo
   async accountsMetainfo(): Promise<AccountMetainfo[]>
   async orders(): Promise<Order[]>
   async positions(): Promise<Position[]>
   async executions(symbol: string): Promise<Execution[]>
   async symbolInfo(symbol: string): Promise<InstrumentInfo>
+  async previewOrder(order: PreOrder): Promise<OrderPreviewResult>
   async placeOrder(order: PreOrder): Promise<PlaceOrderResult>
-  async modifyOrder(order: Order): Promise<void>
+  async modifyOrder(order: Order, confirmId?: string): Promise<void>
   async cancelOrder(orderId: string): Promise<void>
+  async closePosition(positionId: string, amount?: number): Promise<void>
+  async editPositionBrackets(positionId: string, brackets: Brackets): Promise<void>
+  async leverageInfo(params: LeverageInfoParams): Promise<LeverageInfo>
+  async setLeverage(params: LeverageSetParams): Promise<LeverageSetResult>
+  async previewLeverage(params: LeverageSetParams): Promise<LeveragePreviewResult>
   async chartContextMenuActions(context: TradeContext): Promise<ActionMetaInfo[]>
-  async isTradable(): Promise<boolean>
+  async isTradable(): Promise<IsTradableResult>
   async formatter(symbol: string, alignToMinMove: boolean): Promise<INumberFormatter>
   currentAccount(): AccountId
-  connectionStatus(): ConnectionStatus
+  connectionStatus(): ConnectionStatusType
 }
 ```
 
@@ -280,9 +344,12 @@ The broker's capabilities are defined via `broker_config.configFlags`:
 | ------------------------------ | ----------- | --------------------------------- |
 | `supportClosePosition`         | ✅ Enabled  | Allow closing positions from UI   |
 | `supportNativeReversePosition` | ✅ Enabled  | Support position reversal         |
-| `supportPLUpdate`              | ✅ Enabled  | Support P&L updates (planned)     |
+| `supportPLUpdate`              | ✅ Enabled  | Support P&L updates               |
 | `supportExecutions`            | ✅ Enabled  | Show execution history            |
 | `supportPositions`             | ✅ Enabled  | Show position panel               |
+| `supportOrderPreview`          | ✅ Enabled  | Preview orders before placement   |
+| `supportPositionBrackets`      | ✅ Enabled  | Edit SL/TP for positions          |
+| `supportLeverage`              | ✅ Enabled  | Leverage management               |
 | `showQuantityInsteadOfAmount`  | ❌ Disabled | Show quantity vs. monetary amount |
 | `supportLevel2Data`            | ❌ Disabled | No DOM/Level 2 data               |
 | `supportOrdersHistory`         | ❌ Disabled | No historical orders panel        |
