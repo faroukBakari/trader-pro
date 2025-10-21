@@ -3,51 +3,45 @@
  */
 
 import type {
-  Execution,
   IBrokerConnectionAdapterHost,
   IDatafeedQuotesApi,
   IWatchedValue,
-  Order, Position,
+  PreOrder,
 } from '@public/trading_terminal'
 import { OrderStatus, OrderType, Side } from '@public/trading_terminal'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { BrokerTerminalService } from '../brokerTerminalService'
-
-// Feature flag to switch between fallback and backend client
-// mock = true (default) → use fallback
-// mock = false → use backend API
-const USE_MOCK = import.meta.env.VITE_USE_MOCK_BROKER !== 'false'
+import { BrokerTerminalService, resetApiFallbackState } from '../brokerTerminalService'
 
 /**
  * Test suite for BrokerTerminalService
  *
- * Tests position management logic, particularly:
- * - Opening long/short positions
- * - Closing long/short positions
- * - Partial position closes
- * - Position reversals
+ * Tests the simplified fallback broker client logic:
+ * - Order preview with detailed sections
+ * - Order placement without execution simulation
+ * - Order modification
+ * - Order cancellation
+ * - Account info retrieval
+ * - Service configuration (mock vs backend)
+ *
+ * NOTE: The ApiFallback no longer simulates order execution or position management.
+ * It only stores order records and returns them when queried.
  */
 describe('BrokerTerminalService', () => {
   let brokerService: BrokerTerminalService
   let mockHost: IBrokerConnectionAdapterHost
   let mockDatafeed: IDatafeedQuotesApi
-  let orderUpdateSpy: ReturnType<typeof vi.fn>
-  let positionUpdateSpy: ReturnType<typeof vi.fn>
-  let executionUpdateSpy: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
-    // Setup spies
-    orderUpdateSpy = vi.fn()
-    positionUpdateSpy = vi.fn()
-    executionUpdateSpy = vi.fn()
+    // Reset ApiFallback state before each test
+    resetApiFallbackState()
 
     // Mock TradingView host
     mockHost = {
-      orderUpdate: orderUpdateSpy,
-      positionUpdate: positionUpdateSpy,
-      executionUpdate: executionUpdateSpy,
       defaultContextMenuActions: vi.fn().mockResolvedValue([]),
-      defaultFormatter: vi.fn(),
+      defaultFormatter: vi.fn().mockResolvedValue({
+        format: vi.fn((value: number) => value.toFixed(2)),
+      }),
+      getSymbolMinTick: vi.fn().mockResolvedValue(0.01),
       factory: {
         createWatchedValue: vi.fn((value: number) => {
           const mock: IWatchedValue<number> = {
@@ -65,370 +59,377 @@ describe('BrokerTerminalService', () => {
     // Mock datafeed
     mockDatafeed = {} as IDatafeedQuotesApi
 
-    // Use backend client when USE_MOCK = false
-    brokerService = new BrokerTerminalService(mockHost, mockDatafeed, USE_MOCK)
+    // Use fallback client (mock = true)
+    brokerService = new BrokerTerminalService(mockHost, mockDatafeed, true)
 
     // Clear all mocks
     vi.clearAllMocks()
   })
 
-  describe('Position Management - Opening Positions', () => {
-    it('should create a new long position when buying', async () => {
-      await brokerService.placeOrder({
+  describe('Order Preview', () => {
+    it('should generate order preview with order details section', async () => {
+      const preOrder: PreOrder = {
+        symbol: 'AAPL',
+        type: OrderType.Limit,
+        side: Side.Buy,
+        qty: 100,
+        limitPrice: 150.0,
+      }
+
+      const preview = await brokerService.previewOrder(preOrder)
+
+      expect(preview.sections).toBeDefined()
+      expect(preview.sections.length).toBeGreaterThan(0)
+
+      const orderDetailsSection = preview.sections.find((s) => s.header === 'Order Details')
+      expect(orderDetailsSection).toBeDefined()
+      expect(orderDetailsSection?.rows).toContainEqual({ title: 'Symbol', value: 'AAPL' })
+      expect(orderDetailsSection?.rows).toContainEqual({ title: 'Side', value: 'Buy' })
+      expect(orderDetailsSection?.rows).toContainEqual({ title: 'Quantity', value: '100.00' })
+      expect(orderDetailsSection?.rows).toContainEqual({ title: 'Order Type', value: 'Limit' })
+      expect(orderDetailsSection?.rows).toContainEqual({ title: 'Limit Price', value: '$150.00' })
+    })
+
+    it('should generate cost analysis section', async () => {
+      const preOrder: PreOrder = {
         symbol: 'AAPL',
         type: OrderType.Market,
         side: Side.Buy,
         qty: 100,
-      })
+      }
 
-      // Wait for simulated execution
-      await new Promise((resolve) => setTimeout(resolve, 300))
+      const preview = await brokerService.previewOrder(preOrder)
 
-      // Position update should be called with new long position
-      const positionUpdateCalls = positionUpdateSpy.mock.calls
-      const lastPositionUpdate = positionUpdateCalls[positionUpdateCalls.length - 1][0] as Position
-
-      expect(lastPositionUpdate.symbol).toBe('AAPL')
-      expect(lastPositionUpdate.qty).toBe(100)
-      expect(lastPositionUpdate.side).toBe(Side.Buy)
+      const costSection = preview.sections.find((s) => s.header === 'Cost Analysis')
+      expect(costSection).toBeDefined()
+      expect(costSection?.rows.length).toBeGreaterThan(0)
+      expect(costSection?.rows.some((r) => r.title === 'Estimated Price')).toBe(true)
+      expect(costSection?.rows.some((r) => r.title === 'Order Value')).toBe(true)
+      expect(costSection?.rows.some((r) => r.title === 'Commission')).toBe(true)
+      expect(costSection?.rows.some((r) => r.title === 'Margin Required')).toBe(true)
+      expect(costSection?.rows.some((r) => r.title === 'Total Cost')).toBe(true)
     })
 
-    it('should create a new short position when selling', async () => {
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Sell,
-        qty: 100,
-      })
-
-      // Wait for simulated execution
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Position update should be called with new short position
-      const positionUpdateCalls = positionUpdateSpy.mock.calls
-      const lastPositionUpdate = positionUpdateCalls[positionUpdateCalls.length - 1][0] as Position
-
-      expect(lastPositionUpdate.symbol).toBe('AAPL')
-      expect(lastPositionUpdate.qty).toBe(100)
-      expect(lastPositionUpdate.side).toBe(Side.Sell)
-    })
-  })
-
-  describe('Position Management - Closing Positions', () => {
-    it('should close a long position completely when selling the same quantity', async () => {
-      // Open long position: Buy 100
-      await brokerService.placeOrder({
+    it('should generate risk management section when brackets are present', async () => {
+      const preOrder: PreOrder = {
         symbol: 'AAPL',
         type: OrderType.Market,
         side: Side.Buy,
         qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
+        takeProfit: 110.0,
+        stopLoss: 90.0,
+      }
 
-      // Clear previous calls
-      positionUpdateSpy.mockClear()
+      const preview = await brokerService.previewOrder(preOrder)
 
-      // Close position: Sell 100
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Sell,
-        qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Position should be closed (qty: 0)
-      const positionUpdateCalls = positionUpdateSpy.mock.calls
-      const lastPositionUpdate = positionUpdateCalls[positionUpdateCalls.length - 1][0] as Position
-
-      expect(lastPositionUpdate.symbol).toBe('AAPL')
-      expect(lastPositionUpdate.qty).toBe(0)
+      const riskSection = preview.sections.find((s) => s.header === 'Risk Management')
+      expect(riskSection).toBeDefined()
+      expect(riskSection?.rows.some((r) => r.title === 'Take Profit')).toBe(true)
+      expect(riskSection?.rows.some((r) => r.title === 'Stop Loss')).toBe(true)
     })
 
-    it('should close a short position completely when buying the same quantity', async () => {
-      // Open short position: Sell 100
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Sell,
-        qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Clear previous calls
-      positionUpdateSpy.mockClear()
-
-      // Close position: Buy 100
-      await brokerService.placeOrder({
+    it('should include confirmation ID in preview', async () => {
+      const preOrder: PreOrder = {
         symbol: 'AAPL',
         type: OrderType.Market,
         side: Side.Buy,
         qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
+      }
 
-      // Position should be closed (qty: 0)
-      const positionUpdateCalls = positionUpdateSpy.mock.calls
-      const lastPositionUpdate = positionUpdateCalls[positionUpdateCalls.length - 1][0] as Position
+      const preview = await brokerService.previewOrder(preOrder)
 
-      expect(lastPositionUpdate.symbol).toBe('AAPL')
-      expect(lastPositionUpdate.qty).toBe(0)
+      expect(preview.confirmId).toBeDefined()
+      expect(preview.confirmId).toMatch(/^PREVIEW-/)
     })
-  })
 
-  describe('Position Management - Partial Closes', () => {
-    it('should reduce a long position when selling less than the full quantity', async () => {
-      // Open long position: Buy 100
-      await brokerService.placeOrder({
+    it('should include warnings for market orders', async () => {
+      const preOrder: PreOrder = {
         symbol: 'AAPL',
         type: OrderType.Market,
         side: Side.Buy,
         qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
+      }
 
-      // Clear previous calls
-      positionUpdateSpy.mockClear()
+      const preview = await brokerService.previewOrder(preOrder)
 
-      // Partial close: Sell 50
-      await brokerService.placeOrder({
+      expect(preview.warnings).toBeDefined()
+      expect(preview.warnings?.length).toBeGreaterThan(0)
+      expect(preview.warnings).toContain('Market orders execute immediately at current market price')
+    })
+
+    it('should include warnings for large orders', async () => {
+      const preOrder: PreOrder = {
         symbol: 'AAPL',
         type: OrderType.Market,
+        side: Side.Buy,
+        qty: 1500,
+      }
+
+      const preview = await brokerService.previewOrder(preOrder)
+
+      expect(preview.warnings).toBeDefined()
+      expect(preview.warnings).toContain('Large order size may experience slippage')
+    })
+
+    it('should handle stop orders correctly', async () => {
+      const preOrder: PreOrder = {
+        symbol: 'AAPL',
+        type: OrderType.Stop,
         side: Side.Sell,
         qty: 50,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
+        stopPrice: 95.0,
+      }
 
-      // Position should be reduced to 50
-      const positionUpdateCalls = positionUpdateSpy.mock.calls
-      const lastPositionUpdate = positionUpdateCalls[positionUpdateCalls.length - 1][0] as Position
+      const preview = await brokerService.previewOrder(preOrder)
 
-      expect(lastPositionUpdate.symbol).toBe('AAPL')
-      expect(lastPositionUpdate.qty).toBe(50)
-      expect(lastPositionUpdate.side).toBe(Side.Buy)
+      const orderDetailsSection = preview.sections.find((s) => s.header === 'Order Details')
+      expect(orderDetailsSection?.rows).toContainEqual({ title: 'Order Type', value: 'Stop' })
+      expect(orderDetailsSection?.rows).toContainEqual({ title: 'Stop Price', value: '$95.00' })
     })
 
-    it('should reduce a short position when buying less than the full quantity', async () => {
-      // Open short position: Sell 100
-      await brokerService.placeOrder({
+    it('should handle stop limit orders correctly', async () => {
+      const preOrder: PreOrder = {
         symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Sell,
-        qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Clear previous calls
-      positionUpdateSpy.mockClear()
-
-      // Partial close: Buy 50
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
+        type: OrderType.StopLimit,
         side: Side.Buy,
-        qty: 50,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
+        qty: 75,
+        stopPrice: 105.0,
+        limitPrice: 106.0,
+      }
 
-      // Position should be reduced to 50 (still short)
-      const positionUpdateCalls = positionUpdateSpy.mock.calls
-      const lastPositionUpdate = positionUpdateCalls[positionUpdateCalls.length - 1][0] as Position
+      const preview = await brokerService.previewOrder(preOrder)
 
-      expect(lastPositionUpdate.symbol).toBe('AAPL')
-      expect(lastPositionUpdate.qty).toBe(50)
-      expect(lastPositionUpdate.side).toBe(Side.Sell)
+      const orderDetailsSection = preview.sections.find((s) => s.header === 'Order Details')
+      expect(orderDetailsSection?.rows).toContainEqual({ title: 'Order Type', value: 'Stop Limit' })
+      expect(orderDetailsSection?.rows).toContainEqual({ title: 'Stop Price', value: '$105.00' })
+      expect(orderDetailsSection?.rows).toContainEqual({ title: 'Limit Price', value: '$106.00' })
     })
   })
 
-  describe('Position Management - Position Reversals', () => {
-    it('should reverse from long to short when selling more than the current position', async () => {
-      // Open long position: Buy 100
-      await brokerService.placeOrder({
+  describe('Order Placement', () => {
+    it('should place order and return order ID', async () => {
+      const preOrder: PreOrder = {
         symbol: 'AAPL',
         type: OrderType.Market,
         side: Side.Buy,
         qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
+      }
 
-      // Clear previous calls
-      positionUpdateSpy.mockClear()
+      const result = await brokerService.placeOrder(preOrder)
 
-      // Reverse to short: Sell 150
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Sell,
-        qty: 150,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Position should be short 50
-      const positionUpdateCalls = positionUpdateSpy.mock.calls
-      const lastPositionUpdate = positionUpdateCalls[positionUpdateCalls.length - 1][0] as Position
-
-      expect(lastPositionUpdate.symbol).toBe('AAPL')
-      expect(lastPositionUpdate.qty).toBe(50)
-      expect(lastPositionUpdate.side).toBe(Side.Sell)
+      expect(result.orderId).toBeDefined()
+      expect(result.orderId).toMatch(/^ORDER-/)
     })
 
-    it('should reverse from short to long when buying more than the current position', async () => {
-      // Open short position: Sell 100
-      await brokerService.placeOrder({
+    it('should create order with Working status', async () => {
+      const preOrder: PreOrder = {
         symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Sell,
-        qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Clear previous calls
-      positionUpdateSpy.mockClear()
-
-      // Reverse to long: Buy 150
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Buy,
-        qty: 150,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Position should be long 50
-      const positionUpdateCalls = positionUpdateSpy.mock.calls
-      const lastPositionUpdate = positionUpdateCalls[positionUpdateCalls.length - 1][0] as Position
-
-      expect(lastPositionUpdate.symbol).toBe('AAPL')
-      expect(lastPositionUpdate.qty).toBe(50)
-      expect(lastPositionUpdate.side).toBe(Side.Buy)
-    })
-  })
-
-  describe('Position Management - Increasing Positions', () => {
-    it('should increase a long position when buying more', async () => {
-      // Open long position: Buy 100
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
+        type: OrderType.Limit,
         side: Side.Buy,
         qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
+        limitPrice: 150.0,
+      }
 
-      // Clear previous calls
-      positionUpdateSpy.mockClear()
-
-      // Add to position: Buy 50
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Buy,
-        qty: 50,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Position should be long 150
-      const positionUpdateCalls = positionUpdateSpy.mock.calls
-      const lastPositionUpdate = positionUpdateCalls[positionUpdateCalls.length - 1][0] as Position
-
-      expect(lastPositionUpdate.symbol).toBe('AAPL')
-      expect(lastPositionUpdate.qty).toBe(150)
-      expect(lastPositionUpdate.side).toBe(Side.Buy)
-    })
-
-    it('should increase a short position when selling more', async () => {
-      // Open short position: Sell 100
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Sell,
-        qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Clear previous calls
-      positionUpdateSpy.mockClear()
-
-      // Add to position: Sell 50
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Sell,
-        qty: 50,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Position should be short 150
-      const positionUpdateCalls = positionUpdateSpy.mock.calls
-      const lastPositionUpdate = positionUpdateCalls[positionUpdateCalls.length - 1][0] as Position
-
-      expect(lastPositionUpdate.symbol).toBe('AAPL')
-      expect(lastPositionUpdate.qty).toBe(150)
-      expect(lastPositionUpdate.side).toBe(Side.Sell)
-    })
-  })
-
-  describe('Order and Execution Tracking', () => {
-    it('should create order and execution records', async () => {
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Buy,
-        qty: 100,
-      })
-
-      // Wait for simulated execution
-      await new Promise((resolve) => setTimeout(resolve, 300))
-
-      // Verify order updates
-      expect(orderUpdateSpy).toHaveBeenCalled()
-      const orderCalls = orderUpdateSpy.mock.calls
-      const filledOrder = orderCalls.find(
-        (call) => (call[0] as Order).status === OrderStatus.Filled,
-      )?.[0] as Order
-
-      expect(filledOrder).toBeDefined()
-      expect(filledOrder.symbol).toBe('AAPL')
-      expect(filledOrder.qty).toBe(100)
-      expect(filledOrder.filledQty).toBe(100)
-
-      // Verify execution update
-      expect(executionUpdateSpy).toHaveBeenCalled()
-      const execution = executionUpdateSpy.mock.calls[0][0] as Execution
-
-      expect(execution.symbol).toBe('AAPL')
-      expect(execution.qty).toBe(100)
-      expect(execution.side).toBe(Side.Buy)
-    })
-
-    it('should maintain order history', async () => {
-      await brokerService.placeOrder({
-        symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Buy,
-        qty: 100,
-      })
-      await new Promise((resolve) => setTimeout(resolve, 300))
+      await brokerService.placeOrder(preOrder)
 
       const orders = await brokerService.orders()
-      expect(orders.length).toBeGreaterThan(0)
+      expect(orders.length).toBe(1)
+      expect(orders[0].status).toBe(OrderStatus.Working)
       expect(orders[0].symbol).toBe('AAPL')
-      expect(orders[0].status).toBe(OrderStatus.Filled)
+      expect(orders[0].qty).toBe(100)
     })
 
-    it('should maintain execution history', async () => {
+    it('should preserve order type and side', async () => {
+      const preOrder: PreOrder = {
+        symbol: 'AAPL',
+        type: OrderType.Stop,
+        side: Side.Sell,
+        qty: 50,
+        stopPrice: 95.0,
+      }
+
+      await brokerService.placeOrder(preOrder)
+
+      const orders = await brokerService.orders()
+      expect(orders[0].type).toBe(OrderType.Stop)
+      expect(orders[0].side).toBe(Side.Sell)
+      expect(orders[0].stopPrice).toBe(95.0)
+    })
+
+    it('should preserve bracket orders (TP/SL)', async () => {
+      const preOrder: PreOrder = {
+        symbol: 'AAPL',
+        type: OrderType.Market,
+        side: Side.Buy,
+        qty: 100,
+        takeProfit: 110.0,
+        stopLoss: 90.0,
+      }
+
+      await brokerService.placeOrder(preOrder)
+
+      const orders = await brokerService.orders()
+      expect(orders[0].takeProfit).toBe(110.0)
+      expect(orders[0].stopLoss).toBe(90.0)
+    })
+
+    it('should place multiple orders independently', async () => {
       await brokerService.placeOrder({
         symbol: 'AAPL',
         type: OrderType.Market,
         side: Side.Buy,
         qty: 100,
       })
-      await new Promise((resolve) => setTimeout(resolve, 300))
 
-      const executions = await brokerService.executions('AAPL')
-      expect(executions.length).toBeGreaterThan(0)
-      expect(executions[0].symbol).toBe('AAPL')
-      expect(executions[0].qty).toBe(100)
+      await brokerService.placeOrder({
+        symbol: 'GOOGL',
+        type: OrderType.Limit,
+        side: Side.Sell,
+        qty: 50,
+        limitPrice: 2500.0,
+      })
+
+      const orders = await brokerService.orders()
+      expect(orders.length).toBe(2)
+      expect(orders[0].symbol).toBe('AAPL')
+      expect(orders[1].symbol).toBe('GOOGL')
+    })
+  })
+
+  describe('Order Modification', () => {
+    it('should modify order quantity', async () => {
+      await brokerService.placeOrder({
+        symbol: 'AAPL',
+        type: OrderType.Limit,
+        side: Side.Buy,
+        qty: 100,
+        limitPrice: 150.0,
+      })
+
+      const orders = await brokerService.orders()
+      const originalOrder = orders[0]
+
+      await brokerService.modifyOrder({
+        ...originalOrder,
+        qty: 150,
+      })
+
+      const modifiedOrders = await brokerService.orders()
+      expect(modifiedOrders[0].qty).toBe(150)
+    })
+
+    it('should modify limit price', async () => {
+      await brokerService.placeOrder({
+        symbol: 'AAPL',
+        type: OrderType.Limit,
+        side: Side.Buy,
+        qty: 100,
+        limitPrice: 150.0,
+      })
+
+      const orders = await brokerService.orders()
+      const originalOrder = orders[0]
+
+      await brokerService.modifyOrder({
+        ...originalOrder,
+        limitPrice: 155.0,
+      })
+
+      const modifiedOrders = await brokerService.orders()
+      expect(modifiedOrders[0].limitPrice).toBe(155.0)
+    })
+
+    it('should modify stop price', async () => {
+      await brokerService.placeOrder({
+        symbol: 'AAPL',
+        type: OrderType.Stop,
+        side: Side.Sell,
+        qty: 100,
+        stopPrice: 95.0,
+      })
+
+      const orders = await brokerService.orders()
+      const originalOrder = orders[0]
+
+      await brokerService.modifyOrder({
+        ...originalOrder,
+        stopPrice: 93.0,
+      })
+
+      const modifiedOrders = await brokerService.orders()
+      expect(modifiedOrders[0].stopPrice).toBe(93.0)
+    })
+
+    it('should use confirmId when provided', async () => {
+      await brokerService.placeOrder({
+        symbol: 'AAPL',
+        type: OrderType.Limit,
+        side: Side.Buy,
+        qty: 100,
+        limitPrice: 150.0,
+      })
+
+      const orders = await brokerService.orders()
+      const originalOrderId = orders[0].id
+
+      // Modify using the confirmId (which should be the order ID)
+      await brokerService.modifyOrder(
+        {
+          ...orders[0],
+          qty: 200,
+        },
+        originalOrderId,
+      )
+
+      const modifiedOrders = await brokerService.orders()
+      expect(modifiedOrders[0].qty).toBe(200)
+    })
+  })
+
+  describe('Order Cancellation', () => {
+    it('should cancel order by ID', async () => {
+      const result = await brokerService.placeOrder({
+        symbol: 'AAPL',
+        type: OrderType.Limit,
+        side: Side.Buy,
+        qty: 100,
+        limitPrice: 150.0,
+      })
+
+      await brokerService.cancelOrder(result.orderId!)
+
+      const orders = await brokerService.orders()
+      expect(orders[0].status).toBe(OrderStatus.Canceled)
+    })
+
+    it('should set updateTime on cancelled order', async () => {
+      const result = await brokerService.placeOrder({
+        symbol: 'AAPL',
+        type: OrderType.Market,
+        side: Side.Buy,
+        qty: 100,
+      })
+
+      await brokerService.cancelOrder(result.orderId!)
+
+      const orders = await brokerService.orders()
+      expect(orders[0].updateTime).toBeDefined()
+    })
+
+    it('should keep cancelled order in order list', async () => {
+      const result = await brokerService.placeOrder({
+        symbol: 'AAPL',
+        type: OrderType.Limit,
+        side: Side.Buy,
+        qty: 100,
+        limitPrice: 150.0,
+      })
+
+      await brokerService.cancelOrder(result.orderId!)
+
+      const orders = await brokerService.orders()
+      expect(orders.length).toBe(1)
+      expect(orders[0].id).toBe(result.orderId)
     })
   })
 
@@ -438,44 +439,140 @@ describe('BrokerTerminalService', () => {
       expect(positions).toEqual([])
     })
 
-    it('should return positions after trades', async () => {
+    it('should return empty positions after placing orders (no execution simulation)', async () => {
       await brokerService.placeOrder({
         symbol: 'AAPL',
         type: OrderType.Market,
         side: Side.Buy,
         qty: 100,
       })
-      await new Promise((resolve) => setTimeout(resolve, 300))
 
       const positions = await brokerService.positions()
-      expect(positions.length).toBe(1)
-      expect(positions[0].symbol).toBe('AAPL')
-      expect(positions[0].qty).toBe(100)
-      expect(positions[0].side).toBe(Side.Buy)
+      expect(positions).toEqual([])
+    })
+  })
+
+  describe('Execution Queries', () => {
+    it('should return empty executions list initially', async () => {
+      const executions = await brokerService.executions('AAPL')
+      expect(executions).toEqual([])
     })
 
-    it('should not return closed positions', async () => {
-      // Open and close position
+    it('should return empty executions after placing orders (no execution simulation)', async () => {
       await brokerService.placeOrder({
         symbol: 'AAPL',
         type: OrderType.Market,
         side: Side.Buy,
         qty: 100,
       })
-      await new Promise((resolve) => setTimeout(resolve, 300))
 
-      await brokerService.placeOrder({
+      const executions = await brokerService.executions('AAPL')
+      expect(executions).toEqual([])
+    })
+  })
+
+  describe('Account Information', () => {
+    it('should return account metadata', async () => {
+      const accounts = await brokerService.accountsMetainfo()
+
+      expect(accounts).toBeDefined()
+      expect(accounts.length).toBe(1)
+      expect(accounts[0].id).toBe('DEMO-001')
+      expect(accounts[0].name).toBe('Demo Trading Account')
+    })
+
+    it('should return current account ID', () => {
+      const accountId = brokerService.currentAccount()
+      expect(accountId).toBe('DEMO-001')
+    })
+
+    it('should return account manager info with balance and equity', () => {
+      const accountInfo = brokerService.accountManagerInfo()
+
+      expect(accountInfo.accountTitle).toBe('Mock Trading Account')
+      expect(accountInfo.summary).toBeDefined()
+      expect(accountInfo.summary.length).toBeGreaterThan(0)
+
+      const balanceField = accountInfo.summary.find((s) => s.text === 'Balance')
+      expect(balanceField).toBeDefined()
+      expect(balanceField?.wValue).toBeDefined()
+
+      const equityField = accountInfo.summary.find((s) => s.text === 'Equity')
+      expect(equityField).toBeDefined()
+      expect(equityField?.wValue).toBeDefined()
+    })
+
+    it('should configure order columns in account manager', () => {
+      const accountInfo = brokerService.accountManagerInfo()
+
+      expect(accountInfo.orderColumns).toBeDefined()
+      expect(accountInfo.orderColumns.length).toBeGreaterThan(0)
+      expect(accountInfo.orderColumns.some((col) => col.id === 'symbol')).toBe(true)
+      expect(accountInfo.orderColumns.some((col) => col.id === 'side')).toBe(true)
+      expect(accountInfo.orderColumns.some((col) => col.id === 'qty')).toBe(true)
+      expect(accountInfo.orderColumns.some((col) => col.id === 'status')).toBe(true)
+    })
+
+    it('should configure position columns in account manager', () => {
+      const accountInfo = brokerService.accountManagerInfo()
+
+      expect(accountInfo.positionColumns).toBeDefined()
+      expect(accountInfo.positionColumns!.length).toBeGreaterThan(0)
+      expect(accountInfo.positionColumns!.some((col) => col.id === 'symbol')).toBe(true)
+      expect(accountInfo.positionColumns!.some((col) => col.id === 'side')).toBe(true)
+      expect(accountInfo.positionColumns!.some((col) => col.id === 'qty')).toBe(true)
+      expect(accountInfo.positionColumns!.some((col) => col.id === 'avgPrice')).toBe(true)
+    })
+  })
+
+  describe('Symbol Information', () => {
+    it('should return symbol info with min/max quantity', async () => {
+      const symbolInfo = await brokerService.symbolInfo('AAPL')
+
+      expect(symbolInfo.qty).toBeDefined()
+      expect(symbolInfo.qty.min).toBe(1)
+      expect(symbolInfo.qty.max).toBe(1e12)
+      expect(symbolInfo.qty.step).toBe(1)
+    })
+
+    it('should return pip and tick values', async () => {
+      const symbolInfo = await brokerService.symbolInfo('AAPL')
+
+      expect(symbolInfo.pipValue).toBeDefined()
+      expect(symbolInfo.pipSize).toBeDefined()
+      expect(symbolInfo.minTick).toBeDefined()
+    })
+  })
+
+  describe('Trading Operations', () => {
+    it('should report symbol as tradable', async () => {
+      const isTradable = await brokerService.isTradable('AAPL')
+      expect(isTradable).toBe(true)
+    })
+
+    it('should return formatter for symbol', async () => {
+      const formatter = await brokerService.formatter('AAPL', false)
+      expect(formatter).toBeDefined()
+    })
+
+    it('should return chart context menu actions', async () => {
+      const actions = await brokerService.chartContextMenuActions({
         symbol: 'AAPL',
-        type: OrderType.Market,
-        side: Side.Sell,
-        qty: 100,
+        displaySymbol: 'AAPL',
+        value: 150.0,
+        formattedValue: '$150.00',
+        last: 150.0,
       })
-      await new Promise((resolve) => setTimeout(resolve, 300))
 
-      const positions = await brokerService.positions()
-      // Position should be removed from internal map after closing
-      // We send a 0-qty update to TradingView, but don't keep it in our map
-      expect(positions.length).toBe(0)
+      expect(actions).toBeDefined()
+      expect(Array.isArray(actions)).toBe(true)
+    })
+  })
+
+  describe('Connection Status', () => {
+    it('should report connected status', () => {
+      const status = brokerService.connectionStatus()
+      expect(status).toBe(1) // ConnectionStatus.Connected
     })
   })
 })

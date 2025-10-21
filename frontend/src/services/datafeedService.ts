@@ -115,7 +115,7 @@ function generateLast400DaysBars(): Bar[] {
 
   return bars
 }
-const sampleBars: Bar[] = generateLast400DaysBars()
+const mockedBars: Bar[] = generateLast400DaysBars()
 
 class ApiFallback implements ApiInterface {
   /**
@@ -251,7 +251,7 @@ class ApiFallback implements ApiInterface {
     }
 
     // Filter bars within the requested time range [from, to]
-    const filteredBars = sampleBars.filter((bar) => bar.time >= from && bar.time <= to)
+    const filteredBars = mockedBars.filter((bar) => bar.time >= from && bar.time <= to)
 
     console.log(`[Datafeed] Found ${filteredBars.length} bars in time range, need ${countBack}`)
 
@@ -287,7 +287,7 @@ class ApiFallback implements ApiInterface {
       }
 
       // Generate realistic quote data based on the last bar
-      const lastBar = sampleBars[sampleBars.length - 1]
+      const lastBar = mockedBars[mockedBars.length - 1]
       if (!lastBar) {
         console.log(`[Datafeed] No historical data available for quotes: ${symbol}`)
         return {
@@ -356,13 +356,13 @@ class BarsWsFallback implements BarWsInterface {
     string,
     { params: BarsSubscriptionRequest; onUpdate: (data: Bar) => void }
   >()
-  private intervalId: number
+  private intervalId: NodeJS.Timeout
 
   constructor() {
     // Mock data updates every 3 seconds
-    this.intervalId = window.setInterval(() => {
+    this.intervalId = setInterval(() => {
       this.subscriptions.forEach(({ onUpdate }) => {
-        onUpdate(this.mockLastBar(sampleBars[sampleBars.length - 1]))
+        onUpdate(this.mockLastBar(mockedBars[mockedBars.length - 1]))
       })
     }, 1000)
   }
@@ -415,12 +415,12 @@ class QuotesWsFallback implements QuoteWsInterface {
     string,
     { params: QuoteDataSubscriptionRequest; onUpdate: (data: QuoteData) => void }
   >()
-  private intervalId: number
+  private intervalId: NodeJS.Timeout
   private lastPrices = new Map<string, number>()
 
   constructor() {
     // Mock quote updates every 2 seconds for fast symbols, 10 seconds for slow
-    this.intervalId = window.setInterval(() => {
+    this.intervalId = setInterval(() => {
       this.subscriptions.forEach(({ params, onUpdate }) => {
         const allSymbols = [
           ...(params.symbols || []),
@@ -436,7 +436,7 @@ class QuotesWsFallback implements QuoteWsInterface {
   }
 
   private mockQuoteData(symbol: string): QuoteData {
-    const lastBar = sampleBars[sampleBars.length - 1]
+    const lastBar = mockedBars[mockedBars.length - 1]
     if (!lastBar) {
       return {
         s: 'error',
@@ -547,7 +547,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
 
   private mock: boolean
 
-  constructor(mock: boolean = false) {
+  constructor({ mock = false }: { mock?: boolean } = {}) {
     this.apiAdapter = new ApiAdapter()
     this.apiFallback = new ApiFallback()
     this.wsAdapter = new WsAdapter()

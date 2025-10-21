@@ -16,6 +16,7 @@ from trading_api.core.broker_service import BrokerService
 from trading_api.models.broker import (
     AccountMetainfo,
     Execution,
+    OrderPreviewResult,
     PlacedOrder,
     PlaceOrderResult,
     Position,
@@ -70,6 +71,28 @@ async def placeOrder(order: PreOrder) -> PlaceOrderResult:
     """
     try:
         return await broker_service.place_order(order)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post(
+    "/orders/preview",
+    response_model=OrderPreviewResult,
+    summary="Preview order costs and requirements",
+    operation_id="previewOrder",
+)
+async def previewOrder(order: PreOrder) -> OrderPreviewResult:
+    """
+    Preview order costs, fees, margin, and requirements without placing it.
+
+    Args:
+        order: Order to preview
+
+    Returns:
+        OrderPreviewResult: Estimated costs, fees, margin, and confirmation ID
+    """
+    try:
+        return await broker_service.preview_order(order)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

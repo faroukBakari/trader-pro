@@ -1,9 +1,9 @@
 import {
 	LibrarySymbolInfo,
-	SearchSymbolResultItem,
 	ResolutionString,
+	SearchSymbolResultItem,
 	VisiblePlotsSet,
-} from '../../../charting_library/datafeed-api';
+} from '../../../trading_terminal/datafeed-api';
 
 import {
 	getErrorMessage,

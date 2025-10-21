@@ -16,6 +16,7 @@ import type {
   Execution,
   LibrarySymbolInfo,
   Order,
+  OrderPreviewResult,
   PlaceOrderResult,
   Position,
   PreOrder,
@@ -288,6 +289,15 @@ export class ApiAdapter {
     return {
       status: response.status,
       data: response.data as PlaceOrderResult,
+    }
+  }
+  @ApiErrorHandler('/orders/preview')
+  async previewOrder(order: PreOrder): ApiPromise<OrderPreviewResult> {
+    const response = await this.rawApi.previewOrder(apiMappers.mapPreOrder(order))
+
+    return {
+      status: response.status,
+      data: response.data as OrderPreviewResult,
     }
   }
 
