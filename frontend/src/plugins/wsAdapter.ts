@@ -4,7 +4,6 @@
 import type {
   Bar,
   QuoteData,
-  QuoteDataResponse,
 } from '@public/trading_terminal/charting_library';
 import {
   type Bar as Bar_backend,
@@ -12,30 +11,43 @@ import {
   type QuoteData as QuoteData_backend,
   type QuoteDataSubscriptionRequest as QuoteDataSubscriptionRequest_backend
 } from '../clients/ws-types-generated/index.js';
-import { WebSocketClient } from './wsClientBase.js';
-
-export interface WebSocketInterface<TParams extends object, TData extends object> {
-  subscribe(
-    subscriptionId: string,
-    params: TParams,
-    onUpdate: (data: TData) => void
-  ): Promise<string>
-  unsubscribe(subscriptionId: string): Promise<void>
-}
-
+import { mapQuoteData } from './mappers.js';
+import { WebSocketClient, WebSocketFallback, type WebSocketInterface } from './wsClientBase.js';
 
 export type BarsSubscriptionRequest = BarsSubscriptionRequest_backend
 export type QuoteDataSubscriptionRequest = QuoteDataSubscriptionRequest_backend
 
-export class WsAdapter {
+export type WsAdapterType = {
+  bars: WebSocketInterface<BarsSubscriptionRequest, Bar>
+  quotes: WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>
+}
 
-  bars: WebSocketClient<BarsSubscriptionRequest, Bar_backend, Bar>
-  quotes: WebSocketClient<QuoteDataSubscriptionRequest, QuoteData_backend, QuoteData>
+export class WsAdapter implements WsAdapterType {
+
+  bars: WebSocketInterface<BarsSubscriptionRequest, Bar>
+  quotes: WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>
 
   constructor() {
     this.bars = new WebSocketClient<BarsSubscriptionRequest, Bar_backend, Bar>('bars', data => data)
     this.quotes = new WebSocketClient<QuoteDataSubscriptionRequest, QuoteData_backend, QuoteData>(
-      'quotes', data => data as QuoteDataResponse as QuoteData
+      'quotes', mapQuoteData
     )
+  }
+}
+
+export class WsFallback implements WsAdapterType {
+
+  bars: WebSocketInterface<BarsSubscriptionRequest, Bar>
+  quotes: WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>
+
+  constructor({
+    barsMocker,
+    quotesMocker
+  }: {
+    barsMocker: () => Bar,
+    quotesMocker: () => QuoteData
+  }) {
+    this.bars = new WebSocketFallback<BarsSubscriptionRequest, Bar>(barsMocker)
+    this.quotes = new WebSocketFallback<QuoteDataSubscriptionRequest, QuoteData>(quotesMocker)
   }
 }

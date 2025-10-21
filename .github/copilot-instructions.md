@@ -11,7 +11,26 @@ You are an expert full-stack developer and DevOps engineer with deep knowledge i
 - Follow TDD: write failing tests for features first, implement minimal code to pass tests, then refactor while keeping tests green.  
 - Produce clean, self-explanatory code. Comments in source code are only for planning (TODO, FIXME). Never add general explanatory comments in code.  
 - Prefer open standards and widely adopted OSS tools; avoid proprietary or closed-source frameworks.  
-- Avoid using npm or poetry commands directly; use Makefile commands for consistency.
+- **CRITICAL: ALWAYS use Makefile commands instead of npm, poetry, or other package manager commands directly. Never run npm/poetry commands unless absolutely no Makefile target exists.**
+
+---
+
+### Makefile-first workflow (MANDATORY)
+
+**BEFORE running ANY command:**
+1. Check MAKEFILE-GUIDE.md for available targets
+2. Use `make help` (backend) or `make -f project.mk help` (root) to list available commands
+3. ONLY if no Makefile target exists, then use npm/poetry directly
+
+**Common violations to AVOID:**
+- ❌ `npm run type-check` → ✅ `make type-check`
+- ❌ `npm run test:unit` → ✅ `make test`
+- ❌ `npm run lint` → ✅ `make lint`
+- ❌ `npm run dev` → ✅ `make dev`
+- ❌ `poetry run pytest` → ✅ `make test`
+- ❌ `poetry install` → ✅ `make install`
+
+**When in doubt:** Check `make help` first, ALWAYS.
 
 ---
 
@@ -76,12 +95,18 @@ Frontend
 
 ### Verification, tooling, and quality gates
 
+- **ALWAYS use Makefile commands for all operations: testing, linting, formatting, type checking, building, etc.**
+- Check MAKEFILE-GUIDE.md and `make help` BEFORE running any command
 - ALWAYS verify results and impacts using available Makefile commands and MCP tools (Playwright MCP Server, todos mcp server) before delivering code or docs.  
 - Use the todos mcp server to manage and track tasks.  
 - Use Playwright MCP Server to validate frontend visual results after changes.  
-- Run linters, formatters, and type checkers before committing.  
 - Enforce type safety, automatic client generation, and common shared models to streamline backend/frontend contracts.  
 - Remove unused code and clean up after any change.
+
+**Makefile command reference (use these, NOT npm/poetry directly):**
+- Backend: `make test`, `make lint`, `make format`, `make type-check` (via mypy in lint-check)
+- Frontend: `make test`, `make lint`, `make format`, `make type-check`
+- Root: `make -f project.mk test-all`, `make -f project.mk lint-all`, `make -f project.mk format-all`
 
 ---
 
@@ -98,13 +123,14 @@ Frontend
 
 ### Quick checklist (pre-merge)
 
+- [ ] **Check MAKEFILE-GUIDE.md or run `make help` for available commands**
 - [ ] explore docs/DOCUMENTATION-GUIDE.md to find relevant md files for the task.
 - [ ] Summarize related README and md files for the task.
 - [ ] Summarize related code files and models.  
 - [ ] Validate and approve todos before implementation.  
 - [ ] Get plan approval for features/refactors/bugs.  
 - [ ] Implement via TDD.  
-- [ ] Run tests, linters, formatters, and type checks.  
+- [ ] **Use Makefile commands: `make test`, `make lint`, `make format`, `make type-check`**
 - [ ] Run MCP servers (Playwright, todos) and verify results.  
 - [ ] Update ARCHITECTURE.md and related READMEs only after approval and verification.  
 - [ ] Clean up unused code and comments (keep TODO/FIXME only).  

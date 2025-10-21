@@ -203,6 +203,8 @@ await client.subscribe({ symbol: 'AAPL', resolution: '1' }, (bar: Bar) =>
 ### Key Files
 
 - **Base Client**: `src/plugins/wsClientBase.ts` - Core WebSocket implementation
+- **WebSocket Adapter**: `src/plugins/wsAdapter.ts` - High-level WebSocket clients wrapper
+- **Data Mappers**: `src/plugins/mappers.ts` - Type-safe data transformations between backend/frontend types
 - **Generated Types**: `src/clients/ws-types-generated/index.ts` - Auto-generated type definitions (from AsyncAPI)
 - **Integration**: `src/services/datafeedService.ts` - TradingView integration example
 - **Type Generator**: `scripts/generate-ws-types.mjs` - AsyncAPI → TypeScript types

@@ -17,7 +17,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 5. **API Versioning** - Backwards-compatible evolution strategy
 6. **DevOps Ready** - Automated CI/CD with parallel testing
 
-##  System Architecture
+## System Architecture
 
 ### High-Level View
 
@@ -37,6 +37,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 ### Technology Stack
 
 #### Backend
+
 - **Framework**: FastAPI 0.104+ (ASGI async)
 - **WebSocket**: FastWS 0.1.7 (AsyncAPI documented)
 - **Runtime**: Python 3.11 + Uvicorn
@@ -47,6 +48,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 - **Docs**: OpenAPI 3.0 + AsyncAPI 2.4.0
 
 #### Frontend
+
 - **Framework**: Vue 3 + Composition API + TypeScript
 - **Build**: Vite 7+
 - **Package Mgmt**: npm (Node.js 20+)
@@ -57,6 +59,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 - **Code Quality**: ESLint + Prettier
 
 #### Real-Time Infrastructure
+
 - **Protocol**: WebSocket (ws/wss)
 - **Framework**: FastWS with AsyncAPI docs
 - **Pattern**: Topic-based pub/sub (`bars:SYMBOL:RESOLUTION`)
@@ -64,6 +67,7 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 - **Features**: Heartbeat, connection lifespan, metrics
 
 #### DevOps
+
 - **CI/CD**: GitHub Actions (parallel jobs)
 - **Testing**: Multi-tier (unit, integration, smoke, e2e)
 - **Development**: VS Code multi-root workspace
@@ -114,9 +118,13 @@ src/
 │   ├── brokerTerminalService.ts   # Broker adapter
 │   └── datafeedService.ts         # Datafeed adapter
 ├── plugins/
-│   └── apiAdapter.ts   # Consolidated backend client wrapper
-├── clients/            # Auto-generated API clients
-│   └── trader-client-generated/
+│   ├── wsAdapter.ts    # Centralized WebSocket clients wrapper
+│   ├── wsClientBase.ts # WebSocket base client (singleton)
+│   ├── mappers.ts      # Type-safe data transformations
+│   └── apiAdapter.ts   # REST client wrapper
+├── clients/            # Auto-generated clients
+│   ├── trader-client-generated/   # REST API client
+│   └── ws-types-generated/        # WebSocket types
 ├── components/         # Vue components
 └── types/              # TypeScript type definitions
 
@@ -134,15 +142,61 @@ Frontend → Generated Client → ApiAdapter → FastAPI Router
          ← Type-safe data  ← Pydantic    ← Business Logic
 ```
 
-### WebSocket Flow
+### WebSocket Flow (Centralized Architecture)
 
 ```
-Frontend ═══► /api/v1/ws ═══► FastWS Adapter
-    │ Subscribe(topic)        │
-    │◄════ Response ══════════┤
-    │                         │
-    │◄═══ Updates ════════════┤ publish(topic, data)
-         (topic subscribers)
+┌──────────────────────────────────────────────────────────────┐
+│                    Application Layer                         │
+│  (DatafeedService, BrokerTerminalService)                    │
+└─────────────────────────┬────────────────────────────────────┘
+                          │ wsAdapter.bars.subscribe()
+                          ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    Adapter Layer                             │
+│  WsAdapter - Centralized clients (bars, quotes, etc.)        │
+└─────────────────────────┬────────────────────────────────────┘
+                          │ WebSocketClient<TParams, TBackendData, TData>
+                          ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    Mapper Layer                              │
+│  mappers.ts - Type-safe transformations                      │
+│  • mapQuoteData() • mapPreOrder()                            │
+└─────────────────────────┬────────────────────────────────────┘
+                          │ Backend types → Frontend types
+                          ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    Client Layer                              │
+│  WebSocketClient - Generic client with mapping               │
+└─────────────────────────┬────────────────────────────────────┘
+                          │ Uses singleton instance
+                          ▼
+┌──────────────────────────────────────────────────────────────┐
+│                    Base Layer                                │
+│  WebSocketBase - Singleton connection management             │
+│  • Subscribe/Unsubscribe • Topic routing                     │
+│  • Auto-reconnection • Reference counting                    │
+└─────────────────────────┬────────────────────────────────────┘
+                          │ WebSocket protocol
+                          ▼
+                   Backend (/api/v1/ws)
+```
+
+### WebSocket Message Flow
+
+```
+1. SUBSCRIPTION
+   Service → WsAdapter.bars.subscribe()
+         → WebSocketClient (applies mapper)
+         → WebSocketBase (manages connection)
+         → Backend
+         ← bars.subscribe.response (confirmation)
+         → Mark subscription as confirmed
+
+2. DATA UPDATES
+   Backend broadcasts → bars.update
+         → WebSocketBase (routes to confirmed subscribers)
+         → WebSocketClient (applies mapper: TBackendData → TData)
+         → Callback in Service
 ```
 
 ## Client Generation
@@ -155,6 +209,7 @@ Frontend ═══► /api/v1/ws ═══► FastWS Adapter
 4. **Type Safety** → Full TypeScript types from Pydantic models
 
 **Benefits**:
+
 - ✅ Automatic sync on backend changes
 - ✅ Hot reload integration
 - ✅ File-based (efficient, no server polling)
@@ -166,6 +221,7 @@ Frontend ═══► /api/v1/ws ═══► FastWS Adapter
 **Planned**: `/api/v2/` (Future breaking changes)
 
 **Strategy**:
+
 - URL-based versioning (`/api/v{major}/`)
 - No breaking changes within versions
 - 6-month deprecation period
@@ -190,10 +246,113 @@ Frontend ═══► /api/v1/ws ═══► FastWS Adapter
 ```
 
 **Key Features**:
+
 - Independent backend/frontend testing (no cross-dependencies)
 - FastAPI TestClient for backend (no server needed)
 - Mock services for frontend (offline testing)
 - Parallel execution in CI/CD
+
+## Mapper Layer Architecture
+
+### Overview
+
+The mapper layer provides centralized, type-safe data transformations between backend and frontend types, ensuring clean separation of concerns.
+
+**Location**: `frontend/src/plugins/mappers.ts`
+
+### Design Pattern
+
+```
+Backend Types (Python Pydantic)
+    ↓ OpenAPI/AsyncAPI Generation
+Generated Types (*_Backend suffix)
+    ↓ Mapper Functions
+Frontend Types (TradingView/Custom)
+```
+
+### Available Mappers
+
+#### `mapQuoteData()`
+
+Transforms backend quote data to TradingView frontend format:
+
+```typescript
+import type { QuoteData as QuoteData_Backend } from "@/clients/trader-client-generated";
+import type { QuoteData } from "@public/trading_terminal/charting_library";
+
+export function mapQuoteData(quote: QuoteData_Backend): QuoteData {
+  if (quote.s === "error") {
+    return { s: "error", n: quote.n, v: quote.v };
+  }
+  return {
+    s: "ok",
+    n: quote.n,
+    v: {
+      ch: quote.v.ch,
+      chp: quote.v.chp,
+      lp: quote.v.lp,
+      ask: quote.v.ask,
+      bid: quote.v.bid,
+      // ... complete field mapping
+    },
+  };
+}
+```
+
+**Usage**: Integrated in `WsAdapter` for real-time quotes, also used in REST API responses.
+
+#### `mapPreOrder()`
+
+Transforms frontend order to backend format with enum conversions:
+
+```typescript
+export function mapPreOrder(order: PreOrder): PreOrder_Backend {
+  return {
+    symbol: order.symbol,
+    type: order.type as unknown as PreOrder_Backend["type"],
+    side: order.side as unknown as PreOrder_Backend["side"],
+    qty: order.qty,
+    limitPrice: order.limitPrice ?? null,
+    stopPrice: order.stopPrice ?? null,
+    // ... handles optional fields and enum conversions
+  };
+}
+```
+
+**Usage**: Used in broker service for order placement.
+
+### Integration Points
+
+1. **WebSocket Clients** - Mappers applied automatically in `WsAdapter`:
+
+   ```typescript
+   this.quotes = new WebSocketClient("quotes", mapQuoteData);
+   ```
+
+2. **REST API Responses** - Mappers used in service layer:
+
+   ```typescript
+   const quotes = await api.getQuotes(symbols);
+   return quotes.map(mapQuoteData);
+   ```
+
+3. **Type Isolation** - Services never import backend types directly:
+
+   ```typescript
+   // ✅ CORRECT: Use mapper
+   import { mapQuoteData } from "@/plugins/mappers";
+
+   // ❌ WRONG: Don't import backend types in services
+   import type { QuoteData as QuoteData_Backend } from "@/clients/...";
+   ```
+
+### Benefits
+
+✅ **Type Safety**: Compile-time validation of transformations  
+✅ **Reusability**: Single mapper for REST + WebSocket  
+✅ **Maintainability**: Centralized transformation logic  
+✅ **Backend Isolation**: Backend types confined to mapper layer  
+✅ **Runtime Validation**: Handles enum conversions and null handling
 
 ## Real-Time Architecture
 
@@ -203,18 +362,46 @@ Frontend ═══► /api/v1/ws ═══► FastWS Adapter
 **Framework**: FastWS 0.1.7  
 **Documentation**: AsyncAPI at `/api/v1/ws/asyncapi`
 
+### Centralized Adapter Pattern
+
+All WebSocket operations go through `WsAdapter`:
+
+```typescript
+// Single entry point for all WebSocket clients
+export class WsAdapter implements WsAdapterType {
+  bars: WebSocketInterface<BarsSubscriptionRequest, Bar>;
+  quotes: WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>;
+
+  constructor() {
+    this.bars = new WebSocketClient("bars", (data) => data);
+    this.quotes = new WebSocketClient("quotes", mapQuoteData);
+  }
+}
+```
+
+**Features**:
+
+- Singleton WebSocket connection (shared across all clients)
+- Automatic data mapping via mappers
+- Server-confirmed subscriptions
+- Auto-reconnection with resubscription
+- Type-safe operations
+
 ### Message Pattern
 
 ```json
 {
   "type": "operation.name",
-  "payload": { /* data */ }
+  "payload": {
+    /* data */
+  }
 }
 ```
 
 ### Operations
 
 **Subscribe to Bars**:
+
 ```json
 // Client → Server
 {"type": "bars.subscribe", "payload": {"symbol": "AAPL", "resolution": "1"}}
@@ -224,6 +411,7 @@ Frontend ═══► /api/v1/ws ═══► FastWS Adapter
 ```
 
 **Receive Updates**:
+
 ```json
 // Server → Client (Broadcast)
 {"type": "bars.update", "payload": {"time": 1697097600000, "open": 150.0, ...}}
@@ -234,6 +422,7 @@ Frontend ═══► /api/v1/ws ═══► FastWS Adapter
 `bars:{SYMBOL}:{RESOLUTION}` (e.g., `bars:AAPL:1`, `bars:GOOGL:D`)
 
 **Features**:
+
 - Multi-symbol subscriptions per client
 - Topic-based filtering
 - Broadcast only to subscribers
@@ -283,18 +472,21 @@ make -f project.mk lint-all format-all
 ## Design Patterns
 
 ### Backend Patterns
+
 - **Dependency Injection** - FastAPI's DI system
 - **Service Layer** - Business logic separation
 - **Repository Pattern** - Data access abstraction
 - **Response Models** - Consistent API responses
 
 ### Frontend Patterns
+
 - **Composition API** - Vue 3 modern pattern
 - **Store Pattern** - Pinia state management
 - **Service Layer** - API abstraction with smart fallbacks
 - **Dual-Client System** - Mock + Real backend adapters
 
 ### Cross-Cutting
+
 - **Contract-First** - OpenAPI/AsyncAPI specifications
 - **Test-Driven** - TDD workflow
 - **Type-First** - TypeScript/Python type safety
@@ -302,18 +494,21 @@ make -f project.mk lint-all format-all
 ## Performance Considerations
 
 ### Backend
+
 - ASGI async/await for high concurrency
 - In-memory caching for frequently accessed data
 - Pydantic model optimization
 - Efficient WebSocket broadcasting (topic-based)
 
 ### Frontend
+
 - Vite for fast ES builds
 - Code splitting and lazy loading
 - Vue 3 Composition API optimizations
 - Efficient state management with Pinia
 
 ### Real-Time
+
 - Connection pooling
 - Topic-based filtering (send only to subscribers)
 - Heartbeat system for connection health
@@ -322,12 +517,14 @@ make -f project.mk lint-all format-all
 ## Security
 
 ### Current Measures
+
 - CORS configuration
 - Pydantic input validation
 - MyPy + TypeScript static analysis
 - Comprehensive test coverage
 
 ### Planned Enhancements
+
 - JWT authentication
 - Per-endpoint rate limiting
 - HTTPS/WSS for production
@@ -336,12 +533,14 @@ make -f project.mk lint-all format-all
 ## Monitoring & Observability
 
 **Current**:
+
 - Health endpoints (`/api/v1/health`)
 - API version tracking
 - WebSocket connection metrics
 - Comprehensive test reporting
 
 **Planned**:
+
 - Application metrics (response times, error rates)
 - WebSocket lifecycle tracking
 - Centralized error logging
@@ -350,6 +549,7 @@ make -f project.mk lint-all format-all
 ## Documentation Structure
 
 ### Core Documentation
+
 - **ARCHITECTURE.md** - System architecture (this file)
 - **BACKEND-BROKER-METHODOLOGY.md** - TDD implementation guide
 - **docs/DEVELOPMENT.md** - Development workflows
@@ -358,23 +558,27 @@ make -f project.mk lint-all format-all
 - **docs/WEBSOCKET-CLIENTS.md** - WebSocket implementation
 
 ### Configuration
+
 - **WORKSPACE-SETUP.md** - VS Code workspace
 - **ENVIRONMENT-CONFIG.md** - Environment variables
 - **MAKEFILE-GUIDE.md** - Make commands reference
 - **HOOKS-SETUP.md** - Git hooks
 
 ### Component Documentation
+
 - **backend/docs/** - Backend-specific docs
 - **frontend/** - Frontend implementation docs
 
 ## Deployment
 
 ### Development
+
 ```bash
 make -f project.mk dev-fullstack  # All-in-one development
 ```
 
 ### Production (Planned)
+
 - Load balancer (nginx) with SSL/TLS + WebSocket proxy
 - Container orchestration (Docker/Kubernetes)
 - Database layer (Redis + PostgreSQL)
@@ -383,18 +587,21 @@ make -f project.mk dev-fullstack  # All-in-one development
 ## Future Roadmap
 
 ### Short Term (3 months)
+
 - Complete JWT authentication
 - Docker containerization
 - Real market data integration
 - E2E test suite completion
 
 ### Medium Term (6 months)
+
 - Cloud deployment (Kubernetes)
 - Production monitoring
 - Performance analytics
 - Enhanced security measures
 
 ### Long Term (12+ months)
+
 - Mobile application
 - AI-powered trading insights
 - Advanced charting features
