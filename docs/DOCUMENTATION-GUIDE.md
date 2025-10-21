@@ -8,7 +8,7 @@ Complete index of all project documentation with descriptions and reading paths.
 | ---------------------------------- | ---------------------------------------------------------- |
 | **README.md**                      | Project overview, quick start, and basic setup             |
 | **ARCHITECTURE.md**                | System architecture, technology stack, design patterns     |
-| **BACKEND-BROKER-METHODOLOGY.md**  | Generic TDD methodology for backend service implementation |
+| **BACKEND-API-METHODOLOGY.md**     | Generic TDD methodology for backend service implementation |
 | **WORKSPACE-SETUP.md**             | VS Code multi-root workspace configuration guide           |
 | **MAKEFILE-GUIDE.md**              | Makefile commands reference for all components             |
 | **HOOKS-SETUP.md**                 | Git hooks installation and usage                           |
@@ -33,13 +33,13 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### backend/docs/ (Backend-Specific)
 
-| File                                     | Purpose                                    |
-| ---------------------------------------- | ------------------------------------------ |
-| **backend/README.md**                    | Backend overview, setup, and API reference |
-| **backend/docs/WEBSOCKETS.md**           | WebSocket API reference and patterns       |
-| **backend/docs/BAR-BROADCASTING.md**     | Bar broadcaster implementation details     |
-| **backend/docs/VERSIONING.md**           | API versioning strategy and lifecycle      |
-| **backend/docs/WS-ROUTER-GENERATION.md** | WebSocket router auto-generation           |
+| File                                                   | Purpose                                    |
+| ------------------------------------------------------ | ------------------------------------------ |
+| **backend/README.md**                                  | Backend overview, setup, and API reference |
+| **backend/docs/WEBSOCKETS.md**                         | WebSocket API reference and patterns       |
+| **backend/docs/BAR-BROADCASTING.md**                   | Bar broadcaster implementation details     |
+| **backend/docs/VERSIONING.md**                         | API versioning strategy and lifecycle      |
+| **backend/src/trading_api/ws/WS-ROUTER-GENERATION.md** | WebSocket router auto-generation           |
 
 ### backend/examples/ (Implementation Examples)
 
@@ -120,7 +120,7 @@ Complete index of all project documentation with descriptions and reading paths.
 ### Backend Developers
 
 1. **backend/README.md** - Backend overview
-2. **BACKEND-BROKER-METHODOLOGY.md** - TDD implementation workflow
+2. **BACKEND-API-METHODOLOGY.md** - TDD implementation workflow
 3. **backend/docs/WEBSOCKETS.md** - WebSocket API patterns
 4. **docs/TESTING.md** - Testing strategies
 5. **backend/docs/VERSIONING.md** - API versioning approach
@@ -144,7 +144,7 @@ Complete index of all project documentation with descriptions and reading paths.
 ### Full-Stack Developers
 
 1. **ARCHITECTURE.md** - Overall system design
-2. **BACKEND-BROKER-METHODOLOGY.md** - Backend service implementation
+2. **BACKEND-API-METHODOLOGY.md** - Backend service implementation
 3. **docs/CLIENT-GENERATION.md** - Client generation workflow
 4. **docs/WEBSOCKET-CLIENTS.md** - Real-time communication
 5. **docs/DEVELOPMENT.md** - Full-stack workflows
@@ -156,7 +156,7 @@ Complete index of all project documentation with descriptions and reading paths.
 ### Architecture & Design
 
 - **ARCHITECTURE.md** - System architecture
-- **BACKEND-BROKER-METHODOLOGY.md** - TDD methodology
+- **BACKEND-API-METHODOLOGY.md** - TDD methodology
 - **frontend/WEBSOCKET-ARCHITECTURE-DIAGRAMS.md** - WebSocket diagrams
 
 ### Setup & Configuration
@@ -174,6 +174,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### WebSocket & Real-Time
 
+- **backend/src/trading_api/ws/WS-ROUTER-GENERATION.md** - ⚠️ **WebSocket router code generation (CRITICAL for new features)**
 - **docs/WEBSOCKET-CLIENTS.md** - WebSocket overview
 - **backend/docs/WEBSOCKETS.md** - Backend WebSocket API
 - **frontend/WEBSOCKET-CLIENT-PATTERN.md** - Frontend patterns
@@ -195,7 +196,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 - **MAKEFILE-GUIDE.md** - Makefile commands
 - **.github/CI-TROUBLESHOOTING.md** - CI/CD issues
-- **backend/docs/WS-ROUTER-GENERATION.md** - Router generation
+- **backend/src/trading_api/ws/WS-ROUTER-GENERATION.md** - Router generation
 
 ### Code Quality
 

@@ -109,6 +109,11 @@
       "*.mk": "makefile"
     },
 
+    // Editor associations (default preview for markdown)
+    "workbench.editorAssociations": {
+      "*.md": "vscode.markdown.preview.editor"
+    },
+
     // Terminal
     "terminal.integrated.cwd": ".",
     "makefile.configureOnOpen": false

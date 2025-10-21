@@ -1,5 +1,4 @@
-// TODO: add dict with routes as keys and builder as vaues in the fashion of 'bar' => new  WebSocketInterface<BarsSubscriptionRequest, Bar>(bar)
-// TODO: offline mode for asyncapi generator for ci
+// no codegen for this file as developer need to configure mappers as needed
 
 import type {
   Bar,

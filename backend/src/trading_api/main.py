@@ -21,7 +21,7 @@ from .core.config import BroadcasterConfig
 from .core.datafeed_broadcaster import DataFeedBroadcaster
 from .core.datafeed_service import DatafeedService
 from .core.versioning import APIVersion
-from .ws.datafeed import ws_routers
+from .ws import ws_routers
 
 api_routers: list[APIRouter] = [
     health_router,

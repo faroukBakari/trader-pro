@@ -1,7 +1,4 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:venv",
-    "typescript.tsdk": "node_modules/typescript/lib",
-    "typescript.enablePromptUseWorkspaceTsdk": true,
     "typescript.preferences.importModuleSpecifier": "non-relative",
     "python-envs.pythonProjects": [
         {
@@ -10,5 +7,4 @@
             "packageManager": "ms-python.python:pip"
         }
     ],
-    "python-envs.defaultPackageManager": "ms-python.python:pip"
 }

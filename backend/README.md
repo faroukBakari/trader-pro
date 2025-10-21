@@ -119,6 +119,8 @@ The backend publishes OpenAPI and AsyncAPI documentation at startup. After runni
 | `bars.unsubscribe` | SEND    | Unsubscribe from bar updates                    |
 | `bars.update`      | RECEIVE | Real-time OHLC bar data broadcast               |
 
+⚠️ **IMPORTANT**: When implementing WebSocket features, always use the router code generation mechanism. See `src/trading_api/ws/WS-ROUTER-GENERATION.md` for the complete guide on creating type-safe WebSocket routers.
+
 See `docs/websockets.md` for detailed WebSocket documentation.
 
 ## Bar Broadcasting (Real-Time Mocked Data)
