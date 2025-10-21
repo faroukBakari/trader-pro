@@ -17,6 +17,7 @@ You are an expert full-stack developer and DevOps engineer with deep knowledge i
 
 ### Project and documentation rules
 
+- Keep docs/DOCUMENTATION-GUIDE.md updated with all relevant documentation files and their purposes.
 - Keep ARCHITECTURE.md current with overall architecture and design decisions after any design change.  
 - Check and summarize all related README and markdown files relevant to a requested task before starting implementation.  
 - Do not create or update documentation without approval. Before updating docs, ensure all related code passes tests, linters, and type checks. Always ask for confirmation before creating or updating documentation.  
@@ -27,6 +28,7 @@ You are an expert full-stack developer and DevOps engineer with deep knowledge i
 
 ### Feature / refactor / bug workflow
 
+0. Explore docs/DOCUMENTATION-GUIDE.md to find relevant markdown files.
 1. Explore and summarize relevant markdown files.  
 2. Explore and summarize relevant code files.  
 3. Explore and summarize any external references or examples.  
@@ -96,7 +98,8 @@ Frontend
 
 ### Quick checklist (pre-merge)
 
-- [ ] Summarize related README and md files for the task.  
+- [ ] explore docs/DOCUMENTATION-GUIDE.md to find relevant md files for the task.
+- [ ] Summarize related README and md files for the task.
 - [ ] Summarize related code files and models.  
 - [ ] Validate and approve todos before implementation.  
 - [ ] Get plan approval for features/refactors/bugs.  

@@ -1,15 +1,15 @@
 # Makefile Structure Guide
 
-This project uses a consistent Makefile-based build system across all components.
+Consistent Makefile-based build system across all components.
 
 ## Philosophy
 
-- **Consistency**: CI workflows use the same `make` commands as local development
-- **Simplicity**: All common tasks have memorable make targets
-- **Composability**: Project-level targets delegate to component-level Makefiles
-- **Documentation**: Every Makefile has a `help` target showing available commands
+- **Consistency**: CI uses same `make` commands as local development
+- **Simplicity**: Memorable targets for common tasks
+- **Composability**: Project-level delegates to component Makefiles
+- **Documentation**: Every Makefile has `help` target
 
-## Makefile Hierarchy
+## Hierarchy
 
 ```
 project.mk              # Project-wide orchestration
@@ -17,223 +17,141 @@ project.mk              # Project-wide orchestration
 └── frontend/Makefile   # Frontend-specific targets
 ```
 
-## Project-Level Commands
+## Project Commands
 
-Located in `project.mk` at the repository root:
+**Location**: `project.mk` at repository root
 
 ```bash
-# View all available targets
-make -f project.mk help
+make -f project.mk help              # View all targets
 
-# Setup and Installation
-make -f project.mk setup        # Full project setup (hooks + dependencies)
-make -f project.mk install-all  # Install all dependencies (backend + frontend)
+# Setup
+make -f project.mk setup             # Full setup (hooks + deps)
+make -f project.mk install-all       # Install all dependencies
 
 # Development
-make -f project.mk dev-fullstack  # Start full-stack dev environment (recommended)
-make -f project.mk dev-backend    # Start backend only
-make -f project.mk dev-frontend   # Start frontend only
+make -f project.mk dev-fullstack     # Start full stack (recommended)
+make -f project.mk dev-backend       # Backend only
+make -f project.mk dev-frontend      # Frontend only
 
 # Code Generation
-make -f project.mk generate-ws-routers        # Generate WebSocket routers
-make -f project.mk generate-openapi-client    # Generate REST API client
-make -f project.mk generate-asyncapi-types    # Generate WebSocket types
+make -f project.mk generate-ws-routers        # WebSocket routers
+make -f project.mk generate-openapi-client    # REST client
+make -f project.mk generate-asyncapi-types    # WS types
 
-# Testing and Quality
-make -f project.mk test-all     # Run all tests
-make -f project.mk lint-all     # Run all linters
-make -f project.mk format-all   # Format all code
-make -f project.mk build-all    # Build everything
+# Quality
+make -f project.mk test-all          # Run all tests
+make -f project.mk lint-all          # Run all linters
+make -f project.mk format-all        # Format all code
+make -f project.mk build-all         # Build everything
 ```
 
 ## Backend Commands
 
-Located in `backend/Makefile`:
+**Location**: `backend/Makefile`
 
 ```bash
 cd backend
 
 # Development
-make ensure-python     # Check Python 3.11+ (offers auto-install with confirmation)
-make ensure-python-ci  # Check Python 3.11+ (CI mode, auto-installs without prompts)
-make ensure-poetry     # Ensure Poetry is installed (auto-installs if needed)
-make install          # Install dependencies (auto-installs Python & Poetry if needed)
-make install-ci       # Install dependencies for CI (non-interactive)
-make dev          # Start development server (checks port first)
-make dev-ci       # Start server in background for CI
+make ensure-python     # Check Python 3.11+ (offers auto-install)
+make ensure-poetry     # Ensure Poetry installed
+make install           # Install dependencies
+make dev               # Start dev server (checks port)
 
 # Testing
-make test         # Run tests
-make test-cov     # Run tests with coverage
+make test              # Run tests
+make test-cov          # Tests with coverage
 
-# Code Quality
-make lint         # Run flake8 linting
-make lint-check   # Run all linters (black, isort, flake8, mypy)
-make format       # Format code with black and isort
+# Quality
+make lint              # Flake8
+make lint-check        # All linters (black, isort, flake8, mypy)
+make format            # Format with black + isort
 
-# Build & Deploy
-make build        # Build Python package
-make clean        # Clean build artifacts
+# Build
+make build             # Build package
+make clean             # Clean artifacts
 
 # API
-make health       # Check API health
-make health-ci    # Check API health for CI (fail on error)
-make clients      # Generate API clients
-make export-openapi  # Export OpenAPI spec
+make health            # Check API health
+make clients           # Generate clients
+make export-openapi    # Export OpenAPI spec
 ```
 
 ## Frontend Commands
 
-Located in `frontend/Makefile`:
+**Location**: `frontend/Makefile`
 
 ```bash
 cd frontend
 
 # Development
-make ensure-node     # Check Node.js 22.20+ (offers auto-install with confirmation)
-make install        # Install dependencies (auto-installs Node.js if needed)
-make install-ci     # Install dependencies for CI (npm ci)
-make dev            # Start development server (checks port first)
+make ensure-node       # Check Node.js 22.20+
+make install           # Install dependencies
+make dev               # Start dev server
 
 # Testing
-make test         # Run tests in watch mode
-make test     # Run tests once (for CI)
+make test              # Tests in watch mode
+make test-ci           # Tests once (CI)
 
-# Code Quality
-make lint         # Run ESLint and Prettier checks
-make type-check   # Run TypeScript type checking
+# Quality
+make lint              # ESLint
+make lint-fix          # ESLint with auto-fix
+make format            # Prettier format
+make type-check        # TypeScript check
 
-# Build & Deploy
-make build        # Build for production
-make clean        # Clean build artifacts
+# Build
+make build             # Production build
+make preview           # Preview production build
+make clean             # Clean artifacts
+
+# API Clients
+make generate-openapi-client    # Generate REST client
+make generate-asyncapi-types    # Generate WS types
 ```
 
-## CI Integration
+## CI-Specific Targets
 
-The GitHub Actions workflow (`.github/workflows/ci.yml`) uses these Makefiles exclusively:
-
-```yaml
-# Backend CI
-- run: make install-ci
-- run: make test-cov
-- run: make lint-check
-
-# Frontend CI
-- run: make install-ci
-- run: make lint
-- run: make type-check
-- run: make test
-- run: make build
-```
-
-## Benefits
-
-1. **Developer Experience**: Same commands work locally and in CI
-2. **Port Safety**: Automatic port checking prevents conflicts
-3. **Hot Reload**: Full regeneration chain on code changes
-4. **Maintainability**: Changes to build process are centralized in Makefiles
-5. **Discoverability**: `make help` shows available commands at each level
-6. **Consistency**: No mixing of `npm run`, `poetry run`, and custom scripts in CI
-7. **Flexibility**: Easy to add new targets or modify existing ones
-8. **Orchestration**: `dev-fullstack` handles complex startup sequences
-
-## Best Practices
-
-### Adding New Targets
-
-1. Add to appropriate Makefile (backend/frontend/project)
-2. Add to `.PHONY` declaration at top of file
-3. Add to `help` target description
-4. Use consistent naming (verb-noun pattern)
-5. Include descriptive echo statements
-
-### Example New Target
-
-```makefile
-.PHONY: my-target
-
-my-target:
-	@echo "Running my custom task..."
-	# Your commands here
-```
-
-### Updating CI
-
-When adding new build steps, update both:
-
-1. The appropriate Makefile
-2. The CI workflow to use the new make target
-
-## Common Patterns
-
-### Conditional Execution
-
-```makefile
-# Old pattern - just check and fail
-install:
-	@if ! command -v poetry >/dev/null 2>&1; then \
-		echo "Poetry not found!"; \
-		exit 1; \
-	fi
-	poetry install
-
-# New pattern - validate and auto-install with confirmation
-ensure-python:
-	@PYTHON_VERSION=$$(python3 --version | grep -oP '\d+\.\d+' | head -1); \
-	if [ "$$(printf '%s\n' "3.11" "$$PYTHON_VERSION" | sort -V | head -n1)" != "3.11" ]; then \
-		if command -v pyenv >/dev/null 2>&1; then \
-			echo "Install Python 3.11.7? [y/N]"; \
-			read -r REPLY; \
-			[ "$$REPLY" = "y" ] && pyenv install 3.11.7 && pyenv local 3.11.7; \
-		fi; \
-	fi
-
-ensure-poetry:
-	@if ! command -v poetry >/dev/null 2>&1; then \
-		pipx install poetry || pip3 install --user poetry; \
-	fi
-
-install: ensure-python ensure-poetry
-	poetry install
-```
-
-### Cross-Directory Targets
-
-```makefile
-backend-target:
-	make -C backend specific-target
-```
-
-### CI-Specific Behavior
-
-```makefile
-install-ci:
-	poetry install --no-interaction --with dev
-```
-
-## Troubleshooting
-
-### Target Not Found
+Non-interactive versions for CI/CD:
 
 ```bash
-# Make sure you're in the right directory
-cd backend  # or frontend
-make <target>
+# Backend
+make ensure-python-ci  # Auto-install Python (no prompts)
+make install-ci        # Non-interactive install
+make dev-ci            # Background server
+make health-ci         # Health check (fail on error)
 
-# Or use the project-level Makefile
-cd <project-root>
-make -f project.mk <target>
+# Frontend
+make install-ci        # Uses npm ci
 ```
 
-### Permission Errors
+## Common Workflows
 
+### Initial Setup
 ```bash
-# Make sure scripts are executable
-chmod +x scripts/*.sh
+make -f project.mk setup  # Installs hooks + all dependencies
 ```
 
-### CI Failures
+### Daily Development
+```bash
+make -f project.mk dev-fullstack  # One command, full stack
+```
 
-1. Check that the Makefile target works locally first
-2. Ensure all dependencies are in `install-ci` target
-3. Verify CI environment has necessary tools (poetry, npm, etc.)
+### Before Commit
+```bash
+make -f project.mk lint-all format-all test-all
+```
+
+### CI Pipeline
+```bash
+make -f project.mk install-all
+make -f project.mk lint-all
+make -f project.mk test-all
+make -f project.mk build-all
+```
+
+## Tips
+
+- Use `make help` in any directory to see available targets
+- Add `-f project.mk` when running from root
+- Most targets check dependencies (Python, Node, Poetry, etc.)
+- CI targets are non-interactive and fail fast

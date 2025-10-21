@@ -1,127 +1,241 @@
-# VS Code Multi-Root Workspace Setup
+# VS Code Multi-Root Workspace Setup# VS Code Multi-Root Workspace Setup
 
-## 🎯 Purpose
+## Purpose## 🎯 Purpose
 
-This workspace configuration solves TypeScript/Python resolution issues in VS Code by properly separating the backend and frontend contexts in a multi-root workspace.
+Solves TypeScript/Python resolution issues by properly separating backend and frontend contexts in a multi-root workspace.This workspace configuration solves TypeScript/Python resolution issues in VS Code by properly separating the backend and frontend contexts in a multi-root workspace.
 
-## 🚀 Quick Start
+## Quick Start## 🚀 Quick Start
 
-### Option 1: Open Workspace File (Recommended)
+````bash### Option 1: Open Workspace File (Recommended)
 
-1. Close the current VS Code window
+# Option 1: Command line (recommended)
+
+code trader-pro.code-workspace1. Close the current VS Code window
+
 2. Open the workspace file:
-   ```bash
-   code trader-pro.code-workspace
-   ```
 
-### Option 2: From VS Code UI
+# Option 2: From VS Code   ```bash
 
-1. `File` → `Open Workspace from File...`
-2. Select `trader-pro.code-workspace`
+File → Open Workspace from File... → Select trader-pro.code-workspace   code trader-pro.code-workspace
 
-## 📁 Workspace Structure
+```   ```
+
+
+
+## Workspace Structure### Option 2: From VS Code UI
+
+
+
+```1. `File` → `Open Workspace from File...`
+
+🎯 Trader Pro (Root)     - Root files (Makefiles, docs, configs)2. Select `trader-pro.code-workspace`
+
+🔧 Backend API          - Python/FastAPI with isolated .venv
+
+🎨 Frontend             - Vue/TypeScript with isolated node_modules## 📁 Workspace Structure
+
+````
 
 The workspace defines three folders:
 
-```
-🎯 Trader Pro (Root)     - Root-level files (Makefiles, docs, configs)
-🔧 Backend API          - Python/FastAPI backend with isolated Python env
-🎨 Frontend             - Vue/TypeScript frontend with isolated Node env
-```
+## Benefits
+
+````
+
+### TypeScript🎯 Trader Pro (Root)     - Root-level files (Makefiles, docs, configs)
+
+- ✅ Correct `tsconfig.json` usage🔧 Backend API          - Python/FastAPI backend with isolated Python env
+
+- ✅ `import.meta.env` works without errors🎨 Frontend             - Vue/TypeScript frontend with isolated Node env
+
+- ✅ Proper Vue component type checking```
+
+- ✅ TypeScript SDK points to frontend's node_modules
 
 ## ✨ Benefits
 
-### TypeScript Resolution
-- ✅ VS Code uses `frontend/tsconfig.json` correctly
-- ✅ `import.meta.env` works without errors
-- ✅ Vue components get proper type checking
+### Python
+
+- ✅ Correct virtualenv detection### TypeScript Resolution
+
+- ✅ Pytest runs in backend context- ✅ VS Code uses `frontend/tsconfig.json` correctly
+
+- ✅ Black/isort formatting works- ✅ `import.meta.env` works without errors
+
+- ✅ Pylance uses backend's .venv- ✅ Vue components get proper type checking
+
 - ✅ TypeScript SDK points to frontend's node_modules
 
-### Python Environment
-- ✅ Correct virtualenv detection
-- ✅ Pytest runs in backend context
-- ✅ Black/isort formatting works properly
+### Developer Experience
+
+- ✅ Separate terminal contexts### Python Environment
+
+- ✅ Correct IntelliSense per folder- ✅ Correct virtualenv detection
+
+- ✅ Debugging for both stacks- ✅ Pytest runs in backend context
+
+- ✅ Integrated task runner- ✅ Black/isort formatting works properly
+
 - ✅ Pylance uses backend's .venv
 
+## Recommended Extensions
+
 ### Developer Experience
-- ✅ Separate terminal contexts for backend/frontend
+
+Install when prompted or via: `Ctrl+Shift+P` → `Extensions: Show Recommended Extensions`- ✅ Separate terminal contexts for backend/frontend
+
 - ✅ IntelliSense works correctly in each folder
-- ✅ Debugging configurations for both stacks
-- ✅ Task runner for dev/test commands
+
+**Python/Backend**: python, pylance, black-formatter, isort, mypy-type-checker  - ✅ Debugging configurations for both stacks
+
+**TypeScript/Frontend**: vue.volar, eslint, prettier-vscode  - ✅ Task runner for dev/test commands
+
+**General**: editorconfig, github pull-request, gitlens
 
 ## 🔧 Recommended Extensions
 
+## Usage
+
 The workspace will prompt you to install these extensions:
-
-### Python/Backend
-- `ms-python.python` - Python language support
-- `ms-python.vscode-pylance` - Fast Python IntelliSense
-- `ms-python.black-formatter` - Black code formatter
-- `ms-python.isort` - Import sorting
-- `ms-python.mypy-type-checker` - Static type checking
-
-### TypeScript/Frontend
-- `vue.volar` - Vue 3 language support
-- `dbaeumer.vscode-eslint` - ESLint integration
-- `esbenp.prettier-vscode` - Prettier formatter
-
-### General
-- `editorconfig.editorconfig` - EditorConfig support
-- `github.vscode-pull-request-github` - GitHub integration
-- `eamodio.gitlens` - Git supercharged
-
-## 🎮 Using the Workspace
 
 ### Running Dev Servers
 
-**Backend Only:**
-1. Open integrated terminal
-2. Select "🔧 Backend API" from terminal dropdown
-3. Run: `make dev`
+### Python/Backend
 
-**Frontend Only:**
-1. Open integrated terminal
-2. Select "🎨 Frontend" from terminal dropdown
-3. Run: `npm run dev`
+**Backend**: Terminal → Select "🔧 Backend API" → `make dev`  - `ms-python.python` - Python language support
 
-**Both Together:**
-- Use the Debug panel
-- Select "Full Stack: Backend + Frontend"
-- Press F5
+**Frontend**: Terminal → Select "🎨 Frontend" → `npm run dev`  - `ms-python.vscode-pylance` - Fast Python IntelliSense
 
-### Running Tests
+**Both**: Debug panel → "Full Stack: Backend + Frontend" → F5- `ms-python.black-formatter` - Black code formatter
 
-**Via Command Palette (Ctrl+Shift+P):**
-- `Tasks: Run Task` → Select test task
+- `ms-python.isort` - Import sorting
 
-**Via Terminal:**
-```bash
-# Backend tests
-cd backend && make test
+### Running Tests- `ms-python.mypy-type-checker` - Static type checking
 
-# Frontend tests
-cd frontend && npm run test:unit
 
-# Integration tests
-make test-integration
-```
+
+```bash### TypeScript/Frontend
+
+# Backend- `vue.volar` - Vue 3 language support
+
+cd backend && make test- `dbaeumer.vscode-eslint` - ESLint integration
+
+- `esbenp.prettier-vscode` - Prettier formatter
+
+# Frontend
+
+cd frontend && npm run test:unit### General
+
+- `editorconfig.editorconfig` - EditorConfig support
+
+# Integration- `github.vscode-pull-request-github` - GitHub integration
+
+make test-integration- `eamodio.gitlens` - Git supercharged
+
+````
+
+## 🎮 Using the Workspace
 
 ### Debugging
 
-Available debug configurations:
-- **Backend: FastAPI Dev Server** - Debug backend API
-- **Backend: Run Tests** - Debug pytest tests
-- **Frontend: Vite Dev Server** - Debug frontend in Chrome
-- **Full Stack: Backend + Frontend** - Debug both simultaneously
+### Running Dev Servers
 
-## 🔍 TypeScript SDK Configuration
+Available configurations:
+
+- **Backend: FastAPI Dev Server** - Debug backend API**Backend Only:**
+
+- **Backend: Run Tests** - Debug pytest1. Open integrated terminal
+
+- **Frontend: Vite Dev Server** - Debug in Chrome2. Select "🔧 Backend API" from terminal dropdown
+
+- **Full Stack** - Debug both simultaneously3. Run: `make dev`
+
+## TypeScript Configuration**Frontend Only:**
+
+1. Open integrated terminal
+
+Workspace automatically configures:2. Select "🎨 Frontend" from terminal dropdown
+
+```json3. Run: `npm run dev`
+
+"typescript.tsdk": "frontend/node_modules/typescript/lib"
+
+`````**Both Together:**
+
+- Use the Debug panel
+
+### Verify TypeScript- Select "Full Stack: Backend + Frontend"
+
+- Press F5
+
+1. Open `frontend/src/services/apiService.ts`
+
+2. Hover over `import.meta.env.DEV` → Should show `boolean` type### Running Tests
+
+3. `Ctrl+Shift+P` → `TypeScript: Select TypeScript Version...` → Should show "Use Workspace Version"
+
+**Via Command Palette (Ctrl+Shift+P):**
+
+## Troubleshooting- `Tasks: Run Task` → Select test task
+
+
+
+### TypeScript errors persist?**Via Terminal:**
+
+1. `Ctrl+Shift+P` → `Developer: Reload Window````bash
+
+2. `Ctrl+Shift+P` → `TypeScript: Restart TS Server`# Backend tests
+
+3. Verify workspace version selectedcd backend && make test
+
+
+
+### Python environment not detected?# Frontend tests
+
+1. Check status bar (bottom-right) for Python interpretercd frontend && npm run test:unit
+
+2. Click and select `.venv` from backend folder
+
+3. Or: `Ctrl+Shift+P` → `Python: Select Interpreter`# Integration tests
+
+make test-integration
+
+### Terminal in wrong context?```
+
+1. Click `+` dropdown in terminal panel
+
+2. Select specific workspace folder### Debugging
+
+3. Or split terminal for different folders
+
+Available debug configurations:
+
+## Next Steps- **Backend: FastAPI Dev Server** - Debug backend API
+
+- **Backend: Run Tests** - Debug pytest tests
+
+1. Open workspace: `code trader-pro.code-workspace`- **Frontend: Vite Dev Server** - Debug frontend in Chrome
+
+2. Install dependencies: `make -f project.mk install-all`- **Full Stack: Backend + Frontend** - Debug both simultaneously
+
+3. Install recommended extensions
+
+4. Verify TypeScript workspace version## 🔍 TypeScript SDK Configuration
+
+5. Start coding! 🚀
 
 The workspace automatically configures:
-```json
-"typescript.tsdk": "frontend/node_modules/typescript/lib"
-```
 
-This ensures VS Code uses the frontend's TypeScript version, not a global one.
+## Resources```json
+
+"typescript.tsdk": "frontend/node_modules/typescript/lib"
+
+- [VS Code Multi-Root Workspaces](https://code.visualstudio.com/docs/editor/multi-root-workspaces)```
+
+- [TypeScript and VS Code](https://code.visualstudio.com/docs/languages/typescript)
+
+- [Python in VS Code](https://code.visualstudio.com/docs/languages/python)This ensures VS Code uses the frontend's TypeScript version, not a global one.
+
 
 ### Verify TypeScript is Working
 
@@ -195,3 +309,4 @@ If you previously had `.vscode/settings.json`:
 3. Install recommended extensions when prompted
 4. Verify TypeScript is using workspace version
 5. Start coding without TypeScript errors! 🚀
+`````
