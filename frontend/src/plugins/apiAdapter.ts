@@ -379,28 +379,75 @@ export class ApiAdapter {
     }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async closePosition(_positionId: string, _amount?: number): ApiPromise<void> {
-    throw new ApiError('closePosition not implemented in backend API', 501, '/positions/close')
+  @ApiErrorHandler((...args) => `/positions/${args[0]}`)
+  async closePosition(positionId: string, amount?: number): ApiPromise<void> {
+    const response = await this.rawApi.closePosition(positionId, amount)
+    return {
+      status: response.status,
+      data: undefined as void,
+    }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async editPositionBrackets(_positionId: string, _brackets: Brackets, _customFields?: CustomInputFieldsValues): ApiPromise<void> {
-    throw new ApiError('editPositionBrackets not implemented in backend API', 501, '/positions/brackets')
+  @ApiErrorHandler((...args) => `/positions/${args[0]}/brackets`)
+  async editPositionBrackets(positionId: string, brackets: Brackets, customFields?: CustomInputFieldsValues): ApiPromise<void> {
+    const response = await this.rawApi.editPositionBrackets(
+      {
+        brackets: {
+          stopLoss: brackets.stopLoss ?? null,
+          takeProfit: brackets.takeProfit ?? null,
+          guaranteedStop: brackets.guaranteedStop ?? null,
+          trailingStopPips: brackets.trailingStopPips ?? null,
+        },
+        customFields: customFields ?? null,
+      },
+      positionId
+    )
+    return {
+      status: response.status,
+      data: undefined as void,
+    }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async leverageInfo(_leverageInfoParams: LeverageInfoParams): ApiPromise<LeverageInfo> {
-    throw new ApiError('leverageInfo not implemented in backend API', 501, '/leverage/info')
+  @ApiErrorHandler("/leverage/info")
+  async leverageInfo(leverageInfoParams: LeverageInfoParams): ApiPromise<LeverageInfo> {
+    const response = await this.rawApi.leverageInfo(
+      leverageInfoParams.symbol,
+      leverageInfoParams.orderType as unknown as number,
+      leverageInfoParams.side as unknown as number
+    )
+    return {
+      status: response.status,
+      data: response.data as LeverageInfo,
+    }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async setLeverage(_leverageSetParams: LeverageSetParams): ApiPromise<LeverageSetResult> {
-    throw new ApiError('setLeverage not implemented in backend API', 501, '/leverage/set')
+  @ApiErrorHandler("/leverage/set")
+  async setLeverage(leverageSetParams: LeverageSetParams): ApiPromise<LeverageSetResult> {
+    const response = await this.rawApi.setLeverage({
+      symbol: leverageSetParams.symbol,
+      orderType: leverageSetParams.orderType as unknown as number,
+      side: leverageSetParams.side as unknown as number,
+      leverage: leverageSetParams.leverage,
+      customFields: leverageSetParams.customFields ?? null,
+    })
+    return {
+      status: response.status,
+      data: response.data as LeverageSetResult,
+    }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async previewLeverage(_leverageSetParams: LeverageSetParams): ApiPromise<LeveragePreviewResult> {
-    throw new ApiError('previewLeverage not implemented in backend API', 501, '/leverage/preview')
+  @ApiErrorHandler("/leverage/preview")
+  async previewLeverage(leverageSetParams: LeverageSetParams): ApiPromise<LeveragePreviewResult> {
+    const response = await this.rawApi.previewLeverage({
+      symbol: leverageSetParams.symbol,
+      orderType: leverageSetParams.orderType as unknown as number,
+      side: leverageSetParams.side as unknown as number,
+      leverage: leverageSetParams.leverage,
+      customFields: leverageSetParams.customFields ?? null,
+    })
+    return {
+      status: response.status,
+      data: response.data as LeveragePreviewResult,
+    }
   }
 }
