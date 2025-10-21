@@ -121611,7 +121611,7 @@
               e.image
                 ? ((this._customLogoSrc = e.image),
                   (this._customLogoLink = e.link),
-                  (this._needToShow = l.enabled('widget_logo')),
+                  (this._needToShow = false), // l.enabled('widget_logo') ==> disable tradingview logo on chart
                   l.enabled('link_to_tradingview') ? (this._layout = vi) : (this._layout = yi))
                 : (e.tradingviewLogoLinkToPath &&
                     (this._tradingviewLogoLinkToPath = e.tradingviewLogoLinkToPath.replace(
@@ -121619,7 +121619,7 @@
                       '',
                     )),
                   (this._layout = fi),
-                  (this._needToShow = l.enabled('widget_logo'))) // l.enabled('widget_logo') ==> disable tradingview logo on chart
+                  (this._needToShow = false)) // l.enabled('widget_logo') ==> disable tradingview logo on chart
             }
           }
         }
