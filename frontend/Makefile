@@ -71,6 +71,7 @@ help:
 	@echo "  lint            Run frontend linting and formatting checks"
 	@echo "  type-check      Run TypeScript type checking"
 	@echo "  test            Run frontend tests once"
+	@echo "  test-backend    Run frontend tests with backend API (not mock)"
 	@echo "  build           Build frontend for production"
 	@echo "  dev             Start frontend development server"
 	@echo "  clean           Clean build artifacts"
@@ -189,6 +190,12 @@ test:
 	@$(MAKE) generate-openapi-client
 	@$(MAKE) generate-asyncapi-types
 	$(call ensure-node-version,npm run test:run)
+
+test-backend:
+	@echo "Running frontend tests with backend API (not mock)..."
+	@$(MAKE) generate-openapi-client
+	@$(MAKE) generate-asyncapi-types
+	$(call ensure-node-version,VITE_USE_MOCK_BROKER=false npm run test:run)
 
 # Build
 build:

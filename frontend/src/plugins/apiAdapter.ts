@@ -22,6 +22,7 @@ import type {
   QuoteData,
   SearchSymbolResultItem,
 } from '@public/trading_terminal/charting_library';
+import { AxiosError } from 'axios';
 export interface HealthResponse {
   status: string
   message?: string
@@ -57,6 +58,18 @@ export interface GetQuotesRequest {
 
 export type ApiResponse<T> = { status: number; data: T }
 export type ApiPromise<T> = Promise<ApiResponse<T>>
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode?: number,
+    public readonly endpoint?: string,
+    public readonly originalError?: unknown,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
 
 // Type-safe mappers for API responses
 // Mappers can import backend types for type safety (not exposed outside this file)
@@ -119,25 +132,104 @@ const apiMappers = {
   },
 }
 
+/**
+ * Decorator for automatic API error handling
+ * Wraps async methods with try-catch and delegates errors to handleError method
+ *
+ * @param endpoint - Static endpoint string or function that computes endpoint from method arguments
+ *
+ * @example
+ * ```typescript
+ * @HandleApiError('/health')
+ * async getHealthStatus() { ... }
+ *
+ * @HandleApiError((args) => `/symbols/${args[0]}`)
+ * async resolveSymbol(symbol: string) { ... }
+ * ```
+ */
+function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
+  return function (
+    _target: unknown,
+    _propertyKey: string,
+    descriptor: PropertyDescriptor
+  ): PropertyDescriptor {
+    const originalMethod = descriptor.value as (...args: unknown[]) => Promise<unknown>
+
+    descriptor.value = async function (this: { handleError: (error: unknown, endpoint: string) => never }, ...args: unknown[]) {
+      try {
+        return await originalMethod.apply(this, args)
+      } catch (error) {
+        const endpointStr = typeof endpoint === 'function' ? endpoint(...args) : endpoint
+        if (error instanceof AxiosError) {
+          if (error.code === 'ERR_NETWORK' || error.message === 'Network Error') {
+            throw new ApiError(
+              `Network error: Unable to connect to the API server. Please ensure the backend is running and accessible.`,
+              undefined,
+              endpointStr,
+              error,
+            )
+          }
+
+          if (error.response) {
+            const status = error.response.status
+            const data = error.response.data as { detail?: string; message?: string }
+            const message = data?.detail || data?.message || error.message
+
+            throw new ApiError(
+              `API error (${status}): ${message}`,
+              status,
+              endpointStr,
+              error,
+            )
+          }
+
+          if (error.request) {
+            throw new ApiError(
+              `No response received from API server at ${endpointStr}: ${error.message}`,
+              undefined,
+              endpointStr,
+              error,
+            )
+          }
+        }
+
+        throw new ApiError(
+          `Unexpected error during API call to ${endpointStr}: ${error instanceof Error ? error.message : String(error)}`,
+          undefined,
+          endpointStr,
+          error,
+        )
+      }
+    }
+
+    return descriptor
+  }
+}
+
 export class ApiAdapter {
-  rawApi: V1Api
+  private rawApi: V1Api
+  private apiConfig: Configuration
   constructor() {
+    this.apiConfig = new Configuration({
+      basePath: import.meta.env.TRADER_API_BASE_PATH || '',
+    })
     this.rawApi = new V1Api(
-      new Configuration({
-        basePath: import.meta.env.TRADER_API_BASE_PATH || '',
-      }),
+      this.apiConfig
     )
   }
 
+  @ApiErrorHandler('/health')
   async getHealthStatus(): ApiPromise<HealthResponse> {
     const response = await this.rawApi.getHealthStatus()
     return response
   }
 
+  @ApiErrorHandler('/versions')
   async getAPIVersions(): ApiPromise<APIMetadata> {
-    return this.rawApi.getAPIVersions()
+    return await this.rawApi.getAPIVersions()
   }
 
+  @ApiErrorHandler('/config')
   async getConfig(): ApiPromise<DatafeedConfiguration> {
     const response = await this.rawApi.getConfig()
     return {
@@ -148,6 +240,7 @@ export class ApiAdapter {
       }
     }
   }
+  @ApiErrorHandler((...args) => `/symbols/${args[0]}`)
   async resolveSymbol(symbol: string): ApiPromise<LibrarySymbolInfo> {
     const response = await this.rawApi.resolveSymbol(symbol)
     return {
@@ -160,23 +253,26 @@ export class ApiAdapter {
       }
     }
   }
-  searchSymbols(
+  @ApiErrorHandler('/search')
+  async searchSymbols(
     userInput: string,
     exchange?: string,
     symbolType?: string,
     maxResults?: number,
   ): ApiPromise<Array<SearchSymbolResultItem>> {
-    return this.rawApi.searchSymbols(userInput, exchange, symbolType, maxResults)
+    return await this.rawApi.searchSymbols(userInput, exchange, symbolType, maxResults)
   }
-  getBars(
+  @ApiErrorHandler((...args) => `/history?symbol=${args[0]}&resolution=${args[1]}`)
+  async getBars(
     symbol: string,
     resolution: string,
     fromTime: number,
     toTime: number,
     countBack?: number | null,
   ): ApiPromise<GetBarsResponse> {
-    return this.rawApi.getBars(symbol, resolution, fromTime, toTime, countBack)
+    return await this.rawApi.getBars(symbol, resolution, fromTime, toTime, countBack)
   }
+  @ApiErrorHandler('/quotes')
   async getQuotes(getQuotesRequest: GetQuotesRequest): ApiPromise<Array<QuoteData>> {
     const response = await this.rawApi.getQuotes(getQuotesRequest)
 
@@ -185,6 +281,7 @@ export class ApiAdapter {
       data: response.data.map(apiMappers.mapQuoteData),
     }
   }
+  @ApiErrorHandler('/orders')
   async placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult> {
     const response = await this.rawApi.placeOrder(apiMappers.mapPreOrder(order))
 
@@ -194,6 +291,7 @@ export class ApiAdapter {
     }
   }
 
+  @ApiErrorHandler((...args) => `/orders/${(args[1] as string | undefined) ?? (args[0] as Order).id}`)
   async modifyOrder(order: Order, confirmId?: string): ApiPromise<void> {
     const orderId = confirmId ?? order.id
     const response = await this.rawApi.modifyOrder(apiMappers.mapPreOrder(order), orderId)
@@ -204,6 +302,7 @@ export class ApiAdapter {
     }
   }
 
+  @ApiErrorHandler((...args) => `/orders/${args[0]}`)
   async cancelOrder(orderId: string): ApiPromise<void> {
     const response = await this.rawApi.cancelOrder(orderId)
 
@@ -213,6 +312,7 @@ export class ApiAdapter {
     }
   }
 
+  @ApiErrorHandler('/orders')
   async getOrders(): ApiPromise<Order[]> {
     const response = await this.rawApi.getOrders()
 
@@ -226,6 +326,7 @@ export class ApiAdapter {
     }
   }
 
+  @ApiErrorHandler('/positions')
   async getPositions(): ApiPromise<Position[]> {
     const response = await this.rawApi.getPositions()
 
@@ -238,6 +339,7 @@ export class ApiAdapter {
     }
   }
 
+  @ApiErrorHandler((...args) => `/executions?symbol=${args[0]}`)
   async getExecutions(symbol: string): ApiPromise<Execution[]> {
     const response = await this.rawApi.getExecutions(symbol)
 
@@ -250,6 +352,7 @@ export class ApiAdapter {
     }
   }
 
+  @ApiErrorHandler('/accounts')
   async getAccountInfo(): ApiPromise<AccountMetainfo> {
     const response = await this.rawApi.getAccountInfo()
 

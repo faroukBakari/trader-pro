@@ -36,6 +36,23 @@ broker_service = BrokerService()
 
 
 @router.post(
+    "/debug/reset",
+    response_model=SuccessResponse,
+    summary="Reset broker service state (development only)",
+    operation_id="resetBrokerState",
+    include_in_schema=False,  # Hide from production docs
+)
+async def resetBrokerState() -> SuccessResponse:
+    """
+    Reset the broker service state. This clears all orders, positions, and executions.
+    Only available in development mode for testing purposes.
+    """
+    global broker_service
+    broker_service = BrokerService()
+    return SuccessResponse(message="Broker service state reset successfully")
+
+
+@router.post(
     "/orders",
     response_model=PlaceOrderResult,
     summary="Place a new order",

@@ -16,6 +16,9 @@ export default mergeConfig(
         'src/clients/*-generated/**',
       ],
       root: fileURLToPath(new URL('./', import.meta.url)),
+      env: {
+        TRADER_API_BASE_PATH: 'http://localhost:8000',
+      },
     },
   }),
 )
