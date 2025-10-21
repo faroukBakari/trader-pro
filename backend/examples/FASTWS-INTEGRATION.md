@@ -2,6 +2,8 @@
 
 This document provides practical examples of integrating FastWS WebSocket framework into the Trading API.
 
+> ⚠️ **CRITICAL**: Before implementing WebSocket routers, you **MUST** follow the router code generation mechanism documented in [`../src/trading_api/ws/WS-ROUTER-GENERATION.md`](../src/trading_api/ws/WS-ROUTER-GENERATION.md). The examples below show patterns and usage, but **actual router creation should always use code generation** to ensure type safety and consistency.
+
 ## Table of Contents
 
 1. [Basic Setup](#basic-setup)
@@ -115,19 +117,22 @@ async def handle_ping(
 ```
 
 **Client Usage**:
+
 ```javascript
 // Send ping
-ws.send(JSON.stringify({
-    type: 'simple.ping',
-    payload: { timestamp: Date.now() }
-}));
+ws.send(
+  JSON.stringify({
+    type: "simple.ping",
+    payload: { timestamp: Date.now() },
+  })
+);
 
 // Receive pong
 ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    if (msg.type === 'simple.pong') {
-        console.log('RTT:', Date.now() - msg.payload.timestamp);
-    }
+  const msg = JSON.parse(event.data);
+  if (msg.type === "simple.pong") {
+    console.log("RTT:", Date.now() - msg.payload.timestamp);
+  }
 };
 ```
 
@@ -154,6 +159,7 @@ async def broadcast_alert(payload: AlertPayload) -> AlertPayload:
 ```
 
 **Server Broadcasting**:
+
 ```python
 # Somewhere in your backend code
 from trading_api.main import wsApp
@@ -326,12 +332,15 @@ async def strict_operation(payload: StrictPayload) -> dict:
 ```
 
 **Invalid Request**:
+
 ```javascript
 // ❌ This will fail - wrong types
-ws.send(JSON.stringify({
-    type: 'strict',
-    payload: { value: "not_an_int", name: 123 }
-}));
+ws.send(
+  JSON.stringify({
+    type: "strict",
+    payload: { value: "not_an_int", name: 123 },
+  })
+);
 
 // Result: WebSocket closed with code 1003
 // Reason: "Could not validate payload"
@@ -741,6 +750,7 @@ async def operation(payload: Request) -> Response:
 ---
 
 **See Also**:
+
 - `docs/websockets.md` - Complete WebSocket API documentation
 - `external_packages/fastws/README.md` - FastWS framework documentation
 - `tests/test_ws_datafeed.py` - Working test examples

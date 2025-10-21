@@ -4,6 +4,8 @@
 **Last Updated**: October 12, 2025
 **Status**: ✅ Production Ready
 
+> ⚠️ **CRITICAL**: When implementing new WebSocket features or routers, you **MUST** follow the router code generation mechanism documented in [`backend/src/trading_api/ws/WS-ROUTER-GENERATION.md`](../src/trading_api/ws/WS-ROUTER-GENERATION.md). This ensures type safety, eliminates generic overhead, and maintains consistency across all WebSocket operations. **Never create WebSocket routers manually**.
+
 ## Overview
 
 The Trading API provides real-time market data streaming via WebSocket connections using the FastWS framework. This enables bidirectional communication for subscribing to live market data updates with minimal latency.
@@ -563,6 +565,24 @@ FastWS is an open-source WebSocket framework built on top of FastAPI, similar to
 
 **Source**: https://github.com/endrekrohn/fastws
 
+### Router Code Generation
+
+⚠️ **CRITICAL**: All WebSocket routers in this project are generated from a generic template using code generation. This approach provides:
+
+- ✅ Better IDE support and autocomplete
+- ✅ Eliminates generic type parameters at runtime
+- ✅ Full type inference without `Generic[T, U]`
+- ✅ Automatic quality checks (Black, isort, Ruff, mypy)
+- ✅ Single source of truth (`ws/generic.py`)
+
+**To add a new WebSocket router**:
+
+1. Update `ROUTER_SPECS` in `scripts/generate_ws_router.py`
+2. Run `make generate-ws-routers`
+3. Use generated router from `ws/generated/`
+
+**Complete documentation**: See [`backend/src/trading_api/ws/WS-ROUTER-GENERATION.md`](../src/trading_api/ws/WS-ROUTER-GENERATION.md) for the full guide.
+
 ### Project Structure
 
 ```
@@ -572,9 +592,14 @@ backend/src/trading_api/
 │   └── fastws_adapter.py          # FastWSAdapter with publish() helper
 └── ws/
     ├── __init__.py                # Module exports
-    ├── common.py                  # Shared models (SubscriptionRequest/Response)
-    └── datafeed.py                # Bar operations (subscribe/unsubscribe/update)
+    ├── generic.py                 # Generic template (source of truth) ⚠️
+    ├── datafeed.py                # Usage with TYPE_CHECKING guard
+    └── generated/                 # Auto-generated routers ⚠️
+        ├── __init__.py            # Generated exports
+        └── barwsrouter.py         # Generated BarWsRouter class
 ```
+
+⚠️ **Router Generation**: The `generated/` directory contains auto-generated concrete router classes from the `generic.py` template. See [`WS-ROUTER-GENERATION.md`](../src/trading_api/ws/WS-ROUTER-GENERATION.md) for details.
 
 ### Key Components
 
@@ -618,11 +643,15 @@ async def update(payload: Bar) -> Bar:
 #### Integration (main.py)
 
 ```python
+# Import consolidated routers from ws module
+from .ws import ws_routers
+
 # Create WebSocket app
 wsApp = FastWSAdapter(...)
 
-# Include routers
-wsApp.include_router(ws_datafeed_router)
+# Include all WebSocket routers
+for ws_router in ws_routers:
+    wsApp.include_router(ws_router)
 
 # Register AsyncAPI docs
 wsApp.setup(apiApp)
@@ -634,6 +663,8 @@ async def websocket_endpoint(
 ):
     await wsApp.serve(client)
 ```
+
+**Note**: The `ws` module's `__init__.py` consolidates all routers from topical files (datafeed, trading, account, etc.) into a single `ws_routers` list. See [`WS-ROUTER-GENERATION.md`](../src/trading_api/ws/WS-ROUTER-GENERATION.md) for details.
 
 ## Performance Considerations
 
@@ -970,7 +1001,7 @@ For production environments, consider:
 - **Interactive Docs**: http://localhost:8000/api/v1/ws/asyncapi
 - **Architecture**: See `ARCHITECTURE.md` (Real-Time Architecture section)
 - **Backend README**: `backend/README.md`
-- **Router Generation**: `backend/docs/ws-router-generation.md` (backend code generation)
+- **Router Generation**: `backend/src/trading_api/ws/WS-ROUTER-GENERATION.md` (backend code generation)
 - **Frontend Client Generation**: `frontend/WS-CLIENT-AUTO-GENERATION.md` (frontend type-safe clients)
 - **Redis Broadcasting**: `backend/docs/bar-broadcasting.md` (future scalable approach)
 

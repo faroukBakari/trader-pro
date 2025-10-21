@@ -362,6 +362,8 @@ export function mapPreOrder(order: PreOrder): PreOrder_Backend {
 **Framework**: FastWS 0.1.7  
 **Documentation**: AsyncAPI at `/api/v1/ws/asyncapi`
 
+> ⚠️ **IMPORTANT**: All WebSocket routers are generated using code generation from a generic template. When implementing WebSocket features, always follow the router generation mechanism documented in [`backend/src/trading_api/ws/WS-ROUTER-GENERATION.md`](backend/src/trading_api/ws/WS-ROUTER-GENERATION.md). This ensures type safety, consistency, and passes all quality checks.
+
 ### Centralized Adapter Pattern
 
 All WebSocket operations go through `WsAdapter`:
@@ -551,7 +553,7 @@ make -f project.mk lint-all format-all
 ### Core Documentation
 
 - **ARCHITECTURE.md** - System architecture (this file)
-- **BACKEND-BROKER-METHODOLOGY.md** - TDD implementation guide
+- **BACKEND-API-METHODOLOGY.md** - TDD implementation guide
 - **docs/DEVELOPMENT.md** - Development workflows
 - **docs/TESTING.md** - Testing strategies
 - **docs/CLIENT-GENERATION.md** - API client generation
