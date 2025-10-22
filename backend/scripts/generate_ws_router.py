@@ -26,12 +26,18 @@ def parse_router_specs(ws_dir: Path) -> list[RouterSpec]:
 
     Looks for patterns like:
         BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
+        BrokerConnectionWsRouter: TypeAlias = WsRouter[
+            BrokerConnectionSubscriptionRequest, BrokerConnectionStatus
+        ]
 
     Returns a list of RouterSpec instances.
     """
     router_specs = []
+    # Pattern matches both single-line and multi-line TypeAlias declarations
+    # re.DOTALL makes . match newlines, allowing matching across multiple lines
     pattern = re.compile(
-        r"^\s*(\w+):\s*TypeAlias\s*=\s*WsRouter\[(\w+),\s*(\w+)\]", re.MULTILINE
+        r"^\s*(\w+):\s*TypeAlias\s*=\s*WsRouter\[\s*(\w+)\s*,\s*(\w+)\s*\]",
+        re.MULTILINE | re.DOTALL,
     )
 
     # Find all .py files except generic.py and files in generated/

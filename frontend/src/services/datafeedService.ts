@@ -34,128 +34,141 @@ import type {
 // - https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/additional-methods
 
 
-function generateLast400DaysBars(): Bar[] {
-  const bars: Bar[] = []
-  const today = new Date()
-  today.setUTCHours(0, 0, 0, 0) // Set to midnight UTC
-  let currentPrice = 100 // Starting price
 
-  // Generate bars for the last 400 days
-  for (let i = 400; i >= 0; i--) {
-    const date = new Date(today)
-    date.setTime(date.getTime() - i * 24 * 60 * 60 * 1000) // Subtract i days
+export class DatafeedMock {
+  private mockedBars: Bar[]
 
-    const timestamp = Math.floor(date.getTime() / 1000) // Convert to seconds
+  constructor() {
+    this.mockedBars = this.generateLast400DaysBars()
+  }
 
-    // Use date as seed for deterministic random generation
-    const seed = timestamp
-    const seededRandom = (offset: number) => {
-      const x = Math.sin(seed + offset) * 10000
-      return x - Math.floor(x)
+  protected generateLast400DaysBars(): Bar[] {
+    const bars: Bar[] = []
+    const today = new Date()
+    today.setUTCHours(0, 0, 0, 0) // Set to midnight UTC
+    let currentPrice = 100 // Starting price
+
+    // Generate bars for the last 400 days
+    for (let i = 400; i >= 0; i--) {
+      const date = new Date(today)
+      date.setTime(date.getTime() - i * 24 * 60 * 60 * 1000) // Subtract i days
+
+      const timestamp = Math.floor(date.getTime() / 1000) // Convert to seconds
+
+      // Use date as seed for deterministic random generation
+      const seed = timestamp
+      const seededRandom = (offset: number) => {
+        const x = Math.sin(seed + offset) * 10000
+        return x - Math.floor(x)
+      }
+
+      // Generate realistic OHLC data
+      const volatility = 2
+      const open = currentPrice
+      const change = (seededRandom(1) - 0.5) * volatility
+      const close = open + change
+      const high = Math.max(open, close) + seededRandom(2) * volatility
+      const low = Math.min(open, close) - seededRandom(3) * volatility
+      const volume = Math.floor(seededRandom(4) * 1000000) + 500000
+
+      const bar: Bar = {
+        time: timestamp * 1000, // Convert to milliseconds
+        open: parseFloat(open.toFixed(2)),
+        high: parseFloat(high.toFixed(2)),
+        low: parseFloat(low.toFixed(2)),
+        close: parseFloat(close.toFixed(2)),
+        volume,
+      }
+
+      bars.push(bar)
+
+      // Update price for next bar (trend simulation)
+      currentPrice = close + (seededRandom(5) - 0.48) * 0.5
     }
 
-    // Generate realistic OHLC data
-    const volatility = 2
-    const open = currentPrice
-    const change = (seededRandom(1) - 0.5) * volatility
-    const close = open + change
-    const high = Math.max(open, close) + seededRandom(2) * volatility
-    const low = Math.min(open, close) - seededRandom(3) * volatility
-    const volume = Math.floor(seededRandom(4) * 1000000) + 500000
+    return bars
+  }
 
-    const bar: Bar = {
-      time: timestamp * 1000, // Convert to milliseconds
-      open: parseFloat(open.toFixed(2)),
-      high: parseFloat(high.toFixed(2)),
-      low: parseFloat(low.toFixed(2)),
-      close: parseFloat(close.toFixed(2)),
-      volume,
+  getMockedBars(): Bar[] {
+    // Return deep copy to prevent mutations
+    return this.mockedBars.map((bar) => ({ ...bar }))
+  }
+
+  barsMocker(): Bar {
+    const lastBar = this.mockedBars[this.mockedBars.length - 1]
+    const range = lastBar.high - lastBar.low
+    const randomFactor = Math.random() // 0 to 1
+    const newClose = lastBar.low + range * randomFactor
+
+    // Ensure the new close doesn't exceed the original high/low bounds
+    const adjustedClose = Math.max(lastBar.low, Math.min(lastBar.high, newClose))
+
+    // Update high/low if the new close exceeds them
+    const newHigh = Math.max(lastBar.high, adjustedClose)
+    const newLow = Math.min(lastBar.low, adjustedClose)
+
+    return {
+      time: lastBar.time, // Same time to update existing bar
+      open: lastBar.open, // Keep original open
+      high: parseFloat(newHigh.toFixed(2)),
+      low: parseFloat(newLow.toFixed(2)),
+      close: parseFloat(adjustedClose.toFixed(2)),
+      volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000), // Add some volume
+    }
+  }
+
+  quotesMocker(): QuoteData {
+    const lastBar = this.mockedBars[this.mockedBars.length - 1]
+
+    let currentPrice = lastBar.close
+
+    // Simulate price fluctuation within the bar's range with some momentum
+    const range = lastBar.high - lastBar.low
+    const volatility = range * 0.002 // 0.2% of range
+    const momentum = (Math.random() - 0.5) * volatility
+    const newPrice = currentPrice + momentum
+
+    // Keep price roughly within bar's range but allow some deviation
+    const minPrice = lastBar.low * 0.995
+    const maxPrice = lastBar.high * 1.005
+    currentPrice = Math.max(minPrice, Math.min(maxPrice, newPrice))
+
+    // Calculate bid/ask spread (0.1% of price)
+    const spreadValue = currentPrice * 0.001
+    const bid = currentPrice - spreadValue / 2
+    const ask = currentPrice + spreadValue / 2
+
+    // Calculate daily statistics
+    const change = currentPrice - lastBar.open
+    const changePercent = lastBar.open > 0 ? (change / lastBar.open) * 100 : 0
+
+    // Track intraday high/low
+    const currentHigh = Math.max(lastBar.high, currentPrice)
+    const currentLow = Math.min(lastBar.low, currentPrice)
+
+    const quoteValues: DatafeedQuoteValues = {
+      lp: parseFloat(currentPrice.toFixed(2)),
+      ask: parseFloat(ask.toFixed(2)),
+      bid: parseFloat(bid.toFixed(2)),
+      spread: parseFloat(spreadValue.toFixed(2)),
+      open_price: parseFloat(lastBar.open.toFixed(2)),
+      high_price: parseFloat(currentHigh.toFixed(2)),
+      low_price: parseFloat(currentLow.toFixed(2)),
+      prev_close_price: parseFloat((lastBar.open * 0.995).toFixed(2)),
+      volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000),
+      ch: parseFloat(change.toFixed(2)),
+      chp: parseFloat(changePercent.toFixed(2)),
+      short_name: 'DEMO:SYMBOL',
+      exchange: 'DEMO',
+      description: `Demo quotes for DEMO:SYMBOL`,
+      original_name: 'DEMO:SYMBOL',
     }
 
-    bars.push(bar)
-
-    // Update price for next bar (trend simulation)
-    currentPrice = close + (seededRandom(5) - 0.48) * 0.5
-  }
-
-  return bars
-}
-const mockedBars: Bar[] = generateLast400DaysBars()
-
-function mockLastBar(): Bar {
-  const lastBar = mockedBars[mockedBars.length - 1]
-  const range = lastBar.high - lastBar.low
-  const randomFactor = Math.random() // 0 to 1
-  const newClose = lastBar.low + range * randomFactor
-
-  // Ensure the new close doesn't exceed the original high/low bounds
-  const adjustedClose = Math.max(lastBar.low, Math.min(lastBar.high, newClose))
-
-  // Update high/low if the new close exceeds them
-  const newHigh = Math.max(lastBar.high, adjustedClose)
-  const newLow = Math.min(lastBar.low, adjustedClose)
-
-  return {
-    time: lastBar.time, // Same time to update existing bar
-    open: lastBar.open, // Keep original open
-    high: parseFloat(newHigh.toFixed(2)),
-    low: parseFloat(newLow.toFixed(2)),
-    close: parseFloat(adjustedClose.toFixed(2)),
-    volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000), // Add some volume
-  }
-}
-
-function mockQuoteData(symbol: string): QuoteData {
-  const lastBar = mockedBars[mockedBars.length - 1]
-
-  let currentPrice = lastBar.close
-
-  // Simulate price fluctuation within the bar's range with some momentum
-  const range = lastBar.high - lastBar.low
-  const volatility = range * 0.002 // 0.2% of range
-  const momentum = (Math.random() - 0.5) * volatility
-  const newPrice = currentPrice + momentum
-
-  // Keep price roughly within bar's range but allow some deviation
-  const minPrice = lastBar.low * 0.995
-  const maxPrice = lastBar.high * 1.005
-  currentPrice = Math.max(minPrice, Math.min(maxPrice, newPrice))
-
-  // Calculate bid/ask spread (0.1% of price)
-  const spreadValue = currentPrice * 0.001
-  const bid = currentPrice - spreadValue / 2
-  const ask = currentPrice + spreadValue / 2
-
-  // Calculate daily statistics
-  const change = currentPrice - lastBar.open
-  const changePercent = lastBar.open > 0 ? (change / lastBar.open) * 100 : 0
-
-  // Track intraday high/low
-  const currentHigh = Math.max(lastBar.high, currentPrice)
-  const currentLow = Math.min(lastBar.low, currentPrice)
-
-  const quoteValues: DatafeedQuoteValues = {
-    lp: parseFloat(currentPrice.toFixed(2)),
-    ask: parseFloat(ask.toFixed(2)),
-    bid: parseFloat(bid.toFixed(2)),
-    spread: parseFloat(spreadValue.toFixed(2)),
-    open_price: parseFloat(lastBar.open.toFixed(2)),
-    high_price: parseFloat(currentHigh.toFixed(2)),
-    low_price: parseFloat(currentLow.toFixed(2)),
-    prev_close_price: parseFloat((lastBar.open * 0.995).toFixed(2)),
-    volume: (lastBar.volume || 0) + Math.floor(Math.random() * 10000),
-    ch: parseFloat(change.toFixed(2)),
-    chp: parseFloat(changePercent.toFixed(2)),
-    short_name: symbol,
-    exchange: 'DEMO',
-    description: `Demo quotes for ${symbol}`,
-    original_name: symbol,
-  }
-
-  return {
-    s: 'ok',
-    n: symbol,
-    v: quoteValues,
+    return {
+      s: 'ok',
+      n: 'DEMO:SYMBOL',
+      v: quoteValues,
+    }
   }
 }
 
@@ -180,7 +193,9 @@ interface ApiInterface {
 
 class ApiFallback implements ApiInterface {
   private readonly availableSymbols: LibrarySymbolInfo[]
-  constructor() {
+  private datafeedMocker: DatafeedMock
+
+  constructor(datafeedMocker: DatafeedMock) {
     this.availableSymbols = symbolsData.map((symbol) => ({
       ...symbol,
       supported_resolutions: symbol.supported_resolutions as ResolutionString[],
@@ -188,6 +203,7 @@ class ApiFallback implements ApiInterface {
       format: symbol.format as SeriesFormat,
       data_status: symbol.data_status as 'streaming' | 'endofday' | 'delayed_streaming',
     }))
+    this.datafeedMocker = datafeedMocker
   }
   async getConfig(): ApiPromise<DatafeedConfiguration> {
     const configuration: DatafeedConfiguration = {
@@ -223,13 +239,17 @@ class ApiFallback implements ApiInterface {
   async resolveSymbol(symbolName: string): ApiPromise<LibrarySymbolInfo> {
     console.log('[Datafeed] resolveSymbol called:', { symbolName })
 
+    // Handle EXCHANGE:SYMBOL format (e.g., "NASDAQ:AAPL" -> "AAPL")
+    const symbolParts = symbolName.split(':')
+    const actualSymbol = symbolParts.length > 1 ? symbolParts[1] : symbolName
+
     // Search for the symbol in our available symbols
     const symbolInfo = this.availableSymbols.find(
       (symbol) =>
-        symbol.name === symbolName ||
-        symbol.ticker === symbolName ||
-        symbol.name.toLowerCase() === symbolName.toLowerCase() ||
-        (symbol.ticker && symbol.ticker.toLowerCase() === symbolName.toLowerCase()),
+        symbol.name === actualSymbol ||
+        symbol.ticker === actualSymbol ||
+        symbol.name.toLowerCase() === actualSymbol.toLowerCase() ||
+        (symbol.ticker && symbol.ticker.toLowerCase() === actualSymbol.toLowerCase()),
     )
     return Promise.resolve({
       data: symbolInfo!,
@@ -309,15 +329,20 @@ class ApiFallback implements ApiInterface {
     }
 
     // Filter bars within the requested time range [from, to]
-    const filteredBars = mockedBars.filter((bar) => bar.time >= from && bar.time <= to)
+    const filteredBars = this.datafeedMocker.getMockedBars().filter((bar) => bar.time >= from && bar.time <= to)
 
     console.log(`[Datafeed] Found ${filteredBars.length} bars in time range, need ${countBack}`)
 
+    // Sort bars in chronological order
     filteredBars.sort((a, b) => a.time - b.time)
+
+    // Limit to countBack if provided
+    const limitedBars = countBack && countBack > 0 ? filteredBars.slice(-countBack) : filteredBars
+
     return Promise.resolve({
       data: {
-        bars: filteredBars,
-        no_data: filteredBars.length === 0,
+        bars: limitedBars,
+        no_data: limitedBars.length === 0,
       },
       status: 200,
     }) as ApiPromise<GetBarsResponse>
@@ -325,8 +350,8 @@ class ApiFallback implements ApiInterface {
   async getQuotes(
     getQuotesRequest: GetQuotesRequest,
   ): ApiPromise<Array<QuoteData>> {
-    const quoteData: QuoteData[] = getQuotesRequest.symbols.map(mockQuoteData)
 
+    const quoteData: QuoteData[] = getQuotesRequest.symbols.map(() => this.datafeedMocker.quotesMocker())
     console.debug(`[Datafeed] Generated quotes for ${quoteData.length} symbols`)
     return Promise.resolve({
       data: quoteData,
@@ -337,29 +362,26 @@ class ApiFallback implements ApiInterface {
 
 export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private apiAdapter: ApiInterface
-  private apiFallback: ApiInterface
+  private apiFallback?: ApiInterface
 
   private wsAdapter: WsAdapterType
-  private wsFallback: Partial<WsAdapterType>
+  private wsFallback?: Partial<WsAdapterType>
 
-  private mock: boolean
-
-  constructor({ mock = false }: { mock?: boolean } = {}) {
+  constructor(datafeedMocker?: DatafeedMock) {
     this.apiAdapter = new ApiAdapter()
-    this.apiFallback = new ApiFallback()
     this.wsAdapter = new WsAdapter()
-    this.wsFallback = new WsFallback({
-      barsMocker: () => mockLastBar(),
-      quotesMocker: () => mockQuoteData('DEMO:SYMBOL'),
-    })
-    this.mock = mock
+
+    if (datafeedMocker) {
+      this.apiFallback = new ApiFallback(datafeedMocker)
+      this.wsFallback = new WsFallback(datafeedMocker)
+    }
   }
 
-  _getWsAdapter(mock: boolean = this.mock): WsAdapterType | Partial<WsAdapterType> {
-    return mock ? this.wsFallback : this.wsAdapter
+  _getWsAdapter(): WsAdapterType | Partial<WsAdapterType> {
+    return this.wsFallback ?? this.wsAdapter
   }
-  _getApiAdapter(mock: boolean = this.mock): ApiInterface {
-    return mock ? this.apiFallback : this.apiAdapter
+  _getApiAdapter(): ApiInterface {
+    return this.apiFallback ?? this.apiAdapter
   }
   onReady(callback: OnReadyCallback): void {
     console.log('[Datafeed] onReady called')
