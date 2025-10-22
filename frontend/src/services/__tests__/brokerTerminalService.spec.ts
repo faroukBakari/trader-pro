@@ -94,8 +94,6 @@ describe('BrokerTerminalService', () => {
   })
 
   afterEach(() => {
-    // Clean up WebSocket fallback timers before resetting mock
-    brokerService.destroy()
     // Clean up any remaining state
     testBrokerMock.reset()
   })

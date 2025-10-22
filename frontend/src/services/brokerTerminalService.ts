@@ -1,12 +1,3 @@
-/**
- * Broker Terminal Service for TradingView Trading Platform
- *
- * This service acts as an adapter between TradingView's broker interface
- * and our broker client implementations (fallback mock or real backend).
- * It delegates broker operations to the injected client while managing
- * TradingView-specific concerns like host notifications and UI configuration.
- */
-
 import type {
   AccountId,
   AccountManagerInfo,
@@ -42,18 +33,7 @@ import { WsAdapter, WsFallback, type BrokerConnectionStatus, type EquityData, ty
 import { ConnectionStatus, NotificationType, OrderStatus, Side, StandardFormatterName } from '@public/trading_terminal'
 import { DatafeedService } from './datafeedService.js'
 
-// ============================================================================
-// BROKER CLIENT INTERFACE
-// ============================================================================
 
-/**
- * Broker client interface
- * Contract that all broker clients (fallback, real backend) must implement
- *
- * This interface defines the core broker operations that both the mock fallback client
- * and the real backend client must support. It ensures type-safe communication and
- * allows for seamless switching between mock and real implementations.
- */
 export interface ApiInterface {
   // Order operations
   previewOrder(order: PreOrder): ApiPromise<OrderPreviewResult>
@@ -603,7 +583,6 @@ class ApiFallback implements ApiInterface {
   }
 }
 
-
 export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly _hostAdapter: IBrokerConnectionAdapterHost
 
@@ -625,20 +604,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly equity: IWatchedValue<number>
   private readonly startingBalance = 100000
 
-  /**
-   * Cleanup method to destroy WebSocket fallback timers
-   * Call this in tests' afterEach to prevent timers from accessing destroyed objects
-   */
-  destroy(): void {
-    if (this._wsFallback) {
-      this._wsFallback.orders?.destroy?.()
-      this._wsFallback.positions?.destroy?.()
-      this._wsFallback.executions?.destroy?.()
-      this._wsFallback.equity?.destroy?.()
-      this._wsFallback.brokerConnection?.destroy?.()
-    }
-  }
-
   constructor(
     host: IBrokerConnectionAdapterHost,
     quotesProvider: IDatafeedQuotesApi,
@@ -653,13 +618,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     this.apiFallback = new ApiFallback(brokerMock)
     this._wsAdapter = new WsAdapter()
     // Bind mocker methods to preserve 'this' context
-    this._wsFallback = new WsFallback(brokerMock ? {
-      ordersMocker: brokerMock.ordersMocker.bind(brokerMock),
-      positionsMocker: brokerMock.positionsMocker.bind(brokerMock),
-      executionsMocker: brokerMock.executionsMocker.bind(brokerMock),
-      equityMocker: brokerMock.equityMocker.bind(brokerMock),
-      brokerConnectionMocker: brokerMock.brokerConnectionMocker.bind(brokerMock),
-    } : {})
+    this._wsFallback = new WsFallback(brokerMock ?? {})
 
     // Create reactive values
     this.balance = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
