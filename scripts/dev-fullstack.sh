@@ -203,7 +203,8 @@ print_step "   🔧 Generating WebSocket routers..."
 if make -f project.mk generate-ws-routers >/dev/null 2>&1; then
     print_success "   WebSocket routers generated"
 else
-    print_warning "   WebSocket router generation failed, continuing..."
+    print_error "   WebSocket router generation failed!"
+    exit 1
 fi
 
 # Step 2: Start backend server in background

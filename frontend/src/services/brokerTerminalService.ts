@@ -31,7 +31,6 @@ import type {
 import { ApiAdapter, type ApiPromise } from '@/plugins/apiAdapter'
 import { WsAdapter, WsFallback, type BrokerConnectionStatus, type EquityData, type WsAdapterType } from '@/plugins/wsAdapter'
 import { ConnectionStatus, NotificationType, OrderStatus, Side, StandardFormatterName } from '@public/trading_terminal'
-import { DatafeedService } from './datafeedService.js'
 
 
 export interface ApiInterface {
@@ -75,6 +74,11 @@ export class BrokerMock {
     unrealizedPL: this._unrealizedPL,
     realizedPL: this._realizedPL,
   }]
+  protected connectionStatusUpdates: BrokerConnectionStatus[] = [{
+    status: ConnectionStatus.Connected,
+    message: 'Mock broker connected',
+    timestamp: Date.now(),
+  }]
 
   getAccountId(): AccountId {
     return this._accountId
@@ -82,19 +86,6 @@ export class BrokerMock {
 
   getAccountName(): string {
     return this._accountName
-  }
-
-  addOrder(order: Order): void {
-    this._orderById.set(order.id, { ...order })
-    this.orderUpdates.push({ ...order })
-  }
-
-  updateOrder(orderId: string, updates: Partial<Order>): void {
-    const order = this._orderById.get(orderId)
-    if (order) {
-      Object.assign(order, updates)
-      this.orderUpdates.push({ ...order })
-    }
   }
 
   getOrders(): Order[] {
@@ -115,14 +106,6 @@ export class BrokerMock {
     return position ? { ...position } : undefined
   }
 
-  addPositionBracketOrders(positionId: string, updates: Partial<Position>): void {
-    const position = this._positions.get(positionId)
-    if (position) {
-      Object.assign(position, updates)
-      this.positionUpdates.push({ ...position })
-    }
-  }
-
   getExecutions(): Execution[] {
     return this._executions.map(exec => ({ ...exec }))
   }
@@ -133,10 +116,25 @@ export class BrokerMock {
       .map(exec => ({ ...exec }))
   }
 
-  reset(): void {
-    this._orderById.clear()
-    this._positions.clear()
-    this._executions.length = 0
+  addOrder(order: Order): void {
+    this._orderById.set(order.id, { ...order })
+    this.orderUpdates.push({ ...order })
+  }
+
+  updateOrder(orderId: string, updates: Partial<Order>): void {
+    const order = this._orderById.get(orderId)
+    if (order) {
+      Object.assign(order, updates)
+      this.orderUpdates.push({ ...order })
+    }
+  }
+
+  addPositionBracketOrders(positionId: string, updates: Partial<Position>): void {
+    const position = this._positions.get(positionId)
+    if (position) {
+      Object.assign(position, updates)
+      this.positionUpdates.push({ ...position })
+    }
   }
 
   ordersMocker(): Order | undefined {
@@ -248,20 +246,30 @@ export class BrokerMock {
   }
 
   equityMocker(): EquityData | undefined {
-    return {
-      equity: this._equity,
-      balance: this._balance,
-      unrealizedPL: this._unrealizedPL,
-      realizedPL: this._realizedPL,
-    }
+    return this.equityUpdates.shift()
   }
 
   brokerConnectionMocker(): BrokerConnectionStatus | undefined {
-    return {
+    return this.connectionStatusUpdates.shift()
+  }
+
+  reset(): void {
+    this._orderById.clear()
+    this._positions.clear()
+    this._executions.length = 0
+    this.orderUpdates.length = 0
+    this.executionUpdates.length = 0
+    this.positionUpdates.length = 0
+    this.equityUpdates.length = 0
+    this._equity = 105000
+    this._balance = 100000
+    this._unrealizedPL = 5000
+    this._realizedPL = 0
+    this.connectionStatusUpdates.push({
       status: ConnectionStatus.Connected,
       message: 'Mock broker connected',
       timestamp: Date.now(),
-    }
+    })
   }
 }
 
@@ -587,71 +595,59 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly _hostAdapter: IBrokerConnectionAdapterHost
 
   private readonly _quotesProvider: IDatafeedQuotesApi
-  private readonly _quotesFallback: IDatafeedQuotesApi
 
   // Client adapters
-  private readonly apiFallback: ApiInterface
+  private readonly _apiFallback?: ApiInterface
   private readonly apiAdapter: ApiInterface
   private readonly _wsAdapter: WsAdapter
-  private readonly _wsFallback: Partial<WsAdapterType>
-  private readonly _brokerMock?: BrokerMock
-
-  // Mock flag
-  private readonly mock: boolean
+  private readonly _wsFallback?: Partial<WsAdapterType>
 
   // UI state (managed by service, not client)
   private readonly balance: IWatchedValue<number>
   private readonly equity: IWatchedValue<number>
   private readonly startingBalance = 100000
 
+  private readonly listenerId: string
+
   constructor(
     host: IBrokerConnectionAdapterHost,
     quotesProvider: IDatafeedQuotesApi,
-    brokerMock?: BrokerMock
+    brokerMock?: BrokerMock,
   ) {
-    this.mock = !!brokerMock
-    this._brokerMock = brokerMock
     this._hostAdapter = host
     this._quotesProvider = quotesProvider
-    this._quotesFallback = new DatafeedService({ mock: true })
     this.apiAdapter = new ApiAdapter()
-    this.apiFallback = new ApiFallback(brokerMock)
     this._wsAdapter = new WsAdapter()
-    // Bind mocker methods to preserve 'this' context
-    this._wsFallback = new WsFallback(brokerMock ?? {})
 
-    // Create reactive values
+    if (brokerMock) {
+      this._apiFallback = new ApiFallback(brokerMock)
+      this._wsFallback = new WsFallback(brokerMock)
+    }
+
     this.balance = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
     this.equity = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
 
-    // Setup WebSocket handlers
+    this.listenerId = `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
     this.setupWebSocketHandlers()
   }
 
-  private _getApiAdapter(mock: boolean = this.mock): ApiInterface {
-    return mock ? this.apiFallback : this.apiAdapter
+  private _getApiAdapter(): ApiInterface {
+    return this._apiFallback ?? this.apiAdapter
   }
 
-  private _getQuotesProvider(mock: boolean = this.mock): IDatafeedQuotesApi {
-    return mock ? this._quotesFallback : this._quotesProvider
-  }
-
-  private _getWsAdapter(mock: boolean = this.mock): WsAdapterType | Partial<WsAdapterType> {
-    return mock ? this._wsFallback : this._wsAdapter
+  private _getWsAdapter(): WsAdapterType | Partial<WsAdapterType> {
+    return this._wsFallback ?? this._wsAdapter
   }
 
   /**
    * Setup WebSocket subscription handlers for broker events
    * Subscribes to orders, positions, executions, equity, and broker connection status
    */
-  private async setupWebSocketHandlers(): Promise<void> {
-    const response = await this._getApiAdapter().getAccountInfo()
-    const accountId = response.data.id
-
+  private setupWebSocketHandlers(): void {
     // Order updates
     this._getWsAdapter().orders?.subscribe(
       'broker-orders',
-      { accountId },
+      { accountId: this.listenerId },
       (order: Order) => {
         this._hostAdapter.orderUpdate(order)
 
@@ -669,7 +665,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     // Position updates
     this._getWsAdapter().positions?.subscribe(
       'broker-positions',
-      { accountId },
+      { accountId: this.listenerId },
       (position: Position) => {
         this._hostAdapter.positionUpdate(position)
       }
@@ -678,7 +674,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     // Execution updates
     this._getWsAdapter().executions?.subscribe(
       'broker-executions',
-      { accountId },
+      { accountId: this.listenerId },
       (execution: Execution) => {
         this._hostAdapter.executionUpdate(execution)
       }
@@ -687,7 +683,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     // Equity updates
     this._getWsAdapter().equity?.subscribe(
       'broker-equity',
-      { accountId },
+      { accountId: this.listenerId },
       (data: EquityData) => {
         this._hostAdapter.equityUpdate(data.equity)
 
@@ -704,7 +700,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     // Broker connection status (backend ↔ real broker)
     this._getWsAdapter().brokerConnection?.subscribe(
       'broker-connection-status',
-      { accountId },
+      { accountId: this.listenerId },
       (data: BrokerConnectionStatus) => {
         this._hostAdapter.connectionStatusUpdate(data.status, {
           message: data.message ?? undefined,

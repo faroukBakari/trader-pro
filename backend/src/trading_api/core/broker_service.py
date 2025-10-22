@@ -51,89 +51,7 @@ class BrokerService:
         # Store leverage settings per symbol
         self._leverage_settings: Dict[str, float] = {}
 
-    async def place_order(self, order: PreOrder) -> PlaceOrderResult:
-        """
-        Place a new order
-
-        Args:
-            order: Order request from client
-
-        Returns:
-            PlaceOrderResult: Result containing the generated order ID
-        """
-        order_id = f"ORDER-{self._order_counter}"
-        self._order_counter += 1
-
-        placed_order = PlacedOrder(
-            id=order_id,
-            symbol=order.symbol,
-            type=order.type,
-            side=order.side,
-            qty=order.qty,
-            status=OrderStatus.WORKING,
-            limitPrice=order.limitPrice,
-            stopPrice=order.stopPrice,
-            takeProfit=order.takeProfit,
-            stopLoss=order.stopLoss,
-            guaranteedStop=order.guaranteedStop,
-            trailingStopPips=order.trailingStopPips,
-            stopType=order.stopType,
-            filledQty=0.0,
-            avgPrice=None,
-            updateTime=int(time.time() * 1000),
-        )
-
-        self._orders[order_id] = placed_order
-
-        asyncio.create_task(self._simulate_execution(order_id))
-
-        return PlaceOrderResult(orderId=order_id)
-
-    async def modify_order(self, order_id: str, order: PreOrder) -> None:
-        """
-        Modify an existing order
-
-        Args:
-            order_id: ID of the order to modify
-            order: Updated order details
-        """
-        existing_order = self._orders.get(order_id)
-        if not existing_order:
-            raise ValueError(f"Order {order_id} not found")
-
-        if existing_order.status not in [OrderStatus.WORKING, OrderStatus.PLACING]:
-            raise ValueError(
-                f"Cannot modify order {order_id} with status {existing_order.status}"
-            )
-
-        existing_order.qty = order.qty
-        existing_order.limitPrice = order.limitPrice
-        existing_order.stopPrice = order.stopPrice
-        existing_order.takeProfit = order.takeProfit
-        existing_order.stopLoss = order.stopLoss
-        existing_order.guaranteedStop = order.guaranteedStop
-        existing_order.trailingStopPips = order.trailingStopPips
-        existing_order.stopType = order.stopType
-        existing_order.updateTime = int(time.time() * 1000)
-
-    async def cancel_order(self, order_id: str) -> None:
-        """
-        Cancel an order
-
-        Args:
-            order_id: ID of the order to cancel
-        """
-        order = self._orders.get(order_id)
-        if not order:
-            raise ValueError(f"Order {order_id} not found")
-
-        if order.status not in [OrderStatus.WORKING, OrderStatus.PLACING]:
-            raise ValueError(
-                f"Cannot cancel order {order_id} with status {order.status}"
-            )
-
-        order.status = OrderStatus.CANCELED
-        order.updateTime = int(time.time() * 1000)
+    # ================================ GETTERS =================================#
 
     async def get_orders(self) -> List[PlacedOrder]:
         """
@@ -318,6 +236,308 @@ class BrokerService:
             errors=errors if errors else None,
         )
 
+    async def preview_leverage(
+        self, params: LeverageSetParams
+    ) -> LeveragePreviewResult:
+        """
+        Preview leverage changes before applying
+
+        Args:
+            params: Leverage set parameters
+
+        Returns:
+            LeveragePreviewResult: Preview messages (infos, warnings, errors)
+        """
+        warnings: List[str] = []
+        errors: List[str] = []
+        infos: List[str] = []
+
+        # Validate range
+        if params.leverage < 1.0:
+            errors.append("Leverage must be at least 1.0")
+        elif params.leverage > 100.0:
+            errors.append("Leverage cannot exceed 100.0")
+        else:
+            # Calculate margin requirement
+            margin_percent = 100.0 / params.leverage
+            infos.append(f"Margin requirement: {margin_percent:.2f}%")
+
+            # Add warnings for high leverage
+            if params.leverage > 50:
+                warnings.append(
+                    f"High leverage ({params.leverage}x) significantly increases risk. "
+                    "You may lose more than your initial investment."
+                )
+            elif params.leverage > 20:
+                warnings.append(
+                    f"Moderate leverage ({params.leverage}x) increases risk. "
+                    "Ensure adequate risk management."
+                )
+
+            # Additional info
+            if params.leverage == 1.0:
+                infos.append("No leverage applied (1:1 ratio)")
+            else:
+                infos.append(
+                    f"With {params.leverage}x leverage, a $1,000 investment "
+                    f"controls ${1000 * params.leverage:.2f} in assets"
+                )
+
+        return LeveragePreviewResult(
+            infos=infos if infos else None,
+            warnings=warnings if warnings else None,
+            errors=errors if errors else None,
+        )
+
+    async def leverage_info(self, params: LeverageInfoParams) -> LeverageInfo:
+        """
+        Get leverage information for symbol
+
+        Args:
+            params: Leverage info request parameters
+
+        Returns:
+            LeverageInfo: Leverage settings and constraints
+        """
+        # Get current leverage or default
+        current_leverage = self._leverage_settings.get(params.symbol, 10.0)
+
+        return LeverageInfo(
+            title=f"Leverage for {params.symbol}",
+            leverage=current_leverage,
+            min=1.0,
+            max=100.0,
+            step=1.0,
+        )
+
+    # ================================ SETTERS =================================#
+    async def place_order(self, order: PreOrder) -> PlaceOrderResult:
+        """
+        Place a new order
+
+        Args:
+            order: Order request from client
+
+        Returns:
+            PlaceOrderResult: Result containing the generated order ID
+        """
+        order_id = f"ORDER-{self._order_counter}"
+        self._order_counter += 1
+
+        placed_order = PlacedOrder(
+            id=order_id,
+            symbol=order.symbol,
+            type=order.type,
+            side=order.side,
+            qty=order.qty,
+            status=OrderStatus.WORKING,
+            limitPrice=order.limitPrice,
+            stopPrice=order.stopPrice,
+            takeProfit=order.takeProfit,
+            stopLoss=order.stopLoss,
+            guaranteedStop=order.guaranteedStop,
+            trailingStopPips=order.trailingStopPips,
+            stopType=order.stopType,
+            filledQty=0.0,
+            avgPrice=None,
+            updateTime=int(time.time() * 1000),
+        )
+
+        self._orders[order_id] = placed_order
+
+        return PlaceOrderResult(orderId=order_id)
+
+    async def modify_order(self, order_id: str, order: PreOrder) -> None:
+        """
+        Modify an existing order
+
+        Args:
+            order_id: ID of the order to modify
+            order: Updated order details
+        """
+        existing_order = self._orders.get(order_id)
+        if not existing_order:
+            raise ValueError(f"Order {order_id} not found")
+
+        if existing_order.status not in [OrderStatus.WORKING, OrderStatus.PLACING]:
+            raise ValueError(
+                f"Cannot modify order {order_id} with status {existing_order.status}"
+            )
+
+        existing_order.qty = order.qty
+        existing_order.limitPrice = order.limitPrice
+        existing_order.stopPrice = order.stopPrice
+        existing_order.takeProfit = order.takeProfit
+        existing_order.stopLoss = order.stopLoss
+        existing_order.guaranteedStop = order.guaranteedStop
+        existing_order.trailingStopPips = order.trailingStopPips
+        existing_order.stopType = order.stopType
+        existing_order.updateTime = int(time.time() * 1000)
+
+    async def cancel_order(self, order_id: str) -> None:
+        """
+        Cancel an order
+
+        Args:
+            order_id: ID of the order to cancel
+        """
+        order = self._orders.get(order_id)
+        if not order:
+            raise ValueError(f"Order {order_id} not found")
+
+        if order.status not in [
+            OrderStatus.WORKING,
+            OrderStatus.PLACING,
+            OrderStatus.FILLED,
+        ]:
+            raise ValueError(
+                f"Cannot cancel order {order_id} with status {order.status}"
+            )
+
+        order.status = OrderStatus.CANCELED
+        order.updateTime = int(time.time() * 1000)
+
+    async def close_position(
+        self, position_id: str, amount: Optional[float] = None
+    ) -> None:
+        """
+        Close position (full or partial) by creating a closing order
+
+        Args:
+            position_id: ID of the position to close
+            amount: Amount to close (if None, closes entire position)
+
+        Raises:
+            ValueError: If position not found or invalid amount
+        """
+        position = self._positions.get(position_id)
+        if not position:
+            raise ValueError(f"Position {position_id} not found")
+
+        # Determine quantity to close
+        close_qty = amount if amount is not None else position.qty
+
+        if close_qty <= 0:
+            raise ValueError("Amount must be positive")
+        if close_qty > position.qty:
+            raise ValueError(
+                f"Amount {close_qty} exceeds position quantity {position.qty}"
+            )
+
+        # Create a closing order (opposite side of the position)
+        closing_side = Side.SELL if position.side == Side.BUY else Side.BUY
+
+        closing_order = PreOrder(
+            symbol=position.symbol,
+            type=OrderType.MARKET,
+            side=closing_side,
+            qty=close_qty,
+            limitPrice=None,
+            stopPrice=None,
+            takeProfit=None,
+            stopLoss=None,
+            guaranteedStop=None,
+            trailingStopPips=None,
+            stopType=None,
+        )
+
+        # Place the closing order - execution will be simulated via normal flow
+        await self.place_order(closing_order)
+
+    async def edit_position_brackets(
+        self,
+        position_id: str,
+        brackets: Brackets,
+        custom_fields: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Update position brackets (stop-loss, take-profit) by creating bracket orders
+
+        Args:
+            position_id: ID of the position to modify
+            brackets: New bracket values
+            custom_fields: Optional custom fields
+
+        Raises:
+            ValueError: If position not found
+        """
+        position = self._positions.get(position_id)
+        if not position:
+            raise ValueError(f"Position {position_id} not found")
+
+        # Cancel existing bracket orders for this position
+        # Bracket orders are identified by symbol and opposite side
+        opposite_side = Side.SELL if position.side == Side.BUY else Side.BUY
+        for order_id, order in list(self._orders.items()):
+            if (
+                order.symbol == position.symbol
+                and order.side == opposite_side
+                and order.status in [OrderStatus.WORKING, OrderStatus.PLACING]
+                and (order.stopPrice is not None or order.limitPrice is not None)
+            ):
+                order.status = OrderStatus.CANCELED
+                order.updateTime = int(time.time() * 1000)
+
+        # Create new bracket orders based on the brackets parameter
+        # Stop Loss order (market order triggered at stop price)
+        if brackets.stopLoss is not None:
+            stop_loss_order = PreOrder(
+                symbol=position.symbol,
+                type=OrderType.STOP,
+                side=opposite_side,
+                qty=position.qty,
+                limitPrice=None,
+                stopPrice=brackets.stopLoss,
+                takeProfit=None,
+                stopLoss=None,
+                guaranteedStop=None,
+                trailingStopPips=None,
+                stopType=None,
+            )
+            await self.place_order(stop_loss_order)
+
+        # Take Profit order (limit order at take profit price)
+        if brackets.takeProfit is not None:
+            take_profit_order = PreOrder(
+                symbol=position.symbol,
+                type=OrderType.LIMIT,
+                side=opposite_side,
+                qty=position.qty,
+                limitPrice=brackets.takeProfit,
+                stopPrice=None,
+                takeProfit=None,
+                stopLoss=None,
+                guaranteedStop=None,
+                trailingStopPips=None,
+                stopType=None,
+            )
+            await self.place_order(take_profit_order)
+
+    async def set_leverage(self, params: LeverageSetParams) -> LeverageSetResult:
+        """
+        Set leverage for symbol
+
+        Args:
+            params: Leverage set parameters
+
+        Returns:
+            LeverageSetResult: Confirmed leverage value
+
+        Raises:
+            ValueError: If leverage value is out of range
+        """
+        # Validate leverage range
+        if params.leverage < 1.0:
+            raise ValueError("Leverage must be at least 1.0")
+        if params.leverage > 100.0:
+            raise ValueError("Leverage cannot exceed 100.0")
+
+        # Store leverage setting
+        self._leverage_settings[params.symbol] = params.leverage
+
+        return LeverageSetResult(leverage=params.leverage)
+
+    # ================================ SIMULATION =================================
     async def _simulate_execution(self, order_id: str) -> None:
         """
         Simulate order execution after a small delay
@@ -411,179 +631,3 @@ class BrokerService:
                 side=execution.side,
                 avgPrice=execution.price,
             )
-
-    async def close_position(
-        self, position_id: str, amount: Optional[float] = None
-    ) -> None:
-        """
-        Close position (full or partial)
-
-        Args:
-            position_id: ID of the position to close
-            amount: Amount to close (if None, closes entire position)
-
-        Raises:
-            ValueError: If position not found or invalid amount
-        """
-        position = self._positions.get(position_id)
-        if not position:
-            raise ValueError(f"Position {position_id} not found")
-
-        if amount is not None:
-            if amount <= 0:
-                raise ValueError("Amount must be positive")
-            if amount > position.qty:
-                raise ValueError(
-                    f"Amount {amount} exceeds position quantity {position.qty}"
-                )
-
-            # Partial close
-            position.qty -= amount
-
-            # Record execution for partial close
-            execution = Execution(
-                symbol=position.symbol,
-                price=position.avgPrice,  # Mock price
-                qty=amount,
-                side=Side.SELL if position.side == Side.BUY else Side.BUY,
-                time=int(time.time() * 1000),
-            )
-            self._executions.append(execution)
-        else:
-            # Full close - remove position
-            # Record execution for full close
-            execution = Execution(
-                symbol=position.symbol,
-                price=position.avgPrice,  # Mock price
-                qty=position.qty,
-                side=Side.SELL if position.side == Side.BUY else Side.BUY,
-                time=int(time.time() * 1000),
-            )
-            self._executions.append(execution)
-
-            del self._positions[position_id]
-
-    async def edit_position_brackets(
-        self,
-        position_id: str,
-        brackets: Brackets,
-        custom_fields: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """
-        Update position brackets (stop-loss, take-profit)
-
-        Args:
-            position_id: ID of the position to modify
-            brackets: New bracket values
-            custom_fields: Optional custom fields
-
-        Raises:
-            ValueError: If position not found
-        """
-        position = self._positions.get(position_id)
-        if not position:
-            raise ValueError(f"Position {position_id} not found")
-
-        # In a real implementation, brackets would be stored on the position
-        # or as separate orders. For this mock, we just validate the request.
-        # Note: The Position model doesn't have bracket fields yet,
-        # but this validates the API contract.
-        pass
-
-    async def leverage_info(self, params: LeverageInfoParams) -> LeverageInfo:
-        """
-        Get leverage information for symbol
-
-        Args:
-            params: Leverage info request parameters
-
-        Returns:
-            LeverageInfo: Leverage settings and constraints
-        """
-        # Get current leverage or default
-        current_leverage = self._leverage_settings.get(params.symbol, 10.0)
-
-        return LeverageInfo(
-            title=f"Leverage for {params.symbol}",
-            leverage=current_leverage,
-            min=1.0,
-            max=100.0,
-            step=1.0,
-        )
-
-    async def set_leverage(self, params: LeverageSetParams) -> LeverageSetResult:
-        """
-        Set leverage for symbol
-
-        Args:
-            params: Leverage set parameters
-
-        Returns:
-            LeverageSetResult: Confirmed leverage value
-
-        Raises:
-            ValueError: If leverage value is out of range
-        """
-        # Validate leverage range
-        if params.leverage < 1.0:
-            raise ValueError("Leverage must be at least 1.0")
-        if params.leverage > 100.0:
-            raise ValueError("Leverage cannot exceed 100.0")
-
-        # Store leverage setting
-        self._leverage_settings[params.symbol] = params.leverage
-
-        return LeverageSetResult(leverage=params.leverage)
-
-    async def preview_leverage(
-        self, params: LeverageSetParams
-    ) -> LeveragePreviewResult:
-        """
-        Preview leverage changes before applying
-
-        Args:
-            params: Leverage set parameters
-
-        Returns:
-            LeveragePreviewResult: Preview messages (infos, warnings, errors)
-        """
-        warnings: List[str] = []
-        errors: List[str] = []
-        infos: List[str] = []
-
-        # Validate range
-        if params.leverage < 1.0:
-            errors.append("Leverage must be at least 1.0")
-        elif params.leverage > 100.0:
-            errors.append("Leverage cannot exceed 100.0")
-        else:
-            # Calculate margin requirement
-            margin_percent = 100.0 / params.leverage
-            infos.append(f"Margin requirement: {margin_percent:.2f}%")
-
-            # Add warnings for high leverage
-            if params.leverage > 50:
-                warnings.append(
-                    f"High leverage ({params.leverage}x) significantly increases risk. "
-                    "You may lose more than your initial investment."
-                )
-            elif params.leverage > 20:
-                warnings.append(
-                    f"Moderate leverage ({params.leverage}x) increases risk. "
-                    "Ensure adequate risk management."
-                )
-
-            # Additional info
-            if params.leverage == 1.0:
-                infos.append("No leverage applied (1:1 ratio)")
-            else:
-                infos.append(
-                    f"With {params.leverage}x leverage, a $1,000 investment "
-                    f"controls ${1000 * params.leverage:.2f} in assets"
-                )
-
-        return LeveragePreviewResult(
-            infos=infos if infos else None,
-            warnings=warnings if warnings else None,
-            errors=errors if errors else None,
-        )

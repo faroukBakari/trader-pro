@@ -235,30 +235,23 @@ async def test_get_account_info_endpoint():
 
 @pytest.mark.asyncio
 async def test_close_position_endpoint():
-    """Test closing a position (full close)"""
+    """Test closing a position (full close) - verify closing order is created"""
     async with AsyncClient(app=apiApp, base_url="http://test") as client:
-        # First place an order to create a position
-        order_response = await client.post(
-            "/api/v1/broker/orders",
-            json={
-                "symbol": "AAPL",
-                "type": 2,  # MARKET
-                "side": 1,  # BUY
-                "qty": 100,
-            },
+        # Reset broker state
+        await client.post("/api/v1/broker/debug/reset")
+
+        # Manually create a position (bypass execution simulation)
+        from trading_api.api.broker import broker_service
+        from trading_api.models.broker import Position, Side
+
+        position_id = "AAPL-POS"
+        broker_service._positions[position_id] = Position(
+            id=position_id,
+            symbol="AAPL",
+            qty=100.0,
+            side=Side.BUY,
+            avgPrice=100.0,
         )
-        assert order_response.status_code == 200
-
-        # Wait for order execution and position creation
-        import asyncio
-
-        await asyncio.sleep(0.3)
-
-        # Get positions to find position ID
-        positions_response = await client.get("/api/v1/broker/positions")
-        positions = positions_response.json()
-        assert len(positions) > 0
-        position_id = positions[0]["id"]
 
         # Close the position
         close_response = await client.delete(f"/api/v1/broker/positions/{position_id}")
@@ -266,41 +259,38 @@ async def test_close_position_endpoint():
         data = close_response.json()
         assert data["success"] is True
 
-        # Verify position is removed
-        positions_response = await client.get("/api/v1/broker/positions")
-        positions_after = positions_response.json()
-        assert len(positions_after) == 0
+        # Verify closing order was created
+        orders_response = await client.get("/api/v1/broker/orders")
+        orders = orders_response.json()
+        # Should have 1 closing SELL order
+        assert len(orders) == 1
+        closing_order = orders[0]
+        assert closing_order["symbol"] == "AAPL"
+        assert closing_order["side"] == -1  # SELL (opposite of BUY)
+        assert closing_order["qty"] == 100.0
+        assert closing_order["type"] == 2  # MARKET
+        assert closing_order["status"] == 6  # WORKING
 
 
 @pytest.mark.asyncio
 async def test_close_position_partial_endpoint():
-    """Test partially closing a position"""
+    """Test partially closing a position - verify partial closing order is created"""
     async with AsyncClient(app=apiApp, base_url="http://test") as client:
         # Reset broker state
         await client.post("/api/v1/broker/debug/reset")
 
-        # Place order to create position
-        order_response = await client.post(
-            "/api/v1/broker/orders",
-            json={
-                "symbol": "AAPL",
-                "type": 2,  # MARKET
-                "side": 1,  # BUY
-                "qty": 100,
-            },
+        # Manually create a position (bypass execution simulation)
+        from trading_api.api.broker import broker_service
+        from trading_api.models.broker import Position, Side
+
+        position_id = "AAPL-POS"
+        broker_service._positions[position_id] = Position(
+            id=position_id,
+            symbol="AAPL",
+            qty=100.0,
+            side=Side.BUY,
+            avgPrice=100.0,
         )
-        assert order_response.status_code == 200
-
-        # Wait for execution
-        import asyncio
-
-        await asyncio.sleep(0.3)
-
-        # Get position ID
-        positions_response = await client.get("/api/v1/broker/positions")
-        positions = positions_response.json()
-        position_id = positions[0]["id"]
-        original_qty = positions[0]["qty"]
 
         # Partially close position (50 units)
         close_response = await client.delete(
@@ -308,40 +298,38 @@ async def test_close_position_partial_endpoint():
         )
         assert close_response.status_code == 200
 
-        # Verify position quantity reduced
-        positions_response = await client.get("/api/v1/broker/positions")
-        positions_after = positions_response.json()
-        assert len(positions_after) == 1
-        assert positions_after[0]["qty"] == original_qty - 50
+        # Verify closing order was created for partial amount
+        orders_response = await client.get("/api/v1/broker/orders")
+        orders = orders_response.json()
+        # Should have 1 partial closing SELL order
+        assert len(orders) == 1
+        closing_order = orders[0]
+        assert closing_order["symbol"] == "AAPL"
+        assert closing_order["side"] == -1  # SELL (opposite of BUY)
+        assert closing_order["qty"] == 50.0  # Partial close amount
+        assert closing_order["type"] == 2  # MARKET
+        assert closing_order["status"] == 6  # WORKING
 
 
 @pytest.mark.asyncio
 async def test_edit_position_brackets_endpoint():
-    """Test editing position brackets (stop-loss, take-profit)"""
+    """Test editing position brackets (stop-loss, take-profit) - verify bracket orders are created"""
     async with AsyncClient(app=apiApp, base_url="http://test") as client:
-        # Reset and create position
+        # Reset broker state
         await client.post("/api/v1/broker/debug/reset")
 
-        order_response = await client.post(
-            "/api/v1/broker/orders",
-            json={
-                "symbol": "AAPL",
-                "type": 2,  # MARKET
-                "side": 1,  # BUY
-                "qty": 100,
-            },
+        # Manually create a position (bypass execution simulation)
+        from trading_api.api.broker import broker_service
+        from trading_api.models.broker import Position, Side
+
+        position_id = "AAPL-POS"
+        broker_service._positions[position_id] = Position(
+            id=position_id,
+            symbol="AAPL",
+            qty=100.0,
+            side=Side.BUY,
+            avgPrice=100.0,
         )
-        assert order_response.status_code == 200
-
-        # Wait for execution
-        import asyncio
-
-        await asyncio.sleep(0.3)
-
-        # Get position ID
-        positions_response = await client.get("/api/v1/broker/positions")
-        positions = positions_response.json()
-        position_id = positions[0]["id"]
 
         # Edit position brackets
         brackets_response = await client.put(
@@ -358,6 +346,36 @@ async def test_edit_position_brackets_endpoint():
         assert brackets_response.status_code == 200
         data = brackets_response.json()
         assert data["success"] is True
+
+        # Verify bracket orders were created
+        orders_response = await client.get("/api/v1/broker/orders")
+        orders = orders_response.json()
+        # Should have 2 bracket orders: stop loss SELL, take profit SELL
+        assert len(orders) == 2
+
+        bracket_orders = orders
+
+        # Find stop loss order (STOP type with stopPrice)
+        stop_loss_order = next(
+            (o for o in bracket_orders if o["type"] == 3 and o["stopPrice"] == 90.0),
+            None,
+        )
+        assert stop_loss_order is not None
+        assert stop_loss_order["symbol"] == "AAPL"
+        assert stop_loss_order["side"] == -1  # SELL (opposite of position)
+        assert stop_loss_order["qty"] == 100.0
+        assert stop_loss_order["status"] == 6  # WORKING
+
+        # Find take profit order (LIMIT type with limitPrice)
+        take_profit_order = next(
+            (o for o in bracket_orders if o["type"] == 1 and o["limitPrice"] == 110.0),
+            None,
+        )
+        assert take_profit_order is not None
+        assert take_profit_order["symbol"] == "AAPL"
+        assert take_profit_order["side"] == -1  # SELL (opposite of position)
+        assert take_profit_order["qty"] == 100.0
+        assert take_profit_order["status"] == 6  # WORKING
 
 
 @pytest.mark.asyncio
@@ -500,4 +518,5 @@ async def test_preview_leverage_invalid_range():
         assert response.status_code == 200
         data = response.json()
         assert data.get("errors") is not None
+        assert any("cannot exceed" in error.lower() for error in data["errors"])
         assert any("cannot exceed" in error.lower() for error in data["errors"])
