@@ -38,7 +38,8 @@ import type {
 } from '@public/trading_terminal'
 
 import { ApiAdapter, type ApiPromise } from '@/plugins/apiAdapter'
-import { ConnectionStatus, OrderStatus, StandardFormatterName } from '@public/trading_terminal'
+import { WsAdapter, WsFallback, type BrokerConnectionStatus, type EquityData, type WsAdapterType } from '@/plugins/wsAdapter'
+import { ConnectionStatus, NotificationType, OrderStatus, Side, StandardFormatterName } from '@public/trading_terminal'
 import { DatafeedService } from './datafeedService.js'
 
 // ============================================================================
@@ -74,40 +75,222 @@ export interface ApiInterface {
   previewLeverage(leverageSetParams: LeverageSetParams): ApiPromise<LeveragePreviewResult>
 }
 
-// Private state management
-const _orderById = new Map<string, Order>()
-const _positions = new Map<string, Position>()
-const _executions: Execution[] = []
-const _accountId: AccountId = 'DEMO-001' as AccountId
-const _accountName = 'Demo Trading Account'
+export class BrokerMock {
+  protected _orderById = new Map<string, Order>()
+  protected _positions = new Map<string, Position>()
+  protected _executions: Execution[] = []
+  protected _accountId: AccountId = 'DEMO-001' as AccountId
+  protected _accountName = 'Demo Trading Account'
+  protected _equity = 105000
+  protected _balance = 100000
+  protected _unrealizedPL = 5000
+  protected _realizedPL = 0
 
-/**
- * Reset fallback state for testing purposes
- * ONLY use this in test environments
- */
-export function resetApiFallbackState(): void {
-  _orderById.clear()
-  _positions.clear()
-  _executions.length = 0
-}
+  protected orderUpdates: Order[] = []
+  protected executionUpdates: Execution[] = []
+  protected positionUpdates: Position[] = []
+  protected equityUpdates: { equity: number, balance: number, unrealizedPL: number, realizedPL: number }[] = [{
+    equity: this._equity,
+    balance: this._balance,
+    unrealizedPL: this._unrealizedPL,
+    realizedPL: this._realizedPL,
+  }]
 
-/**
- * Add a test position to fallback state
- * ONLY use this in test environments
- */
-export function addTestPosition(positionId: string, symbol: string, qty: number, side: number, avgPrice: number = 150.0): void {
-  _positions.set(positionId, {
-    id: positionId,
-    symbol,
-    qty,
-    side,
-    avgPrice,
-  })
+  getAccountId(): AccountId {
+    return this._accountId
+  }
+
+  getAccountName(): string {
+    return this._accountName
+  }
+
+  addOrder(order: Order): void {
+    this._orderById.set(order.id, { ...order })
+    this.orderUpdates.push({ ...order })
+  }
+
+  updateOrder(orderId: string, updates: Partial<Order>): void {
+    const order = this._orderById.get(orderId)
+    if (order) {
+      Object.assign(order, updates)
+      this.orderUpdates.push({ ...order })
+    }
+  }
+
+  getOrders(): Order[] {
+    return Array.from(this._orderById.values()).map(order => ({ ...order }))
+  }
+
+  getOrderById(orderId: string): Order | undefined {
+    const order = this._orderById.get(orderId)
+    return order ? { ...order } : undefined
+  }
+
+  getPositions(): Position[] {
+    return Array.from(this._positions.values()).map(pos => ({ ...pos }))
+  }
+
+  getPositionBySymbol(symbol: string): Position | undefined {
+    const position = Array.from(this._positions.values()).find(pos => pos.symbol === symbol)
+    return position ? { ...position } : undefined
+  }
+
+  addPositionBracketOrders(positionId: string, updates: Partial<Position>): void {
+    const position = this._positions.get(positionId)
+    if (position) {
+      Object.assign(position, updates)
+      this.positionUpdates.push({ ...position })
+    }
+  }
+
+  getExecutions(): Execution[] {
+    return this._executions.map(exec => ({ ...exec }))
+  }
+
+  getExecutionsBySymbol(symbol: string): Execution[] {
+    return this._executions
+      .filter(exec => exec.symbol === symbol)
+      .map(exec => ({ ...exec }))
+  }
+
+  reset(): void {
+    this._orderById.clear()
+    this._positions.clear()
+    this._executions.length = 0
+  }
+
+  ordersMocker(): Order | undefined {
+    const order = this.orderUpdates.shift()
+    if (order) {
+      const execution = {
+        id: order.id,
+        symbol: order.symbol,
+        side: order.side,
+        qty: order.qty,
+        price: order.limitPrice || order.stopPrice || 0,
+        time: Date.now(),
+      }
+      this._executions.push(execution)
+      this.executionUpdates.push({ ...execution })
+    }
+    return order
+  }
+
+  executionsMocker(): Execution | undefined {
+    const execution = this.executionUpdates.shift()
+    if (execution) {
+      // Update position based on execution
+      const existingPosition = this._positions.get(execution.symbol)
+
+      if (existingPosition) {
+        // Position exists - update it
+        const isSameSide = existingPosition.side === execution.side
+        if (isSameSide) {
+          // Add to position
+          const totalQty = existingPosition.qty + execution.qty
+          const totalValue = (existingPosition.avgPrice * existingPosition.qty) + (execution.price * execution.qty)
+          const newAvgPrice = totalValue / totalQty
+
+          Object.assign(existingPosition, {
+            qty: totalQty,
+            avgPrice: newAvgPrice,
+          })
+        } else {
+          // Reduce or reverse position
+          const netQty = existingPosition.qty - execution.qty
+          if (netQty > 0) {
+            // Reduce position
+            Object.assign(existingPosition, { qty: netQty })
+          } else if (netQty < 0) {
+            // Reverse position
+            Object.assign(existingPosition, {
+              qty: Math.abs(netQty),
+              side: execution.side,
+              avgPrice: execution.price,
+            })
+          } else {
+            Object.assign(existingPosition, {
+              qty: 0,
+            })
+          }
+        }
+
+        if (this._positions.has(execution.symbol)) {
+          this.positionUpdates.push({ ...existingPosition })
+        }
+      } else {
+        // Create new position
+        const newPosition: Position = {
+          id: execution.symbol,
+          symbol: execution.symbol,
+          side: execution.side,
+          qty: execution.qty,
+          avgPrice: execution.price,
+        }
+        this._positions.set(execution.symbol, newPosition)
+        this.positionUpdates.push({ ...newPosition })
+      }
+    }
+    return execution
+  }
+
+  positionsMocker(): Position | undefined {
+    const position = this.positionUpdates.shift()
+    if (position) {
+
+      this._unrealizedPL = Array.from(this._positions.values())
+        .reduce((total, pos) => {
+          const posUnrealized = pos.avgPrice * pos.qty * (pos.side === Side.Buy ? -1 : 1)
+          return total + posUnrealized
+        }, 0)
+
+      this._realizedPL = this._executions
+        .reduce((total, execution) => {
+          const position = this._positions.get(execution.symbol)
+          if (!position) {
+            const pnl = execution.price * execution.qty * (execution.side === Side.Buy ? -1 : 1)
+            return total + pnl
+          }
+          return total
+        }, 0)
+
+      this._equity = this._balance + this._unrealizedPL + this._realizedPL
+
+      this.equityUpdates.push({
+        equity: this._equity,
+        balance: this._balance,
+        unrealizedPL: this._unrealizedPL,
+        realizedPL: this._realizedPL,
+      })
+
+    }
+    return position
+  }
+
+  equityMocker(): EquityData | undefined {
+    return {
+      equity: this._equity,
+      balance: this._balance,
+      unrealizedPL: this._unrealizedPL,
+      realizedPL: this._realizedPL,
+    }
+  }
+
+  brokerConnectionMocker(): BrokerConnectionStatus | undefined {
+    return {
+      status: ConnectionStatus.Connected,
+      message: 'Mock broker connected',
+      timestamp: Date.now(),
+    }
+  }
 }
 
 class ApiFallback implements ApiInterface {
+  private readonly brokerMock: BrokerMock
 
-  constructor() { }
+  constructor(brokerMock?: BrokerMock) {
+    this.brokerMock = brokerMock ?? new BrokerMock()
+  }
 
   async previewOrder(order: PreOrder): ApiPromise<OrderPreviewResult> {
     // Calculate order value and costs
@@ -209,7 +392,7 @@ class ApiFallback implements ApiInterface {
   }
 
   async placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult> {
-    const orderId = `ORDER-${_orderById.size + 1}`
+    const orderId = `ORDER-${this.brokerMock.getOrders().length + 1}`
 
     const newOrder: Order = {
       id: orderId,
@@ -224,7 +407,7 @@ class ApiFallback implements ApiInterface {
       stopLoss: order.stopLoss,
     }
 
-    _orderById.set(orderId, newOrder)
+    this.brokerMock.addOrder(newOrder)
 
     console.log(`[FallbackClient] Order created: ${orderId}`)
 
@@ -235,21 +418,25 @@ class ApiFallback implements ApiInterface {
   }
 
   async modifyOrder(order: Order, confirmId?: string): ApiPromise<void> {
-    const originalOrder = _orderById.get(confirmId ?? order.id)
+    const orderId = confirmId ?? order.id
+    const originalOrder = this.brokerMock.getOrderById(orderId)
     if (!originalOrder) {
-      console.warn(`[FallbackClient] Order not found: ${confirmId ?? order.id}`)
+      console.warn(`[FallbackClient] Order not found: ${orderId}`)
       return {
         status: 404,
         data: undefined as void,
       }
     }
 
-    // Only update specific fields, not entire order
-    originalOrder.qty = order.qty
-    originalOrder.limitPrice = order.limitPrice
-    originalOrder.stopPrice = order.stopPrice
+    this.brokerMock.updateOrder(orderId, {
+      qty: order.qty,
+      limitPrice: order.limitPrice,
+      stopPrice: order.stopPrice,
+      takeProfit: order.takeProfit,
+      stopLoss: order.stopLoss,
+    })
 
-    console.log(`[FallbackClient] Order modified: ${originalOrder.id}`)
+    console.log(`[FallbackClient] Order modified: ${orderId}`)
 
     return {
       status: 200,
@@ -258,7 +445,7 @@ class ApiFallback implements ApiInterface {
   }
 
   async cancelOrder(orderId: string): ApiPromise<void> {
-    const order = _orderById.get(orderId)
+    const order = this.brokerMock.getOrderById(orderId)
     if (!order) {
       console.warn(`[FallbackClient] Order not found: ${orderId}`)
       return {
@@ -267,8 +454,10 @@ class ApiFallback implements ApiInterface {
       }
     }
 
-    order.status = OrderStatus.Canceled
-    order.updateTime = Date.now()
+    this.brokerMock.updateOrder(orderId, {
+      status: OrderStatus.Canceled,
+      updateTime: Date.now(),
+    })
 
     console.log(`[FallbackClient] Order cancelled: ${orderId}`)
 
@@ -281,21 +470,21 @@ class ApiFallback implements ApiInterface {
   async getOrders(): ApiPromise<Order[]> {
     return {
       status: 200,
-      data: Array.from(_orderById.values()),
+      data: this.brokerMock.getOrders(),
     }
   }
 
   async getPositions(): ApiPromise<Position[]> {
     return {
       status: 200,
-      data: Array.from(_positions.values()),
+      data: this.brokerMock.getPositions(),
     }
   }
 
   async getExecutions(symbol: string): ApiPromise<Execution[]> {
     return {
       status: 200,
-      data: _executions.filter((exec) => exec.symbol === symbol),
+      data: this.brokerMock.getExecutionsBySymbol(symbol),
     }
   }
 
@@ -303,14 +492,14 @@ class ApiFallback implements ApiInterface {
     return {
       status: 200,
       data: {
-        id: _accountId as AccountId,
-        name: _accountName,
+        id: this.brokerMock.getAccountId(),
+        name: this.brokerMock.getAccountName(),
       },
     }
   }
 
   async closePosition(positionId: string, amount?: number): ApiPromise<void> {
-    const position = _positions.get(positionId)
+    const position = this.brokerMock.getPositionBySymbol(positionId)
     if (!position) {
       console.warn(`[FallbackClient] Position not found: ${positionId}`)
       return {
@@ -319,18 +508,21 @@ class ApiFallback implements ApiInterface {
       }
     }
 
-    if (amount !== undefined) {
-      if (amount >= position.qty) {
-        _positions.delete(positionId)
-        console.log(`[FallbackClient] Position fully closed: ${positionId}`)
-      } else {
-        position.qty -= amount
-        console.log(`[FallbackClient] Position partially closed: ${positionId}, reduced by ${amount}, remaining: ${position.qty}`)
-      }
-    } else {
-      _positions.delete(positionId)
-      console.log(`[FallbackClient] Position fully closed: ${positionId}`)
+    const closeQty = amount !== undefined ? amount : position.qty
+    const closingSide = position.side === Side.Buy ? Side.Sell : Side.Buy
+
+    const closingOrder: Order = {
+      id: `CLOSE-ORDER-${Date.now()}`,
+      symbol: position.symbol,
+      type: 2,
+      side: closingSide,
+      qty: closeQty,
+      status: OrderStatus.Working,
     }
+
+    this.brokerMock.addOrder(closingOrder)
+
+    console.log(`[FallbackClient] Closing order created for position ${positionId}: ${closingOrder.id}, qty: ${closeQty}`)
 
     return {
       status: 200,
@@ -339,7 +531,7 @@ class ApiFallback implements ApiInterface {
   }
 
   async editPositionBrackets(positionId: string, brackets: Brackets, customFields?: CustomInputFieldsValues): ApiPromise<void> {
-    const position = _positions.get(positionId)
+    const position = this.brokerMock.getPositionBySymbol(positionId)
     if (!position) {
       console.warn(`[FallbackClient] Position not found: ${positionId}`)
       return {
@@ -348,8 +540,10 @@ class ApiFallback implements ApiInterface {
       }
     }
 
-    position.stopLoss = brackets.stopLoss
-    position.takeProfit = brackets.takeProfit
+    this.brokerMock.addPositionBracketOrders(positionId, {
+      stopLoss: brackets.stopLoss,
+      takeProfit: brackets.takeProfit,
+    })
 
     console.log(`[FallbackClient] Position brackets edited: ${positionId}`, brackets, customFields)
 
@@ -419,6 +613,9 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   // Client adapters
   private readonly apiFallback: ApiInterface
   private readonly apiAdapter: ApiInterface
+  private readonly _wsAdapter: WsAdapter
+  private readonly _wsFallback: Partial<WsAdapterType>
+  private readonly _brokerMock?: BrokerMock
 
   // Mock flag
   private readonly mock: boolean
@@ -428,21 +625,48 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly equity: IWatchedValue<number>
   private readonly startingBalance = 100000
 
+  /**
+   * Cleanup method to destroy WebSocket fallback timers
+   * Call this in tests' afterEach to prevent timers from accessing destroyed objects
+   */
+  destroy(): void {
+    if (this._wsFallback) {
+      this._wsFallback.orders?.destroy?.()
+      this._wsFallback.positions?.destroy?.()
+      this._wsFallback.executions?.destroy?.()
+      this._wsFallback.equity?.destroy?.()
+      this._wsFallback.brokerConnection?.destroy?.()
+    }
+  }
+
   constructor(
     host: IBrokerConnectionAdapterHost,
     quotesProvider: IDatafeedQuotesApi,
-    mock: boolean = true // Default to fallback for safety
+    brokerMock?: BrokerMock
   ) {
-    this.mock = mock
+    this.mock = !!brokerMock
+    this._brokerMock = brokerMock
     this._hostAdapter = host
     this._quotesProvider = quotesProvider
     this._quotesFallback = new DatafeedService({ mock: true })
     this.apiAdapter = new ApiAdapter()
-    this.apiFallback = new ApiFallback()
+    this.apiFallback = new ApiFallback(brokerMock)
+    this._wsAdapter = new WsAdapter()
+    // Bind mocker methods to preserve 'this' context
+    this._wsFallback = new WsFallback(brokerMock ? {
+      ordersMocker: brokerMock.ordersMocker.bind(brokerMock),
+      positionsMocker: brokerMock.positionsMocker.bind(brokerMock),
+      executionsMocker: brokerMock.executionsMocker.bind(brokerMock),
+      equityMocker: brokerMock.equityMocker.bind(brokerMock),
+      brokerConnectionMocker: brokerMock.brokerConnectionMocker.bind(brokerMock),
+    } : {})
 
-    // TODO setup subscriptions for these values from client
+    // Create reactive values
     this.balance = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
     this.equity = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
+
+    // Setup WebSocket handlers
+    this.setupWebSocketHandlers()
   }
 
   private _getApiAdapter(mock: boolean = this.mock): ApiInterface {
@@ -451,6 +675,99 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   private _getQuotesProvider(mock: boolean = this.mock): IDatafeedQuotesApi {
     return mock ? this._quotesFallback : this._quotesProvider
+  }
+
+  private _getWsAdapter(mock: boolean = this.mock): WsAdapterType | Partial<WsAdapterType> {
+    return mock ? this._wsFallback : this._wsAdapter
+  }
+
+  /**
+   * Setup WebSocket subscription handlers for broker events
+   * Subscribes to orders, positions, executions, equity, and broker connection status
+   */
+  private async setupWebSocketHandlers(): Promise<void> {
+    const response = await this._getApiAdapter().getAccountInfo()
+    const accountId = response.data.id
+
+    // Order updates
+    this._getWsAdapter().orders?.subscribe(
+      'broker-orders',
+      { accountId },
+      (order: Order) => {
+        this._hostAdapter.orderUpdate(order)
+
+        // Show notification on fill
+        if (order.status === OrderStatus.Filled) {
+          this._hostAdapter.showNotification(
+            'Order Filled',
+            `${order.symbol} ${order.side === 1 ? 'Buy' : 'Sell'} ${order.qty} @ ${order.avgPrice ?? 'market'}`,
+            NotificationType.Success
+          )
+        }
+      }
+    )
+
+    // Position updates
+    this._getWsAdapter().positions?.subscribe(
+      'broker-positions',
+      { accountId },
+      (position: Position) => {
+        this._hostAdapter.positionUpdate(position)
+      }
+    )
+
+    // Execution updates
+    this._getWsAdapter().executions?.subscribe(
+      'broker-executions',
+      { accountId },
+      (execution: Execution) => {
+        this._hostAdapter.executionUpdate(execution)
+      }
+    )
+
+    // Equity updates
+    this._getWsAdapter().equity?.subscribe(
+      'broker-equity',
+      { accountId },
+      (data: EquityData) => {
+        this._hostAdapter.equityUpdate(data.equity)
+
+        // Update reactive balance/equity values
+        if (data.balance !== undefined && data.balance !== null) {
+          this.balance.setValue(data.balance)
+        }
+        if (data.equity !== undefined && data.equity !== null) {
+          this.equity.setValue(data.equity)
+        }
+      }
+    )
+
+    // Broker connection status (backend ↔ real broker)
+    this._getWsAdapter().brokerConnection?.subscribe(
+      'broker-connection-status',
+      { accountId },
+      (data: BrokerConnectionStatus) => {
+        this._hostAdapter.connectionStatusUpdate(data.status, {
+          message: data.message ?? undefined,
+          disconnectType: data.disconnectType ?? undefined,
+        })
+
+        // Notify user on connection changes
+        if (data.status === ConnectionStatus.Disconnected) {
+          this._hostAdapter.showNotification(
+            'Broker Disconnected',
+            data.message ?? 'Connection to broker lost',
+            NotificationType.Error
+          )
+        } else if (data.status === ConnectionStatus.Connected) {
+          this._hostAdapter.showNotification(
+            'Broker Connected',
+            data.message ?? 'Successfully connected to broker',
+            NotificationType.Success
+          )
+        }
+      }
+    )
   }
 
   // IBrokerWithoutRealtime interface implementation

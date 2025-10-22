@@ -347,6 +347,7 @@ export interface WebSocketInterface<TParams extends object, TData extends object
     onUpdate: (data: TData) => void
   ): Promise<string>
   unsubscribe(subscriptionId: string): Promise<void>
+  destroy?(): void
 }
 
 export class WebSocketClient<TParams extends object, TBackendData extends object, TData extends object> implements WebSocketInterface<TParams, TData> {
@@ -408,14 +409,14 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
   >()
   private intervalId: NodeJS.Timeout
 
-  constructor(mockData: () => TData) {
+  constructor(mockData: () => TData | undefined) {
     // Mock data updates every 3 seconds
     this.intervalId = setInterval(() => {
       this.subscriptions.forEach(({ onUpdate }) => {
         const data = mockData()
         if (data) onUpdate(data)
       })
-    }, 1000)
+    }, 100)
   }
 
   async subscribe(
@@ -433,7 +434,7 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
 
   destroy(): void {
     if (this.intervalId) {
-      window.clearInterval(this.intervalId)
+      clearInterval(this.intervalId)
     }
     this.subscriptions.clear()
   }

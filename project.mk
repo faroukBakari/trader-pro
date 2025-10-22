@@ -108,12 +108,20 @@ test-all:
 	@echo ""
 	@echo "[1/2] Backend tests"
 	@echo "========================================"
-	make -C backend test
+	@if ! make -C backend test; then \
+		echo "" && \
+		echo "❌ Backend tests failed! Stopping test execution." && \
+		exit 1; \
+	fi
 	@echo ""
 	@echo "[2/2] Frontend tests (with client generation)"
 	@echo "========================================"
 	@echo "Note: Client generation happens automatically before tests"
-	make -C frontend test
+	@if ! make -C frontend test; then \
+		echo "" && \
+		echo "❌ Frontend tests failed!" && \
+		exit 1; \
+	fi
 	@echo ""
 	@echo "✓ All tests completed successfully!"
 

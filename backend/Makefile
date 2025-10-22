@@ -195,11 +195,11 @@ install-ci: ensure-python-ci ensure-poetry
 # Testing
 test:
 	@echo "Running backend tests..."
-	poetry run pytest -v
+	poetry run pytest -v -x
 
 test-cov:
 	@echo "Running backend tests with coverage..."
-	poetry run pytest --cov=trading_api --cov-report=xml --cov-report=term-missing
+	poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
 
 # Linting and formatting
 lint:

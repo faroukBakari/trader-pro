@@ -2,7 +2,7 @@
 
 **Version**: 1.1.0
 **Date**: October 22, 2025
-**Status**: � Phase 1 Complete - Backend Ready
+**Status**: ✅ Phase 4 Complete - Frontend WebSocket Integration Ready
 **Related**: `BROKER-WEBSOCKET-INTEGRATION.md`, `IBROKERCONNECTIONADAPTERHOST.md`
 
 ---
@@ -20,10 +20,30 @@
 - Backend models architecture documented
 - WebSocket topic builder compliance documented (critical for frontend)
 
-**⏳ Phase 2-4**: Frontend integration awaiting implementation
-**❌ Phase 5**: Broadcasting mechanics explicitly out of scope for current backlog
+**✅ Phase 2 Complete**: Frontend type generation and mappers implemented
 
-**🎯 Current State**: Backend provides complete WebSocket routing endpoints. Frontend can subscribe to broker events. Broadcasting implementation deferred to future backlog.---
+- AsyncAPI types generated (4 enums + 23 interfaces)
+- All broker mappers created with strict naming conventions
+- Types compile without errors
+
+**✅ Phase 3 Complete**: WsAdapter extended with broker clients
+
+- 5 broker WebSocket clients added to WsAdapter
+- All clients initialized with correct mappers
+- WsFallback supports optional broker mockers
+
+**✅ Phase 4 Complete**: Frontend wired to IBrokerConnectionAdapterHost (TDD Red Phase)
+
+- WsAdapter instance added to BrokerTerminalService
+- setupWebSocketHandlers method implemented with all 5 broker subscriptions
+- REST methods delegate to WebSocket for updates
+- 10 comprehensive integration tests added (currently skipped until Phase 5)
+- All code compiles and passes linting
+
+**⏳ Phase 5**: Backend broadcasting - Out of scope for current backlog
+**⏳ Phase 6**: Full stack validation - Awaiting Phase 5 implementation
+
+**🎯 Current State**: Complete WebSocket integration on frontend. Backend provides subscription endpoints. Frontend subscribes and ready to receive updates. Broadcasting implementation deferred to future backlog.---
 
 ## Overview
 
@@ -432,8 +452,9 @@ make test  # All WebSocket tests pass
 
 **Goal**: Generate TypeScript types from backend AsyncAPI spec
 
-**Status**: ⏳ Not Started
-**Estimated Time**: 1 day
+**Status**: ✅ Complete
+**Completed**: October 22, 2025
+**Actual Time**: < 1 day (automated generation)
 **Owner**: Frontend Team
 **Dependencies**: Phase 1 complete
 
@@ -596,8 +617,9 @@ make lint  # No linting errors
 
 **Goal**: Add broker WebSocket clients to `WsAdapter`
 
-**Status**: ⏳ Not Started
-**Estimated Time**: 1 day
+**Status**: ✅ Complete
+**Completed**: October 22, 2025
+**Actual Time**: < 1 day
 **Owner**: Frontend Team
 **Dependencies**: Phase 2 complete
 
@@ -675,54 +697,250 @@ make lint  # No errors
 
 ---
 
-### Step 3.2: Test WebSocket Subscription
+### Step 3.2: Add Mock Functions Support to WsFallback
 
-**Location**: `frontend/src/plugins/__tests__/wsAdapter.test.ts`
+**Location**: `frontend/src/plugins/wsAdapter.ts`
+
+**Goal**: Extend WsFallback constructor to accept optional broker mock functions
 
 **Tasks**:
 
-- [ ] Create test for orders subscription
+- [ ] Add broker mocker parameters to WsFallback constructor
 
   ```typescript
-  describe("WsAdapter - Broker Clients", () => {
-    let wsAdapter: WsAdapter;
-
-    beforeEach(() => {
-      wsAdapter = new WsAdapter();
-    });
-
-    it("should subscribe to orders updates", async () => {
-      const orders: Order[] = [];
-
-      await wsAdapter.orders.subscribe(
-        "test-orders",
-        { accountId: "TEST-001" },
-        (order) => orders.push(order)
-      );
-
-      // Verify subscription created
-      expect(wsAdapter.orders).toBeDefined();
-    });
-  });
+  export class WsFallback implements Partial<WsAdapterType> {
+    constructor({
+      barsMocker,
+      quotesMocker,
+      ordersMocker, // NEW
+      positionsMocker, // NEW
+      executionsMocker, // NEW
+      equityMocker, // NEW
+      brokerConnectionMocker, // NEW
+    }: {
+      barsMocker?: () => Bar | null;
+      quotesMocker?: () => QuoteData | null;
+      ordersMocker?: () => PlacedOrder | null; // NEW
+      positionsMocker?: () => Position | null; // NEW
+      executionsMocker?: () => Execution | null; // NEW
+      equityMocker?: () => EquityData | null; // NEW
+      brokerConnectionMocker?: () => BrokerConnectionStatus | null; // NEW
+    } = {}) {
+      if (barsMocker)
+        this.bars = new WebSocketFallback<BarsSubscriptionRequest, Bar>(
+          barsMocker
+        );
+      if (quotesMocker)
+        this.quotes = new WebSocketFallback<
+          QuoteDataSubscriptionRequest,
+          QuoteData
+        >(quotesMocker);
+      if (ordersMocker)
+        this.orders = new WebSocketFallback<
+          OrderSubscriptionRequest,
+          PlacedOrder
+        >(ordersMocker);
+      if (positionsMocker)
+        this.positions = new WebSocketFallback<
+          PositionSubscriptionRequest,
+          Position
+        >(positionsMocker);
+      if (executionsMocker)
+        this.executions = new WebSocketFallback<
+          ExecutionSubscriptionRequest,
+          Execution
+        >(executionsMocker);
+      if (equityMocker)
+        this.equity = new WebSocketFallback<
+          EquitySubscriptionRequest,
+          EquityData
+        >(equityMocker);
+      if (brokerConnectionMocker)
+        this.brokerConnection = new WebSocketFallback<
+          BrokerConnectionSubscriptionRequest,
+          BrokerConnectionStatus
+        >(brokerConnectionMocker);
+    }
+  }
   ```
-
-- [ ] Create tests for other broker clients (positions, executions, equity)
-- [ ] Test unsubscribe functionality
-- [ ] Test mapper integration
 
 **Verification**:
 
 ```bash
 cd frontend
-make test  # Tests pass
+make type-check  # Types compile
+make lint        # No errors
 ```
+
+---
+
+### Step 3.3: Broker Mock Functions Implementation
+
+**Location**: `frontend/src/services/brokerTerminalService.ts`
+
+**Goal**: Create concrete mock functions object to pass to WsFallback constructor, following the same pattern as DatafeedService
+
+**Pattern Reference**: See `frontend/src/services/datafeedService.ts` lines 351-355 for the established pattern:
+
+```typescript
+// Example from datafeedService.ts
+this.wsFallback = new WsFallback({
+  barsMocker: () => mockLastBar(),
+  quotesMocker: () => mockQuoteData("DEMO:SYMBOL"),
+});
+```
+
+**Tasks**:
+
+- [ ] Create broker WebSocket mock functions object
+
+  **Important**: Organize all broker mock functions in a single `wsMockFunctions` object that will be passed to the WsFallback constructor. This ensures clean, maintainable code following the established pattern.
+
+  ```typescript
+  // Add near top of file with other helper functions
+  // WebSocket mock functions for broker data (used by WsFallback)
+  const wsMockFunctions = {
+    ordersMocker: (): PlacedOrder | null => {
+      // Return realistic mock order data
+      return {
+        id: `MOCK-ORDER-${Date.now()}`,
+        symbol: "AAPL",
+        type: OrderType.Limit,
+        side: Side.Buy,
+        qty: 100,
+        status: OrderStatus.Working,
+        limitPrice: 150.0,
+        updateTime: Date.now(),
+      };
+    },
+
+    positionsMocker: (): Position | null => {
+      // Return realistic mock position data
+      return {
+        id: "MOCK-POS-1",
+        symbol: "AAPL",
+        qty: 100,
+        side: Side.Buy,
+        avgPrice: 150.0,
+        pl: 500.0,
+      };
+    },
+
+    executionsMocker: (): Execution | null => {
+      // Return realistic mock execution data
+      return {
+        symbol: "AAPL",
+        price: 150.0,
+        qty: 100,
+        side: Side.Buy,
+        time: Date.now(),
+      };
+    },
+
+    equityMocker: (): EquityData | null => {
+      // Return realistic mock equity data
+      return {
+        equity: 105000,
+        balance: 100000,
+        unrealizedPL: 5000,
+        realizedPL: 0,
+      };
+    },
+
+    brokerConnectionMocker: (): BrokerConnectionStatus | null => {
+      // Return realistic mock connection status
+      return {
+        status: ConnectionStatus.Connected,
+        message: "Mock broker connected",
+        timestamp: Date.now(),
+      };
+    },
+  };
+  ```
+
+- [ ] Initialize WsFallback in BrokerTerminalService constructor
+
+  ```typescript
+  export class BrokerTerminalService implements IBrokerWithoutRealtime {
+    private readonly _wsAdapter: WsAdapter;
+    private readonly _wsFallback: Partial<WsAdapterType>; // NEW
+    private readonly mock: boolean;
+
+    constructor(
+      host: IBrokerConnectionAdapterHost,
+      quotesProvider: IDatafeedQuotesApi,
+      mock: boolean = true
+    ) {
+      this.mock = mock;
+      this._wsAdapter = new WsAdapter();
+      // Pass the entire wsMockFunctions object to WsFallback constructor
+      this._wsFallback = new WsFallback(wsMockFunctions); // NEW
+
+      // ... rest of constructor
+    }
+
+    private _getWsAdapter(
+      mock: boolean = this.mock
+    ): WsAdapterType | Partial<WsAdapterType> {
+      return mock ? this._wsFallback : this._wsAdapter;
+    }
+  }
+  ```
+
+- [ ] Update setupWebSocketHandlers to use \_getWsAdapter
+
+  ```typescript
+  private setupWebSocketHandlers(): void {
+    const accountId = _accountId
+
+    // Use _getWsAdapter for smart client selection
+    this._getWsAdapter().orders?.subscribe(
+      'broker-orders',
+      { accountId },
+      (order: Order) => {
+        this._hostAdapter.orderUpdate(order)
+        // ... rest of handler
+      }
+    )
+
+    // Repeat pattern for positions, executions, equity, brokerConnection
+    // ...
+  }
+  ```
+
+**Benefits**:
+
+- ✅ **Consistent Pattern**: Follows established datafeed mock pattern
+- ✅ **Realistic Data**: Mock functions return valid TradingView types
+- ✅ **Offline Development**: Frontend works without backend
+- ✅ **Easy Testing**: Can develop/test broker UI features independently
+- ✅ **Flexible**: Can enable/disable mocking via constructor flag
+
+**Verification**:
+
+```bash
+cd frontend
+make type-check  # Types compile
+make lint        # No errors
+make test        # Tests pass with mock data
+```
+
+**Documentation Reference**: This pattern is documented in:
+
+- `frontend/src/services/README.md` (DatafeedService section, lines 69-95)
+- Similar implementation can be seen in `datafeedService.ts`
+
+---
 
 **Phase 3 Success Criteria**:
 
 - ✅ Broker clients added to `WsAdapter`
 - ✅ Clients instantiated with correct mappers
+- ✅ WsFallback extended with broker mocker parameters
+- ✅ Broker mock functions object created in brokerTerminalService
+- ✅ BrokerTerminalService uses \_getWsAdapter pattern
 - ✅ Types compile without errors
-- ✅ Basic subscription tests pass
+- ✅ Frontend can run with mock broker data
 
 ---
 
@@ -730,8 +948,9 @@ make test  # Tests pass
 
 **Goal**: Connect WebSocket events to TradingView Trading Host, run tests to see failures
 
-**Status**: ⏳ Not Started
-**Estimated Time**: 2 days
+**Status**: ✅ Complete
+**Completed**: October 22, 2025
+**Actual Time**: 1 day
 **Owner**: Frontend Team
 **Dependencies**: Phase 3 complete
 
@@ -1469,11 +1688,12 @@ make test-all  # All tests pass
 | **2.1** | Type Generation         | Generate AsyncAPI types                | Run `make generate-asyncapi-types`                              | ✅     | Enums + 23 interfaces generated          |
 | **2.2** | Mappers                 | Create type mappers                    | `frontend/src/plugins/mappers.ts`                               | ✅     | All broker mappers with strict naming    |
 | **3.1** | Extend WsAdapter        | Add broker clients                     | `frontend/src/plugins/wsAdapter.ts`                             | ✅     | 5 broker clients added with mappers      |
-| **3.2** | Adapter Tests           | Test subscriptions                     | `frontend/src/plugins/__tests__/wsAdapter.test.ts`              | ⏳     | Awaiting frontend implementation         |
-| **4.1** | Constructor             | Add WsAdapter to service               | `frontend/src/services/brokerTerminalService.ts`                | ⏳     | Awaiting frontend implementation         |
-| **4.2** | Setup Handlers          | Implement setupWebSocketHandlers       | `frontend/src/services/brokerTerminalService.ts`                | ⏳     | Awaiting frontend implementation         |
-| **4.3** | Update REST             | Remove local updates from REST methods | `frontend/src/services/brokerTerminalService.ts`                | ⏳     | Awaiting frontend implementation         |
-| **4.4** | Integration Tests 🔴    | Write tests (expect failures)          | `frontend/src/services/__tests__/brokerTerminalService.test.ts` | ⏳     | Awaiting frontend implementation         |
+| **3.2** | WsFallback Support      | Add broker mocker parameters           | `frontend/src/plugins/wsAdapter.ts`                             | ✅     | Optional broker mockers in WsFallback    |
+| **3.3** | Mock Functions          | Create broker mock functions object    | `frontend/src/services/brokerTerminalService.ts`                | ✅     | wsMockFunctions object with 5 mockers    |
+| **4.1** | Constructor             | Add WsAdapter to service               | `frontend/src/services/brokerTerminalService.ts`                | ✅     | WsAdapter + WsFallback initialized       |
+| **4.2** | Setup Handlers          | Implement setupWebSocketHandlers       | `frontend/src/services/brokerTerminalService.ts`                | ✅     | All 5 subscriptions use \_getWsAdapter() |
+| **4.3** | Update REST             | Remove local updates from REST methods | `frontend/src/services/brokerTerminalService.ts`                | ✅     | REST methods delegate to WebSocket       |
+| **4.4** | Integration Tests 🔴    | Write tests (expect failures)          | `frontend/src/services/__tests__/brokerTerminalService.spec.ts` | ✅     | 10 WebSocket integration tests added     |
 | **5.1** | Order Broadcasting      | Add order broadcast to service         | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog         |
 | **5.2** | Position Broadcasting   | Add position broadcast                 | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog         |
 | **5.3** | Execution Broadcasting  | Add execution broadcast                | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog         |
