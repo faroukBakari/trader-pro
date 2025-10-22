@@ -340,7 +340,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private apiFallback: ApiInterface
 
   private wsAdapter: WsAdapterType
-  private wsFallback: WsAdapterType
+  private wsFallback: Partial<WsAdapterType>
 
   private mock: boolean
 
@@ -355,7 +355,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     this.mock = mock
   }
 
-  _getWsAdapter(mock: boolean = this.mock): WsAdapterType {
+  _getWsAdapter(mock: boolean = this.mock): WsAdapterType | Partial<WsAdapterType> {
     return mock ? this.wsFallback : this.wsAdapter
   }
   _getApiAdapter(mock: boolean = this.mock): ApiInterface {
@@ -439,7 +439,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     listenerGuid: string,
     // onResetCacheNeededCallback?: () => void,
   ): void {
-    this._getWsAdapter().bars.subscribe(listenerGuid, { symbol: symbolInfo.name, resolution }, (bar) => {
+    this._getWsAdapter().bars?.subscribe(listenerGuid, { symbol: symbolInfo.name, resolution }, (bar) => {
       console.debug('[Datafeed] Bar received from WebSocket:', {
         symbol: symbolInfo.name,
         resolution,
@@ -450,7 +450,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     })
   }
   unsubscribeBars(listenerGuid: string): void {
-    this._getWsAdapter().bars.unsubscribe(listenerGuid).catch((error) => {
+    this._getWsAdapter().bars?.unsubscribe(listenerGuid).catch((error) => {
       console.error('[Datafeed] WebSocket unsubscription failed:', error)
     })
   }
@@ -487,7 +487,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     }
 
     this._getWsAdapter().quotes
-      .subscribe(
+      ?.subscribe(
         listenerGUID,
         { symbols, fast_symbols: fastSymbols },
         (quoteData) => {
@@ -504,7 +504,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       })
   }
   unsubscribeQuotes(listenerGUID: string): void {
-    this._getWsAdapter().quotes.unsubscribe(listenerGUID).then(() => {
+    this._getWsAdapter().quotes?.unsubscribe(listenerGUID).then(() => {
       console.log(`[Datafeed] Unsubscribed from quotes successfully: ${listenerGUID}`)
     })
   }

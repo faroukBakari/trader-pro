@@ -85,6 +85,11 @@ Backend
 Frontend
 - Use Vue.js + TypeScript, enforce type safety across the stack, and prefer shared common models between backend and frontend with automatic client generation.  
 - Maintain consistent, reusable styles with CSS/SCSS and design-system patterns.  
+- **⚠️ STRICT TYPE NAMING IN MAPPERS**: When importing types in `frontend/src/plugins/mappers.ts`, ALWAYS use:
+  - API Backend: `<TYPE>_Api_Backend` (e.g., `PreOrder_Api_Backend`)
+  - WebSocket Backend: `<TYPE>_Ws_Backend` (e.g., `PlacedOrder_Ws_Backend`)
+  - Frontend: `<TYPE>` (e.g., `PreOrder`, `PlacedOrder`)
+  - This ensures code readability and maintainability across all mappers
 - When using TradingView API or creating new interfaces/types consult:
   - frontend/public/trading_terminal/charting_library.d.ts  
   - frontend/public/trading_terminal/datafeed-api.d.ts  

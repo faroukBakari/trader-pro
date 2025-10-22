@@ -120,6 +120,49 @@ await wsAdapter.bars.subscribe(
 
 Type-safe data transformations between backend and frontend types are centralized in `src/plugins/mappers.ts`.
 
+#### ⚠️ STRICT NAMING CONVENTIONS ⚠️
+
+**CRITICAL**: All mapper type imports MUST follow this exact naming pattern:
+
+```typescript
+// ✅ CORRECT: Strict naming pattern
+import type {
+  PreOrder as PreOrder_Api_Backend,
+  QuoteData as QuoteData_Api_Backend,
+} from "@clients/trader-client-generated";
+
+import type {
+  PlacedOrder as PlacedOrder_Ws_Backend,
+  Position as Position_Ws_Backend,
+  Execution as Execution_Ws_Backend,
+} from "@clients/ws-types-generated";
+
+import type {
+  PreOrder,
+  QuoteData,
+  PlacedOrder,
+  Position,
+  Execution,
+} from "@public/trading_terminal/charting_library";
+
+// ❌ WRONG: Inconsistent naming
+import type { PreOrder as PreOrder_Backend } from "@clients/trader-client-generated";
+import type { PlacedOrder as Order_Backend } from "@clients/ws-types-generated";
+```
+
+**Naming Rules**:
+
+1. **API Backend types**: Always suffix with `_Api_Backend`
+2. **WebSocket Backend types**: Always suffix with `_Ws_Backend`
+3. **Frontend types**: No suffix, just the type name
+
+**Benefits**:
+
+- **Instant Recognition**: Know the source of each type at a glance
+- **Easy Maintenance**: Consistent pattern across entire codebase
+- **Clear Separation**: Distinguish between API and WebSocket variants
+- **Better Debugging**: Quickly identify type mismatches
+
 #### Why Mappers?
 
 Backend and frontend may use different type definitions for the same concepts:

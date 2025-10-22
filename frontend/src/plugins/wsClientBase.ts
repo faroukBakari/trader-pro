@@ -412,7 +412,8 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
     // Mock data updates every 3 seconds
     this.intervalId = setInterval(() => {
       this.subscriptions.forEach(({ onUpdate }) => {
-        onUpdate(mockData())
+        const data = mockData()
+        if (data) onUpdate(data)
       })
     }, 1000)
   }

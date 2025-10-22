@@ -443,6 +443,37 @@ The mapper layer provides centralized, type-safe data transformations between ba
 
 **Location**: `frontend/src/plugins/mappers.ts`
 
+### ⚠️ STRICT NAMING CONVENTIONS ⚠️
+
+**CRITICAL**: Always follow these naming conventions when importing types in mappers:
+
+```typescript
+// ✅ CORRECT: Strict naming pattern
+import type { QuoteData as QuoteData_Api_Backend } from "@clients/trader-client-generated";
+import type { PlacedOrder as PlacedOrder_Ws_Backend } from "@clients/ws-types-generated";
+import type {
+  QuoteData,
+  PlacedOrder,
+} from "@public/trading_terminal/charting_library";
+
+// ❌ WRONG: Inconsistent naming
+import type { QuoteData as QuoteData_Backend } from "@clients/trader-client-generated";
+import type { PlacedOrder as Order_Backend } from "@clients/ws-types-generated";
+```
+
+**Naming Rules**:
+
+- **API Backend imports**: `<TYPE>_Api_Backend` (e.g., `QuoteData_Api_Backend`)
+- **WebSocket Backend imports**: `<TYPE>_Ws_Backend` (e.g., `PlacedOrder_Ws_Backend`)
+- **Frontend imports**: `<TYPE>` (e.g., `QuoteData`, `PlacedOrder`)
+
+**Why Strict Naming?**
+
+- **Readability**: Instantly identify source of each type
+- **Maintainability**: Consistent pattern across all mappers
+- **Type Safety**: Clear distinction between backend variants (API vs WS)
+- **Debugging**: Easy to trace type mismatches
+
 ### Design Pattern
 
 ```
