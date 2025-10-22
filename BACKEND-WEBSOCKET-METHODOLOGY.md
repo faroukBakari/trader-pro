@@ -487,6 +487,32 @@ npm run type-check  # Types compile successfully
 
 **Location**: `frontend/src/plugins/mappers.ts`
 
+**⚠️ CRITICAL - STRICT NAMING CONVENTIONS ⚠️**
+
+All type imports in mappers MUST follow this exact pattern:
+
+```typescript
+// API Backend types: <TYPE>_Api_Backend
+import type { PreOrder as PreOrder_Api_Backend } from "@clients/trader-client-generated";
+
+// WebSocket Backend types: <TYPE>_Ws_Backend
+import type {
+  PlacedOrder as PlacedOrder_Ws_Backend,
+  Position as Position_Ws_Backend,
+  Execution as Execution_Ws_Backend,
+} from "@clients/ws-types-generated";
+
+// Frontend types: <TYPE> (no suffix)
+import type {
+  PreOrder,
+  PlacedOrder,
+  Position,
+  Execution,
+} from "@public/trading_terminal/charting_library";
+```
+
+**Rationale**: Consistent naming ensures code readability and maintainability.
+
 **Tasks**:
 
 - [ ] Create `mapOrder` mapper
@@ -1430,35 +1456,35 @@ make test-all  # All tests pass
 
 ## Implementation Checklist
 
-| Phase   | Step                    | Task                                   | Location                                                        | Status | Notes                                          |
-| ------- | ----------------------- | -------------------------------------- | --------------------------------------------------------------- | ------ | ---------------------------------------------- |
-| **1.1** | Backend Models          | Define subscription/update models      | `backend/src/trading_api/models/broker/*.py` (topic-based)      | ✅     | Integrated into existing topic files           |
-| **1.2** | Orders Router           | Create orders WebSocket router         | `backend/src/trading_api/ws/broker.py`                          | ✅     | Consolidated in single broker.py file          |
-| **1.3** | Positions Router        | Create positions WebSocket router      | `backend/src/trading_api/ws/broker.py`                          | ✅     | Consolidated in single broker.py file          |
-| **1.4** | Executions Router       | Create executions WebSocket router     | `backend/src/trading_api/ws/broker.py`                          | ✅     | Consolidated in single broker.py file          |
-| **1.5** | Equity Router           | Create equity WebSocket router         | `backend/src/trading_api/ws/broker.py`                          | ✅     | Consolidated in single broker.py file          |
-| **1.6** | Connection Router       | Create connection WebSocket router     | `backend/src/trading_api/ws/broker.py`                          | ✅     | Consolidated in single broker.py file          |
-| **1.7** | Register Routers        | Generate and include routers in app    | `backend/src/trading_api/main.py`                               | ✅     | Generated via `make generate-ws-routers`       |
-| **1.8** | Backend Tests           | Write WebSocket subscription tests     | `backend/tests/test_ws_broker.py`                               | ✅     | 13 tests passing (83/83 total)                 |
-| **2.1** | Type Generation         | Generate AsyncAPI types                | Run `make generate-asyncapi-types`                              | ⏳     | Ready for frontend (AsyncAPI spec generated)   |
-| **2.2** | Mappers                 | Create type mappers                    | `frontend/src/plugins/mappers.ts`                               | ⏳     | Awaiting frontend implementation               |
-| **3.1** | Extend WsAdapter        | Add broker clients                     | `frontend/src/plugins/wsAdapter.ts`                             | ⏳     | Awaiting frontend implementation               |
-| **3.2** | Adapter Tests           | Test subscriptions                     | `frontend/src/plugins/__tests__/wsAdapter.test.ts`              | ⏳     | Awaiting frontend implementation               |
-| **4.1** | Constructor             | Add WsAdapter to service               | `frontend/src/services/brokerTerminalService.ts`                | ⏳     | Awaiting frontend implementation               |
-| **4.2** | Setup Handlers          | Implement setupWebSocketHandlers       | `frontend/src/services/brokerTerminalService.ts`                | ⏳     | Awaiting frontend implementation               |
-| **4.3** | Update REST             | Remove local updates from REST methods | `frontend/src/services/brokerTerminalService.ts`                | ⏳     | Awaiting frontend implementation               |
-| **4.4** | Integration Tests 🔴    | Write tests (expect failures)          | `frontend/src/services/__tests__/brokerTerminalService.test.ts` | ⏳     | Awaiting frontend implementation               |
-| **5.1** | Order Broadcasting      | Add order broadcast to service         | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog               |
-| **5.2** | Position Broadcasting   | Add position broadcast                 | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog               |
-| **5.3** | Execution Broadcasting  | Add execution broadcast                | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog               |
-| **5.4** | Equity Broadcasting     | Add equity broadcast                   | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog               |
-| **5.5** | Connection Broadcasting | Add connection status broadcast        | `backend/src/trading_api/core/broker_connection.py`             | ⏳     | Out of scope for current backlog               |
-| **5.6** | Verify Tests 🟢         | Run tests (expect success)             | Frontend tests                                                  | ⏳     | Awaiting Phase 5 implementation                |
-| **6.1** | Manual Testing          | Test all scenarios                     | Browser                                                         | ⏳     | Awaiting Phase 5 implementation                |
-| **6.2** | Performance             | Test latency and load                  | Browser + DevTools                                              | ⏳     | Awaiting Phase 5 implementation                |
-| **6.3** | Smoke Tests             | Write E2E smoke tests                  | `smoke-tests/tests/broker-websocket.spec.ts`                    | ⏳     | Awaiting Phase 5 implementation                |
-| **6.4** | Documentation           | Update docs                            | Various README files                                            | ✅     | Topic builder compliance + models architecture |
-| **6.5** | Cleanup                 | Optimize and refactor                  | All code                                                        | ✅     | Code formatted, tests passing                  |
+| Phase   | Step                    | Task                                   | Location                                                        | Status | Notes                                    |
+| ------- | ----------------------- | -------------------------------------- | --------------------------------------------------------------- | ------ | ---------------------------------------- |
+| **1.1** | Backend Models          | Define subscription/update models      | `backend/src/trading_api/models/broker/*.py` (topic-based)      | ✅     | Integrated into existing topic files     |
+| **1.2** | Orders Router           | Create orders WebSocket router         | `backend/src/trading_api/ws/broker.py`                          | ✅     | Consolidated in single broker.py file    |
+| **1.3** | Positions Router        | Create positions WebSocket router      | `backend/src/trading_api/ws/broker.py`                          | ✅     | Consolidated in single broker.py file    |
+| **1.4** | Executions Router       | Create executions WebSocket router     | `backend/src/trading_api/ws/broker.py`                          | ✅     | Consolidated in single broker.py file    |
+| **1.5** | Equity Router           | Create equity WebSocket router         | `backend/src/trading_api/ws/broker.py`                          | ✅     | Consolidated in single broker.py file    |
+| **1.6** | Connection Router       | Create connection WebSocket router     | `backend/src/trading_api/ws/broker.py`                          | ✅     | Consolidated in single broker.py file    |
+| **1.7** | Register Routers        | Generate and include routers in app    | `backend/src/trading_api/main.py`                               | ✅     | Generated via `make generate-ws-routers` |
+| **1.8** | Backend Tests           | Write WebSocket subscription tests     | `backend/tests/test_ws_broker.py`                               | ✅     | 13 tests passing (83/83 total)           |
+| **2.1** | Type Generation         | Generate AsyncAPI types                | Run `make generate-asyncapi-types`                              | ✅     | Enums + 23 interfaces generated          |
+| **2.2** | Mappers                 | Create type mappers                    | `frontend/src/plugins/mappers.ts`                               | ✅     | All broker mappers with strict naming    |
+| **3.1** | Extend WsAdapter        | Add broker clients                     | `frontend/src/plugins/wsAdapter.ts`                             | ✅     | 5 broker clients added with mappers      |
+| **3.2** | Adapter Tests           | Test subscriptions                     | `frontend/src/plugins/__tests__/wsAdapter.test.ts`              | ⏳     | Awaiting frontend implementation         |
+| **4.1** | Constructor             | Add WsAdapter to service               | `frontend/src/services/brokerTerminalService.ts`                | ⏳     | Awaiting frontend implementation         |
+| **4.2** | Setup Handlers          | Implement setupWebSocketHandlers       | `frontend/src/services/brokerTerminalService.ts`                | ⏳     | Awaiting frontend implementation         |
+| **4.3** | Update REST             | Remove local updates from REST methods | `frontend/src/services/brokerTerminalService.ts`                | ⏳     | Awaiting frontend implementation         |
+| **4.4** | Integration Tests 🔴    | Write tests (expect failures)          | `frontend/src/services/__tests__/brokerTerminalService.test.ts` | ⏳     | Awaiting frontend implementation         |
+| **5.1** | Order Broadcasting      | Add order broadcast to service         | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog         |
+| **5.2** | Position Broadcasting   | Add position broadcast                 | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog         |
+| **5.3** | Execution Broadcasting  | Add execution broadcast                | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog         |
+| **5.4** | Equity Broadcasting     | Add equity broadcast                   | `backend/src/trading_api/core/broker_service.py`                | ⏳     | Out of scope for current backlog         |
+| **5.5** | Connection Broadcasting | Add connection status broadcast        | `backend/src/trading_api/core/broker_connection.py`             | ⏳     | Out of scope for current backlog         |
+| **5.6** | Verify Tests 🟢         | Run tests (expect success)             | Frontend tests                                                  | ⏳     | Awaiting Phase 5 implementation          |
+| **6.1** | Manual Testing          | Test all scenarios                     | Browser                                                         | ⏳     | Awaiting Phase 5 implementation          |
+| **6.2** | Performance             | Test latency and load                  | Browser + DevTools                                              | ⏳     | Awaiting Phase 5 implementation          |
+| **6.3** | Smoke Tests             | Write E2E smoke tests                  | `smoke-tests/tests/broker-websocket.spec.ts`                    | ⏳     | Awaiting Phase 5 implementation          |
+| **6.4** | Documentation           | Update docs                            | Various README files                                            | ✅     | Strict naming conventions documented     |
+| **6.5** | Cleanup                 | Optimize and refactor                  | All code                                                        | ✅     | Code formatted, tests passing            |
 
 **Status Legend**:
 
