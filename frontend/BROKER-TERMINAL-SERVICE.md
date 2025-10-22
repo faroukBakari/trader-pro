@@ -61,8 +61,8 @@ The **BrokerTerminalService** is a TypeScript class that implements the TradingV
 │              BrokerTerminalService                              │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │  Client Selection (_getApiAdapter)                        │  │
-│  │  • mock = true  → ApiFallback (mock implementation)      │  │
-│  │  • mock = false → ApiAdapter (real backend)              │  │
+│  │  • brokerMock provided → ApiFallback(brokerMock)         │  │
+│  │  • brokerMock absent   → ApiAdapter (real backend)       │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │  ┌───────────────────────────────────────────────────────────┐  │
 │  │  Core Operations (delegates to ApiInterface)             │  │
@@ -128,9 +128,9 @@ The BrokerTerminalService integrates with TradingView through the `broker_factor
 const widgetOptions: TradingTerminalWidgetOptions = {
   // ... other options
   broker_factory: (host: IBrokerConnectionAdapterHost) => {
-    // Smart client selection via mock flag
-    const useMock = import.meta.env.VITE_USE_MOCK_BROKER !== 'false'
-    return new BrokerTerminalService(host, datafeed, useMock)
+    // Smart client selection via optional BrokerMock instance
+    // Pass undefined or omit third parameter to use real backend
+    return new BrokerTerminalService(host, datafeed)
   },
   broker_config: {
     configFlags: {
@@ -810,9 +810,12 @@ Updates position based on order fill:
 To enable trading features, configure the TradingView widget with broker options:
 
 ```typescript
+// For production/real backend (default)
+const datafeed = new DatafeedService()
+
 const widgetOptions: TradingTerminalWidgetOptions = {
   symbol: 'AAPL',
-  datafeed: new DatafeedService(),
+  datafeed,
   interval: '1D' as ResolutionString,
   container: chartContainer.value,
   library_path: '/trading_terminal/',
@@ -822,7 +825,7 @@ const widgetOptions: TradingTerminalWidgetOptions = {
   debug: false, // General debugging
   debug_broker: 'all', // Broker API debugging (logs all broker calls)
 
-  // Broker integration
+  // Broker integration (real backend)
   broker_factory: (host: IBrokerConnectionAdapterHost) => {
     return new BrokerTerminalService(host, datafeed)
   },
@@ -842,13 +845,30 @@ const widgetOptions: TradingTerminalWidgetOptions = {
 }
 ```
 
+// For testing with mock data
+import { BrokerMock, DatafeedMock } from '@/services'
+
+const datafeedMock = new DatafeedMock()
+const datafeed = new DatafeedService(datafeedMock)
+const brokerMock = new BrokerMock()
+
+const widgetOptions: TradingTerminalWidgetOptions = {
+// ... same options as above
+broker_factory: (host: IBrokerConnectionAdapterHost) => {
+return new BrokerTerminalService(host, datafeed, brokerMock)
+},
+// ... broker_config
+}
+
+````
+
 ### Debug Modes
 
 #### General Debug Mode
 
 ```typescript
 debug: true // Logs widget lifecycle and general events
-```
+````
 
 #### Broker Debug Mode
 
@@ -886,21 +906,28 @@ The BrokerTerminalService is currently tested through:
    - Position updates
    - Connection status changes
 
-### Recommended Testing Expansion
+### Comprehensive Testing (Implemented)
 
-#### Unit Tests (Planned)
+#### Unit Tests with BrokerMock
 
 ```typescript
-// Example unit test structure
+// Actual test structure from brokerTerminalService.spec.ts
+import { BrokerMock } from '../brokerTerminalService'
+
 describe('BrokerTerminalService', () => {
   let broker: BrokerTerminalService
   let mockHost: IBrokerConnectionAdapterHost
   let mockDatafeed: IDatafeedQuotesApi
+  let testBrokerMock: BrokerMock
 
   beforeEach(() => {
+    // Create fresh BrokerMock instance for each test
+    testBrokerMock = new BrokerMock()
     mockHost = createMockHost()
     mockDatafeed = createMockDatafeed()
-    broker = new BrokerTerminalService(mockHost, mockDatafeed)
+
+    // Service uses fallback client with test BrokerMock instance
+    broker = new BrokerTerminalService(mockHost, mockDatafeed, testBrokerMock)
   })
 
   describe('placeOrder', () => {
@@ -914,58 +941,82 @@ describe('BrokerTerminalService', () => {
       }
 
       const result = await broker.placeOrder(preOrder)
-      expect(result.orderId).toMatch(/^ORDER-\d+$/)
+      expect(result.orderId).toMatch(/^ORDER-/)
 
       const orders = await broker.orders()
-      const order = orders.find((o) => o.id === result.orderId)
-      expect(order?.status).toBe(OrderStatus.Working)
+      expect(orders[0].status).toBe(OrderStatus.Working)
+      expect(orders[0].symbol).toBe('AAPL')
     })
 
-    it('should execute order after delay', async () => {
-      vi.useFakeTimers()
-
-      const preOrder: PreOrder = { symbol: 'AAPL', qty: 100 }
-      const result = await broker.placeOrder(preOrder)
-
-      vi.advanceTimersByTime(3000)
+    it('should place multiple orders independently', async () => {
+      await broker.placeOrder({ symbol: 'AAPL', qty: 100 })
+      await broker.placeOrder({ symbol: 'GOOGL', qty: 50 })
 
       const orders = await broker.orders()
-      const order = orders.find((o) => o.id === result.orderId)
-      expect(order?.status).toBe(OrderStatus.Filled)
+      expect(orders.length).toBe(2)
     })
   })
 
   describe('positions', () => {
-    it('should create position on order fill', async () => {
-      // Test position creation logic
+    it('should create position via mocker chain', async () => {
+      await broker.placeOrder({ symbol: 'AAPL', qty: 100 })
+
+      // Wait for mocker chain: order → execution → position
+      await waitForMockerChain()
+
+      const positions = await broker.positions()
+      expect(positions[0].symbol).toBe('AAPL')
     })
 
-    it('should update position on multiple fills', async () => {
-      // Test position consolidation
-    })
+    it('should handle position closing', async () => {
+      // Create position first
+      await broker.placeOrder({ symbol: 'AAPL', qty: 100 })
+      await waitForMockerChain()
 
-    it('should reverse position side on opposite fills', async () => {
-      // Test position reversal
+      // Close position
+      await broker.closePosition('AAPL')
+
+      const orders = await broker.orders()
+      const closingOrder = orders.find((o) => o.id.startsWith('CLOSE-ORDER'))
+      expect(closingOrder).toBeDefined()
     })
   })
 })
+
+// Helper for WebSocket mocker chain
+const waitForMockerChain = async (cycles = 4) => {
+  // WebSocket fallback polls every 100ms
+  await new Promise((resolve) => setTimeout(resolve, cycles * 100 + 50))
+}
 ```
 
-#### Integration Tests (Planned)
+#### Integration Tests
 
 ```typescript
-// Test with actual TradingView widget
-describe('TradingView Integration', () => {
-  it('should display broker status button', () => {
-    // Verify Trading Status button appears
+// DatafeedService tests (datafeedService.spec.ts)
+import { DatafeedMock, DatafeedService } from '../datafeedService'
+
+describe('DatafeedService', () => {
+  let datafeedService: DatafeedService
+  let testDatafeedMock: DatafeedMock
+
+  beforeEach(() => {
+    // Create fresh DatafeedMock instance
+    testDatafeedMock = new DatafeedMock()
+
+    // Use fallback client with test DatafeedMock instance
+    datafeedService = new DatafeedService(testDatafeedMock)
   })
 
-  it('should show account panel with balance', () => {
-    // Verify account summary displays
+  it('should return datafeed configuration', async () => {
+    const config = await onReadyPromise()
+    expect(config.supported_resolutions).toContain('1D')
   })
 
-  it('should enable order placement from chart', () => {
-    // Test order ticket integration
+  it('should generate deterministic mock bars', () => {
+    const bars = testDatafeedMock.getMockedBars()
+    expect(bars.length).toBe(401) // 400 days + today
+    expect(bars[0].time).toBeLessThan(bars[bars.length - 1].time)
   })
 })
 ```
@@ -985,6 +1036,56 @@ make -f project.mk test-smoke
 # Full test suite
 make -f project.mk test-all
 ```
+
+### Test Coverage Summary
+
+#### BrokerTerminalService Tests (`brokerTerminalService.spec.ts`)
+
+✅ **Comprehensive Coverage (28+ tests)**:
+
+- Order preview with detailed sections
+- Order placement (Market, Limit, Stop, StopLimit)
+- Order modification and cancellation
+- Position management via mocker chain
+- Position closing (full/partial)
+- Position bracket editing (SL/TP)
+- Execution tracking
+- Account information
+- Leverage operations
+- Multiple concurrent orders
+- Edge cases and error handling
+
+#### DatafeedService Tests (`datafeedService.spec.ts`)
+
+✅ **Full Coverage (20+ tests)**:
+
+- Configuration loading
+- Symbol search and resolution
+- Historical bars fetching
+- Real-time bar subscriptions
+- Quote data generation
+- WebSocket subscriptions
+- DatafeedMock deterministic data
+
+### Testing Best Practices
+
+The project uses **no external mocking** - services have built-in fallback clients:
+
+```typescript
+// ❌ Traditional mocking (NOT used)
+vi.mock('@/services/apiService')
+
+// ✅ Built-in fallback (actually used)
+const brokerMock = new BrokerMock()
+const broker = new BrokerTerminalService(host, datafeed, brokerMock)
+```
+
+Benefits:
+
+- Tests use real service logic
+- Deterministic mock data
+- No brittle mock setups
+- Runtime flexibility (can switch mock/backend)
 
 ## Future Enhancements
 
@@ -1067,14 +1168,96 @@ make -f project.mk test-all
 ### Architecture Evolution
 
 ```
+
 Current: Mock Broker (Local State)
-   ↓
+↓
 Phase 1: Backend Integration (REST API)
-   ↓
+↓
 Phase 2: Real-Time Streaming (WebSockets)
-   ↓
+↓
 Phase 3: Production Broker (Full Features)
+
 ```
+
+## Known Issues
+
+### AccountId Mismatch: currentAccount() vs WebSocket Subscriptions
+
+**Issue**: `Error: Value is undefined` in TradingView Account Manager rendering
+
+**Root Cause**: The `currentAccount()` method returns a hardcoded `'DEMO-ACCOUNT'` AccountId, but WebSocket subscriptions use a dynamically generated `listenerId` (e.g., `'ACCOUNT-abc123def456'`). This mismatch causes WebSocket updates to be sent with the wrong AccountId, preventing the Account Manager from receiving proper updates.
+
+**Symptoms**:
+
+- Browser console error: `Uncaught (in promise) Error: Value is undefined`
+- Error occurs in `trading-account-manager` during `_render` / `_createAccountManager`
+- Account Manager fails to display balance, equity, orders, or positions
+- WebSocket subscriptions work but updates don't reach the UI
+
+**Code Location**:
+
+```typescript
+// brokerTerminalService.ts - Line ~630
+this.listenerId = `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
+this.setupWebSocketHandlers()  // Uses listenerId for subscriptions
+
+// brokerTerminalService.ts - Line ~878
+currentAccount(): AccountId {
+  return 'DEMO-ACCOUNT' as AccountId  // ❌ Mismatch!
+}
+```
+
+**Why It Happens**:
+
+1. TradingView calls `currentAccount()` to get the AccountId for UI rendering
+2. The service subscribes to WebSocket events using `listenerId` as `accountId`
+3. Backend sends updates with the subscription's `accountId` (listenerId)
+4. TradingView expects updates for `'DEMO-ACCOUNT'` but receives them for `'ACCOUNT-abc123def456'`
+5. Account Manager cannot match the AccountId and shows "Value is undefined"
+
+**Temporary Workaround**:
+
+```typescript
+// Make currentAccount() return the same value as listenerId
+private readonly accountId: AccountId = 'DEMO-ACCOUNT' as AccountId
+
+constructor(...) {
+  // Use consistent AccountId everywhere
+  this.listenerId = this.accountId  // or vice versa
+  this.setupWebSocketHandlers()
+}
+
+currentAccount(): AccountId {
+  return this.accountId
+}
+```
+
+**Proper Solution** (requires backend coordination):
+
+1. Backend should provide the AccountId during authentication
+2. Frontend should fetch AccountId asynchronously during initialization
+3. Store AccountId and use it consistently for:
+   - `currentAccount()` return value
+   - WebSocket subscription `accountId` parameter
+   - All broker API calls
+
+**Constraints**:
+
+- `currentAccount()` must be **synchronous** (TradingView requirement)
+- Cannot `await` backend API call in `currentAccount()`
+- AccountId must be known before broker initialization completes
+
+**Related Files**:
+
+- `frontend/src/services/brokerTerminalService.ts` (lines 630, 878)
+- `frontend/src/plugins/wsAdapter.ts` (WebSocket subscription handlers)
+- `backend/src/trading_api/ws/broker.py` (WebSocket message routing)
+
+**Priority**: High - Blocks Account Manager functionality
+
+**Last Encountered**: October 22, 2025
+
+---
 
 ## References
 
@@ -1110,6 +1293,10 @@ Phase 3: Production Broker (Full Features)
 
 ---
 
-**Maintained by**: Development Team  
-**Review Schedule**: Updated as features are implemented  
+**Maintained by**: Development Team
+**Review Schedule**: Updated as features are implemented
 **Last Review**: October 18, 2025
+
+```
+
+```

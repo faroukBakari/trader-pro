@@ -509,13 +509,13 @@ describe('BrokerTerminalService', () => {
 
       expect(accounts).toBeDefined()
       expect(accounts.length).toBe(1)
-      expect(accounts[0].id).toBe('DEMO-001')
+      expect(accounts[0].id).toBe('DEMO-ACCOUNT')
       expect(accounts[0].name).toBe('Demo Trading Account')
     })
 
     it('should return current account ID', () => {
       const accountId = brokerService.currentAccount()
-      expect(accountId).toBe('DEMO-001')
+      expect(accountId).toBe('DEMO-ACCOUNT')
     })
 
     it('should return account manager info with balance and equity', () => {
@@ -729,7 +729,7 @@ describe('BrokerTerminalService', () => {
     })
 
     it('should provide account information', () => {
-      expect(testBrokerMock.getAccountId()).toBe('DEMO-001')
+      expect(testBrokerMock.getAccountId()).toBe('DEMO-ACCOUNT')
       expect(testBrokerMock.getAccountName()).toBe('Demo Trading Account')
     })
 
