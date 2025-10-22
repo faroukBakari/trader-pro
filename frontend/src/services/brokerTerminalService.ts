@@ -58,7 +58,7 @@ export class BrokerMock {
   protected _orderById = new Map<string, Order>()
   protected _positions = new Map<string, Position>()
   protected _executions: Execution[] = []
-  protected _accountId: AccountId = 'DEMO-001' as AccountId
+  protected _accountId: AccountId = 'DEMO-ACCOUNT' as AccountId // needs to match backend account
   protected _accountName = 'Demo Trading Account'
   protected _equity = 105000
   protected _balance = 100000
@@ -603,8 +603,8 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly _wsFallback?: Partial<WsAdapterType>
 
   // UI state (managed by service, not client)
-  private readonly balance: IWatchedValue<number>
-  private readonly equity: IWatchedValue<number>
+  private balance: IWatchedValue<number>
+  private equity: IWatchedValue<number>
   private readonly startingBalance = 100000
 
   private readonly listenerId: string
@@ -624,9 +624,12 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
       this._wsFallback = new WsFallback(brokerMock)
     }
 
+    // Initialize balance and equity first to ensure they exist before any UI calls
     this.balance = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
     this.equity = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
 
+    // KNOWN ISSUE: listenerId must match currentAccount() return value
+    // See BROKER-TERMINAL-SERVICE.md "Known Issues" section
     this.listenerId = `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
     this.setupWebSocketHandlers()
   }
@@ -874,7 +877,15 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   currentAccount(): AccountId {
-    return 'DEMO-001' as AccountId
+    // KNOWN ISSUE: This returns 'DEMO-ACCOUNT' but listenerId is dynamic (e.g., 'ACCOUNT-abc123')
+    // causing AccountId mismatch between currentAccount() and WebSocket subscriptions.
+    // This breaks Account Manager rendering with "Value is undefined" error.
+    // See BROKER-TERMINAL-SERVICE.md "Known Issues" section for details.
+    //
+    // Must be synchronous (TradingView requirement) - cannot await backend call.
+    // TODO: Fetch AccountId from backend during app initialization, store it,
+    // and use the same value here and in WebSocket subscriptions.
+    return 'DEMO-ACCOUNT' as AccountId
   }
 
   connectionStatus(): ConnectionStatusType {

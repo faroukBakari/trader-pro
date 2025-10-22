@@ -137,7 +137,8 @@ onMounted(() => {
       // Trading functionality
       ...(props.enableTrading && {
         broker_factory: (host: IBrokerConnectionAdapterHost) => {
-          return new BrokerTerminalService(host, datafeed)
+          const brokerService = new BrokerTerminalService(host, datafeed)
+          return brokerService
         },
         broker_config: {
           configFlags: {
