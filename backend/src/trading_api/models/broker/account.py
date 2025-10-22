@@ -2,8 +2,6 @@
 Broker account models matching TradingView broker API types
 """
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -28,9 +26,9 @@ class EquityData(BaseModel):
     """
 
     equity: float = Field(..., description="Total account equity")
-    balance: Optional[float] = Field(None, description="Account balance")
-    unrealizedPL: Optional[float] = Field(None, description="Unrealized profit/loss")
-    realizedPL: Optional[float] = Field(None, description="Realized profit/loss")
+    balance: float = Field(..., description="Account balance")
+    unrealizedPL: float = Field(..., description="Unrealized profit/loss")
+    realizedPL: float = Field(..., description="Realized profit/loss")
 
 
 class EquitySubscriptionRequest(BaseModel):

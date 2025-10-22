@@ -6,6 +6,20 @@ This module provides mock broker functionality for development:
 - Position tracking
 - Execution simulation
 - Account information
+- FIFO event pipes for real-time updates
+
+Event Pipes:
+    The service includes asyncio.Queue instances for each business object type,
+    enabling event-driven architecture for broadcasting updates to WebSocket clients
+    or other consumers. These FIFO pipes ensure ordered delivery of updates:
+
+    - bars_queue: Market bar/OHLC updates
+    - quotes_queue: Real-time quote updates
+    - orders_queue: Order status changes
+    - positions_queue: Position updates
+    - executions_queue: Trade execution events
+    - equity_queue: Account equity/balance updates
+    - broker_connection_queue: Broker connection status changes
 
 Note: This is a mock implementation. In production, this would integrate
 with a real broker API.
@@ -19,6 +33,8 @@ from typing import Any, Dict, List, Optional
 from trading_api.models.broker import (
     AccountMetainfo,
     Brackets,
+    BrokerConnectionStatus,
+    EquityData,
     Execution,
     LeverageInfo,
     LeverageInfoParams,
@@ -39,7 +55,33 @@ from trading_api.models.broker import (
 
 
 class BrokerService:
-    """Mock broker service for development"""
+    """
+    Mock broker service for development
+
+    Provides broker operations and maintains FIFO event pipes for real-time updates.
+
+    Attributes:
+        _orders: Dictionary of active orders keyed by order ID
+        _positions: Dictionary of open positions keyed by position ID
+        _executions: List of all trade executions
+        _order_counter: Counter for generating unique order IDs
+        _account_id: Demo account identifier
+        _account_name: Demo account display name
+        _leverage_settings: Per-symbol leverage settings
+
+    Event Pipes (FIFO Queues):
+        _bars_queue: Queue[Bar] - Market bar updates
+        _quotes_queue: Queue[QuoteData] - Real-time quote updates
+        _orders_queue: Queue[PlacedOrder] - Order status changes
+        _positions_queue: Queue[Position] - Position updates
+        _executions_queue: Queue[Execution] - Trade execution events
+        _equity_queue: Queue[EquityData] - Account equity/balance updates
+        _broker_connection_queue: Queue[BrokerConnectionStatus] - Connection status changes
+
+    The event pipes enable decoupled, async broadcasting of business object updates
+    to WebSocket clients, background tasks, or other consumers. Updates are not yet
+    automatically enqueued; integration will be added in future work.
+    """
 
     def __init__(self) -> None:
         self._orders: Dict[str, PlacedOrder] = {}
@@ -48,8 +90,26 @@ class BrokerService:
         self._order_counter = 1
         self._account_id = "DEMO-ACCOUNT"
         self._account_name = "Demo Trading Account"
-        # Store leverage settings per symbol
         self._leverage_settings: Dict[str, float] = {}
+        self.unrealizedPL: Dict[str, float] = {}
+        self.initial_balance = 100000.0
+        self._equity: EquityData = EquityData(
+            equity=0.0,
+            balance=100000.0,
+            unrealizedPL=0.0,
+            realizedPL=0.0,
+        )
+
+        # FIFO event pipes for business object updates
+        # These queues enable async event-driven architecture for broadcasting
+        # updates to WebSocket clients or other consumers
+        self._orders_queue: asyncio.Queue[PlacedOrder] = asyncio.Queue()
+        self._positions_queue: asyncio.Queue[Position] = asyncio.Queue()
+        self._executions_queue: asyncio.Queue[Execution] = asyncio.Queue()
+        self._equity_queue: asyncio.Queue[EquityData] = asyncio.Queue()
+        self._broker_connection_queue: asyncio.Queue[
+            BrokerConnectionStatus
+        ] = asyncio.Queue()
 
     # ================================ GETTERS =================================#
 
@@ -537,38 +597,29 @@ class BrokerService:
 
         return LeverageSetResult(leverage=params.leverage)
 
+    # ========================== EVENT PIPE METHODS ===========================
+
+    async def executions_updates(self) -> Execution:
+        update = await self._executions_queue.get()
+        return update
+
+    async def orders_updates(self) -> PlacedOrder:
+        update = await self._orders_queue.get()
+        return update
+
+    async def positions_updates(self) -> Position:
+        update = await self._positions_queue.get()
+        return update
+
+    async def equity_updates(self) -> EquityData:
+        update = await self._equity_queue.get()
+        return update
+
+    async def broker_connection_updates(self) -> BrokerConnectionStatus:
+        update = await self._broker_connection_queue.get()
+        return update
+
     # ================================ SIMULATION =================================
-    async def _simulate_execution(self, order_id: str) -> None:
-        """
-        Simulate order execution after a small delay
-
-        Args:
-            order_id: ID of the order to execute
-        """
-        await asyncio.sleep(0.2)
-
-        order = self._orders.get(order_id)
-        if not order or order.status != OrderStatus.WORKING:
-            return
-
-        execution_price = self._get_execution_price(order)
-
-        execution = Execution(
-            symbol=order.symbol,
-            price=execution_price,
-            qty=order.qty,
-            side=order.side,
-            time=int(time.time() * 1000),
-        )
-        self._executions.append(execution)
-
-        order.status = OrderStatus.FILLED
-        order.filledQty = order.qty
-        order.avgPrice = execution_price
-        order.updateTime = execution.time
-
-        self._update_position(execution)
-
     def _get_execution_price(self, order: PlacedOrder) -> float:
         """
         Determine execution price based on order type
@@ -592,6 +643,74 @@ class BrokerService:
                 return order.stopPrice
         return 100.0
 
+    async def _simulate_execution(self, order_id: str) -> None:
+        """
+        Simulate order execution after a small delay
+
+        Args:
+            order_id: ID of the order to execute
+        """
+        await asyncio.sleep(0.2)
+
+        order = self._orders.get(order_id)
+        if not order or order.status != OrderStatus.WORKING:
+            return
+
+        execution_price = self._get_execution_price(order)
+
+        execution = Execution(
+            symbol=order.symbol,
+            price=execution_price,
+            qty=order.qty,
+            side=order.side,
+            time=int(time.time() * 1000),
+        )
+        self._executions.append(execution)
+        self._executions_queue.put_nowait(execution)
+
+        order.status = OrderStatus.FILLED
+        order.filledQty = order.qty
+        order.avgPrice = execution_price
+        order.updateTime = execution.time
+
+        self._update_equity(execution)
+
+    def _update_equity(self, execution: Execution) -> None:
+        """
+        Update equity after execution
+
+        Args:
+            execution: Execution that affects equity
+        """
+        # Calculate execution value
+        current_price = execution.price
+        current_position = self._positions.get(execution.symbol)
+        if current_position is not None and current_position.qty > 0:
+            self.unrealizedPL[execution.symbol] = (
+                (current_price - current_position.avgPrice)
+                * current_position.qty
+                * current_position.side
+            )
+            self._equity.unrealizedPL = sum(self.unrealizedPL.values())
+            if execution.side != current_position.side:
+                self._equity.realizedPL += (
+                    (current_price - current_position.avgPrice)
+                    * execution.qty
+                    * current_position.side
+                )
+
+        # Update balance (initial balance + realized P/L)
+        self._equity.balance = self.initial_balance + self._equity.realizedPL
+
+        # Update equity (balance + unrealized P/L)
+        self._equity.equity = self._equity.balance + self._equity.unrealizedPL
+
+        # Enqueue equity update event
+        self._equity_queue.put_nowait(self._equity)
+
+        # Update position
+        self._update_position(execution)
+
     def _update_position(self, execution: Execution) -> None:
         """
         Update position from execution
@@ -599,35 +718,33 @@ class BrokerService:
         Args:
             execution: Execution to update position from
         """
-        position_id = f"{execution.symbol}-POS"
-        existing = self._positions.get(position_id)
+        existing = self._positions.get(execution.symbol)
 
         if existing:
-            total_qty = existing.qty
-            total_cost = existing.avgPrice * existing.qty
+            total_qty = abs(
+                (existing.qty * existing.side) + (execution.qty * execution.side)
+            )
+            total_cost = abs(
+                (existing.qty * existing.avgPrice * existing.side)
+                + (execution.qty * execution.price * execution.side)
+            )
 
-            if execution.side == existing.side:
-                total_qty += execution.qty
-                total_cost += execution.price * execution.qty
+            total_side = (
+                existing.side if existing.qty > execution.qty else execution.side
+            )
+
+            if total_qty > 0:
+                existing.side = total_side
                 existing.qty = total_qty
                 existing.avgPrice = total_cost / total_qty
             else:
-                if execution.qty >= existing.qty:
-                    net_qty = execution.qty - existing.qty
-                    if net_qty > 0:
-                        existing.qty = net_qty
-                        existing.side = execution.side
-                        existing.avgPrice = execution.price
-                    else:
-                        del self._positions[position_id]
-                        return
-                else:
-                    existing.qty -= execution.qty
+                del self._positions[execution.symbol]
         else:
-            self._positions[position_id] = Position(
-                id=position_id,
+            existing = self._positions[execution.symbol] = Position(
+                id=execution.symbol,
                 symbol=execution.symbol,
                 qty=execution.qty,
                 side=execution.side,
                 avgPrice=execution.price,
             )
+        self._positions_queue.put_nowait(existing)
