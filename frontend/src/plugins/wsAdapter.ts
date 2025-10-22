@@ -89,7 +89,19 @@ export class WsAdapter implements WsAdapterType {
   }
 }
 
+export interface wsMocker {
+  barsMocker?: () => Bar | undefined,
+  quotesMocker?: () => QuoteData | undefined,
+  ordersMocker?: () => PlacedOrder | undefined,
+  positionsMocker?: () => Position | undefined,
+  executionsMocker?: () => Execution | undefined,
+  equityMocker?: () => EquityData | undefined,
+  brokerConnectionMocker?: () => BrokerConnectionStatus | undefined,
+}
+
 export class WsFallback implements Partial<WsAdapterType> {
+
+  private _wsMocker: wsMocker
 
   bars?: WebSocketInterface<BarsSubscriptionRequest, Bar>
   quotes?: WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>
@@ -99,29 +111,16 @@ export class WsFallback implements Partial<WsAdapterType> {
   equity?: WebSocketInterface<EquitySubscriptionRequest, EquityData>
   brokerConnection?: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
 
-  constructor({
-    barsMocker,
-    quotesMocker,
-    ordersMocker,
-    positionsMocker,
-    executionsMocker,
-    equityMocker,
-    brokerConnectionMocker,
-  }: {
-    barsMocker?: () => Bar,
-    quotesMocker?: () => QuoteData,
-    ordersMocker?: () => PlacedOrder,
-    positionsMocker?: () => Position,
-    executionsMocker?: () => Execution,
-    equityMocker?: () => EquityData,
-    brokerConnectionMocker?: () => BrokerConnectionStatus,
-  } = {}) {
-    if (barsMocker) this.bars = new WebSocketFallback<BarsSubscriptionRequest, Bar>(barsMocker)
-    if (quotesMocker) this.quotes = new WebSocketFallback<QuoteDataSubscriptionRequest, QuoteData>(quotesMocker)
-    if (ordersMocker) this.orders = new WebSocketFallback<OrderSubscriptionRequest, PlacedOrder>(ordersMocker)
-    if (positionsMocker) this.positions = new WebSocketFallback<PositionSubscriptionRequest, Position>(positionsMocker)
-    if (executionsMocker) this.executions = new WebSocketFallback<ExecutionSubscriptionRequest, Execution>(executionsMocker)
-    if (equityMocker) this.equity = new WebSocketFallback<EquitySubscriptionRequest, EquityData>(equityMocker)
-    if (brokerConnectionMocker) this.brokerConnection = new WebSocketFallback<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>(brokerConnectionMocker)
+  constructor(wsMocker: wsMocker = {}) {
+
+    this._wsMocker = wsMocker
+
+    if (this._wsMocker.barsMocker) this.bars = new WebSocketFallback<BarsSubscriptionRequest, Bar>(this._wsMocker.barsMocker)
+    if (this._wsMocker.quotesMocker) this.quotes = new WebSocketFallback<QuoteDataSubscriptionRequest, QuoteData>(this._wsMocker.quotesMocker)
+    if (this._wsMocker.ordersMocker) this.orders = new WebSocketFallback<OrderSubscriptionRequest, PlacedOrder>(this._wsMocker.ordersMocker)
+    if (this._wsMocker.positionsMocker) this.positions = new WebSocketFallback<PositionSubscriptionRequest, Position>(this._wsMocker.positionsMocker)
+    if (this._wsMocker.executionsMocker) this.executions = new WebSocketFallback<ExecutionSubscriptionRequest, Execution>(this._wsMocker.executionsMocker)
+    if (this._wsMocker.equityMocker) this.equity = new WebSocketFallback<EquitySubscriptionRequest, EquityData>(this._wsMocker.equityMocker)
+    if (this._wsMocker.brokerConnectionMocker) this.brokerConnection = new WebSocketFallback<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>(this._wsMocker.brokerConnectionMocker)
   }
 }

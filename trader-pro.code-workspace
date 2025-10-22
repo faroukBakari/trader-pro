@@ -110,9 +110,9 @@
     },
 
     // Editor associations (default preview for markdown)
-    "workbench.editorAssociations": {
-      "*.md": "vscode.markdown.preview.editor"
-    },
+    // "workbench.editorAssociations": {
+    //   "*.md": "vscode.markdown.preview.editor"
+    // },
 
     // Terminal
     "terminal.integrated.cwd": ".",
