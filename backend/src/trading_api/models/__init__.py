@@ -11,12 +11,19 @@ organized by functionality:
 # Import from broker domain
 from .broker import (
     AccountMetainfo,
+    BrokerConnectionStatus,
+    BrokerConnectionSubscriptionRequest,
+    EquityData,
+    EquitySubscriptionRequest,
     Execution,
+    ExecutionSubscriptionRequest,
     OrderStatus,
+    OrderSubscriptionRequest,
     OrderType,
     PlacedOrder,
     PlaceOrderResult,
     Position,
+    PositionSubscriptionRequest,
     PreOrder,
     Side,
     StopType,
@@ -82,4 +89,12 @@ __all__ = [
     "Position",
     "Execution",
     "AccountMetainfo",
+    # Broker WebSocket models
+    "OrderSubscriptionRequest",
+    "PositionSubscriptionRequest",
+    "ExecutionSubscriptionRequest",
+    "EquityData",
+    "EquitySubscriptionRequest",
+    "BrokerConnectionStatus",
+    "BrokerConnectionSubscriptionRequest",
 ]

@@ -24,3 +24,12 @@ class Position(BaseModel):
     )
 
     model_config = {"use_enum_values": True}
+
+
+# WebSocket models
+
+
+class PositionSubscriptionRequest(BaseModel):
+    """WebSocket subscription request for position updates"""
+
+    accountId: str = Field(..., description="Account ID to subscribe to")

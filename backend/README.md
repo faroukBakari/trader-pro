@@ -14,6 +14,7 @@ FastAPI backend that powers the Trading Pro platform. It exposes a RESTful API f
 ## Documentation
 
 - `ARCHITECTURE.md` – end-to-end system architecture
+  - **Backend Models Architecture** section – topic-based organization principles for Pydantic models
 - `docs/versioning.md` – API versioning strategy and lifecycle
 - `docs/websockets.md` – WebSocket real-time data streaming guide
 - `backend/README.md` (this file) – backend setup and reference

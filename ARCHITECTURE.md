@@ -1,7 +1,7 @@
 # Trading Pro - Architecture Documentation
 
-**Version**: 2.0.0  
-**Last Updated**: October 21, 2025  
+**Version**: 2.0.0
+**Last Updated**: October 21, 2025
 **Status**: ✅ Production Ready
 
 ## Overview
@@ -86,25 +86,208 @@ src/trading_api/
 │   ├── health.py        # Health checks
 │   └── versions.py      # API versioning
 ├── ws/                  # WebSocket operations
-│   └── datafeed.py      # Real-time bar data (subscribe/unsubscribe)
+│   ├── broker.py        # Broker WebSocket routers (orders, positions, executions, equity, connection)
+│   └── datafeed.py      # Market data WebSocket routers (bars, quotes)
 ├── core/                # Business logic
 │   ├── broker_service.py      # Broker operations
 │   ├── datafeed_service.py    # Market data logic
 │   ├── bar_broadcaster.py     # Background broadcasting
 │   └── config.py              # Configuration models
-├── models/              # Pydantic models
+├── models/              # Pydantic models (topic-based organization)
 │   ├── common.py        # Shared types (BaseApiResponse, etc.)
-│   ├── broker/          # Broker models (orders, positions)
-│   └── market/          # Market data models (bars, quotes, symbols)
+│   ├── broker/          # Broker business domain models
+│   │   ├── orders.py       # Order models (REST + WebSocket)
+│   │   ├── positions.py    # Position models (REST + WebSocket)
+│   │   ├── executions.py   # Execution models (REST + WebSocket)
+│   │   ├── account.py      # Account/equity models (REST + WebSocket)
+│   │   ├── connection.py   # Connection status models (WebSocket)
+│   │   └── leverage.py     # Leverage models (REST)
+│   └── market/          # Market data business domain models
+│       ├── bars.py         # Bar/OHLC models (REST + WebSocket)
+│       ├── quotes.py       # Quote models (REST + WebSocket)
+│       ├── instruments.py  # Symbol/instrument models (REST)
+│       ├── search.py       # Search models (REST)
+│       └── configuration.py # Datafeed config models (REST)
 └── plugins/
-    └── fastws_adapter.py  # FastWS integration
+    └── fastws_adapter.py  # FastWS integration adapter
 
 tests/
 ├── test_api_broker.py   # Broker API tests
 ├── test_api_health.py   # Health endpoint tests
-├── test_ws_datafeed.py  # WebSocket tests
+├── test_ws_broker.py    # Broker WebSocket tests
+├── test_ws_datafeed.py  # Datafeed WebSocket tests
 └── test_datafeed_broadcaster.py  # Broadcaster tests
 ```
+
+### Backend Models Architecture
+
+**Organizational Principle**: Models are grouped by **business concepts/domains**, not by technical layers or API types.
+
+#### Topic-Based Model Organization
+
+The backend follows a **domain-driven design** approach where models are organized around business concepts (topics) rather than technical API types:
+
+```
+models/
+├── common.py           # Cross-cutting shared models
+├── broker/             # Broker business domain
+│   ├── orders.py       # Everything related to orders (REST + WS)
+│   ├── positions.py    # Everything related to positions (REST + WS)
+│   ├── executions.py   # Everything related to executions (REST + WS)
+│   ├── account.py      # Everything related to accounts (REST + WS)
+│   ├── connection.py   # Everything related to broker connections (WS)
+│   └── leverage.py     # Everything related to leverage (REST)
+└── market/             # Market data business domain
+    ├── bars.py         # Everything related to bars/OHLC (REST + WS)
+    ├── quotes.py       # Everything related to quotes (REST + WS)
+    ├── instruments.py  # Everything related to instruments/symbols (REST)
+    ├── search.py       # Everything related to search (REST)
+    └── configuration.py # Everything related to datafeed config (REST)
+```
+
+#### Design Principles
+
+1. **Business Concept Grouping**
+
+   - Each file represents a **single business concept** (orders, positions, bars, etc.)
+   - All model variations for that concept live in the same file
+   - Both REST and WebSocket models coexist in topic files
+
+2. **Model Type Coexistence**
+
+   - REST request/response models: `PreOrder`, `PlacedOrder`
+   - WebSocket subscription models: `OrderSubscriptionRequest`
+   - WebSocket update models: Use the same response models as REST
+   - All related to the same business concept stay together
+
+3. **No Technical Segregation**
+
+   - ❌ **AVOID**: Separating by API type (`rest_models/`, `ws_models/`)
+   - ❌ **AVOID**: Separating by operation type (`requests/`, `responses/`)
+   - ✅ **PREFER**: One topic file contains all model types for that domain
+
+4. **Domain Separation**
+   - Top-level separation by business domain (`broker/`, `market/`)
+   - Reflects the two main API areas: trading operations vs market data
+   - Aligns with TradingView API structure (broker API vs datafeed API)
+
+#### Example: orders.py Structure
+
+```python
+# models/broker/orders.py
+
+# Enumerations (shared across REST + WebSocket)
+class OrderStatus(IntEnum): ...
+class OrderType(IntEnum): ...
+class Side(IntEnum): ...
+
+# REST Models
+class PreOrder(BaseModel):
+    """Order request from client (REST API input)"""
+    symbol: str
+    type: OrderType
+    # ...
+
+class PlacedOrder(BaseModel):
+    """Complete order with status (REST API output + WebSocket update)"""
+    id: str
+    symbol: str
+    status: OrderStatus
+    # ...
+
+# WebSocket Models
+class OrderSubscriptionRequest(BaseModel):
+    """WebSocket subscription parameters for order updates"""
+    accountId: str
+```
+
+**Key Insight**: `PlacedOrder` is used in both:
+
+- REST API responses (`GET /api/v1/broker/orders`)
+- WebSocket update messages (`orders.update`)
+
+This eliminates duplication and ensures consistency across API types.
+
+#### Benefits of Topic-Based Organization
+
+✅ **Single Source of Truth**: One place for all order-related models
+✅ **Reduced Duplication**: Shared models between REST and WebSocket
+✅ **Easier Maintenance**: Changes to business logic happen in one file
+✅ **Better Discoverability**: Developers find all related models together
+✅ **Domain Alignment**: Matches business concepts, not technical infrastructure
+✅ **Type Reusability**: Same `PlacedOrder` model for REST responses and WS updates
+✅ **Enum Sharing**: Enumerations (`OrderStatus`, `OrderType`) shared across all operations
+
+#### Anti-Patterns to Avoid
+
+❌ **Technical Layer Separation**:
+
+```
+models/
+├── rest/
+│   ├── orders.py
+│   └── positions.py
+└── websocket/
+    ├── orders.py       # Duplication!
+    └── positions.py    # Duplication!
+```
+
+❌ **Operation Type Separation**:
+
+```
+models/
+├── requests/
+│   ├── order_request.py
+│   └── subscription_request.py
+└── responses/
+    ├── order_response.py
+    └── subscription_response.py
+```
+
+✅ **Business Topic Organization** (Current):
+
+```
+models/
+├── broker/
+│   ├── orders.py       # PreOrder, PlacedOrder, OrderSubscriptionRequest
+│   └── positions.py    # Position, PositionSubscriptionRequest
+└── market/
+    └── bars.py         # Bar, BarsSubscriptionRequest
+```
+
+#### Integration with WebSocket Routers
+
+WebSocket routers import models from their corresponding topic files:
+
+```python
+# ws/broker.py
+from trading_api.models.broker.orders import OrderSubscriptionRequest, PlacedOrder
+from trading_api.models.broker.positions import PositionSubscriptionRequest, Position
+
+if TYPE_CHECKING:
+    OrderWsRouter: TypeAlias = WsRouter[OrderSubscriptionRequest, PlacedOrder]
+    PositionWsRouter: TypeAlias = WsRouter[PositionSubscriptionRequest, Position]
+```
+
+This creates a clean flow:
+
+1. **Business concept** defines all related models in one file
+2. **Router** imports subscription request + update model from the same topic file
+3. **Type safety** ensured across REST and WebSocket operations
+
+#### Guidelines for New Models
+
+When adding new models:
+
+1. **Identify the business concept** (order, position, bar, quote, etc.)
+2. **Locate the appropriate topic file** (`broker/orders.py`, `market/bars.py`, etc.)
+3. **Add all model types** to that single file (request, response, subscription)
+4. **Share enumerations and common types** across REST and WebSocket
+5. **Export from topic `__init__.py`** to maintain clean imports
+6. **Update domain `__init__.py`** (`broker/__init__.py`, `market/__init__.py`)
+7. **Export from main models** (`models/__init__.py`) for external access
+
+**Never** create separate files for WebSocket vs REST models of the same business concept.
 
 ### Frontend Structure
 
@@ -217,7 +400,7 @@ Frontend → Generated Client → ApiAdapter → FastAPI Router
 
 ## API Versioning
 
-**Current**: `/api/v1/` (Stable)  
+**Current**: `/api/v1/` (Stable)
 **Planned**: `/api/v2/` (Future breaking changes)
 
 **Strategy**:
@@ -348,18 +531,18 @@ export function mapPreOrder(order: PreOrder): PreOrder_Backend {
 
 ### Benefits
 
-✅ **Type Safety**: Compile-time validation of transformations  
-✅ **Reusability**: Single mapper for REST + WebSocket  
-✅ **Maintainability**: Centralized transformation logic  
-✅ **Backend Isolation**: Backend types confined to mapper layer  
+✅ **Type Safety**: Compile-time validation of transformations
+✅ **Reusability**: Single mapper for REST + WebSocket
+✅ **Maintainability**: Centralized transformation logic
+✅ **Backend Isolation**: Backend types confined to mapper layer
 ✅ **Runtime Validation**: Handles enum conversions and null handling
 
 ## Real-Time Architecture
 
 ### WebSocket Implementation
 
-**Endpoint**: `ws://localhost:8000/api/v1/ws`  
-**Framework**: FastWS 0.1.7  
+**Endpoint**: `ws://localhost:8000/api/v1/ws`
+**Framework**: FastWS 0.1.7
 **Documentation**: AsyncAPI at `/api/v1/ws/asyncapi`
 
 > ⚠️ **IMPORTANT**: All WebSocket routers are generated using code generation from a generic template. When implementing WebSocket features, always follow the router generation mechanism documented in [`backend/src/trading_api/ws/WS-ROUTER-GENERATION.md`](backend/src/trading_api/ws/WS-ROUTER-GENERATION.md). This ensures type safety, consistency, and passes all quality checks.
@@ -421,14 +604,31 @@ export class WsAdapter implements WsAdapterType {
 
 ### Topic Format
 
-`bars:{SYMBOL}:{RESOLUTION}` (e.g., `bars:AAPL:1`, `bars:GOOGL:D`)
+**CRITICAL**: Topics use **JSON-serialized parameters** with sorted keys, not simple string concatenation.
+
+```
+{route}:{JSON-serialized-params}
+```
+
+**Examples**:
+
+- `bars:{"resolution":"1","symbol":"AAPL"}` - Apple 1-minute bars
+- `orders:{"accountId":"TEST-001"}` - Orders for account TEST-001
+- `executions:{"accountId":"TEST-001","symbol":"AAPL"}` - AAPL executions for account
+
+**⚠️ Topic Builder Compliance**: The topic builder algorithm MUST be **identical** in backend (Python) and frontend (TypeScript). See:
+
+- Backend: `backend/src/trading_api/ws/router_interface.py` - `buildTopicParams()`
+- Frontend: `frontend/src/plugins/wsClientBase.ts` - `buildTopicParams()`
+- Documentation: `backend/docs/WEBSOCKETS.md` and `docs/WEBSOCKET-CLIENTS.md`
 
 **Features**:
 
-- Multi-symbol subscriptions per client
-- Topic-based filtering
-- Broadcast only to subscribers
+- Multi-symbol/multi-account subscriptions per client
+- Topic-based filtering with complex parameters
+- Broadcast only to subscribers with matching topics
 - Automatic cleanup on disconnect
+- Type-safe parameter serialization
 
 ### Connection Management
 
@@ -611,15 +811,15 @@ make -f project.mk dev-fullstack  # All-in-one development
 
 ## Success Metrics
 
-✅ **Independent Development** - Parallel team workflows  
-✅ **Type Safety** - End-to-end type checking  
-✅ **Real-Time Ready** - WebSocket infrastructure complete  
-✅ **Test-Driven** - Comprehensive testing at all levels  
-✅ **DevOps Friendly** - Automated CI/CD pipelines  
-✅ **Developer Experience** - Zero-config setup with intelligent fallbacks  
+✅ **Independent Development** - Parallel team workflows
+✅ **Type Safety** - End-to-end type checking
+✅ **Real-Time Ready** - WebSocket infrastructure complete
+✅ **Test-Driven** - Comprehensive testing at all levels
+✅ **DevOps Friendly** - Automated CI/CD pipelines
+✅ **Developer Experience** - Zero-config setup with intelligent fallbacks
 ✅ **Production Ready** - Scalable architecture for deployment
 
 ---
 
-**Maintained by**: Development Team  
+**Maintained by**: Development Team
 **Review Schedule**: Quarterly architecture reviews

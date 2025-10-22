@@ -142,3 +142,12 @@ class OrderPreviewResult(BaseModel):
     errors: Optional[list[str]] = Field(None, description="Error messages")
 
     model_config = {"use_enum_values": True}
+
+
+# WebSocket models
+
+
+class OrderSubscriptionRequest(BaseModel):
+    """WebSocket subscription request for order updates"""
+
+    accountId: str = Field(..., description="Account ID to subscribe to")

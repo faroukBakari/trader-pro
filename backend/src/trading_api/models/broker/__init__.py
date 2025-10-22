@@ -2,16 +2,18 @@
 Trading API broker models package
 
 This package contains Pydantic models for broker operations:
-- Orders: PreOrder, PlacedOrder, OrderStatus, OrderType
-- Positions: Position, Side
-- Executions: Execution
-- Account: AccountMetainfo, PlaceOrderResult
+- Orders: PreOrder, PlacedOrder, OrderStatus, OrderType, OrderSubscriptionRequest
+- Positions: Position, Side, PositionSubscriptionRequest
+- Executions: Execution, ExecutionSubscriptionRequest
+- Account: AccountMetainfo, PlaceOrderResult, EquityData, EquitySubscriptionRequest
 - Leverage: LeverageInfo, LeverageSetParams, LeverageSetResult, LeveragePreviewResult
 - Brackets: Brackets
+- Connection: BrokerConnectionStatus, BrokerConnectionSubscriptionRequest
 """
 
-from .account import AccountMetainfo
-from .executions import Execution
+from .account import AccountMetainfo, EquityData, EquitySubscriptionRequest
+from .connection import BrokerConnectionStatus, BrokerConnectionSubscriptionRequest
+from .executions import Execution, ExecutionSubscriptionRequest
 from .leverage import (
     Brackets,
     LeverageInfo,
@@ -25,6 +27,7 @@ from .orders import (
     OrderPreviewSection,
     OrderPreviewSectionRow,
     OrderStatus,
+    OrderSubscriptionRequest,
     OrderType,
     PlacedOrder,
     PlaceOrderResult,
@@ -32,7 +35,7 @@ from .orders import (
     Side,
     StopType,
 )
-from .positions import Position
+from .positions import Position, PositionSubscriptionRequest
 
 __all__ = [
     # Enums
@@ -60,4 +63,12 @@ __all__ = [
     "LeverageSetParams",
     "LeverageSetResult",
     "LeveragePreviewResult",
+    # WebSocket models
+    "OrderSubscriptionRequest",
+    "PositionSubscriptionRequest",
+    "ExecutionSubscriptionRequest",
+    "EquitySubscriptionRequest",
+    "BrokerConnectionSubscriptionRequest",
+    "EquityData",
+    "BrokerConnectionStatus",
 ]

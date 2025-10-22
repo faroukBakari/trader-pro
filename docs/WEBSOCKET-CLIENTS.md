@@ -6,6 +6,152 @@
 
 WebSocket types are automatically generated from the backend AsyncAPI specification. The frontend uses a **centralized adapter pattern** with type-safe mappers for real-time data streaming.
 
+## ⚠️ CRITICAL: Topic Builder Compliance
+
+**MUST BE SHARED ACROSS BACKEND AND FRONTEND**
+
+The topic builder algorithm is the **critical contract** between backend and frontend. Both implementations **MUST** produce identical topic strings for the same subscription parameters.
+
+### Topic Format
+
+```
+{route}:{JSON-serialized-params}
+```
+
+**Examples**:
+
+- `bars:{"resolution":"1","symbol":"AAPL"}` - Apple 1-minute bars
+- `orders:{"accountId":"TEST-001"}` - Orders for account TEST-001
+- `executions:{"accountId":"TEST-001","symbol":""}` - All executions for account
+- `executions:{"accountId":"TEST-001","symbol":"AAPL"}` - AAPL executions only
+
+### Algorithm Requirements
+
+**BOTH backend (Python) and frontend (TypeScript) MUST**:
+
+1. **Sort object keys alphabetically** before serialization
+2. **Use compact JSON format** with separators `(",", ":")` - no spaces
+3. **Handle nested objects recursively** with sorted keys at all levels
+4. **Handle arrays** by recursively processing each element
+5. **Handle null/undefined** by converting to empty string `""`
+6. **Use consistent casing** for parameter names (match Pydantic model)
+
+### Implementation Contract
+
+#### Backend (Python)
+
+```python
+# backend/src/trading_api/ws/router_interface.py
+
+def buildTopicParams(obj: Any) -> str:
+    """
+    JSON stringify with sorted object keys for consistent serialization.
+    Handles nested objects and arrays recursively.
+    """
+    def sort_recursive(item: Any) -> Any:
+        if isinstance(item, dict):
+            return {k: sort_recursive(v) for k, v in sorted(item.items())}
+        elif isinstance(item, list):
+            return [sort_recursive(element) for element in item]
+        elif item is None:
+            return ""
+        else:
+            return item
+
+    sorted_obj = sort_recursive(obj)
+    return json.dumps(sorted_obj, separators=(",", ":"))
+
+class WsRouterInterface(OperationRouter, WsRouterProto):
+    def topic_builder(self, params: BaseModel) -> str:
+        return f"{self.route}:{buildTopicParams(params.model_dump())}"
+```
+
+#### Frontend (TypeScript)
+
+```typescript
+// frontend/src/plugins/wsClientBase.ts
+
+function buildTopicParams(obj: unknown): string {
+  if (obj === null || obj === undefined) {
+    return "";
+  }
+
+  if (typeof obj !== "object") {
+    return JSON.stringify(obj);
+  }
+
+  if (Array.isArray(obj)) {
+    return `[${obj.map(buildTopicParams).join(",")}]`;
+  }
+
+  const objRecord = obj as Record<string, unknown>;
+  const sortedKeys = Object.keys(objRecord).sort();
+  const pairs = sortedKeys.map(
+    (key) => `${JSON.stringify(key)}:${buildTopicParams(objRecord[key])}`
+  );
+  return `{${pairs.join(",")}}`;
+}
+
+// Usage in WebSocketClient
+const topic = `${this.wsRoute}:${buildTopicParams(subscriptionParams)}`;
+```
+
+### Critical Rules
+
+✅ **DO**:
+
+- Always sort object keys alphabetically
+- Use compact JSON (no whitespace)
+- Recursively process nested structures
+- Convert null/undefined to empty string
+- Match exact parameter names from backend Pydantic models
+
+❌ **DO NOT**:
+
+- Use simple string concatenation (`bars:${symbol}:${resolution}`)
+- Include whitespace in JSON output
+- Change key ordering
+- Skip null/undefined handling
+- Modify parameter casing
+
+### Verification
+
+Both backend and frontend MUST produce identical topics:
+
+```typescript
+// Frontend
+const params = { accountId: "TEST-001", symbol: "AAPL" };
+const topic = `orders:${buildTopicParams(params)}`;
+// Result: orders:{"accountId":"TEST-001","symbol":"AAPL"}
+```
+
+```python
+# Backend
+params = OrderSubscriptionRequest(accountId="TEST-001", symbol="AAPL")
+topic = topic_builder(params)
+# Result: orders:{"accountId":"TEST-001","symbol":"AAPL"}
+```
+
+### Why This Matters
+
+**Topic string is the subscription identifier**:
+
+- Backend uses it to route update messages to correct subscribers
+- Frontend uses it to match incoming updates to callbacks
+- **Mismatch = No updates received** even though subscription appears successful
+
+**Common failure scenario**:
+
+```typescript
+// ❌ WRONG: Simple concatenation
+const topic = `orders:${accountId}`; // "orders:TEST-001"
+
+// ✅ CORRECT: JSON serialization
+const topic = `orders:${buildTopicParams({ accountId })}`; // "orders:{\"accountId\":\"TEST-001\"}"
+```
+
+The backend will always return the JSON-serialized format. Frontend must match exactly.
+
 ## Architecture
 
 ### Five-Layer Design
@@ -427,9 +573,9 @@ export function mapPreOrder(order: PreOrder): PreOrder_Backend {
 
 ### Mapper Benefits
 
-✅ **Type Safety**: Backend types isolated to mapper functions  
-✅ **Reusability**: Shared across REST and WebSocket clients  
-✅ **Maintainability**: Single source of truth for transformations  
+✅ **Type Safety**: Backend types isolated to mapper functions
+✅ **Reusability**: Shared across REST and WebSocket clients
+✅ **Maintainability**: Single source of truth for transformations
 ✅ **Clean Services**: Services never import backend types
 
 ## Fallback Client
@@ -625,19 +771,19 @@ cd frontend && make client-generate
 
 ### Before Refactoring
 
-❌ Services tracked subscriptions manually  
-❌ Duplicate state management  
-❌ Complex cleanup logic  
-❌ No centralized mappers  
+❌ Services tracked subscriptions manually
+❌ Duplicate state management
+❌ Complex cleanup logic
+❌ No centralized mappers
 ❌ Direct backend type usage in services
 
 ### After Refactoring
 
-✅ **Single Source of Truth**: WebSocketBase manages all subscription state  
-✅ **Simplified Services**: Just pass through to adapter  
-✅ **Centralized Mappers**: Type-safe transformations in one place  
-✅ **Type Isolation**: Backend types never leak to services  
-✅ **Automatic Reconnection**: Base client handles everything  
+✅ **Single Source of Truth**: WebSocketBase manages all subscription state
+✅ **Simplified Services**: Just pass through to adapter
+✅ **Centralized Mappers**: Type-safe transformations in one place
+✅ **Type Isolation**: Backend types never leak to services
+✅ **Automatic Reconnection**: Base client handles everything
 ✅ **Clean Testing**: Mock adapter interface, not service internals
 
 ## Related Documentation

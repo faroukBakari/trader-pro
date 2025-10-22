@@ -156,6 +156,8 @@ Complete index of all project documentation with descriptions and reading paths.
 ### Architecture & Design
 
 - **ARCHITECTURE.md** - System architecture
+  - Component architecture with detailed backend/frontend structure
+  - **Backend Models Architecture** - Topic-based organization principles (business concepts over technical layers)
 - **BACKEND-API-METHODOLOGY.md** - TDD methodology
 - **frontend/WEBSOCKET-ARCHITECTURE-DIAGRAMS.md** - WebSocket diagrams
 
@@ -225,5 +227,5 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ---
 
-**Last Updated**: October 21, 2025  
+**Last Updated**: October 21, 2025
 **Maintained by**: Development Team
