@@ -133,7 +133,7 @@ This document provides a **detailed implementation backlog** for integrating bro
 
 - [ ] Create equity data model
 
-  - `EquityData(equity: float, balance?: float, unrealizedPL?: float, realizedPL?: float)`
+  - `EquityData(equity: float, balance: float, unrealizedPL: float, realizedPL: float)`
 
 - [ ] Create broker connection status model
   - `BrokerConnectionStatus(status: int, message?: str, disconnectType?: int, timestamp: int)`
