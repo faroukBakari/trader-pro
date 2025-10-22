@@ -101,8 +101,6 @@ export interface wsMocker {
 
 export class WsFallback implements Partial<WsAdapterType> {
 
-  private _wsMocker: wsMocker
-
   bars?: WebSocketInterface<BarsSubscriptionRequest, Bar>
   quotes?: WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>
   orders?: WebSocketInterface<OrderSubscriptionRequest, PlacedOrder>
@@ -112,15 +110,12 @@ export class WsFallback implements Partial<WsAdapterType> {
   brokerConnection?: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
 
   constructor(wsMocker: wsMocker = {}) {
-
-    this._wsMocker = wsMocker
-
-    if (this._wsMocker.barsMocker) this.bars = new WebSocketFallback<BarsSubscriptionRequest, Bar>(this._wsMocker.barsMocker)
-    if (this._wsMocker.quotesMocker) this.quotes = new WebSocketFallback<QuoteDataSubscriptionRequest, QuoteData>(this._wsMocker.quotesMocker)
-    if (this._wsMocker.ordersMocker) this.orders = new WebSocketFallback<OrderSubscriptionRequest, PlacedOrder>(this._wsMocker.ordersMocker)
-    if (this._wsMocker.positionsMocker) this.positions = new WebSocketFallback<PositionSubscriptionRequest, Position>(this._wsMocker.positionsMocker)
-    if (this._wsMocker.executionsMocker) this.executions = new WebSocketFallback<ExecutionSubscriptionRequest, Execution>(this._wsMocker.executionsMocker)
-    if (this._wsMocker.equityMocker) this.equity = new WebSocketFallback<EquitySubscriptionRequest, EquityData>(this._wsMocker.equityMocker)
-    if (this._wsMocker.brokerConnectionMocker) this.brokerConnection = new WebSocketFallback<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>(this._wsMocker.brokerConnectionMocker)
+    if (wsMocker.barsMocker) this.bars = new WebSocketFallback<BarsSubscriptionRequest, Bar>(wsMocker.barsMocker.bind(wsMocker))
+    if (wsMocker.quotesMocker) this.quotes = new WebSocketFallback<QuoteDataSubscriptionRequest, QuoteData>(wsMocker.quotesMocker.bind(wsMocker))
+    if (wsMocker.ordersMocker) this.orders = new WebSocketFallback<OrderSubscriptionRequest, PlacedOrder>(wsMocker.ordersMocker.bind(wsMocker))
+    if (wsMocker.positionsMocker) this.positions = new WebSocketFallback<PositionSubscriptionRequest, Position>(wsMocker.positionsMocker.bind(wsMocker))
+    if (wsMocker.executionsMocker) this.executions = new WebSocketFallback<ExecutionSubscriptionRequest, Execution>(wsMocker.executionsMocker.bind(wsMocker))
+    if (wsMocker.equityMocker) this.equity = new WebSocketFallback<EquitySubscriptionRequest, EquityData>(wsMocker.equityMocker.bind(wsMocker))
+    if (wsMocker.brokerConnectionMocker) this.brokerConnection = new WebSocketFallback<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>(wsMocker.brokerConnectionMocker.bind(wsMocker))
   }
 }
