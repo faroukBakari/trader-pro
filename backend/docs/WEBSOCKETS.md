@@ -59,6 +59,179 @@ ws.onmessage = (event) => {
 - **Message Format**: JSON with strict Pydantic validation
 - **Transport**: ASGI via Uvicorn
 
+### ⚠️ CRITICAL: Topic Builder Contract
+
+**MUST BE IDENTICAL ACROSS BACKEND AND FRONTEND**
+
+The topic builder is the **core contract** for WebSocket subscriptions. The algorithm must produce identical topic strings in both Python (backend) and TypeScript (frontend).
+
+#### Topic Format
+
+```
+{route}:{JSON-serialized-params}
+```
+
+Where:
+
+- `{route}` = WebSocket route name (e.g., "bars", "orders", "positions")
+- `{JSON-serialized-params}` = Compact JSON with **sorted keys**, no whitespace
+
+**Examples**:
+
+```
+bars:{"resolution":"1","symbol":"AAPL"}
+orders:{"accountId":"TEST-001"}
+executions:{"accountId":"TEST-001","symbol":"AAPL"}
+positions:{"accountId":"TEST-001"}
+equity:{"accountId":"TEST-001"}
+broker-connection:{"accountId":"TEST-001"}
+```
+
+#### Implementation (Python)
+
+**Location**: `backend/src/trading_api/ws/router_interface.py`
+
+```python
+def buildTopicParams(obj: Any) -> str:
+    """
+    JSON stringify with sorted object keys for consistent serialization.
+    Handles nested objects and arrays recursively.
+    """
+    def sort_recursive(item: Any) -> Any:
+        if isinstance(item, dict):
+            # Sort dict keys alphabetically
+            return {k: sort_recursive(v) for k, v in sorted(item.items())}
+        elif isinstance(item, list):
+            # Recursively process list elements
+            return [sort_recursive(element) for element in item]
+        elif item is None:
+            # Convert null to empty string
+            return ""
+        else:
+            return item
+
+    sorted_obj = sort_recursive(obj)
+    # Compact JSON: no whitespace, separators=(",", ":")
+    return json.dumps(sorted_obj, separators=(",", ":"))
+
+class WsRouterInterface(OperationRouter, WsRouterProto):
+    def topic_builder(self, params: BaseModel) -> str:
+        return f"{self.route}:{buildTopicParams(params.model_dump())}"
+```
+
+#### Algorithm Requirements
+
+**Both implementations MUST**:
+
+1. **Sort object keys alphabetically** at all nesting levels
+2. **Use compact JSON** with separators `(",", ":")` - no spaces
+3. **Handle nested objects** recursively with sorted keys
+4. **Handle arrays** by processing each element recursively
+5. **Handle null values** by converting to empty string `""`
+6. **Match parameter casing** exactly as defined in Pydantic models
+
+#### Frontend Compliance
+
+**Location**: `frontend/src/plugins/wsClientBase.ts`
+
+The frontend MUST implement the identical algorithm:
+
+```typescript
+function buildTopicParams(obj: unknown): string {
+  if (obj === null || obj === undefined) {
+    return "";
+  }
+
+  if (typeof obj !== "object") {
+    return JSON.stringify(obj);
+  }
+
+  if (Array.isArray(obj)) {
+    return `[${obj.map(buildTopicParams).join(",")}]`;
+  }
+
+  const objRecord = obj as Record<string, unknown>;
+  const sortedKeys = Object.keys(objRecord).sort();
+  const pairs = sortedKeys.map(
+    (key) => `${JSON.stringify(key)}:${buildTopicParams(objRecord[key])}`
+  );
+  return `{${pairs.join(",")}}`;
+}
+```
+
+#### Why This Matters
+
+**Subscription Flow**:
+
+1. Frontend sends subscription request with params
+2. Backend generates topic using `topic_builder(params)`
+3. Backend returns topic in `subscribe.response`
+4. Frontend must use **exact same topic** to receive updates
+5. Backend broadcasts updates to subscribers of that exact topic string
+
+**Failure Scenario**:
+
+```python
+# Backend generates: "orders:{\"accountId\":\"TEST-001\"}"
+# Frontend expects: "orders:TEST-001"
+# Result: No updates received, subscription appears dead
+```
+
+#### Testing Topic Builder
+
+Always verify both implementations produce identical output:
+
+```python
+# Backend test
+params = OrderSubscriptionRequest(accountId="TEST-001", symbol="AAPL")
+topic = topic_builder(params)
+assert topic == 'orders:{"accountId":"TEST-001","symbol":"AAPL"}'
+```
+
+```typescript
+// Frontend test
+const params = { accountId: "TEST-001", symbol: "AAPL" };
+const topic = `orders:${buildTopicParams(params)}`;
+assert(topic === 'orders:{"accountId":"TEST-001","symbol":"AAPL"}');
+```
+
+#### Anti-Patterns
+
+❌ **Simple String Concatenation** (WRONG):
+
+```python
+# Backend
+topic = f"bars:{symbol}:{resolution}"  # NO!
+
+# Frontend
+topic = `bars:${symbol}:${resolution}`  // NO!
+```
+
+✅ **JSON Serialization** (CORRECT):
+
+```python
+# Backend
+topic = f"{route}:{buildTopicParams(params.model_dump())}"
+
+# Frontend
+topic = `${route}:${buildTopicParams(params)}`
+```
+
+#### Compliance Checklist
+
+When implementing WebSocket features:
+
+- [ ] Backend uses `WsRouterInterface.topic_builder()`
+- [ ] Frontend uses `buildTopicParams()` helper
+- [ ] Both sort object keys alphabetically
+- [ ] Both use compact JSON (no whitespace)
+- [ ] Both handle nested objects/arrays recursively
+- [ ] Both convert null to empty string
+- [ ] Parameter names match Pydantic model fields exactly
+- [ ] Tests verify identical topic generation
+
+See `docs/WEBSOCKET-CLIENTS.md` for frontend implementation details.
+
 ### Message Structure
 
 All WebSocket messages follow a consistent envelope format:
