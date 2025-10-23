@@ -219,7 +219,7 @@ async def broadcast_trade(trade: Trade):
     await wsApp.publish(
         topic=topic,
         data=trade,
-        message_type="trades.update"
+        route="trades"
     )
 ```
 
@@ -591,7 +591,7 @@ class MarketDataService:
         await wsApp.publish(
             topic=topic,
             data=trade,
-            message_type="trades.update"
+            route="trades"
         )
 ```
 
@@ -608,7 +608,7 @@ async def broadcast_if_subscribed(symbol: str, data: Trade):
 
     # Check if topic has subscribers
     if wsApp.has_subscribers(topic):
-        await wsApp.publish(topic=topic, data=data, message_type="trades.update")
+        await wsApp.publish(topic=topic, data=data, route="trades")
     else:
         # Skip unnecessary work
         pass
@@ -873,10 +873,10 @@ print(f"Broadcasting to: {trades_topic_builder('AAPL', {})}")
 
 ```python
 # Correct
-await wsApp.publish(topic=topic, data=trade, message_type="trades.update")
+await wsApp.publish(topic=topic, data=trade, route="trades")
 
 # Wrong
-await wsApp.publish(topic=topic, data=trade, message_type="trade.update")  # Missing 's'
+await wsApp.publish(topic=topic, data=trade, route="trade")  # Missing 's'
 ```
 
 3. **Check client subscription**: Verify in browser DevTools Network tab
@@ -906,7 +906,7 @@ async def broadcast_batch(updates: list[Trade]):
         wsApp.publish(
             topic=trades_topic_builder(trade.symbol, {}),
             data=trade,
-            message_type="trades.update"
+            route="trades"
         )
         for trade in updates
     ]

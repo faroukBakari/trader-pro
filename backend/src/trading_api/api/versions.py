@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from trading_api.core.versioning import VERSION_CONFIG, APIMetadata, APIVersion
 
-router = APIRouter()
+router = APIRouter(tags=["versioning"])
 
 
 @router.get(
@@ -13,7 +13,6 @@ router = APIRouter()
     description="Returns information about all available API versions",
     response_model=APIMetadata,
     operation_id="getAPIVersions",
-    tags=["versioning"],
 )
 async def get_api_versions() -> APIMetadata:
     """Get information about all available API versions."""
@@ -30,7 +29,6 @@ async def get_api_versions() -> APIMetadata:
     summary="Current API Version",
     description="Returns information about the current API version",
     operation_id="getCurrentAPIVersion",
-    tags=["versioning"],
 )
 async def get_current_version() -> dict:
     """Get information about the current API version."""

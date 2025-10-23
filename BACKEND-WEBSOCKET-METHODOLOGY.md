@@ -1293,7 +1293,7 @@ make test
           await wsApp.publish(
               topic=topic,
               data=update,
-              message_type="orders.update"
+              route="orders"
           )
   ```
 
@@ -1345,7 +1345,7 @@ make test  # Backend tests still pass
       await wsApp.publish(
           topic=topic,
           data=update,
-          message_type="positions.update"
+          route="positions"
       )
   ```
 
@@ -1376,7 +1376,7 @@ make test  # Backend tests still pass
       await wsApp.publish(
           topic=topic,
           data=update,
-          message_type="executions.update"
+          route="executions"
       )
   ```
 
@@ -1405,7 +1405,7 @@ make test  # Backend tests still pass
       await wsApp.publish(
           topic=topic,
           data=update,
-          message_type="equity.update"
+          route="equity"
       )
   ```
 
@@ -1463,7 +1463,7 @@ make test  # Backend tests still pass
           await wsApp.publish(
               topic=topic,
               data=update,
-              message_type="broker-connection.update"
+              route="broker-connection"
           )
   ```
 

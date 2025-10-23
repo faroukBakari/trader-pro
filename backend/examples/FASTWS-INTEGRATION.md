@@ -66,7 +66,7 @@ class FastWSAdapter(FastWS):
         self,
         topic: str,
         data: BaseModel,
-        message_type: str = "update"
+        route: str = "bars"
     ) -> None:
         """
         broadcast data to all clients subscribed to topic
@@ -74,10 +74,10 @@ class FastWSAdapter(FastWS):
         Args:
             topic: Topic identifier (e.g., "bars:AAPL:1")
             data: Pydantic model instance
-            message_type: Message type (e.g., "bars.update")
+            route: Message type (e.g., "bars")
         """
         message = Message(
-            type=message_type,
+            type=f"{route}.update",
             payload=data.model_dump()
         )
         await self.server_send(message, topic=topic)
@@ -173,7 +173,7 @@ await wsApp.publish(
         message="System maintenance in 5 minutes",
         timestamp=int(time.time() * 1000)
     ),
-    message_type="alerts.alert"
+    route="alerts"
 )
 ```
 
@@ -244,7 +244,7 @@ async def stream_market_data():
         await wsApp.publish(
             topic=topic,
             data=bar,
-            message_type="bars.update"
+            route="bars"
         )
 
         await asyncio.sleep(60)  # 1-minute interval
@@ -310,7 +310,7 @@ async def notify_all_clients(message: str):
     await wsApp.publish(
         topic="system",
         data=notification,
-        message_type="system.notification"
+        route="system"
     )
 ```
 
@@ -508,7 +508,7 @@ async def test_server_publish():
         await wsApp.publish(
             topic="bars:AAPL:1",
             data=test_bar,
-            message_type="bars.update"
+            route="bars"
         )
 
         # Receive broadcast
@@ -569,7 +569,7 @@ async def broadcast_if_changed(
         await wsApp.publish(
             topic=topic,
             data=new_bar,
-            message_type="bars.update"
+            route="bars"
         )
 
         # Update cache

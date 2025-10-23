@@ -277,7 +277,7 @@ class TestBarBroadcasterBroadcasting:
         # Verify call arguments
         call_args = broadcaster.ws_app.publish.call_args  # type: ignore[attr-defined]
         assert call_args.kwargs["topic"] == build_topic("AAPL", "1")
-        assert call_args.kwargs["message_type"] == "bars.update"
+        assert call_args.kwargs["route"] == "bars"
         assert isinstance(call_args.kwargs["data"], Bar)
 
         # Verify metrics
@@ -563,7 +563,7 @@ class TestQuoteBroadcasting:
         # Verify call arguments
         call_args = broadcaster.ws_app.publish.call_args  # type: ignore[attr-defined]
         assert call_args.kwargs["topic"] == build_quote_topic(["AAPL"])
-        assert call_args.kwargs["message_type"] == "quotes.update"
+        assert call_args.kwargs["route"] == "quotes"
         assert isinstance(call_args.kwargs["data"], QuoteData)
 
         # Verify metrics

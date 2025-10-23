@@ -47,9 +47,9 @@ class WsRouterInterface(OperationRouter, WsRouterProto):
             "docs": wsApp.asyncapi_docs_url,
             "spec": wsApp.asyncapi_url,
             "operations": [
-                "quotes.subscribe",
-                "quotes.unsubscribe",
-                "quotes.update",
+                f"{self.route}.subscribe",
+                f"{self.route}.unsubscribe",
+                f"{self.route}.update",
             ],
             "note": "WebSocket endpoints use AsyncAPI spec, not OpenAPI/Swagger",
         }

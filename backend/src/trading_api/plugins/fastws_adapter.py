@@ -26,7 +26,7 @@ class FastWSAdapter(FastWS):
         self,
         topic: str,
         data: BaseModel,
-        message_type: str,
+        route: str,
     ) -> None:
         """
         Publish data update to all subscribed clients
@@ -34,11 +34,11 @@ class FastWSAdapter(FastWS):
         Args:
             topic: Topic identifier (e.g., "bars:AAPL:1")
             data: Business model instance (e.g., Bar)
-            message_type: Message type for the update (e.g., "bars.update")
+            route: Message type for the update (e.g., "bars.update")
         """
         # Create message with data model directly as payload
         message = Message(
-            type=message_type,
+            type=f"{route}.update",
             payload=SubscriptionUpdate(
                 topic=topic,
                 payload=data,
@@ -46,4 +46,4 @@ class FastWSAdapter(FastWS):
         )
 
         await self.server_send(message, topic=topic)
-        logger.debug(f"Published {message_type} to topic: {topic}")
+        logger.debug(f"Published {route} to topic: {topic}")

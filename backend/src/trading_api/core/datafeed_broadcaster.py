@@ -10,13 +10,9 @@ import logging
 from typing import List
 
 from trading_api.core.datafeed_service import DatafeedService
+from trading_api.models import BarsSubscriptionRequest, QuoteDataSubscriptionRequest
 from trading_api.plugins.fastws_adapter import FastWSAdapter
-from trading_api.ws.datafeed import (
-    BarsSubscriptionRequest,
-    QuoteDataSubscriptionRequest,
-    bars_topic_builder,
-    quotes_topic_builder,
-)
+from trading_api.ws.datafeed import bars_topic_builder, quotes_topic_builder
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +191,7 @@ class DataFeedBroadcaster:
                     await self.ws_app.publish(
                         topic=topic,
                         data=mocked_bar,
-                        message_type="bars.update",
+                        route="bars",
                     )
 
                     self._broadcasts_sent += 1
@@ -247,7 +243,7 @@ class DataFeedBroadcaster:
                 await self.ws_app.publish(
                     topic=topic,
                     data=quote_data,
-                    message_type="quotes.update",
+                    route="quotes",
                 )
 
                 self._quote_broadcasts_sent += 1
