@@ -916,7 +916,7 @@ class BrokerService:
         await wsApp.publish(
             topic=topic,
             data=order,
-            message_type="orders.update"
+            route="orders"
         )
 
         return OrderResult(order_id=order.id)

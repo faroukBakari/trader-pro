@@ -6,29 +6,19 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, AsyncGenerator
 
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from external_packages.fastws import Client
 from trading_api.plugins.fastws_adapter import FastWSAdapter
 
-from .api.broker import router as broker_router
-from .api.datafeed import router as datafeed_router
-from .api.health import router as health_router
-from .api.versions import router as versions_router
+from .api import api_routers
 from .core.config import BroadcasterConfig
 from .core.datafeed_broadcaster import DataFeedBroadcaster
 from .core.datafeed_service import DatafeedService
 from .core.versioning import APIVersion
 from .ws import ws_routers
-
-api_routers: list[APIRouter] = [
-    health_router,
-    versions_router,
-    datafeed_router,
-    broker_router,
-]
 
 # Configure logging for the application
 logging.basicConfig(
@@ -71,6 +61,9 @@ def validate_response_models(app: FastAPI) -> None:
         raise ValueError(error_msg)
 
     print("✅ All FastAPI routes have response_model defined")
+
+
+# TODO: FastWS response model validation
 
 
 @asynccontextmanager

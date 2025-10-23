@@ -24,7 +24,7 @@ from trading_api.models.broker import (
     PositionSubscriptionRequest,
 )
 
-from .generic import WsRouter
+from .generic_route import WsRouter
 from .router_interface import WsRouterInterface
 
 # Type aliases for code generation

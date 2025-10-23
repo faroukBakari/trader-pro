@@ -1,4 +1,5 @@
 """Health API router with versioning support."""
+
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -6,7 +7,7 @@ from pydantic import BaseModel
 
 from trading_api.core.versioning import VERSION_CONFIG, APIVersion
 
-router = APIRouter()
+router = APIRouter(tags=["health"])
 
 
 class HealthResponse(BaseModel):
@@ -28,7 +29,6 @@ class HealthResponse(BaseModel):
     ),
     response_model=HealthResponse,
     operation_id="getHealthStatus",
-    tags=["health"],
 )
 async def healthcheck() -> HealthResponse:
     """Health check endpoint that returns the service status and version info."""

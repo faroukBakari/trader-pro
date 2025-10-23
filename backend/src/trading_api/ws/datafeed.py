@@ -11,7 +11,7 @@ from trading_api.models import (
     QuoteDataSubscriptionRequest,
 )
 
-from .generic import WsRouter
+from .generic_route import WsRouter
 from .router_interface import WsRouterInterface
 
 if TYPE_CHECKING:

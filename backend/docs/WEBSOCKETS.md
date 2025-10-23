@@ -786,10 +786,10 @@ class FastWSAdapter(FastWS):
         self,
         topic: str,
         data: BaseModel,
-        message_type: str = "bars.update"
+        route: str = "bars"
     ) -> None:
         """broadcast data update to all subscribed clients"""
-        message = Message(type=message_type, payload=data.model_dump())
+        message = Message(type=route, payload=data.model_dump())
         await self.server_send(message, topic=topic)
 ```
 

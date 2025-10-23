@@ -20,6 +20,7 @@ class RouterSpec(NamedTuple):
     data_type: str
 
 
+# TODO: validate router syntax and report errors more gracefully
 def parse_router_specs(ws_dir: Path) -> list[RouterSpec]:
     """
     Parse WebSocket router files to extract TypeAlias definitions.
