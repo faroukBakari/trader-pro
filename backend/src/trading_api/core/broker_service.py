@@ -26,6 +26,7 @@ with a real broker API.
 """
 
 import asyncio
+import logging
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -53,6 +54,8 @@ from trading_api.models.broker import (
     Side,
 )
 from trading_api.ws.router_interface import WsRouteService
+
+logger = logging.getLogger(__name__)
 
 
 class BrokerService(WsRouteService):
@@ -86,6 +89,7 @@ class BrokerService(WsRouteService):
 
     def __init__(self) -> None:
         super().__init__()
+        self._topic_queues: dict[str, asyncio.Queue] = {}
         self._orders: Dict[str, PlacedOrder] = {}
         self._positions: Dict[str, Position] = {}
         self._executions: List[Execution] = []
@@ -112,6 +116,15 @@ class BrokerService(WsRouteService):
         self._broker_connection_queue: asyncio.Queue[
             BrokerConnectionStatus
         ] = asyncio.Queue()
+
+    async def create_topic(self, topic: str) -> None:
+        logger.info(f"Creating topic queue for: {topic}")
+
+    def get_topic_queue(self, topic: str) -> asyncio.Queue:
+        return self._topic_queues.setdefault(topic, asyncio.Queue())
+
+    def del_topic(self, topic: str) -> None:
+        self._topic_queues.pop(topic, None)
 
     def reset(self) -> None:
         """Reset the broker service to initial state (for testing)"""
@@ -774,4 +787,5 @@ class BrokerService(WsRouteService):
                 side=execution.side,
                 avgPrice=execution.price,
             )
+        self._positions_queue.put_nowait(existing)
         self._positions_queue.put_nowait(existing)

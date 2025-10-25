@@ -2,7 +2,9 @@
 Datafeed service for handling market data operations
 """
 
+import asyncio
 import json
+import logging
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,6 +20,8 @@ from trading_api.models import (
 )
 from trading_api.ws import WsRouteService
 
+logger = logging.getLogger(__name__)
+
 
 # TODO: leverage WsRouteService queues for real-time datafeed updates
 class DatafeedService(WsRouteService):
@@ -30,12 +34,22 @@ class DatafeedService(WsRouteService):
             symbols_file_path: Path to symbols JSON file. If None, uses
                 default embedded symbols.
         """
-        super().__init__()
+        self.configuration = DatafeedConfiguration()
+        self._topic_queues: dict[str, asyncio.Queue] = {}
         self.symbols_file_path = symbols_file_path
         self._symbols: List[SymbolInfo] = []
         self._sample_bars: List[Bar] = []
         self._load_symbols()
         self._generate_sample_bars()
+
+    async def create_topic(self, topic: str) -> None:
+        logger.info(f"Creating topic queue for: {topic}")
+
+    def get_topic_queue(self, topic: str) -> asyncio.Queue:
+        return self._topic_queues.setdefault(topic, asyncio.Queue())
+
+    def del_topic(self, topic: str) -> None:
+        self._topic_queues.pop(topic, None)
 
     def _load_symbols(self) -> None:
         """Load symbols from JSON file or use default symbols"""
@@ -160,7 +174,7 @@ class DatafeedService(WsRouteService):
 
     def get_configuration(self) -> DatafeedConfiguration:
         """Get datafeed configuration"""
-        return DatafeedConfiguration()
+        return self.configuration
 
     def search_symbols(
         self,

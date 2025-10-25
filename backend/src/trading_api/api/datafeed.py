@@ -137,7 +137,7 @@ class DatafeedApi(APIRouter):
                     to_time=to_time,
                     count_back=count_back,
                 )
-                return GetBarsResponse(bars=bars, no_data=False)
+                return GetBarsResponse(bars=bars, no_data=len(bars) == 0)
             except Exception as e:
                 raise HTTPException(
                     status_code=500, detail=f"Error getting bars: {str(e)}"
