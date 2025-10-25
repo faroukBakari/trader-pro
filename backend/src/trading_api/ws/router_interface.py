@@ -28,16 +28,15 @@ def buildTopicParams(obj: Any) -> str:
     return json.dumps(sorted_obj, separators=(",", ":"))
 
 
-class WsRouteService:
-    def __init__(self) -> None:
-        super().__init__()
-        self._topic_queues: dict[str, asyncio.Queue] = {}
+class WsRouteService(Protocol):
+    async def create_topic(self, topic: str) -> None:
+        ...
 
     def get_topic_queue(self, topic: str) -> asyncio.Queue:
-        return self._topic_queues.setdefault(topic, asyncio.Queue())
+        ...
 
     def del_topic(self, topic: str) -> None:
-        self._topic_queues.pop(topic, None)
+        ...
 
 
 class WsRouterProto(Protocol):

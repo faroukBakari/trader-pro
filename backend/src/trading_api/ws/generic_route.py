@@ -41,7 +41,7 @@ class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
             return payload
 
         @self.send("subscribe", reply="subscribe.response")  # type: ignore[misc]
-        def send_subscribe(
+        async def send_subscribe(
             payload: _TRequest,
             client: Client,
         ) -> SubscriptionResponse:
@@ -50,6 +50,7 @@ class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
             client.subscribe(topic)
 
             if topic not in self.topic_queues:
+                await self.service.create_topic(topic)
 
                 def send_update(data: _TData) -> None:
                     update(SubscriptionUpdate[_TData](topic=topic, payload=data))

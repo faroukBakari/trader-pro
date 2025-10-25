@@ -72,11 +72,20 @@ def generate_router_code(spec: RouterSpec, template: str) -> str:
         f"from trading_api.models import {spec.request_type}, {spec.data_type}"
     ]
     for line in lines:
+        # Skip TypeVar declarations
         if "TypeVar(" in line:
             continue
+        # Skip Generic and TypeVar imports (not needed in concrete classes)
+        if "from typing import" in line and ("Generic" in line or "TypeVar" in line):
+            continue
+        # Skip BaseModel import if it only imports BaseModel (we don't need it)
+        if line.strip() == "from pydantic import BaseModel":
+            continue
+        # Replace class declaration
         if "class WsRouter(" in line:
             result_lines.append(f"class {spec.class_name}(WsRouterInterface):")
             continue
+        # Replace type parameters
         modified_line = line.replace("_TRequest", spec.request_type)
         modified_line = modified_line.replace("_TData", spec.data_type)
         result_lines.append(modified_line)
