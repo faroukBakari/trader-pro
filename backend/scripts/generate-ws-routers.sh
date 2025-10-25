@@ -106,10 +106,12 @@ VERIFY_SCRIPT=$(cat <<'EOF'
 import sys
 try:
     from trading_api.ws.generated import BarWsRouter
+    from trading_api.ws.router_interface import WsRouteService
     print("✓ BarWsRouter imported successfully")
     
-    # Verify class is callable
-    router = BarWsRouter(route="test", tags=["test"])
+    # Verify class is callable with required service parameter
+    service = WsRouteService()
+    router = BarWsRouter(route="test", tags=["test"], service=service)
     print("✓ BarWsRouter instantiation works")
     
     # Verify topic_builder exists
@@ -143,5 +145,7 @@ done
 echo ""
 echo -e "${BLUE}Usage example:${NC}"
 echo "  from trading_api.ws.generated import BarWsRouter"
-echo "  router = BarWsRouter(route='bars', tags=['datafeed'])"
+echo "  from trading_api.ws.router_interface import WsRouteService"
+echo "  service = WsRouteService()"
+echo "  router = BarWsRouter(route='bars', tags=['datafeed'], service=service)"
 echo ""

@@ -10,9 +10,8 @@ from trading_api.models import (
     QuoteData,
     QuoteDataSubscriptionRequest,
 )
-
-from .generic_route import WsRouter
-from .router_interface import WsRouterInterface
+from trading_api.ws.generic_route import WsRouter
+from trading_api.ws.router_interface import WsRouterInterface, WsRouteService
 
 if TYPE_CHECKING:
     BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
@@ -21,11 +20,19 @@ else:
     from .generated import BarWsRouter, QuoteWsRouter
 
 
-bar_router = BarWsRouter(route="bars", tags=["datafeed"])
-bars_topic_builder = bar_router.topic_builder
+class DatafeedWsRouters(list[WsRouterInterface]):
+    def __init__(self, datafeed_service: WsRouteService):
+        # Instantiate routers
+        bar_router = BarWsRouter(
+            route="bars", tags=["datafeed"], service=datafeed_service
+        )
+        quote_router = QuoteWsRouter(
+            route="quotes", tags=["datafeed"], service=datafeed_service
+        )
 
-quote_router = QuoteWsRouter(route="quotes", tags=["datafeed"])
-quotes_topic_builder = quote_router.topic_builder
-
-
-ws_routers: list[WsRouterInterface] = [bar_router, quote_router]
+        super().__init__(
+            [
+                bar_router,
+                quote_router,
+            ]
+        )

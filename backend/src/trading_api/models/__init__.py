@@ -36,6 +36,7 @@ from .common import (
     SubscriptionResponse,
     SubscriptionUpdate,
 )
+from .health import HealthResponse
 
 # Import from market data domain
 from .market import (
@@ -55,6 +56,9 @@ from .market import (
     SearchSymbolsRequest,
     SymbolInfo,
 )
+
+# Import versioning models
+from .versioning import VERSION_CONFIG, APIMetadata, APIVersion, VersionInfo
 
 __all__ = [
     # Common utilities
@@ -97,4 +101,13 @@ __all__ = [
     "EquitySubscriptionRequest",
     "BrokerConnectionStatus",
     "BrokerConnectionSubscriptionRequest",
+    # Health model
+    "HealthResponse",
+    # Versioning models
+    "APIMetadata",
+    "APIVersion",
+    "VERSION_CONFIG",
+    "VersionInfo",
+    # WebSocket Router models
+    "WsRouteService",
 ]

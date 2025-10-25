@@ -1,5 +1,13 @@
 # Bar Data Broadcasting with Redis
 
+> ⚠️ **STATUS: PLANNED FEATURE - NOT CURRENTLY IMPLEMENTED**
+>
+> **Background**: The previous in-process `DatafeedBroadcaster` has been removed as part of architectural refactoring (October 2025). The WebSocket architecture now uses a **queue-based service pattern** with `WsRouteService` and `topicTracker` for event-driven updates instead of periodic broadcasting.
+>
+> **This Document**: Describes a **future Redis-based enhancement** for production-grade real-time data broadcasting across distributed services. The current implementation handles WebSocket updates through service queues without Redis.
+>
+> **Current Architecture**: See `WEBSOCKETS.md` for the active WsRouteService/topicTracker implementation.
+
 ## Overview
 
 This document describes the implementation plan for offloading real-time bar data generation and broadcasting to a separate process using Redis Pub/Sub. This approach minimizes overhead on the main FastAPI application while providing scalable, resilient real-time data streaming.
@@ -38,16 +46,19 @@ This document describes the implementation plan for offloading real-time bar dat
 **File**: `backend/src/trading_api/services/bar_generator.py`
 
 **Responsibilities**:
+
 - Generate mocked bar data using `DatafeedService.mock_last_bar()`
 - Publish bar data to Redis channels
 - Run as standalone Python process
 - Configurable symbols, resolutions, and intervals
 
 **Redis Channel Format**: `bars:{SYMBOL}:{RESOLUTION}`
+
 - Example: `bars:AAPL:1` for Apple 1-minute bars
 - Example: `bars:GOOGL:D` for Google daily bars
 
 **Message Format**:
+
 ```json
 {
   "symbol": "AAPL",
@@ -64,6 +75,7 @@ This document describes the implementation plan for offloading real-time bar dat
 ```
 
 **Configuration**:
+
 ```python
 generator = BarGenerator(
     redis_url="redis://localhost:6379",
@@ -78,6 +90,7 @@ generator = BarGenerator(
 **File**: `backend/src/trading_api/services/bar_subscriber.py`
 
 **Responsibilities**:
+
 - Subscribe to Redis channels using pattern matching (`bars:*`)
 - Receive bar data from Redis
 - Check if WebSocket clients are subscribed to topic
@@ -85,6 +98,7 @@ generator = BarGenerator(
 - Run within main FastAPI application lifecycle
 
 **Integration**:
+
 - Starts during FastAPI `lifespan` startup
 - Stops gracefully during shutdown
 - Uses existing `FastWSAdapter.publish()` method
@@ -94,6 +108,7 @@ generator = BarGenerator(
 **File**: `backend/src/trading_api/main.py`
 
 **Changes Required**:
+
 1. Import `BarSubscriber`
 2. Initialize subscriber in `lifespan` startup
 3. Stop subscriber in `lifespan` shutdown
@@ -104,6 +119,7 @@ generator = BarGenerator(
 ## Dependencies
 
 ### Add to `pyproject.toml`:
+
 ```toml
 [tool.poetry.dependencies]
 redis = "^5.0.0"  # Async Redis client
@@ -121,6 +137,7 @@ poetry add redis
 ### Step 2: Create Bar Generator
 
 Create `backend/src/trading_api/services/bar_generator.py` with:
+
 - `BarGenerator` class
 - Async generation loop
 - Redis publish logic
@@ -129,6 +146,7 @@ Create `backend/src/trading_api/services/bar_generator.py` with:
 ### Step 3: Create Bar Subscriber
 
 Create `backend/src/trading_api/services/bar_subscriber.py` with:
+
 - `BarSubscriber` class
 - Redis pattern subscription
 - Message handling and parsing
@@ -137,12 +155,14 @@ Create `backend/src/trading_api/services/bar_subscriber.py` with:
 ### Step 4: Update Main App
 
 Modify `backend/src/trading_api/main.py`:
+
 - Add subscriber to lifespan
 - Configure Redis URL (from environment variable)
 
 ### Step 5: Update Configuration
 
 Add to environment variables:
+
 ```bash
 REDIS_URL=redis://localhost:6379
 BAR_GENERATOR_INTERVAL=2.0
@@ -161,6 +181,7 @@ BAR_GENERATOR_RESOLUTIONS=1,5,D
 ### Development Setup
 
 **Terminal 1: Start Redis**
+
 ```bash
 docker run -d -p 6379:6379 redis:alpine
 # OR if Redis is already installed
@@ -168,12 +189,14 @@ redis-server
 ```
 
 **Terminal 2: Start Main API**
+
 ```bash
 cd backend
 make dev
 ```
 
 **Terminal 3: Start Bar Generator**
+
 ```bash
 cd backend
 poetry run python -m trading_api.services.bar_generator
@@ -182,13 +205,14 @@ poetry run python -m trading_api.services.bar_generator
 ### Production Setup
 
 **Docker Compose Example**:
+
 ```yaml
 services:
   redis:
     image: redis:alpine
     ports:
       - "6379:6379"
-  
+
   api:
     build: ./backend
     command: uvicorn trading_api.main:app --host 0.0.0.0
@@ -196,7 +220,7 @@ services:
       - redis
     environment:
       - REDIS_URL=redis://redis:6379
-  
+
   bar-generator:
     build: ./backend
     command: python -m trading_api.services.bar_generator
@@ -212,11 +236,13 @@ services:
 ### Unit Tests
 
 **Test Bar Generator** (`tests/test_bar_generator.py`):
+
 - Mock Redis client
 - Verify message format
 - Test error handling
 
 **Test Bar Subscriber** (`tests/test_bar_subscriber.py`):
+
 - Mock Redis messages
 - Verify `wsApp.publish()` is called
 - Test subscriber lifecycle
@@ -224,6 +250,7 @@ services:
 ### Integration Tests
 
 **Test End-to-End Flow** (`tests/test_bar_broadcasting.py`):
+
 1. Start Redis container
 2. Start generator
 3. Connect WebSocket client
@@ -264,6 +291,7 @@ redis-cli PUBSUB NUMSUB bars:AAPL:1
 ### Application Metrics
 
 Add metrics to track:
+
 - Messages published per second
 - Messages received per second
 - WebSocket broadcast count
@@ -273,6 +301,7 @@ Add metrics to track:
 ### Logging
 
 **Generator Logs**:
+
 ```
 INFO: Bar generator started for symbols: ['AAPL', 'GOOGL', 'MSFT']
 DEBUG: Published to bars:AAPL:1
@@ -280,6 +309,7 @@ DEBUG: Published to bars:GOOGL:1
 ```
 
 **Subscriber Logs**:
+
 ```
 INFO: Bar subscriber started for pattern: bars:*
 DEBUG: Broadcasted bar for bars:AAPL:1
@@ -290,10 +320,11 @@ DEBUG: Broadcasted bar for bars:AAPL:1
 ### Horizontal Scaling
 
 1. **Multiple Generators**: Run separate generators for different symbol sets
+
    ```bash
    # Generator 1: US stocks
    BAR_GENERATOR_SYMBOLS=AAPL,GOOGL,MSFT python -m trading_api.services.bar_generator
-   
+
    # Generator 2: Crypto
    BAR_GENERATOR_SYMBOLS=BTC,ETH,SOL python -m trading_api.services.bar_generator
    ```
@@ -314,15 +345,18 @@ DEBUG: Broadcasted bar for bars:AAPL:1
 ## Migration Path
 
 ### Phase 1: Development (Current)
+
 - No Redis, simple in-process broadcasting
 - Good for testing and development
 
 ### Phase 2: Redis Integration (This Document)
+
 - Add Redis pub/sub
 - Separate generator process
 - Production-ready architecture
 
 ### Phase 3: Real Data Integration (Future)
+
 - Replace mock generator with real market data feed
 - Keep Redis pub/sub infrastructure
 - Minimal code changes needed
@@ -330,18 +364,22 @@ DEBUG: Broadcasted bar for bars:AAPL:1
 ## Alternatives Considered
 
 ### 1. In-Process Background Task
+
 - **Pros**: Simple, no dependencies
 - **Cons**: CPU overhead on main app, not scalable
 
 ### 2. RabbitMQ/Kafka
+
 - **Pros**: More features (queuing, persistence)
 - **Cons**: Overkill for pub/sub, more complex setup
 
 ### 3. Python Multiprocessing
+
 - **Pros**: No external dependencies
 - **Cons**: Doesn't work across machines, harder to monitor
 
 ### Decision: Redis Pub/Sub
+
 - Perfect balance of simplicity and scalability
 - Widely used in production systems
 - Easy to set up and monitor

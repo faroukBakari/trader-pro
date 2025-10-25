@@ -6,11 +6,10 @@ coverage/
 # Node modules
 node_modules/
 
-# Generated files
-src/clients/trader-client-generated/
+# Generated files (auto-generated from OpenAPI/AsyncAPI specs)
+src/clients/*-generated/
 
 # External libraries and dependencies
-public/
 public/
 
 # Configuration files that should not be formatted

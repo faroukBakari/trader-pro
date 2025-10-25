@@ -1,4 +1,5 @@
 """API versioning models and utilities."""
+
 from enum import Enum
 from typing import List, Optional
 

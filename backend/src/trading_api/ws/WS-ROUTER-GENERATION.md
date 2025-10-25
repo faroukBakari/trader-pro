@@ -113,7 +113,7 @@ make generate-ws-routers
 2. Finds `TradeWsRouter: TypeAlias = WsRouter[TradeSubscriptionRequest, Trade]`
 3. Creates `backend/src/trading_api/ws/generated/tradewsrouter.py` with:
    - Concrete `TradeWsRouter` class (no generics)
-   - Pre-defined `subscribe`, `unsubscribe`, `update` operations from `generic.py`
+   - Pre-defined `subscribe`, `unsubscribe`, `update` operations from `generic_route.py`
    - Full type safety and all quality checks passed
 
 ### Step 5: Update ws/**init**.py to Export Routers
@@ -238,7 +238,7 @@ async def broadcast_trade(trade: Trade):
 ```
 backend/src/trading_api/ws/
 ├── __init__.py            # 👈 Consolidates all ws_routers (main export)
-├── generic.py              # Generic template (pre-defined operations)
+├── generic_route.py              # Generic template (pre-defined operations)
 ├── router_interface.py     # Base interface and topic builder logic
 ├── datafeed.py            # Market data routers (bars, quotes)
 ├── trading.py             # Trading routers (trades, orders) - add as needed
@@ -268,9 +268,9 @@ backend/src/trading_api/ws/
 
 ## How It Works
 
-### 1. Template (generic.py) - Pre-Defined Operations
+### 1. Template (generic_route.py) - Pre-Defined Operations
 
-The `generic.py` file contains a generic `WsRouter` class with:
+The `generic_route.py` file contains a generic `WsRouter` class with:
 
 - Type parameters: `__TRequest` and `__TData`
 - **Pre-defined operations** (subscribe, unsubscribe, update) already implemented!
@@ -311,7 +311,7 @@ else:
 
 The generator **automatically scans** `ws/` directory for TypeAlias patterns:
 
-1. **Scans** all `.py` files (except `__init__.py`, `generic.py`, `router_interface.py`)
+1. **Scans** all `.py` files (except `__init__.py`, `generic_route.py`, `router_interface.py`)
 2. **Finds** regex pattern: `BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]`
 3. **Extracts** class name, request type, and data type
 4. **Generates** concrete class by:
@@ -389,7 +389,7 @@ bars_topic_builder = router.topic_builder
 - ✅ When type inference is sufficient
 - ✅ No complex type manipulation needed
 
-## Pre-Defined Operations (From generic.py)
+## Pre-Defined Operations (From generic_route.py)
 
 **Important**: The generated routers come with operations already implemented! You don't write these handlers.
 
@@ -500,7 +500,7 @@ rm -rf backend/src/trading_api/ws/generated/*.py
 
 ### ✅ Maintainability
 
-- Single source of truth (generic.py)
+- Single source of truth (generic_route.py)
 - Automated generation ensures consistency
 - All quality checks automated
 

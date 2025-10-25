@@ -9,6 +9,7 @@
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Implementation Status](#implementation-status)
+- [WebSocket Integration](#websocket-integration)
 - [TradingView Integration](#tradingview-integration)
 - [Data Flow](#data-flow)
 - [Core Features](#core-features)
@@ -16,6 +17,7 @@
 - [Configuration](#configuration)
 - [Testing Strategy](#testing-strategy)
 - [Future Enhancements](#future-enhancements)
+- [Known Issues](#known-issues)
 - [References](#references)
 
 ## Overview
@@ -147,6 +149,417 @@ const widgetOptions: TradingTerminalWidgetOptions = {
 }
 ```
 
+## WebSocket Integration
+
+The BrokerTerminalService uses **dual-mode WebSocket integration** to support both mock fallback and real backend communication. This allows seamless development and testing without backend dependencies while enabling production-ready real-time updates.
+
+### Architecture Pattern
+
+The service uses a **smart client selection pattern** similar to the REST API layer:
+
+```typescript
+export interface WsAdapterType {
+  orders: {
+    subscribe(
+      listenerId: string,
+      params: { accountId: string },
+      callback: (order: Order) => void,
+    ): void
+    unsubscribe(listenerId: string): void
+  }
+  positions: {
+    subscribe(
+      listenerId: string,
+      params: { accountId: string },
+      callback: (position: Position) => void,
+    ): void
+    unsubscribe(listenerId: string): void
+  }
+  executions: {
+    subscribe(
+      listenerId: string,
+      params: { accountId: string },
+      callback: (execution: Execution) => void,
+    ): void
+    unsubscribe(listenerId: string): void
+  }
+  equity: {
+    subscribe(
+      listenerId: string,
+      params: { accountId: string },
+      callback: (data: EquityData) => void,
+    ): void
+    unsubscribe(listenerId: string): void
+  }
+  brokerConnectionStatus: {
+    subscribe(
+      listenerId: string,
+      params: { accountId: string },
+      callback: (status: BrokerConnectionStatus) => void,
+    ): void
+    unsubscribe(listenerId: string): void
+  }
+}
+
+class WsFallback implements Partial<WsAdapterType> {
+  // Mock implementation with polling simulation
+  // Checks BrokerMock state every 100ms and emits updates
+}
+
+class WsAdapter implements WsAdapterType {
+  // Real WebSocket via backend connection
+  // Subscribes to server-confirmed topic subscriptions
+}
+```
+
+### WebSocket Setup
+
+The service initializes WebSocket subscriptions during construction:
+
+```typescript
+constructor(
+  host: IBrokerConnectionAdapterHost,
+  quotesProvider: IDatafeedQuotesApi,
+  brokerMock?: BrokerMock,
+) {
+  this._hostAdapter = host
+  this._quotesProvider = quotesProvider
+  this.apiAdapter = new ApiAdapter()
+  this._wsAdapter = new WsAdapter()
+
+  if (brokerMock) {
+    this._apiFallback = new ApiFallback(brokerMock)
+    this._wsFallback = new WsFallback(brokerMock)  // 👈 WebSocket fallback
+  }
+
+  // Initialize reactive values
+  this.balance = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
+  this.equity = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
+
+  // Generate unique listener ID for WebSocket subscriptions
+  this.listenerId = `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
+
+  // Setup all 5 WebSocket subscriptions
+  this.setupWebSocketHandlers()  // 👈 Key initialization
+}
+```
+
+### Smart Client Selection
+
+The `_getWsAdapter()` method selects between fallback and real WebSocket:
+
+```typescript
+private _getWsAdapter(): WsAdapterType | Partial<WsAdapterType> {
+  return this._wsFallback ?? this._wsAdapter
+}
+```
+
+**Logic**:
+
+- If `brokerMock` provided → Returns `WsFallback` (polling-based mock)
+- If `brokerMock` absent → Returns `WsAdapter` (real WebSocket connection)
+
+This mirrors the REST API pattern with `_getApiAdapter()`.
+
+### WebSocket Subscription Lifecycle
+
+The `setupWebSocketHandlers()` method establishes 5 real-time subscriptions:
+
+```typescript
+private setupWebSocketHandlers(): void {
+  // 1. Order updates (status changes, fills, cancellations)
+  this._getWsAdapter().orders?.subscribe(
+    'broker-orders',
+    { accountId: this.listenerId },
+    (order: Order) => {
+      this._hostAdapter.orderUpdate(order)
+
+      // Show notification on fill
+      if (order.status === OrderStatus.Filled) {
+        this._hostAdapter.showNotification(
+          'Order Filled',
+          `${order.symbol} ${order.side === 1 ? 'Buy' : 'Sell'} ${order.qty} @ ${order.avgPrice ?? 'market'}`,
+          NotificationType.Success
+        )
+      }
+    }
+  )
+
+  // 2. Position updates (new positions, quantity changes, closures)
+  this._getWsAdapter().positions?.subscribe(
+    'broker-positions',
+    { accountId: this.listenerId },
+    (position: Position) => {
+      this._hostAdapter.positionUpdate(position)
+    }
+  )
+
+  // 3. Execution updates (trade confirmations)
+  this._getWsAdapter().executions?.subscribe(
+    'broker-executions',
+    { accountId: this.listenerId },
+    (execution: Execution) => {
+      this._hostAdapter.executionUpdate(execution)
+    }
+  )
+
+  // 4. Equity updates (balance, equity, P&L changes)
+  this._getWsAdapter().equity?.subscribe(
+    'broker-equity',
+    { accountId: this.listenerId },
+    (data: EquityData) => {
+      this._hostAdapter.equityUpdate(data.equity)
+
+      // Update reactive balance/equity values
+      if (data.balance !== undefined && data.balance !== null) {
+        this.balance.setValue(data.balance)
+      }
+      if (data.equity !== undefined && data.equity !== null) {
+        this.equity.setValue(data.equity)
+      }
+    }
+  )
+
+  // 5. Broker connection status (connected, disconnected, errors)
+  this._getWsAdapter().brokerConnectionStatus?.subscribe(
+    'broker-connection-status',
+    { accountId: this.listenerId },
+    (status: BrokerConnectionStatus) => {
+      this._hostAdapter.showNotification(
+        'Broker Status',
+        status.message || 'Connection status changed',
+        status.status === ConnectionStatus.Connected
+          ? NotificationType.Success
+          : NotificationType.Error
+      )
+    }
+  )
+}
+```
+
+### Subscription Details
+
+| Subscription               | Topic                                  | Purpose                         | Updates                                  |
+| -------------------------- | -------------------------------------- | ------------------------------- | ---------------------------------------- |
+| **orders**                 | `orders:{accountId}`                   | Real-time order status changes  | Working, Filled, Canceled, Rejected      |
+| **positions**              | `positions:{accountId}`                | Position quantity/price updates | New positions, size changes, closures    |
+| **executions**             | `executions:{accountId}`               | Trade confirmations             | Execution price, quantity, timestamp     |
+| **equity**                 | `equity:{accountId}`                   | Account value changes           | Balance, equity, unrealized/realized P&L |
+| **brokerConnectionStatus** | `broker-connection-status:{accountId}` | Connection health               | Connected, Disconnected, Error           |
+
+### Mock vs Real WebSocket Behavior
+
+#### WsFallback (Mock Mode)
+
+**Polling Simulation**:
+
+```typescript
+// Checks BrokerMock state every 100ms
+setInterval(() => {
+  const newOrders = brokerMock.getOrderUpdates()
+  newOrders.forEach((order) => callback(order))
+}, 100)
+```
+
+**Characteristics**:
+
+- No server dependency
+- Deterministic behavior for testing
+- Instant updates (no network latency)
+- Predictable execution timing
+
+**When Used**:
+
+- Unit tests with `BrokerMock` instance
+- Offline development
+- UI testing without backend
+
+#### WsAdapter (Real Mode)
+
+**WebSocket Connection**:
+
+```typescript
+// Subscribes to backend WebSocket server
+wsClient.subscribe('orders:ACCOUNT-abc123', (message) => {
+  const order = mapper.toOrder(message)
+  callback(order)
+})
+```
+
+**Characteristics**:
+
+- Real server-confirmed subscriptions
+- Network latency and connection handling
+- Server-side validation
+- Production-ready reliability
+
+**When Used**:
+
+- Production deployment
+- Integration testing with backend
+- Backend development workflow
+
+### TradingView Integration Callbacks
+
+The WebSocket handlers use TradingView's `IBrokerConnectionAdapterHost` interface to push updates:
+
+| Method                               | Purpose                           | When Called                                 |
+| ------------------------------------ | --------------------------------- | ------------------------------------------- |
+| `orderUpdate(order)`                 | Update order in Order Panel       | Order status changes (Working→Filled, etc.) |
+| `positionUpdate(position)`           | Update position in Position Panel | Position changes (new, modified, closed)    |
+| `executionUpdate(execution)`         | Add to Executions tab             | Trade execution confirmation                |
+| `equityUpdate(equity)`               | Update account equity             | P&L changes, balance updates                |
+| `showNotification(title, msg, type)` | Display UI notification           | Order fills, connection changes             |
+
+### Event Flow Example
+
+**Order Placement with WebSocket Updates**:
+
+```
+1. User clicks "Buy" on chart
+   ↓
+2. BrokerTerminalService.placeOrder() (REST API)
+   ↓
+3. Backend creates order, broadcasts update
+   ↓
+4. WsAdapter receives message on orders:{accountId}
+   ↓
+5. setupWebSocketHandlers() callback triggered
+   ↓
+6. this._hostAdapter.orderUpdate(order)
+   ↓
+7. TradingView Order Panel updates (Working status)
+   ↓
+8. Backend fills order, broadcasts update
+   ↓
+9. WsAdapter receives fill message
+   ↓
+10. Callback updates UI + shows notification
+    ↓
+11. Position/Execution updates follow same flow
+```
+
+### Testing WebSocket Integration
+
+#### Unit Tests with WsFallback
+
+```typescript
+// From brokerTerminalService.spec.ts
+it('should receive order updates via WebSocket', async () => {
+  const testBrokerMock = new BrokerMock()
+  const broker = new BrokerTerminalService(mockHost, mockDatafeed, testBrokerMock)
+
+  // Place order via REST
+  await broker.placeOrder({ symbol: 'AAPL', qty: 100 })
+
+  // Wait for WebSocket mocker chain (polling cycles)
+  await waitForMockerChain(4) // 4 * 100ms polling
+
+  // Verify WebSocket pushed update to TradingView
+  expect(mockHost.orderUpdate).toHaveBeenCalled()
+})
+
+const waitForMockerChain = async (cycles = 4) => {
+  // WsFallback polls every 100ms
+  await new Promise((resolve) => setTimeout(resolve, cycles * 100 + 50))
+}
+```
+
+#### Integration Tests with Real Backend
+
+```bash
+# Start backend with WebSocket support
+make -f project.mk dev-backend
+
+# Run frontend with real WsAdapter
+make -f project.mk dev-frontend
+
+# Frontend automatically connects to ws://localhost:8000/ws
+```
+
+### WebSocket Configuration
+
+**Backend WebSocket Endpoint**:
+
+```typescript
+// WsAdapter connects to:
+const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000/ws'
+```
+
+**Environment Variables**:
+
+```env
+# .env.development
+VITE_WS_BASE_URL=ws://localhost:8000/ws
+
+# .env.production
+VITE_WS_BASE_URL=wss://api.trader-pro.com/ws
+```
+
+**Connection Lifecycle**:
+
+1. WsAdapter initializes on service construction
+2. WebSocket connects on first subscription
+3. Sends server-confirmed subscription requests
+4. Backend validates and confirms subscriptions
+5. Broadcasts updates to confirmed subscriptions
+6. Reconnects automatically on disconnection
+
+### Current Limitations (Phase 4 Complete, Phase 5 Pending)
+
+**✅ Frontend Implementation Complete**:
+
+- All 5 WebSocket subscriptions implemented
+- Smart client selection (`_getWsAdapter()`)
+- TradingView integration callbacks
+- Mock fallback for testing
+- Type-safe WebSocket adapters
+
+**⏳ Backend Implementation Pending (Phase 5)**:
+
+- Backend broadcasting logic not yet implemented
+- WebSocket tests in TDD Red Phase (expected failures)
+- Server-confirmed subscriptions protocol defined
+- AsyncAPI spec complete, broadcasting code pending
+
+**Workaround**: Use `BrokerMock` for development until Phase 5 completes:
+
+```typescript
+// Development mode with mock
+const brokerMock = new BrokerMock()
+const broker = new BrokerTerminalService(host, datafeed, brokerMock)
+```
+
+See `BACKEND-WEBSOCKET-METHODOLOGY.md` for Phase 5 implementation roadmap.
+
+## Component Integration
+
+The BrokerTerminalService integrates with TradingView through the `broker_factory` option:
+
+```typescript
+// TraderChartContainer.vue
+const widgetOptions: TradingTerminalWidgetOptions = {
+  // ... other options
+  broker_factory: (host: IBrokerConnectionAdapterHost) => {
+    // Smart client selection via optional BrokerMock instance
+    // Pass undefined or omit third parameter to use real backend
+    return new BrokerTerminalService(host, datafeed)
+  },
+  broker_config: {
+    configFlags: {
+      supportClosePosition: true,
+      supportNativeReversePosition: true,
+      supportPLUpdate: true,
+      supportExecutions: true,
+      supportPositions: true,
+      showQuantityInsteadOfAmount: false,
+      supportLevel2Data: false,
+      supportOrdersHistory: false,
+    },
+  },
+}
+```
+
 ## Implementation Status
 
 ### ✅ Fully Implemented Features
@@ -216,7 +629,10 @@ const widgetOptions: TradingTerminalWidgetOptions = {
 - ✅ **REST API Communication**: Full implementation via ApiAdapter
 - ✅ **Type Conversion**: Enum casting in adapter layer
 - ✅ **Error Handling**: HTTP error mapping
-- ⚠️ **WebSocket Updates**: Real-time position/order updates (planned)
+- ✅ **WebSocket Updates**: Real-time position/order updates via WsAdapter
+- ✅ **WebSocket Subscriptions**: 5 broker event subscriptions (orders, positions, executions, equity, connection status)
+- ✅ **Smart Client Selection**: `_getWsAdapter()` method for fallback/real WebSocket switching
+- ⚠️ **Backend Broadcasting**: Phase 5 pending (backend WebSocket implementation)
 - ⚠️ **Optimistic Updates**: UI updates before backend confirmation (planned)
 
 ### ❌ Not Implemented (Future)

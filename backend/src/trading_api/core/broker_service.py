@@ -52,9 +52,10 @@ from trading_api.models.broker import (
     PreOrder,
     Side,
 )
+from trading_api.ws.router_interface import WsRouteService
 
 
-class BrokerService:
+class BrokerService(WsRouteService):
     """
     Mock broker service for development
 
@@ -84,6 +85,7 @@ class BrokerService:
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self._orders: Dict[str, PlacedOrder] = {}
         self._positions: Dict[str, Position] = {}
         self._executions: List[Execution] = []
@@ -110,6 +112,31 @@ class BrokerService:
         self._broker_connection_queue: asyncio.Queue[
             BrokerConnectionStatus
         ] = asyncio.Queue()
+
+    def reset(self) -> None:
+        """Reset the broker service to initial state (for testing)"""
+        self._orders = {}
+        self._positions = {}
+        self._executions = []
+        self._order_counter = 1
+        self._account_id = "DEMO-ACCOUNT"
+        self._account_name = "Demo Trading Account"
+        self._leverage_settings = {}
+        self.unrealizedPL = {}
+        self.initial_balance = 100000.0
+        self._equity = EquityData(
+            equity=0.0,
+            balance=100000.0,
+            unrealizedPL=0.0,
+            realizedPL=0.0,
+        )
+
+        # FIFO event pipes for business object updates
+        self._orders_queue = asyncio.Queue()
+        self._positions_queue = asyncio.Queue()
+        self._executions_queue = asyncio.Queue()
+        self._equity_queue = asyncio.Queue()
+        self._broker_connection_queue = asyncio.Queue()
 
     # ================================ GETTERS =================================#
 
