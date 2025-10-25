@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional
 
-from ..models import (
+from trading_api.models import (
     Bar,
     DatafeedConfiguration,
     QuoteData,
@@ -16,17 +16,21 @@ from ..models import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
+from trading_api.ws import WsRouteService
 
 
-class DatafeedService:
+# TODO: leverage WsRouteService queues for real-time datafeed updates
+class DatafeedService(WsRouteService):
     """Service for handling datafeed operations"""
 
     def __init__(self, symbols_file_path: Optional[str] = None):
         """Initialize the datafeed service
 
-        Args:\n            symbols_file_path: Path to symbols JSON file. If None, uses
-        default\n                embedded symbols.
+        Args:
+            symbols_file_path: Path to symbols JSON file. If None, uses
+                default embedded symbols.
         """
+        super().__init__()
         self.symbols_file_path = symbols_file_path
         self._symbols: List[SymbolInfo] = []
         self._sample_bars: List[Bar] = []

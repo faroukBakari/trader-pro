@@ -3,8 +3,8 @@
 import pytest
 from httpx import AsyncClient
 
-from trading_api.core.versioning import APIVersion
 from trading_api.main import apiApp
+from trading_api.models.versioning import APIVersion
 
 
 class TestAPIVersioning:

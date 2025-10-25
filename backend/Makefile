@@ -219,6 +219,7 @@ lint-response-models:
 
 format:
 	@echo "Formatting backend code..."
+	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive src/ tests/
 	poetry run black src/ tests/
 	poetry run isort src/ tests/
 

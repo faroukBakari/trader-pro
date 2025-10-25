@@ -1,12 +1,6 @@
-from fastapi import APIRouter
+from .broker import BrokerApi
+from .datafeed import DatafeedApi
+from .health import HealthApi
+from .versions import VersionApi
 
-from . import broker, datafeed, health, versions
-
-api_routers: list[APIRouter] = [
-    health.router,
-    versions.router,
-    datafeed.router,
-    broker.router,
-]
-
-__all__ = ["api_routers"]
+__all__ = ["BrokerApi", "DatafeedApi", "VersionApi", "HealthApi"]

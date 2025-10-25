@@ -25,7 +25,7 @@ from trading_api.models.broker import (
 )
 
 from .generic_route import WsRouter
-from .router_interface import WsRouterInterface
+from .router_interface import WsRouterInterface, WsRouteService
 
 # Type aliases for code generation
 if TYPE_CHECKING:
@@ -45,29 +45,31 @@ else:
         PositionWsRouter,
     )
 
-# Instantiate routers
-order_router = OrderWsRouter(route="orders", tags=["broker"])
-orders_topic_builder = order_router.topic_builder
 
-position_router = PositionWsRouter(route="positions", tags=["broker"])
-positions_topic_builder = position_router.topic_builder
-
-execution_router = ExecutionWsRouter(route="executions", tags=["broker"])
-executions_topic_builder = execution_router.topic_builder
-
-equity_router = EquityWsRouter(route="equity", tags=["broker"])
-equity_topic_builder = equity_router.topic_builder
-
-broker_connection_router = BrokerConnectionWsRouter(
-    route="broker-connection", tags=["broker"]
-)
-broker_connection_topic_builder = broker_connection_router.topic_builder
-
-# Export all routers for main app registration
-ws_routers: list[WsRouterInterface] = [
-    order_router,
-    position_router,
-    execution_router,
-    equity_router,
-    broker_connection_router,
-]
+class BrokerWsRouters(list[WsRouterInterface]):
+    def __init__(self, broker_service: WsRouteService):
+        # Instantiate routers
+        order_router = OrderWsRouter(
+            route="orders", tags=["broker"], service=broker_service
+        )
+        position_router = PositionWsRouter(
+            route="positions", tags=["broker"], service=broker_service
+        )
+        execution_router = ExecutionWsRouter(
+            route="executions", tags=["broker"], service=broker_service
+        )
+        equity_router = EquityWsRouter(
+            route="equity", tags=["broker"], service=broker_service
+        )
+        broker_connection_router = BrokerConnectionWsRouter(
+            route="broker-connection", tags=["broker"], service=broker_service
+        )
+        super().__init__(
+            [
+                order_router,
+                position_router,
+                execution_router,
+                equity_router,
+                broker_connection_router,
+            ]
+        )

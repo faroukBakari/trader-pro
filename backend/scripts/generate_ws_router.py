@@ -41,9 +41,9 @@ def parse_router_specs(ws_dir: Path) -> list[RouterSpec]:
         re.MULTILINE | re.DOTALL,
     )
 
-    # Find all .py files except generic.py and files in generated/
+    # Find all .py files except generic_route.py and files in generated/
     for py_file in ws_dir.glob("*.py"):
-        if py_file.name in ("__init__.py", "generic.py", "router_interface.py"):
+        if py_file.name in ("__init__.py", "generic_route.py", "router_interface.py"):
             continue
 
         content = py_file.read_text()
@@ -77,8 +77,8 @@ def generate_router_code(spec: RouterSpec, template: str) -> str:
         if "class WsRouter(" in line:
             result_lines.append(f"class {spec.class_name}(WsRouterInterface):")
             continue
-        modified_line = line.replace("__TRequest", spec.request_type)
-        modified_line = modified_line.replace("__TData", spec.data_type)
+        modified_line = line.replace("_TRequest", spec.request_type)
+        modified_line = modified_line.replace("_TData", spec.data_type)
         result_lines.append(modified_line)
     return "\n".join(result_lines)
 
@@ -112,8 +112,8 @@ __all__ = [
 
 def main():
     """Generate all router classes."""
-    template = Path(f"{Path.cwd()}/src/trading_api/ws/generic.py").read_text()
-    print("📖 Read generic template from ws/generic.py")
+    template = Path(f"{Path.cwd()}/src/trading_api/ws/generic_route.py").read_text()
+    print("📖 Read generic template from ws/generic_route.py")
 
     output_dir = Path(f"{Path.cwd()}/src/trading_api/ws/generated")
     if output_dir.exists():

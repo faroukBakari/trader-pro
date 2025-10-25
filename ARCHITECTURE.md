@@ -80,22 +80,26 @@ Trading Pro is a modern full-stack trading platform built with **FastAPI** backe
 ```
 src/trading_api/
 ├── main.py              # App lifecycle, routing, specs
-├── api/                 # REST endpoints
-│   ├── broker.py        # Broker operations (orders, positions, leverage)
-│   ├── datafeed.py      # Market data endpoints
-│   ├── health.py        # Health checks
-│   └── versions.py      # API versioning
-├── ws/                  # WebSocket operations
-│   ├── broker.py        # Broker WebSocket routers (orders, positions, executions, equity, connection)
-│   └── datafeed.py      # Market data WebSocket routers (bars, quotes)
-├── core/                # Business logic
-│   ├── broker_service.py      # Broker operations
-│   ├── datafeed_service.py    # Market data logic
-│   ├── bar_broadcaster.py     # Background broadcasting
-│   └── config.py              # Configuration models
+├── api/                 # REST endpoints (class-based APIRouter)
+│   ├── broker.py        # BrokerApi class - Broker operations (orders, positions, leverage)
+│   ├── datafeed.py      # DatafeedApi class - Market data endpoints
+│   ├── health.py        # HealthApi class - Health checks
+│   └── versions.py      # VersionApi class - API versioning
+├── ws/                  # WebSocket operations (router factories)
+│   ├── router_interface.py  # WsRouterInterface, WsRouteService, topicTracker
+│   ├── generic_route.py     # Generic WsRouter implementation
+│   ├── broker.py            # BrokerWsRouters factory (orders, positions, executions, equity, connection)
+│   ├── datafeed.py          # DatafeedWsRouters factory (bars, quotes)
+│   └── generated/           # Auto-generated concrete router classes
+├── core/                # Business logic services
+│   ├── broker_service.py      # BrokerService (extends WsRouteService)
+│   └── datafeed_service.py    # DatafeedService (extends WsRouteService)
 ├── models/              # Pydantic models (topic-based organization)
-│   ├── common.py        # Shared types (BaseApiResponse, etc.)
+│   ├── common.py        # Shared types (BaseApiResponse, SubscriptionUpdate, etc.)
+│   ├── health.py        # Health check models
+│   ├── versioning.py    # API version models
 │   ├── broker/          # Broker business domain models
+│   │   ├── common.py       # Shared broker models (SuccessResponse)
 │   │   ├── orders.py       # Order models (REST + WebSocket)
 │   │   ├── positions.py    # Position models (REST + WebSocket)
 │   │   ├── executions.py   # Execution models (REST + WebSocket)
@@ -114,9 +118,9 @@ src/trading_api/
 tests/
 ├── test_api_broker.py   # Broker API tests
 ├── test_api_health.py   # Health endpoint tests
+├── test_api_versioning.py # Versioning API tests
 ├── test_ws_broker.py    # Broker WebSocket tests
-├── test_ws_datafeed.py  # Datafeed WebSocket tests
-└── test_datafeed_broadcaster.py  # Broadcaster tests
+└── test_ws_datafeed.py  # Datafeed WebSocket tests
 ```
 
 ### Backend Models Architecture
@@ -288,6 +292,196 @@ When adding new models:
 7. **Export from main models** (`models/__init__.py`) for external access
 
 **Never** create separate files for WebSocket vs REST models of the same business concept.
+
+## WebSocket Real-Time Architecture
+
+### WsRouteService Pattern
+
+The backend implements a **queue-based WebSocket service architecture** that connects business services to WebSocket clients through a topic subscription system.
+
+#### Core Components
+
+**1. `WsRouteService` (Base Class)**
+
+Location: `ws/router_interface.py`
+
+```python
+class WsRouteService:
+    """Base class providing topic-based queue management for WebSocket routing."""
+
+    def __init__(self) -> None:
+        self._topic_queues: dict[str, asyncio.Queue] = {}
+
+    def get_topic_queue(self, topic: str) -> asyncio.Queue:
+        """Get or create queue for a topic."""
+        return self._topic_queues.setdefault(topic, asyncio.Queue())
+
+    def del_topic(self, topic: str) -> None:
+        """Remove topic queue when no longer needed."""
+        self._topic_queues.pop(topic, None)
+```
+
+**Inheritance**: `BrokerService(WsRouteService)`, `DatafeedService(WsRouteService)`
+
+**2. `topicTracker` (Generic Class)**
+
+Location: `ws/router_interface.py`
+
+```python
+class topicTracker(Generic[_TData]):
+    """Manages subscription lifecycle and broadcasting for a single topic."""
+
+    def __init__(
+        self,
+        topic: str,
+        service: WsRouteService,
+        send_update: Callable[[_TData], None],
+    ) -> None:
+        self.topic = topic
+        self.service = service
+        self.count = 1  # Reference counting for active subscriptions
+        self.send_update = send_update
+        self._task = asyncio.create_task(self.poll())
+
+    async def poll(self) -> None:
+        """Poll service queue and broadcast updates to subscribers."""
+        while self.count > 0:
+            data = await self.service.get_topic_queue(self.topic).get()
+            self.send_update(data)
+
+    def inc(self) -> None:
+        """Increment subscription count."""
+        self.count += 1
+
+    def dec(self) -> None:
+        """Decrement subscription count, cleanup if zero."""
+        self.count -= 1
+        if self.count <= 0:
+            self.service.del_topic(self.topic)
+```
+
+**3. `WsRouter` (Generic Implementation)**
+
+Location: `ws/generic_route.py`
+
+```python
+class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
+    """Generic WebSocket router with subscription management."""
+
+    def __init__(self, route: str, tags: list, service: WsRouteService):
+        super().__init__(prefix=f"{route}.", tags=tags)
+        self.service = service
+        self.topic_queues: dict[str, topicTracker[_TData]] = {}
+
+    # Subscribe handler creates or increments tracker
+    @self.send("subscribe", reply="subscribe.response")
+    def send_subscribe(payload: _TRequest, client: Client):
+        topic = self.topic_builder(payload)
+        client.subscribe(topic)
+
+        if topic not in self.topic_queues:
+            self.topic_queues[topic] = topicTracker[_TData](
+                topic, self.service, send_update
+            )
+        else:
+            self.topic_queues[topic].inc()
+
+    # Unsubscribe handler decrements tracker
+    @self.send("unsubscribe", reply="unsubscribe.response")
+    def send_unsubscribe(payload: _TRequest, client: Client):
+        topic = self.topic_builder(payload)
+        client.unsubscribe(topic)
+        self.topic_queues[topic].dec()  # Auto-cleanup when count hits 0
+```
+
+#### Data Flow Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     WebSocket Data Flow                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. Service Layer (BrokerService / DatafeedService)            │
+│     └─> Generates business events (orders, bars, etc.)         │
+│     └─> Puts data into topic queue                             │
+│         queue = service.get_topic_queue(topic)                  │
+│         await queue.put(data)                                   │
+│                                                                 │
+│  2. topicTracker (one per unique topic)                        │
+│     └─> Created on first subscription                          │
+│     └─> Polls queue in background task (async loop)            │
+│     └─> Calls send_update callback with data                   │
+│     └─> Reference counting for multiple subscribers            │
+│     └─> Auto-cleanup when count reaches 0                      │
+│                                                                 │
+│  3. WsRouter (route handler)                                   │
+│     └─> Subscribe: Creates tracker or increments count         │
+│     └─> Unsubscribe: Decrements count                          │
+│     └─> Update: Broadcasts to all subscribed clients           │
+│                                                                 │
+│  4. FastWS Framework                                           │
+│     └─> Manages WebSocket connections                          │
+│     └─> Delivers updates to subscribed clients via topics      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Design Decisions
+
+**1. Service-to-Router Decoupling**
+
+- Services don't know about WebSocket clients
+- Services only put data into queues
+- Routers poll queues and broadcast
+
+**2. Reference Counting**
+
+- Multiple clients can subscribe to same topic
+- Single `topicTracker` handles all subscribers for a topic
+- Automatic cleanup when last client unsubscribes
+
+**3. Async Polling Pattern**
+
+- Each tracker runs independent async task
+- Non-blocking queue polling
+- Efficient fan-out to multiple subscribers
+
+**4. No Manual Broadcasting**
+
+- ❌ Removed: `DatafeedBroadcaster` periodic task
+- ✅ New: Event-driven queue-based updates
+- Services control timing by putting data in queues
+
+#### Router Factory Pattern
+
+**Class-Based API Routers**:
+
+```python
+# api/broker.py
+class BrokerApi(APIRouter):
+    def __init__(self, broker_service: BrokerService):
+        super().__init__(prefix="/broker", tags=["broker"])
+        self.broker_service = broker_service
+        # Define routes in __init__
+```
+
+**WebSocket Router Factories**:
+
+```python
+# ws/broker.py
+class BrokerWsRouters(list[WsRouterInterface]):
+    def __init__(self, broker_service: WsRouteService):
+        order_router = OrderWsRouter(route="orders", service=broker_service)
+        position_router = PositionWsRouter(route="positions", service=broker_service)
+        super().__init__([order_router, position_router, ...])
+```
+
+**Benefits**:
+
+- Dependency injection (services passed in constructor)
+- No global state or singletons
+- Testable (mock services easily)
+- Clean lifecycle management
 
 ### Frontend Structure
 

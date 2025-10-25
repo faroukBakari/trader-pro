@@ -31,6 +31,7 @@ mypy = "^1.7.1"
 pre-commit = "^3.5.0"
 debugpy = "^1.8.0"
 asyncapi = "^0.14.1"
+autoflake = "^2.3.1"
 
 [build-system]
 requires = ["poetry-core"]
@@ -43,6 +44,13 @@ target-version = ['py311']
 [tool.isort]
 profile = "black"
 line_length = 88
+
+[tool.autoflake]
+remove-all-unused-imports = true
+remove-unused-variables = true
+ignore-init-module-imports = true
+recursive = true
+in-place = true
 
 [tool.mypy]
 python_version = "3.11"

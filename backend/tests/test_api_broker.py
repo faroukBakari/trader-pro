@@ -241,7 +241,7 @@ async def test_close_position_endpoint():
         await client.post("/api/v1/broker/debug/reset")
 
         # Manually create a position (bypass execution simulation)
-        from trading_api.api.broker import broker_service
+        from trading_api.main import broker_service
         from trading_api.models.broker import Position, Side
 
         position_id = "AAPL-POS"
@@ -280,7 +280,7 @@ async def test_close_position_partial_endpoint():
         await client.post("/api/v1/broker/debug/reset")
 
         # Manually create a position (bypass execution simulation)
-        from trading_api.api.broker import broker_service
+        from trading_api.main import broker_service
         from trading_api.models.broker import Position, Side
 
         position_id = "AAPL-POS"
@@ -319,7 +319,7 @@ async def test_edit_position_brackets_endpoint():
         await client.post("/api/v1/broker/debug/reset")
 
         # Manually create a position (bypass execution simulation)
-        from trading_api.api.broker import broker_service
+        from trading_api.main import broker_service
         from trading_api.models.broker import Position, Side
 
         position_id = "AAPL-POS"

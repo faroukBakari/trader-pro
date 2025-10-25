@@ -1,5 +1,6 @@
+import asyncio
 import json
-from typing import Any, Protocol
+from typing import Any, Callable, Generic, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -25,6 +26,18 @@ def buildTopicParams(obj: Any) -> str:
 
     sorted_obj = sort_recursive(obj)
     return json.dumps(sorted_obj, separators=(",", ":"))
+
+
+class WsRouteService:
+    def __init__(self) -> None:
+        super().__init__()
+        self._topic_queues: dict[str, asyncio.Queue] = {}
+
+    def get_topic_queue(self, topic: str) -> asyncio.Queue:
+        return self._topic_queues.setdefault(topic, asyncio.Queue())
+
+    def del_topic(self, topic: str) -> None:
+        self._topic_queues.pop(topic, None)
 
 
 class WsRouterProto(Protocol):
@@ -53,3 +66,38 @@ class WsRouterInterface(OperationRouter, WsRouterProto):
             ],
             "note": "WebSocket endpoints use AsyncAPI spec, not OpenAPI/Swagger",
         }
+
+
+_TData = TypeVar("_TData", bound=BaseModel)
+
+
+class topicTracker(Generic[_TData]):
+    def __init__(
+        self,
+        topic: str,
+        service: WsRouteService,
+        send_update: Callable[[_TData], None],
+    ) -> None:
+        self.topic = topic
+        self.service = service
+        self.count = 1
+        self.send_update = send_update
+        self._task = asyncio.create_task(self.poll())
+
+    async def poll(self) -> None:
+        while self.count > 0:
+            data = await self.service.get_topic_queue(self.topic).get()
+            self.send_update(data)
+
+    def inc(self) -> None:
+        self.count += 1
+
+    def dec(self) -> None:
+        self.count -= 1
+        if self.count <= 0:
+            self.service.del_topic(self.topic)
+
+    def __del__(self) -> None:
+        """Destructor to clean up topic when tracker is garbage collected"""
+        if self.count > 0:
+            self.service.del_topic(self.topic)

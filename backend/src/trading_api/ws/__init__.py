@@ -1,10 +1,10 @@
-from . import broker, datafeed
-from .router_interface import WsRouterInterface
+from .broker import BrokerWsRouters
+from .datafeed import DatafeedWsRouters
+from .router_interface import WsRouterInterface, WsRouteService
 
-# Consolidate all WebSocket routers from different modules
-ws_routers: list[WsRouterInterface] = [
-    *datafeed.ws_routers,
-    *broker.ws_routers,
+__all__ = [
+    "BrokerWsRouters",
+    "DatafeedWsRouters",
+    "WsRouterInterface",
+    "WsRouteService",
 ]
-
-__all__ = ["ws_routers"]
