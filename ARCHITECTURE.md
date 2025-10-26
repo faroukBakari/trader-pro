@@ -1,77 +1,260 @@
 # Trading Pro - Architecture Documentation
 
-**Version**: 2.0.0
-**Last Updated**: October 21, 2025
+**Version**: 3.0.0
+**Last Updated**: October 26, 2025
 **Status**: ✅ Production Ready
 
 ## Overview
 
-Trading Pro is a modern full-stack trading platform built with **FastAPI** backend and **Vue.js** frontend, featuring RESTful API (OpenAPI) and real-time WebSocket streaming (AsyncAPI). Designed with **TDD** principles and modern DevOps practices.
+Trading Pro is a modern full-stack trading platform built with **FastAPI** backend and **Vue.js** frontend, featuring RESTful API (OpenAPI) and real-time WebSocket streaming (AsyncAPI). The architecture is centered around **type safety**, **code generation**, and **test-driven development** to maintain coherence across the stack.
 
-## Core Principles
+## Core Architectural Principles
 
-1. **Decoupled Architecture** - Independent frontend/backend development and deployment
-2. **Type Safety** - End-to-end TypeScript/Python type safety with automatic client generation
-3. **Test-Driven Development** - TDD workflow with comprehensive coverage
-4. **Real-Time Streaming** - WebSocket-based market data with FastWS framework
-5. **API Versioning** - Backwards-compatible evolution strategy
-6. **DevOps Ready** - Automated CI/CD with parallel testing
+### 1. Contract-First Development (Code Generation as Foundation)
 
-## System Architecture
-
-### High-Level View
+The entire system is built on **specification-driven development** where API contracts (OpenAPI/AsyncAPI) drive automatic client generation:
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                   Trading Pro Platform                    │
-├──────────────────────────────────────────────────────────┤
-│  Frontend (Vue 3)        │  Backend (FastAPI)            │
-│  • Composition API       │  • REST API (OpenAPI)         │
-│  • TypeScript + Vite     │  • WebSocket (AsyncAPI)       │
-│  • Pinia State Mgmt      │  • API Versioning (v1)        │
-│  • Auto Client Gen       │  • TradingView Integration    │
-│  • Smart Fallbacks       │  • Broker & Datafeed APIs     │
-└──────────────────────────────────────────────────────────┘
+Backend Models (Pydantic) → OpenAPI/AsyncAPI Specs → TypeScript Clients → Frontend Types
 ```
 
-### Technology Stack
+This ensures:
 
-#### Backend
+- **Single Source of Truth**: Backend models define the contract
+- **Compile-Time Safety**: Breaking changes caught during build
+- **Zero Drift**: Frontend and backend types always synchronized
+- **Automatic Updates**: Client regeneration on spec changes
+
+### 2. Type-Safe Data Flow (End-to-End Type Coherence)
+
+```
+Python (Pydantic) ←→ JSON (OpenAPI/AsyncAPI) ←→ TypeScript (Generated) ←→ Vue Components
+```
+
+**Critical Pattern**: Mapper layer isolates type transformations
+
+- Backend types confined to `mappers.ts` (never in services)
+- Services work exclusively with frontend types
+- Breaking changes detected at compile time, not runtime
+
+### 3. Test-Driven Architecture (TDD at Every Layer)
+
+```
+Unit Tests (Fast) → Integration Tests (Medium) → E2E Tests (Slow)
+    ↓                       ↓                          ↓
+Backend (pytest)     Frontend+Backend         Full Stack (Playwright)
+Frontend (Vitest)    (Contract Tests)         (User Workflows)
+```
+
+**Key Design**: Independent test suites (no cross-dependencies) enable parallel CI/CD execution.
+
+### 4. Real-Time Coherence (WebSocket State Synchronization)
+
+```
+Backend Service → FastWSAdapter → WebSocketBase (Singleton) → Multiple Clients → UI Updates
+```
+
+**Critical**: Topic-based subscription with reference counting ensures:
+
+- Automatic resource cleanup (last unsubscribe stops data generation)
+- Single WebSocket connection shared across all clients
+- Server-confirmed subscriptions (no race conditions)
+
+### 5. Incremental Development (Fallback-Driven Design)
+
+Every service has dual implementations:
+
+- **Fallback Client**: Mock implementation for offline development
+- **Real Client**: Generated from backend API
+- **Smart Adapter**: Automatically switches based on backend availability
+
+This enables:
+
+- Frontend development without backend
+- Backend development without frontend
+- Graceful degradation in production
+
+---
+
+## Technology Stack
+
+### Backend
 
 - **Framework**: FastAPI 0.104+ (ASGI async)
 - **WebSocket**: FastWS 0.1.7 (AsyncAPI documented)
 - **Runtime**: Python 3.11 + Uvicorn
 - **Package Mgmt**: Poetry
-- **Testing**: pytest + pytest-asyncio + httpx
 - **Type Safety**: MyPy + Pydantic
-- **Code Quality**: Black + isort + Flake8
-- **Docs**: OpenAPI 3.0 + AsyncAPI 2.4.0
+- **Testing**: pytest + pytest-asyncio + httpx TestClient
 
-#### Frontend
+### Frontend
 
 - **Framework**: Vue 3 + Composition API + TypeScript
-- **Build**: Vite 7+
+- **Build**: Vite 7+ with HMR
 - **Package Mgmt**: npm (Node.js 20+)
-- **State**: Pinia
-- **Routing**: Vue Router 4
+- **State**: Pinia stores
 - **Testing**: Vitest + Vue Test Utils
 - **Charts**: TradingView Advanced Charting Library
-- **Code Quality**: ESLint + Prettier
 
-#### Real-Time Infrastructure
-
-- **Protocol**: WebSocket (ws/wss)
-- **Framework**: FastWS with AsyncAPI docs
-- **Pattern**: Topic-based pub/sub (`bars:SYMBOL:RESOLUTION`)
-- **Operations**: Subscribe, Unsubscribe, Update messages
-- **Features**: Heartbeat, connection lifespan, metrics
-
-#### DevOps
+### DevOps
 
 - **CI/CD**: GitHub Actions (parallel jobs)
-- **Testing**: Multi-tier (unit, integration, smoke, e2e)
+- **Build**: Makefile orchestration (NEVER use npm/poetry directly)
+- **Quality**: Pre-commit hooks (Black, isort, ESLint, Prettier)
 - **Development**: VS Code multi-root workspace
-- **Build**: Intelligent Makefile system
+
+---
+
+## Code Generation Pipeline (Central Architecture Pillar)
+
+Code generation is the **foundational mechanism** that maintains type coherence across the entire stack.
+
+### 1. Backend Spec Generation (Offline Mode)
+
+**Command**: `make export-openapi-spec` and `make export-asyncapi-spec` (backend)
+
+**Process Flow**:
+
+```
+FastAPI App + Pydantic Models → Export Script → openapi.json
+FastWS App + AsyncAPI Decorator → Export Script → asyncapi.json
+```
+
+**Key Features**:
+
+- No server startup required (< 1 second execution)
+- Script-based extraction from app configuration
+- Automatic model introspection via Pydantic
+- Generates OpenAPI 3.0 and AsyncAPI 2.4.0 specs
+
+### 2. Frontend Client Generation (Automatic)
+
+**Generation Targets**:
+
+| Command                        | Input Spec            | Output Location                               | Artifacts Generated                              |
+| ------------------------------ | --------------------- | --------------------------------------------- | ------------------------------------------------ |
+| `make generate-openapi-client` | backend/openapi.json  | frontend/src/clients/trader-client-generated/ | TypeScript interfaces, API client classes        |
+| `make generate-asyncapi-types` | backend/asyncapi.json | frontend/src/clients/ws-types-generated/      | WebSocket message types, subscription interfaces |
+
+**Process Flow**:
+
+```
+OpenAPI Spec → OpenAPI Generator Tool → TypeScript Client Code
+AsyncAPI Spec → Custom Type Extractor → TypeScript Interfaces
+```
+
+**Type Alignment**:
+
+- Python Pydantic models → JSON Schema → TypeScript interfaces
+- Enum values preserved across languages
+- Optional fields mapped to TypeScript optional properties
+- Discriminated unions for polymorphic types
+
+### 3. Backend WebSocket Router Generation
+
+**Command**: `make generate-ws-routers` (backend)
+
+**Purpose**: Generate concrete (non-generic) router classes from generic template
+
+**Generation Process**:
+
+| Step        | Description                                  | Output                     |
+| ----------- | -------------------------------------------- | -------------------------- |
+| 1. Scan     | Find TypeAlias declarations in ws/ directory | List of router definitions |
+| 2. Extract  | Parse generic parameters (TRequest, TData)   | Type information           |
+| 3. Generate | Create concrete class from template          | Generated router file      |
+| 4. Validate | Run MyPy and quality checks                  | Type-safe router           |
+
+**Pattern**:
+
+```
+TypeAlias Definition → Code Generator → Concrete Router Class
+(at type-check time)    (build step)     (runtime implementation)
+```
+
+**Benefits**:
+
+- Better IDE autocomplete and IntelliSense
+- Improved static type checking (MyPy compliance)
+- Runtime performance (no generic overhead)
+- Consistent implementation across all routers
+
+### 4. File Watchers (Development Mode)
+
+**Command**: `make dev-fullstack` (root)
+
+**Watch Loop Flow**:
+
+```
+File System Monitor → Detect Spec Change → Trigger Regeneration → HMR Update
+        ↓                    ↓                      ↓                  ↓
+  Watch specs      openapi.json or      Run generator       Frontend reloads
+                   asyncapi.json        command             with new types
+```
+
+**Monitored Files**:
+
+- `backend/openapi.json` → Triggers REST client regeneration
+- `backend/asyncapi.json` → Triggers WebSocket types regeneration
+
+**Developer Experience**:
+
+- Change backend model → Spec auto-regenerates → Frontend types update → Hot reload applies
+- Average update cycle: 2-3 seconds
+- No manual intervention required
+
+### 5. Type Safety Enforcement
+
+**Critical Rule**: Backend types NEVER imported directly in services
+
+**Type Isolation Architecture**:
+
+```
+Services Layer (Frontend Types Only)
+        ↑
+        │ Uses frontend types exclusively
+        │
+Mappers Layer (Type Transformations)
+        ↑
+        │ Imports both backend and frontend types
+        │
+Generated Clients (Backend Types)
+```
+
+**Benefits of Isolation**:
+
+- **Compile-Time Detection**: Breaking changes fail TypeScript compilation
+- **Single Responsibility**: Mappers own all type transformations
+- **Testability**: Services mock frontend types, not backend types
+- **Maintainability**: Type changes localized to mapper layer
+
+### 6. CI/CD Integration
+
+**Pipeline Flow**:
+
+```
+Backend Job → Export Specs → Frontend Job → Generate Clients → Type Check
+     ↓              ↓              ↓                ↓                ↓
+  Run tests    openapi.json   Install deps    TypeScript gen    Validate types
+              asyncapi.json                                     (fails on mismatch)
+```
+
+**Job Dependencies**:
+
+- Frontend job depends on backend completion (specs availability)
+- Type check runs after client generation
+- Breaking changes detected before merge
+
+**Quality Gates**:
+
+- Backend tests must pass
+- Specs must generate successfully
+- Frontend types must compile
+- All tests must pass with new types
+
+**Guarantee**: Pull requests with breaking changes fail type-check step.
+
+---
 
 ## Component Architecture
 
@@ -175,42 +358,24 @@ models/
    - Reflects the two main API areas: trading operations vs market data
    - Aligns with TradingView API structure (broker API vs datafeed API)
 
-#### Example: orders.py Structure
+#### Example: orders.py Model Organization
 
-```python
-# models/broker/orders.py
+**Model Categories in Single File**:
 
-# Enumerations (shared across REST + WebSocket)
-class OrderStatus(IntEnum): ...
-class OrderType(IntEnum): ...
-class Side(IntEnum): ...
+| Category                   | Model Name                   | Usage                                       |
+| -------------------------- | ---------------------------- | ------------------------------------------- |
+| **Enumerations**           | OrderStatus, OrderType, Side | Shared across REST and WebSocket            |
+| **REST Request**           | PreOrder                     | Input for placing orders via POST           |
+| **REST/WS Response**       | PlacedOrder                  | Order status (REST responses + WS updates)  |
+| **WebSocket Subscription** | OrderSubscriptionRequest     | Parameters for subscribing to order updates |
 
-# REST Models
-class PreOrder(BaseModel):
-    """Order request from client (REST API input)"""
-    symbol: str
-    type: OrderType
-    # ...
+**Key Design Insight**:
 
-class PlacedOrder(BaseModel):
-    """Complete order with status (REST API output + WebSocket update)"""
-    id: str
-    symbol: str
-    status: OrderStatus
-    # ...
-
-# WebSocket Models
-class OrderSubscriptionRequest(BaseModel):
-    """WebSocket subscription parameters for order updates"""
-    accountId: str
-```
-
-**Key Insight**: `PlacedOrder` is used in both:
-
-- REST API responses (`GET /api/v1/broker/orders`)
-- WebSocket update messages (`orders.update`)
-
-This eliminates duplication and ensures consistency across API types.
+- `PlacedOrder` serves dual purpose:
+  - REST API response: `GET /api/v1/broker/orders` returns list of PlacedOrder
+  - WebSocket update: `orders.update` broadcasts PlacedOrder on changes
+- Single model definition eliminates duplication
+- Ensures type consistency across communication channels
 
 #### Benefits of Topic-Based Organization
 
@@ -261,23 +426,28 @@ models/
 
 #### Integration with WebSocket Routers
 
-WebSocket routers import models from their corresponding topic files:
+**Model-to-Router Flow**:
 
-```python
-# ws/broker.py
-from trading_api.models.broker.orders import OrderSubscriptionRequest, PlacedOrder
-from trading_api.models.broker.positions import PositionSubscriptionRequest, Position
-
-if TYPE_CHECKING:
-    OrderWsRouter: TypeAlias = WsRouter[OrderSubscriptionRequest, PlacedOrder]
-    PositionWsRouter: TypeAlias = WsRouter[PositionSubscriptionRequest, Position]
+```
+Topic File (orders.py) → Router File (ws/broker.py) → Generated Router
+        ↓                          ↓                          ↓
+  OrderSubscriptionRequest    TypeAlias definition      OrderWsRouter
+  PlacedOrder                 Generic parameters        (concrete class)
 ```
 
-This creates a clean flow:
+**Integration Pattern**:
 
-1. **Business concept** defines all related models in one file
-2. **Router** imports subscription request + update model from the same topic file
-3. **Type safety** ensured across REST and WebSocket operations
+1. **Business concept** defines all related models in one topic file
+2. **Router factory** imports subscription request + update model from topic file
+3. **Type alias** declares generic router with topic-specific types
+4. **Code generator** creates concrete router class
+5. **Type safety** ensured across REST and WebSocket operations
+
+**Benefits**:
+
+- Models and routers stay synchronized
+- Change in topic file automatically propagates to router
+- Type mismatches caught at build time
 
 #### Guidelines for New Models
 
@@ -303,136 +473,141 @@ The backend implements a **Protocol-based WebSocket service architecture** where
 
 **1. `WsRouteService` (Protocol)**
 
-Location: `ws/router_interface.py`
+**Location**: `ws/router_interface.py`
 
-```python
-class WsRouteService(Protocol):
-    """Protocol for services providing WebSocket topic lifecycle management."""
+**Protocol Methods**:
 
-    async def create_topic(self, topic: str) -> None:
-        """Create and start data generation for a topic."""
-        ...
-
-    def remove_topic(self, topic: str) -> None:
-        """Stop and clean up data generation for a topic."""
-        ...
-```
+| Method       | Signature                   | Purpose                                       |
+| ------------ | --------------------------- | --------------------------------------------- |
+| create_topic | `async (topic: str) → None` | Create and start data generation for a topic  |
+| remove_topic | `(topic: str) → None`       | Stop and clean up data generation for a topic |
 
 **Implementations**: `BrokerService`, `DatafeedService`
 
-**2. Service Implementation (Self-Managed Generators)**
+**Design Benefits**:
 
-Location: `core/datafeed_service.py`, `core/broker_service.py`
+- Protocol-based (no inheritance required)
+- Services remain independent
+- Clean dependency injection pattern
 
-```python
-class DatafeedService:
-    """Market data service implementing WsRouteService Protocol."""
+**Service Layer (Self-Managed Generators)**
 
-    def __init__(self) -> None:
-        self._topic_generators: dict[str, asyncio.Task] = {}
+**Locations**: `core/datafeed_service.py`, `core/broker_service.py`
 
-    async def create_topic(self, topic: str) -> None:
-        """Start generator task for topic."""
-        if topic not in self._topic_generators:
-            if topic.startswith("bars:"):
-                task = asyncio.create_task(self._bar_generator(topic))
-                self._topic_generators[topic] = task
+**Service Architecture**:
 
-    def remove_topic(self, topic: str) -> None:
-        """Stop generator task for topic."""
-        if topic in self._topic_generators:
-            self._topic_generators[topic].cancel()
-            del self._topic_generators[topic]
-
-    async def _bar_generator(self, topic: str) -> None:
-        """Generate and broadcast bar data for topic."""
-        while True:
-            bar = self.mock_last_bar(symbol, resolution)
-            await self.publish(topic, bar)  # Publish to FastWSAdapter
-            await asyncio.sleep(interval)
 ```
+BrokerService
+    ├─ _topic_trackers: dict[str, Callable]  # Maps topic → topic_update callback
+    ├─ Business state (_orders, _positions, etc.)
+    ├─ Event queues (for future event-driven architecture)
+    │  ├─ _orders_queue: asyncio.Queue[PlacedOrder]
+    │  ├─ _positions_queue: asyncio.Queue[Position]
+    │  ├─ _executions_queue: asyncio.Queue[Execution]
+    │  └─ _equity_queue: asyncio.Queue[EquityData]
+    └─ Methods implementing WsRouteService Protocol
+       ├─ create_topic(topic, topic_update) → Store callback
+       └─ remove_topic(topic) → Remove callback
+```
+
+**Current Data Flow**:
+
+1. **create_topic()** called by WsRouter when first subscriber arrives
+
+   - Stores `topic_update` callback in `_topic_trackers[topic]`
+   - Service ready to broadcast updates for this topic
+
+2. **Business logic methods** (e.g., `placeOrder()`, `modifyPosition()`)
+
+   - Update internal state (e.g., `_orders[order_id] = new_order`)
+   - **Currently**: Direct state mutation (no automatic broadcasting)
+   - **Future**: Enqueue to event queues for automatic broadcasting
+
+3. **remove_topic()** called when last subscriber unsubscribes
+   - Removes callback from `_topic_trackers`
+   - Lightweight cleanup (no task cancellation needed)
+
+**Event Queues (Future Enhancement)**:
+
+Services include FIFO event queues for event-driven architecture:
+
+- `_orders_queue`, `_positions_queue`, `_executions_queue`, `_equity_queue`
+- Partially integrated (some enqueue operations present)
+- Will enable automatic broadcasting when fully integrated
+- Decouples business logic from WebSocket concerns
 
 **3. `WsRouter` (Generic Implementation with Reference Counting)**
 
-Location: `ws/generic_route.py`
+**Location**: `ws/generic_route.py`
 
-```python
-class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
-    """Generic WebSocket router with subscription management."""
+**Router Responsibilities**:
 
-    def __init__(self, route: str, tags: list, service: WsRouteService):
-        super().__init__(prefix=f"{route}.", tags=tags)
-        self.service = service
-        self.topic_trackers: dict[str, int] = {}  # Reference counting
+| Operation       | Trigger                     | Action                                                                   |
+| --------------- | --------------------------- | ------------------------------------------------------------------------ |
+| **Subscribe**   | First subscriber            | Increment counter to 1, call `service.create_topic(topic, topic_update)` |
+| **Subscribe**   | Additional subscriber       | Increment counter                                                        |
+| **Unsubscribe** | Not last subscriber         | Decrement counter                                                        |
+| **Unsubscribe** | Last subscriber (count → 0) | Delete tracker entry, call `service.remove_topic(topic)`                 |
 
-    # Subscribe handler creates topic on first subscriber
-    @self.send("subscribe", reply="subscribe.response")
-    async def send_subscribe(payload: _TRequest, client: Client):
-        topic = self.topic_builder(payload)
-        client.subscribe(topic)
+**Reference Counting Flow**:
 
-        if topic not in self.topic_trackers:
-            # First subscriber - create topic
-            self.topic_trackers[topic] = 1
-            await self.service.create_topic(topic)
-        else:
-            # Additional subscriber - increment count
-            self.topic_trackers[topic] += 1
+```
+Subscribe Request
+    ↓
+  Build topic from parameters
+    ↓
+  Check topic_trackers dictionary
+    ↓
+  If new topic → Set counter = 1 → create_topic(topic, topic_update)
+  If existing → Increment counter
+    ↓
+  Client subscribes to topic
+    ↓
+  Send confirmation response
+```
 
-    # Unsubscribe handler removes topic when count reaches 0
-    @self.send("unsubscribe", reply="unsubscribe.response")
-    def send_unsubscribe(payload: _TRequest, client: Client):
-        topic = self.topic_builder(payload)
-        client.unsubscribe(topic)
+**Unsubscribe Flow**:
 
-        if topic in self.topic_trackers:
-            self.topic_trackers[topic] -= 1
-            if self.topic_trackers[topic] <= 0:
-                del self.topic_trackers[topic]
-                self.service.remove_topic(topic)  # Cleanup
+```
+Unsubscribe Request
+    ↓
+  Build topic from parameters
+    ↓
+  Decrement topic_trackers[topic]
+    ↓
+  If counter ≤ 0 → remove_topic() → Delete tracker entry
+    ↓
+  Client unsubscribes from topic
 ```
 
 **4. `FastWSAdapter` (Broadcasting with Per-Router Queues)**
 
-Location: `plugins/fastws_adapter.py`
+**Location**: `plugins/fastws_adapter.py`
 
-```python
-class FastWSAdapter(FastWS):
-    """Self-contained WebSocket adapter with embedded endpoint and broadcasting."""
+**Adapter Responsibilities**:
 
-    def __init__(self, ...) -> None:
-        super().__init__(...)
-        self._routers: dict[str, WsRouterInterface] = {}
-        self._router_queues: dict[str, asyncio.Queue] = {}
-        self._broadcast_tasks: list[asyncio.Task] = []
+| Component            | Purpose                     | Details                                                      |
+| -------------------- | --------------------------- | ------------------------------------------------------------ |
+| Background Tasks     | Broadcasting workers        | `_broadcast_tasks: list[asyncio.Task]`                       |
+| Router Registration  | `include_router()` override | Registers router, stores broadcast coroutine                 |
+| Setup Method         | `setup()` override          | Starts all pending broadcast tasks                           |
+| Message Broadcasting | Background task per router  | Polls router.updates_queue, sends via FastWS                 |
+| Queue Management     | Per-router message queues   | `router.updates_queue: asyncio.Queue` (in WsRouterInterface) |
 
-    def include_router(self, router: WsRouterInterface) -> None:
-        """Register router and start broadcasting task."""
-        self._routers[router.route] = router
-        updates_queue: asyncio.Queue = asyncio.Queue()
-        self._router_queues[router.route] = updates_queue
+**Broadcasting Flow**:
 
-        # Start background task for this router
-        task = asyncio.create_task(
-            self.broadcast_router_messages(router.route, updates_queue)
-        )
-        self._broadcast_tasks.append(task)
-
-        super().include_router(router)
-
-    async def broadcast_router_messages(
-        self, route: str, updates_queue: asyncio.Queue
-    ) -> None:
-        """Background task broadcasting messages for a specific router."""
-        while True:
-            topic, data = await updates_queue.get()
-            message = Message(type=f"{route}.update", payload=data)
-            await self.server_send(message, topic=topic)
-
-    async def publish(self, topic: str, data: BaseModel, route: str) -> None:
-        """Queue data update for broadcasting to subscribed clients."""
-        if route in self._router_queues:
-            await self._router_queues[route].put((topic, data.model_dump()))
+```
+Service generator calls topic_update(data)
+    ↓
+  topic_update enqueues SubscriptionUpdate(topic, data)
+    ↓
+  router.updates_queue.put_nowait(update)
+    ↓
+  Background task polls router.updates_queue
+    ↓
+  Create Message(type="{route}.update", payload=update.model_dump())
+    ↓
+  server_send(message, topic=update.topic) → Only to subscribed clients
 ```
 
 #### Data Flow Architecture
@@ -443,23 +618,27 @@ class FastWSAdapter(FastWS):
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  1. Service Layer (BrokerService / DatafeedService)            │
-│     └─> Manages _topic_generators: dict[str, asyncio.Task]     │
-│     └─> create_topic() starts generator task                   │
-│     └─> Generator calls publish(topic, data)                   │
+│     └─> Manages _topic_trackers: dict[str, Callable]           │
+│     └─> create_topic(topic, topic_update) stores callback      │
+│     └─> Service generates data and calls topic_update(data)    │
 │                                                                 │
-│  2. FastWSAdapter (Broadcasting Layer)                         │
-│     └─> Maintains _router_queues per router                    │
-│     └─> publish() queues (topic, data) for router              │
-│     └─> Background task polls queue and broadcasts             │
-│         await server_send(message, topic=topic)                │
+│  2. WsRouter (Subscription Management)                         │
+│     └─> topic_update callback enqueues to updates_queue        │
+│     └─> updates_queue: asyncio.Queue in WsRouterInterface      │
 │                                                                 │
-│  3. WsRouter (Subscription Management)                         │
+│  3. FastWSAdapter (Broadcasting Layer)                         │
+│     └─> include_router() override registers routers            │
+│     └─> setup() starts background tasks per router             │
+│     └─> Background task polls router.updates_queue             │
+│         await server_send(message, topic=update.topic)         │
+│                                                                 │
+│  4. WsRouter (Subscription Management)                         │
 │     └─> Subscribe: Increments topic_trackers[topic]            │
 │     └─> First subscriber → service.create_topic()              │
 │     └─> Unsubscribe: Decrements topic_trackers[topic]          │
 │     └─> Last unsubscribe → service.remove_topic()              │
 │                                                                 │
-│  4. FastWS Framework                                           │
+│  5. FastWS Framework                                           │
 │     └─> Manages WebSocket connections                          │
 │     └─> Delivers updates to subscribed clients via topics      │
 │                                                                 │
@@ -494,7 +673,34 @@ class FastWSAdapter(FastWS):
 
 #### Router Factory Pattern
 
-**Class-Based API Routers**:
+**Pattern Comparison**:
+
+| Component             | Pattern         | Constructor Injection             | Benefits                           |
+| --------------------- | --------------- | --------------------------------- | ---------------------------------- |
+| **REST API Routers**  | Class-based     | `BrokerApi(broker_service)`       | Service passed as dependency       |
+| **WebSocket Routers** | Factory pattern | `BrokerWsRouters(broker_service)` | Returns list of configured routers |
+
+**REST API Router Pattern**:
+
+- Inherits from `APIRouter`
+- Constructor accepts service dependency
+- Defines routes in `__init__` method
+- Example: `BrokerApi`, `DatafeedApi`, `HealthApi`
+
+**WebSocket Router Factory Pattern**:
+
+- Inherits from `list[WsRouterInterface]`
+- Constructor creates multiple related routers
+- Each router configured with shared service
+- Returns list for registration
+- Example: `BrokerWsRouters`, `DatafeedWsRouters`
+
+**Shared Benefits**:
+
+- Dependency injection (no global state)
+- No singletons
+- Testable (easily mock services)
+- Clean lifecycle management
 
 ```python
 # api/broker.py
@@ -552,68 +758,747 @@ scripts/
 
 ## Data Flow
 
-### REST API Flow
+### 1. REST API Request/Response Flow
 
 ```
-Frontend → Generated Client → ApiAdapter → FastAPI Router
-         ← Type-safe data  ← Pydantic    ← Business Logic
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         REST API DATA FLOW                              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐
+│   Vue Component │  User action (place order, fetch positions, etc.)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Service Layer   │  brokerTerminalService.placeOrder(preOrder)
+│ (Frontend)      │  • Uses frontend types only (PreOrder, PlacedOrder)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Mapper Layer    │  mapPreOrder(preOrder) → PreOrder_Api_Backend
+│ (mappers.ts)    │  • Type transformation happens HERE
+│                 │  • Enum conversions, null/undefined handling
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Generated REST  │  POST /api/v1/broker/orders
+│ Client          │  • Type-safe API calls with backend types
+│ (OpenAPI Gen)   │  • Automatic serialization/deserialization
+└────────┬────────┘
+         │
+         │ HTTP POST (JSON)
+         ▼
+┌─────────────────┐
+│ FastAPI Router  │  BrokerApi.placeOrder(PreOrder_Api_Backend)
+│ (api/broker.py) │  • Pydantic validation
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Business Logic  │  BrokerService.placeOrder()
+│ (BrokerService) │  • Process order, update state
+└────────┬────────┘
+         │
+         │ Response: PlaceOrderResult
+         ▼
+┌─────────────────┐
+│ Pydantic Model  │  PlaceOrderResult serialization
+│ Validation      │  • Type validation, JSON encoding
+└────────┬────────┘
+         │
+         │ HTTP 200 (JSON)
+         ▼
+┌─────────────────┐
+│ Generated REST  │  Deserialize to PlaceOrderResult_Api_Backend
+│ Client          │  • Type-safe response handling
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Service Layer   │  Process result, update UI state
+│ (Frontend)      │  • Uses frontend types only
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   Vue Component │  Render result to user
+└─────────────────┘
 ```
 
-### WebSocket Flow (Centralized Architecture)
+### 2. WebSocket Subscription Flow
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    Application Layer                         │
-│  (DatafeedService, BrokerTerminalService)                    │
-└─────────────────────────┬────────────────────────────────────┘
-                          │ wsAdapter.bars.subscribe()
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    Adapter Layer                             │
-│  WsAdapter - Centralized clients (bars, quotes, etc.)        │
-└─────────────────────────┬────────────────────────────────────┘
-                          │ WebSocketClient<TParams, TBackendData, TData>
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    Mapper Layer                              │
-│  mappers.ts - Type-safe transformations                      │
-│  • mapQuoteData() • mapPreOrder()                            │
-└─────────────────────────┬────────────────────────────────────┘
-                          │ Backend types → Frontend types
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    Client Layer                              │
-│  WebSocketClient - Generic client with mapping               │
-└─────────────────────────┬────────────────────────────────────┘
-                          │ Uses singleton instance
-                          ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    Base Layer                                │
-│  WebSocketBase - Singleton connection management             │
-│  • Subscribe/Unsubscribe • Topic routing                     │
-│  • Auto-reconnection • Reference counting                    │
-└─────────────────────────┬────────────────────────────────────┘
-                          │ WebSocket protocol
-                          ▼
-                   Backend (/api/v1/ws)
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    WEBSOCKET SUBSCRIPTION FLOW                          │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐
+│   Vue Component │  Subscribe to real-time updates
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Service Layer   │  wsAdapter.bars.subscribe(listenerId, params, onUpdate)
+│ (Frontend)      │  • Params: { symbol: "AAPL", resolution: "1" }
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ WebSocketClient │  Build topic: "bars:{"resolution":"1","symbol":"AAPL"}"
+│ (wsClientBase)  │  • Topic format uses JSON-serialized params
+│                 │  • Register listener with callback
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ WebSocketBase   │  Check if subscription exists for topic
+│ (Singleton)     │  • New topic: Create subscription state
+│                 │  • Existing topic: Add listener to existing subscription
+└────────┬────────┘
+         │
+         │ Send: { type: "bars.subscribe", payload: params }
+         ▼
+┌─────────────────┐
+│ FastWS Router   │  Receive subscribe request
+│ (Backend)       │  • Route: bars.subscribe
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ WsRouter        │  Build topic using same algorithm
+│ (Generic)       │  • topic = buildTopicParams(params)
+│                 │  • Check topic_trackers dict
+└────────┬────────┘
+         │
+         ├─ First subscriber for topic?
+         │  YES ──────────┐
+         │                ▼
+         │         ┌─────────────────┐
+         │         │ WsRouteService  │  create_topic(topic, topic_update)
+         │         │ (BrokerService) │  • Create asyncio.Task for data generation
+         │         │                 │  • Store topic_update callback
+         │         │                 │  • Start generator loop
+         │         └────────┬────────┘
+         │                  │
+         ├──────────────────┘
+         │
+         │  Increment topic_trackers[topic]
+         │  Client.subscribe(topic) in FastWS
+         │
+         │ Send: { type: "bars.subscribe.response", payload: { status: "ok", topic: ... }}
+         ▼
+┌─────────────────┐
+│ WebSocketBase   │  Receive subscription confirmation
+│ (Singleton)     │  • Match by topic
+│                 │  • Mark subscription.confirmed = true
+│                 │  • Resolve pending promise
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Service Layer   │  Subscription confirmed, ready for updates
+│ (Frontend)      │  • Returns topic string to caller
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   Vue Component │  Display "subscribed" status
+└─────────────────┘
 ```
 
-### WebSocket Message Flow
+### 3. WebSocket Data Update Flow
 
 ```
-1. SUBSCRIPTION
-   Service → WsAdapter.bars.subscribe()
-         → WebSocketClient (applies mapper)
-         → WebSocketBase (manages connection)
-         → Backend
-         ← bars.subscribe.response (confirmation)
-         → Mark subscription as confirmed
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      WEBSOCKET UPDATE FLOW                              │
+└─────────────────────────────────────────────────────────────────────────┘
 
-2. DATA UPDATES
-   Backend broadcasts → bars.update
-         → WebSocketBase (routes to confirmed subscribers)
-         → WebSocketClient (applies mapper: TBackendData → TData)
-         → Callback in Service
+┌─────────────────┐
+│ Data Generator  │  asyncio.Task running in BrokerService
+│ (Service Layer) │  • Generates mock/real market data
+│                 │  • Infinite loop with await asyncio.sleep()
+└────────┬────────┘
+         │
+         │ New data available: Bar(time=..., open=..., high=...)
+         ▼
+┌─────────────────┐
+│ topic_update    │  Callback registered during create_topic()
+│ Callback        │  • Called by data generator
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ WsRouter        │  topic_update(data) → Enqueue to updates_queue
+│ (Generic)       │  • updates_queue.put_nowait(SubscriptionUpdate)
+│                 │  • SubscriptionUpdate(topic=topic, payload=data)
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ FastWSAdapter   │  Background task polling updates_queue
+│ Broadcasting    │  • Runs per-router broadcast coroutine
+│ Task            │  • await router.updates_queue.get()
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ FastWS Server   │  server_send(message, topic=update.topic)
+│                 │  • Message type: "bars.update"
+│                 │  • Only sends to clients subscribed to topic
+└────────┬────────┘
+         │
+         │ WebSocket message: { type: "bars.update", payload: { topic, payload: {...}}}
+         ▼
+┌─────────────────┐
+│ WebSocketBase   │  Receive update message
+│ (Singleton)     │  • Parse message, extract topic
+│                 │  • Route to subscriptions matching topic
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Subscription    │  Check subscription.confirmed === true
+│ State           │  • Only route to confirmed subscriptions
+│                 │  • Iterate over all listeners for topic
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ WebSocketClient │  Apply data mapper: mapQuoteData(backendData)
+│ Mapper          │  • Transform backend types to frontend types
+│                 │  • TBackendData → TData
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Listener        │  Execute onUpdate(mappedData) callback
+│ Callback        │  • Registered during subscribe()
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Service Layer   │  Process update, update reactive state
+│ (Frontend)      │  • Store in Pinia, update component state
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│   Vue Component │  Reactivity triggers re-render
+│                 │  • Display new data to user
+└─────────────────┘
+```
+
+### 4. Code Generation Pipeline Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    CODE GENERATION PIPELINE                             │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐
+│ Developer       │  Modify backend Pydantic model
+│ Action          │  • e.g., Add field to PlacedOrder
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ make dev-       │  Backend starts with auto-spec generation
+│ fullstack       │  • make -f project.mk dev-fullstack
+└────────┬────────┘
+         │
+         ├────────────────────────────────────────────────────────┐
+         │                                                        │
+         ▼                                                        ▼
+┌─────────────────┐                                    ┌─────────────────┐
+│ Backend Startup │  Uvicorn starts FastAPI app       │ File Watchers   │
+└────────┬────────┘                                    │ (inotifywait)   │
+         │                                             │ Monitor specs   │
+         ▼                                             └────────┬────────┘
+┌─────────────────┐                                             │
+│ Spec Export     │  make export-openapi-spec                   │
+│ (Offline Mode)  │  make export-asyncapi-spec                  │
+│                 │  • scripts/export_openapi_spec.py           │
+│                 │  • scripts/export_asyncapi_spec.py          │
+└────────┬────────┘                                             │
+         │                                                       │
+         │ Generate: backend/openapi.json                        │
+         │           backend/asyncapi.json                       │
+         ▼                                                       │
+┌─────────────────┐                                             │
+│ Wait for        │  Health endpoint check                      │
+│ Backend Ready   │  • Poll http://localhost:8000/api/v1/health │
+└────────┬────────┘                                             │
+         │                                                       │
+         ▼                                                       │
+┌─────────────────┐                                             │
+│ Frontend Client │  make generate-openapi-client               │
+│ Generation      │  make generate-asyncapi-types               │
+│ (Initial)       │  • OpenAPI Generator Tool                   │
+│                 │  • Custom AsyncAPI type extractor           │
+└────────┬────────┘                                             │
+         │                                                       │
+         │ Generate: frontend/src/clients/                      │
+         │   ├─ trader-client-generated/                        │
+         │   │  ├─ apis/                                        │
+         │   │  ├─ models/                                      │
+         │   │  └─ index.ts                                     │
+         │   └─ ws-types-generated/                             │
+         │      └─ index.ts                                     │
+         ▼                                                       │
+┌─────────────────┐                                             │
+│ Frontend Dev    │  Vite starts with HMR                       │
+│ Server Starts   │  • Port 5173                                │
+└────────┬────────┘                                             │
+         │                                                       │
+         │◄────────────────────────────────────────────────────┐│
+         │                                                      ││
+         │ File watcher detects spec change                    ││
+         │                                                      ││
+         ▼                                                      ││
+┌─────────────────┐                                            ││
+│ Auto-           │  inotifywait triggers on spec file change  ││
+│ Regeneration    │  • backend/openapi.json modified           ││
+│                 │  • backend/asyncapi.json modified          ││
+└────────┬────────┘                                            ││
+         │                                                      ││
+         ▼                                                      ││
+┌─────────────────┐                                            ││
+│ Run Client      │  make generate-openapi-client              ││
+│ Generation      │  make generate-asyncapi-types              ││
+└────────┬────────┘                                            ││
+         │                                                      ││
+         │ Updated TypeScript types                            ││
+         ▼                                                      ││
+┌─────────────────┐                                            ││
+│ Vite HMR        │  Frontend hot-reloads with new types       ││
+│ Update          │  • Breaking changes → TypeScript errors    ││
+│                 │  • Compatible changes → Seamless update    ││
+└────────┬────────┘                                            ││
+         │                                                      ││
+         └──────────────────────────────────────────────────────┘│
+         │                                                       │
+         │  Continue watching for changes                        │
+         └───────────────────────────────────────────────────────┘
+
+Key Features:
+• Offline spec generation (no server needed for export)
+• File-based watching (efficient, no polling)
+• Automatic type synchronization
+• Breaking changes caught at compile time
+• ~2-3 second update cycle
+```
+
+### 5. Type Transformation Flow (Mapper Layer)
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   TYPE TRANSFORMATION FLOW                              │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      BACKEND TYPE SOURCES                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Python (Pydantic Models)                                               │
+│  ├─ models/broker/orders.py                                            │
+│  │  ├─ class PreOrder(BaseModel)                                       │
+│  │  │     symbol: str                                                  │
+│  │  │     type: OrderType (Literal["market", "limit", "stop"])         │
+│  │  │     side: Side (Literal["buy", "sell"])                          │
+│  │  │     qty: float                                                   │
+│  │  │     limitPrice: float | None = None                              │
+│  │  │                                                                  │
+│  │  └─ class PlacedOrder(BaseModel)                                    │
+│  │        id: str                                                      │
+│  │        symbol: str                                                  │
+│  │        status: OrderStatus (Literal["working", "filled", ...])      │
+│  │        ... (same fields as PreOrder)                                │
+│  │                                                                     │
+│  └─ models/market/quotes.py                                            │
+│     └─ class QuoteData(BaseModel)                                      │
+│           s: Literal["ok", "error"]                                    │
+│           n: str  # symbol name                                        │
+│           v: QuoteOkValue | QuoteErrorValue                            │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ OpenAPI/AsyncAPI Generation
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   GENERATED TYPESCRIPT TYPES                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  // frontend/src/clients/trader-client-generated/models/                │
+│  export interface PreOrder {                                            │
+│    symbol: string                                                       │
+│    type: "market" | "limit" | "stop"                                    │
+│    side: "buy" | "sell"                                                 │
+│    qty: number                                                          │
+│    limitPrice?: number | null                                           │
+│  }                                                                      │
+│                                                                         │
+│  // frontend/src/clients/ws-types-generated/index.ts                    │
+│  export interface PlacedOrder {                                         │
+│    id: string                                                           │
+│    symbol: string                                                       │
+│    type: "market" | "limit" | "stop"                                    │
+│    side: "buy" | "sell"                                                 │
+│    status: "working" | "filled" | "rejected" | "canceled"               │
+│    qty: number                                                          │
+│    limitPrice?: number | null                                           │
+│  }                                                                      │
+│                                                                         │
+│  export interface QuoteData {                                           │
+│    s: "ok" | "error"                                                    │
+│    n: string                                                            │
+│    v: QuoteOkValue | QuoteErrorValue                                    │
+│  }                                                                      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ Import with strict naming
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       MAPPER LAYER (mappers.ts)                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  // ⚠️ STRICT NAMING CONVENTION ⚠️                                      │
+│  import type {                                                          │
+│    PreOrder as PreOrder_Api_Backend                                     │
+│  } from '@clients/trader-client-generated'                              │
+│                                                                         │
+│  import type {                                                          │
+│    PlacedOrder as PlacedOrder_Ws_Backend,                               │
+│    QuoteData as QuoteData_Ws_Backend                                    │
+│  } from '@clients/ws-types-generated'                                   │
+│                                                                         │
+│  import type {                                                          │
+│    PreOrder, PlacedOrder, QuoteData                                     │
+│  } from '@public/trading_terminal/charting_library'                     │
+│                                                                         │
+│  // Mapper functions                                                    │
+│  export function mapPreOrder(                                           │
+│    order: PreOrder                                                      │
+│  ): PreOrder_Api_Backend {                                              │
+│    return {                                                             │
+│      symbol: order.symbol,                                              │
+│      type: order.type as unknown as PreOrder_Api_Backend['type'],       │
+│      side: order.side as unknown as PreOrder_Api_Backend['side'],       │
+│      qty: order.qty,                                                    │
+│      limitPrice: order.limitPrice ?? null,  // undefined → null         │
+│      stopPrice: order.stopPrice ?? null,                                │
+│      // ... other fields                                                │
+│    }                                                                    │
+│  }                                                                      │
+│                                                                         │
+│  export function mapOrder(                                              │
+│    order: PlacedOrder_Ws_Backend                                        │
+│  ): PlacedOrder {                                                       │
+│    return {                                                             │
+│      id: order.id,                                                      │
+│      symbol: order.symbol,                                              │
+│      type: order.type as unknown as PlacedOrder['type'],                │
+│      side: order.side as unknown as PlacedOrder['side'],                │
+│      status: order.status as unknown as PlacedOrder['status'],          │
+│      qty: order.qty,                                                    │
+│      limitPrice: order.limitPrice ?? undefined,  // null → undefined    │
+│      // ... other fields                                                │
+│    }                                                                    │
+│  }                                                                      │
+│                                                                         │
+│  export function mapQuoteData(                                          │
+│    quote: QuoteData_Ws_Backend                                          │
+│  ): QuoteData {                                                         │
+│    if (quote.s === 'error') {                                           │
+│      return { s: 'error', n: quote.n, v: quote.v }                      │
+│    }                                                                    │
+│    return { s: 'ok', n: quote.n, v: { ...quote.v } }                    │
+│  }                                                                      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ Services import ONLY frontend types
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        SERVICE LAYER                                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  // services/brokerTerminalService.ts                                   │
+│  import { mapPreOrder, mapOrder } from '@/plugins/mappers'              │
+│  import type { PreOrder, PlacedOrder } from '@public/trading_terminal/  │
+│     charting_library'                                                   │
+│                                                                         │
+│  // ❌ NEVER import backend types here                                  │
+│  // ❌ import type { PreOrder } from '@clients/trader-client-generated' │
+│                                                                         │
+│  class BrokerTerminalService {                                          │
+│    async placeOrder(order: PreOrder): Promise<PlacedOrder> {            │
+│      const backendOrder = mapPreOrder(order)  // Transform              │
+│      const result = await api.placeOrder(backendOrder)                  │
+│      return mapOrder(result.order)  // Transform back                   │
+│    }                                                                    │
+│  }                                                                      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+Key Principles:
+• Backend types confined to mappers.ts (NEVER in services)
+• Strict naming: _Api_Backend, _Ws_Backend suffixes
+• Services work exclusively with frontend types
+• Breaking changes detected at TypeScript compile time
+• Single responsibility: Mappers own all transformations
+```
+
+### 6. WebSocket Reconnection Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   WEBSOCKET RECONNECTION FLOW                           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────┐
+│ WebSocketBase   │  Connection is active, subscriptions confirmed
+│ (Connected)     │  • ws.readyState === WebSocket.OPEN
+└────────┬────────┘
+         │
+         │ Network error, server restart, etc.
+         ▼
+┌─────────────────┐
+│ ws.onclose      │  Connection closed event
+│ Event           │  • ws.readyState === WebSocket.CLOSED
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Reconnection    │  setTimeout(() => this.resubscribeAll(), 0)
+│ Trigger         │  • Non-blocking trigger
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ resubscribeAll()│  await new Promise(resolve => setTimeout(2000))
+│                 │  • Wait 2 seconds before attempting reconnection
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Clear Pending   │  this.pendingRequests.forEach(pending => clearTimeout)
+│ Requests        │  this.pendingRequests.clear()
+│                 │  • Clean up old timeouts
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Mark All        │  for (const sub of subscriptions.values())
+│ Unconfirmed     │    subscription.confirmed = false
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Reconnect       │  await this.__socketConnect()
+│ WebSocket       │  • Create new WebSocket instance
+│                 │  • Wait for ws.onopen
+└────────┬────────┘
+         │
+         │ Connection established
+         ▼
+┌─────────────────┐
+│ Resubscribe     │  for (const subscription of subscriptions.values())
+│ All Topics      │    • subscription.confirmed = false
+│                 │    • Send subscription request
+│                 │    • Wait for confirmation
+│                 │    • subscription.confirmed = true
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Resume Data     │  All subscriptions confirmed
+│ Streaming       │  • Updates flow to listeners again
+└─────────────────┘
+
+Key Features:
+• Automatic reconnection on connection loss
+• All active subscriptions re-established
+• No data loss (buffering in backend queues)
+• Transparent to application layer
+• Reference counting preserved across reconnections
+```
+
+### 7. Complete Backend/Frontend Interaction Patterns
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              BACKEND/FRONTEND INTERACTION PATTERNS                      │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ PATTERN 1: REST API CALL (Synchronous Request/Response)                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│ Frontend: brokerTerminalService.placeOrder(preOrder)                    │
+│     ↓                                                                   │
+│ mapPreOrder: PreOrder → PreOrder_Api_Backend                            │
+│     ↓                                                                   │
+│ HTTP POST /api/v1/broker/orders {symbol, type, side, qty, ...}         │
+│     ↓                                                                   │
+│ Backend: BrokerApi.placeOrder(preOrder: PreOrder_Api_Backend)           │
+│     ↓                                                                   │
+│ BrokerService.placeOrder() → Updates state, returns PlaceOrderResult   │
+│     ↓                                                                   │
+│ HTTP 200 {success: true, order: {id, symbol, status, ...}}             │
+│     ↓                                                                   │
+│ Frontend: Receives PlaceOrderResult_Api_Backend                         │
+│     ↓                                                                   │
+│ Updates UI (show order placed confirmation)                             │
+│                                                                         │
+│ Timing: ~50-200ms round-trip                                            │
+│ Use Case: User actions requiring immediate confirmation                 │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ PATTERN 2: WEBSOCKET SUBSCRIPTION (Asynchronous Push Updates)          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│ Frontend: wsAdapter.orders.subscribe(listenerId, {accountId}, onUpdate)│
+│     ↓                                                                   │
+│ WebSocketClient builds topic: "orders:{"accountId":"DEMO-ACCOUNT"}"    │
+│     ↓                                                                   │
+│ WebSocket SEND {type: "orders.subscribe", payload: {accountId}}        │
+│     ↓                                                                   │
+│ Backend: OrderWsRouter receives subscription                            │
+│     ↓                                                                   │
+│ Reference counting: topic_trackers[topic]++                             │
+│     ↓                                                                   │
+│ First subscriber? service.create_topic(topic, topic_update)            │
+│     ↓                                                                   │
+│ BrokerService stores topic_update callback                              │
+│     ↓                                                                   │
+│ WebSocket SEND {type: "orders.subscribe.response", payload: {status}}  │
+│     ↓                                                                   │
+│ Frontend: Subscription confirmed, waiting for updates...               │
+│                                                                         │
+│ --- Later: Order status changes ---                                    │
+│                                                                         │
+│ Backend: Order fills, BrokerService updates state                       │
+│     ↓                                                                   │
+│ Calls topic_update(updatedOrder) → Enqueues to router.updates_queue    │
+│     ↓                                                                   │
+│ FastWSAdapter broadcast task polls queue                                │
+│     ↓                                                                   │
+│ WebSocket SEND {type: "orders.update", payload: {topic, payload}}      │
+│     ↓                                                                   │
+│ Frontend: WebSocketBase routes to confirmed subscriptions              │
+│     ↓                                                                   │
+│ WebSocketClient applies mapper: PlacedOrder_Ws_Backend → PlacedOrder   │
+│     ↓                                                                   │
+│ onUpdate(mappedOrder) callback executes                                 │
+│     ↓                                                                   │
+│ UI reactively updates (order status changed)                            │
+│                                                                         │
+│ Timing: ~10-50ms per update (after initial subscription)               │
+│ Use Case: Real-time monitoring of trading state                         │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ PATTERN 3: HYBRID (REST + WebSocket)                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│ PHASE 1: Subscribe to real-time updates                                │
+│     Frontend: wsAdapter.positions.subscribe(...)                        │
+│     Backend: Service registers subscription, starts tracking            │
+│                                                                         │
+│ PHASE 2: Perform action via REST                                       │
+│     Frontend: HTTP POST /api/v1/broker/positions/{id}/close            │
+│     Backend: BrokerService.closePosition() → Updates state             │
+│     Response: {success: true}                                           │
+│                                                                         │
+│ PHASE 3: Receive update via WebSocket                                  │
+│     Backend: Detects position closed, calls topic_update(position)     │
+│     WebSocket broadcasts: positions.update                              │
+│     Frontend: onUpdate receives closed position                         │
+│     UI: Position disappears from list (reactive update)                 │
+│                                                                         │
+│ Why Hybrid?                                                             │
+│   • REST: Reliable action confirmation (synchronous)                    │
+│   • WebSocket: Real-time state sync (all clients notified)              │
+│   • Best of both: Immediate feedback + global state coherence           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ PATTERN 4: TYPE-SAFE CONTRACT EVOLUTION                                │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│ Developer adds new field to PlacedOrder model:                          │
+│                                                                         │
+│ 1. Backend Change (models/broker/orders.py):                            │
+│    class PlacedOrder(BaseModel):                                        │
+│        ...existing fields...                                            │
+│        parentOrderId: str | None = None  # NEW FIELD                    │
+│                                                                         │
+│ 2. Spec Regeneration (automatic):                                       │
+│    File watcher detects change → make export-openapi-spec               │
+│    backend/openapi.json updated with new field                          │
+│                                                                         │
+│ 3. Frontend Client Generation (automatic):                              │
+│    File watcher detects openapi.json change                             │
+│    → make generate-openapi-client                                       │
+│    PlacedOrder_Api_Backend interface updated                            │
+│                                                                         │
+│ 4. TypeScript Compilation:                                              │
+│    ✅ Compatible change: Builds successfully                             │
+│    ❌ Breaking change: Compilation fails with error locations           │
+│                                                                         │
+│ 5. Mapper Update (if needed):                                           │
+│    mappers.ts: Add parentOrderId field mapping                          │
+│    TypeScript validates transformation correctness                      │
+│                                                                         │
+│ 6. Service Layer (automatic):                                           │
+│    Services already use frontend types → No changes needed              │
+│    Type safety maintained end-to-end                                    │
+│                                                                         │
+│ Result: Breaking changes caught at compile time, not runtime!           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│ PATTERN 5: MULTI-CLIENT SUBSCRIPTION (Reference Counting)              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│ Scenario: Two components subscribe to same data                         │
+│                                                                         │
+│ Component A: wsAdapter.quotes.subscribe("A", {symbol: "AAPL"}, ...)    │
+│     Topic: "quotes:{"symbol":"AAPL"}"                                   │
+│     Backend: topic_trackers["quotes:..."] = 1                           │
+│     Service: create_topic() called → Start data generation              │
+│                                                                         │
+│ Component B: wsAdapter.quotes.subscribe("B", {symbol: "AAPL"}, ...)    │
+│     Same topic: "quotes:{"symbol":"AAPL"}"                              │
+│     Backend: topic_trackers["quotes:..."] = 2                           │
+│     Service: create_topic() NOT called (already exists)                 │
+│     → Both components receive same data stream                          │
+│                                                                         │
+│ Component A unsubscribes:                                               │
+│     Backend: topic_trackers["quotes:..."] = 1                           │
+│     Service: remove_topic() NOT called (still has subscriber)           │
+│     → Component B continues receiving updates                           │
+│                                                                         │
+│ Component B unsubscribes:                                               │
+│     Backend: topic_trackers["quotes:..."] = 0                           │
+│     Service: remove_topic() called → Stop data generation               │
+│     → Resource cleanup (no more subscribers)                            │
+│                                                                         │
+│ Benefits:                                                               │
+│   • Single data stream shared across multiple subscribers               │
+│   • Automatic resource management (no memory leaks)                     │
+│   • Efficient: Backend generates data only when needed                  │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Client Generation
@@ -722,77 +1607,57 @@ Frontend Types (TradingView/Custom)
 
 #### `mapQuoteData()`
 
-Transforms backend quote data to TradingView frontend format:
+**Purpose**: Transforms backend quote data to TradingView frontend format
 
-```typescript
-import type { QuoteData as QuoteData_Backend } from "@/clients/trader-client-generated";
-import type { QuoteData } from "@public/trading_terminal/charting_library";
+**Transformation Details**:
 
-export function mapQuoteData(quote: QuoteData_Backend): QuoteData {
-  if (quote.s === "error") {
-    return { s: "error", n: quote.n, v: quote.v };
-  }
-  return {
-    s: "ok",
-    n: quote.n,
-    v: {
-      ch: quote.v.ch,
-      chp: quote.v.chp,
-      lp: quote.v.lp,
-      ask: quote.v.ask,
-      bid: quote.v.bid,
-      // ... complete field mapping
-    },
-  };
-}
-```
+| Aspect        | Backend Type               | Frontend Type              | Handling               |
+| ------------- | -------------------------- | -------------------------- | ---------------------- |
+| Status field  | `s: "ok" \| "error"`       | `s: "ok" \| "error"`       | Direct mapping         |
+| Error state   | `v: { error: string }`     | `v: string`                | Unwrap error message   |
+| Success state | `v: { lp, bid, ask, ... }` | `v: { lp, bid, ask, ... }` | Field-by-field mapping |
+| Symbol name   | `n: string`                | `n: string`                | Direct mapping         |
 
 **Usage**: Integrated in `WsAdapter` for real-time quotes, also used in REST API responses.
 
 #### `mapPreOrder()`
 
-Transforms frontend order to backend format with enum conversions:
+**Purpose**: Transforms frontend order to backend format with enum conversions
 
-```typescript
-export function mapPreOrder(order: PreOrder): PreOrder_Backend {
-  return {
-    symbol: order.symbol,
-    type: order.type as unknown as PreOrder_Backend["type"],
-    side: order.side as unknown as PreOrder_Backend["side"],
-    qty: order.qty,
-    limitPrice: order.limitPrice ?? null,
-    stopPrice: order.stopPrice ?? null,
-    // ... handles optional fields and enum conversions
-  };
-}
-```
+**Transformation Details**:
+
+| Field      | Frontend              | Backend                       | Conversion               |
+| ---------- | --------------------- | ----------------------------- | ------------------------ |
+| symbol     | `string`              | `string`                      | Direct                   |
+| type       | Numeric enum          | String literal                | Cast with type assertion |
+| side       | Numeric enum (1/-1)   | String literal ("buy"/"sell") | Cast with type assertion |
+| qty        | `number`              | `number`                      | Direct                   |
+| limitPrice | `number \| undefined` | `number \| null`              | `?? null` operator       |
+| stopPrice  | `number \| undefined` | `number \| null`              | `?? null` operator       |
 
 **Usage**: Used in broker service for order placement.
 
 ### Integration Points
 
-1. **WebSocket Clients** - Mappers applied automatically in `WsAdapter`:
+**Integration Methods**:
 
-   ```typescript
-   this.quotes = new WebSocketClient("quotes", mapQuoteData);
-   ```
+| Integration Point      | Description                                | Pattern                                       |
+| ---------------------- | ------------------------------------------ | --------------------------------------------- |
+| **WebSocket Clients**  | Mappers applied automatically in WsAdapter | Client constructed with mapper function       |
+| **REST API Responses** | Mappers used in service layer              | Array.map() with mapper function              |
+| **Type Isolation**     | Services never import backend types        | Import mappers only, work with frontend types |
 
-2. **REST API Responses** - Mappers used in service layer:
+**Architectural Rule**:
 
-   ```typescript
-   const quotes = await api.getQuotes(symbols);
-   return quotes.map(mapQuoteData);
-   ```
-
-3. **Type Isolation** - Services never import backend types directly:
-
-   ```typescript
-   // ✅ CORRECT: Use mapper
-   import { mapQuoteData } from "@/plugins/mappers";
-
-   // ❌ WRONG: Don't import backend types in services
-   import type { QuoteData as QuoteData_Backend } from "@/clients/...";
-   ```
+```
+Services Layer
+    ↓
+  Import mappers from @/plugins/mappers
+  Import frontend types only
+    ↓
+  Never import from @/clients/trader-client-generated
+  Never import from @/clients/ws-types-generated
+```
 
 ### Benefits
 
@@ -814,58 +1679,49 @@ export function mapPreOrder(order: PreOrder): PreOrder_Backend {
 
 ### Centralized Adapter Pattern
 
-All WebSocket operations go through `WsAdapter`:
+**WsAdapter Structure**:
 
-```typescript
-// Single entry point for all WebSocket clients
-export class WsAdapter implements WsAdapterType {
-  bars: WebSocketInterface<BarsSubscriptionRequest, Bar>;
-  quotes: WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>;
+| Client Property | Route        | Mapper Function       | Purpose                                        |
+| --------------- | ------------ | --------------------- | ---------------------------------------------- |
+| bars            | "bars"       | Identity (no mapping) | Bar data already in correct format             |
+| quotes          | "quotes"     | mapQuoteData          | Transform backend quotes to TradingView format |
+| orders          | "orders"     | Identity              | Order updates                                  |
+| positions       | "positions"  | Identity              | Position updates                               |
+| executions      | "executions" | Identity              | Trade executions                               |
+| equity          | "equity"     | Identity              | Account equity updates                         |
 
-  constructor() {
-    this.bars = new WebSocketClient("bars", (data) => data);
-    this.quotes = new WebSocketClient("quotes", mapQuoteData);
-  }
-}
-```
+**Adapter Features**:
 
-**Features**:
-
+- Single entry point for all WebSocket operations
 - Singleton WebSocket connection (shared across all clients)
-- Automatic data mapping via mappers
+- Automatic data mapping via mapper functions
 - Server-confirmed subscriptions
 - Auto-reconnection with resubscription
-- Type-safe operations
+- Type-safe operations with generic parameters
 
 ### Message Pattern
 
-```json
-{
-  "type": "operation.name",
-  "payload": {
-    /* data */
-  }
-}
-```
+**WebSocket Message Structure**:
+
+| Field   | Type   | Description             | Example                             |
+| ------- | ------ | ----------------------- | ----------------------------------- |
+| type    | string | Operation identifier    | `"bars.subscribe"`, `"bars.update"` |
+| payload | object | Operation-specific data | Request parameters or update data   |
 
 ### Operations
 
 **Subscribe to Bars**:
 
-```json
-// Client → Server
-{"type": "bars.subscribe", "payload": {"symbol": "AAPL", "resolution": "1"}}
-
-// Server → Client
-{"type": "bars.subscribe.response", "payload": {"status": "ok", "topic": "bars:AAPL:1"}}
-```
+| Direction       | Message Type              | Payload                | Purpose              |
+| --------------- | ------------------------- | ---------------------- | -------------------- |
+| Client → Server | `bars.subscribe`          | `{symbol, resolution}` | Request subscription |
+| Server → Client | `bars.subscribe.response` | `{status, topic}`      | Confirm subscription |
 
 **Receive Updates**:
 
-```json
-// Server → Client (Broadcast)
-{"type": "bars.update", "payload": {"time": 1697097600000, "open": 150.0, ...}}
-```
+| Direction       | Message Type  | Payload                                  | Purpose            |
+| --------------- | ------------- | ---------------------------------------- | ------------------ |
+| Server → Client | `bars.update` | `{time, open, high, low, close, volume}` | Broadcast bar data |
 
 ### Topic Format
 
@@ -906,35 +1762,31 @@ export class WsAdapter implements WsAdapterType {
 
 ### Full-Stack Development
 
-```bash
-# Recommended: One command starts everything
-make -f project.mk dev-fullstack
+**Command**: `make -f project.mk dev-fullstack`
 
-# What it does:
-# 1. Port availability check
-# 2. Start backend (generates specs)
-# 3. Wait for backend ready
-# 4. Generate API clients
-# 5. Start file watchers (auto-regenerate on changes)
-# 6. Start frontend
-# 7. Monitor all processes
-```
+**Workflow Steps**:
+
+| Step | Action                    | Purpose                                            |
+| ---- | ------------------------- | -------------------------------------------------- |
+| 1    | Port availability check   | Ensure 8000 (backend) and 5173 (frontend) are free |
+| 2    | Start backend server      | Launch FastAPI + Uvicorn                           |
+| 3    | Generate specs            | Export openapi.json and asyncapi.json              |
+| 4    | Wait for backend ready    | Health endpoint check                              |
+| 5    | Generate frontend clients | TypeScript types from specs                        |
+| 6    | Start file watchers       | Monitor specs for changes                          |
+| 7    | Start frontend dev server | Launch Vite with HMR                               |
+| 8    | Monitor all processes     | Track status, handle errors                        |
 
 ### Component Development
 
-```bash
-# Backend only
-cd backend && make dev
+**Development Commands**:
 
-# Frontend only (after backend ready)
-cd frontend && make dev
-
-# Run tests
-make -f project.mk test-all
-
-# Code quality
-make -f project.mk lint-all format-all
-```
+| Component     | Command                                  | Prerequisites          | Use Case                     |
+| ------------- | ---------------------------------------- | ---------------------- | ---------------------------- |
+| Backend only  | `cd backend && make dev`                 | Poetry environment     | Backend feature development  |
+| Frontend only | `cd frontend && make dev`                | Backend running        | Frontend feature development |
+| Run all tests | `make -f project.mk test-all`            | Dependencies installed | Verify all changes           |
+| Code quality  | `make -f project.mk lint-all format-all` | Pre-commit hooks       | Before committing            |
 
 ## Design Patterns
 
@@ -1018,7 +1870,8 @@ make -f project.mk lint-all format-all
 ### Core Documentation
 
 - **ARCHITECTURE.md** - System architecture (this file)
-- **BACKEND-API-METHODOLOGY.md** - TDD implementation guide
+- **API-METHODOLOGY.md** - TDD implementation guide
+- **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
 - **docs/DEVELOPMENT.md** - Development workflows
 - **docs/TESTING.md** - Testing strategies
 - **docs/CLIENT-GENERATION.md** - API client generation
@@ -1040,16 +1893,27 @@ make -f project.mk lint-all format-all
 
 ### Development
 
-```bash
-make -f project.mk dev-fullstack  # All-in-one development
-```
+**Development Deployment**:
+
+| Aspect      | Details                            |
+| ----------- | ---------------------------------- |
+| Command     | `make -f project.mk dev-fullstack` |
+| Backend     | Uvicorn with auto-reload           |
+| Frontend    | Vite dev server with HMR           |
+| WebSocket   | Development endpoint (ws)          |
+| Environment | Local machine                      |
 
 ### Production (Planned)
 
-- Load balancer (nginx) with SSL/TLS + WebSocket proxy
-- Container orchestration (Docker/Kubernetes)
-- Database layer (Redis + PostgreSQL)
-- Monitoring and observability platform
+**Production Architecture**:
+
+| Component     | Technology           | Purpose                              |
+| ------------- | -------------------- | ------------------------------------ |
+| Load Balancer | nginx                | SSL/TLS termination, WebSocket proxy |
+| Orchestration | Docker/Kubernetes    | Container management, scaling        |
+| Database      | Redis + PostgreSQL   | Caching and persistent storage       |
+| Monitoring    | Prometheus + Grafana | Metrics and observability            |
+| Logging       | ELK Stack            | Centralized log aggregation          |
 
 ## Future Roadmap
 
@@ -1078,6 +1942,77 @@ make -f project.mk dev-fullstack  # All-in-one development
 
 ✅ **Independent Development** - Parallel team workflows
 ✅ **Type Safety** - End-to-end type checking
+✅ **Real-Time Ready** - WebSocket infrastructure complete
+✅ **Test-Driven** - Comprehensive testing at all levels
+✅ **DevOps Friendly** - Automated CI/CD pipelines
+✅ **Developer Experience** - Zero-config setup with intelligent fallbacks
+✅ **Production Ready** - Scalable architecture for deployment
+
+---
+
+## Terminology Glossary
+
+### General Terms
+
+| Term                  | Definition                                                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Trading Host**      | The `IBrokerConnectionAdapterHost` interface provided by TradingView that allows pushing updates to the UI |
+| **Broker API**        | Your implementation of `IBrokerWithoutRealtime` or `IBrokerTerminal` that handles trading operations       |
+| **Datafeed**          | Service providing market data (bars, quotes, symbols) to the charting library                              |
+| **Client Generation** | Automatic creation of TypeScript types and API clients from OpenAPI/AsyncAPI specs                         |
+
+### Backend Terms
+
+| Term               | Definition                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------ |
+| **WsRouteService** | Protocol defining WebSocket topic lifecycle management (create_topic, remove_topic)                    |
+| **WsRouter**       | Generic WebSocket router handling subscriptions with type-safe request/data parameters                 |
+| **FastWSAdapter**  | Self-contained WebSocket adapter with embedded broadcasting and per-router message queues              |
+| **Topic Builder**  | Algorithm creating consistent topic strings from subscription parameters (must match backend/frontend) |
+| **Router Factory** | Pattern using class constructors to instantiate multiple related routers with dependency injection     |
+
+### Frontend Terms
+
+| Term              | Definition                                                                               |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| **WsAdapter**     | Centralized wrapper exposing all WebSocket clients (bars, quotes, orders, etc.)          |
+| **WsFallback**    | Mock WebSocket implementation for offline development and testing                        |
+| **WebSocketBase** | Singleton managing WebSocket connection with auto-reconnection and subscription tracking |
+| **Mapper**        | Type-safe function transforming backend types to frontend types (e.g., `mapQuoteData`)   |
+| **wsClientBase**  | Generic WebSocket client with server-confirmed subscriptions and topic-based routing     |
+
+### WebSocket Terms
+
+| Term                    | Definition                                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| **Topic**               | JSON-serialized subscription identifier (e.g., `bars:{"resolution":"1","symbol":"AAPL"}`)     |
+| **Server Confirmation** | Backend sends `{route}.subscribe.response` before client routes messages to subscribers       |
+| **Reference Counting**  | Tracking subscription count per topic for automatic cleanup when last subscriber unsubscribes |
+| **Auto-Resubscription** | Automatically resubscribing to all active topics when WebSocket reconnects                    |
+| **Topic-Based Routing** | Filtering and delivering messages only to subscribers matching the exact topic                |
+
+### TradingView Terms
+
+| Term                | Definition                                                                         |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| **Order Ticket**    | TradingView dialog for placing/modifying orders with risk calculations             |
+| **Account Manager** | Bottom panel showing account info, orders, positions, executions                   |
+| **Broker Terminal** | Complete trading solution integrating broker API with TradingView charts           |
+| **Watched Value**   | Reactive value created by `host.factory.createWatchedValue()` that auto-updates UI |
+| **Trading Context** | Chart context for trade actions (symbol, price, position on chart)                 |
+
+### Testing Terms
+
+| Term                 | Definition                                                       |
+| -------------------- | ---------------------------------------------------------------- |
+| **TDD Red Phase**    | Writing failing tests before implementation                      |
+| **TDD Green Phase**  | Implementing minimal code to make tests pass                     |
+| **Smoke Test**       | High-level end-to-end test verifying critical paths work         |
+| **Integration Test** | Test verifying multiple components work together correctly       |
+| **Mock Service**     | Fake implementation replacing real service for testing isolation |
+
+---
+
 ✅ **Real-Time Ready** - WebSocket infrastructure complete
 ✅ **Test-Driven** - Comprehensive testing at all levels
 ✅ **DevOps Friendly** - Automated CI/CD pipelines

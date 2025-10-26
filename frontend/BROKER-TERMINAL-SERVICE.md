@@ -530,7 +530,7 @@ const brokerMock = new BrokerMock()
 const broker = new BrokerTerminalService(host, datafeed, brokerMock)
 ```
 
-See `BACKEND-WEBSOCKET-METHODOLOGY.md` for Phase 5 implementation roadmap.
+See `WEBSOCKET-METHODOLOGY.md` for Phase 5 implementation roadmap.
 
 ## Component Integration
 

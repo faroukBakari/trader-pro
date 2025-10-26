@@ -209,18 +209,34 @@ await wsAdapter.trades.subscribe(
 ### Broadcasting Updates from Backend
 
 ```python
-# Somewhere in your backend code (e.g., market data service)
-from trading_api.main import wsApp
-from trading_api.ws.trades import trades_topic_builder
+# Service implementation (e.g., market data service)
+from trading_api.ws.router_interface import WsRouteService
 
-async def broadcast_trade(trade: Trade):
-    """Broadcast trade update to subscribers"""
-    topic = trades_topic_builder(trade.symbol, {})
-    await wsApp.publish(
-        topic=topic,
-        data=trade,
-        route="trades"
-    )
+class MarketDataService(WsRouteService):
+    def __init__(self):
+        self._topic_generators: dict[str, asyncio.Task] = {}
+
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+        """Start data generation for topic"""
+        if topic not in self._topic_generators:
+            self._topic_generators[topic] = asyncio.create_task(
+                self._trade_generator(topic, topic_update)
+            )
+
+    def remove_topic(self, topic: str) -> None:
+        """Stop data generation for topic"""
+        task = self._topic_generators.get(topic)
+        if task:
+            task.cancel()
+        self._topic_generators.pop(topic, None)
+
+    async def _trade_generator(self, topic: str, topic_update: Callable) -> None:
+        """Generate trades and call topic_update callback"""
+        while True:
+            trade = await self.get_next_trade()
+            # Call callback to enqueue update
+            topic_update(trade)
+            await asyncio.sleep(0.1)
 ```
 
 **That's it!** 🎉 You now have:
@@ -415,7 +431,7 @@ All generated routers automatically include:
 
 - Receive-only operation for AsyncAPI documentation
 - Defines the data structure for server broadcasts
-- Used when calling `wsApp.publish()`
+- Used to identify router in WsRouter factory registration
 
 ### What You DO Configure
 
@@ -577,41 +593,26 @@ def news_topic_builder(symbol: str, params: dict) -> str:
 ### Broadcasting from Services
 
 ```python
-# In your service/background task
-from trading_api.main import wsApp
-from trading_api.ws.trades import trades_topic_builder
+# In your service implementation
+from trading_api.ws.router_interface import WsRouteService
+from typing import Callable
 
-class MarketDataService:
-    async def on_new_trade(self, trade: Trade):
-        """Called when new trade arrives from exchange"""
-        # Build topic
-        topic = trades_topic_builder(trade.symbol, {})
-
-        # Broadcast to all subscribers of this topic
-        await wsApp.publish(
-            topic=topic,
-            data=trade,
-            route="trades"
+class MarketDataService(WsRouteService):
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+        """Start generating trade data for topic"""
+        # Parse topic to get symbol
+        # topic format: "trades:{\"symbol\":\"AAPL\"}"
+        self._topic_generators[topic] = asyncio.create_task(
+            self._trade_generator(topic, topic_update)
         )
-```
 
-### Conditional Broadcasting
-
-Only broadcast if there are subscribers:
-
-```python
-from trading_api.main import wsApp
-
-async def broadcast_if_subscribed(symbol: str, data: Trade):
-    """Only broadcast if someone is listening"""
-    topic = trades_topic_builder(symbol, {})
-
-    # Check if topic has subscribers
-    if wsApp.has_subscribers(topic):
-        await wsApp.publish(topic=topic, data=data, route="trades")
-    else:
-        # Skip unnecessary work
-        pass
+    async def _trade_generator(self, topic: str, topic_update: Callable) -> None:
+        """Called when new trade arrives - broadcasts via callback"""
+        while True:
+            trade = await self.get_next_trade()
+            # Call callback to enqueue update to router's updates_queue
+            topic_update(trade)
+            await asyncio.sleep(0.1)
 ```
 
 ### Multi-Symbol Subscriptions
@@ -869,14 +870,11 @@ open http://localhost:8000/api/v1/ws/asyncapi
 print(f"Broadcasting to: {trades_topic_builder('AAPL', {})}")
 ```
 
-2. **Verify message type**: Must match operation name
+2. **Verify message type**: Must match router route name in update message
 
 ```python
-# Correct
-await wsApp.publish(topic=topic, data=trade, route="trades")
-
-# Wrong
-await wsApp.publish(topic=topic, data=trade, route="trade")  # Missing 's'
+# Router updates_queue receives SubscriptionUpdate with topic
+# FastWSAdapter broadcasts as: Message(type=f"{router.route}.update", ...)
 ```
 
 3. **Check client subscription**: Verify in browser DevTools Network tab
@@ -896,31 +894,35 @@ logging.getLogger("trading_api.ws").setLevel(logging.DEBUG)
 
 **Solutions**:
 
-1. **Batch broadcasting**: Send updates in groups
+1. **Batch updates in generator**: Produce updates efficiently
 
 ```python
 import asyncio
 
-async def broadcast_batch(updates: list[Trade]):
-    tasks = [
-        wsApp.publish(
-            topic=trades_topic_builder(trade.symbol, {}),
-            data=trade,
-            route="trades"
-        )
-        for trade in updates
-    ]
-    await asyncio.gather(*tasks)
+class MarketDataService(WsRouteService):
+    async def _trade_generator(self, topic: str, topic_update: Callable) -> None:
+        """Batch process trades for efficiency"""
+        batch: list[Trade] = []
+
+        while True:
+            trade = await self.get_next_trade()
+            batch.append(trade)
+
+            # Flush batch every 100ms or when full
+            if len(batch) >= 10:
+                for t in batch:
+                    topic_update(t)
+                batch.clear()
+
+            await asyncio.sleep(0.01)
 ```
 
-2. **Rate limiting**: Limit broadcast frequency per topic
+2. **Rate limiting**: Limit update frequency per topic in generator
 
-3. **Selective broadcasting**: Check for subscribers before broadcasting
-
-```python
-if wsApp.has_subscribers(topic):
-    await wsApp.publish(...)
-```
+3. **Reference counting**: WsRouter automatically manages topic lifecycle
+   - First subscriber: calls `service.create_topic()` → starts generator
+   - Last unsubscribe: calls `service.remove_topic()` → stops generator
+   - No subscribers = no CPU/memory usage for that topic
 
 ---
 

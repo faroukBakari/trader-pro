@@ -4,6 +4,40 @@ You are an expert full-stack developer and DevOps engineer with deep knowledge i
 
 ---
 
+## !!CRITICAL!! Documentation-First Approach (MANDATORY)
+
+**BEFORE starting ANY task, feature, refactor, bug fix, or troubleshooting:**
+
+1. **ALWAYS read `docs/DOCUMENTATION-GUIDE.md` FIRST** - This is your complete documentation index
+2. **Identify and read ALL relevant documentation** listed in DOCUMENTATION-GUIDE.md for your task
+3. **Summarize the relevant documentation** to understand established patterns, guidelines, and architecture
+4. **Never reverse-engineer or guess** - The documentation contains the answers
+
+**Why this is critical:**
+- ✅ Maintains consistency across the entire project
+- ✅ Respects established guidelines, patterns, and methodologies
+- ✅ Prevents reinventing solutions that already exist
+- ✅ Saves time by leveraging existing knowledge
+- ✅ Ensures troubleshooting follows documented patterns
+- ✅ Avoids breaking established conventions
+
+**Examples of when to consult DOCUMENTATION-GUIDE.md:**
+- Adding a new API endpoint → Read API-METHODOLOGY.md, backend/docs/VERSIONING.md
+- Adding WebSocket feature → Read WEBSOCKET-METHODOLOGY.md, backend/docs/WEBSOCKETS.md, frontend/WEBSOCKET-CLIENT-PATTERN.md
+- TradingView integration → Read frontend/BROKER-TERMINAL-SERVICE.md, frontend/IBROKERCONNECTIONADAPTERHOST.md
+- Testing issues → Read docs/TESTING.md, relevant test README files
+- CI/CD problems → Read .github/CI-TROUBLESHOOTING.md
+- Client generation → Read docs/CLIENT-GENERATION.md
+- Architecture questions → Read ARCHITECTURE.md
+
+**DO NOT proceed with implementation until you have:**
+- [x] Read docs/DOCUMENTATION-GUIDE.md
+- [x] Identified relevant documentation for the task
+- [x] Read and summarized all relevant documentation
+- [x] Understood the established patterns and guidelines
+
+---
+
 ### Core responsibilities
 
 - Design efficient, scalable schemas and optimize database interactions for Redis, MongoDB, and PostgreSQL.  
@@ -47,18 +81,19 @@ You are an expert full-stack developer and DevOps engineer with deep knowledge i
 
 ### Feature / refactor / bug workflow
 
-0. Explore docs/DOCUMENTATION-GUIDE.md to find relevant markdown files.
-1. Explore and summarize relevant markdown files.  
-2. Explore and summarize relevant code files.  
-3. Explore and summarize any external references or examples.  
-4. Suggest improvements or optimizations.  
-5. Propose a plan with a TODO list for implementation.  
-6. Validate created todos before implementing.  
-7. Ask for approval of the plan before implementing.  
-8. After approval, implement using TDD.  
-9. ALWAYS ask for approval before changing important design decisions.  
+**!!CRITICAL!! Step 0: ALWAYS start with documentation exploration (MANDATORY)**
+0. **Read docs/DOCUMENTATION-GUIDE.md** - Find ALL relevant documentation for your task
+1. Explore and summarize ALL relevant markdown files identified in DOCUMENTATION-GUIDE.md
+2. Explore and summarize relevant code files
+3. Explore and summarize any external references or examples
+4. Suggest improvements or optimizations based on documented patterns
+5. Propose a plan with a TODO list for implementation
+6. Validate created todos before implementing
+7. Ask for approval of the plan before implementing
+8. After approval, implement using TDD
+9. ALWAYS ask for approval before changing important design decisions
 
-TDD rules (strict)
+**TDD rules (strict)**
 - Test only features, not implementation details.  
 - Write/rewite a failing test for the smallest behavior.  
 - Run tests and confirm failure.  

@@ -52,35 +52,52 @@ async def websocket_endpoint(
 
 ### Custom FastWS Adapter
 
-Our Trading API uses a custom adapter to add helper methods:
+Our Trading API uses a custom adapter that overrides `include_router()` and `setup()`:
 
 ```python
 # plugins/fastws_adapter.py
 from external_packages.fastws import FastWS, Message
-from pydantic import BaseModel
+from fastapi import FastAPI
+import asyncio
 
 class FastWSAdapter(FastWS):
-    """Extended FastWS with convenience methods"""
+    """
+    Self-contained WebSocket adapter with embedded broadcasting.
 
-    async def publish(
-        self,
-        topic: str,
-        data: BaseModel,
-        route: str = "bars"
-    ) -> None:
-        """
-        broadcast data to all clients subscribed to topic
+    Overrides include_router() to register routers and store broadcast coroutines.
+    Overrides setup() to start all broadcasting tasks when FastAPI app is ready.
+    """
 
-        Args:
-            topic: Topic identifier (e.g., "bars:AAPL:1")
-            data: Pydantic model instance
-            route: Message type (e.g., "bars")
-        """
-        message = Message(
-            type=f"{route}.update",
-            payload=data.model_dump()
-        )
-        await self.server_send(message, topic=topic)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._pending_routers: list[Callable] = []
+        self._broadcast_tasks: list[asyncio.Task] = []
+
+    def include_router(self, router: WsRouterInterface) -> None:
+        """Override to register router and create broadcast coroutine"""
+        super().include_router(router)
+
+        async def broadcast_router_messages() -> None:
+            """Poll router.updates_queue and broadcast to clients"""
+            while True:
+                update = await router.updates_queue.get()
+                message = Message(
+                    type=f"{router.route}.update",
+                    payload=update.model_dump(),
+                )
+                await self.server_send(message, topic=update.topic)
+
+        self._pending_routers.append(broadcast_router_messages)
+
+    def setup(self, app: FastAPI) -> None:
+        """Override setup to start all broadcasting tasks"""
+        super().setup(app)
+
+        for broadcast_coro in self._pending_routers:
+            task = asyncio.create_task(broadcast_coro())
+            self._broadcast_tasks.append(task)
+
+        self._pending_routers.clear()
 ```
 
 ## Creating Custom Operations
@@ -158,23 +175,32 @@ async def broadcast_alert(payload: AlertPayload) -> AlertPayload:
     return payload
 ```
 
-**Server Broadcasting**:
+**Server Broadcasting via Service Generator**:
 
 ```python
-# Somewhere in your backend code
-from trading_api.main import wsApp
+# In your service implementation
+from trading_api.ws.router_interface import WsRouteService
 from trading_api.models import AlertPayload
 import time
 
-await wsApp.publish(
-    topic="system.alerts",
-    data=AlertPayload(
-        severity="warning",
-        message="System maintenance in 5 minutes",
-        timestamp=int(time.time() * 1000)
-    ),
-    route="alerts"
-)
+class AlertService(WsRouteService):
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+        """Start alert generator for topic"""
+        if topic not in self._topic_generators:
+            self._topic_generators[topic] = asyncio.create_task(
+                self._alert_generator(topic, topic_update)
+            )
+
+    async def _alert_generator(self, topic: str, topic_update: Callable) -> None:
+        """Generate alerts and call callback"""
+        while True:
+            alert = AlertPayload(
+                severity="warning",
+                message="System maintenance in 5 minutes",
+                timestamp=int(time.time() * 1000)
+            )
+            topic_update(alert)
+            await asyncio.sleep(300)  # Every 5 minutes
 ```
 
 ## Topic-Based Broadcasting
@@ -227,27 +253,35 @@ async def subscribe(
     )
 ```
 
-### Broadcasting to Topics
+### Broadcasting via Service Generators
 
 ```python
-# Background task or external trigger
-async def stream_market_data():
-    """Stream market data to subscribed clients"""
-    while True:
-        # Get new bar data
-        bar = await fetch_latest_bar("AAPL", resolution="1")
+# Service implementation
+from trading_api.ws.router_interface import WsRouteService
 
-        # Build topic
-        topic = bars_topic_builder("AAPL", {"resolution": "1"})
+class MarketDataService(WsRouteService):
+    def __init__(self):
+        self._topic_generators: dict[str, asyncio.Task] = {}
 
-        # Broadcast to all subscribed clients
-        await wsApp.publish(
-            topic=topic,
-            data=bar,
-            route="bars"
-        )
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+        """Start market data generator for topic"""
+        if topic not in self._topic_generators:
+            # Parse topic to extract symbol and resolution
+            # topic format: "bars:{\"resolution\":\"1\",\"symbol\":\"AAPL\"}"
+            self._topic_generators[topic] = asyncio.create_task(
+                self._stream_market_data(topic, topic_update)
+            )
 
-        await asyncio.sleep(60)  # 1-minute interval
+    async def _stream_market_data(self, topic: str, topic_update: Callable) -> None:
+        """Stream market data to subscribed clients via callback"""
+        while True:
+            # Get new bar data
+            bar = await self.fetch_latest_bar("AAPL", resolution="1")
+
+            # Call callback to enqueue update
+            topic_update(bar)
+
+            await asyncio.sleep(60)  # 1-minute interval
 ```
 
 ## Client Connection Management
@@ -305,13 +339,9 @@ async def notify_all_clients(message: str):
         "timestamp": int(time.time() * 1000)
     }
 
-    # Broadcast to special "system" topic
-    # (assuming all clients auto-subscribe to it)
-    await wsApp.publish(
-        topic="system",
-        data=notification,
-        route="system"
-    )
+    # System notifications broadcast via service generator
+    # SystemService creates a notification and calls topic_update(notification)
+    # which enqueues to router.updates_queue for broadcasting
 ```
 
 ## Error Handling
@@ -495,27 +525,16 @@ async def test_server_publish():
         # Clear subscription response
         _ = websocket.receive_json()
 
-        # Server broadcasts update
-        test_bar = Bar(
-            time=1697097600000,
-            open=150.0,
-            high=151.0,
-            low=149.5,
-            close=150.5,
-            volume=1000000
-        )
-
-        await wsApp.publish(
-            topic="bars:AAPL:1",
-            data=test_bar,
-            route="bars"
-        )
+        # Service generator automatically broadcasts updates
+        # The service's _bar_generator calls topic_update(bar)
+        # which enqueues to router.updates_queue
+        # FastWSAdapter broadcasts from queue
 
         # Receive broadcast
         update = websocket.receive_json()
 
         assert update["type"] == "bars.update"
-        assert update["payload"]["close"] == 150.5
+        assert "close" in update["payload"]
 ```
 
 ## Advanced Patterns
@@ -549,77 +568,72 @@ async def multi_subscribe(
     }
 ```
 
-### Conditional Broadcasting
+### Conditional Updates in Generator
 
 ```python
-async def broadcast_if_changed(
-    symbol: str,
-    new_bar: Bar,
-    threshold: float = 0.01
-):
-    """Only broadcast if price changed significantly"""
-    # Get last broadcast price (from cache/db)
-    last_price = await get_last_price(symbol)
+class MarketDataService(WsRouteService):
+    async def _bar_generator_with_threshold(
+        self,
+        topic: str,
+        topic_update: Callable,
+        threshold: float = 0.01
+    ) -> None:
+        """Only broadcast if price changed significantly"""
+        last_price = None
 
-    # Calculate change
-    change = abs(new_bar.close - last_price) / last_price
+        while True:
+            new_bar = await self.fetch_latest_bar(symbol)
 
-    if change >= threshold:
-        topic = bars_topic_builder(symbol, {"resolution": "1"})
-        await wsApp.publish(
-            topic=topic,
-            data=new_bar,
-            route="bars"
-        )
+            if last_price is None:
+                # First update always broadcasts
+                topic_update(new_bar)
+                last_price = new_bar.close
+            else:
+                # Calculate change
+                change = abs(new_bar.close - last_price) / last_price
 
-        # Update cache
-        await set_last_price(symbol, new_bar.close)
+                if change >= threshold:
+                    topic_update(new_bar)
+                    last_price = new_bar.close
+
+            await asyncio.sleep(1)
 ```
 
-### Rate-Limited Broadcasting
+### Rate-Limited Updates in Generator
 
 ```python
 import asyncio
 from collections import defaultdict
 
-class RateLimitedBroadcaster:
-    """Limit broadcast frequency per topic"""
+class MarketDataService(WsRouteService):
+    """Service with rate-limited updates"""
 
-    def __init__(self, min_interval: float = 1.0):
-        self.min_interval = min_interval
-        self.last_broadcast = defaultdict(float)
-        self.pending = {}
+    def __init__(self):
+        super().__init__()
+        self.min_interval = 1.0  # Minimum seconds between updates
+        self.last_update: dict[str, float] = {}
+        self.pending_data: dict[str, Any] = {}
 
-    async def publish(self, topic: str, data: BaseModel):
-        """broadcast with rate limiting"""
-        now = asyncio.get_event_loop().time()
-        last = self.last_broadcast[topic]
+    async def _rate_limited_generator(
+        self,
+        topic: str,
+        topic_update: Callable
+    ) -> None:
+        """Generate updates with rate limiting"""
+        while True:
+            data = await self.fetch_data()
+            now = asyncio.get_event_loop().time()
+            last = self.last_update.get(topic, 0)
 
-        if now - last >= self.min_interval:
-            # Immediate broadcast
-            await wsApp.publish(topic=topic, data=data)
-            self.last_broadcast[topic] = now
+            if now - last >= self.min_interval:
+                # Immediate update
+                topic_update(data)
+                self.last_update[topic] = now
+            else:
+                # Store for batch update
+                self.pending_data[topic] = data
 
-            # Cancel pending if any
-            if topic in self.pending:
-                self.pending[topic].cancel()
-                del self.pending[topic]
-        else:
-            # Schedule for later
-            if topic in self.pending:
-                self.pending[topic].cancel()
-
-            delay = self.min_interval - (now - last)
-            self.pending[topic] = asyncio.create_task(
-                self._delayed_publish(topic, data, delay)
-            )
-
-    async def _delayed_publish(self, topic: str, data: BaseModel, delay: float):
-        """broadcast after delay"""
-        await asyncio.sleep(delay)
-        await wsApp.publish(topic=topic, data=data)
-        self.last_broadcast[topic] = asyncio.get_event_loop().time()
-        del self.pending[topic]
+            await asyncio.sleep(0.1)
 ```
 
 ### Connection Metrics
