@@ -1,16 +1,11 @@
 import logging
-from enum import Enum
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
 from external_packages.fastws import Client
 from trading_api.models import SubscriptionResponse, SubscriptionUpdate
-from trading_api.ws.router_interface import (
-    WsRouterInterface,
-    WsRouteService,
-    topicTracker,
-)
+from trading_api.ws.router_interface import WsRouterInterface, WsRouteService
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +15,12 @@ _TData = TypeVar("_TData", bound=BaseModel)
 
 
 # TODO : implement secure route that encapsulates authentication/authorization per client
+# TODO : implement server side subscription cancelation
 class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
-    def __init__(
-        self,
-        *,
-        route: str = "",
-        tags: list[str | Enum] | None = None,
-        service: WsRouteService,
-    ) -> None:
-        super().__init__(prefix=f"{route}.", tags=tags)
-        self.route = route
+    def __init__(self, service: WsRouteService, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
         self.service = service
-        self.topic_queues: dict[str, topicTracker[_TData]] = {}
+        self.topic_trackers: dict[str, int] = {}
 
         @self.recv("update")  # type: ignore[misc]
         def update(
@@ -49,17 +38,20 @@ class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
             topic = self.topic_builder(payload)
             client.subscribe(topic)
 
-            if topic not in self.topic_queues:
-                await self.service.create_topic(topic)
+            if topic not in self.topic_trackers:
+                # nested function to avoid binding issue in closure
+                def topic_update(data: _TData) -> None:
+                    self.updates_queue.put_nowait(
+                        SubscriptionUpdate(
+                            topic=topic,
+                            payload=data,
+                        )
+                    )
 
-                def send_update(data: _TData) -> None:
-                    update(SubscriptionUpdate[_TData](topic=topic, payload=data))
-
-                self.topic_queues[topic] = topicTracker[_TData](
-                    topic, self.service, send_update
-                )
+                await self.service.create_topic(topic, topic_update)
+                self.topic_trackers[topic] = 1
             else:
-                self.topic_queues[topic].inc()
+                self.topic_trackers[topic] = self.topic_trackers[topic] + 1
 
             logger.info(f"Client {client.uid} subscribed to topic: {topic}")
 
@@ -78,7 +70,10 @@ class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
             topic = self.topic_builder(payload)
             client.unsubscribe(topic)
 
-            self.topic_queues[topic].dec()
+            self.topic_trackers[topic] = self.topic_trackers[topic] - 1
+            if self.topic_trackers[topic] <= 0:
+                self.service.remove_topic(topic)
+                self.topic_trackers.pop(topic, None)
 
             logger.info(f"Client {client.uid} unsubscribed from topic: {topic}")
 

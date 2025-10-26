@@ -61,7 +61,7 @@ def buildTopicParams(obj: Any) -> str:
     sorted_obj = sort_recursive(obj)
     return json.dumps(sorted_obj, separators=(",", ":"))
 
-class WsRouterInterface(OperationRouter, WsRouterProto):
+class WsRouterInterface(OperationRouter):
     def topic_builder(self, params: BaseModel) -> str:
         return f"{self.route}:{buildTopicParams(params.model_dump())}"
 ```

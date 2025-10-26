@@ -16,12 +16,13 @@ from trading_api.ws.router_interface import WsRouterInterface, WsRouteService
 if TYPE_CHECKING:
     BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
     QuoteWsRouter: TypeAlias = WsRouter[QuoteDataSubscriptionRequest, QuoteData]
-else:
-    from .generated import BarWsRouter, QuoteWsRouter
 
 
 class DatafeedWsRouters(list[WsRouterInterface]):
     def __init__(self, datafeed_service: WsRouteService):
+        # Import generated routers locally to avoid circular import
+        from .generated import BarWsRouter, QuoteWsRouter
+
         # Instantiate routers
         bar_router = BarWsRouter(
             route="bars", tags=["datafeed"], service=datafeed_service

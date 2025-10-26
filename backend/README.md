@@ -122,24 +122,25 @@ The backend publishes OpenAPI and AsyncAPI documentation at startup. After runni
 
 ⚠️ **IMPORTANT**: When implementing WebSocket features, always use the router code generation mechanism. See `src/trading_api/ws/WS-ROUTER-GENERATION.md` for the complete guide on creating type-safe WebSocket routers.
 
-See `docs/websockets.md` for detailed WebSocket documentation including the WsRouteService architecture and topicTracker pattern.
+See `docs/websockets.md` for detailed WebSocket documentation including the WsRouteService Protocol architecture.
 
 ## Architecture Overview
 
-### Service-Based WebSocket Architecture
+### Protocol-Based WebSocket Architecture
 
-The backend uses a **queue-based service architecture** for WebSocket real-time updates:
+The backend uses a **Protocol-based service architecture** for WebSocket real-time updates:
 
-1. **WsRouteService** - Base class providing topic-based queue management
+1. **WsRouteService Protocol** - Simple two-method contract for topic lifecycle
 
-   - `BrokerService(WsRouteService)` - Handles broker operations
-   - `DatafeedService(WsRouteService)` - Handles market data
+   - `BrokerService` - Implements protocol for broker operations
+   - `DatafeedService` - Implements protocol for market data
+   - Services manage their own `_topic_generators: dict[str, asyncio.Task]`
 
-2. **topicTracker** - Manages subscription lifecycle per topic
+2. **Reference Counting** - Simple dict-based subscription tracking
 
-   - Reference counting for multiple subscribers
-   - Async polling of service queues
-   - Automatic cleanup when count reaches zero
+   - `topic_trackers: dict[str, int]` in routers
+   - First subscriber triggers `service.create_topic()`
+   - Last unsubscribe triggers `service.remove_topic()`
 
 3. **Router Factories** - Inject services into WebSocket routers
    - `BrokerWsRouters(broker_service)` - Creates broker WS routers
@@ -148,7 +149,7 @@ The backend uses a **queue-based service architecture** for WebSocket real-time 
 **Data Flow**:
 
 ```
-Service → Queue → topicTracker → WsRouter → FastWS → Clients
+Service Generators → FastWSAdapter Queues → WsRouter → FastWS → Clients
 ```
 
 See `docs/WEBSOCKETS.md` and `ARCHITECTURE.md` for detailed documentation.
@@ -189,7 +190,7 @@ backend/
 │   │   └── versions.py        # VersionApi class (API version catalogue)
 │   ├── ws/
 │   │   ├── __init__.py        # WebSocket module exports
-│   │   ├── router_interface.py # WsRouterInterface, WsRouteService, topicTracker
+│   │   ├── router_interface.py # WsRouterInterface, WsRouteService Protocol
 │   │   ├── generic_route.py   # Generic WsRouter implementation
 │   │   ├── broker.py          # BrokerWsRouters factory
 │   │   ├── datafeed.py        # DatafeedWsRouters factory
@@ -197,8 +198,8 @@ backend/
 │   ├── plugins/
 │   │   └── fastws_adapter.py  # FastWS integration adapter
 │   ├── core/
-│   │   ├── broker_service.py      # BrokerService (extends WsRouteService)
-│   │   └── datafeed_service.py    # DatafeedService (extends WsRouteService)
+│   │   ├── broker_service.py      # BrokerService (implements WsRouteService Protocol)
+│   │   └── datafeed_service.py    # DatafeedService (implements WsRouteService Protocol)
 │   └── models/
 │       ├── __init__.py
 │       ├── common.py          # BaseApiResponse, SubscriptionResponse, SubscriptionUpdate
@@ -227,7 +228,6 @@ backend/
 │   ├── test_ws_broker.py
 │   └── test_ws_datafeed.py    # WebSocket integration tests
 ├── docs/
-│   ├── BAR-BROADCASTING.md    # Future Redis-based broadcasting (planned)
 │   ├── VERSIONING.md
 │   └── WEBSOCKETS.md          # WebSocket streaming guide + WsRouteService docs
 └── README.md
