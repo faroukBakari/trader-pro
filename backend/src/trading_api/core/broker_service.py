@@ -34,7 +34,6 @@ from typing import Any, Callable, Dict, List, Optional
 from trading_api.models.broker import (
     AccountMetainfo,
     Brackets,
-    BrokerConnectionStatus,
     EquityData,
     Execution,
     LeverageInfo,
@@ -85,11 +84,46 @@ class BrokerService(WsRouteService):
     The event pipes enable decoupled, async broadcasting of business object updates
     to WebSocket clients, background tasks, or other consumers. Updates are not yet
     automatically enqueued; integration will be added in future work.
+
+    Single execution loop → triggers cascade of updates → callbacks broadcast changes:
+
+        WebSocket Subscriptions → create_topic() → Register callbacks
+                    ↓
+        Start _execution_simulator() (if first subscription)
+                    ↓
+        ┌───────────────────────────┐
+        │  Execution Simulator Loop │
+        │  (1-2 second intervals)   │
+        └───────────────────────────┘
+                    ↓
+        Pick random WORKING order
+                    ↓
+        _simulate_execution(order_id)
+                    ↓
+        ┌───────────────────────────┐
+        │   Execution Created       │ → callbacks["executions"](execution)
+        └───────────────────────────┘
+                    ↓
+        ┌───────────────────────────┐
+        │   Order Status = FILLED   │ → callbacks["orders"](order)
+        └───────────────────────────┘
+                    ↓
+        _update_equity(execution)
+                    ↓
+        ┌───────────────────────────┐
+        │   Equity Updated          │ → callbacks["equity"](equity)
+        └───────────────────────────┘
+                    ↓
+        _update_position(execution)
+                    ↓
+        ┌───────────────────────────┐
+        │   Position Updated        │ → callbacks["positions"](position)
+        └───────────────────────────┘
+
     """
 
     def __init__(self) -> None:
         super().__init__()
-        self._topic_trackers: dict[str, Callable] = {}
         self._orders: Dict[str, PlacedOrder] = {}
         self._positions: Dict[str, Position] = {}
         self._executions: List[Execution] = []
@@ -106,25 +140,13 @@ class BrokerService(WsRouteService):
             realizedPL=0.0,
         )
 
-        # FIFO event pipes for business object updates
-        # These queues enable async event-driven architecture for broadcasting
-        # updates to WebSocket clients or other consumers
-        self._orders_queue: asyncio.Queue[PlacedOrder] = asyncio.Queue()
-        self._positions_queue: asyncio.Queue[Position] = asyncio.Queue()
-        self._executions_queue: asyncio.Queue[Execution] = asyncio.Queue()
-        self._equity_queue: asyncio.Queue[EquityData] = asyncio.Queue()
-        self._broker_connection_queue: asyncio.Queue[
-            BrokerConnectionStatus
-        ] = asyncio.Queue()
+        self._update_callbacks: dict[str, Callable[[Any], None]] = {}
 
     async def create_topic(self, topic: str, topic_update: Callable) -> None:
-        logger.info(f"Creating topic queue for: {topic}")
-        if topic not in self._topic_trackers:
-            self._topic_trackers[topic] = topic_update
+        pass
 
     def remove_topic(self, topic: str) -> None:
-        logger.info(f"Deleting topic queue for: {topic}")
-        self._topic_trackers.pop(topic, None)
+        pass
 
     def reset(self) -> None:
         """Reset the broker service to initial state (for testing)"""
@@ -143,13 +165,6 @@ class BrokerService(WsRouteService):
             unrealizedPL=0.0,
             realizedPL=0.0,
         )
-
-        # FIFO event pipes for business object updates
-        self._orders_queue = asyncio.Queue()
-        self._positions_queue = asyncio.Queue()
-        self._executions_queue = asyncio.Queue()
-        self._equity_queue = asyncio.Queue()
-        self._broker_connection_queue = asyncio.Queue()
 
     # ================================ GETTERS =================================#
 
@@ -637,28 +652,6 @@ class BrokerService(WsRouteService):
 
         return LeverageSetResult(leverage=params.leverage)
 
-    # ========================== EVENT PIPE METHODS ===========================
-
-    async def executions_updates(self) -> Execution:
-        update = await self._executions_queue.get()
-        return update
-
-    async def orders_updates(self) -> PlacedOrder:
-        update = await self._orders_queue.get()
-        return update
-
-    async def positions_updates(self) -> Position:
-        update = await self._positions_queue.get()
-        return update
-
-    async def equity_updates(self) -> EquityData:
-        update = await self._equity_queue.get()
-        return update
-
-    async def broker_connection_updates(self) -> BrokerConnectionStatus:
-        update = await self._broker_connection_queue.get()
-        return update
-
     # ================================ SIMULATION =================================
     def _get_execution_price(self, order: PlacedOrder) -> float:
         """
@@ -698,6 +691,7 @@ class BrokerService(WsRouteService):
 
         execution_price = self._get_execution_price(order)
 
+        # TODO: simulate partial fills, slippage, etc.
         execution = Execution(
             symbol=order.symbol,
             price=execution_price,
@@ -706,7 +700,6 @@ class BrokerService(WsRouteService):
             time=int(time.time() * 1000),
         )
         self._executions.append(execution)
-        self._executions_queue.put_nowait(execution)
 
         order.status = OrderStatus.FILLED
         order.filledQty = order.qty
@@ -744,9 +737,6 @@ class BrokerService(WsRouteService):
 
         # Update equity (balance + unrealized P/L)
         self._equity.equity = self._equity.balance + self._equity.unrealizedPL
-
-        # Enqueue equity update event
-        self._equity_queue.put_nowait(self._equity)
 
         # Update position
         self._update_position(execution)
@@ -787,5 +777,3 @@ class BrokerService(WsRouteService):
                 side=execution.side,
                 avgPrice=execution.price,
             )
-        self._positions_queue.put_nowait(existing)
-        self._positions_queue.put_nowait(existing)
