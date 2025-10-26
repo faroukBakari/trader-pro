@@ -75,8 +75,11 @@ def generate_router_code(spec: RouterSpec, template: str) -> str:
         # Skip TypeVar declarations
         if "TypeVar(" in line:
             continue
-        # Skip Generic and TypeVar imports (not needed in concrete classes)
+        # Skip Generic and TypeVar imports, but keep Any
         if "from typing import" in line and ("Generic" in line or "TypeVar" in line):
+            # Extract only the 'Any' import if present
+            if "Any" in line:
+                result_lines.append("from typing import Any")
             continue
         # Skip BaseModel import if it only imports BaseModel (we don't need it)
         if line.strip() == "from pydantic import BaseModel":

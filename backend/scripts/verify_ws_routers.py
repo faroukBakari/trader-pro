@@ -25,11 +25,11 @@ def verify_router(router_class_name: str, service_type: str) -> tuple[bool, str]
         Tuple of (success: bool, message: str)
     """
     try:
-        # Import the router class
-        from trading_api.ws import generated
+        # Import the router class directly from generated package
+        import trading_api.ws.generated as generated_module
         from trading_api.ws.router_interface import WsRouteService
 
-        router_class = getattr(generated, router_class_name)
+        router_class = getattr(generated_module, router_class_name)
 
         # Import the appropriate service
         service: WsRouteService
@@ -84,7 +84,8 @@ def main():
 
     # Import to get all router classes
     try:
-        from trading_api.ws import generated
+        import trading_api.ws.generated as generated
+        from trading_api.ws.generated import __all__ as router_classes
     except ImportError as e:
         print(f"✗ Failed to import generated routers: {e}")
         sys.exit(1)

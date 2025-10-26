@@ -2,11 +2,11 @@
 
 > ⚠️ **STATUS: PLANNED FEATURE - NOT CURRENTLY IMPLEMENTED**
 >
-> **Background**: The previous in-process `DatafeedBroadcaster` has been removed as part of architectural refactoring (October 2025). The WebSocket architecture now uses a **queue-based service pattern** with `WsRouteService` and `topicTracker` for event-driven updates instead of periodic broadcasting.
+> **Background**: The previous in-process `DatafeedBroadcaster` has been removed as part of architectural refactoring (October 2025). The WebSocket architecture now uses a **Protocol-based service pattern** where services implement `WsRouteService` Protocol and manage their own generator tasks, broadcasting updates through `FastWSAdapter`.
 >
-> **This Document**: Describes a **future Redis-based enhancement** for production-grade real-time data broadcasting across distributed services. The current implementation handles WebSocket updates through service queues without Redis.
+> **This Document**: Describes a **future Redis-based enhancement** for production-grade real-time data broadcasting across distributed services. The current implementation handles WebSocket updates through service-managed generators and adapter queues without Redis.
 >
-> **Current Architecture**: See `WEBSOCKETS.md` for the active WsRouteService/topicTracker implementation.
+> **Current Architecture**: See `WEBSOCKETS.md` for the active WsRouteService Protocol implementation.
 
 ## Overview
 

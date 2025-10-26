@@ -8,12 +8,14 @@ import logging
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from trading_api.models import (
     Bar,
+    BarsSubscriptionRequest,
     DatafeedConfiguration,
     QuoteData,
+    QuoteDataSubscriptionRequest,
     QuoteValues,
     SearchSymbolResultItem,
     SymbolInfo,
@@ -23,7 +25,6 @@ from trading_api.ws import WsRouteService
 logger = logging.getLogger(__name__)
 
 
-# TODO: leverage WsRouteService queues for real-time datafeed updates
 class DatafeedService(WsRouteService):
     """Service for handling datafeed operations"""
 
@@ -35,21 +36,103 @@ class DatafeedService(WsRouteService):
                 default embedded symbols.
         """
         self.configuration = DatafeedConfiguration()
-        self._topic_queues: dict[str, asyncio.Queue] = {}
         self.symbols_file_path = symbols_file_path
         self._symbols: List[SymbolInfo] = []
         self._sample_bars: List[Bar] = []
         self._load_symbols()
         self._generate_sample_bars()
 
-    async def create_topic(self, topic: str) -> None:
-        logger.info(f"Creating topic queue for: {topic}")
+        # temporarly broadcast mocked data / should be replaced with real datafeed logic
+        self._topic_generators: dict[str, asyncio.Task] = {}
 
-    def get_topic_queue(self, topic: str) -> asyncio.Queue:
-        return self._topic_queues.setdefault(topic, asyncio.Queue())
+    # temporarly broadcast mocked data / should be replaced with real datafeed logic
+    async def _bar_generator(
+        self, symbol: str, topic_update: Callable[[Bar], None]
+    ) -> None:
+        """Start broadcasting real-time bar updates to all subscribed topics"""
+        logger.info(f"Starting service _bar_generator loop for symbol: {symbol}")
 
-    def del_topic(self, topic: str) -> None:
-        self._topic_queues.pop(topic, None)
+        while True:
+            updated_bar = self.mock_last_bar(symbol)
+            if updated_bar:
+                topic_update(updated_bar)
+            await asyncio.sleep(0.2)
+
+    # temporarly broadcast mocked data / should be replaced with real datafeed logic
+    async def _quote_generator(
+        self, symbols: List[str], topic_update: Callable[[QuoteData], None]
+    ) -> None:
+        """Start broadcasting real-time quote updates for subscribed symbols"""
+        logger.info(f"Starting service _quote_generator loop for symbols: {symbols}")
+
+        while True:
+            quotes = self.get_quotes(symbols)
+            for quote in quotes:
+                topic_update(quote)
+            await asyncio.sleep(0.2)
+
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+        """Parse topic and create appropriate subscription task.
+
+        Topic formats:
+            - bars:{"resolution":"1D","symbol":"AAPL"}
+            - quotes:{"symbols":["AAPL","GOOGL"],"fast_symbols":["MSFT"]}
+
+        Raises:
+            ValueError: If topic format is invalid or unknown topic type
+            json.JSONDecodeError: If JSON params cannot be parsed
+        """
+
+        if topic not in self._topic_generators:
+            logger.info(f"New topic in DatafeedService : {topic}")
+            # Parse topic format: "topic_type:{json_params}"
+            if ":" not in topic:
+                raise ValueError(f"Invalid topic format: {topic}")
+
+            topic_type, params_json = topic.split(":", 1)
+
+            if topic_type == "bars":
+                # Parse the JSON params part / Validate model
+                params_dict = json.loads(params_json)
+                subscription_request = BarsSubscriptionRequest.model_validate(
+                    params_dict
+                )
+
+                # Create task with parsed symbol
+                self._topic_generators[topic] = asyncio.create_task(
+                    self._bar_generator(subscription_request.symbol, topic_update)
+                )
+            elif topic_type == "quotes":
+                # Parse the JSON params part / Validate model
+                params_dict = json.loads(params_json)
+                quote_subscription_request = (
+                    QuoteDataSubscriptionRequest.model_validate(params_dict)
+                )
+
+                # Combine all symbols (both slow and fast)
+                all_symbols = list(
+                    set(
+                        quote_subscription_request.symbols
+                        + quote_subscription_request.fast_symbols
+                    )
+                )
+
+                if not all_symbols:
+                    raise ValueError("No symbols provided for quote subscription")
+
+                # Create task with all symbols
+                self._topic_generators[topic] = asyncio.create_task(
+                    self._quote_generator(all_symbols, topic_update)
+                )
+            else:
+                raise ValueError(f"Unknown topic type: {topic_type}")
+
+    def remove_topic(self, topic: str) -> None:
+        logger.info(f"Deleting topic queue for: {topic}")
+        task = self._topic_generators.get(topic)
+        if task:
+            task.cancel()
+        self._topic_generators.pop(topic, None)
 
     def _load_symbols(self) -> None:
         """Load symbols from JSON file or use default symbols"""
@@ -369,3 +452,12 @@ class DatafeedService(WsRouteService):
             volume=(last_bar.volume or 0)
             + int(random.random() * 10000),  # Add some volume
         )
+
+    def __del__(self) -> None:
+        """Cleanup generator tasks on instance deletion"""
+        for task in self._topic_generators.values():
+            try:
+                task.cancel()
+                logger.info(f"Cancelled generator task: {task.get_name()}")
+            except Exception as e:
+                logger.error(f"Error cancelling generator task: {e}")

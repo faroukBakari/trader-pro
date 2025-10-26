@@ -29,7 +29,7 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from trading_api.models.broker import (
     AccountMetainfo,
@@ -89,7 +89,7 @@ class BrokerService(WsRouteService):
 
     def __init__(self) -> None:
         super().__init__()
-        self._topic_queues: dict[str, asyncio.Queue] = {}
+        self._topic_trackers: dict[str, Callable] = {}
         self._orders: Dict[str, PlacedOrder] = {}
         self._positions: Dict[str, Position] = {}
         self._executions: List[Execution] = []
@@ -117,14 +117,14 @@ class BrokerService(WsRouteService):
             BrokerConnectionStatus
         ] = asyncio.Queue()
 
-    async def create_topic(self, topic: str) -> None:
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
         logger.info(f"Creating topic queue for: {topic}")
+        if topic not in self._topic_trackers:
+            self._topic_trackers[topic] = topic_update
 
-    def get_topic_queue(self, topic: str) -> asyncio.Queue:
-        return self._topic_queues.setdefault(topic, asyncio.Queue())
-
-    def del_topic(self, topic: str) -> None:
-        self._topic_queues.pop(topic, None)
+    def remove_topic(self, topic: str) -> None:
+        logger.info(f"Deleting topic queue for: {topic}")
+        self._topic_trackers.pop(topic, None)
 
     def reset(self) -> None:
         """Reset the broker service to initial state (for testing)"""

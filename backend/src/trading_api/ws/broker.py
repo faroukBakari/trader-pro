@@ -36,18 +36,19 @@ if TYPE_CHECKING:
     BrokerConnectionWsRouter: TypeAlias = WsRouter[
         BrokerConnectionSubscriptionRequest, BrokerConnectionStatus
     ]
-else:
-    from .generated import (
-        BrokerConnectionWsRouter,
-        EquityWsRouter,
-        ExecutionWsRouter,
-        OrderWsRouter,
-        PositionWsRouter,
-    )
 
 
 class BrokerWsRouters(list[WsRouterInterface]):
     def __init__(self, broker_service: WsRouteService):
+        # Import generated routers locally to avoid circular import
+        from .generated import (
+            BrokerConnectionWsRouter,
+            EquityWsRouter,
+            ExecutionWsRouter,
+            OrderWsRouter,
+            PositionWsRouter,
+        )
+
         # Instantiate routers
         order_router = OrderWsRouter(
             route="orders", tags=["broker"], service=broker_service

@@ -37,7 +37,6 @@ Complete index of all project documentation with descriptions and reading paths.
 | ------------------------------------------------------ | ------------------------------------------ |
 | **backend/README.md**                                  | Backend overview, setup, and API reference |
 | **backend/docs/WEBSOCKETS.md**                         | WebSocket API reference and patterns       |
-| **backend/docs/BAR-BROADCASTING.md**                   | Bar broadcaster implementation details     |
 | **backend/docs/VERSIONING.md**                         | API versioning strategy and lifecycle      |
 | **backend/src/trading_api/ws/WS-ROUTER-GENERATION.md** | WebSocket router auto-generation           |
 
@@ -180,7 +179,6 @@ Complete index of all project documentation with descriptions and reading paths.
 - **docs/WEBSOCKET-CLIENTS.md** - WebSocket overview
 - **backend/docs/WEBSOCKETS.md** - Backend WebSocket API
 - **frontend/WEBSOCKET-CLIENT-PATTERN.md** - Frontend patterns
-- **backend/docs/BAR-BROADCASTING.md** - Broadcasting service
 
 ### Testing
 

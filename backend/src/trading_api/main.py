@@ -174,7 +174,7 @@ for api_router in api_routers:
 
 # Register the WebSocket endpoint
 @apiApp.websocket(ws_url)
-async def websocket_bars_endpoint(
+async def websocket_endpoint(
     client: Annotated[Client, Depends(wsApp.manage)],
 ) -> None:
     """WebSocket endpoint for real-time bar data streaming"""

@@ -86,14 +86,14 @@ src/trading_api/
 │   ├── health.py        # HealthApi class - Health checks
 │   └── versions.py      # VersionApi class - API versioning
 ├── ws/                  # WebSocket operations (router factories)
-│   ├── router_interface.py  # WsRouterInterface, WsRouteService, topicTracker
+│   ├── router_interface.py  # WsRouterInterface, WsRouteService Protocol
 │   ├── generic_route.py     # Generic WsRouter implementation
 │   ├── broker.py            # BrokerWsRouters factory (orders, positions, executions, equity, connection)
 │   ├── datafeed.py          # DatafeedWsRouters factory (bars, quotes)
 │   └── generated/           # Auto-generated concrete router classes
 ├── core/                # Business logic services
-│   ├── broker_service.py      # BrokerService (extends WsRouteService)
-│   └── datafeed_service.py    # DatafeedService (extends WsRouteService)
+│   ├── broker_service.py      # BrokerService (implements WsRouteService Protocol)
+│   └── datafeed_service.py    # DatafeedService (implements WsRouteService Protocol)
 ├── models/              # Pydantic models (topic-based organization)
 │   ├── common.py        # Shared types (BaseApiResponse, SubscriptionUpdate, etc.)
 │   ├── health.py        # Health check models
@@ -295,72 +295,64 @@ When adding new models:
 
 ## WebSocket Real-Time Architecture
 
-### WsRouteService Pattern
+### WsRouteService Protocol Pattern
 
-The backend implements a **queue-based WebSocket service architecture** that connects business services to WebSocket clients through a topic subscription system.
+The backend implements a **Protocol-based WebSocket service architecture** where services manage their own topic generators and broadcast updates through the FastWSAdapter.
 
 #### Core Components
 
-**1. `WsRouteService` (Base Class)**
+**1. `WsRouteService` (Protocol)**
 
 Location: `ws/router_interface.py`
 
 ```python
-class WsRouteService:
-    """Base class providing topic-based queue management for WebSocket routing."""
+class WsRouteService(Protocol):
+    """Protocol for services providing WebSocket topic lifecycle management."""
+
+    async def create_topic(self, topic: str) -> None:
+        """Create and start data generation for a topic."""
+        ...
+
+    def remove_topic(self, topic: str) -> None:
+        """Stop and clean up data generation for a topic."""
+        ...
+```
+
+**Implementations**: `BrokerService`, `DatafeedService`
+
+**2. Service Implementation (Self-Managed Generators)**
+
+Location: `core/datafeed_service.py`, `core/broker_service.py`
+
+```python
+class DatafeedService:
+    """Market data service implementing WsRouteService Protocol."""
 
     def __init__(self) -> None:
-        self._topic_queues: dict[str, asyncio.Queue] = {}
+        self._topic_generators: dict[str, asyncio.Task] = {}
 
-    def get_topic_queue(self, topic: str) -> asyncio.Queue:
-        """Get or create queue for a topic."""
-        return self._topic_queues.setdefault(topic, asyncio.Queue())
+    async def create_topic(self, topic: str) -> None:
+        """Start generator task for topic."""
+        if topic not in self._topic_generators:
+            if topic.startswith("bars:"):
+                task = asyncio.create_task(self._bar_generator(topic))
+                self._topic_generators[topic] = task
 
-    def del_topic(self, topic: str) -> None:
-        """Remove topic queue when no longer needed."""
-        self._topic_queues.pop(topic, None)
+    def remove_topic(self, topic: str) -> None:
+        """Stop generator task for topic."""
+        if topic in self._topic_generators:
+            self._topic_generators[topic].cancel()
+            del self._topic_generators[topic]
+
+    async def _bar_generator(self, topic: str) -> None:
+        """Generate and broadcast bar data for topic."""
+        while True:
+            bar = self.mock_last_bar(symbol, resolution)
+            await self.publish(topic, bar)  # Publish to FastWSAdapter
+            await asyncio.sleep(interval)
 ```
 
-**Inheritance**: `BrokerService(WsRouteService)`, `DatafeedService(WsRouteService)`
-
-**2. `topicTracker` (Generic Class)**
-
-Location: `ws/router_interface.py`
-
-```python
-class topicTracker(Generic[_TData]):
-    """Manages subscription lifecycle and broadcasting for a single topic."""
-
-    def __init__(
-        self,
-        topic: str,
-        service: WsRouteService,
-        send_update: Callable[[_TData], None],
-    ) -> None:
-        self.topic = topic
-        self.service = service
-        self.count = 1  # Reference counting for active subscriptions
-        self.send_update = send_update
-        self._task = asyncio.create_task(self.poll())
-
-    async def poll(self) -> None:
-        """Poll service queue and broadcast updates to subscribers."""
-        while self.count > 0:
-            data = await self.service.get_topic_queue(self.topic).get()
-            self.send_update(data)
-
-    def inc(self) -> None:
-        """Increment subscription count."""
-        self.count += 1
-
-    def dec(self) -> None:
-        """Decrement subscription count, cleanup if zero."""
-        self.count -= 1
-        if self.count <= 0:
-            self.service.del_topic(self.topic)
-```
-
-**3. `WsRouter` (Generic Implementation)**
+**3. `WsRouter` (Generic Implementation with Reference Counting)**
 
 Location: `ws/generic_route.py`
 
@@ -371,27 +363,76 @@ class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
     def __init__(self, route: str, tags: list, service: WsRouteService):
         super().__init__(prefix=f"{route}.", tags=tags)
         self.service = service
-        self.topic_queues: dict[str, topicTracker[_TData]] = {}
+        self.topic_trackers: dict[str, int] = {}  # Reference counting
 
-    # Subscribe handler creates or increments tracker
+    # Subscribe handler creates topic on first subscriber
     @self.send("subscribe", reply="subscribe.response")
-    def send_subscribe(payload: _TRequest, client: Client):
+    async def send_subscribe(payload: _TRequest, client: Client):
         topic = self.topic_builder(payload)
         client.subscribe(topic)
 
-        if topic not in self.topic_queues:
-            self.topic_queues[topic] = topicTracker[_TData](
-                topic, self.service, send_update
-            )
+        if topic not in self.topic_trackers:
+            # First subscriber - create topic
+            self.topic_trackers[topic] = 1
+            await self.service.create_topic(topic)
         else:
-            self.topic_queues[topic].inc()
+            # Additional subscriber - increment count
+            self.topic_trackers[topic] += 1
 
-    # Unsubscribe handler decrements tracker
+    # Unsubscribe handler removes topic when count reaches 0
     @self.send("unsubscribe", reply="unsubscribe.response")
     def send_unsubscribe(payload: _TRequest, client: Client):
         topic = self.topic_builder(payload)
         client.unsubscribe(topic)
-        self.topic_queues[topic].dec()  # Auto-cleanup when count hits 0
+
+        if topic in self.topic_trackers:
+            self.topic_trackers[topic] -= 1
+            if self.topic_trackers[topic] <= 0:
+                del self.topic_trackers[topic]
+                self.service.remove_topic(topic)  # Cleanup
+```
+
+**4. `FastWSAdapter` (Broadcasting with Per-Router Queues)**
+
+Location: `plugins/fastws_adapter.py`
+
+```python
+class FastWSAdapter(FastWS):
+    """Self-contained WebSocket adapter with embedded endpoint and broadcasting."""
+
+    def __init__(self, ...) -> None:
+        super().__init__(...)
+        self._routers: dict[str, WsRouterInterface] = {}
+        self._router_queues: dict[str, asyncio.Queue] = {}
+        self._broadcast_tasks: list[asyncio.Task] = []
+
+    def include_router(self, router: WsRouterInterface) -> None:
+        """Register router and start broadcasting task."""
+        self._routers[router.route] = router
+        updates_queue: asyncio.Queue = asyncio.Queue()
+        self._router_queues[router.route] = updates_queue
+
+        # Start background task for this router
+        task = asyncio.create_task(
+            self.broadcast_router_messages(router.route, updates_queue)
+        )
+        self._broadcast_tasks.append(task)
+
+        super().include_router(router)
+
+    async def broadcast_router_messages(
+        self, route: str, updates_queue: asyncio.Queue
+    ) -> None:
+        """Background task broadcasting messages for a specific router."""
+        while True:
+            topic, data = await updates_queue.get()
+            message = Message(type=f"{route}.update", payload=data)
+            await self.server_send(message, topic=topic)
+
+    async def publish(self, topic: str, data: BaseModel, route: str) -> None:
+        """Queue data update for broadcasting to subscribed clients."""
+        if route in self._router_queues:
+            await self._router_queues[route].put((topic, data.model_dump()))
 ```
 
 #### Data Flow Architecture
@@ -402,22 +443,21 @@ class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  1. Service Layer (BrokerService / DatafeedService)            │
-│     └─> Generates business events (orders, bars, etc.)         │
-│     └─> Puts data into topic queue                             │
-│         queue = service.get_topic_queue(topic)                  │
-│         await queue.put(data)                                   │
+│     └─> Manages _topic_generators: dict[str, asyncio.Task]     │
+│     └─> create_topic() starts generator task                   │
+│     └─> Generator calls publish(topic, data)                   │
 │                                                                 │
-│  2. topicTracker (one per unique topic)                        │
-│     └─> Created on first subscription                          │
-│     └─> Polls queue in background task (async loop)            │
-│     └─> Calls send_update callback with data                   │
-│     └─> Reference counting for multiple subscribers            │
-│     └─> Auto-cleanup when count reaches 0                      │
+│  2. FastWSAdapter (Broadcasting Layer)                         │
+│     └─> Maintains _router_queues per router                    │
+│     └─> publish() queues (topic, data) for router              │
+│     └─> Background task polls queue and broadcasts             │
+│         await server_send(message, topic=topic)                │
 │                                                                 │
-│  3. WsRouter (route handler)                                   │
-│     └─> Subscribe: Creates tracker or increments count         │
-│     └─> Unsubscribe: Decrements count                          │
-│     └─> Update: Broadcasts to all subscribed clients           │
+│  3. WsRouter (Subscription Management)                         │
+│     └─> Subscribe: Increments topic_trackers[topic]            │
+│     └─> First subscriber → service.create_topic()              │
+│     └─> Unsubscribe: Decrements topic_trackers[topic]          │
+│     └─> Last unsubscribe → service.remove_topic()              │
 │                                                                 │
 │  4. FastWS Framework                                           │
 │     └─> Manages WebSocket connections                          │
@@ -428,29 +468,29 @@ class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
 
 #### Key Design Decisions
 
-**1. Service-to-Router Decoupling**
+**1. Protocol-Based Contracts**
 
-- Services don't know about WebSocket clients
-- Services only put data into queues
-- Routers poll queues and broadcast
+- Services implement simple two-method Protocol
+- No inheritance required (BrokerService, DatafeedService are independent)
+- Clean dependency injection
 
-**2. Reference Counting**
+**2. Service-Managed Generators**
 
-- Multiple clients can subscribe to same topic
-- Single `topicTracker` handles all subscribers for a topic
-- Automatic cleanup when last client unsubscribes
+- Each service owns its `_topic_generators` dict
+- Services control timing and data generation
+- Services call `publish()` to broadcast updates
 
-**3. Async Polling Pattern**
+**3. Reference Counting with Simple Dict**
 
-- Each tracker runs independent async task
-- Non-blocking queue polling
-- Efficient fan-out to multiple subscribers
+- `topic_trackers: dict[str, int]` tracks subscriber count
+- First subscriber triggers `create_topic()`
+- Last unsubscribe triggers `remove_topic()`
 
-**4. No Manual Broadcasting**
+**4. FastWSAdapter Broadcasting**
 
-- ❌ Removed: `DatafeedBroadcaster` periodic task
-- ✅ New: Event-driven queue-based updates
-- Services control timing by putting data in queues
+- Per-router queues for message distribution
+- Background tasks poll queues and broadcast
+- Clean separation: services → adapter → clients
 
 #### Router Factory Pattern
 

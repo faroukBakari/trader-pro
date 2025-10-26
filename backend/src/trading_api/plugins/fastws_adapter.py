@@ -2,12 +2,14 @@
 Generic FastWS adapter with built-in WebSocket endpoint
 """
 
+import asyncio
 import logging
+from typing import Any, Callable
 
-from pydantic import BaseModel
+from fastapi import FastAPI
 
 from external_packages.fastws import FastWS, Message
-from trading_api.models.common import SubscriptionUpdate
+from trading_api.ws.router_interface import WsRouterInterface
 
 logger = logging.getLogger(__name__)
 
@@ -22,28 +24,60 @@ class FastWSAdapter(FastWS):
     Type parameter T: The business model type (e.g., Bar)
     """
 
-    async def publish(
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._pending_routers: list[Callable] = []
+        self._broadcast_tasks: list[asyncio.Task] = []
+
+    def include_router(
         self,
-        topic: str,
-        data: BaseModel,
-        route: str,
+        router: WsRouterInterface,
     ) -> None:
-        """
-        Publish data update to all subscribed clients
+        super().include_router(router)
 
-        Args:
-            topic: Topic identifier (e.g., "bars:AAPL:1")
-            data: Business model instance (e.g., Bar)
-            route: Message type for the update (e.g., "bars.update")
-        """
-        # Create message with data model directly as payload
-        message = Message(
-            type=f"{route}.update",
-            payload=SubscriptionUpdate(
-                topic=topic,
-                payload=data,
-            ).model_dump(),
-        )
+        async def broadcast_router_messages() -> None:
+            logger.info(f"Started broadcasting task for router: {router.route}")
+            while True:
+                try:
+                    # Get message from queue (non-blocking)
+                    update = await router.updates_queue.get()
 
-        await self.server_send(message, topic=topic)
-        logger.debug(f"Published {route} to topic: {topic}")
+                    # Send message to all subscribed clients
+                    await self.server_send(
+                        Message(
+                            type=f"{router.route}.update",
+                            payload=update.model_dump(),
+                        ),
+                        topic=update.topic,
+                    )
+                    logger.debug(f"Broadcasted message from router: {update.topic}")
+
+                except asyncio.QueueEmpty:
+                    logger.warning("No messages in router queue, continuing")
+                    await asyncio.sleep(1)
+                    continue
+                except Exception as e:
+                    logger.error(f"Error broadcasting {router.route}.update: {e}")
+                    await asyncio.sleep(1)
+
+        self._pending_routers.append(broadcast_router_messages)
+
+    def setup(self, app: FastAPI) -> None:
+        """Setup FastWS with FastAPI app and start broadcasting tasks"""
+        super().setup(app)
+
+        for broadcast_coro in self._pending_routers:
+            task = asyncio.create_task(
+                broadcast_coro(), name=f"broadcast_{broadcast_coro.__name__}"
+            )
+            self._broadcast_tasks.append(task)
+
+        self._pending_routers.clear()
+
+    def __del__(self) -> None:
+        """Cleanup broadcasting tasks on instance deletion"""
+        for task in self._broadcast_tasks:
+            if not task.done():
+                task.cancel()
+                logger.info(f"Cancelled broadcasting task: {task.get_name()}")
+                logger.info(f"Cancelled broadcasting task: {task.get_name()}")

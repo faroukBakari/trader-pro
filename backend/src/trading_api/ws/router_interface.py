@@ -1,11 +1,10 @@
 import asyncio
 import json
-from typing import Any, Callable, Generic, Protocol, TypeVar
+from typing import Any, Callable, Protocol
 
 from pydantic import BaseModel
 
-from external_packages.fastws import OperationRouter
-from trading_api.plugins.fastws_adapter import FastWSAdapter
+from external_packages.fastws import FastWS, OperationRouter
 
 
 def buildTopicParams(obj: Any) -> str:
@@ -29,31 +28,23 @@ def buildTopicParams(obj: Any) -> str:
 
 
 class WsRouteService(Protocol):
-    async def create_topic(self, topic: str) -> None:
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
         ...
 
-    def get_topic_queue(self, topic: str) -> asyncio.Queue:
-        ...
-
-    def del_topic(self, topic: str) -> None:
+    def remove_topic(self, topic: str) -> None:
         ...
 
 
-class WsRouterProto(Protocol):
-    route: str
+class WsRouterInterface(OperationRouter):
+    def __init__(self, route: str, *args: Any, **kwargs: Any):
+        super().__init__(prefix=f"{route}.", *args, **kwargs)
+        self.route: str = route
+        self.updates_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=1000)
 
-    def topic_builder(self, params: BaseModel) -> str:
-        ...
-
-    def build_specs(self, wsUrl: str, wsApp: FastWSAdapter) -> dict:
-        ...
-
-
-class WsRouterInterface(OperationRouter, WsRouterProto):
     def topic_builder(self, params: BaseModel) -> str:
         return f"{self.route}:{buildTopicParams(params.model_dump())}"
 
-    def build_specs(self, wsUrl: str, wsApp: FastWSAdapter) -> dict:
+    def build_specs(self, wsUrl: str, wsApp: FastWS) -> dict:
         return {
             "endpoint": wsUrl,
             "docs": wsApp.asyncapi_docs_url,
@@ -65,38 +56,3 @@ class WsRouterInterface(OperationRouter, WsRouterProto):
             ],
             "note": "WebSocket endpoints use AsyncAPI spec, not OpenAPI/Swagger",
         }
-
-
-_TData = TypeVar("_TData", bound=BaseModel)
-
-
-class topicTracker(Generic[_TData]):
-    def __init__(
-        self,
-        topic: str,
-        service: WsRouteService,
-        send_update: Callable[[_TData], None],
-    ) -> None:
-        self.topic = topic
-        self.service = service
-        self.count = 1
-        self.send_update = send_update
-        self._task = asyncio.create_task(self.poll())
-
-    async def poll(self) -> None:
-        while self.count > 0:
-            data = await self.service.get_topic_queue(self.topic).get()
-            self.send_update(data)
-
-    def inc(self) -> None:
-        self.count += 1
-
-    def dec(self) -> None:
-        self.count -= 1
-        if self.count <= 0:
-            self.service.del_topic(self.topic)
-
-    def __del__(self) -> None:
-        """Destructor to clean up topic when tracker is garbage collected"""
-        if self.count > 0:
-            self.service.del_topic(self.topic)

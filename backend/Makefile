@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 BACKEND_APP_NAME ?= app
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-cov lint lint-check lint-response-models format build clean dev dev-no-debug dev-ci health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-cov lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
 
 # Default target
 help:
@@ -22,6 +22,7 @@ help:
 	@echo "  dev               Start backend development server with debugpy"
 	@echo "  dev-no-debug      Start backend development server without debugpy"
 	@echo "  clean             Clean build artifacts"
+	@echo "  clean-cache       Clean all Python caches (mypy, pytest, pycache, ruff)"
 	@echo "  health            Check backend health"
 	@echo "  export-openapi-spec   Export OpenAPI specification (offline)"
 	@echo "  export-asyncapi-spec  Export AsyncAPI specification (offline)"
@@ -286,6 +287,26 @@ clean:
 	@echo "Cleaning backend build artifacts..."
 	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage clients/ src/trading_api/ws/generated/ openapi.json asyncapi.json
 	@echo "Backend clean complete."
+
+# Clean all Python caches
+clean-cache:
+	@echo "Cleaning all Python caches..."
+	@find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".pytype" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+	@echo "✓ Removed .mypy_cache directories"
+	@echo "✓ Removed __pycache__ directories"
+	@echo "✓ Removed .pytest_cache directories"
+	@echo "✓ Removed .ruff_cache directories"
+	@echo "✓ Removed .pytype directories"
+	@echo "✓ Removed *.egg-info directories"
+	@echo ""
+	@echo "💡 Tip: After cleaning caches, reload VS Code window:"
+	@echo "   Press Ctrl+Shift+P → 'Developer: Reload Window'"
+	@echo "   Or run: 'Python: Restart Language Server'"
 
 # Export OpenAPI specification (offline)
 export-openapi-spec:
