@@ -25,22 +25,19 @@ backend_files=$(get_staged_files "^backend/.*\.py$")
 frontend_files=$(get_staged_files "^frontend/.*\.(js|ts|vue)$")
 config_files=$(get_staged_files "\.(json|yaml|yml|toml)$")
 
-# Track failures
-failed_checks=()
-
 # Common checks for all files
 if [[ -n "$config_files" ]] || [[ -n "$backend_files" ]] || [[ -n "$frontend_files" ]]; then
     log_info "Running common file checks..."
 
     # Check for trailing whitespace
     if ! run_check "Trailing whitespace check" "git diff --check --cached  -- .:^frontend/public/"; then
-        failed_checks+=("trailing-whitespace")
+        exit 1
     fi
 
     # Check for merge conflicts (avoid false positives from regex patterns)
     if git diff --check | grep -i conflict; then
         log_error "Merge conflict markers found in staged files"
-        failed_checks+=("merge-conflicts")
+        exit 1
     fi
 fi
 
@@ -53,23 +50,23 @@ if [[ -n "$backend_files" ]]; then
     # Check if Poetry is available
     if ! command_exists poetry; then
         log_error "Poetry not found. Please install Poetry to run backend checks."
-        failed_checks+=("poetry-missing")
-    else
-        # Format backend code (auto-fix with Black and isort)
-        if ! run_check "Backend formatting" "make format" "$repo_root/backend"; then
-            failed_checks+=("format")
-        fi
+        exit 1
+    fi
 
-        # Lint backend code (flake8 + mypy)
-        if ! run_check "Backend linting" "make lint-check" "$repo_root/backend"; then
-            failed_checks+=("lint-check")
-        fi
+    # Format backend code (auto-fix with Black and isort)
+    if ! run_check "Backend formatting" "make format" "$repo_root/backend"; then
+        exit 1
+    fi
 
-        # Run tests (only if not in CI for speed)
-        if ! is_ci; then
-            if ! run_check "Backend tests" "make test" "$repo_root/backend"; then
-                failed_checks+=("backend-tests")
-            fi
+    # Lint backend code (flake8 + mypy)
+    if ! run_check "Backend linting" "make lint-check" "$repo_root/backend"; then
+        exit 1
+    fi
+
+    # Run tests (only if not in CI for speed)
+    if ! is_ci; then
+        if ! run_check "Backend tests" "make test" "$repo_root/backend"; then
+            exit 1
         fi
     fi
 fi
@@ -83,44 +80,34 @@ if [[ -n "$frontend_files" ]]; then
     # Check if npm is available
     if ! command_exists npm; then
         log_error "npm not found. Please install Node.js and npm to run frontend checks."
-        failed_checks+=("npm-missing")
-    else
-        # Check if node_modules exists
-        if [[ ! -d "node_modules" ]]; then
-            log_warning "node_modules not found. Running npm install..."
-            npm install
-        fi
+        exit 1
+    fi
 
-        # Linting (includes client generation)
-        if ! run_check "Frontend linting" "make lint" "$repo_root/frontend"; then
-            log_warning "Run 'cd frontend && make lint' to fix linting issues"
-            failed_checks+=("lint")
-        fi
+    # Check if node_modules exists
+    if [[ ! -d "node_modules" ]]; then
+        log_warning "node_modules not found. Running npm install..."
+        npm install
+    fi
 
-        # TypeScript type checking (includes client generation)
-        if ! run_check "TypeScript type checking" "make type-check" "$repo_root/frontend"; then
-            failed_checks+=("type-check")
-        fi
+    # Linting (includes client generation)
+    if ! run_check "Frontend linting" "make lint" "$repo_root/frontend"; then
+        log_warning "Run 'cd frontend && make lint' to fix linting issues"
+        exit 1
+    fi
 
-        # Run tests (only if not in CI for speed, includes client generation)
-        if ! is_ci; then
-            if ! run_check "Frontend tests" "make test" "$repo_root/frontend"; then
-                failed_checks+=("frontend-tests")
-            fi
+    # TypeScript type checking (includes client generation)
+    if ! run_check "TypeScript type checking" "make type-check" "$repo_root/frontend"; then
+        exit 1
+    fi
+
+    # Run tests (only if not in CI for speed, includes client generation)
+    if ! is_ci; then
+        if ! run_check "Frontend tests" "make test" "$repo_root/frontend"; then
+            exit 1
         fi
     fi
 fi
 
-# Summary
-if [[ ${#failed_checks[@]} -eq 0 ]]; then
-    log_success "All pre-commit checks passed! 🎉"
-    exit 0
-else
-    log_error "Pre-commit checks failed: ${failed_checks[*]}"
-    echo
-    log_info "To skip these checks temporarily, use: git commit --no-verify"
-    log_info "To skip all hooks: SKIP_HOOKS=true git commit"
-    echo
-    log_info "Fix the issues above and try committing again."
-    exit 1
-fi
+# All checks passed
+log_success "All pre-commit checks passed! 🎉"
+exit 0
