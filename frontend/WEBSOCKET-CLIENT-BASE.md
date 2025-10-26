@@ -1374,7 +1374,7 @@ const broker = new BrokerTerminalService(host, datafeed, brokerMock)
 ### Related Documentation
 
 - **WebSocket Integration**: `frontend/BROKER-TERMINAL-SERVICE.md#websocket-integration`
-- **Backend Methodology**: `BACKEND-WEBSOCKET-METHODOLOGY.md`
+- **Backend Methodology**: `WEBSOCKET-METHODOLOGY.md`
 - **Type Mappers**: `frontend/src/plugins/mappers.ts`
 - **WsAdapter Implementation**: `frontend/src/plugins/wsAdapter.ts`
 - **WebSocket Client Base**: `frontend/src/plugins/wsClientBase.ts`

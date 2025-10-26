@@ -829,12 +829,12 @@ class DatafeedService:
             self._topic_generators[topic].cancel()
             del self._topic_generators[topic]
 
-    async def _bar_generator(self, topic: str) -> None:
+    async def _bar_generator(self, topic: str, topic_update: Callable) -> None:
         """Generate and broadcast bar data for topic."""
         while True:
             bar = self.mock_last_bar(symbol, resolution)
-            # Broadcast via fastws_adapter
-            await self.publish(topic, bar)
+            # Broadcast via topic_update callback
+            topic_update(bar)
             await asyncio.sleep(interval)
 ```
 
@@ -842,20 +842,20 @@ class DatafeedService:
 
 - **Protocol-Based**: Services implement a simple two-method contract
 - **Self-Managed**: Each service manages its own generator tasks
-- **Async Generators**: Long-running tasks that broadcast updates
+- **Async Generators**: Long-running tasks that broadcast updates via callback
 - **Clean Lifecycle**: Tasks created on subscription, cancelled on unsubscribe
 
 **Data Flow**:
 
 ```
-Service._topic_generators[topic] → publish() → FastWSAdapter → Clients
+Service generator → topic_update(data) → Router updates_queue → FastWSAdapter → Clients
 ```
 
 #### FastWSAdapter (plugins/fastws_adapter.py)
 
 **Self-Contained WebSocket Adapter with Broadcasting**
 
-The `FastWSAdapter` manages WebSocket connections and broadcasting with queue-based message routing:
+The `FastWSAdapter` manages WebSocket connections and broadcasting by overriding `include_router()` and `setup()`:
 
 ```python
 class FastWSAdapter(FastWS):
@@ -863,44 +863,43 @@ class FastWSAdapter(FastWS):
 
     def __init__(self, ...) -> None:
         super().__init__(...)
-        self._routers: dict[str, WsRouterInterface] = {}
-        self._router_queues: dict[str, asyncio.Queue] = {}
+        self._pending_routers: list[Callable] = []
         self._broadcast_tasks: list[asyncio.Task] = []
 
     def include_router(self, router: WsRouterInterface) -> None:
-        """Register router and start broadcasting task."""
-        self._routers[router.route] = router
-        updates_queue: asyncio.Queue = asyncio.Queue()
-        self._router_queues[router.route] = updates_queue
-
-        # Start background task for this router
-        task = asyncio.create_task(
-            self.broadcast_router_messages(router.route, updates_queue)
-        )
-        self._broadcast_tasks.append(task)
-
+        """Override to register router and store broadcast coroutine."""
         super().include_router(router)
 
-    async def broadcast_router_messages(
-        self, route: str, updates_queue: asyncio.Queue
-    ) -> None:
-        """Background task broadcasting messages for a specific router."""
-        while True:
-            topic, data = await updates_queue.get()
-            message = Message(type=f"{route}.update", payload=data)
-            await self.server_send(message, topic=topic)
+        async def broadcast_router_messages() -> None:
+            """Background task that polls router's updates_queue."""
+            while True:
+                update = await router.updates_queue.get()
+                message = Message(
+                    type=f"{router.route}.update",
+                    payload=update.model_dump(),
+                )
+                await self.server_send(message, topic=update.topic)
 
-    async def publish(self, topic: str, data: BaseModel, route: str) -> None:
-        """Queue data update for broadcasting to subscribed clients."""
-        if route in self._router_queues:
-            await self._router_queues[route].put((topic, data.model_dump()))
+        # Store for later startup
+        self._pending_routers.append(broadcast_router_messages)
+
+    def setup(self, app: FastAPI) -> None:
+        """Override setup to start all broadcasting tasks."""
+        super().setup(app)
+
+        for broadcast_coro in self._pending_routers:
+            task = asyncio.create_task(broadcast_coro())
+            self._broadcast_tasks.append(task)
+
+        self._pending_routers.clear()
 ```
 
 **Key Features**:
 
-- **Per-Router Queues**: Each router has its own `updates_queue` for broadcasting
-- **Background Tasks**: One broadcast task per router handles all topics for that router
-- **Clean Integration**: Services publish to adapter, adapter broadcasts to clients
+- **include_router() Override**: Registers router with parent, creates broadcast coroutine
+- **setup() Override**: Starts all pending broadcast tasks when FastAPI app is ready
+- **Per-Router Broadcasting**: Each router has its own background task polling `updates_queue`
+- **Clean Integration**: Services call topic_update → enqueues to router.updates_queue → broadcast task sends to clients
 - **Type Safety**: Pydantic models validated before broadcasting
 
 #### WsRouter - Generic WebSocket Router

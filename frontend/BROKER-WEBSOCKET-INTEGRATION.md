@@ -911,13 +911,9 @@ class BrokerService:
         # Save to database
         await self.save_order(order)
 
-        # Broadcast to WebSocket subscribers
-        topic = f"orders:{order.account_id}"
-        await wsApp.publish(
-            topic=topic,
-            data=order,
-            route="orders"
-        )
+        # Order updates are broadcast automatically via service generator
+        # The BrokerService._orders_queue gets the update
+        # which is consumed by the generator and passed to topic_update callback
 
         return OrderResult(order_id=order.id)
 ```
