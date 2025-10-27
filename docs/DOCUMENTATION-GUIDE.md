@@ -21,15 +21,15 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ## 📖 docs/ Folder (Core Cross-Cutting Documentation)
 
-| File                            | Purpose                                   |
-| ------------------------------- | ----------------------------------------- |
-| **docs/README.md**              | Documentation index and navigation guide  |
-| **docs/DOCUMENTATION-GUIDE.md** | This file - complete documentation index  |
+| File                            | Purpose                                         |
+| ------------------------------- | ----------------------------------------------- |
+| **docs/README.md**              | Documentation index and navigation guide        |
+| **docs/DOCUMENTATION-GUIDE.md** | This file - complete documentation index        |
 | **docs/BROKER-ARCHITECTURE.md** | Broker service execution simulator architecture |
-| **docs/CLIENT-GENERATION.md**   | REST and WebSocket client auto-generation |
-| **docs/WEBSOCKET-CLIENTS.md**   | WebSocket implementation overview         |
-| **docs/DEVELOPMENT.md**         | Development workflows and setup           |
-| **docs/TESTING.md**             | Testing strategy and best practices       |
+| **docs/CLIENT-GENERATION.md**   | REST and WebSocket client auto-generation       |
+| **docs/WEBSOCKET-CLIENTS.md**   | WebSocket implementation overview               |
+| **docs/DEVELOPMENT.md**         | Development workflows and setup                 |
+| **docs/TESTING.md**             | Testing strategy and best practices             |
 
 ---
 

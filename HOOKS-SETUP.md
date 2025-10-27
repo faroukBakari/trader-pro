@@ -31,7 +31,16 @@ chmod +x .githooks/*
 - ✅ isort import sorting
 - ✅ Flake8 linting
 - ✅ MyPy type checking
+- ✅ OpenAPI spec validation (`make export-openapi-spec`)
+- ✅ AsyncAPI spec validation (`make export-asyncapi-spec`)
 - ✅ Pytest tests (local only)
+
+**Note on spec validation**:
+
+- **OpenAPI spec validation** ensures all REST API models and routes can be exported without errors
+- **AsyncAPI spec validation** ensures all WebSocket models are valid and checks that subscription request models have **required** parameters only (no optional/default values)
+- Optional parameters in subscription requests cause topic mismatch issues between request and response
+- These validations run on **every commit** to prevent committing invalid schemas that would fail in CI
 
 ### Frontend (TypeScript/Vue files)
 

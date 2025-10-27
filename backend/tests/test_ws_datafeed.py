@@ -136,18 +136,21 @@ class TestBarsWebSocketIntegration:
                     == f'bars:{{"resolution":"1","symbol":"{symbol}"}}'
                 )
 
-    def test_subscribe_without_resolution_uses_default(self):
-        """Test that subscribing without resolution parameter uses default"""
+    def test_subscribe_with_explicit_resolution(self):
+        """Test that subscribing with explicit resolution works correctly"""
         client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
-            # Subscribe without specifying resolution
+            # Subscribe with explicit resolution
             websocket.send_json(
-                {"type": "bars.subscribe", "payload": {"symbol": "AAPL"}}
+                {
+                    "type": "bars.subscribe",
+                    "payload": {"symbol": "AAPL", "resolution": "1"},
+                }
             )
             response = websocket.receive_json()
 
-            # Should use default resolution "1"
+            # Should create topic with resolution "1"
             assert (
                 response["payload"]["topic"]
                 == 'bars:{"resolution":"1","symbol":"AAPL"}'
