@@ -59,17 +59,17 @@ uninstall-hooks:
 install:
 	@echo "Installing all project dependencies..."
 	@echo ""
-	@echo "[1/3] Installing Git hooks..."
-	@echo "========================================"
-	@$(MAKE) install-hooks
-	@echo ""
-	@echo "[2/3] Installing backend dependencies..."
+	@echo "[1/2] Installing backend dependencies..."
 	@echo "========================================"
 	make -C backend install
 	@echo ""
-	@echo "[3/3] Installing frontend dependencies..."
+	@echo "[2/2] Installing frontend dependencies..."
 	@echo "========================================="
 	make -C frontend install
+	@echo ""
+	@echo "[3/3] Installing Git hooks..."
+	@echo "========================================"
+	@$(MAKE) install-hooks
 	@echo ""
 	@echo "✓ All dependencies installed successfully!"
 	@echo ""
