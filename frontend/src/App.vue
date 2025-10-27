@@ -5,15 +5,6 @@ import ApiStatus from '@/components/ApiStatus.vue'
 
 <template>
   <div id="app-container">
-    <header>
-      <div class="header-content">
-        <router-link to="/" class="logo">
-          <!-- <h1>TraderPRO Backend</h1> -->
-        </router-link>
-        <!-- <p>Monitor your TraderPRO backend status</p> -->
-      </div>
-    </header>
-
     <main>
       <RouterView />
     </main>
