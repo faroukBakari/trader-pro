@@ -132,7 +132,7 @@ onMounted(() => {
       studies_overrides: props.studiesOverrides,
 
       debug: false,
-      debug_broker: 'all', // BrokerDebugMode.All,
+      // debug_broker: 'all', // BrokerDebugMode.All,
 
       // Trading functionality
       ...(props.enableTrading && {

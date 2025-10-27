@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 BACKEND_APP_NAME ?= app
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-cov lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-cov lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
 
 # Default target
 help:
@@ -21,6 +21,7 @@ help:
 	@echo "  build             Build backend package"
 	@echo "  dev               Start backend development server with debugpy"
 	@echo "  dev-no-debug      Start backend development server without debugpy"
+	@echo "  kill-dev          Kill any running backend development server"
 	@echo "  clean             Clean build artifacts"
 	@echo "  clean-cache       Clean all Python caches (mypy, pytest, pycache, ruff)"
 	@echo "  health            Check backend health"
@@ -258,6 +259,27 @@ dev-no-debug:
 	fi
 	@echo "✅ Port $(BACKEND_PORT) is available"
 	poetry run uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --reload --host 0.0.0.0 --port $(BACKEND_PORT) --log-level info
+
+# Kill backend development server
+kill-dev:
+	@echo "🔍 Checking for running backend processes..."
+	@PIDS=$$(lsof -ti :$(BACKEND_PORT) 2>/dev/null || true); \
+	if [ -n "$$PIDS" ]; then \
+		echo "Found backend process(es) on port $(BACKEND_PORT):"; \
+		lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN 2>/dev/null || true; \
+		echo ""; \
+		echo "Killing process(es)..."; \
+		kill -9 $$PIDS 2>/dev/null || true; \
+		sleep 1; \
+		if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
+			echo "❌ Failed to kill some processes. Please check manually."; \
+			exit 1; \
+		else \
+			echo "✅ Backend development server stopped"; \
+		fi; \
+	else \
+		echo "✅ No backend process found on port $(BACKEND_PORT)"; \
+	fi
 
 # CI development server (background)
 dev-ci:

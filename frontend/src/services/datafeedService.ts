@@ -367,6 +367,8 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private wsAdapter: WsAdapterType
   private wsFallback?: Partial<WsAdapterType>
 
+  debug_datafeed: boolean = false
+
   constructor(datafeedMocker?: DatafeedMock) {
     this.apiAdapter = new ApiAdapter()
     this.wsAdapter = new WsAdapter()
@@ -384,7 +386,6 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     return this.apiFallback ?? this.apiAdapter
   }
   onReady(callback: OnReadyCallback): void {
-    console.log('[Datafeed] onReady called')
 
     this._getApiAdapter().getConfig().then((response) => {
       // Handle both AxiosResponse (generated client) and direct data (fallback client)
@@ -400,7 +401,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onResult: SearchSymbolsCallback,
   ): void {
     this._getApiAdapter().searchSymbols(userInput, exchange, symbolType, 30).then((response) => {
-      console.log(
+      if (this.debug_datafeed) console.log(
         `[Datafeed] searchSymbols found ${response.data.length} symbols for input "${userInput}"`,
       )
       onResult(response.data)
@@ -412,14 +413,14 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onError: DatafeedErrorCallback,
   ): void {
     this._getApiAdapter().resolveSymbol(symbolName).then((response) => {
-      console.log(
+      if (this.debug_datafeed) console.log(
         `[Datafeed] resolveSymbol found ${response.data ? 'a' : 'no'} symbol for input "${symbolName}"`,
       )
       if (response.data) {
-        console.log('[Datafeed] Symbol resolved:', response.data)
+        if (this.debug_datafeed) console.log('[Datafeed] Symbol resolved:', response.data)
         onResolve(response.data)
       } else {
-        console.log('[Datafeed] Symbol not found:', symbolName)
+        if (this.debug_datafeed) console.log('[Datafeed] Symbol not found:', symbolName)
         onError('unknown_symbol')
       }
     })
@@ -440,7 +441,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         periodParams.countBack,
       )
       .then((response) => {
-        console.log(
+        if (this.debug_datafeed) console.log(
           `[Datafeed] getBars returned ${response.data.bars.length} bars for ${symbolInfo.name} in range ${new Date(
             periodParams.from * 1000,
           ).toISOString()} - ${new Date(periodParams.to * 1000).toISOString()}`,
@@ -450,7 +451,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         onResult(response.data.bars, { noData: response.data.no_data || false })
       })
       .catch((error) => {
-        console.error('[Datafeed] Error in getBars:', error)
+        if (this.debug_datafeed) console.error('[Datafeed] Error in getBars:', error)
         onError(error instanceof Error ? error.message : 'Unknown error occurred')
       })
   }
@@ -462,7 +463,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     // onResetCacheNeededCallback?: () => void,
   ): void {
     this._getWsAdapter().bars?.subscribe(listenerGuid, { symbol: symbolInfo.name, resolution }, (bar) => {
-      console.debug('[Datafeed] Bar received from WebSocket:', {
+      if (this.debug_datafeed) console.debug('[Datafeed] Bar received from WebSocket:', {
         symbol: symbolInfo.name,
         resolution,
         listenerGuid,
@@ -473,7 +474,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   }
   unsubscribeBars(listenerGuid: string): void {
     this._getWsAdapter().bars?.unsubscribe(listenerGuid).catch((error) => {
-      console.error('[Datafeed] WebSocket unsubscription failed:', error)
+      if (this.debug_datafeed) console.error('[Datafeed] WebSocket unsubscription failed:', error)
     })
   }
   getQuotes(
@@ -484,13 +485,13 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     this._getApiAdapter()
       .getQuotes({ symbols })
       .then((response) => {
-        console.debug(
+        if (this.debug_datafeed) console.debug(
           `[Datafeed] getQuotes returned ${response.data.length} quotes for ${symbols.length} requested symbols`,
         )
         onDataCallback(response.data)
       })
       .catch((error) => {
-        console.error('[Datafeed] Error in getQuotes:', error)
+        if (this.debug_datafeed) console.error('[Datafeed] Error in getQuotes:', error)
         onErrorCallback(error instanceof Error ? error.message : 'Unknown error occurred')
       })
   }
@@ -504,7 +505,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     const allSymbols = [...new Set([...symbols, ...fastSymbols])]
 
     if (allSymbols.length === 0) {
-      console.log('[Datafeed] No symbols to subscribe to for quotes')
+      if (this.debug_datafeed) console.log('[Datafeed] No symbols to subscribe to for quotes')
       return
     }
 
@@ -513,21 +514,21 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         listenerGUID,
         { symbols, fast_symbols: fastSymbols },
         (quoteData) => {
-          console.debug('[Datafeed] Quote data received from WebSocket:', {
+          if (this.debug_datafeed) console.log('[Datafeed] Quote data received from WebSocket:', {
             listenerGUID,
             quoteData,
           })
           onRealtimeCallback([quoteData])
         }
       ).then(() => {
-        console.log(
+        if (this.debug_datafeed) console.log(
           `[Datafeed] Quote subscription started for ${allSymbols.length} symbols (${listenerGUID})`,
         )
       })
   }
   unsubscribeQuotes(listenerGUID: string): void {
     this._getWsAdapter().quotes?.unsubscribe(listenerGUID).then(() => {
-      console.log(`[Datafeed] Unsubscribed from quotes successfully: ${listenerGUID}`)
+      if (this.debug_datafeed) console.log(`[Datafeed] Unsubscribed from quotes successfully: ${listenerGUID}`)
     })
   }
 }

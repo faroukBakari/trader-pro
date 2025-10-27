@@ -43,6 +43,18 @@ class StopType(IntEnum):
     GUARANTEED_STOP = 2
 
 
+class CurrentQuotes(BaseModel):
+    """
+    Current market quotes (matching TradingView AskBid)
+    Contains current ask and bid prices
+    """
+
+    ask: float = Field(..., description="Current ask price")
+    bid: float = Field(..., description="Current bid price")
+
+    model_config = {"use_enum_values": True}
+
+
 class PreOrder(BaseModel):
     """
     Order request from client (matching TradingView PreOrder)
@@ -66,6 +78,12 @@ class PreOrder(BaseModel):
         None, description="Order trailing stop (Brackets)"
     )
     stopType: Optional[StopType] = Field(None, description="Type of stop order")
+    seenPrice: Optional[float] = Field(
+        None, description="Price seen at order creation time"
+    )
+    currentQuotes: Optional[CurrentQuotes] = Field(
+        None, description="Current market quotes (ask and bid)"
+    )
 
     model_config = {"use_enum_values": True}
 

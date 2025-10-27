@@ -42,20 +42,47 @@ class FastWSAdapter(FastWS):
                     # Get message from queue (non-blocking)
                     update = await router.updates_queue.get()
 
-                    # Send message to all subscribed clients
-                    await self.server_send(
-                        Message(
-                            type=f"{router.route}.update",
-                            payload=update.model_dump(),
-                        ),
-                        topic=update.topic,
+                    # Get all clients subscribed to this topic
+                    topics = set().union(
+                        *[client.topics for client in self.connections.values()]
                     )
-                    logger.debug(f"Broadcasted message from router: {update.topic}")
+
+                    if not topics:
+                        logger.info("No topic subscriptions found, continuing")
+                        continue
+
+                    # Skip broadcast if no clients are subscribed
+                    if update.topic not in topics:
+                        logger.info(f"No clients subscribed to topic: {update.topic}")
+                        continue
+
+                    try:
+                        # Send message to all subscribed clients
+                        await self.server_send(
+                            Message(
+                                type=f"{router.route}.update",
+                                payload=update.model_dump(),
+                            ),
+                            topic=update.topic,
+                        )
+                        if router.route == "executions":
+                            logger.info(
+                                f"Broadcasted execution update on topic: {update.topic}"
+                            )
+                        else:
+                            logger.debug(
+                                f"Broadcasted message from router: {update.topic}"
+                            )
+                    except* Exception:
+                        # Handle ExceptionGroup from TaskGroup (e.g., closed connections)
+                        logger.warning(
+                            f"Some clients disconnected during {router.route}.update broadcast, continuing"
+                        )
+                        await asyncio.sleep(1)
 
                 except asyncio.QueueEmpty:
                     logger.warning("No messages in router queue, continuing")
                     await asyncio.sleep(1)
-                    continue
                 except Exception as e:
                     logger.error(f"Error broadcasting {router.route}.update: {e}")
                     await asyncio.sleep(1)

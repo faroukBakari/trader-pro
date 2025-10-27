@@ -27,6 +27,7 @@ with a real broker API.
 
 import asyncio
 import logging
+import random
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
@@ -34,6 +35,7 @@ from typing import Any, Callable, Dict, List, Optional
 from trading_api.models.broker import (
     AccountMetainfo,
     Brackets,
+    BrokerConnectionStatus,
     EquityData,
     Execution,
     LeverageInfo,
@@ -122,7 +124,15 @@ class BrokerService(WsRouteService):
 
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        execution_delay: float | None = None,
+    ) -> None:
+        """Initialize broker service.
+
+        Args:
+            execution_delay: Delay between executions in seconds (default: None)
+        """
         super().__init__()
         self._orders: Dict[str, PlacedOrder] = {}
         self._positions: Dict[str, Position] = {}
@@ -132,39 +142,21 @@ class BrokerService(WsRouteService):
         self._account_name = "Demo Trading Account"
         self._leverage_settings: Dict[str, float] = {}
         self.unrealizedPL: Dict[str, float] = {}
-        self.initial_balance = 100000.0
-        self._equity: EquityData = EquityData(
-            equity=0.0,
+        self.accounting: EquityData = EquityData(
+            equity=100000.0,
             balance=100000.0,
             unrealizedPL=0.0,
             realizedPL=0.0,
         )
 
+        # WebSocket callback registry (one per topic type)
         self._update_callbacks: dict[str, Callable[[Any], None]] = {}
 
-    async def create_topic(self, topic: str, topic_update: Callable) -> None:
-        pass
+        # Single execution simulation task
+        self._execution_simulator_task: Optional[asyncio.Task] = None
 
-    def remove_topic(self, topic: str) -> None:
-        pass
-
-    def reset(self) -> None:
-        """Reset the broker service to initial state (for testing)"""
-        self._orders = {}
-        self._positions = {}
-        self._executions = []
-        self._order_counter = 1
-        self._account_id = "DEMO-ACCOUNT"
-        self._account_name = "Demo Trading Account"
-        self._leverage_settings = {}
-        self.unrealizedPL = {}
-        self.initial_balance = 100000.0
-        self._equity = EquityData(
-            equity=0.0,
-            balance=100000.0,
-            unrealizedPL=0.0,
-            realizedPL=0.0,
-        )
+        # Execution simulator configuration
+        self._execution_delay = execution_delay
 
     # ================================ GETTERS =================================#
 
@@ -426,6 +418,7 @@ class BrokerService(WsRouteService):
         )
 
     # ================================ SETTERS =================================#
+
     async def place_order(self, order: PreOrder) -> PlaceOrderResult:
         """
         Place a new order
@@ -439,6 +432,17 @@ class BrokerService(WsRouteService):
         order_id = f"ORDER-{self._order_counter}"
         self._order_counter += 1
 
+        # Determine limit price: use explicit limitPrice, then seenPrice, then current quotes
+        limit_price = order.limitPrice
+        if limit_price is None:
+            limit_price = order.seenPrice
+        if limit_price is None and order.currentQuotes is not None:
+            limit_price = (
+                order.currentQuotes.ask
+                if order.side == Side.BUY
+                else order.currentQuotes.bid
+            )
+
         placed_order = PlacedOrder(
             id=order_id,
             symbol=order.symbol,
@@ -446,7 +450,7 @@ class BrokerService(WsRouteService):
             side=order.side,
             qty=order.qty,
             status=OrderStatus.WORKING,
-            limitPrice=order.limitPrice,
+            limitPrice=limit_price,
             stopPrice=order.stopPrice,
             takeProfit=order.takeProfit,
             stopLoss=order.stopLoss,
@@ -479,8 +483,19 @@ class BrokerService(WsRouteService):
                 f"Cannot modify order {order_id} with status {existing_order.status}"
             )
 
+        # Determine limit price: use explicit limitPrice, then seenPrice, then current quotes
+        limit_price = order.limitPrice
+        if limit_price is None:
+            limit_price = order.seenPrice
+        if limit_price is None and order.currentQuotes is not None:
+            limit_price = (
+                order.currentQuotes.ask
+                if order.side == Side.BUY
+                else order.currentQuotes.bid
+            )
+
         existing_order.qty = order.qty
-        existing_order.limitPrice = order.limitPrice
+        existing_order.limitPrice = limit_price
         existing_order.stopPrice = order.stopPrice
         existing_order.takeProfit = order.takeProfit
         existing_order.stopLoss = order.stopLoss
@@ -554,6 +569,8 @@ class BrokerService(WsRouteService):
             guaranteedStop=None,
             trailingStopPips=None,
             stopType=None,
+            seenPrice=None,
+            currentQuotes=None,
         )
 
         # Place the closing order - execution will be simulated via normal flow
@@ -608,6 +625,8 @@ class BrokerService(WsRouteService):
                 guaranteedStop=None,
                 trailingStopPips=None,
                 stopType=None,
+                seenPrice=None,
+                currentQuotes=None,
             )
             await self.place_order(stop_loss_order)
 
@@ -625,6 +644,8 @@ class BrokerService(WsRouteService):
                 guaranteedStop=None,
                 trailingStopPips=None,
                 stopType=None,
+                seenPrice=None,
+                currentQuotes=None,
             )
             await self.place_order(take_profit_order)
 
@@ -652,7 +673,146 @@ class BrokerService(WsRouteService):
 
         return LeverageSetResult(leverage=params.leverage)
 
-    # ================================ SIMULATION =================================
+    def reset(self) -> None:
+        """Reset the broker service to initial state (for testing)"""
+        # Cancel execution simulator
+        if self._execution_simulator_task:
+            self._execution_simulator_task.cancel()
+            self._execution_simulator_task = None
+
+        # Clear all state
+        self._orders = {}
+        self._positions = {}
+        self._executions = []
+        self._order_counter = 1
+        self._account_id = "DEMO-ACCOUNT"
+        self._account_name = "Demo Trading Account"
+        self._leverage_settings = {}
+        self.unrealizedPL = {}
+        self.initial_balance = 100000.0
+        self.accounting = EquityData(
+            equity=0.0,
+            balance=100000.0,
+            unrealizedPL=0.0,
+            realizedPL=0.0,
+        )
+        self._update_callbacks = {}
+
+    # ========================== WEBSOCKET STREAMING ==========================#
+
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+        """Register callback for topic type and start execution simulator if needed.
+
+        Topic formats:
+            - orders:{"accountId":"DEMO-ACCOUNT"}
+            - positions:{"accountId":"DEMO-ACCOUNT"}
+            - executions:{"accountId":"DEMO-ACCOUNT","symbol":"AAPL"}
+            - equity:{"accountId":"DEMO-ACCOUNT"}
+            - broker-connection:{"accountId":"DEMO-ACCOUNT"}
+
+        Args:
+            topic: Topic string in format "topic_type:{json_params}"
+            topic_update: Callback to broadcast updates
+
+        Raises:
+            ValueError: If topic format is invalid
+        """
+        if ":" not in topic:
+            raise ValueError(f"Invalid topic format: {topic}")
+
+        topic_type, _ = topic.split(":", 1)
+
+        # we are ignoring accountId param for now. Note that if accountId changes on the frontend,
+        # this topic update callback would have no listener due to topic filtering on FastWS side.
+        # Register callback for this topic type (single callback per type for now)
+
+        # anti-pattern: should define topic types more formally
+        if topic_type not in self._update_callbacks:
+            logger.info(f"Registering callback for topic type: {topic_type}")
+            self._update_callbacks[topic_type] = topic_update
+
+            # Send initial connection status if broker-connection topic
+            if topic_type == "broker-connection":
+                status = BrokerConnectionStatus(
+                    status=1,  # 1 = Connected
+                    message="Connected to demo broker",
+                    disconnectType=None,
+                    timestamp=int(time.time() * 1000),
+                )
+                topic_update(status)
+
+        # Start execution simulator if not already running and we have orders topic
+        if self._execution_simulator_task is None and len(self._update_callbacks) > 0:
+            logger.info("Starting execution simulator task")
+            self._execution_simulator_task = asyncio.create_task(
+                self._execution_simulator()
+            )
+
+    def remove_topic(self, topic: str) -> None:
+        """Unregister callback for topic type and stop simulator if no subscribers.
+
+        Args:
+            topic: Topic to remove
+        """
+        if ":" not in topic:
+            return
+
+        topic_type, _ = topic.split(":", 1)
+
+        # Remove callback for this topic type
+        if topic_type in self._update_callbacks:
+            logger.info(f"Removing callback for topic type: {topic_type}")
+            del self._update_callbacks[topic_type]
+
+        # Stop execution simulator if no more subscribers
+        if len(self._update_callbacks) == 0 and self._execution_simulator_task:
+            logger.info("Stopping execution simulator task (no subscribers)")
+            self._execution_simulator_task.cancel()
+            self._execution_simulator_task = None
+
+    # ================================ SIMULATION =============================#
+
+    async def _execution_simulator(self) -> None:
+        """
+        Simulate random order executions with 1-2 second intervals.
+
+        This is the ONLY background task. It triggers the execution cascade:
+            1. Pick random WORKING order
+            2. Call _simulate_execution()
+            3. Execution updates trigger all downstream broadcasts
+        """
+        logger.info("Execution simulator started")
+
+        while True:
+            try:
+                # Random delay between executions
+                delay = self._execution_delay or random.uniform(1, 2)
+                await asyncio.sleep(delay)
+
+                # Find all WORKING orders
+                working_orders = [
+                    order_id
+                    for order_id, order in self._orders.items()
+                    if order.status == OrderStatus.WORKING
+                ]
+
+                if working_orders:
+                    # Pick a random order to execute
+                    order_id = random.choice(working_orders)
+                    logger.info(f"Simulating execution for order: {order_id}")
+
+                    # Trigger execution cascade
+                    await self._simulate_execution(order_id)
+                else:
+                    logger.debug("No working orders to execute")
+
+            except asyncio.CancelledError:
+                logger.info("Execution simulator cancelled")
+                break
+            except Exception as e:
+                logger.error(f"Error in execution simulator: {e}", exc_info=True)
+                # Continue running despite errors
+
     def _get_execution_price(self, order: PlacedOrder) -> float:
         """
         Determine execution price based on order type
@@ -664,7 +824,8 @@ class BrokerService(WsRouteService):
             float: Execution price
         """
         if order.type == OrderType.MARKET:
-            return 100.0
+            # TODO: need to inject datafeed service to get current market price
+            return order.limitPrice if order.limitPrice is not None else 100.0
         elif order.type == OrderType.LIMIT and order.limitPrice is not None:
             return order.limitPrice
         elif order.type == OrderType.STOP and order.stopPrice is not None:
@@ -678,12 +839,18 @@ class BrokerService(WsRouteService):
 
     async def _simulate_execution(self, order_id: str) -> None:
         """
-        Simulate order execution after a small delay
+        Simulate order execution and trigger update cascade.
+
+        Broadcast flow:
+            1. Create execution → broadcast to "executions" subscribers
+            2. Update order status → broadcast to "orders" subscribers
+            3. Update equity → broadcast to "equity" subscribers
+            4. Update position → broadcast to "positions" subscribers
 
         Args:
             order_id: ID of the order to execute
         """
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.2)  # Small delay for realism
 
         order = self._orders.get(order_id)
         if not order or order.status != OrderStatus.WORKING:
@@ -691,7 +858,7 @@ class BrokerService(WsRouteService):
 
         execution_price = self._get_execution_price(order)
 
-        # TODO: simulate partial fills, slippage, etc.
+        # Create execution object
         execution = Execution(
             symbol=order.symbol,
             price=execution_price,
@@ -701,49 +868,77 @@ class BrokerService(WsRouteService):
         )
         self._executions.append(execution)
 
+        # 1. Broadcast execution update
+        if "executions" in self._update_callbacks:
+            logger.info(f"Broadcasting execution: {execution.symbol}")
+            self._update_callbacks["executions"](execution)
+
+        # Update order status
         order.status = OrderStatus.FILLED
         order.filledQty = order.qty
         order.avgPrice = execution_price
         order.updateTime = execution.time
 
+        # 2. Broadcast order update
+        if "orders" in self._update_callbacks:
+            logger.info(f"Broadcasting order update: {order.id}")
+            self._update_callbacks["orders"](order)
+
+        # 3. Trigger equity update (which broadcasts)
         self._update_equity(execution)
 
     def _update_equity(self, execution: Execution) -> None:
         """
-        Update equity after execution
+        Update equity after execution and broadcast changes.
 
         Args:
             execution: Execution that affects equity
         """
-        # Calculate execution value
-        current_price = execution.price
-        current_position = self._positions.get(execution.symbol)
-        if current_position is not None and current_position.qty > 0:
-            self.unrealizedPL[execution.symbol] = (
-                (current_price - current_position.avgPrice)
-                * current_position.qty
-                * current_position.side
+
+        execution_value = execution.side * execution.qty * execution.price
+        new_position_value = execution_value
+        position = self._positions.get(execution.symbol)
+        if position is not None and position.qty != 0:
+            position_value = position.side * position.avgPrice * position.qty
+            new_position_size = abs(position.side * position.qty) + (
+                execution.side * execution.qty
             )
-            self._equity.unrealizedPL = sum(self.unrealizedPL.values())
-            if execution.side != current_position.side:
-                self._equity.realizedPL += (
-                    (current_price - current_position.avgPrice)
-                    * execution.qty
-                    * current_position.side
+            new_position_value += position_value
+            new_position_side = (0 <= new_position_value) and Side.BUY or Side.SELL
+
+            if position.side == execution.side:
+                new_position_avg_price = new_position_value / new_position_size
+                unrealized_pnl = (
+                    (execution.price - new_position_avg_price)
+                    * new_position_side
+                    * new_position_size
+                )
+                self.unrealizedPL[execution.symbol] = unrealized_pnl
+                self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
+                self.accounting.equity = (
+                    self.accounting.balance + self.accounting.unrealizedPL
                 )
 
-        # Update balance (initial balance + realized P/L)
-        self._equity.balance = self.initial_balance + self._equity.realizedPL
+            if position.side != execution.side:
+                pnl = (
+                    (execution.price - position.avgPrice)
+                    * execution.side
+                    * execution.qty
+                )
+                self.accounting.balance += pnl
+                self.accounting.realizedPL += pnl
 
-        # Update equity (balance + unrealized P/L)
-        self._equity.equity = self._equity.balance + self._equity.unrealizedPL
+        # Broadcast equity update
+        if "equity" in self._update_callbacks:
+            logger.info(f"Broadcasting equity update: {self.accounting}")
+            self._update_callbacks["equity"](self.accounting)
 
-        # Update position
+        # Trigger position update (which broadcasts)
         self._update_position(execution)
 
     def _update_position(self, execution: Execution) -> None:
         """
-        Update position from execution
+        Update position from execution and broadcast changes.
 
         Args:
             execution: Execution to update position from
@@ -767,13 +962,31 @@ class BrokerService(WsRouteService):
                 existing.side = total_side
                 existing.qty = total_qty
                 existing.avgPrice = total_cost / total_qty
+
+                # Broadcast position update
+                if "positions" in self._update_callbacks:
+                    logger.info(f"Broadcasting position update: {existing.symbol}")
+                    self._update_callbacks["positions"](existing)
             else:
+                existing.qty = total_qty
+                # Position closed - broadcast before deletion
+                if "positions" in self._update_callbacks:
+                    logger.info(f"Broadcasting position closure: {existing.symbol}")
+                    self._update_callbacks["positions"](existing)
+
                 del self._positions[execution.symbol]
         else:
-            existing = self._positions[execution.symbol] = Position(
+            # New position created
+            new_position = Position(
                 id=execution.symbol,
                 symbol=execution.symbol,
                 qty=execution.qty,
                 side=execution.side,
                 avgPrice=execution.price,
             )
+            self._positions[execution.symbol] = new_position
+
+            # Broadcast new position
+            if "positions" in self._update_callbacks:
+                logger.info(f"Broadcasting new position: {new_position.symbol}")
+                self._update_callbacks["positions"](new_position)
