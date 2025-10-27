@@ -53,12 +53,12 @@ class QuoteDataSubscriptionRequest(BaseModel):
     """
 
     symbols: List[str] = Field(
-        default_factory=list,
+        ...,
         description="Symbols requiring slow updates (once per minute) - "
         "e.g., watchlist items not currently visible",
     )
     fast_symbols: List[str] = Field(
-        default_factory=list,
+        ...,
         description="Symbols requiring fast updates (at least every 10 seconds) - "
         "e.g., currently visible or active symbols",
     )

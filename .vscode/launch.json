@@ -1,0 +1,46 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Debug Current Vitest Test File",
+            "program": "${workspaceFolder}/frontend/node_modules/.bin/vitest",
+            "args": [
+                "run",
+                "--pool=threads",
+                "--poolOptions.threads.singleThread",
+                "--no-isolate",
+                "--no-coverage",
+                "${file}"
+            ],
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen",
+            "cwd": "${workspaceFolder}/frontend",
+            "env": {
+                "VITE_USE_MOCK_BROKER": "false",
+                "NODE_ENV": "test"
+            },
+            "skipFiles": [
+                "<node_internals>/**",
+                "**/node_modules/**"
+            ]
+        },
+        {
+            "name": "Backend: Attach to Remote Debugpy (Port 5678)",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}/backend/",
+                    "remoteRoot": "."
+                }
+            ],
+            "justMyCode": true
+        },
+    ]
+}

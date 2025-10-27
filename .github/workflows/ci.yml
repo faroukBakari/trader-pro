@@ -141,7 +141,7 @@ jobs:
 
     - name: Run frontend tests
       working-directory: frontend
-      run: make test-run
+      run: make test
       env:
         CI: true
 

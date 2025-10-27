@@ -14,6 +14,7 @@ FastAPI backend that powers the Trading Pro platform. It exposes a RESTful API f
 ## Documentation
 
 - `ARCHITECTURE.md` – end-to-end system architecture
+  - **Backend Models Architecture** section – topic-based organization principles for Pydantic models
 - `docs/versioning.md` – API versioning strategy and lifecycle
 - `docs/websockets.md` – WebSocket real-time data streaming guide
 - `backend/README.md` (this file) – backend setup and reference
@@ -119,47 +120,65 @@ The backend publishes OpenAPI and AsyncAPI documentation at startup. After runni
 | `bars.unsubscribe` | SEND    | Unsubscribe from bar updates                    |
 | `bars.update`      | RECEIVE | Real-time OHLC bar data broadcast               |
 
-See `docs/websockets.md` for detailed WebSocket documentation.
+⚠️ **IMPORTANT**: When implementing WebSocket features, always use the router code generation mechanism. See `src/trading_api/ws/WS-ROUTER-GENERATION.md` for the complete guide on creating type-safe WebSocket routers.
 
-## Bar Broadcasting (Real-Time Mocked Data)
+See `docs/websockets.md` for detailed WebSocket documentation including the WsRouteService Protocol architecture.
 
-The API includes an optional background service that broadcasts mocked bar data to WebSocket clients:
+## Architecture Overview
 
-### Quick Start
+### Protocol-Based WebSocket Architecture
 
-```bash
-# Default: Enabled, 2s interval, AAPL/GOOGL/MSFT, 1-min resolution
-make dev
+The backend uses a **Protocol-based service architecture** for WebSocket real-time updates:
 
-# Custom configuration
-export BAR_BROADCASTER_INTERVAL=1.0
-export BAR_BROADCASTER_SYMBOLS=AAPL,TSLA,BTC
-export BAR_BROADCASTER_RESOLUTIONS=1,5,D
-make dev
+1. **WsRouteService Protocol** - Simple two-method contract for topic lifecycle
 
-# Disable broadcaster
-export BAR_BROADCASTER_ENABLED=false
-make dev
+   - `BrokerService` - Implements protocol for broker operations
+   - `DatafeedService` - Implements protocol for market data
+
+2. **Reference Counting** - Simple dict-based subscription tracking
+
+   - `topic_trackers: dict[str, int]` in routers
+   - First subscriber triggers `service.create_topic()`
+   - Last unsubscribe triggers `service.remove_topic()`
+
+3. **Router Factories** - Inject services into WebSocket routers
+   - `BrokerWsRouters(broker_service)` - Creates broker WS routers
+   - `DatafeedWsRouters(datafeed_service)` - Creates datafeed WS routers
+
+### BrokerService Execution Simulation
+
+The `BrokerService` implements a **realistic order execution simulator** with automatic lifecycle management:
+
+**Features:**
+
+- **Single Execution Loop**: Background task that randomly executes WORKING orders
+- **Configurable Delay**: 1-2 second intervals (customizable for testing)
+- **Automatic Lifecycle**: Starts when first subscription is created, stops when last subscription is removed
+- **Price Determination**: Uses `limitPrice`, `seenPrice`, or `currentQuotes` (in order of preference)
+- **Execution Cascade**: execution → order → equity → position updates
+
+**Testing with Custom Delays:**
+
+```python
+# Fast execution for testing
+service = BrokerService(execution_delay=0.1)  # 100ms
+
+# Disable automatic execution (manual trigger only)
+service = BrokerService(execution_delay=None)
+
+# Custom interval
+service = BrokerService(execution_delay=5.0)  # 5 seconds
 ```
 
-### Environment Variables
+See `docs/BROKER-ARCHITECTURE.md` for detailed architecture documentation.
 
-| Variable                      | Default           | Description                   |
-| ----------------------------- | ----------------- | ----------------------------- |
-| `BAR_BROADCASTER_ENABLED`     | `true`            | Enable/disable broadcaster    |
-| `BAR_BROADCASTER_INTERVAL`    | `2.0`             | Broadcast interval in seconds |
-| `BAR_BROADCASTER_SYMBOLS`     | `AAPL,GOOGL,MSFT` | Comma-separated symbols       |
-| `BAR_BROADCASTER_RESOLUTIONS` | `1`               | Comma-separated resolutions   |
+**Data Flow**:
 
-### Features
+```
+Service Generators → FastWSAdapter Queues → WsRouter → FastWS → Clients
+```
 
-- ✅ **Automatic**: Starts with the application
-- ✅ **Efficient**: Only broadcasts to topics with subscribers
-- ✅ **Metrics**: Track broadcasts_sent, broadcasts_skipped, errors
-- ✅ **Realistic Data**: Uses `DatafeedService.mock_last_bar()` for variations
-- ✅ **Configurable**: Full control via environment variables
-
-See `docs/websockets.md` (Bar Broadcasting Service section) for details.
+See `docs/WEBSOCKETS.md` and `ARCHITECTURE.md` for detailed documentation.
 
 ## API Versioning
 
@@ -191,23 +210,35 @@ backend/
 │   ├── __init__.py
 │   ├── main.py                # FastAPI + FastWS application factory
 │   ├── api/
-│   │   ├── datafeed.py        # TradingView-compatible REST endpoints
-│   │   ├── health.py          # Service heartbeat
-│   │   └── versions.py        # API version catalogue
+│   │   ├── broker.py          # BrokerApi class (REST endpoints)
+│   │   ├── datafeed.py        # DatafeedApi class (TradingView-compatible REST)
+│   │   ├── health.py          # HealthApi class (service heartbeat)
+│   │   └── versions.py        # VersionApi class (API version catalogue)
 │   ├── ws/
 │   │   ├── __init__.py        # WebSocket module exports
-│   │   └── datafeed.py        # Real-time bar operations
+│   │   ├── router_interface.py # WsRouterInterface, WsRouteService Protocol
+│   │   ├── generic_route.py   # Generic WsRouter implementation
+│   │   ├── broker.py          # BrokerWsRouters factory
+│   │   ├── datafeed.py        # DatafeedWsRouters factory
+│   │   └── generated/         # Auto-generated concrete router classes
 │   ├── plugins/
 │   │   └── fastws_adapter.py  # FastWS integration adapter
 │   ├── core/
-│   │   ├── bar_broadcaster.py     # Background bar broadcasting service
-│   │   ├── config.py              # Application configuration
-│   │   ├── datafeed_service.py    # In-memory market data provider
-│   │   ├── response_validation.py # FastAPI response model guardrails
-│   │   └── versioning.py          # Version metadata and helpers
+│   │   ├── broker_service.py      # BrokerService (implements WsRouteService Protocol)
+│   │   └── datafeed_service.py    # DatafeedService (implements WsRouteService Protocol)
 │   └── models/
 │       ├── __init__.py
-│       ├── common.py          # BaseApiResponse, SubscriptionResponse
+│       ├── common.py          # BaseApiResponse, SubscriptionResponse, SubscriptionUpdate
+│       ├── health.py          # HealthResponse
+│       ├── versioning.py      # API version models
+│       ├── broker/
+│       │   ├── common.py      # SuccessResponse
+│       │   ├── orders.py      # Order models (REST + WebSocket)
+│       │   ├── positions.py   # Position models (REST + WebSocket)
+│       │   ├── executions.py  # Execution models (REST + WebSocket)
+│       │   ├── account.py     # Account/equity models (REST + WebSocket)
+│       │   ├── connection.py  # Connection status models (WebSocket)
+│       │   └── leverage.py    # Leverage models (REST)
 │       └── market/
 │           ├── bars.py        # Bar, BarsSubscriptionRequest
 │           ├── configuration.py
@@ -217,12 +248,14 @@ backend/
 ├── external_packages/
 │   └── fastws/                # FastWS framework (vendored)
 ├── tests/
+│   ├── test_api_broker.py
 │   ├── test_api_health.py
 │   ├── test_api_versioning.py
+│   ├── test_ws_broker.py
 │   └── test_ws_datafeed.py    # WebSocket integration tests
 ├── docs/
-│   ├── versioning.md
-│   └── websockets.md          # WebSocket streaming guide
+│   ├── VERSIONING.md
+│   └── WEBSOCKETS.md          # WebSocket streaming guide + WsRouteService docs
 └── README.md
 ```
 

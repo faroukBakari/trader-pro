@@ -134,7 +134,7 @@ echo "🧹 Cleaning generated clients..."
 rm -rf src/clients/trader-client-generated src/clients/ws-generated src/clients/ws-types-generated
 
 echo "🧪 Running frontend tests (with mocks)..."
-if make test-run > /dev/null 2>&1; then
+if make test > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Frontend tests passed (using mocks)${NC}"
 else
     echo -e "${RED}❌ Frontend tests failed${NC}"

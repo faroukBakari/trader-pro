@@ -77,7 +77,7 @@ class BarsWebSocketFallbackClient implements BarsWebSocketInterface {
 
   constructor() {
     // Mock data updates every second
-    this.intervalId = window.setInterval(() => {
+    this.intervalId = setInterval(() => {
       this.subscriptions.forEach(({ onUpdate }) => {
         onUpdate(this.mockLastBar())
       })

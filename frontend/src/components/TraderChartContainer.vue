@@ -11,13 +11,13 @@
 // other charting library sources : https://github.com/search?q=charting_library%2Fbundles%2Ffloating-toolbars.&type=code
 import { onMounted, ref, onUnmounted } from 'vue'
 import { DatafeedService } from '@/services/datafeedService'
-import { brokerTerminalService } from '@/services/brokerTerminalService'
+import { BrokerTerminalService } from '@/services/brokerTerminalService'
 import { widget } from '@public/trading_terminal'
 import type {
   IChartingLibraryWidget,
   ResolutionString,
   LanguageCode,
-  ChartingLibraryWidgetOptions,
+  TradingTerminalWidgetOptions,
   IBrokerConnectionAdapterHost,
 } from '@public/trading_terminal'
 
@@ -97,7 +97,7 @@ onMounted(() => {
 
   try {
     const datafeed = new DatafeedService()
-    const widgetOptions: ChartingLibraryWidgetOptions = {
+    const widgetOptions: TradingTerminalWidgetOptions = {
       symbol: props.symbol,
       datafeed,
       interval: props.interval as ResolutionString,
@@ -131,10 +131,14 @@ onMounted(() => {
       autosize: props.autosize,
       studies_overrides: props.studiesOverrides,
 
+      debug: false,
+      // debug_broker: 'all', // BrokerDebugMode.All,
+
       // Trading functionality
       ...(props.enableTrading && {
         broker_factory: (host: IBrokerConnectionAdapterHost) => {
-          return new brokerTerminalService(host, datafeed)
+          const brokerService = new BrokerTerminalService(host, datafeed)
+          return brokerService
         },
         broker_config: {
           configFlags: {
@@ -145,9 +149,22 @@ onMounted(() => {
             supportPositions: true,
             showQuantityInsteadOfAmount: false,
             supportLevel2Data: false,
-            supportDOM: false,
             supportOrdersHistory: false,
-            supportEquity: true,
+            supportModifyOrderPreview: true,
+            supportMargin: true,
+            supportPositionBrackets: true,
+            supportOrderBrackets: true,
+            supportModifyOrderPrice: true,
+            supportModifyBrackets: true,
+            supportLimitOrders: true,
+            supportStopOrders: true,
+            supportStopLimitOrders: true,
+            supportMarketBrackets: true,
+            supportModifyDuration: true,
+            supportModifyTrailingStop: true,
+            supportPlaceOrderPreview: true,
+            supportLeverage: true,
+            supportLeverageButton: true,
           },
         },
       }),
@@ -161,6 +178,7 @@ onMounted(() => {
     if (chartWidget) {
       chartWidget.onChartReady(() => {
         if (chartWidget) {
+          chartWidget.setDebugMode(widgetOptions.debug || false)
           chartWidget.headerReady().then(() => {
             if (chartWidget) {
               const button = chartWidget.createButton()

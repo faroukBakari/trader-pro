@@ -101,32 +101,11 @@ fi
 echo ""
 
 # Step 9: Verify imports work
-echo -e "${BLUE}🧪 Step 9: Verifying imports...${NC}"
-VERIFY_SCRIPT=$(cat <<'EOF'
-import sys
-try:
-    from trading_api.ws.generated import BarWsRouter
-    print("✓ BarWsRouter imported successfully")
-    
-    # Verify class is callable
-    router = BarWsRouter(route="test", tags=["test"])
-    print("✓ BarWsRouter instantiation works")
-    
-    # Verify topic_builder exists
-    assert hasattr(router, 'topic_builder'), "topic_builder method missing"
-    print("✓ topic_builder method exists")
-    
-    sys.exit(0)
-except Exception as e:
-    print(f"✗ Import verification failed: {e}")
-    sys.exit(1)
-EOF
-)
-
-if echo "$VERIFY_SCRIPT" | poetry run python -c "$(cat)"; then
-    echo -e "${GREEN}✅ Import verification passed${NC}"
+echo -e "${BLUE}🧪 Step 9: Verifying all routers...${NC}"
+if poetry run python scripts/verify_ws_routers.py; then
+    echo -e "${GREEN}✅ All routers verified successfully${NC}"
 else
-    echo -e "${RED}❌ Import verification failed${NC}"
+    echo -e "${RED}❌ Router verification failed${NC}"
     exit 1
 fi
 echo ""
@@ -142,6 +121,45 @@ find "$GENERATED_DIR" -type f -name "*.py" | while read -r file; do
 done
 echo ""
 echo -e "${BLUE}Usage example:${NC}"
-echo "  from trading_api.ws.generated import BarWsRouter"
-echo "  router = BarWsRouter(route='bars', tags=['datafeed'])"
+echo ""
+
+# Get all generated router classes from __init__.py
+GENERATED_INIT="$GENERATED_DIR/__init__.py"
+if [[ -f "$GENERATED_INIT" ]]; then
+    # Extract all router class names from __all__ list
+    ALL_ROUTERS=($(grep -oP '"\K[^"]+(?=")' "$GENERATED_INIT"))
+    
+    # Pick a random router
+    RANDOM_ROUTER=${ALL_ROUTERS[$RANDOM % ${#ALL_ROUTERS[@]}]}
+    
+    # Determine service type by checking which file defined the TypeAlias
+    DATAFEED_FILE="$BACKEND_DIR/src/trading_api/ws/datafeed.py"
+    BROKER_FILE="$BACKEND_DIR/src/trading_api/ws/broker.py"
+    
+    if grep -q "$RANDOM_ROUTER" "$DATAFEED_FILE" 2>/dev/null; then
+        SERVICE_TYPE="datafeed"
+        SERVICE_CLASS="DatafeedService"
+        SERVICE_IMPORT="trading_api.core.datafeed_service"
+    elif grep -q "$RANDOM_ROUTER" "$BROKER_FILE" 2>/dev/null; then
+        SERVICE_TYPE="broker"
+        SERVICE_CLASS="BrokerService"
+        SERVICE_IMPORT="trading_api.core.broker_service"
+    else
+        SERVICE_TYPE="unknown"
+        SERVICE_CLASS="UnknownService"
+        SERVICE_IMPORT="trading_api.core.unknown_service"
+    fi
+    
+    # Generate route name
+    ROUTER_FILE=$(echo "$RANDOM_ROUTER" | sed 's/WsRouter//')
+    ROUTE_NAME=$(echo "$ROUTER_FILE" | sed 's/\([A-Z]\)/_\L\1/g' | sed 's/^_//' | tr '_' '-')
+    
+    echo "  # ${SERVICE_TYPE^} router (${RANDOM_ROUTER}):"
+    echo "  from trading_api.ws.generated import ${RANDOM_ROUTER}"
+    echo "  from ${SERVICE_IMPORT} import ${SERVICE_CLASS}"
+    echo "  service = ${SERVICE_CLASS}()"
+    echo "  router = ${RANDOM_ROUTER}(route='${ROUTE_NAME}', tags=['${SERVICE_TYPE}'], service=service)"
+else
+    echo "  # No routers generated"
+fi
 echo ""

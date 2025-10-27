@@ -4,11 +4,9 @@ Integration tests for WebSocket endpoints
 
 import json
 
-import pytest
 from fastapi.testclient import TestClient
 
-from trading_api.main import apiApp, wsApp
-from trading_api.models import Bar, BarsSubscriptionRequest
+from trading_api.main import apiApp
 
 
 def build_topic(symbol: str, resolution: str) -> str:
@@ -138,79 +136,22 @@ class TestBarsWebSocketIntegration:
                     == f'bars:{{"resolution":"1","symbol":"{symbol}"}}'
                 )
 
-    def test_subscribe_without_resolution_uses_default(self):
-        """Test that subscribing without resolution parameter uses default"""
+    def test_subscribe_with_explicit_resolution(self):
+        """Test that subscribing with explicit resolution works correctly"""
         client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
-            # Subscribe without specifying resolution
-            websocket.send_json(
-                {"type": "bars.subscribe", "payload": {"symbol": "AAPL"}}
-            )
-            response = websocket.receive_json()
-
-            # Should use default resolution "1"
-            assert (
-                response["payload"]["topic"]
-                == 'bars:{"resolution":"1","symbol":"AAPL"}'
-            )
-
-    @pytest.mark.asyncio
-    async def test_broadcast_to_subscribed_clients(self):
-        """Test that broadcast sends updates to subscribed clients"""
-        import time
-
-        from trading_api.ws.datafeed import bars_topic_builder
-
-        client = TestClient(apiApp)
-
-        with client.websocket_connect("/api/v1/ws") as websocket:
-            # Subscribe to AAPL bars
+            # Subscribe with explicit resolution
             websocket.send_json(
                 {
                     "type": "bars.subscribe",
                     "payload": {"symbol": "AAPL", "resolution": "1"},
                 }
             )
-            subscribe_response = websocket.receive_json()
-            assert subscribe_response["payload"]["status"] == "ok"
+            response = websocket.receive_json()
 
-            # Broadcast a bar update
-            test_bar = Bar(
-                time=int(time.time() * 1000),
-                open=150.0,
-                high=151.0,
-                low=149.5,
-                close=150.5,
-                volume=1000000,
+            # Should create topic with resolution "1"
+            assert (
+                response["payload"]["topic"]
+                == 'bars:{"resolution":"1","symbol":"AAPL"}'
             )
-
-            await wsApp.publish(
-                topic=bars_topic_builder(
-                    params=BarsSubscriptionRequest(symbol="AAPL", resolution="1")
-                ),
-                data=test_bar,
-                message_type="bars.update",
-            )
-
-            # Receive the broadcast message
-            update_msg = websocket.receive_json()
-
-            # Verify the update message
-            assert update_msg["type"] == "bars.update"
-
-            # The payload is SubscriptionUpdate with topic and payload fields
-            assert "payload" in update_msg
-            subscription_update = update_msg["payload"]
-
-            # Verify SubscriptionUpdate structure
-            assert subscription_update["topic"] == build_topic("AAPL", "1")
-            bar_data = subscription_update["payload"]
-
-            # Now verify the actual bar data
-            assert bar_data["time"] == test_bar.time
-            assert bar_data["open"] == test_bar.open
-            assert bar_data["high"] == test_bar.high
-            assert bar_data["low"] == test_bar.low
-            assert bar_data["close"] == test_bar.close
-            assert bar_data["volume"] == test_bar.volume

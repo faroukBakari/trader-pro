@@ -166,6 +166,71 @@ function generateTypes(specPath, outputDir) {
 
 `
 
+    // First, generate enum types
+    log('blue', '🔧 Generating TypeScript enums...')
+    let enumCount = 0
+
+    for (const [name, schema] of Object.entries(schemas)) {
+      // Check if this is an enum (has enum property but not properties)
+      if (schema.enum && !schema.properties) {
+        const enumName = sanitizeName(name)
+        if (!enumName) continue
+
+        const description = schema.description
+        if (description) {
+          output += `/**\n * ${description}\n */\n`
+        }
+
+        output += `export enum ${enumName} {\n`
+
+        // For integer enums, generate based on the enum values
+        if (schema.type === 'integer' || schema.type === 'number') {
+          // Create enum member names from the description or use VALUE_<n> pattern
+          schema.enum.forEach((value) => {
+            // Try to infer name from common patterns
+            let memberName = `VALUE_${value}`.replace('-', 'NEG_')
+
+            // Special handling for common broker enums
+            if (enumName === 'Side') {
+              memberName = value === 1 ? 'BUY' : 'SELL'
+            } else if (enumName === 'OrderStatus') {
+              const statusNames = [
+                'CANCELED',
+                'FILLED',
+                'INACTIVE',
+                'PLACING',
+                'REJECTED',
+                'WORKING',
+              ]
+              memberName = statusNames[value - 1] || `STATUS_${value}`
+            } else if (enumName === 'OrderType') {
+              const typeNames = ['LIMIT', 'MARKET', 'STOP', 'STOP_LIMIT']
+              memberName = typeNames[value - 1] || `TYPE_${value}`
+            } else if (enumName === 'StopType') {
+              const stopNames = ['STOP_LOSS', 'TRAILING_STOP', 'GUARANTEED_STOP']
+              memberName = stopNames[value] || `STOP_${value}`
+            }
+
+            output += `  ${memberName} = ${value},\n`
+          })
+        } else {
+          // For string enums
+          schema.enum.forEach((value) => {
+            const memberName = value
+              .toString()
+              .toUpperCase()
+              .replace(/[^A-Z0-9]/g, '_')
+            output += `  ${memberName} = '${value}',\n`
+          })
+        }
+
+        output += '}\n\n'
+        enumCount++
+      }
+    }
+
+    log('green', `✅ Generated ${enumCount} enums`)
+
     // Generate interfaces from schemas
     log('blue', '🔧 Generating TypeScript interfaces...')
     let interfaceCount = 0
