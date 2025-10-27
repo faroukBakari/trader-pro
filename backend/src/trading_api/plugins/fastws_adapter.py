@@ -49,11 +49,13 @@ class FastWSAdapter(FastWS):
 
                     if not topics:
                         logger.info("No topic subscriptions found, continuing")
+                        await asyncio.sleep(1)
                         continue
 
                     # Skip broadcast if no clients are subscribed
                     if update.topic not in topics:
                         logger.info(f"No clients subscribed to topic: {update.topic}")
+                        await asyncio.sleep(1)
                         continue
 
                     try:
