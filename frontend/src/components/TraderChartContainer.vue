@@ -110,6 +110,7 @@ onMounted(() => {
       disabled_features: ['study_templates', 'adaptive_logo'], // , 'use_localstorage_for_settings'
 
       // System color scheme overrides
+      // need to clear site data on the browser to see the effect after changing these values
       overrides: {
         'paneProperties.backgroundGradientStartColor': '#131722',
         'paneProperties.backgroundGradientEndColor': '#131722',
@@ -245,7 +246,7 @@ onUnmounted(() => {
 
 .TVChartContainer {
   width: 100%;
-  height: 800px;
+  height: 850px;
 }
 
 @media (max-width: 768px) {
