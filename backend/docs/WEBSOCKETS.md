@@ -1,7 +1,7 @@
 # WebSocket Real-Time Data Streaming
 
 **Version**: 1.0.0
-**Last Updated**: October 12, 2025
+**Last Updated**: October 27, 2025
 **Status**: ✅ Production Ready
 
 > ⚠️ **CRITICAL**: When implementing new WebSocket features or routers, you **MUST** follow the router code generation mechanism documented in [`backend/src/trading_api/ws/WS-ROUTER-GENERATION.md`](../src/trading_api/ws/WS-ROUTER-GENERATION.md). This ensures type safety, eliminates generic overhead, and maintains consistency across all WebSocket operations. **Never create WebSocket routers manually**.
@@ -168,6 +168,36 @@ function buildTopicParams(obj: unknown): string {
 3. Backend returns topic in `subscribe.response`
 4. Frontend must use **exact same topic** to receive updates
 5. Backend broadcasts updates to subscribers of that exact topic string
+
+### ⚠️ Subscription Model Validation (CRITICAL)
+
+**RULE:** Subscription request models MUST NOT have optional parameters.
+
+**Why:** Optional parameters cause topic mismatch between frontend and backend:
+- Backend may include default values in response topic string
+- Frontend doesn't include optional params in request
+- Topics don't match → updates not received
+
+**Validation:** AsyncAPI export validates this automatically (see `scripts/export_asyncapi_spec.py`)
+
+**Example - WRONG:**
+```python
+class QuoteDataSubscriptionRequest(BaseModel):
+    symbols: List[str] = Field(default_factory=list)  # ❌ Optional with default
+    fast_symbols: List[str] = Field(default_factory=list)  # ❌ Optional with default
+```
+
+**Example - CORRECT:**
+```python
+class QuoteDataSubscriptionRequest(BaseModel):
+    symbols: List[str] = Field(..., description="Symbols for slow updates")  # ✅ Required
+    fast_symbols: List[str] = Field(..., description="Symbols for fast updates")  # ✅ Required
+```
+
+**Validation Enforcement:**
+- `make export-asyncapi-spec` fails if optional parameters found
+- Error message lists problematic models and parameters
+- Fix by making parameters required or removing them entirely
 
 **Failure Scenario**:
 

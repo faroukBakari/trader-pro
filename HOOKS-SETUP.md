@@ -20,24 +20,28 @@ chmod +x .githooks/*
 ## What Gets Checked
 
 **Important**: The pre-commit hook automatically stashes any unstaged changes before running checks and **always** restores them afterward, regardless of whether the checks pass or fail. This ensures that:
+
 - Only staged changes are checked
 - Your working directory changes are preserved
 - Failed checks don't lose your work
 
 ### Backend (Python files)
+
 - ✅ Black formatting
-- ✅ isort import sorting  
+- ✅ isort import sorting
 - ✅ Flake8 linting
 - ✅ MyPy type checking
 - ✅ Pytest tests (local only)
 
 ### Frontend (TypeScript/Vue files)
+
 - ✅ ESLint linting & auto-fixing
 - ✅ Prettier formatting
 - ✅ TypeScript type checking
 - ✅ Vitest unit tests (local only)
 
 ### All Files
+
 - ✅ Trailing whitespace
 - ✅ Merge conflict markers
 - ✅ JSON/YAML validation
@@ -54,6 +58,7 @@ chmod +x .githooks/*
 ## Usage
 
 ### Skip Hooks Temporarily
+
 ```bash
 # Skip once
 git commit --no-verify
@@ -63,11 +68,13 @@ SKIP_HOOKS=true git commit
 ```
 
 ### Run Checks Manually
+
 ```bash
 make lint && make format && make test
 ```
 
 ### Remove Hooks
+
 ```bash
 make -f project.mk uninstall-hooks
 ```

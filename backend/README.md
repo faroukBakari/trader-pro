@@ -134,7 +134,6 @@ The backend uses a **Protocol-based service architecture** for WebSocket real-ti
 
    - `BrokerService` - Implements protocol for broker operations
    - `DatafeedService` - Implements protocol for market data
-   - Services manage their own `_topic_generators: dict[str, asyncio.Task]`
 
 2. **Reference Counting** - Simple dict-based subscription tracking
 
@@ -145,6 +144,31 @@ The backend uses a **Protocol-based service architecture** for WebSocket real-ti
 3. **Router Factories** - Inject services into WebSocket routers
    - `BrokerWsRouters(broker_service)` - Creates broker WS routers
    - `DatafeedWsRouters(datafeed_service)` - Creates datafeed WS routers
+
+### BrokerService Execution Simulation
+
+The `BrokerService` implements a **realistic order execution simulator** with automatic lifecycle management:
+
+**Features:**
+- **Single Execution Loop**: Background task that randomly executes WORKING orders
+- **Configurable Delay**: 1-2 second intervals (customizable for testing)
+- **Automatic Lifecycle**: Starts when first subscription is created, stops when last subscription is removed
+- **Price Determination**: Uses `limitPrice`, `seenPrice`, or `currentQuotes` (in order of preference)
+- **Execution Cascade**: execution → order → equity → position updates
+
+**Testing with Custom Delays:**
+```python
+# Fast execution for testing
+service = BrokerService(execution_delay=0.1)  # 100ms
+
+# Disable automatic execution (manual trigger only)
+service = BrokerService(execution_delay=None)
+
+# Custom interval
+service = BrokerService(execution_delay=5.0)  # 5 seconds
+```
+
+See `docs/BROKER-ARCHITECTURE.md` for detailed architecture documentation.
 
 **Data Flow**:
 

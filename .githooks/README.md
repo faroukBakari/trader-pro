@@ -28,11 +28,13 @@ git config --get core.hooksPath
 ## What the Hooks Do
 
 ### Pre-commit Hook
+
 Automatically runs when you commit code. It will:
 
 **Important**: The hook automatically stashes any unstaged changes before running checks and **always** restores them afterward (even if checks fail), ensuring your work is never lost.
 
 #### For Backend (Python) Files:
+
 - **Black**: Code formatting
 - **isort**: Import sorting
 - **Flake8**: Code linting
@@ -40,12 +42,14 @@ Automatically runs when you commit code. It will:
 - **Tests**: Run pytest (local only, skipped in CI)
 
 #### For Frontend (TypeScript/Vue) Files:
+
 - **ESLint**: Code linting and fixing
 - **Prettier**: Code formatting
 - **TypeScript**: Type checking
 - **Tests**: Run unit tests (local only, skipped in CI)
 
 #### For All Files:
+
 - Check for trailing whitespace
 - Check for merge conflict markers
 - Validate JSON/YAML syntax
@@ -68,21 +72,25 @@ NO_VERIFY=true git commit
 ## Troubleshooting
 
 ### Missing Dependencies
+
 If you get errors about missing tools:
 
 **Backend issues:**
+
 ```bash
 cd backend
 poetry install  # Install Python dependencies
 ```
 
 **Frontend issues:**
+
 ```bash
 cd frontend
 npm install  # Install Node.js dependencies
 ```
 
 ### Hooks Not Running
+
 ```bash
 # Check if hooks are installed
 git config --get core.hooksPath
@@ -96,7 +104,9 @@ ls -la .githooks/
 ```
 
 ### Slow Pre-commit Checks
+
 Tests are skipped in CI environments. For local development:
+
 - Use `git commit --no-verify` for quick commits during development
 - Run `make test` separately to run full test suites
 - The hooks focus on fast formatting and linting checks
@@ -130,6 +140,7 @@ npm run test:unit run
 ## CI Integration
 
 The hooks work seamlessly with CI:
+
 - Set `git config core.hooksPath .githooks` in CI setup
 - Tests and slower checks can be run separately in CI
 - Use `SKIP_HOOKS=true` or `--no-verify` for automated commits

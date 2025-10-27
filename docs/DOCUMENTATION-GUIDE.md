@@ -8,6 +8,7 @@ Complete index of all project documentation with descriptions and reading paths.
 | ---------------------------------- | ---------------------------------------------------------- |
 | **README.md**                      | Project overview, quick start, and basic setup             |
 | **ARCHITECTURE.md**                | System architecture, technology stack, design patterns     |
+| **AUTH_IMPLEMENTATION.md**         | Authentication system architecture and implementation plan |
 | **API-METHODOLOGY.md**             | Generic TDD methodology for backend service implementation |
 | **WEBSOCKET-METHODOLOGY.md**       | Generic 6-phase TDD methodology for WebSocket features     |
 | **WORKSPACE-SETUP.md**             | VS Code multi-root workspace configuration guide           |
@@ -24,6 +25,7 @@ Complete index of all project documentation with descriptions and reading paths.
 | ------------------------------- | ----------------------------------------- |
 | **docs/README.md**              | Documentation index and navigation guide  |
 | **docs/DOCUMENTATION-GUIDE.md** | This file - complete documentation index  |
+| **docs/BROKER-ARCHITECTURE.md** | Broker service execution simulator architecture |
 | **docs/CLIENT-GENERATION.md**   | REST and WebSocket client auto-generation |
 | **docs/WEBSOCKET-CLIENTS.md**   | WebSocket implementation overview         |
 | **docs/DEVELOPMENT.md**         | Development workflows and setup           |
@@ -181,6 +183,8 @@ Complete index of all project documentation with descriptions and reading paths.
 - **ARCHITECTURE.md** - System architecture
   - Component architecture with detailed backend/frontend structure
   - **Backend Models Architecture** - Topic-based organization principles (business concepts over technical layers)
+- **docs/BROKER-ARCHITECTURE.md** - Broker service execution simulator architecture
+- **AUTH_IMPLEMENTATION.md** - Authentication system design and planning
 - **API-METHODOLOGY.md** - TDD methodology
 - **frontend/WEBSOCKET-ARCHITECTURE-DIAGRAMS.md** - WebSocket diagrams
 
@@ -238,8 +242,8 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### Categories Summary
 
-- **Root Documentation**: 9 essential project-wide guides
-- **docs/ Folder**: 6 core cross-cutting documentation files
+- **Root Documentation**: 10 essential project-wide guides
+- **docs/ Folder**: 7 core cross-cutting documentation files
 - **Backend Documentation**: 7 backend-specific guides + 1 third-party doc
 - **Frontend Documentation**: 15 frontend-specific guides + 2 third-party docs
 - **Auto-Generated Docs**: 40+ API model references
@@ -248,7 +252,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### Total Documentation Files
 
-- **User-Maintained**: ~42 actively maintained documentation files
+- **User-Maintained**: ~44 actively maintained documentation files
 - **Auto-Generated**: 40+ API model documentation files
 - **Third-Party**: 3 external package documentation files
 
@@ -262,5 +266,5 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ---
 
-**Last Updated**: October 26, 2025
+**Last Updated**: October 27, 2025
 **Maintained by**: Development Team
