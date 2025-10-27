@@ -19,6 +19,11 @@ chmod +x .githooks/*
 
 ## What Gets Checked
 
+**Important**: The pre-commit hook automatically stashes any unstaged changes before running checks and **always** restores them afterward, regardless of whether the checks pass or fail. This ensures that:
+- Only staged changes are checked
+- Your working directory changes are preserved
+- Failed checks don't lose your work
+
 ### Backend (Python files)
 - ✅ Black formatting
 - ✅ isort import sorting  

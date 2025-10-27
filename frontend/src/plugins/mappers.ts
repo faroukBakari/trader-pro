@@ -88,8 +88,14 @@ export function mapQuoteData(quote: QuoteData_Api_Backend | QuoteData_Ws_Backend
 /**
  * Maps frontend PreOrder to backend PreOrder_Api_Backend
  * Handles enum type conversions for type, side, and stopType
+ *
+ * Note: seenPrice is sent by TradingView but not in official type definitions,
+ * so we use type assertion to access it
  */
 export function mapPreOrder(order: PreOrder): PreOrder_Api_Backend {
+  // TradingView sends seenPrice but it's not in the official type definitions
+  const orderWithSeenPrice = order as PreOrder & { seenPrice?: number | null }
+
   return {
     symbol: order.symbol,
     type: order.type as unknown as PreOrder_Api_Backend['type'],
@@ -102,10 +108,15 @@ export function mapPreOrder(order: PreOrder): PreOrder_Api_Backend {
     guaranteedStop: order.guaranteedStop ?? null,
     trailingStopPips: order.trailingStopPips ?? null,
     stopType: order.stopType ? (order.stopType as unknown as PreOrder_Api_Backend['stopType']) : null,
+    seenPrice: orderWithSeenPrice.seenPrice ?? null,
+    currentQuotes: order.currentQuotes
+      ? {
+        ask: order.currentQuotes.ask,
+        bid: order.currentQuotes.bid,
+      }
+      : null,
   }
-}
-
-/**
+}/**
  * Maps backend PlacedOrder_Ws_Backend to TradingView PlacedOrder
  * Converts null values to undefined and handles enum types
  */

@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 FRONTEND_PORT ?= 5173
 
-.PHONY: help setup install install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration generate-ws-routers generate-openapi-client generate-asyncapi-types
+.PHONY: help setup install install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack kill-dev test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration generate-ws-routers generate-openapi-client generate-asyncapi-types
 
 # Default target
 help:
@@ -16,6 +16,7 @@ help:
 	@echo "  dev-backend       Start backend development server"
 	@echo "  dev-frontend      Start frontend development server"
 	@echo "  dev-fullstack     Start backend, generate client, then start frontend"
+	@echo "  kill-dev          Stop all running development servers (frontend then backend)"
 	@echo "  test-all          Run all tests (auto-generates clients for frontend)"
 	@echo "  test-smoke        Run smoke tests with Playwright"
 	@echo "  test-integration  Run full integration test suite"
@@ -101,6 +102,20 @@ dev-frontend:
 dev-fullstack:
 	@echo "Starting full-stack development environment..."
 	./scripts/dev-fullstack.sh
+
+# Kill all development servers
+kill-dev:
+	@echo "Stopping all development servers..."
+	@echo ""
+	@echo "[1/2] Stopping frontend..."
+	@echo "=========================================="
+	@make -C frontend kill-dev || true
+	@echo ""
+	@echo "[2/2] Stopping backend..."
+	@echo "=========================================="
+	@make -C backend kill-dev || true
+	@echo ""
+	@echo "✅ All development servers stopped"
 
 # Testing
 test-all:

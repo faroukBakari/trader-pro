@@ -5,6 +5,7 @@ from typing import Any, Callable, Protocol
 from pydantic import BaseModel
 
 from external_packages.fastws import FastWS, OperationRouter
+from trading_api.models.common import SubscriptionUpdate
 
 
 def buildTopicParams(obj: Any) -> str:
@@ -35,11 +36,12 @@ class WsRouteService(Protocol):
         ...
 
 
+# TODO: add clear subscriptions method to use on FastWSAdapter when client disconnects
 class WsRouterInterface(OperationRouter):
     def __init__(self, route: str, *args: Any, **kwargs: Any):
         super().__init__(prefix=f"{route}.", *args, **kwargs)
         self.route: str = route
-        self.updates_queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=1000)
+        self.updates_queue = asyncio.Queue[SubscriptionUpdate[BaseModel]](maxsize=1000)
 
     def topic_builder(self, params: BaseModel) -> str:
         return f"{self.route}:{buildTopicParams(params.model_dump())}"

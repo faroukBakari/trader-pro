@@ -18,6 +18,33 @@ if should_skip_hooks; then
     exit 0
 fi
 
+# Stash unstaged changes before running checks
+STASH_NAME="pre-commit-$(date +%s)"
+STASHED=0
+
+log_info "Stashing unstaged changes..."
+if git diff --quiet; then
+    log_info "No unstaged changes to stash"
+else
+    git stash push -k -u -m "$STASH_NAME" >/dev/null 2>&1 || true
+    STASHED=1
+    log_success "Unstaged changes stashed"
+fi
+
+# Setup trap to ALWAYS restore stashed changes
+trap 'restore_stash' EXIT
+
+restore_stash() {
+    if [[ $STASHED -eq 1 ]]; then
+        log_info "Restoring stashed changes..."
+        if git stash pop >/dev/null 2>&1; then
+            log_success "Stashed changes restored"
+        else
+            log_warning "Failed to restore stashed changes automatically. Run 'git stash pop' manually."
+        fi
+    fi
+}
+
 log_info "Running pre-commit checks for trading-api..."
 
 # Detect what files are staged

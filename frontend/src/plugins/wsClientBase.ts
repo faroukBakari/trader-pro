@@ -137,7 +137,7 @@ export class WebSocketBase {
         await this.__socketConnect()
       } catch (error) {
         this.logger.log('Connection error:', error)
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        await new Promise(resolve => setTimeout(resolve, 200))
       }
     }
   }
@@ -185,6 +185,9 @@ export class WebSocketBase {
   }
 
   private routeUpdateMessage(data: DataFeed): void {
+    if (!(data.topic.startsWith('quotes:') || data.topic.startsWith('bars:'))) {
+      console.log(`${data.topic} message received:`, data)
+    }
     for (const subscription of Array.from(this.subscriptions.values())) {
       if (subscription.confirmed && subscription.topic === data.topic) {
         try {
@@ -234,7 +237,7 @@ export class WebSocketBase {
           const timeout = setTimeout(() => {
             this.pendingRequests.delete(requestId)
             reject(new Error(`Request timeout: ${requestId}`))
-          }, 15000)
+          }, 3000)
 
           // Register response handler
           this.pendingRequests.set(requestId, {
@@ -267,14 +270,14 @@ export class WebSocketBase {
         return subscription
       } catch (error) {
         this.logger.error('Subscription error:', error)
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        await new Promise(resolve => setTimeout(resolve, 200))
       }
   }
 
   private async resubscribeAll(): Promise<void> {
     this.logger.log('Resubscribing to all active subscriptions...')
 
-    await new Promise(resolve => setTimeout(resolve, 2000))
+    await new Promise(resolve => setTimeout(resolve, 200))
 
     this.pendingRequests.forEach((pending) => {
       clearTimeout(pending.timeout)
@@ -291,7 +294,7 @@ export class WebSocketBase {
         const timeout = setTimeout(() => {
           this.pendingRequests.delete(requestId)
           reject(new Error(`Request timeout: ${requestId}`))
-        }, 15000)
+        }, 3000)
 
         this.pendingRequests.set(requestId, {
           resolve: (response: SubscriptionResponse) => {
@@ -379,7 +382,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     }
 
 
-    await this.ws.subscribe(
+    await WebSocketBase.getInstance().subscribe(
       topic,
       this.wsRoute + '.subscribe',
       subscriptionParams,
@@ -397,7 +400,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
       return
     }
     this.listeners.delete(listenerId)
-    await this.ws.unsubscribe(listenerId, topic)
+    await WebSocketBase.getInstance().unsubscribe(listenerId, topic)
 
   }
 }

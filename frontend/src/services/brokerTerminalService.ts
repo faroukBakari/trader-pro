@@ -607,7 +607,8 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private equity: IWatchedValue<number>
   private readonly startingBalance = 100000
 
-  private readonly listenerId: string
+  private readonly accountId: string
+  private brokerConnectionStatus: ConnectionStatusType = ConnectionStatus.Disconnected
 
   constructor(
     host: IBrokerConnectionAdapterHost,
@@ -630,8 +631,24 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
     // KNOWN ISSUE: listenerId must match currentAccount() return value
     // See BROKER-TERMINAL-SERVICE.md "Known Issues" section
-    this.listenerId = `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
+    this.accountId = "ACCOUNT-01" // `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
+
     this.setupWebSocketHandlers()
+      .then(() => {
+        this.brokerConnectionStatus = ConnectionStatus.Connected
+        console.log('[BrokerTerminalService] WebSocket subscriptions ready')
+        this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
+          message: 'Broker data subscriptions established'
+        })
+      })
+      .catch((error) => {
+        this.brokerConnectionStatus = ConnectionStatus.Error
+        console.error('[BrokerTerminalService] WebSocket setup failed:', error)
+        this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
+          message: 'Failed to establish broker data subscriptions'
+        })
+      })
+
   }
 
   private _getApiAdapter(): ApiInterface {
@@ -646,86 +663,113 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
    * Setup WebSocket subscription handlers for broker events
    * Subscribes to orders, positions, executions, equity, and broker connection status
    */
-  private setupWebSocketHandlers(): void {
+  private async setupWebSocketHandlers(): Promise<(void | undefined)[]> {
     // Order updates
-    this._getWsAdapter().orders?.subscribe(
-      'broker-orders',
-      { accountId: this.listenerId },
-      (order: Order) => {
-        this._hostAdapter.orderUpdate(order)
+    return Promise.all([
+      this._getWsAdapter().orders?.subscribe(
+        'orders',
+        { accountId: this.accountId },
+        (order: Order) => {
+          console.log('Received order update via WebSocket:', order)
+          this._hostAdapter.orderUpdate(order)
 
-        // Show notification on fill
-        if (order.status === OrderStatus.Filled) {
-          this._hostAdapter.showNotification(
-            'Order Filled',
-            `${order.symbol} ${order.side === 1 ? 'Buy' : 'Sell'} ${order.qty} @ ${order.avgPrice ?? 'market'}`,
-            NotificationType.Success
-          )
+          // Show notification on fill
+          if (order.status === OrderStatus.Filled) {
+            this._hostAdapter.showNotification(
+              'Order Filled',
+              `${order.symbol} ${order.side === 1 ? 'Buy' : 'Sell'} ${order.qty} @ ${order.avgPrice ?? 'market'}`,
+              NotificationType.Success
+            )
+          }
         }
-      }
-    )
+      ).then((response) => {
+        console.log('Subscribed to WebSocket order updates:', response)
+      }).catch((error) => {
+        console.error('Failed to subscribe to WebSocket order updates:', error)
+      }),
 
-    // Position updates
-    this._getWsAdapter().positions?.subscribe(
-      'broker-positions',
-      { accountId: this.listenerId },
-      (position: Position) => {
-        this._hostAdapter.positionUpdate(position)
-      }
-    )
-
-    // Execution updates
-    this._getWsAdapter().executions?.subscribe(
-      'broker-executions',
-      { accountId: this.listenerId },
-      (execution: Execution) => {
-        this._hostAdapter.executionUpdate(execution)
-      }
-    )
-
-    // Equity updates
-    this._getWsAdapter().equity?.subscribe(
-      'broker-equity',
-      { accountId: this.listenerId },
-      (data: EquityData) => {
-        this._hostAdapter.equityUpdate(data.equity)
-
-        // Update reactive balance/equity values
-        if (data.balance !== undefined && data.balance !== null) {
-          this.balance.setValue(data.balance)
+      // Position updates
+      this._getWsAdapter().positions?.subscribe(
+        'positions',
+        { accountId: this.accountId },
+        (position: Position) => {
+          console.log('Received position update via WebSocket:', position)
+          this._hostAdapter.positionUpdate(position)
         }
-        if (data.equity !== undefined && data.equity !== null) {
-          this.equity.setValue(data.equity)
-        }
-      }
-    )
+      ).then((response) => {
+        console.log('Subscribed to WebSocket position updates:', response)
+      }).catch((error) => {
+        console.error('Failed to subscribe to WebSocket position updates:', error)
+      }),
 
-    // Broker connection status (backend ↔ real broker)
-    this._getWsAdapter().brokerConnection?.subscribe(
-      'broker-connection-status',
-      { accountId: this.listenerId },
-      (data: BrokerConnectionStatus) => {
-        this._hostAdapter.connectionStatusUpdate(data.status, {
-          message: data.message ?? undefined,
-          disconnectType: data.disconnectType ?? undefined,
-        })
-
-        // Notify user on connection changes
-        if (data.status === ConnectionStatus.Disconnected) {
-          this._hostAdapter.showNotification(
-            'Broker Disconnected',
-            data.message ?? 'Connection to broker lost',
-            NotificationType.Error
-          )
-        } else if (data.status === ConnectionStatus.Connected) {
-          this._hostAdapter.showNotification(
-            'Broker Connected',
-            data.message ?? 'Successfully connected to broker',
-            NotificationType.Success
-          )
+      // Execution updates
+      this._getWsAdapter().executions?.subscribe(
+        'executions',
+        { accountId: this.accountId },
+        (execution: Execution) => {
+          console.log('Received execution update via WebSocket:', execution)
+          this._hostAdapter.executionUpdate(execution)
         }
-      }
-    )
+      ).then((response) => {
+        console.log('Subscribed to WebSocket execution updates:', response)
+      }).catch((error) => {
+        console.error('Failed to subscribe to WebSocket execution updates:', error)
+      }),
+      // Equity updates
+      this._getWsAdapter().equity?.subscribe(
+        'equity',
+        { accountId: this.accountId },
+        (data: EquityData) => {
+          this._hostAdapter.equityUpdate(data.equity)
+
+          // Update reactive balance/equity values
+          if (data.balance !== undefined && data.balance !== null) {
+            console.log('Updating balance to:', data.balance)
+            this.balance.setValue(data.balance)
+          }
+          if (data.equity !== undefined && data.equity !== null) {
+            console.log('Updating equity to:', data.equity)
+            this.equity.setValue(data.equity)
+          }
+        }
+      ).then((response) => {
+        console.log('Subscribed to WebSocket equity updates:', response)
+      }).catch((error) => {
+        console.error('Failed to subscribe to WebSocket equity updates:', error)
+      }),
+
+      // Broker connection status (backend ↔ real broker)
+      this._getWsAdapter().brokerConnection?.subscribe(
+        'broker-connection',
+        { accountId: this.accountId },
+        (data: BrokerConnectionStatus) => {
+          this.brokerConnectionStatus = data.status
+          this._hostAdapter.connectionStatusUpdate(data.status, {
+            message: data.message ?? undefined,
+            disconnectType: data.disconnectType ?? undefined,
+          })
+
+          // Notify user on connection changes
+          if (data.status === ConnectionStatus.Disconnected) {
+            this._hostAdapter.showNotification(
+              'Broker Disconnected',
+              data.message ?? 'Connection to broker lost',
+              NotificationType.Error
+            )
+          } else if (data.status === ConnectionStatus.Connected) {
+            this._hostAdapter.showNotification(
+              'Broker Connected',
+              data.message ?? 'Successfully connected to broker',
+              NotificationType.Success
+            )
+          }
+        }
+      ).then((response) => {
+        console.log('Subscribed to WebSocket broker-connection updates:', response)
+      }).catch((error) => {
+        console.error('Failed to subscribe to WebSocket broker-connection updates:', error)
+      }),
+    ])
   }
 
   // IBrokerWithoutRealtime interface implementation
@@ -805,21 +849,26 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   async accountsMetainfo(): Promise<AccountMetainfo[]> {
     const response = await this._getApiAdapter().getAccountInfo()
-    return [response.data]
+    const result = [response.data]
+    console.log(`BrokerTerminalService.accountsMetainfo() => `, result)
+    return result
   }
 
   async orders(): Promise<Order[]> {
     const response = await this._getApiAdapter().getOrders()
+    console.log(`BrokerTerminalService.orders() => `, response.data)
     return response.data
   }
 
   async positions(): Promise<Position[]> {
     const response = await this._getApiAdapter().getPositions()
+    console.log(`BrokerTerminalService.positions() => `, response.data)
     return response.data
   }
 
   async executions(symbol: string): Promise<Execution[]> {
     const response = await this._getApiAdapter().getExecutions(symbol)
+    console.log(`BrokerTerminalService.executions[${symbol}] => `, response.data)
     return response.data
   }
 
@@ -829,7 +878,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     const accountCurrencyRate = 1 // Account currency rate
     const pointValue = 1 // USD value of 1 point of price
 
-    return {
+    const result = {
       qty: {
         min: 1,
         max: 1e12,
@@ -840,35 +889,43 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
       minTick: mintick,
       description: '',
     }
+    console.debug(`BrokerTerminalService.symbolInfo[${symbol}] => ${JSON.stringify(result)}`)
+    return result
   }
 
   async previewOrder(order: PreOrder): Promise<OrderPreviewResult> {
     const response = await this._getApiAdapter().previewOrder(order)
+    console.debug(`BrokerTerminalService.previewOrder[${JSON.stringify(order)}] => `, response.data)
     return response.data
   }
 
   async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
     const response = await this._getApiAdapter().placeOrder(order)
+    console.log(`BrokerTerminalService.placeOrder[${JSON.stringify(order)}] => `, response.data)
     return response.data
   }
 
   async modifyOrder(order: Order, confirmId?: string): Promise<void> {
     await this._getApiAdapter().modifyOrder(order, confirmId)
+    console.log(`BrokerTerminalService.modifyOrder[order: ${JSON.stringify(order)}, confirmId: ${confirmId}] => completed`)
   }
 
   async cancelOrder(orderId: string): Promise<void> {
     await this._getApiAdapter().cancelOrder(orderId)
+    console.log(`BrokerTerminalService.cancelOrder[${orderId}] => completed`)
   }
 
   async chartContextMenuActions(
     context: TradeContext,
     options?: DefaultContextMenuActionsParams
   ): Promise<ActionMetaInfo[]> {
-    return this._hostAdapter.defaultContextMenuActions(context, options)
+    const result = this._hostAdapter.defaultContextMenuActions(context, options)
+    console.log(`BrokerTerminalService.chartContextMenuActions[${JSON.stringify(context)}] => `, result)
+    return result
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async isTradable(symbol: string): Promise<boolean | IsTradableResult> {
+    console.log(`BrokerTerminalService.isTradable[${symbol}] => true`)
     return true
   }
 
@@ -889,29 +946,34 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   connectionStatus(): ConnectionStatusType {
-    return ConnectionStatus.Connected
+    return ConnectionStatus.Connected // this.brokerConnectionStatus
   }
 
   async closePosition(positionId: string, amount?: number): Promise<void> {
     await this._getApiAdapter().closePosition(positionId, amount)
+    console.log(`BrokerTerminalService.closePosition[${positionId}, amount: ${amount}] => completed`)
   }
 
   async editPositionBrackets(positionId: string, brackets: Brackets, customFields?: CustomInputFieldsValues): Promise<void> {
     await this._getApiAdapter().editPositionBrackets(positionId, brackets, customFields)
+    console.log(`BrokerTerminalService.editPositionBrackets[${positionId}] => brackets: ${JSON.stringify(brackets)}, customFields: ${JSON.stringify(customFields)} => completed`)
   }
 
   async leverageInfo(leverageInfoParams: LeverageInfoParams): Promise<LeverageInfo> {
     const response = await this._getApiAdapter().leverageInfo(leverageInfoParams)
+    console.log(`BrokerTerminalService.leverageInfo[${JSON.stringify(leverageInfoParams)}] => ${JSON.stringify(response.data)}`)
     return response.data
   }
 
   async setLeverage(leverageSetParams: LeverageSetParams): Promise<LeverageSetResult> {
     const response = await this._getApiAdapter().setLeverage(leverageSetParams)
+    console.log(`BrokerTerminalService.setLeverage[${JSON.stringify(leverageSetParams)}] => ${JSON.stringify(response.data)}`)
     return response.data
   }
 
   async previewLeverage(leverageSetParams: LeverageSetParams): Promise<LeveragePreviewResult> {
     const response = await this._getApiAdapter().previewLeverage(leverageSetParams)
+    console.log(`BrokerTerminalService.previewLeverage[${JSON.stringify(leverageSetParams)}] => ${JSON.stringify(response.data)}`)
     return response.data
   }
 }

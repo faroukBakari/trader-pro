@@ -2,8 +2,6 @@
 Broker execution models matching TradingView broker API types
 """
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 # Import Side from orders module (shared enum)
@@ -31,4 +29,3 @@ class ExecutionSubscriptionRequest(BaseModel):
     """WebSocket subscription request for execution updates"""
 
     accountId: str = Field(..., description="Account ID to subscribe to")
-    symbol: Optional[str] = Field(None, description="Optional symbol filter")

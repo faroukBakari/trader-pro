@@ -30,6 +30,8 @@ git config --get core.hooksPath
 ### Pre-commit Hook
 Automatically runs when you commit code. It will:
 
+**Important**: The hook automatically stashes any unstaged changes before running checks and **always** restores them afterward (even if checks fail), ensuring your work is never lost.
+
 #### For Backend (Python) Files:
 - **Black**: Code formatting
 - **isort**: Import sorting

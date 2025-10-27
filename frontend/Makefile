@@ -218,6 +218,27 @@ dev:
 	@echo "✅ Port 5173 is available"
 	$(call ensure-node-version,npm run dev)
 
+# Kill frontend development server
+kill-dev:
+	@echo "🔍 Checking for running frontend processes..."
+	@PIDS=$$(lsof -ti :5173 2>/dev/null || true); \
+	if [ -n "$$PIDS" ]; then \
+		echo "Found frontend process(es) on port 5173:"; \
+		lsof -Pi :5173 -sTCP:LISTEN 2>/dev/null || true; \
+		echo ""; \
+		echo "Killing process(es)..."; \
+		kill -9 $$PIDS 2>/dev/null || true; \
+		sleep 1; \
+		if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then \
+			echo "❌ Failed to kill some processes. Please check manually."; \
+			exit 1; \
+		else \
+			echo "✅ Frontend development server stopped"; \
+		fi; \
+	else \
+		echo "✅ No frontend process found on port 5173"; \
+	fi
+
 # Cleanup
 clean:
 	@echo "Cleaning frontend build artifacts..."
