@@ -1,7 +1,7 @@
 # Trading Pro - Architecture Documentation
 
 **Version**: 3.0.0
-**Last Updated**: October 26, 2025
+**Last Updated**: October 27, 2025
 **Status**: ✅ Production Ready
 
 ## Overview
@@ -498,43 +498,60 @@ The backend implements a **Protocol-based WebSocket service architecture** where
 
 ```
 BrokerService
-    ├─ _topic_trackers: dict[str, Callable]  # Maps topic → topic_update callback
-    ├─ Business state (_orders, _positions, etc.)
-    ├─ Event queues (for future event-driven architecture)
-    │  ├─ _orders_queue: asyncio.Queue[PlacedOrder]
-    │  ├─ _positions_queue: asyncio.Queue[Position]
-    │  ├─ _executions_queue: asyncio.Queue[Execution]
-    │  └─ _equity_queue: asyncio.Queue[EquityData]
+    ├─ _update_callbacks: dict[str, Callable]  # Maps topic_type → broadcast callback
+    ├─ _execution_simulator_task: Optional[Task]  # Single background execution task
+    ├─ Business state (_orders, _positions, _executions, accounting)
     └─ Methods implementing WsRouteService Protocol
-       ├─ create_topic(topic, topic_update) → Store callback
-       └─ remove_topic(topic) → Remove callback
+       ├─ create_topic(topic, topic_update) → Register callback, start simulator
+       └─ remove_topic(topic) → Unregister callback, stop simulator if last
+```
+
+**Execution Simulator Architecture** (see `docs/BROKER-ARCHITECTURE.md` for details):
+
+- **Single Background Task**: Random execution loop (1-2 second intervals)
+- **Callback-Based Broadcasting**: Direct invocation, no queue overhead
+- **Automatic Lifecycle**: Starts with first subscription, stops with last unsubscription
+- **Execution Cascade**: execution → order → equity → position updates
+
+```
+Execution Simulator → _simulate_execution()
+  ├─→ Create Execution → callback["executions"](execution)
+  ├─→ Update Order Status → callback["orders"](order)
+  ├─→ _update_equity() → callback["equity"](equity)
+  └─→ _update_position() → callback["positions"](position)
 ```
 
 **Current Data Flow**:
 
 1. **create_topic()** called by WsRouter when first subscriber arrives
 
-   - Stores `topic_update` callback in `_topic_trackers[topic]`
+   - Registers `topic_update` callback in `_update_callbacks[topic_type]`
+   - Starts execution simulator if not already running (first subscription)
    - Service ready to broadcast updates for this topic
 
-2. **Business logic methods** (e.g., `placeOrder()`, `modifyPosition()`)
+2. **Execution Simulator Loop** (background task)
 
-   - Update internal state (e.g., `_orders[order_id] = new_order`)
-   - **Currently**: Direct state mutation (no automatic broadcasting)
-   - **Future**: Enqueue to event queues for automatic broadcasting
+   - Picks random WORKING orders at 1-2 second intervals
+   - Calls `_simulate_execution(order_id)` → triggers cascade
+   - Execution cascade invokes callbacks directly (no queues)
 
-3. **remove_topic()** called when last subscriber unsubscribes
-   - Removes callback from `_topic_trackers`
-   - Lightweight cleanup (no task cancellation needed)
+3. **Callback Broadcasting** (immediate, deterministic order)
 
-**Event Queues (Future Enhancement)**:
+   - Execution created → `callback["executions"](execution)`
+   - Order updated → `callback["orders"](order)`
+   - Equity updated → `callback["equity"](equity)`
+   - Position updated → `callback["positions"](position)`
 
-Services include FIFO event queues for event-driven architecture:
+4. **remove_topic()** called when last subscriber unsubscribes
+   - Removes callback from `_update_callbacks`
+   - Stops execution simulator if no more subscribers (automatic cleanup)
 
-- `_orders_queue`, `_positions_queue`, `_executions_queue`, `_equity_queue`
-- Partially integrated (some enqueue operations present)
-- Will enable automatic broadcasting when fully integrated
-- Decouples business logic from WebSocket concerns
+**Design Benefits**:
+
+- ✅ Zero latency: Direct callback invocation (no queue delays)
+- ✅ Deterministic ordering: Cascade always executes in same sequence
+- ✅ Resource efficient: Simulator runs only when clients are subscribed
+- ✅ Simple debugging: Stack trace shows full execution path
 
 **3. `WsRouter` (Generic Implementation with Reference Counting)**
 

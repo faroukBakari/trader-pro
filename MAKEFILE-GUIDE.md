@@ -32,6 +32,7 @@ make -f project.mk install-all       # Install all dependencies
 make -f project.mk dev-fullstack     # Start full stack (recommended)
 make -f project.mk dev-backend       # Backend only
 make -f project.mk dev-frontend      # Frontend only
+make -f project.mk kill-dev          # Kill all dev servers (frontend + backend)
 
 # Code Generation
 make -f project.mk generate-ws-routers        # WebSocket routers
@@ -57,6 +58,7 @@ make ensure-python     # Check Python 3.11+ (offers auto-install)
 make ensure-poetry     # Ensure Poetry installed
 make install           # Install dependencies
 make dev               # Start dev server (checks port)
+make kill-dev          # Kill backend dev server (port 8000)
 
 # Testing
 make test              # Run tests
@@ -88,6 +90,7 @@ cd frontend
 make ensure-node       # Check Node.js 22.20+
 make install           # Install dependencies
 make dev               # Start dev server
+make kill-dev          # Kill frontend dev server (port 5173)
 
 # Testing
 make test              # Tests in watch mode
@@ -135,6 +138,22 @@ make -f project.mk setup  # Installs hooks + all dependencies
 ```bash
 make -f project.mk dev-fullstack  # One command, full stack
 ```
+
+### Stopping Development Servers
+```bash
+# Kill all dev servers (useful for port conflicts or stuck processes)
+make -f project.mk kill-dev      # Kill both frontend and backend
+
+# Kill individual servers
+make -C backend kill-dev         # Kill backend only (port 8000)
+make -C frontend kill-dev        # Kill frontend only (port 5173)
+```
+
+**Use Cases for `kill-dev`:**
+- Port already in use errors (e.g., "Address already in use")
+- Stuck processes after crashes or Ctrl+C
+- Clean restart needed
+- Process not responding to normal termination
 
 ### Before Commit
 ```bash
