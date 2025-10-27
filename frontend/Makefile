@@ -89,15 +89,11 @@ ensure-node:
 		echo "❌ Node.js not found!"; \
 		echo ""; \
 		if command -v nvm >/dev/null 2>&1 || [ "$$(type nvm 2>/dev/null)" ]; then \
-			echo "Would you like to install Node.js $$NODE_TO_INSTALL via nvm? [y/N]"; \
-			read -r REPLY; \
-			if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
-				echo "Installing Node.js $$NODE_TO_INSTALL..."; \
-				nvm install $$NODE_TO_INSTALL && \
-				nvm use $$NODE_TO_INSTALL && \
-				echo "✓ Node.js $$NODE_TO_INSTALL installed and activated!" && \
-				exit 0; \
-			fi; \
+			echo "Installing Node.js $$NODE_TO_INSTALL via nvm..."; \
+			nvm install $$NODE_TO_INSTALL && \
+			nvm use $$NODE_TO_INSTALL && \
+			echo "✓ Node.js $$NODE_TO_INSTALL installed and activated!" && \
+			exit 0; \
 		fi; \
 		echo "Please install Node.js 22.20+:"; \
 		echo "  - Using nvm (recommended): nvm install $$NODE_TO_INSTALL && nvm use $$NODE_TO_INSTALL"; \
@@ -116,27 +112,19 @@ ensure-node:
 		echo "❌ Node.js $$NODE_VERSION detected (requires 22.20+)"; \
 		echo ""; \
 		if command -v nvm >/dev/null 2>&1 || [ "$$(type nvm 2>/dev/null)" ]; then \
-			INSTALLED_VALID=$$(nvm list 2>/dev/null | grep -oE "v(22\\.(2[0-9]|[3-9][0-9])|2[3-9]\\.[0-9]+|[3-9][0-9]\\.[0-9]+)\\.[0-9]+" | head -1 | cut -c2-); \
+			INSTALLED_VALID=$$(nvm list 2>/dev/null | grep -E "^[ \t]*v(22\\.(2[0-9]|[3-9][0-9])|2[3-9]\\.[0-9]+|[3-9][0-9]\\.[0-9]+)\\.[0-9]+" | grep -v "N/A" | head -1 | grep -oE "v[0-9]+\\.[0-9]+\\.[0-9]+" | cut -c2-); \
 			if [ -n "$$INSTALLED_VALID" ]; then \
 				echo "✓ Found existing valid Node.js version: $$INSTALLED_VALID - activating it..."; \
 				nvm use $$INSTALLED_VALID && \
 				echo "✓ Node.js $$INSTALLED_VALID activated!" && \
 				exit 0; \
 			else \
-				echo "Would you like to install Node.js $$NODE_TO_INSTALL via nvm? [y/N]"; \
-				read -r REPLY; \
-				if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
-					echo "Installing Node.js $$NODE_TO_INSTALL..."; \
-					nvm install $$NODE_TO_INSTALL && \
-					nvm use $$NODE_TO_INSTALL && \
-					echo "✓ Node.js $$NODE_TO_INSTALL installed and activated!" && \
-					exit 0; \
-				fi; \
+				echo "Installing Node.js $$NODE_TO_INSTALL via nvm..."; \
+				nvm install $$NODE_TO_INSTALL && \
+				nvm use $$NODE_TO_INSTALL && \
+				echo "✓ Node.js $$NODE_TO_INSTALL installed and activated!" && \
+				exit 0; \
 			fi; \
-			echo ""; \
-			echo "Manual installation:"; \
-			echo "  nvm install $$NODE_TO_INSTALL"; \
-			echo "  nvm use $$NODE_TO_INSTALL"; \
 		else \
 			echo "nvm not found. Install it for automatic Node.js version management:"; \
 			echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash"; \
@@ -154,8 +142,6 @@ ensure-node:
 install: ensure-node
 	@echo "Installing frontend dependencies..."
 	$(call ensure-node-version,npm install)
-	@echo ""
-	@echo "💡 Tip: Install Git hooks with: make -f ../project.mk install-hooks"
 
 install-ci:
 	@echo "Installing frontend dependencies for CI..."
