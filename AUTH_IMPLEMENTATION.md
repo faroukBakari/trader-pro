@@ -1,484 +1,471 @@
-## 🔐 Authentication Implementation - Preparation Summary
+# Authentication & Session Management - SSO Implementation
 
-### Current State Analysis
+**Status**: Ready for Implementation  
+**Last Updated**: October 27, 2025  
+**Approach**: Google SSO + Single Account + Pickle Persistence
 
-**Existing System:**
+## Summary
 
-- ✅ No authentication currently implemented
-- ✅ CORS middleware enabled (allow all origins in dev)
-- ✅ Pydantic validation for all requests
-- ✅ WebSocket infrastructure with `auth_handler` support (FastWS)
-- ✅ Type-safe architecture (Python + TypeScript)
-- ✅ Code generation pipeline (OpenAPI/AsyncAPI → TypeScript clients)
+Google OAuth 2.0-based authentication with lightweight session management:
 
-**Documented Plans (from ARCHITECTURE.md):**
+- **Authentication**: Google SSO (no password management)
+- **Storage**: Pickle files (MVP), migrate to Redis later
+- **Account Model**: Single account per user
+- **Session Delivery**: `X-Session-Id` header (REST), `?sessionId=` param (WebSocket)
 
-- 🎯 JWT authentication planned
-- 🎯 Per-endpoint rate limiting
-- 🎯 Enhanced security measures
-- 🎯 WebSocket authentication via `auth_handler`
+## Design Decisions
 
----
+- **SSO Provider**: Google OAuth 2.0
+- **Session Storage**: Pickle files → Redis (production)
+- **Account Model**: Single account per user (multi-account deferred)
+- **Token Storage**: sessionStorage (cleared on tab close)
+- **No email verification** (Google handles it)
 
-## 🏗️ Proposed Authentication Architecture
+## Architecture
 
-### 1. **Backend Components** (Following Project Patterns)
-
-#### **Models** (`backend/src/trading_api/models/auth/`)
-
-```python
-# Models organized by business domain (following broker/market pattern)
-auth/
-├── __init__.py
-├── common.py        # Shared auth types (TokenType enum, etc.)
-├── user.py          # User models (User, UserProfile, UserCreate)
-├── credentials.py   # Login models (LoginRequest, LoginResponse)
-├── tokens.py        # JWT models (Token, TokenData, RefreshTokenRequest)
-└── session.py       # Session models (Session, SessionInfo)
+```
+Frontend                                Backend
+━━━━━━━                                 ━━━━━━━
+1. Google OAuth → Google ID Token
+2. POST /auth/google {token}        →  Validate with Google API
+3. Store sessionId                  ←  Create session → sessions.pkl
+4. X-Session-Id header (REST)       →  Extract accountId
+5. ?sessionId= param (WebSocket)    →  Validate & store in ws.state
 ```
 
-**Key Models:**
+**Session Structure**:
 
-- `User` - User account (id, email, username, hashed_password, is_active, created_at)
-- `LoginRequest` - Credentials (email/username, password)
-- `LoginResponse` - Auth result (access_token, refresh_token, user_info)
-- `Token` - JWT structure (access_token, token_type, expires_in)
-- `TokenData` - Decoded JWT payload (user_id, email, exp, scopes)
+```python
+{
+  "session_id": "uuid-v4",
+  "user_id": "google-oauth2|123456789",
+  "email": "user@gmail.com",
+  "account_id": "ACC-{hash}",  # Single account
+  "created_at": timestamp,
+  "expires_at": timestamp
+}
+```
 
-#### **Service Layer** (`backend/src/trading_api/core/auth_service.py`)
+**Flow**:
+
+1. User clicks "Sign in with Google" → OAuth flow → ID token
+2. Backend validates token → creates session → returns sessionId
+3. Frontend stores sessionId (sessionStorage)
+4. Auto-inject: REST (`X-Session-Id` header), WebSocket (`?sessionId=` param)
+5. Backend validates session → extracts accountId → processes request
+
+## Implementation
+
+### Backend Structure
+
+```
+backend/src/trading_api/
+├── models/auth/
+│   ├── user.py          # User, UserInfo
+│   ├── google_auth.py   # GoogleTokenRequest, GoogleUserInfo
+│   └── session.py       # Session, SessionInfo, LoginResponse
+├── core/
+│   └── auth_service.py  # AuthService (pickle persistence)
+├── dependencies/
+│   └── auth.py          # get_current_session, get_account_id
+├── api/
+│   └── auth.py          # /auth endpoints
+└── plugins/
+    └── fastws_adapter.py # ws_auth_handler
+```
+
+### Key Models
+
+```python
+# user.py
+class User(BaseModel):
+    id: str                    # "google-oauth2|123456789"
+    email: str
+    name: str
+    picture: str | None = None
+    email_verified: bool
+    created_at: int
+    last_login: int
+
+# session.py
+class Session(BaseModel):
+    session_id: str            # UUID v4
+    user_id: str
+    email: str
+    account_id: str            # Single account: ACC-{hash}
+    created_at: int
+    expires_at: int
+
+class LoginResponse(BaseModel):
+    session: SessionInfo
+    message: str
+```
+
+### AuthService (Simplified)
 
 ```python
 class AuthService:
-    """Authentication and authorization service following project patterns"""
+    """Google SSO + Pickle persistence"""
 
-    # In-memory storage for development (like BrokerService pattern)
-    _users: Dict[str, User]
-    _sessions: Dict[str, Session]
-    _refresh_tokens: Dict[str, str]  # token → user_id
+    def __init__(self):
+        self._users: Dict[str, User] = {}
+        self._sessions: Dict[str, Session] = {}
+        self._load_from_disk()
 
-    async def register_user(request: UserCreate) -> User
-    async def login(credentials: LoginRequest) -> LoginResponse
-    async def logout(user_id: str) -> None
-    async def refresh_token(refresh_token: str) -> Token
-    async def verify_token(token: str) -> TokenData
-    async def get_current_user(token: str) -> User
+    def _load_from_disk(self):
+        """Load from data/sessions.pkl and data/users.pkl"""
+
+    def _save_to_disk(self):
+        """Save to pickle files"""
+
+    async def verify_google_token(self, token: str) -> GoogleUserInfo:
+        """Verify with google.oauth2.id_token.verify_oauth2_token"""
+
+    async def login_with_google(self, token_request: GoogleTokenRequest) -> LoginResponse:
+        """Validate token → create/update user → create session"""
+
+    async def validate_session(self, session_id: str) -> Session:
+        """Validate session exists and not expired"""
+
+    def _generate_account_id(self, user_id: str) -> str:
+        """ACC-{sha256(user_id)[:8]}"""
 ```
 
-#### **REST API** (`backend/src/trading_api/api/auth.py`)
+### Dependencies & Endpoints
 
 ```python
-class AuthApi(APIRouter):
-    """Auth endpoints following BrokerApi pattern"""
+# dependencies/auth.py
+async def get_current_session(
+    x_session_id: Annotated[str, Header(alias="X-Session-Id")]
+) -> Session:
+    return await auth_service.validate_session(x_session_id)
 
-    POST   /auth/register      # User registration
-    POST   /auth/login         # Login with credentials
-    POST   /auth/logout        # Logout and invalidate tokens
-    POST   /auth/refresh       # Refresh access token
-    GET    /auth/me            # Get current user profile
-    PUT    /auth/me            # Update user profile
-    POST   /auth/change-password
+async def get_account_id(session: Session = Depends(get_current_session)) -> str:
+    return session.account_id
+
+# api/auth.py
+@router.post("/auth/google", response_model=LoginResponse)
+async def login_with_google(token_request: GoogleTokenRequest):
+    return await auth_service.login_with_google(token_request)
+
+@router.post("/auth/logout")
+async def logout(session: Session = Depends(get_current_session)):
+    await auth_service.logout(session.session_id)
+
+@router.get("/auth/me", response_model=UserInfo)
+async def get_current_user_profile(session: Session = Depends(get_current_session)):
+    return await auth_service.get_session_info(session.session_id).user
 ```
 
-#### **Dependencies** (`backend/src/trading_api/dependencies/auth.py`)
+### WebSocket Authentication
 
 ```python
-# FastAPI dependency injection for protected routes
-async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)]
-) -> User:
-    """Verify JWT and return current user"""
-
-async def get_current_active_user(
-    current_user: Annotated[User, Depends(get_current_user)]
-) -> User:
-    """Ensure user is active"""
-
-# Optional scopes for role-based access
-async def require_scope(required_scope: str):
-    """Check user has required permission scope"""
-```
-
-#### **WebSocket Authentication** (fastws_adapter.py)
-
-```python
-# Update FastWSAdapter to include auth_handler
+# plugins/fastws_adapter.py
 async def ws_auth_handler(ws: WebSocket) -> bool:
-    """
-    WebSocket authentication via JWT token
-
-    Protocol:
-    1. Client connects
-    2. Server accepts connection
-    3. Client sends: {"type": "auth", "token": "<jwt>"}
-    4. Server validates token and returns success/failure
-    5. Connection established or closed
-    """
+    """Validate ?sessionId= query param"""
     await ws.accept()
-    try:
-        auth_msg = await asyncio.wait_for(
-            ws.receive_json(),
-            timeout=5.0
-        )
-        if auth_msg.get("type") != "auth":
-            return False
 
-        token = auth_msg.get("token")
-        user = await auth_service.verify_token(token)
-
-        # Store user context in connection
-        ws.state.user = user
-        return True
-
-    except (asyncio.TimeoutError, ValueError):
+    session_id = ws.query_params.get("sessionId")
+    if not session_id:
+        await ws.close(code=1008, reason="sessionId required")
         return False
+
+    session = await auth_service.get_session(session_id)
+    if not session:
+        await ws.close(code=1008, reason="Invalid or expired session")
+        return False
+
+    # Store in WebSocket state
+    ws.state.session = session
+    ws.state.account_id = session.account_id
+    return True
+
+# Configure in main.py
+wsApp = FastWSAdapter(auth_handler=ws_auth_handler, auto_ws_accept=False)
 ```
 
----
-
-### 2. **Frontend Components**
-
-#### **Generated Types** (Auto-generated from OpenAPI)
+### Frontend Implementation
 
 ```typescript
-// frontend/src/clients/trader-client-generated/models/
-interface User {
-  id: string;
-  email: string;
-  username: string;
-  isActive: boolean;
-  createdAt: number;
-}
-
-interface LoginRequest {
-  email: string;
-  password: string;
-}
-
-interface LoginResponse {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: string;
-  expiresIn: number;
-  user: User;
-}
-```
-
-#### **Auth Store** (Pinia - State Management)
-
-```typescript
-// frontend/src/stores/authStore.ts
-export const useAuthStore = defineStore('auth', {
+// stores/authStore.ts
+export const useAuthStore = defineStore("auth", {
   state: () => ({
-    user: null as User | null,
-    accessToken: null as string | null,
-    refreshToken: null as string | null,
+    session: null as SessionInfo | null,
     isAuthenticated: false,
-    isLoading: false,
   }),
 
   actions: {
-    async login(credentials: LoginRequest): Promise<void>
-    async logout(): Promise<void>
-    async refreshToken(): Promise<void>
-    async fetchCurrentUser(): Promise<void>
+    async loginWithGoogle() {
+      // Load Google Identity Services
+      await this.loadGoogleIdentityServices();
 
-    // Automatic token refresh before expiry
-    setupTokenRefresh(): void
+      // Init Google OAuth client
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+        scope: "openid email profile",
+        callback: async (response) => {
+          const loginResponse = await apiAdapter.loginWithGoogle({
+            token: response.access_token,
+          });
+          this.session = loginResponse.session;
+          this.isAuthenticated = true;
+          apiAdapter.setSessionId(this.sessionId!);
+        },
+      });
+
+      client.requestAccessToken();
+    },
+
+    async logout() {
+      await apiAdapter.logout();
+      this.session = null;
+      this.isAuthenticated = false;
+      apiAdapter.setSessionId(null);
+    },
   },
 
   persist: {
-    storage: localStorage,
-    paths: ['accessToken', 'refreshToken'], // Don't persist user data
-  }
-})
-```
+    storage: sessionStorage,
+    paths: ["session"],
+  },
+});
 
-#### **API Adapter Updates** (apiAdapter.ts)
+// services/apiAdapter.ts
+class ApiAdapter {
+  private sessionId: string | null;
 
-```typescript
-export class ApiAdapter {
-  private rawApi: V1Api;
-  private authStore = useAuthStore();
-
-  constructor() {
-    const apiConfig = new Configuration({
-      basePath: import.meta.env.VITE_API_URL || "",
-      accessToken: () => this.authStore.accessToken || "", // Auto-inject token
+  setSessionId(sessionId: string | null) {
+    this.sessionId = sessionId;
+    // Recreate config with X-Session-Id header
+    this.apiConfig = new Configuration({
+      headers: sessionId ? { "X-Session-Id": sessionId } : {},
     });
-    this.rawApi = new V1Api(apiConfig);
   }
-
-  // Auth methods
-  async login(credentials: LoginRequest): ApiPromise<LoginResponse>;
-  async logout(): ApiPromise<void>;
-  async refreshToken(token: string): ApiPromise<Token>;
-  async getCurrentUser(): ApiPromise<User>;
 }
-```
 
-#### **WebSocket Authentication** (wsClientBase.ts)
-
-```typescript
-// Update WebSocketBase to send auth token on connection
+// clients/wsClientBase.ts
 class WebSocketBase {
-  private async __socketConnect(): Promise<void> {
-    this.ws = new WebSocket(this.url);
-
-    this.ws.onopen = async () => {
-      // Send authentication message
-      const authStore = useAuthStore();
-      if (authStore.accessToken) {
-        this.ws.send(
-          JSON.stringify({
-            type: "auth",
-            token: authStore.accessToken,
-          })
-        );
-      }
-
-      // Wait for auth confirmation before proceeding
-      await this.waitForAuthConfirmation();
-      this.resolveConnection();
-    };
-  }
-
-  private async waitForAuthConfirmation(): Promise<void> {
-    // Listen for auth response message
-    // Reject connection if auth fails
+  private getWebSocketUrl(): string {
+    const sessionId = useAuthStore().sessionId;
+    if (!sessionId) throw new Error("No active session");
+    return `${baseUrl}/ws?sessionId=${encodeURIComponent(sessionId)}`;
   }
 }
 ```
 
-#### **Router Guards** (index.ts)
+## Implementation Plan
+
+**Timeline: 6-8 days**
+
+### Phase 1: Backend Setup (1 day)
+
+- Install `google-auth`, `google-auth-oauthlib`
+- Create auth models (user.py, session.py, google_auth.py)
+- Setup data directory, add `data/*.pkl` to .gitignore
+- Add `GOOGLE_CLIENT_ID` to `.env`
+
+### Phase 2: AuthService (1-2 days)
+
+- Implement AuthService with pickle persistence
+- Create dependencies (get_current_session, get_account_id)
+- Create /auth endpoints (POST /google, POST /logout, GET /me)
+- Generate OpenAPI spec
+- Write tests (test_auth_service.py, test_api_auth.py)
+
+### Phase 3: WebSocket Auth (1 day)
+
+- Implement ws_auth_handler (validate sessionId param)
+- Update main.py with auth_handler
+- Write WebSocket auth tests
+
+### Phase 4: Frontend (1-2 days)
+
+- Generate TypeScript client
+- Create/update authStore (Google OAuth integration)
+- Update ApiAdapter (X-Session-Id header injection)
+- Update WebSocketBase (?sessionId= param)
+- Add router guards
+- Create login UI with "Sign in with Google"
+- Add `VITE_GOOGLE_CLIENT_ID` to .env
+
+### Phase 5: Broker Auth (1 day, optional)
+
+- Add get_account_id dependency to broker endpoints
+- E2E testing: login → place order → logout
+
+### Phase 6: Integration & Docs (1 day)
+
+- Manual testing
+- Update ARCHITECTURE.md, ENVIRONMENT-CONFIG.md
+- Smoke tests
+
+## Security
+
+### Google SSO
+
+- Validate tokens server-side with `google.oauth2.id_token.verify_oauth2_token`
+- Never trust client-side validation
+- Verify issuer, audience, expiration
+
+### Session Management
+
+- Secure tokens: `secrets.token_urlsafe(32)`
+- Session expiration: 7 days (configurable)
+- Invalidate on logout
+
+### Pickle Files
+
+- Restrict permissions: `chmod 600 data/*.pkl`
+- Add to `.gitignore`
+- **Warning**: Pickle can execute arbitrary code if tampered - trusted env only
+- Production: Migrate to Redis/PostgreSQL
+
+### CORS
+
+```python
+CORS_ORIGINS=http://localhost:5173,https://accounts.google.com
+```
+
+### Environment Variables
+
+```bash
+# backend/.env
+GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
+SESSION_EXPIRE_DAYS=7
+
+# frontend/.env
+VITE_GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
+```
+
+### Production Considerations
+
+1. **Replace Pickle**: Use Redis (sessions) + PostgreSQL (users)
+2. **HTTPS Only**: `secure=True` on cookies, HSTS headers
+3. **Rate Limiting**: Protect `/auth/google` endpoint
+4. **Token Refresh**: Implement Google refresh token flow
+
+## Testing
+
+### Backend Tests
+
+```python
+# test_auth_service.py
+- test_verify_google_token_valid/invalid
+- test_create_session
+- test_validate_session (valid/expired/invalid)
+- test_logout_invalidates_session
+- test_pickle_persistence/loading
+
+# test_api_auth.py
+- test_google_auth_endpoint (valid/invalid token)
+- test_get_user_info (with/without session)
+- test_logout_endpoint
+
+# test_ws_auth.py
+- test_websocket_requires_session
+- test_websocket_with_valid/invalid_session
+- test_websocket_session_in_state
+```
+
+### Frontend Tests
 
 ```typescript
-router.beforeEach(async (to, from, next) => {
-  const authStore = useAuthStore();
+// authStore.spec.ts
+- Google OAuth initialization
+- Login flow and session storage
+- Logout and session cleanup
+- Session persistence/restoration
 
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    // Redirect to login
-    next({ name: "login", query: { redirect: to.fullPath } });
-  } else {
-    next();
-  }
-});
+// apiAdapter.spec.ts
+- X-Session-Id header injection
+- Session updates
+
+// wsClientBase.spec.ts
+- sessionId query param
+- Reconnection on session change
 ```
 
----
-
-### 3. **Implementation Plan Following API-METHODOLOGY.md**
-
-#### **Phase 1: Backend Models + API Stubs** (1-2 days)
-
-- ✅ Create auth models in `models/auth/`
-- ✅ Create `AuthApi` with empty stubs (NotImplementedError)
-- ✅ Register auth router in main.py
-- ✅ Generate OpenAPI spec
-- ✅ Frontend: Generate TypeScript client
-- ✅ Verification: Backend starts, specs exported, no type errors
-
-#### **Phase 2: Backend Service Implementation** (2-3 days)
-
-- ✅ Implement `AuthService` (in-memory storage initially)
-- ✅ JWT creation/validation utilities
-- ✅ Password hashing (bcrypt/passlib)
-- ✅ Wire service to API endpoints
-- ✅ Write backend unit tests
-- ✅ Verification: Backend tests pass
-
-#### **Phase 3: FastAPI Dependencies** (1 day)
-
-- ✅ Create `get_current_user` dependency
-- ✅ Create `get_current_active_user` dependency
-- ✅ Optional: Role/scope-based dependencies
-- ✅ Apply dependencies to protected routes
-- ✅ Test dependency injection
-- ✅ Verification: Protected routes require authentication
-
-#### **Phase 4: WebSocket Authentication** (1-2 days)
-
-- ✅ Implement `ws_auth_handler` in `FastWSAdapter`
-- ✅ Update WebSocket connection to require auth
-- ✅ Store user context in connection state
-- ✅ Update subscription handlers to use user context
-- ✅ Write WebSocket auth tests
-- ✅ Verification: WebSocket requires auth token
-
-#### **Phase 5: Frontend Implementation** (2-3 days)
-
-- ✅ Create auth store (Pinia)
-- ✅ Update `ApiAdapter` to inject tokens
-- ✅ Implement login/logout/refresh flows
-- ✅ Update `WebSocketBase` to authenticate
-- ✅ Add router guards
-- ✅ Create login/register UI components
-- ✅ Write frontend tests
-- ✅ Verification: Full auth flow works end-to-end
-
-#### **Phase 6: Integration & Documentation** (1 day)
-
-- ✅ End-to-end testing (login → trade → logout)
-- ✅ WebSocket reconnection with auth
-- ✅ Token refresh automation
-- ✅ Update ARCHITECTURE.md
-- ✅ Create AUTH-IMPLEMENTATION.md
-- ✅ Update ENVIRONMENT-CONFIG.md (JWT_SECRET, etc.)
-- ✅ Smoke tests with authentication
-
----
-
-### 4. **Security Considerations**
-
-**JWT Configuration:**
-
-```python
-# Environment variables (ENVIRONMENT-CONFIG.md)
-JWT_SECRET_KEY=<random-secret>       # For signing tokens
-JWT_ALGORITHM=HS256                  # HMAC SHA-256
-ACCESS_TOKEN_EXPIRE_MINUTES=15       # Short-lived access tokens
-REFRESH_TOKEN_EXPIRE_DAYS=7          # Long-lived refresh tokens
-```
-
-**Password Security:**
-
-```python
-# Use bcrypt or passlib for hashing
-from passlib.context import CryptContext
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-```
-
-**CORS Updates (Production):**
-
-```python
-# Restrict CORS in production
-CORS_ORIGINS = ["https://traderpro.com"]  # From env variable
-```
-
-**Rate Limiting (Future):**
-
-```python
-# Add to auth endpoints
-@router.post("/auth/login")
-@limiter.limit("5/minute")  # Prevent brute force
-async def login(...)
-```
-
----
-
-### 5. **Testing Strategy**
-
-**Backend Tests:**
-
-```python
-# tests/test_auth_service.py
-async def test_register_user()
-async def test_login_success()
-async def test_login_invalid_credentials()
-async def test_token_refresh()
-async def test_token_expiration()
-
-# tests/test_api_auth.py
-async def test_protected_endpoint_requires_auth()
-async def test_protected_endpoint_with_valid_token()
-async def test_protected_endpoint_with_expired_token()
-
-# tests/test_ws_auth.py
-async def test_websocket_connection_requires_auth()
-async def test_websocket_connection_with_valid_token()
-async def test_websocket_connection_with_invalid_token()
-```
-
-**Frontend Tests:**
+### Integration Tests
 
 ```typescript
-// src/stores/__tests__/authStore.spec.ts
-describe("AuthStore", () => {
-  it("should login successfully");
-  it("should logout and clear state");
-  it("should refresh token before expiry");
-  it("should handle login errors");
-});
-
-// src/services/__tests__/authService.spec.ts
-describe("Auth Service Integration", () => {
-  it("should authenticate and access protected routes");
-  it("should handle token expiration");
-});
+// smoke-tests/google-auth-flow.spec.ts
+- Full OAuth flow (mock Google response)
+- Session creation and storage
+- Authenticated API calls
+- WebSocket with session
+- Logout
 ```
 
----
+**Testing Notes**:
 
-### 6. **Dependencies to Add**
+- Mock `google.oauth2.id_token.verify_oauth2_token` in unit tests
+- Use separate pickle files for tests
+- Use `freezegun` for time-based expiration tests
 
-**Backend:**
+## Dependencies
 
-```toml
-# pyproject.toml
-python-jose = "^3.3.0"       # JWT encoding/decoding
-passlib = "^1.7.4"           # Password hashing
-bcrypt = "^4.0.1"            # Bcrypt hashing algorithm
-python-multipart = "^0.0.6"  # Form data parsing
+### Backend
+
+```bash
+poetry add google-auth google-auth-oauthlib
 ```
 
-**Frontend:**
+### Frontend
 
-```json
-// package.json - No new dependencies needed
-// Using existing: Pinia (state), axios/fetch (HTTP)
+```html
+<!-- index.html -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 ```
 
----
+### Environment Setup
 
-Starting (4/4) _Validate plan and get approval_
+```bash
+# backend/.env
+GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
+SESSION_EXPIRE_DAYS=7
+CORS_ORIGINS=http://localhost:5173,https://accounts.google.com
 
-## 📋 Next Steps & Recommendations
+# frontend/.env
+VITE_GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
+```
 
-### Immediate Actions:
+## Success Criteria
 
-1. **Review the Plan** - Confirm the architecture aligns with your requirements
-2. **Choose Database** - Decide on user storage (in-memory → PostgreSQL/MongoDB later)
-3. **JWT Secret Generation** - Generate strong secret key for production
-4. **Scope Definition** - Decide on role-based access control (admin, trader, viewer)
+### Functional
 
-### Estimated Timeline:
+- ✅ Users can login with Google SSO
+- ✅ Sessions persisted to pickle files
+- ✅ Sessions expire after configured duration
+- ✅ REST API validates X-Session-Id header
+- ✅ WebSocket validates ?sessionId= param
+- ✅ Frontend: OAuth flow, session storage, auto-injection
 
-| Phase                   | Duration      | Effort                                       |
-| ----------------------- | ------------- | -------------------------------------------- |
-| Phase 1: Models + Stubs | 1-2 days      | Backend models, API stubs, client generation |
-| Phase 2: Service Logic  | 2-3 days      | AuthService, JWT utilities, tests            |
-| Phase 3: Dependencies   | 1 day         | FastAPI dependencies, protected routes       |
-| Phase 4: WebSocket Auth | 1-2 days      | ws_auth_handler, connection auth             |
-| Phase 5: Frontend       | 2-3 days      | Auth store, UI, integration                  |
-| Phase 6: Integration    | 1 day         | E2E tests, documentation                     |
-| **Total**               | **8-12 days** | Full authentication system                   |
+### Security
 
-### Key Design Decisions to Confirm:
+- ✅ Server-side Google token validation
+- ✅ Cryptographically secure session tokens
+- ✅ Restricted pickle file permissions (600)
+- ✅ CORS configured for Google domains
 
-1. **User Registration:** Open registration vs invite-only?
-2. **Token Storage:** localStorage (current) vs httpOnly cookies?
-3. **Multi-Factor Auth:** Include 2FA/TOTP in initial implementation?
-4. **Account Management:** Email verification, password reset flows?
-5. **Session Management:** Single device vs multiple concurrent sessions?
+### Testing
 
----
+- ✅ Unit tests for AuthService, API endpoints, WebSocket auth
+- ✅ Frontend tests for auth store, API adapter, WebSocket client
+- ✅ E2E test: login → API call → logout
 
-## 🎯 Ready to Start?
+### Documentation
 
-The preparation is complete! The implementation follows your existing patterns:
+- ✅ ENVIRONMENT-CONFIG.md updated with Google credentials
+- ✅ ARCHITECTURE.md updated with auth flow
+- ✅ API docs show authentication requirements
 
-- ✅ TDD methodology (API-METHODOLOGY.md)
-- ✅ Topic-based models (broker/market pattern)
-- ✅ Service layer architecture
-- ✅ Type-safe contracts (OpenAPI → TypeScript)
-- ✅ WebSocket integration (FastWS auth_handler)
-- ✅ Dual-client frontend (mock + real)
+## Questions
 
-**Would you like me to:**
+1. Google Cloud Console setup needed?
+2. Session expiration: 7 days or custom?
+3. Pickle location: `data/` directory OK?
+4. Add broker auth now or later?
+5. Login page or just "Sign in with Google" button?
+6. Test Google account or mocked tokens?
 
-1. Start implementing Phase 1 (Backend Models + API Stubs)?
-2. Create a detailed AUTH-IMPLEMENTATION.md document first?
-3. Set up environment variables and dependencies?
-4. Create authentication-specific documentation?
-
-Let me know how you'd like to proceed! 🚀
+Ready to start implementation following TDD methodology.
