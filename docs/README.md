@@ -77,7 +77,6 @@ Located in the project root:
 Located in `backend/docs/`:
 
 - **websockets.md** - WebSocket API reference
-- **bar-broadcasting.md** - Broadcaster service implementation
 - **versioning.md** - API versioning strategy
 - **ws-router-generation.md** - Router generation details
 

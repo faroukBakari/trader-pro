@@ -22,25 +22,99 @@ src/services/
 
 The `DatafeedService` class implements the TradingView Charting Library's datafeed interface, including both basic charting functionality and trading platform quotes support.
 
+### Architecture
+
+The service leverages a layered architecture for clean separation of concerns:
+
+```
+DatafeedService (Business Logic)
+    ↓ uses
+WsAdapter (WebSocket Client Wrapper)
+    ↓ uses
+WebSocketClient<TParams, TBackendData, TData> (Generic Client)
+    ↓ uses mappers
+Mappers (Type-Safe Transformations)
+    ↓ extends
+WebSocketBase (Singleton Connection Management)
+```
+
 ### Features Implemented
 
 ✅ **Basic Charting (IBasicDataFeed)**
 
-- Symbol search and resolution
-- Historical data (OHLC bars)
-- Real-time data updates
+- Symbol search and resolution via REST API
+- Historical data (OHLC bars) via REST API
+- Real-time data updates via WebSocket streaming
 
 ✅ **Trading Platform Quotes (IDatafeedQuotesApi)**
 
-- Real-time market quotes (bid/ask, last price, volume)
+- Real-time market quotes via WebSocket (bid/ask, last price, volume)
 - Quote subscriptions for watchlists and trading features
 - Mobile-compatible quote data with change calculations
+
+✅ **Simplified State Management**
+
+- No local subscription tracking needed
+- Delegates to `WsAdapter` for all WebSocket operations
+- Automatic reconnection and resubscription handled by base client
 
 ### Quick Start
 
 1. **Use Existing Implementation**: The service is fully functional with demo data
 2. **Customize Data Sources**: Replace demo data with your API/WebSocket feeds
 3. **Test Trading Features**: Quotes support enables watchlist, order ticket, and DOM widgets
+
+### WebSocket Adapter Pattern
+
+The service uses `WsAdapter` for centralized WebSocket client management:
+
+```typescript
+import { WsAdapter, WsFallback } from '@/plugins/wsAdapter'
+import type { WsAdapterType } from '@/plugins/wsAdapter'
+
+export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
+  private wsAdapter: WsAdapterType
+  private wsFallback: WsAdapterType
+  private mock: boolean
+
+  constructor({ mock = false }: { mock?: boolean } = {}) {
+    // Initialize adapters
+    this.wsAdapter = new WsAdapter() // Real WebSocket clients
+    this.wsFallback = new WsFallback({
+      // Mock clients for offline dev
+      barsMocker: () => mockLastBar(),
+      quotesMocker: () => mockQuoteData('DEMO:SYMBOL'),
+    })
+    this.mock = mock
+  }
+
+  _getWsAdapter(mock: boolean = this.mock): WsAdapterType {
+    return mock ? this.wsFallback : this.wsAdapter
+  }
+
+  // Subscribe to real-time bars - NO local subscription tracking!
+  subscribeBars(listenerGuid, symbolInfo, resolution, onRealtimeCallback) {
+    return this._getWsAdapter().bars.subscribe(
+      listenerGuid,
+      { symbol: symbolInfo.name, resolution },
+      onRealtimeCallback,
+    )
+  }
+
+  // Unsubscribe - base client handles cleanup
+  unsubscribeBars(listenerGuid) {
+    return this._getWsAdapter().bars.unsubscribe(listenerGuid)
+  }
+}
+```
+
+### Key Benefits
+
+✅ **No Duplicate State**: Service doesn't track subscriptions - `WsAdapter` handles everything  
+✅ **Automatic Reconnection**: Base client resubscribes on disconnect  
+✅ **Type-Safe Mappers**: Data transformations isolated to mapper layer  
+✅ **Dual-Mode Support**: Switch between real and mock WebSocket with one flag  
+✅ **Simplified Code**: Services just pass through to adapters
 
 ### Supported TradingView Features
 
@@ -407,38 +481,54 @@ async getBars(symbolInfo: LibrarySymbolInfo, resolution: ResolutionString, perio
 
 Called to subscribe to real-time data updates.
 
-**Example Implementation:**
+**Current Implementation (Simplified with WsAdapter):**
 
 ```typescript
-subscribeBars(symbolInfo: LibrarySymbolInfo, resolution: ResolutionString, onTick: SubscribeBarsCallback, listenerGuid: string, onResetCacheNeededCallback: () => void): void {
-  // Store subscription
-  this.subscriptions.set(listenerGuid, {
-    symbolInfo,
-    resolution,
-    onTick,
-    onResetCacheNeededCallback
-  })
-
-  // Start real-time updates
-  startRealTimeUpdates(symbolInfo.name, resolution, onTick)
+subscribeBars(
+  symbolInfo: LibrarySymbolInfo,
+  resolution: ResolutionString,
+  onTick: SubscribeBarsCallback,
+  listenerGuid: string,
+  onResetCacheNeededCallback: () => void
+): void {
+  // NO local subscription tracking needed!
+  // WsAdapter handles all subscription state
+  this._getWsAdapter().bars.subscribe(
+    listenerGuid,
+    { symbol: symbolInfo.name, resolution },
+    (bar: Bar) => {
+      onTick(bar)
+    }
+  )
 }
 ```
+
+**Benefits:**
+
+- ✅ No `this.subscriptions = new Map()` needed
+- ✅ Base client manages subscription lifecycle
+- ✅ Automatic reconnection and resubscription
+- ✅ Type-safe data via mappers
 
 ### `unsubscribeBars(listenerGuid): void`
 
 Called to unsubscribe from real-time data updates.
 
-**Example Implementation:**
+**Current Implementation (Simplified with WsAdapter):**
 
 ```typescript
 unsubscribeBars(listenerGuid: string): void {
-  const subscription = this.subscriptions.get(listenerGuid)
-  if (subscription) {
-    stopRealTimeUpdates(listenerGuid)
-    this.subscriptions.delete(listenerGuid)
-  }
+  // Just pass through - base client handles cleanup
+  this._getWsAdapter().bars.unsubscribe(listenerGuid)
 }
 ```
+
+**Benefits:**
+
+- ✅ Single line implementation
+- ✅ No manual cleanup logic
+- ✅ Base client handles reference counting
+- ✅ Connection closes when last listener unsubscribes
 
 ## Data Format
 
@@ -473,7 +563,104 @@ const datafeed = new DatafeedService()
 3. Handle error cases appropriately
 4. Test with TradingView charts
 
+## Type-Safe Data Mappers
+
+### Overview
+
+Mappers provide centralized, type-safe transformations between backend and frontend types.
+
+**Location**: `frontend/src/plugins/mappers.ts`
+
+### Available Mappers
+
+#### `mapQuoteData()`
+
+Transforms backend quote data to TradingView frontend format:
+
+```typescript
+import { mapQuoteData } from '@/plugins/mappers'
+import type { QuoteData as QuoteData_Backend } from '@/clients/trader-client-generated'
+
+// Backend → Frontend transformation
+const frontendQuote = mapQuoteData(backendQuote)
+
+// Usage in WsAdapter
+this.quotes = new WebSocketClient(
+  'quotes',
+  mapQuoteData, // Automatic mapping on every message
+)
+```
+
+#### `mapPreOrder()`
+
+Transforms frontend order to backend format:
+
+```typescript
+import { mapPreOrder } from '@/plugins/mappers'
+import type { PreOrder } from '@public/trading_terminal/charting_library'
+
+// Frontend → Backend transformation
+const backendOrder = mapPreOrder(frontendOrder)
+
+// Handles:
+// - Enum type conversions (type, side, stopType)
+// - Null handling (limitPrice, stopPrice, etc.)
+// - Optional field mapping
+```
+
+### Mapper Benefits
+
+✅ **Type Safety**: Backend types isolated to mapper functions  
+✅ **Reusability**: Shared across REST and WebSocket clients  
+✅ **Maintainability**: Single source of truth for transformations  
+✅ **Runtime Validation**: Handles enum conversions and null handling  
+✅ **Clean Services**: Services never import backend types directly
+
+### When to Create New Mappers
+
+Create a mapper function when:
+
+1. Backend and frontend use different type definitions
+2. Enum values need conversion
+3. Field names differ between backend/frontend
+4. Complex nested transformations needed
+5. Type is used in multiple places (REST + WebSocket)
+
+### Mapper Testing Pattern
+
+```typescript
+import { describe, it, expect } from 'vitest'
+import { mapQuoteData } from '@/plugins/mappers'
+
+describe('mapQuoteData', () => {
+  it('maps success quote data correctly', () => {
+    const backend = {
+      s: 'ok',
+      n: 'AAPL',
+      v: { lp: 150.0, bid: 149.9, ask: 150.1 /* ... */ },
+    }
+
+    const frontend = mapQuoteData(backend)
+
+    expect(frontend.s).toBe('ok')
+    expect(frontend.n).toBe('AAPL')
+    expect(frontend.v.lp).toBe(150.0)
+  })
+
+  it('maps error quote data correctly', () => {
+    const backend = { s: 'error', n: 'INVALID', v: { error: 'Not found' } }
+    const frontend = mapQuoteData(backend)
+
+    expect(frontend.s).toBe('error')
+    expect(frontend.v).toBe('Not found')
+  })
+})
+```
+
 ## Documentation
 
 - [TradingView Datafeed API](https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi)
 - [TradingView Tutorials](https://www.tradingview.com/charting-library-docs/latest/tutorials/)
+- [WebSocket Client Pattern](../WEBSOCKET-CLIENT-PATTERN.md)
+- [WebSocket Client Base](../WEBSOCKET-CLIENT-BASE.md)
+- [Client Generation Guide](../../../docs/CLIENT-GENERATION.md)

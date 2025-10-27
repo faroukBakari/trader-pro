@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 BACKEND_APP_NAME ?= app
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install test test-cov lint lint-check format build clean dev health export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-cov lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
 
 # Default target
 help:
@@ -21,7 +21,9 @@ help:
 	@echo "  build             Build backend package"
 	@echo "  dev               Start backend development server with debugpy"
 	@echo "  dev-no-debug      Start backend development server without debugpy"
+	@echo "  kill-dev          Kill any running backend development server"
 	@echo "  clean             Clean build artifacts"
+	@echo "  clean-cache       Clean all Python caches (mypy, pytest, pycache, ruff)"
 	@echo "  health            Check backend health"
 	@echo "  export-openapi-spec   Export OpenAPI specification (offline)"
 	@echo "  export-asyncapi-spec  Export AsyncAPI specification (offline)"
@@ -195,11 +197,11 @@ install-ci: ensure-python-ci ensure-poetry
 # Testing
 test:
 	@echo "Running backend tests..."
-	poetry run pytest -v
+	poetry run pytest -v -x
 
 test-cov:
 	@echo "Running backend tests with coverage..."
-	poetry run pytest --cov=trading_api --cov-report=xml --cov-report=term-missing
+	poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
 
 # Linting and formatting
 lint:
@@ -219,6 +221,7 @@ lint-response-models:
 
 format:
 	@echo "Formatting backend code..."
+	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive src/ tests/
 	poetry run black src/ tests/
 	poetry run isort src/ tests/
 
@@ -239,6 +242,44 @@ dev:
 	@echo "✅ Port $(BACKEND_PORT) is available"
 	@echo "Debug server listening on port 5678 (attach debugger to localhost:5678)"
 	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --reload --host 0.0.0.0 --port $(BACKEND_PORT) --log-level info
+
+# Development server without debugger
+dev-no-debug:
+	@echo "Starting backend development server on http://localhost:$(BACKEND_PORT)"
+	@echo "🔍 Checking if backend port is available..."
+	@if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
+		echo "❌ Error: Backend port $(BACKEND_PORT) is already in use!"; \
+		echo ""; \
+		echo "Process using port $(BACKEND_PORT):"; \
+		lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN; \
+		echo ""; \
+		echo "Please stop the existing server or use a different port:"; \
+		echo "  export BACKEND_PORT=<new_port>"; \
+		exit 1; \
+	fi
+	@echo "✅ Port $(BACKEND_PORT) is available"
+	poetry run uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --reload --host 0.0.0.0 --port $(BACKEND_PORT) --log-level info
+
+# Kill backend development server
+kill-dev:
+	@echo "🔍 Checking for running backend processes..."
+	@PIDS=$$(lsof -ti :$(BACKEND_PORT) 2>/dev/null || true); \
+	if [ -n "$$PIDS" ]; then \
+		echo "Found backend process(es) on port $(BACKEND_PORT):"; \
+		lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN 2>/dev/null || true; \
+		echo ""; \
+		echo "Killing process(es)..."; \
+		kill -9 $$PIDS 2>/dev/null || true; \
+		sleep 1; \
+		if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
+			echo "❌ Failed to kill some processes. Please check manually."; \
+			exit 1; \
+		else \
+			echo "✅ Backend development server stopped"; \
+		fi; \
+	else \
+		echo "✅ No backend process found on port $(BACKEND_PORT)"; \
+	fi
 
 # CI development server (background)
 dev-ci:
@@ -268,6 +309,26 @@ clean:
 	@echo "Cleaning backend build artifacts..."
 	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage clients/ src/trading_api/ws/generated/ openapi.json asyncapi.json
 	@echo "Backend clean complete."
+
+# Clean all Python caches
+clean-cache:
+	@echo "Cleaning all Python caches..."
+	@find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".pytype" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
+	@echo "✓ Removed .mypy_cache directories"
+	@echo "✓ Removed __pycache__ directories"
+	@echo "✓ Removed .pytest_cache directories"
+	@echo "✓ Removed .ruff_cache directories"
+	@echo "✓ Removed .pytype directories"
+	@echo "✓ Removed *.egg-info directories"
+	@echo ""
+	@echo "💡 Tip: After cleaning caches, reload VS Code window:"
+	@echo "   Press Ctrl+Shift+P → 'Developer: Reload Window'"
+	@echo "   Or run: 'Python: Restart Language Server'"
 
 # Export OpenAPI specification (offline)
 export-openapi-spec:

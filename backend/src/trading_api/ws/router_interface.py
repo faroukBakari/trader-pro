@@ -1,10 +1,11 @@
+import asyncio
 import json
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from pydantic import BaseModel
 
-from external_packages.fastws import OperationRouter
-from trading_api.plugins.fastws_adapter import FastWSAdapter
+from external_packages.fastws import FastWS, OperationRouter
+from trading_api.models.common import SubscriptionUpdate
 
 
 def buildTopicParams(obj: Any) -> str:
@@ -27,29 +28,33 @@ def buildTopicParams(obj: Any) -> str:
     return json.dumps(sorted_obj, separators=(",", ":"))
 
 
-class WsRouterProto(Protocol):
-    route: str
-
-    def topic_builder(self, params: BaseModel) -> str:
+class WsRouteService(Protocol):
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
         ...
 
-    def build_specs(self, wsUrl: str, wsApp: FastWSAdapter) -> dict:
+    def remove_topic(self, topic: str) -> None:
         ...
 
 
-class WsRouterInterface(OperationRouter, WsRouterProto):
+# TODO: add clear subscriptions method to use on FastWSAdapter when client disconnects
+class WsRouterInterface(OperationRouter):
+    def __init__(self, route: str, *args: Any, **kwargs: Any):
+        super().__init__(prefix=f"{route}.", *args, **kwargs)
+        self.route: str = route
+        self.updates_queue = asyncio.Queue[SubscriptionUpdate[BaseModel]](maxsize=1000)
+
     def topic_builder(self, params: BaseModel) -> str:
         return f"{self.route}:{buildTopicParams(params.model_dump())}"
 
-    def build_specs(self, wsUrl: str, wsApp: FastWSAdapter) -> dict:
+    def build_specs(self, wsUrl: str, wsApp: FastWS) -> dict:
         return {
             "endpoint": wsUrl,
             "docs": wsApp.asyncapi_docs_url,
             "spec": wsApp.asyncapi_url,
             "operations": [
-                "quotes.subscribe",
-                "quotes.unsubscribe",
-                "quotes.update",
+                f"{self.route}.subscribe",
+                f"{self.route}.unsubscribe",
+                f"{self.route}.update",
             ],
             "note": "WebSocket endpoints use AsyncAPI spec, not OpenAPI/Swagger",
         }

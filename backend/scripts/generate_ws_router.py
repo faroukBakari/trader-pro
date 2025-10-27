@@ -20,23 +20,30 @@ class RouterSpec(NamedTuple):
     data_type: str
 
 
+# TODO: validate router syntax and report errors more gracefully
 def parse_router_specs(ws_dir: Path) -> list[RouterSpec]:
     """
     Parse WebSocket router files to extract TypeAlias definitions.
 
     Looks for patterns like:
         BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
+        BrokerConnectionWsRouter: TypeAlias = WsRouter[
+            BrokerConnectionSubscriptionRequest, BrokerConnectionStatus
+        ]
 
     Returns a list of RouterSpec instances.
     """
     router_specs = []
+    # Pattern matches both single-line and multi-line TypeAlias declarations
+    # re.DOTALL makes . match newlines, allowing matching across multiple lines
     pattern = re.compile(
-        r"^\s*(\w+):\s*TypeAlias\s*=\s*WsRouter\[(\w+),\s*(\w+)\]", re.MULTILINE
+        r"^\s*(\w+):\s*TypeAlias\s*=\s*WsRouter\[\s*(\w+)\s*,\s*(\w+)\s*\]",
+        re.MULTILINE | re.DOTALL,
     )
 
-    # Find all .py files except generic.py and files in generated/
+    # Find all .py files except generic_route.py and files in generated/
     for py_file in ws_dir.glob("*.py"):
-        if py_file.name in ("__init__.py", "generic.py", "router_interface.py"):
+        if py_file.name in ("__init__.py", "generic_route.py", "router_interface.py"):
             continue
 
         content = py_file.read_text()
@@ -65,13 +72,25 @@ def generate_router_code(spec: RouterSpec, template: str) -> str:
         f"from trading_api.models import {spec.request_type}, {spec.data_type}"
     ]
     for line in lines:
+        # Skip TypeVar declarations
         if "TypeVar(" in line:
             continue
+        # Skip Generic and TypeVar imports, but keep Any
+        if "from typing import" in line and ("Generic" in line or "TypeVar" in line):
+            # Extract only the 'Any' import if present
+            if "Any" in line:
+                result_lines.append("from typing import Any")
+            continue
+        # Skip BaseModel import if it only imports BaseModel (we don't need it)
+        if line.strip() == "from pydantic import BaseModel":
+            continue
+        # Replace class declaration
         if "class WsRouter(" in line:
             result_lines.append(f"class {spec.class_name}(WsRouterInterface):")
             continue
-        modified_line = line.replace("__TRequest", spec.request_type)
-        modified_line = modified_line.replace("__TData", spec.data_type)
+        # Replace type parameters
+        modified_line = line.replace("_TRequest", spec.request_type)
+        modified_line = modified_line.replace("_TData", spec.data_type)
         result_lines.append(modified_line)
     return "\n".join(result_lines)
 
@@ -105,8 +124,8 @@ __all__ = [
 
 def main():
     """Generate all router classes."""
-    template = Path(f"{Path.cwd()}/src/trading_api/ws/generic.py").read_text()
-    print("📖 Read generic template from ws/generic.py")
+    template = Path(f"{Path.cwd()}/src/trading_api/ws/generic_route.py").read_text()
+    print("📖 Read generic template from ws/generic_route.py")
 
     output_dir = Path(f"{Path.cwd()}/src/trading_api/ws/generated")
     if output_dir.exists():

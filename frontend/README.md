@@ -17,10 +17,10 @@ A Vue.js frontend application for the Trading API built with TypeScript, Vue Rou
 
 ### Prerequisites
 
-- **Node.js 20.19+ or 22.12+** (required by Vite)
+- **Node.js 22.20+** (required by Vite)
   - Will be **automatically installed** if you have [nvm](https://github.com/nvm-sh/nvm)
   - Or check version: `node --version`
-  - Manual install: `nvm install 20.19.0 && nvm use 20.19.0`
+  - Manual install: `nvm install 22.20.0 && nvm use 22.20.0`
 - npm (comes with Node.js)
 
 ## Quick Start
@@ -34,14 +34,14 @@ make install       # Validates Node.js version, offers to install if needed, the
 
 The `make install` command will:
 
-1. **Check Node.js version** - Validates Node.js 20.19+ or 22.12+ is available
-2. **Auto-install Node.js** - If wrong version and nvm is available, **offers to install Node.js 20.19.0** (with confirmation)
+1. **Check Node.js version** - Validates Node.js 22.20+ is available
+2. **Auto-install Node.js** - If wrong version and nvm is available, **offers to install Node.js 22.20.0** (with confirmation)
 3. **Install dependencies** - Runs `npm install` to set up the project
 
 **Interactive prompts:**
 
-- If Node.js version is incompatible and nvm is available, you'll be asked: `"Would you like to install Node.js 20.19.0 via nvm? [y/N]"`
-- Type `y` and press Enter to automatically install and activate Node.js 20.19.0
+- If Node.js version is incompatible and nvm is available, you'll be asked: `"Would you like to install Node.js 22.20.0 via nvm? [y/N]"`
+- Type `y` and press Enter to automatically install and activate Node.js 22.20.0
 - Type `n` to skip and see manual installation instructions
 
 Alternatively, check prerequisites manually:
@@ -203,6 +203,9 @@ await client.subscribe({ symbol: 'AAPL', resolution: '1' }, (bar: Bar) =>
 ### Key Files
 
 - **Base Client**: `src/plugins/wsClientBase.ts` - Core WebSocket implementation
+- **WebSocket Adapter**: `src/plugins/wsAdapter.ts` - High-level WebSocket clients wrapper
+- **Data Mappers**: `src/plugins/mappers.ts` - Type-safe data transformations between backend/frontend types
+  - **⚠️ STRICT NAMING**: All type imports must follow `<TYPE>_Api_Backend`, `<TYPE>_Ws_Backend`, and `<TYPE>` pattern
 - **Generated Types**: `src/clients/ws-types-generated/index.ts` - Auto-generated type definitions (from AsyncAPI)
 - **Integration**: `src/services/datafeedService.ts` - TradingView integration example
 - **Type Generator**: `scripts/generate-ws-types.mjs` - AsyncAPI → TypeScript types

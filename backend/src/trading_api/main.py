@@ -6,22 +6,17 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, AsyncGenerator
 
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from external_packages.fastws import Client
 from trading_api.plugins.fastws_adapter import FastWSAdapter
 
-from .api.datafeed import router as datafeed_router
-from .api.health import router as health_router
-from .api.versions import router as versions_router
-from .core.config import BroadcasterConfig
-from .core.datafeed_broadcaster import DataFeedBroadcaster
-from .core.datafeed_service import DatafeedService
-from .core.versioning import APIVersion
-from .ws.datafeed import ws_routers
-
-api_routers: list[APIRouter] = [health_router, versions_router, datafeed_router]
+from .api import BrokerApi, DatafeedApi, HealthApi, VersionApi
+from .core import BrokerService, DatafeedService
+from .models import APIVersion
+from .ws import BrokerWsRouters, DatafeedWsRouters
 
 # Configure logging for the application
 logging.basicConfig(
@@ -36,7 +31,18 @@ logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
 # Global instances
 datafeed_service = DatafeedService()
-datafeed_broadcaster: DataFeedBroadcaster | None = None
+broker_service = BrokerService()
+api_routers = [
+    BrokerApi(service=broker_service, prefix="/broker", tags=["broker"]),
+    DatafeedApi(service=datafeed_service, prefix="/datafeed", tags=["datafeed"]),
+    HealthApi(tags=["health"]),
+    VersionApi(tags=["versioning"]),
+]
+
+ws_routers = [
+    *DatafeedWsRouters(datafeed_service),
+    *BrokerWsRouters(broker_service),
+]
 
 
 def validate_response_models(app: FastAPI) -> None:
@@ -66,10 +72,12 @@ def validate_response_models(app: FastAPI) -> None:
     print("✅ All FastAPI routes have response_model defined")
 
 
+# TODO: FastWS response model validation
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Handle application startup and shutdown events."""
-    global datafeed_broadcaster
 
     # Startup: Validate all routes have response models
     validate_response_models(app)
@@ -99,34 +107,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         print(f"⚠️  Failed to generate AsyncAPI file: {e}")
 
-    # Startup: Start bar broadcaster if enabled
-    if BroadcasterConfig.get_enabled():
-        datafeed_broadcaster = DataFeedBroadcaster(
-            ws_app=wsApp,
-            datafeed_service=datafeed_service,
-            interval=BroadcasterConfig.get_interval(),
-            symbols=BroadcasterConfig.get_symbols(),
-            resolutions=BroadcasterConfig.get_resolutions(),
-        )
-        datafeed_broadcaster.start()
-        print(
-            f"📡 Bar broadcaster started: "
-            f"symbols={BroadcasterConfig.get_symbols()}, "
-            f"interval={BroadcasterConfig.get_interval()}s"
-        )
-    else:
-        print(
-            "⏸️  Bar broadcaster disabled (set BAR_BROADCASTER_ENABLED=true to enable)"
-        )
-
     wsApp.setup(apiApp)
 
     yield
-
-    # Shutdown: Stop bar broadcaster
-    if datafeed_broadcaster:
-        datafeed_broadcaster.stop()
-        print("📡 Bar broadcaster stopped")
 
     # Shutdown: Cleanup is handled by FastAPIAdapter
     print("🛑 FastAPI application shutdown complete")
@@ -149,8 +132,21 @@ apiApp = FastAPI(
         {"name": "health", "description": "Health check operations"},
         {"name": "versioning", "description": "API version information"},
         {"name": "datafeed", "description": "Market data and symbols operations"},
+        {
+            "name": "broker",
+            "description": "Broker operations (orders, positions, executions)",
+        },
     ],
     lifespan=lifespan,
+)
+
+# Add CORS middleware to allow frontend tests to connect
+apiApp.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 ws_url = f"{base_url}/ws"
@@ -178,7 +174,7 @@ for api_router in api_routers:
 
 # Register the WebSocket endpoint
 @apiApp.websocket(ws_url)
-async def websocket_bars_endpoint(
+async def websocket_endpoint(
     client: Annotated[Client, Depends(wsApp.manage)],
 ) -> None:
     """WebSocket endpoint for real-time bar data streaming"""

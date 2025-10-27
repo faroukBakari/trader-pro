@@ -42,7 +42,7 @@ class GetBarsResponse(BaseModel):
 class BarsSubscriptionRequest(BaseModel):
     symbol: str = Field(..., description="Symbol to subscribe to")
     resolution: str = Field(
-        default="1",
+        ...,
         description="Time resolution: '1', '5', '15', '30', '60' (minutes),"
         + " 'D' (day), 'W' (week), 'M' (month)",
     )

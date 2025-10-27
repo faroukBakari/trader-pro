@@ -16,10 +16,10 @@ import {
 	SearchSymbolsCallback,
 	ServerTimeCallback,
 	SubscribeBarsCallback,
-	TimescaleMark,
 	SymbolResolveExtension,
+	TimescaleMark,
 	VisiblePlotsSet,
-} from '../../../charting_library/datafeed-api';
+} from '../../../trading_terminal/datafeed-api';
 
 import {
 	getErrorMessage,
@@ -35,11 +35,11 @@ import {
 	PeriodParamsWithOptionalCountback,
 } from './history-provider';
 
-import { IQuotesProvider } from './iquotes-provider';
 import { DataPulseProvider } from './data-pulse-provider';
+import { IQuotesProvider } from './iquotes-provider';
+import { IRequester } from './irequester';
 import { QuotesPulseProvider } from './quotes-pulse-provider';
 import { SymbolsStorage } from './symbols-storage';
-import { IRequester } from './irequester';
 
 export interface UdfCompatibleConfiguration extends DatafeedConfiguration {
 	// tslint:disable:tv-variable-name
