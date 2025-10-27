@@ -150,6 +150,7 @@ The backend uses a **Protocol-based service architecture** for WebSocket real-ti
 The `BrokerService` implements a **realistic order execution simulator** with automatic lifecycle management:
 
 **Features:**
+
 - **Single Execution Loop**: Background task that randomly executes WORKING orders
 - **Configurable Delay**: 1-2 second intervals (customizable for testing)
 - **Automatic Lifecycle**: Starts when first subscription is created, stops when last subscription is removed
@@ -157,6 +158,7 @@ The `BrokerService` implements a **realistic order execution simulator** with au
 - **Execution Cascade**: execution → order → equity → position updates
 
 **Testing with Custom Delays:**
+
 ```python
 # Fast execution for testing
 service = BrokerService(execution_delay=0.1)  # 100ms

@@ -174,6 +174,7 @@ function buildTopicParams(obj: unknown): string {
 **RULE:** Subscription request models MUST NOT have optional parameters.
 
 **Why:** Optional parameters cause topic mismatch between frontend and backend:
+
 - Backend may include default values in response topic string
 - Frontend doesn't include optional params in request
 - Topics don't match → updates not received
@@ -181,6 +182,7 @@ function buildTopicParams(obj: unknown): string {
 **Validation:** AsyncAPI export validates this automatically (see `scripts/export_asyncapi_spec.py`)
 
 **Example - WRONG:**
+
 ```python
 class QuoteDataSubscriptionRequest(BaseModel):
     symbols: List[str] = Field(default_factory=list)  # ❌ Optional with default
@@ -188,6 +190,7 @@ class QuoteDataSubscriptionRequest(BaseModel):
 ```
 
 **Example - CORRECT:**
+
 ```python
 class QuoteDataSubscriptionRequest(BaseModel):
     symbols: List[str] = Field(..., description="Symbols for slow updates")  # ✅ Required
@@ -195,6 +198,7 @@ class QuoteDataSubscriptionRequest(BaseModel):
 ```
 
 **Validation Enforcement:**
+
 - `make export-asyncapi-spec` fails if optional parameters found
 - Error message lists problematic models and parameters
 - Fix by making parameters required or removing them entirely

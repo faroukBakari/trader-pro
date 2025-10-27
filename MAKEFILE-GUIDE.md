@@ -130,16 +130,19 @@ make install-ci        # Uses npm ci
 ## Common Workflows
 
 ### Initial Setup
+
 ```bash
 make -f project.mk setup  # Installs hooks + all dependencies
 ```
 
 ### Daily Development
+
 ```bash
 make -f project.mk dev-fullstack  # One command, full stack
 ```
 
 ### Stopping Development Servers
+
 ```bash
 # Kill all dev servers (useful for port conflicts or stuck processes)
 make -f project.mk kill-dev      # Kill both frontend and backend
@@ -150,17 +153,20 @@ make -C frontend kill-dev        # Kill frontend only (port 5173)
 ```
 
 **Use Cases for `kill-dev`:**
+
 - Port already in use errors (e.g., "Address already in use")
 - Stuck processes after crashes or Ctrl+C
 - Clean restart needed
 - Process not responding to normal termination
 
 ### Before Commit
+
 ```bash
 make -f project.mk lint-all format-all test-all
 ```
 
 ### CI Pipeline
+
 ```bash
 make -f project.mk install-all
 make -f project.mk lint-all
