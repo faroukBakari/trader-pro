@@ -15,8 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from trading_api.models import APIVersion
-from trading_api.plugins import FastWSAdapter
-from trading_api.shared import ModuleRegistry
+from trading_api.shared import FastWSAdapter, HealthApi, ModuleRegistry, VersionApi
 
 # Configure logging for the application
 logging.basicConfig(
@@ -179,10 +178,11 @@ def create_app(
         allow_headers=["*"],
     )
 
-    # TODO: Load shared routers (health, versions) once Phase 3 is complete
-    # from trading_api.shared.api import HealthApi, VersionApi
-    # api_app.include_router(HealthApi(tags=["health"]), prefix=base_url, tags=["v1"])
-    # api_app.include_router(VersionApi(tags=["versioning"]), prefix=base_url, tags=["v1"])
+    # Load shared routers (health, versions) - always available
+    api_app.include_router(HealthApi(tags=["health"]), prefix=base_url, tags=["v1"])
+    api_app.include_router(
+        VersionApi(tags=["versioning"]), prefix=base_url, tags=["v1"]
+    )
 
     # Load enabled modules
     for module in registry.get_enabled_modules():

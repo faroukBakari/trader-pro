@@ -1,6 +1,6 @@
 # Modular Backend Implementation Plan
 
-**Status**: In Progress - Phase 1 | **Created**: 2025-10-28 | **Updated**: 2025-10-29
+**Status**: In Progress - Phase 3 | **Created**: 2025-10-28 | **Updated**: 2025-10-29
 
 ## 🚀 Implementation Progress
 
@@ -11,7 +11,7 @@
 > - Move next task to "In Progress"
 > - Commit the updated MODULAR_BACKEND_IMPL.md with task changes
 
-### ✅ Completed (10/20 tasks)
+### ✅ Completed (13/20 tasks)
 
 1. **Pre-Migration Validation** ✅ - Completed 2025-10-29
 
@@ -90,6 +90,7 @@
    - Committed: d60aebd
 
 10. **Phase 2: Create BrokerModule** ✅ - Completed 2025-10-29
+
     - Created `modules/broker/__init__.py` with BrokerModule class
     - Implements Module Protocol with lazy-loaded service
     - Methods: `get_api_routers()`, `get_ws_routers()`, `configure_app()`
@@ -97,24 +98,47 @@
     - Type checking passes (mypy: no issues found in 50 source files)
     - Committed: d60aebd
 
+11. **Phase 3: Move Plugins to shared/plugins/** ✅ - Completed 2025-10-29
+
+    - Moved `plugins/fastws_adapter.py` → `shared/plugins/fastws_adapter.py`
+    - Created backward compatibility re-export in `plugins/__init__.py`
+    - Added deprecation notice for old import path
+    - All existing imports continue to work
+    - No test changes required
+
+12. **Phase 3: Refactor WS Router Generation** ✅ - Completed 2025-10-29
+
+    - Updated `ws/generic_route.py` to import from `shared/ws/router_interface`
+    - Updated `scripts/generate_ws_router.py` to support both legacy and modular architectures
+    - Added `find_module_ws_files()` to scan `modules/*/ws.py` files
+    - Added `generate_for_module()` to generate into `modules/{module}/ws_generated/`
+    - Updated `scripts/generate-ws-routers.sh` to format all generated directories (legacy + modular)
+    - Updated `scripts/verify_ws_routers.py` to verify both architectures
+    - Fallback to legacy `ws/generated/` when no module ws.py files found
+    - All 48 tests pass (48 passed in 0.37s)
+    - Generation tested and working in legacy mode
+
+13. **Phase 3: Move API Infrastructure to shared/api/** ✅ - Completed 2025-10-29
+    - Created `shared/api/__init__.py` directory structure
+    - Moved `api/health.py` → `shared/api/health.py`
+    - Moved `api/versions.py` → `shared/api/versions.py`
+    - Updated `api/__init__.py` with backward compatibility re-exports and deprecation notice
+    - Updated `shared/__init__.py` to export `HealthApi` and `VersionApi`
+    - Updated `app_factory.py` to import and include shared API routers
+    - Deleted old `api/health.py` and `api/versions.py` files
+    - All 48 tests pass (48 passed in 0.28s)
+    - Type checking passes (mypy: no issues found in 56 source files)
+    - Linting passes (black, isort, flake8 all green)
+
 ### 🔄 In Progress (0/20 tasks)
 
-**Phase 2 Complete! ✅**
-
-Both module classes are implemented:
-
-- ✅ DatafeedModule implements Module Protocol
-- ✅ BrokerModule implements Module Protocol
-- ✅ Lazy-loaded services for resource efficiency
-- ✅ All routers (API + WebSocket) properly registered
-- ✅ All 48 tests pass, no regressions
-- ✅ Type checking passes, linting green
+**Phase 3: Move Shared and Module Infrastructure** - In Progress
 
 **Next Steps:**
 
-- Phase 3: Move shared infrastructure (plugins, ws, api)
+- Start Task 14: Move datafeed module files (service, api, ws)
 
-### 📋 Pending (10/20 tasks)
+### 📋 Pending (7/20 tasks)
 
 **Phase 0 (Complete):**
 
@@ -128,27 +152,24 @@ Both module classes are implemented:
 
 ✅ All Phase 2 tasks completed
 
-**Phase 3 (Move Shared):**
+**Phase 3 (Move Shared and Module Infrastructure):**
 
-- [ ] Task 11: Move plugins to shared/plugins/
-- [ ] Task 12: Move ws infrastructure to shared/ws/
-- [ ] Task 13: Move api (health, versions) to shared/api/
+- [x] Task 11: Move plugins to shared/plugins/ ✅ **COMPLETED**
+- [x] Task 12: Refactor WS router generation for modular architecture ✅ **COMPLETED**
+- [x] Task 13: Move api (health, versions) to shared/api/ ✅ **COMPLETED**
+- [ ] Task 14: Move datafeed module files (service, api, ws)
+- [ ] Task 15: Move broker module files (service, api, ws)
+- [ ] Task 16: Verify WS router generation for modules
+- [ ] Task 17: Test OpenAPI spec generation with module configurations
+- [ ] Task 18: Test AsyncAPI spec generation with module configurations
 
-**Phase 4-5 (Move Modules):**
+**Phase 4 (Switch to Factory):**
 
-- [ ] Task 14: Move datafeed module files
-- [ ] Task 15: Move broker module files
+- [ ] Task 19: Update fixtures to use factory and move tests to module directories
 
-**Phase 6 (Switch to Factory):**
+**Phase 5-7 (Finalize):**
 
-- [ ] Task 16: Update fixtures to use factory
-- [ ] Task 17: Move tests to module directories
-
-**Phase 7-9 (Finalize):**
-
-- [ ] Task 18: Finalize and validate main.py
-- [ ] Task 19: Update build system and CI
-- [ ] Task 20: Full verification and documentation
+- [ ] Task 20: Finalize and validate main.py, update build system and CI, full verification and documentation
 
 ---
 
@@ -169,7 +190,7 @@ Both module classes are implemented:
 1. **🔴 Global Service Instances** (P0) - `datafeed_service = DatafeedService()` in main.py → Move to factory
 2. **🔴 Test Coupling to Globals** (P0) - All 48 tests import from main → Rewrite with fixtures
 3. **🔴 Spec Export Script Compatibility** (P0) - `scripts/export_openapi_spec.py` imports `apiApp` from main.py → Must maintain export
-4. **🟡 WebSocket Router Generation** (P1) - Update paths to `shared/ws/generated/`
+4. **🟡 WebSocket Router Generation** (P1) - Refactor generation mechanism for module-specific output directories
 
 ## Objectives
 
@@ -193,17 +214,23 @@ backend/src/trading_api/
 │   ├── module_interface.py
 │   ├── module_registry.py
 │   ├── plugins/fastws_adapter.py
-│   ├── ws/                 # router_interface, generic_route, generated/
+│   ├── ws/                 # router_interface, generic_route (NO generated/)
 │   ├── api/                # health, versions
 │   └── tests/
 └── modules/                 # Pluggable modules
     ├── datafeed/
     │   ├── __init__.py     # DatafeedModule
-    │   ├── api.py, ws.py, service.py
+    │   ├── api.py          # DatafeedApi
+    │   ├── ws.py           # DatafeedWsRouters + TypeAlias declarations
+    │   ├── service.py      # DatafeedService
+    │   ├── ws_generated/   # Generated WS routers (BarWsRouter, QuoteWsRouter)
     │   └── tests/
     └── broker/
         ├── __init__.py     # BrokerModule
-        ├── api.py, ws.py, service.py
+        ├── api.py          # BrokerApi
+        ├── ws.py           # BrokerWsRouters + TypeAlias declarations
+        ├── service.py      # BrokerService
+        ├── ws_generated/   # Generated WS routers (OrderWsRouter, etc.)
         └── tests/
 ```
 
@@ -387,14 +414,14 @@ from trading_api.modules.datafeed import DatafeedService  # ❌ VIOLATION
 
 ## Key Decisions
 
-| Decision               | Choice                      | Rationale                             |
-| ---------------------- | --------------------------- | ------------------------------------- |
-| Test Migration         | Gradual (fixtures first)    | Lower risk, parallel work             |
-| WS Router Generation   | Keep current approach       | Proven stable, simple path update     |
-| Broadcast Tasks        | Centralized (FastWSAdapter) | Simpler, current pattern works        |
-| Backward Compatibility | Re-exports during migration | Less disruptive, gradual adoption     |
-| Service Lifecycle      | Lazy loading                | Resource efficient, true independence |
-| CI Parallelization     | Immediate                   | 3x faster CI, natural fit             |
+| Decision               | Choice                      | Rationale                                     |
+| ---------------------- | --------------------------- | --------------------------------------------- |
+| Test Migration         | Gradual (fixtures first)    | Lower risk, parallel work                     |
+| WS Router Generation   | Module-specific generation  | Clear ownership, module isolation, co-located |
+| Broadcast Tasks        | Centralized (FastWSAdapter) | Simpler, current pattern works                |
+| Backward Compatibility | Re-exports during migration | Less disruptive, gradual adoption             |
+| Service Lifecycle      | Lazy loading                | Resource efficient, true independence         |
+| CI Parallelization     | Immediate                   | 3x faster CI, natural fit                     |
 
 ## Export Script Compatibility
 
@@ -537,24 +564,404 @@ make test-cov  # Coverage should match baseline
 - Create `modules/broker/__init__.py` (BrokerModule)
 - Implement Module Protocol with lazy service property
 
-### Phase 3: Move Shared Infrastructure
+### Phase 3: Move Shared and Module Infrastructure
+
+**Task 11: Move Plugins**
 
 - Move `plugins/` → `shared/plugins/`
-- Move `ws/router_interface.py`, `ws/generic_route.py`, `ws/generated/` → `shared/ws/`
+- Add re-exports at old locations for backward compatibility
+
+**Task 12: Refactor WebSocket Router Generation**
+
+**Why refactor**: WS routers are currently generated into a centralized `ws/generated/` directory. In the modular architecture, each module should own its generated routers for true isolation.
+
+**Current mechanism**:
+
+1. TypeAlias declarations in `ws/datafeed.py` and `ws/broker.py`
+2. Generator scans `ws/*.py` files for TypeAlias patterns
+3. Generates concrete routers into `ws/generated/`
+4. Modules import from `ws.generated`
+
+**Target mechanism**:
+
+1. TypeAlias declarations in `modules/datafeed/ws.py` and `modules/broker/ws.py`
+2. Generator scans `modules/*/ws.py` files for TypeAlias patterns
+3. Generates concrete routers into `modules/{module_name}/ws_generated/`
+4. Modules import from `.ws_generated` (local import)
+
+**Implementation steps**:
+
+1. **Move template and interface to shared** (infrastructure only):
+
+   ```bash
+   mkdir -p src/trading_api/shared/ws
+   mv src/trading_api/ws/router_interface.py src/trading_api/shared/ws/
+   mv src/trading_api/ws/generic_route.py src/trading_api/shared/ws/
+   ```
+
+2. **Update generator script** (`scripts/generate_ws_router.py`):
+
+   - Change scanner to find `modules/*/ws.py` files instead of `ws/*.py`
+   - Update output path logic: `modules/{module_name}/ws_generated/` instead of `ws/generated/`
+   - Generate module-specific `__init__.py` in each `ws_generated/` directory
+
+   ```python
+   # Key changes in generate_ws_router.py:
+
+   def find_module_ws_files(base_dir: Path) -> list[tuple[str, Path]]:
+       """Find all ws.py files in modules/ directory."""
+       modules_dir = base_dir / "src/trading_api/modules"
+       ws_files = []
+       for module_dir in modules_dir.iterdir():
+           if module_dir.is_dir():
+               ws_file = module_dir / "ws.py"
+               if ws_file.exists():
+                   ws_files.append((module_dir.name, ws_file))
+       return ws_files
+
+   def generate_for_module(module_name: str, ws_file: Path, template: str, base_dir: Path):
+       """Generate routers for a specific module."""
+       router_specs = parse_router_specs_from_file(ws_file)
+       output_dir = base_dir / f"src/trading_api/modules/{module_name}/ws_generated"
+       # Clear and regenerate...
+   ```
+
+3. **Update wrapper script** (`scripts/generate-ws-routers.sh`):
+
+   - Apply formatters/linters to all `modules/*/ws_generated/` directories
+
+   ```bash
+   GENERATED_DIRS="$BACKEND_DIR/src/trading_api/modules/*/ws_generated"
+   for dir in $GENERATED_DIRS; do
+       if [ -d "$dir" ]; then
+           poetry run black "$dir"
+           poetry run ruff format "$dir"
+           # ... etc
+       fi
+   done
+   ```
+
+4. **Update verification script** (`scripts/verify_ws_routers.py`):
+
+   - Update import paths to check module-specific generated routers
+   - Verify each module's `ws_generated/` directory independently
+
+5. **Delete centralized generated directory**:
+
+   ```bash
+   rm -rf src/trading_api/ws/generated/
+   ```
+
+6. **Regenerate all routers** with new module-specific structure:
+
+   ```bash
+   make generate-ws-routers
+   ```
+
+7. **Update module ws.py imports** (will be done in Phase 4-5):
+
+   ```python
+   # modules/datafeed/ws.py (after migration)
+   from typing import TYPE_CHECKING, TypeAlias
+
+   if TYPE_CHECKING:
+       BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
+   else:
+       from .ws_generated import BarWsRouter  # Local import (not from shared)
+   ```
+
+**Validation**:
+
+```bash
+# Verify generated routers exist in module directories
+ls -la src/trading_api/modules/datafeed/ws_generated/
+ls -la src/trading_api/modules/broker/ws_generated/
+
+# Verify no centralized generated directory
+test ! -d src/trading_api/ws/generated/ && echo "✓ Centralized generated/ removed"
+
+# Run generation and verify all quality checks pass
+make generate-ws-routers
+
+# All tests should still pass
+make test
+```
+
+**Task 13: Move API Infrastructure**
+
 - Move `api/health.py`, `api/versions.py` → `shared/api/`
 - Add re-exports at old locations for backward compatibility
 
-### Phase 4-5: Move Module Files
+**Task 14: Move Datafeed Module Files**
 
 - Move `core/datafeed_service.py` → `modules/datafeed/service.py`
 - Move `api/datafeed.py` → `modules/datafeed/api.py`
 - Move `ws/datafeed.py` → `modules/datafeed/ws.py`
-- Repeat for broker module
+- Update imports in `modules/datafeed/ws.py` to use `.ws_generated` (local import)
 - Update imports to use `models.*`
+- Update `modules/datafeed/__init__.py` to import from new locations
+- All tests should still pass
 
-### Phase 6: Switch Fixtures to Factory
+**Task 15: Move Broker Module Files**
 
-**Prerequisite**: Phase 0 completed (all tests use fixtures from `conftest.py`)
+- Move `core/broker_service.py` → `modules/broker/service.py`
+- Move `api/broker.py` → `modules/broker/api.py`
+- Move `ws/broker.py` → `modules/broker/ws.py`
+- Update imports in `modules/broker/ws.py` to use `.ws_generated` (local import)
+- Update imports to use `models.*`
+- Update `modules/broker/__init__.py` to import from new locations
+- All tests should still pass
+
+**Task 16: Verify WS Router Generation for Modules**
+
+- Run `make generate-ws-routers` to generate module-specific routers
+- Verify `modules/datafeed/ws_generated/` contains all datafeed routers
+- Verify `modules/broker/ws_generated/` contains all broker routers
+- Verify no centralized `ws/generated/` directory exists
+- All tests should still pass (48 passed)
+- Type checking should pass (mypy)
+- Linting should pass (black, isort, flake8)
+
+**Validation**:
+
+```bash
+# Verify module structure
+ls -la src/trading_api/modules/datafeed/
+ls -la src/trading_api/modules/broker/
+
+# Verify generated routers
+ls -la src/trading_api/modules/datafeed/ws_generated/
+ls -la src/trading_api/modules/broker/ws_generated/
+
+# Verify centralized generated directory removed
+test ! -d src/trading_api/ws/generated/ && echo "✓ Centralized generated/ removed"
+
+# Run all quality checks
+make test           # All 48 tests pass
+make lint-check     # All linters pass
+make type-check     # mypy passes
+
+# Verify WS router generation works
+make generate-ws-routers
+```
+
+**Task 17: Test OpenAPI Spec Generation with Module Configurations**
+
+**Objective**: Verify OpenAPI spec generation works correctly with different module configurations (all modules, datafeed-only, broker-only)
+
+**Implementation**:
+
+1. **Scenario 1: Full Stack (All Modules)**
+
+   ```bash
+   # Generate spec with all modules enabled
+   cd backend
+   ENABLED_MODULES=all make export-openapi-spec
+
+   # Verify spec contains both datafeed and broker endpoints
+   grep -q "/api/v1/datafeed/config" openapi.json && echo "✓ Datafeed endpoints present"
+   grep -q "/api/v1/broker/orders" openapi.json && echo "✓ Broker endpoints present"
+   grep -q "/api/v1/health" openapi.json && echo "✓ Shared endpoints present"
+   ```
+
+2. **Scenario 2: Datafeed-Only**
+
+   ```bash
+   # Generate spec with datafeed module only
+   ENABLED_MODULES=datafeed make export-openapi-spec
+   mv openapi.json openapi-datafeed.json
+
+   # Verify spec contains only datafeed and shared endpoints
+   grep -q "/api/v1/datafeed/config" openapi-datafeed.json && echo "✓ Datafeed endpoints present"
+   ! grep -q "/api/v1/broker/orders" openapi-datafeed.json && echo "✓ Broker endpoints absent"
+   grep -q "/api/v1/health" openapi-datafeed.json && echo "✓ Shared endpoints present"
+   ```
+
+3. **Scenario 3: Broker-Only**
+
+   ```bash
+   # Generate spec with broker module only
+   ENABLED_MODULES=broker make export-openapi-spec
+   mv openapi.json openapi-broker.json
+
+   # Verify spec contains only broker and shared endpoints
+   ! grep -q "/api/v1/datafeed/config" openapi-broker.json && echo "✓ Datafeed endpoints absent"
+   grep -q "/api/v1/broker/orders" openapi-broker.json && echo "✓ Broker endpoints present"
+   grep -q "/api/v1/health" openapi-broker.json && echo "✓ Shared endpoints present"
+   ```
+
+**Validation**:
+
+```bash
+# All scenarios should produce valid OpenAPI specs
+python -c "import json; json.load(open('openapi.json'))" && echo "✓ Full spec valid JSON"
+python -c "import json; json.load(open('openapi-datafeed.json'))" && echo "✓ Datafeed spec valid JSON"
+python -c "import json; json.load(open('openapi-broker.json'))" && echo "✓ Broker spec valid JSON"
+
+# Verify frontend client generation works with full spec
+cd ../frontend
+make generate-openapi-client
+make type-check  # Should pass
+
+# Cleanup
+cd ../backend
+rm -f openapi-datafeed.json openapi-broker.json
+```
+
+**Expected Outcome**: OpenAPI specs correctly reflect enabled modules, shared endpoints always present, module-specific endpoints only when enabled.
+
+---
+
+**Task 18: Test AsyncAPI Spec Generation with Module Configurations**
+
+**Objective**: Verify AsyncAPI spec generation works correctly with different module configurations (all modules, datafeed-only, broker-only)
+
+**Implementation**:
+
+1. **Scenario 1: Full Stack (All Modules)**
+
+   ```bash
+   # Generate spec with all modules enabled
+   cd backend
+   ENABLED_MODULES=all make export-asyncapi-spec
+
+   # Verify spec contains both datafeed and broker WS channels
+   grep -q '"bars"' asyncapi.json && echo "✓ Datafeed bars channel present"
+   grep -q '"quotes"' asyncapi.json && echo "✓ Datafeed quotes channel present"
+   grep -q '"orders"' asyncapi.json && echo "✓ Broker orders channel present"
+   grep -q '"positions"' asyncapi.json && echo "✓ Broker positions channel present"
+   grep -q '"executions"' asyncapi.json && echo "✓ Broker executions channel present"
+   ```
+
+2. **Scenario 2: Datafeed-Only**
+
+   ```bash
+   # Generate spec with datafeed module only
+   ENABLED_MODULES=datafeed make export-asyncapi-spec
+   mv asyncapi.json asyncapi-datafeed.json
+
+   # Verify spec contains only datafeed WS channels
+   grep -q '"bars"' asyncapi-datafeed.json && echo "✓ Datafeed bars channel present"
+   grep -q '"quotes"' asyncapi-datafeed.json && echo "✓ Datafeed quotes channel present"
+   ! grep -q '"orders"' asyncapi-datafeed.json && echo "✓ Broker orders channel absent"
+   ! grep -q '"positions"' asyncapi-datafeed.json && echo "✓ Broker positions channel absent"
+   ! grep -q '"executions"' asyncapi-datafeed.json && echo "✓ Broker executions channel absent"
+   ```
+
+3. **Scenario 3: Broker-Only**
+
+   ```bash
+   # Generate spec with broker module only
+   ENABLED_MODULES=broker make export-asyncapi-spec
+   mv asyncapi.json asyncapi-broker.json
+
+   # Verify spec contains only broker WS channels
+   ! grep -q '"bars"' asyncapi-broker.json && echo "✓ Datafeed bars channel absent"
+   ! grep -q '"quotes"' asyncapi-broker.json && echo "✓ Datafeed quotes channel absent"
+   grep -q '"orders"' asyncapi-broker.json && echo "✓ Broker orders channel present"
+   grep -q '"positions"' asyncapi-broker.json && echo "✓ Broker positions channel present"
+   grep -q '"executions"' asyncapi-broker.json && echo "✓ Broker executions channel present"
+   ```
+
+**Validation**:
+
+```bash
+# All scenarios should produce valid AsyncAPI specs
+python -c "import json; json.load(open('asyncapi.json'))" && echo "✓ Full spec valid JSON"
+python -c "import json; json.load(open('asyncapi-datafeed.json'))" && echo "✓ Datafeed spec valid JSON"
+python -c "import json; json.load(open('asyncapi-broker.json'))" && echo "✓ Broker spec valid JSON"
+
+# Verify frontend WS types generation works with full spec
+cd ../frontend
+make generate-asyncapi-types
+make type-check  # Should pass
+
+# Cleanup
+cd ../backend
+rm -f asyncapi-datafeed.json asyncapi-broker.json
+```
+
+**Expected Outcome**: AsyncAPI specs correctly reflect enabled modules, WS channels only included when their module is enabled.
+
+---
+
+### WebSocket Router Generation (Modular Architecture)
+
+**Overview**: After Phase 3 Task 12, the WS router generation mechanism will be refactored to support module-specific output directories.
+
+**New Structure**:
+
+```
+modules/
+├── datafeed/
+│   ├── ws.py              # TypeAlias declarations + DatafeedWsRouters class
+│   └── ws_generated/      # Auto-generated (BarWsRouter, QuoteWsRouter)
+│       ├── __init__.py
+│       ├── barwsrouter.py
+│       └── quotewsrouter.py
+└── broker/
+    ├── ws.py              # TypeAlias declarations + BrokerWsRouters class
+    └── ws_generated/      # Auto-generated (OrderWsRouter, etc.)
+        ├── __init__.py
+        ├── orderwsrouter.py
+        ├── positionwsrouter.py
+        └── ...
+
+shared/
+└── ws/
+    ├── router_interface.py  # WsRouterInterface, WsRouteService (shared)
+    └── generic_route.py     # WsRouter template (shared)
+```
+
+**How it works**:
+
+1. Developer writes TypeAlias in `modules/{module}/ws.py`:
+
+   ```python
+   if TYPE_CHECKING:
+       BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
+   else:
+       from .ws_generated import BarWsRouter
+   ```
+
+2. Run `make generate-ws-routers`:
+
+   - Scans all `modules/*/ws.py` files
+   - Finds TypeAlias patterns using regex
+   - Reads `shared/ws/generic_route.py` as template
+   - Generates concrete classes into `modules/{module}/ws_generated/`
+   - Applies all formatters and linters
+
+3. Module uses local imports:
+   ```python
+   class DatafeedWsRouters(list[WsRouterInterface]):
+       def __init__(self, datafeed_service: WsRouteService):
+           from .ws_generated import BarWsRouter, QuoteWsRouter  # Local!
+           bar_router = BarWsRouter(route="bars", service=datafeed_service)
+           super().__init__([bar_router, quote_router])
+   ```
+
+**Benefits**:
+
+- ✅ **Module ownership** - Each module owns its generated routers
+- ✅ **Clear isolation** - No centralized `shared/ws/generated/` directory
+- ✅ **Co-location** - Generated code lives with module that uses it
+- ✅ **Same workflow** - Developers still write TypeAlias and run `make generate-ws-routers`
+- ✅ **Independent testing** - Can regenerate one module without affecting others
+
+**Makefile commands** (unchanged from current):
+
+```bash
+make generate-ws-routers  # Generates all module routers
+```
+
+---
+
+### Phase 4: Switch Fixtures to Factory and Reorganize Tests
+
+**Task 19: Update Fixtures and Move Tests**
+
+**Prerequisite**: Phase 3 completed (all module files moved, spec generation tested)
 
 **Implementation**:
 
@@ -602,9 +1009,15 @@ make test-cov  # Coverage should match baseline
 
 **Risk**: 🟢 LOW (if Phase 0 completed correctly, this is a single function change)
 
-### Phase 7: Finalize main.py
+---
 
-**Implementation**: Main.py already updated in Phase 1-5, just validate:
+### Phase 5: Finalize and Validate
+
+**Task 20: Finalize main.py, Update Build System, and Full Verification**
+
+**Part 1: Finalize main.py**
+
+Main.py already updated in Phase 1-3, just validate:
 
 ```python
 # main.py structure after Phases 1-5:
@@ -637,13 +1050,13 @@ make export-asyncapi-spec  # Should work
 python -c "from trading_api.main import apiApp; print('✓')"  # Should print ✓
 ```
 
-### Phase 8: Build System
+**Part 2: Update Build System**
 
 - Add Makefile targets: `test-shared`, `test-datafeed`, `test-broker`, `test-integration`
 - Update WS generation script paths
 - Update CI workflow for parallel testing
 
-### Phase 9: Verification
+**Part 3: Full Verification and Documentation**
 
 - Run full test suite: `make test`
 - Verify module isolation: `make test-datafeed`, `make test-broker`
@@ -651,6 +1064,8 @@ python -c "from trading_api.main import apiApp; print('✓')"  # Should print �
 - Validate client generation (should be identical)
 - Update documentation
 - Remove old directories after validation
+
+---
 
 ## Testing Strategy
 
@@ -1114,17 +1529,26 @@ find tests -name 'test_*.py' -exec grep -l '^def test_' {} \; | wc -l  # Count t
 - **CI Improvement**: 3x faster (estimated ~20min → ~7min with parallel execution)
 - **Risk**: 🟡 MODERATE with Phase 0 (fixtures-first), 🔴 HIGH without Phase 0
 
-### Revised Timeline (with Phase 0)
+### Revised Timeline (with Consolidated Phases)
 
 - **Week 1**: Phase 0 (fixtures) + Phase 1 (infrastructure)
-- **Week 2**: Phase 2-3 (module classes + shared migration)
-- **Week 3**: Phase 4-5 (move module files)
-- **Week 4**: Phase 6-7 (switch fixtures to factory, finalize main.py)
-- **Week 5**: Phase 8-9 (build system + verification)
+- **Week 2**: Phase 2 (module classes)
+- **Week 3**: Phase 3 (move shared + move module files + verify ws generation + test spec generation)
+- **Week 4**: Phase 4 (switch fixtures to factory + reorganize tests)
+- **Week 5**: Phase 5 (finalize main.py + build system + verification)
 
 **Total Duration**: 5 weeks (safer approach with continuous testing)
 
-**Alternative (Big Bang)**: 3 weeks with tests broken during Phases 1-5 (higher risk)
+**Total Tasks**: 20 tasks
+
+- Phase 0: 2 tasks (fixtures infrastructure)
+- Phase 1: 4 tasks (core infrastructure)
+- Phase 2: 2 tasks (module classes)
+- Phase 3: 6 tasks (move files + verify generation + test specs)
+- Phase 4: 1 task (switch to factory)
+- Phase 5: 1 task (finalize + verify)
+
+**Key Additions**: Tasks 17-18 ensure spec generation works correctly with modular architecture across all deployment configurations (full, datafeed-only, broker-only).
 
 ### First Steps
 
