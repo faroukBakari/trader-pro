@@ -11,7 +11,7 @@
 > - Move next task to "In Progress"
 > - Commit the updated MODULAR_BACKEND_IMPL.md with task changes
 
-### ✅ Completed (24/28 tasks)
+### ✅ Completed (25/28 tasks)
 
 1. **Pre-Migration Validation** ✅ - Completed 2025-10-29
 
@@ -288,6 +288,18 @@
     - Type checking passes (mypy: no issues found in 61 source files)
     - Committed: 3112cd7
 
+25. **Phase 5: Add generic module-aware Makefile targets** ✅ - Completed 2025-10-30
+
+    - Implemented dynamic module discovery with SELECTED_MODULES variable
+    - Added `modules` parameter support for selective testing
+    - Updated `test-modules` and `test-cov-modules` to support module selection
+    - Default behavior: test all discovered modules when no modules parameter
+    - Usage: `make test-modules modules=broker,datafeed`
+    - Zero configuration for new modules (auto-discovered)
+    - Updated help text to document modules parameter
+    - All 70 tests passing (boundaries + shared + modules + integration)
+    - Committed: 42b1f3a
+
 ### 🔄 In Progress (0/28 tasks)
 
 **Phase 4: Complete** ✅
@@ -298,7 +310,7 @@
 - Phase 5: Tasks 25-27 - Generic Makefile targets, CI/CD, pre-commit hooks
 - Phase 6: Task 28 - Final validation and documentation update
 
-### 📋 Pending (4/28 tasks)
+### 📋 Pending (3/28 tasks)
 
 **Phase 0 (Complete):**
 
@@ -328,7 +340,7 @@
 - [x] Task 22: Remove legacy directories and backward compatibility (Completed: 2025-10-29)
 - [x] Task 23: Create integration test suite for multi-module scenarios (Completed: 2025-10-29)
 - [x] Task 24: Implement import boundary enforcement test (Completed: 2025-10-29)
-- [ ] Task 25: Add generic module-aware Makefile targets
+- [x] Task 25: Add generic module-aware Makefile targets (Completed: 2025-10-30)
 - [ ] Task 26: Update CI/CD workflow for generic parallel module-aware testing
 - [ ] Task 27: Update pre-commit hooks for module validation
 
