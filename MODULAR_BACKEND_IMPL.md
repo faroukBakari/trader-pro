@@ -1,17 +1,17 @@
 # Modular Backend Implementation Plan
 
-**Status**: In Progress - Phase 3 | **Created**: 2025-10-28 | **Updated**: 2025-10-29
+**Status**: In Progress - Phase 5 | **Created**: 2025-10-28 | **Updated**: 2025-10-29
 
 ## 🚀 Implementation Progress
 
 > **⚠️ CRITICAL**: Update this section at the end of EVERY individual task completion.
 >
 > - Move completed task from "In Progress" to "Completed" with date and commit hash
-> - Update task counters (X/20 tasks)
+> - Update task counters (X/28 tasks)
 > - Move next task to "In Progress"
 > - Commit the updated MODULAR_BACKEND_IMPL.md with task changes
 
-### ✅ Completed (20/28 tasks)
+### ✅ Completed (22/28 tasks)
 
 1. **Pre-Migration Validation** ✅ - Completed 2025-10-29
 
@@ -214,6 +214,7 @@
     - Committed: d63a76c
 
 20. **Phase 4: Update Fixtures and Move Tests** ✅ - Completed 2025-10-29
+
     - Created shared test factory in `shared/tests/conftest.py`
     - Created module-specific conftest files (broker, datafeed)
     - Updated modules to use consistent prefix pattern (`/{module.name}`)
@@ -236,17 +237,40 @@
     - Tests follow architectural constraints (no service access, factory pattern only)
     - Committed: b46afb8
 
+21. **Phase 5: Refactor main.py to use app_factory pattern** ✅ - Completed 2025-10-29
+
+    - Removed global service instances from main.py
+    - Switched to create_app() factory pattern
+    - Added ENABLED_MODULES environment variable support
+    - Reduced main.py from ~200 lines to ~30 lines
+    - Maintained backward compatibility for spec exports (app = apiApp)
+    - All 48 tests passing (48 passed in 2.36s)
+    - Type checking passes (mypy: no issues found in 61 source files)
+    - Spec generation unchanged (OpenAPI and AsyncAPI)
+
+22. **Phase 5: Remove legacy directories and backward compatibility** ✅ - Completed 2025-10-29
+    - Moved `ws/WS-ROUTER-GENERATION.md` → `shared/ws/WS-ROUTER-GENERATION.md`
+    - Removed `api/` directory (only backward compatibility re-exports)
+    - Removed `core/` directory (services moved to modules/)
+    - Removed `plugins/` directory (moved to shared/plugins/)
+    - Removed `ws/` directory (infrastructure moved to shared/ws/)
+    - Verified no legacy imports remain in codebase
+    - Clean modular structure achieved (models/, shared/, modules/)
+    - All 48 tests passing (48 passed in 2.36s)
+    - Type checking passes (mypy: no issues found in 61 source files)
+    - Spec generation unchanged
+
 ### 🔄 In Progress (0/28 tasks)
 
 **Phase 4: Complete** ✅
+**Phase 5: Tasks 21-22 Complete** ✅
 
 **Next Steps:**
 
-- Phase 5: Tasks 21-22 - Refactor main.py and remove legacy directories
 - Phase 5: Tasks 23-27 - Integration tests, import boundaries, Makefile targets, CI/CD, pre-commit hooks
 - Phase 6: Task 28 - Final validation and documentation update
 
-### 📋 Pending (8/28 tasks)
+### 📋 Pending (6/28 tasks)
 
 **Phase 0 (Complete):**
 
@@ -263,6 +287,15 @@
 **Phase 3 (Complete):**
 
 ✅ All Phase 3 tasks completed (Tasks 11-19)
+
+**Phase 4 (Complete):**
+
+✅ All Phase 4 tasks completed (Task 20)
+
+**Phase 5 (Partially Complete):**
+
+- [x] Task 21: Refactor main.py to use app_factory pattern (Completed: 2025-10-29)
+- [x] Task 22: Remove legacy directories and backward compatibility (Completed: 2025-10-29)
 
 **Phase 4 (Complete):**
 
