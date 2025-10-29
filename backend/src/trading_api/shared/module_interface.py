@@ -1,0 +1,72 @@
+"""Module Protocol - Contract for pluggable modules.
+
+Defines the interface that all modules (datafeed, broker, etc.) must implement
+to integrate with the application factory pattern.
+"""
+
+from typing import Any, Protocol
+
+from fastapi.routing import APIRouter
+
+
+class Module(Protocol):
+    """Protocol defining the interface for pluggable modules.
+
+    All modules must implement this interface to be registered and loaded
+    by the application factory.
+
+    Properties:
+        name: Unique identifier for the module (e.g., "datafeed", "broker")
+        enabled: Whether this module is currently enabled for loading
+        _enabled: Internal attribute for tracking enabled status (mutable)
+
+    Methods:
+        get_api_routers: Returns list of FastAPI routers for REST API endpoints
+        get_ws_routers: Returns list of WebSocket routers for real-time endpoints
+        configure_app: Optional configuration hook for custom app setup
+    """
+
+    _enabled: bool  # Internal attribute for enabled status
+
+    @property
+    def name(self) -> str:
+        """Return the unique name identifier for this module.
+
+        Returns:
+            str: Module name (e.g., "datafeed", "broker")
+        """
+        ...
+
+    @property
+    def enabled(self) -> bool:
+        """Check if this module is enabled for loading.
+
+        Returns:
+            bool: True if module should be loaded, False otherwise
+        """
+        ...
+
+    def get_api_routers(self) -> list[APIRouter]:
+        """Get all FastAPI routers for this module's REST API endpoints.
+
+        Returns:
+            list[APIRouter]: List of configured API routers
+        """
+        ...
+
+    def get_ws_routers(self) -> list[Any]:
+        """Get all WebSocket routers for this module's real-time endpoints.
+
+        Returns:
+            list[Any]: List of WebSocket router instances
+        """
+        ...
+
+    def configure_app(self, api_app: Any, ws_app: Any) -> None:
+        """Optional hook for custom application configuration.
+
+        Args:
+            api_app: FastAPI application instance
+            ws_app: FastWSAdapter WebSocket application instance
+        """
+        ...
