@@ -105,6 +105,7 @@
     - Added deprecation notice for old import path
     - All existing imports continue to work
     - No test changes required
+    - Committed: 112cf77
 
 12. **Phase 3: Refactor WS Router Generation** ✅ - Completed 2025-10-29
 
@@ -117,6 +118,7 @@
     - Fallback to legacy `ws/generated/` when no module ws.py files found
     - All 48 tests pass (48 passed in 0.37s)
     - Generation tested and working in legacy mode
+    - Committed: 112cf77
 
 13. **Phase 3: Move API Infrastructure to shared/api/** ✅ - Completed 2025-10-29
     - Created `shared/api/__init__.py` directory structure
@@ -126,9 +128,10 @@
     - Updated `shared/__init__.py` to export `HealthApi` and `VersionApi`
     - Updated `app_factory.py` to import and include shared API routers
     - Deleted old `api/health.py` and `api/versions.py` files
-    - All 48 tests pass (48 passed in 0.28s)
+    - All 48 tests pass (48 passed in 0.30s)
     - Type checking passes (mypy: no issues found in 56 source files)
     - Linting passes (black, isort, flake8 all green)
+    - Committed: 112cf77
 
 ### 🔄 In Progress (0/20 tasks)
 
