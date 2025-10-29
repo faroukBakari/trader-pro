@@ -4,7 +4,10 @@
 BACKEND_PORT ?= 8000
 FRONTEND_PORT ?= 5173
 
-.PHONY: help setup install install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack kill-dev test-all test-smoke lint-all format-all build-all clean-all clean-generated health test-integration generate-ws-routers generate-openapi-client generate-asyncapi-types
+# Module discovery
+BACKEND_MODULES = $(shell find backend/src/trading_api/modules -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -v __pycache__ || echo "")
+
+.PHONY: help setup install install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack kill-dev test-all test-backend-modules test-smoke lint-all format-all build-all clean-all clean-generated health test-integration generate-ws-routers generate-openapi-client generate-asyncapi-types
 
 # Default target
 help:
@@ -17,9 +20,14 @@ help:
 	@echo "  dev-frontend      Start frontend development server"
 	@echo "  dev-fullstack     Start backend, generate client, then start frontend"
 	@echo "  kill-dev          Stop all running development servers (frontend then backend)"
-	@echo "  test-all          Run all tests (auto-generates clients for frontend)"
-	@echo "  test-smoke        Run smoke tests with Playwright"
-	@echo "  test-integration  Run full integration test suite"
+	@echo ""
+	@echo "Testing targets:"
+	@echo "  test-all              Run all tests (backend + frontend)"
+	@echo "  test-backend-modules  Run all backend module tests"
+	@echo "  test-smoke            Run smoke tests with Playwright"
+	@echo "  test-integration      Run full integration test suite"
+	@echo ""
+	@echo "Other targets:"
 	@echo "  lint-all          Run all linters"
 	@echo "  format-all        Format all code"
 	@echo "  build-all         Build all projects"
@@ -41,6 +49,8 @@ help:
 	@echo ""
 	@echo "Frontend-specific targets:"
 	@echo "  make -C frontend help"
+	@echo ""
+	@echo "Discovered backend modules: $(BACKEND_MODULES)"
 
 # Git hooks management
 install-hooks:
@@ -118,7 +128,11 @@ kill-dev:
 	@echo "✅ All development servers stopped"
 
 # Testing
-test-all:
+test-backend-modules:
+	@echo "Running backend module tests..."
+	cd backend && $(MAKE) test-modules
+
+test-all: test-backend-modules
 	@echo "Running all tests..."
 	@echo ""
 	@echo "[1/2] Backend tests"

@@ -4,7 +4,19 @@
 BACKEND_PORT ?= 8000
 BACKEND_APP_NAME ?= app
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-boundaries test-cov test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
+# Dynamic module discovery
+MODULES_DIR = src/trading_api/modules
+DISCOVERED_MODULES = $(shell find $(MODULES_DIR) -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -v __pycache__ || echo "")
+
+# Module selection (can be overridden: make test modules=broker,datafeed)
+ifdef modules
+	SELECTED_MODULES = $(subst $(comma), ,$(modules))
+else
+	SELECTED_MODULES = $(DISCOVERED_MODULES)
+endif
+comma := ,
+
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -13,11 +25,23 @@ help:
 	@echo "  ensure-python-ci  Ensure Python 3.11+ is installed (CI mode, no prompts)"
 	@echo "  ensure-poetry     Ensure Poetry is installed (auto-installs if needed)"
 	@echo "  install           Install backend dependencies"
-	@echo "  test              Run backend tests (includes boundary validation)"
+	@echo ""
+	@echo "Testing targets:"
+	@echo "  test              Run all tests (boundaries + shared + modules + integration)"
 	@echo "  test-boundaries   Validate import boundaries between modules"
-	@echo "  test-cov          Run backend tests with coverage"
+	@echo "  test-shared       Run shared infrastructure tests"
+	@echo "  test-modules      Run all module tests (use modules=mod1,mod2 to select specific)"
 	@echo "  test-integration  Run integration tests"
 	@echo "  test-integration-verbose  Run integration tests with detailed output"
+	@echo "  test-cov          Run all tests with coverage"
+	@echo "  test-cov-modules  Run module tests with coverage (use modules=mod1,mod2)"
+	@echo ""
+	@echo "Module-specific test targets (auto-discovered):"
+	@for module in $(DISCOVERED_MODULES); do \
+		echo "  test-module-$$module"; \
+	done
+	@echo ""
+	@echo "Other targets:"
 	@echo "  lint              Run backend linting (check only)"
 	@echo "  lint-check        Run backend linting with type checking"
 	@echo "  format            Format backend code"
@@ -32,6 +56,8 @@ help:
 	@echo "  export-asyncapi-spec  Export AsyncAPI specification (offline)"
 	@echo "  docs-html         Generate static HTML documentation"
 	@echo "  generate-ws-routers Generate WebSocket router classes"
+	@echo ""
+	@echo "Discovered modules: $(DISCOVERED_MODULES)"
 
 # Ensure Python 3.11+ is available
 ensure-python:
@@ -200,13 +226,34 @@ test-boundaries:
 	@echo "Validating import boundaries..."
 	poetry run pytest tests/test_import_boundaries.py -v
 
-test: test-boundaries
-	@echo "Running backend tests..."
-	poetry run pytest -v -x
+test-shared:
+	@echo "Running shared infrastructure tests..."
+	poetry run pytest src/trading_api/shared/tests/ -v -x
 
-test-cov:
-	@echo "Running backend tests with coverage..."
-	poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
+test-modules:
+	@echo "Running module tests..."
+	@if [ -z "$(SELECTED_MODULES)" ]; then \
+		echo "⚠️  No modules selected or found"; \
+	else \
+		echo "Testing modules: $(SELECTED_MODULES)"; \
+		for module in $(SELECTED_MODULES); do \
+			if [ -d "$(MODULES_DIR)/$$module/tests" ]; then \
+				echo "Testing module: $$module"; \
+				poetry run pytest $(MODULES_DIR)/$$module/tests/ -v -x || exit 1; \
+			else \
+				echo "⚠️  No tests found for module: $$module"; \
+			fi; \
+		done; \
+	fi
+
+# Individual module tests (auto-generated targets)
+$(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
+	@echo "Running tests for module: $*..."
+	@if [ -d "$(MODULES_DIR)/$*/tests" ]; then \
+		poetry run pytest $(MODULES_DIR)/$*/tests/ -v -x; \
+	else \
+		echo "⚠️  No tests found for module: $*"; \
+	fi
 
 test-integration:
 	@echo "Running integration tests..."
@@ -215,6 +262,24 @@ test-integration:
 test-integration-verbose:
 	@echo "Running integration tests with detailed output..."
 	poetry run pytest tests/integration/ -v -s -m integration
+
+test: test-boundaries test-shared test-modules test-integration
+	@echo "✅ All tests passed (boundaries + shared + modules + integration)"
+
+# Coverage targets
+test-cov-modules:
+	@echo "Running module tests with coverage..."
+	@if [ -z "$(SELECTED_MODULES)" ]; then \
+		echo "⚠️  No modules selected or found"; \
+	else \
+		echo "Testing modules with coverage: $(SELECTED_MODULES)"; \
+		MODULE_PATHS=$$(for m in $(SELECTED_MODULES); do echo "$(MODULES_DIR)/$$m/tests"; done); \
+		poetry run pytest $$MODULE_PATHS --cov=trading_api.modules --cov-report=xml --cov-report=term-missing; \
+	fi
+
+test-cov: test-boundaries
+	@echo "Running all tests with coverage..."
+	poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
 
 # Linting and formatting
 lint:
