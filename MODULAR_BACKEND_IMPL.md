@@ -11,7 +11,7 @@
 > - Move next task to "In Progress"
 > - Commit the updated MODULAR_BACKEND_IMPL.md with task changes
 
-### ✅ Completed (15/21 tasks)
+### ✅ Completed (19/21 tasks)
 
 1. **Pre-Migration Validation** ✅ - Completed 2025-10-29
 
@@ -149,6 +149,7 @@
     - Committed: f8bbf4f
 
 15. **Phase 3: Move Broker Module Files** ✅ - Completed 2025-10-29
+
     - Moved `core/broker_service.py` → `modules/broker/service.py`
     - Moved `api/broker.py` → `modules/broker/api.py`
     - Moved `ws/broker.py` → `modules/broker/ws.py`
@@ -162,15 +163,65 @@
     - Linting passes (black, isort, flake8 all green)
     - Committed: f8bbf4f
 
-### 🔄 In Progress (0/20 tasks)
+16. **Phase 3: Clean Up Legacy Source Files** ✅ - Completed 2025-10-29
 
-**Phase 3: Move Shared and Module Infrastructure** - Complete
+    - Removed `plugins/fastws_adapter.py` (duplicate of `shared/plugins/fastws_adapter.py`)
+    - Removed centralized `ws/generated/` directory (now in `modules/*/ws_generated/`)
+    - Removed `ws/generic_route.py` (duplicate of `shared/ws/generic_route.py`)
+    - Removed `ws/router_interface.py` (duplicate of `shared/ws/router_interface.py`)
+    - Kept backward compatibility `__init__.py` files in `api/`, `core/`, `plugins/`, `ws/`
+    - Fixed `main.py` import to use backward compat path (`from .plugins import FastWSAdapter`)
+    - All 48 tests pass (48 passed in 0.27s)
+    - Type checking passes (mypy: no issues found in 54 source files)
+    - Linting passes (black, isort, flake8 all green)
+    - Committed: d63a76c
+
+17. **Phase 3: Verify WS Router Generation** ✅ - Completed 2025-10-29
+
+    - Verified `make generate-ws-routers` works correctly with modular architecture
+    - All 7 routers generated in module-specific directories:
+      - `modules/datafeed/ws_generated/`: 2 routers (bars, quotes)
+      - `modules/broker/ws_generated/`: 5 routers (orders, positions, executions, equity, broker_connection)
+    - Centralized `ws/generated/` directory removed (verified)
+    - Router verification script detects modular architecture correctly
+    - All 48 tests pass (48 passed in 0.33s)
+    - Type checking passes (mypy: no issues found in 54 source files)
+    - Committed: d63a76c
+
+18. **Phase 3: Test OpenAPI Spec Generation** ✅ - Completed 2025-10-29
+
+    - Verified full-stack OpenAPI spec generation works
+    - Spec contains all expected endpoints:
+      - Datafeed endpoints: `/api/v1/datafeed/config`
+      - Broker endpoints: `/api/v1/broker/orders`
+      - Shared endpoints: `/api/v1/health`, `/api/v1/versions`
+    - Valid JSON with 21 paths
+    - Frontend client generation works correctly
+    - Frontend type checking passes
+    - **Note**: Module-specific configurations (datafeed-only, broker-only) require `main.py` factory update (Task 21)
+    - Committed: d63a76c
+
+19. **Phase 3: Test AsyncAPI Spec Generation** ✅ - Completed 2025-10-29
+    - Verified full-stack AsyncAPI spec generation works
+    - Spec contains all 7 expected routers:
+      - Datafeed: `bars`, `quotes`
+      - Broker: `orders`, `positions`, `executions`, `equity`, `broker-connection`
+    - Valid JSON with 35 message types
+    - Frontend WS types generation works (23 interfaces)
+    - Frontend type checking passes
+    - **Note**: Module-specific configurations require `main.py` factory update (Task 21)
+    - Committed: d63a76c
+
+### 🔄 In Progress (0/21 tasks)
+
+**Phase 3: Move Shared and Module Infrastructure** - Complete ✅
 
 **Next Steps:**
 
-- Start Task 16: Clean up legacy source files and folders
+- Phase 4: Task 20 - Update fixtures to use factory and move tests to module directories
+- Phase 5: Task 21 - Finalize main.py, update build system, full verification
 
-### 📋 Pending (6/21 tasks)
+### 📋 Pending (6/25 tasks)
 
 **Phase 0 (Complete):**
 
@@ -184,25 +235,24 @@
 
 ✅ All Phase 2 tasks completed
 
-**Phase 3 (Move Shared and Module Infrastructure):**
+**Phase 3 (Complete):**
 
-- [x] Task 11: Move plugins to shared/plugins/ ✅ **COMPLETED** (Committed: 112cf77)
-- [x] Task 12: Refactor WS router generation for modular architecture ✅ **COMPLETED** (Committed: 112cf77)
-- [x] Task 13: Move api (health, versions) to shared/api/ ✅ **COMPLETED** (Committed: 112cf77)
-- [x] Task 14: Move datafeed module files (service, api, ws) ✅ **COMPLETED** (Committed: f8bbf4f)
-- [x] Task 15: Move broker module files (service, api, ws) ✅ **COMPLETED** (Committed: f8bbf4f)
-- [ ] Task 16: Clean up legacy source files and folders
-- [ ] Task 17: Verify WS router generation for modules
-- [ ] Task 18: Test OpenAPI spec generation with module configurations
-- [ ] Task 19: Test AsyncAPI spec generation with module configurations
+✅ All Phase 3 tasks completed (Tasks 11-19)
 
 **Phase 4 (Switch to Factory):**
 
 - [ ] Task 20: Update fixtures to use factory and move tests to module directories
 
-**Phase 5-7 (Finalize):**
+**Phase 5 (Enforce Boundaries & Build System):**
 
-- [ ] Task 21: Finalize and validate main.py, update build system and CI, full verification and documentation
+- [ ] Task 21: Implement import boundary enforcement test
+- [ ] Task 22: Add generic module-aware Makefile targets
+- [ ] Task 23: Update CI/CD workflow for parallel module testing
+- [ ] Task 24: Update pre-commit hooks for module validation
+
+**Phase 6 (Finalize):**
+
+- [ ] Task 25: Final validation and documentation update
 
 ---
 
@@ -1160,13 +1210,720 @@ make generate-ws-routers  # Generates all module routers
 
 ---
 
-### Phase 5: Finalize and Validate
+### Phase 5: Enforce Boundaries & Build System
 
-**Task 21: Finalize main.py, Update Build System, and Full Verification**
+**Task 21: Implement Import Boundary Enforcement**
 
-**Part 1: Finalize main.py**
+**Objective**: Create automated validation to enforce module dependency rules and prevent cross-module imports
 
-Main.py already updated in Phase 1-3, just validate:
+**Implementation**:
+
+1. **Create boundary test file** (`backend/tests/test_import_boundaries.py`):
+
+   ```python
+   """Test to enforce import boundaries between modules."""
+   import ast
+   from pathlib import Path
+   from typing import List, Set
+   import fnmatch
+
+   import pytest
+
+   # Generic rules - no hardcoded module names
+   BOUNDARY_RULES = {
+       "modules/*": {
+           "allowed_patterns": ["trading_api.models.*", "trading_api.shared.*"],
+           "forbidden_patterns": ["trading_api.modules.*"],  # Block ALL cross-module imports
+           "description": "Modules can import from models and shared, but not from other modules"
+       },
+       "shared/*": {
+           "allowed_patterns": ["trading_api.models.*"],
+           "forbidden_patterns": ["trading_api.modules.*"],
+           "description": "Shared code can only import from models, not from modules"
+       },
+       "models/*": {
+           "allowed_patterns": [],
+           "forbidden_patterns": ["trading_api.*"],
+           "description": "Models are pure data - no trading_api imports allowed"
+       },
+   }
+
+   def get_imports_from_file(file_path: Path) -> Set[str]:
+       """Extract all imports from a Python file using AST parsing."""
+       try:
+           with open(file_path, 'r') as f:
+               tree = ast.parse(f.read(), filename=str(file_path))
+       except SyntaxError:
+           return set()
+
+       imports = set()
+       for node in ast.walk(tree):
+           if isinstance(node, ast.Import):
+               for alias in node.names:
+                   imports.add(alias.name)
+           elif isinstance(node, ast.ImportFrom):
+               if node.module:
+                   imports.add(node.module)
+
+       return imports
+
+   def matches_pattern(path: str, pattern: str) -> bool:
+       """Check if path matches glob pattern."""
+       return fnmatch.fnmatch(path, pattern)
+
+   def get_applicable_rule(relative_path: str) -> dict | None:
+       """Get the boundary rule applicable to this file path."""
+       for pattern, rule in BOUNDARY_RULES.items():
+           if matches_pattern(relative_path, pattern):
+               return rule
+       return None
+
+   def validate_import(import_name: str, allowed: List[str], forbidden: List[str]) -> bool:
+       """Check if import violates boundary rules."""
+       # Check forbidden patterns first
+       for pattern in forbidden:
+           # Convert glob pattern to match import paths
+           import_pattern = pattern.replace(".", r"\.").replace("*", ".*")
+           if fnmatch.fnmatch(import_name, pattern) or \
+              any(import_name.startswith(pattern.replace("*", part))
+                  for part in ["", "modules", "shared", "models"]):
+               return False
+
+       # If no allowed patterns specified, allow all (except forbidden)
+       if not allowed:
+           return True
+
+       # Check if matches any allowed pattern
+       for pattern in allowed:
+           if fnmatch.fnmatch(import_name, pattern):
+               return True
+
+       return False
+
+   def test_import_boundaries():
+       """Validate import boundaries across all modules."""
+       src_dir = Path(__file__).parent.parent / "src" / "trading_api"
+       violations = []
+
+       for py_file in src_dir.rglob("*.py"):
+           if "__pycache__" in str(py_file) or "generated" in str(py_file):
+               continue
+
+           relative_path = str(py_file.relative_to(src_dir))
+           rule = get_applicable_rule(relative_path)
+
+           if not rule:
+               continue  # No rule applies to this file
+
+           imports = get_imports_from_file(py_file)
+
+           for import_name in imports:
+               if not import_name.startswith("trading_api."):
+                   continue  # Only validate internal imports
+
+               is_valid = validate_import(
+                   import_name,
+                   rule["allowed_patterns"],
+                   rule["forbidden_patterns"]
+               )
+
+               if not is_valid:
+                   violations.append({
+                       "file": relative_path,
+                       "import": import_name,
+                       "rule": rule["description"]
+                   })
+
+       if violations:
+           error_msg = "\n\n❌ Import Boundary Violations Found:\n\n"
+           for v in violations:
+               error_msg += f"  File: {v['file']}\n"
+               error_msg += f"  Forbidden import: {v['import']}\n"
+               error_msg += f"  Rule: {v['rule']}\n\n"
+
+           pytest.fail(error_msg)
+
+   def test_module_discovery():
+       """Verify boundary rules work for any module (future-proof)."""
+       src_dir = Path(__file__).parent.parent / "src" / "trading_api"
+       modules_dir = src_dir / "modules"
+
+       if not modules_dir.exists():
+           pytest.skip("Modules directory does not exist yet")
+
+       discovered_modules = [
+           d.name for d in modules_dir.iterdir()
+           if d.is_dir() and not d.name.startswith("_")
+       ]
+
+       assert len(discovered_modules) > 0, "No modules discovered"
+
+       # Verify rules apply to all discovered modules
+       for module_name in discovered_modules:
+           test_path = f"modules/{module_name}/service.py"
+           rule = get_applicable_rule(test_path)
+           assert rule is not None, f"No boundary rule applies to modules/{module_name}/"
+           assert "trading_api.modules.*" in rule["forbidden_patterns"], \
+               f"Module {module_name} should have cross-module import restrictions"
+   ```
+
+2. **Add Makefile target**:
+
+   ```makefile
+   # Add to backend/Makefile
+   test-boundaries:
+   	@echo "Validating import boundaries..."
+   	poetry run pytest tests/test_import_boundaries.py -v
+
+   test: test-boundaries
+   	@echo "Running all backend tests (including boundary validation)..."
+   	poetry run pytest -v -x
+   ```
+
+3. **Integrate into pre-commit**:
+
+   ```yaml
+   # Add to .githooks/pre-commit or .pre-commit-config.yaml
+   - repo: local
+     hooks:
+       - id: test-boundaries
+         name: Validate Import Boundaries
+         entry: make -C backend test-boundaries
+         language: system
+         pass_filenames: false
+         files: ^backend/src/trading_api/.*\.py$
+   ```
+
+**Validation**:
+
+```bash
+# Test boundary enforcement
+cd backend
+make test-boundaries  # Should pass with current structure
+
+# Test violation detection (manual test)
+echo "from trading_api.modules.datafeed import DatafeedService" >> src/trading_api/modules/broker/service.py
+make test-boundaries  # Should fail with clear error message
+git checkout src/trading_api/modules/broker/service.py  # Revert test
+```
+
+**Expected Outcome**:
+
+- AST-based import scanner working
+- Generic rules that auto-apply to new modules
+- Clear error messages with file paths
+- Integrated into test suite and CI
+
+**Commit Message**:
+
+```
+feat: Phase 5 Task 21 - Implement import boundary enforcement
+
+- Create test_import_boundaries.py with AST-based import scanner
+- Add generic pattern-based boundary rules
+- Add make test-boundaries target
+- Integrate with pre-commit hooks
+- Zero configuration for new modules
+```
+
+---
+
+**Task 22: Add Generic Module-Aware Makefile Targets**
+
+**Objective**: Create sustainable Makefile targets that auto-discover modules and work regardless of module additions/removals
+
+**Implementation**:
+
+1. **Update backend/Makefile with generic targets**:
+
+   ```makefile
+   # Dynamic module discovery
+   MODULES_DIR = src/trading_api/modules
+   DISCOVERED_MODULES = $(shell find $(MODULES_DIR) -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null || echo "")
+
+   # Test targets - Generic and sustainable
+   test-boundaries:
+   	@echo "Validating import boundaries..."
+   	poetry run pytest tests/test_import_boundaries.py -v
+
+   test-shared:
+   	@echo "Running shared infrastructure tests..."
+   	poetry run pytest src/trading_api/shared/tests/ -v -x
+
+   test-modules:
+   	@echo "Running all module tests..."
+   	@if [ -d "$(MODULES_DIR)" ]; then \
+   		for module in $(DISCOVERED_MODULES); do \
+   			if [ -d "$(MODULES_DIR)/$$module/tests" ]; then \
+   				echo "Testing module: $$module"; \
+   				poetry run pytest $(MODULES_DIR)/$$module/tests/ -v -x || exit 1; \
+   			fi; \
+   		done; \
+   	else \
+   		echo "⚠️  Modules directory not found, skipping module tests"; \
+   	fi
+
+   # Individual module tests (auto-generated targets)
+   .PHONY: $(addprefix test-module-, $(DISCOVERED_MODULES))
+   $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
+   	@echo "Running tests for module: $*..."
+   	@if [ -d "$(MODULES_DIR)/$*/tests" ]; then \
+   		poetry run pytest $(MODULES_DIR)/$*/tests/ -v -x; \
+   	else \
+   		echo "⚠️  No tests found for module: $*"; \
+   	fi
+
+   test-integration:
+   	@echo "Running integration tests..."
+   	@if [ -d "tests/integration" ]; then \
+   		poetry run pytest tests/integration/ -v -x; \
+   	else \
+   		echo "⚠️  No integration tests found"; \
+   	fi
+
+   test: test-boundaries test-shared test-modules test-integration
+   	@echo "✅ All tests passed (boundaries + shared + modules + integration)"
+
+   # Coverage targets
+   test-cov-modules:
+   	@echo "Running module tests with coverage..."
+   	@if [ -d "$(MODULES_DIR)" ]; then \
+   		poetry run pytest $(MODULES_DIR)/*/tests/ --cov=trading_api.modules --cov-report=xml --cov-report=term-missing; \
+   	fi
+
+   test-cov: test-boundaries
+   	@echo "Running all tests with coverage..."
+   	poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
+
+   # Help target - show all available modules
+   help:
+   	@echo "Backend targets:"
+   	@echo "  test                  Run all tests (boundaries + shared + modules + integration)"
+   	@echo "  test-boundaries       Validate import boundaries"
+   	@echo "  test-shared           Run shared infrastructure tests"
+   	@echo "  test-modules          Run all module tests"
+   	@echo "  test-integration      Run integration tests"
+   	@echo "  test-cov              Run all tests with coverage"
+   	@echo ""
+   	@echo "Module-specific test targets (auto-discovered):"
+   	@for module in $(DISCOVERED_MODULES); do \
+   		echo "  test-module-$$module"; \
+   	done
+   	@echo ""
+   	@echo "Discovered modules: $(DISCOVERED_MODULES)"
+   ```
+
+2. **Update root project.mk with module-aware targets**:
+
+   ```makefile
+   # Add to project.mk
+
+   # Module discovery
+   BACKEND_MODULES = $(shell find backend/src/trading_api/modules -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null || echo "")
+
+   test-backend-modules:
+   	@echo "Running backend module tests..."
+   	cd backend && $(MAKE) test-modules
+
+   test-all: test-backend-modules
+   	@echo "Running all project tests..."
+   	cd backend && $(MAKE) test
+   	cd frontend && $(MAKE) test
+
+   help:
+   	@echo "Project-level targets:"
+   	@echo "  test-all              Run all tests (backend + frontend)"
+   	@echo "  test-backend-modules  Run all backend module tests"
+   	@echo ""
+   	@echo "Backend modules: $(BACKEND_MODULES)"
+   ```
+
+**Validation**:
+
+```bash
+# Verify module discovery
+cd backend
+make help  # Should show discovered modules
+
+# Test individual module
+make test-module-datafeed  # Should run only datafeed tests
+make test-module-broker    # Should run only broker tests
+
+# Test all modules
+make test-modules  # Should run all module tests
+
+# Verify sustainability - add a new module directory
+mkdir -p src/trading_api/modules/new_module/tests
+touch src/trading_api/modules/new_module/tests/__init__.py
+make help  # Should now show test-module-new_module
+rm -rf src/trading_api/modules/new_module  # Cleanup
+```
+
+**Expected Outcome**:
+
+- Makefile targets auto-discover modules
+- No hardcoded module names
+- Works with any number of modules
+- Clear help output showing available targets
+
+**Commit Message**:
+
+```
+feat: Phase 5 Task 22 - Add generic module-aware Makefile targets
+
+- Implement dynamic module discovery in Makefile
+- Add test-shared, test-modules, test-integration targets
+- Generate module-specific test targets automatically
+- Update help to show discovered modules
+- Zero configuration for new modules
+```
+
+---
+
+**Task 23: Update CI/CD Workflow for Parallel Module Testing**
+
+**Objective**: Configure GitHub Actions to run module tests in parallel and enforce import boundaries
+
+**Implementation**:
+
+1. **Create new CI workflow** (`.github/workflows/ci.yml`):
+
+   ```yaml
+   name: CI
+
+   on:
+     push:
+       branches: ["*"]
+     pull_request:
+       branches: [main]
+
+   env:
+     BACKEND_PORT: 8000
+     FRONTEND_PORT: 5173
+     VITE_API_URL: http://localhost:8000
+     FRONTEND_URL: http://localhost:5173
+
+   jobs:
+     # Discover modules dynamically
+     discover-modules:
+       runs-on: ubuntu-latest
+       outputs:
+         modules: ${{ steps.find-modules.outputs.modules }}
+       steps:
+         - uses: actions/checkout@v4
+         - id: find-modules
+           run: |
+             if [ -d "backend/src/trading_api/modules" ]; then
+               MODULES=$(ls -1 backend/src/trading_api/modules | jq -R -s -c 'split("\n")[:-1]')
+             else
+               MODULES='[]'
+             fi
+             echo "modules=$MODULES" >> $GITHUB_OUTPUT
+             echo "Discovered modules: $MODULES"
+
+     # Import boundary validation (fast, runs first)
+     validate-boundaries:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v4
+         - uses: actions/setup-python@v4
+           with:
+             python-version: "3.11"
+         - name: Install Poetry
+           uses: snok/install-poetry@v1
+         - name: Install dependencies
+           working-directory: backend
+           run: make install-ci
+         - name: Validate import boundaries
+           working-directory: backend
+           run: make test-boundaries
+
+     # Shared infrastructure tests
+     test-shared:
+       runs-on: ubuntu-latest
+       needs: [validate-boundaries]
+       steps:
+         - uses: actions/checkout@v4
+         - uses: actions/setup-python@v4
+           with:
+             python-version: "3.11"
+         - name: Install Poetry
+           uses: snok/install-poetry@v1
+         - name: Install dependencies
+           working-directory: backend
+           run: make install-ci
+         - name: Generate WebSocket routers
+           working-directory: backend
+           run: make generate-ws-routers
+         - name: Run shared tests
+           working-directory: backend
+           run: make test-shared
+
+     # Module tests (parallel matrix)
+     test-modules:
+       runs-on: ubuntu-latest
+       needs: [discover-modules, validate-boundaries]
+       if: needs.discover-modules.outputs.modules != '[]'
+       strategy:
+         matrix:
+           module: ${{fromJson(needs.discover-modules.outputs.modules)}}
+       steps:
+         - uses: actions/checkout@v4
+         - uses: actions/setup-python@v4
+           with:
+             python-version: "3.11"
+         - name: Install Poetry
+           uses: snok/install-poetry@v1
+         - name: Install dependencies
+           working-directory: backend
+           run: make install-ci
+         - name: Generate WebSocket routers
+           working-directory: backend
+           run: make generate-ws-routers
+         - name: Run ${{ matrix.module }} module tests
+           working-directory: backend
+           run: make test-module-${{ matrix.module }}
+
+     # Integration tests
+     test-integration:
+       runs-on: ubuntu-latest
+       needs: [test-shared, test-modules]
+       steps:
+         - uses: actions/checkout@v4
+         - uses: actions/setup-python@v4
+           with:
+             python-version: "3.11"
+         - name: Install Poetry
+           uses: snok/install-poetry@v1
+         - name: Install dependencies
+           working-directory: backend
+           run: make install-ci
+         - name: Generate WebSocket routers
+           working-directory: backend
+           run: make generate-ws-routers
+         - name: Run integration tests
+           working-directory: backend
+           run: make test-integration
+
+     # Backend lint and type check
+     backend-quality:
+       runs-on: ubuntu-latest
+       needs: [validate-boundaries]
+       steps:
+         - uses: actions/checkout@v4
+         - uses: actions/setup-python@v4
+           with:
+             python-version: "3.11"
+         - name: Install Poetry
+           uses: snok/install-poetry@v1
+         - name: Install dependencies
+           working-directory: backend
+           run: make install-ci
+         - name: Run linting
+           working-directory: backend
+           run: make lint-check
+
+     # Frontend (unchanged but depends on backend validation)
+     frontend:
+       runs-on: ubuntu-latest
+       needs: [validate-boundaries]
+       # ... (rest of frontend job unchanged)
+
+     # Full integration (unchanged)
+     integration:
+       runs-on: ubuntu-latest
+       needs: [test-integration, frontend]
+       # ... (rest of integration job unchanged)
+   ```
+
+**Validation**:
+
+```bash
+# Test CI workflow locally (using act or manual validation)
+# Verify job dependencies are correct
+# Ensure parallel execution works
+
+# Check workflow file
+yamllint .github/workflows/ci.yml
+```
+
+**Expected Outcome**:
+
+- Dynamic module discovery in CI
+- Parallel module testing (faster CI)
+- Import boundary validation runs first (fail fast)
+- Module-agnostic workflow (works with new modules)
+
+**Commit Message**:
+
+```
+feat: Phase 5 Task 23 - Update CI/CD for parallel module testing
+
+- Add dynamic module discovery job
+- Implement parallel module test matrix
+- Add import boundary validation job (fail fast)
+- Separate shared, module, and integration test jobs
+- Module-agnostic workflow configuration
+```
+
+---
+
+**Task 24: Update Pre-commit Hooks for Module Validation**
+
+**Objective**: Enforce module boundaries and standards at commit time
+
+**Implementation**:
+
+1. **Update .githooks/pre-commit**:
+
+   ```bash
+   #!/bin/bash
+   # Pre-commit hook for TraderPRO
+
+   set -e
+
+   echo "🔍 Running pre-commit checks..."
+
+   # Check if we're in the repository root
+   if [ ! -f "project.mk" ]; then
+       echo "❌ Error: Must be run from repository root"
+       exit 1
+   fi
+
+   # Get list of changed Python files in backend
+   CHANGED_PY_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^backend/src/trading_api/.*\.py$' || true)
+
+   if [ -n "$CHANGED_PY_FILES" ]; then
+       echo "📝 Python files changed, running backend checks..."
+
+       # Import boundary validation (fast check first)
+       echo "  🔒 Validating import boundaries..."
+       cd backend
+       if ! make test-boundaries > /dev/null 2>&1; then
+           echo "❌ Import boundary violations detected!"
+           make test-boundaries  # Show detailed errors
+           exit 1
+       fi
+       echo "  ✅ Import boundaries valid"
+
+       # Format check
+       echo "  🎨 Checking code formatting..."
+       if ! poetry run black --check $CHANGED_PY_FILES > /dev/null 2>&1; then
+           echo "❌ Code formatting issues detected. Run: make format"
+           exit 1
+       fi
+       echo "  ✅ Code formatting valid"
+
+       # Import sorting
+       echo "  📚 Checking import sorting..."
+       if ! poetry run isort --check-only $CHANGED_PY_FILES > /dev/null 2>&1; then
+           echo "❌ Import sorting issues detected. Run: make format"
+           exit 1
+       fi
+       echo "  ✅ Import sorting valid"
+
+       cd ..
+   fi
+
+   # Get list of changed TypeScript files in frontend
+   CHANGED_TS_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '^frontend/src/.*\.ts$' || true)
+
+   if [ -n "$CHANGED_TS_FILES" ]; then
+       echo "📝 TypeScript files changed, running frontend checks..."
+       cd frontend
+
+       # Type checking
+       echo "  🔍 Running type check..."
+       if ! make type-check > /dev/null 2>&1; then
+           echo "❌ Type checking failed!"
+           make type-check
+           exit 1
+       fi
+       echo "  ✅ Type checking passed"
+
+       cd ..
+   fi
+
+   echo "✅ All pre-commit checks passed!"
+   ```
+
+2. **Make hook executable and install**:
+
+   ```bash
+   chmod +x .githooks/pre-commit
+   git config core.hooksPath .githooks
+   ```
+
+3. **Update HOOKS-SETUP.md**:
+
+   ```markdown
+   ## Pre-commit Hook Features
+
+   - **Import Boundary Validation**: Prevents cross-module imports
+   - **Code Formatting**: Ensures consistent Python/TypeScript style
+   - **Type Checking**: Validates TypeScript types
+   - **Fast Execution**: Only checks changed files
+   - **Clear Error Messages**: Shows exactly what needs fixing
+
+   ## Module-Aware Validation
+
+   The pre-commit hook automatically:
+
+   - Detects which modules were modified
+   - Validates import boundaries for those modules
+   - Works with any number of modules (future-proof)
+   ```
+
+**Validation**:
+
+```bash
+# Test pre-commit hook
+cd backend
+echo "from trading_api.modules.datafeed import DatafeedService" >> src/trading_api/modules/broker/service.py
+git add src/trading_api/modules/broker/service.py
+git commit -m "test: boundary violation"  # Should fail
+git checkout src/trading_api/modules/broker/service.py  # Revert
+
+# Test with valid change
+echo "# comment" >> src/trading_api/modules/broker/service.py
+git add src/trading_api/modules/broker/service.py
+git commit -m "test: valid change"  # Should pass
+git reset HEAD~1  # Undo commit
+git checkout src/trading_api/modules/broker/service.py  # Revert
+```
+
+**Expected Outcome**:
+
+- Pre-commit validates import boundaries
+- Fast execution (only changed files)
+- Clear error messages
+- Works with any modules
+
+**Commit Message**:
+
+```
+feat: Phase 5 Task 24 - Update pre-commit hooks for module validation
+
+- Add import boundary validation to pre-commit
+- Check only changed Python files (performance)
+- Add clear error messages with fix instructions
+- Update HOOKS-SETUP.md documentation
+- Module-agnostic hook implementation
+```
+
+---
+
+### Phase 6: Final Validation and Documentation
+
+---
+
+### Phase 6: Final Validation and Documentation
+
+**Task 25: Final Validation and Documentation Update**
+
+**Objective**: Comprehensive validation of the modular architecture and complete documentation update
+
+**Part 1: Validate main.py Factory Integration**
 
 ```python
 # main.py structure after Phases 1-5:
@@ -1191,7 +1948,13 @@ async def websocket_endpoint(client: Annotated[Client, Depends(wsApp.manage)]):
 app = apiApp  # ✅ CRITICAL: Required for spec export scripts
 ```
 
-**Validation**:
+```bash
+make export-openapi-spec  # Should work (uses app export)
+make export-asyncapi-spec  # Should work
+python -c "from trading_api.main import apiApp; print('✓')"  # Should print ✓
+```
+
+**Part 2: Comprehensive Testing**
 
 ```bash
 make export-openapi-spec  # Should work (uses app export)
@@ -1199,23 +1962,221 @@ make export-asyncapi-spec  # Should work
 python -c "from trading_api.main import apiApp; print('✓')"  # Should print ✓
 ```
 
-**Part 2: Update Build System**
+**Part 2: Comprehensive Testing**
 
-- Add Makefile targets: `test-shared`, `test-datafeed`, `test-broker`, `test-integration`
-- Update WS generation script paths
-- Update CI workflow for parallel testing
+```bash
+# Run full test suite
+cd backend
+make test  # Should run: boundaries + shared + modules + integration
 
-**Part 3: Full Verification**
+# Verify module isolation
+make test-module-datafeed  # Datafeed tests only
+make test-module-broker    # Broker tests only
+make test-shared           # Shared tests only
+make test-integration      # Integration tests
 
-- Run full test suite: `make test`
-- Verify module isolation: `make test-datafeed`, `make test-broker`
-- Test deployments: datafeed-only, broker-only, full-stack
-- Validate client generation (should be identical)
-- Remove old directories after validation
+# Test module-specific deployments
+ENABLED_MODULES=datafeed make dev  # Start datafeed-only server
+curl http://localhost:8000/api/v1/datafeed/config  # ✅ Should work
+curl http://localhost:8000/api/v1/broker/orders     # ❌ Should 404
+make kill-dev
+
+ENABLED_MODULES=broker make dev  # Start broker-only server
+curl http://localhost:8000/api/v1/broker/orders      # ✅ Should work
+curl http://localhost:8000/api/v1/datafeed/config    # ❌ Should 404
+make kill-dev
+```
+
+**Part 3: Validate Client Generation**
+
+```bash
+# Backup current specs
+cp backend/openapi.json backend/openapi.json.backup
+cp backend/asyncapi.json backend/asyncapi.json.backup
+
+# Regenerate and compare
+cd backend
+make export-openapi-spec
+make export-asyncapi-spec
+diff openapi.json openapi.json.backup  # Should be identical or minimal changes
+diff asyncapi.json asyncapi.json.backup
+
+# Test frontend client generation
+cd ../frontend
+make generate-openapi-client
+make generate-asyncapi-types
+make type-check  # Must pass without errors
+make test        # Must pass
+```
+
+**Part 4: Documentation Updates**
+
+Update all documentation files (see Phase 6 Task 22 from original plan):
+
+1. **Update ARCHITECTURE.md**:
+
+   - Document modular structure with diagrams
+   - Add import boundary rules
+   - Document Module Protocol pattern
+   - Add deployment configuration examples
+
+2. **Update backend/README.md**:
+
+   - Document new Makefile targets
+   - Update directory structure
+   - Add ENABLED_MODULES documentation
+   - Add module development guide
+
+3. **Update docs/TESTING.md**:
+
+   - Document module-specific testing
+   - Explain test organization
+   - Document CI parallel execution
+   - Add import boundary testing
+
+4. **Update docs/DEVELOPMENT.md**:
+
+   - Document how to add new modules
+   - Explain Module Protocol implementation
+   - Add troubleshooting guide
+
+5. **Update MAKEFILE-GUIDE.md**:
+
+   - Document all new module-aware targets
+   - Explain dynamic module discovery
+   - Add examples for each target
+
+6. **Create backend/src/trading_api/modules/README.md**:
+
+   ````markdown
+   # Trading API Modules
+
+   ## Architecture
+
+   Each module is a self-contained unit with:
+
+   - Service layer (`service.py`)
+   - API routes (`api.py`)
+   - WebSocket routes (`ws.py`)
+   - Tests (`tests/`)
+   - Generated WebSocket routers (`ws_generated/`)
+
+   ## Available Modules
+
+   - **datafeed**: Market data streaming and historical data
+   - **broker**: Order management, positions, executions
+
+   ## Creating a New Module
+
+   1. Create module directory:
+      ```bash
+      mkdir -p src/trading_api/modules/mymodule/{tests,ws_generated}
+      touch src/trading_api/modules/mymodule/{__init__,service,api,ws,tests/__init__}.py
+      ```
+   ````
+
+   2. Implement Module Protocol in `__init__.py`:
+
+      ```python
+      from trading_api.shared.module_interface import Module
+
+      class MyModule:
+          @property
+          def name(self) -> str:
+              return "mymodule"
+
+          # ... implement other protocol methods
+      ```
+
+   3. Register in app_factory.py:
+
+      ```python
+      from trading_api.modules.mymodule import MyModule
+      registry.register(MyModule())
+      ```
+
+   4. Run tests:
+      ```bash
+      make test-module-mymodule
+      ```
+
+   ## Import Rules
+
+   - ✅ CAN import: `trading_api.models.*`, `trading_api.shared.*`
+   - ❌ CANNOT import: `trading_api.modules.*` (other modules)
+
+   Validated automatically by `make test-boundaries`
+
+   ```
+
+   ```
+
+7. **Update docs/DOCUMENTATION-GUIDE.md**:
+   - Add entry for `modules/README.md`
+   - Update reading paths for modular architecture
+
+**Part 5: Final Verification Checklist**
+
+```bash
+# Complete validation script
+cd backend
+
+echo "1. Testing..."
+make test-boundaries || exit 1
+make test || exit 1
+
+echo "2. Linting..."
+make lint-check || exit 1
+
+echo "3. Spec generation..."
+make export-openapi-spec || exit 1
+make export-asyncapi-spec || exit 1
+
+echo "4. Client generation..."
+cd ../frontend
+make generate-openapi-client || exit 1
+make generate-asyncapi-types || exit 1
+make type-check || exit 1
+
+echo "5. Full stack test..."
+cd ..
+./scripts/test-integration.sh || exit 1
+
+echo "✅ All validations passed!"
+```
+
+**Validation Checklist**:
+
+- [ ] All 48+ tests passing
+- [ ] Import boundaries enforced
+- [ ] Module-specific tests work (`test-module-*`)
+- [ ] Module isolation verified (datafeed-only, broker-only deployments)
+- [ ] Spec generation unchanged
+- [ ] Frontend clients generate correctly
+- [ ] CI workflow updated and tested
+- [ ] Pre-commit hooks work
+- [ ] All documentation updated
+- [ ] No legacy references in docs
+- [ ] Makefile help shows all modules
+
+**Commit Message**:
+
+```
+feat: Phase 6 Task 25 - Final validation and documentation
+
+- Complete comprehensive testing of modular architecture
+- Validate module isolation and deployments
+- Update all documentation for modular patterns
+- Create modules/README.md with developer guide
+- Verify client generation compatibility
+- Update DOCUMENTATION-GUIDE.md
+- All 48+ tests passing
+- Zero breaking changes to frontend
+```
 
 ---
 
-### Phase 6: Documentation Updates
+### Phase 6: Documentation Updates (Expanded)
 
 **Task 22: Update All Documentation to Reflect Modular Architecture**
 
@@ -1825,20 +2786,34 @@ find tests -name 'test_*.py' -exec grep -l '^def test_' {} \; | wc -l  # Count t
 - **Week 2**: Phase 2 (module classes)
 - **Week 3**: Phase 3 (move shared + move module files + verify ws generation + test spec generation)
 - **Week 4**: Phase 4 (switch fixtures to factory + reorganize tests)
-- **Week 5**: Phase 5 (finalize main.py + build system + verification)
+- **Week 5**: Phase 5 (import boundaries + Makefile + CI/CD + pre-commit)
+- **Week 6**: Phase 6 (final validation + documentation)
 
-**Total Duration**: 5 weeks (safer approach with continuous testing)
+**Total Duration**: 6 weeks (comprehensive approach with validation and tooling)
 
-**Total Tasks**: 21 tasks
+**Total Tasks**: 25 tasks
 
 - Phase 0: 2 tasks (fixtures infrastructure)
 - Phase 1: 4 tasks (core infrastructure)
 - Phase 2: 2 tasks (module classes)
-- Phase 3: 7 tasks (move files + cleanup legacy + verify generation + test specs)
+- Phase 3: 9 tasks (move files + cleanup + verify + test specs)
 - Phase 4: 1 task (switch to factory)
-- Phase 5: 1 task (finalize + verify)
+- Phase 5: 4 tasks (boundaries + Makefile + CI + hooks)
+- Phase 6: 1 task (final validation + docs)
 
-**Key Additions**: Task 16 removes all legacy source files and folders. Tasks 18-19 ensure spec generation works correctly with modular architecture across all deployment configurations (full, datafeed-only, broker-only).
+**New Tasks Added (4):**
+
+- Task 21: Import boundary enforcement (test + Makefile target)
+- Task 22: Generic module-aware Makefile targets
+- Task 23: CI/CD workflow with parallel module testing
+- Task 24: Pre-commit hooks for module validation
+
+**Key Improvements:**
+
+- ✅ **Sustainable Makefile**: Dynamic module discovery, no hardcoded names
+- ✅ **Import Boundary Enforcement**: AST-based validation, runs in CI and pre-commit
+- ✅ **Parallel CI**: Module tests run in parallel (faster builds)
+- ✅ **Future-Proof**: All tooling auto-discovers modules, works with additions/changes
 
 ### First Steps
 
