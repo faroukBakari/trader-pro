@@ -11,7 +11,7 @@
 > - Move next task to "In Progress"
 > - Commit the updated MODULAR_BACKEND_IMPL.md with task changes
 
-### ✅ Completed (23/28 tasks)
+### ✅ Completed (24/28 tasks)
 
 1. **Pre-Migration Validation** ✅ - Completed 2025-10-29
 
@@ -276,17 +276,29 @@
     - Tests cover: cross-module workflows, full-stack scenarios, module isolation
     - Validates: all modules work together, independent testing, registry cleanup
 
+24. **Phase 5: Implement import boundary enforcement** ✅ - Completed 2025-10-29
+
+    - Created `test_import_boundaries.py` with AST-based import scanner
+    - Implemented generic pattern-based boundary rules (modules, shared, models)
+    - Added `make test-boundaries` target integrated with `make test`
+    - Rules prevent cross-module imports (e.g., broker importing datafeed)
+    - Validation detects violations with clear error messages and file paths
+    - Zero configuration for new modules (patterns auto-apply)
+    - All 70 tests passing (68 existing + 2 new boundary tests)
+    - Type checking passes (mypy: no issues found in 61 source files)
+    - Committed: 3112cd7
+
 ### 🔄 In Progress (0/28 tasks)
 
 **Phase 4: Complete** ✅
-**Phase 5: Tasks 21-23 Complete** ✅
+**Phase 5: Tasks 21-24 Complete** ✅
 
 **Next Steps:**
 
-- Phase 5: Tasks 24-27 - Import boundaries, Makefile targets, CI/CD, pre-commit hooks
+- Phase 5: Tasks 25-27 - Generic Makefile targets, CI/CD, pre-commit hooks
 - Phase 6: Task 28 - Final validation and documentation update
 
-### 📋 Pending (5/28 tasks)
+### 📋 Pending (4/28 tasks)
 
 **Phase 0 (Complete):**
 
@@ -315,7 +327,7 @@
 - [x] Task 21: Refactor main.py to use app_factory pattern (Completed: 2025-10-29)
 - [x] Task 22: Remove legacy directories and backward compatibility (Completed: 2025-10-29)
 - [x] Task 23: Create integration test suite for multi-module scenarios (Completed: 2025-10-29)
-- [ ] Task 24: Implement import boundary enforcement test
+- [x] Task 24: Implement import boundary enforcement test (Completed: 2025-10-29)
 - [ ] Task 25: Add generic module-aware Makefile targets
 - [ ] Task 26: Update CI/CD workflow for generic parallel module-aware testing
 - [ ] Task 27: Update pre-commit hooks for module validation
