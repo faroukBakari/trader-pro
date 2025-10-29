@@ -7,9 +7,9 @@ from typing import Any
 
 from fastapi.routing import APIRouter
 
-from trading_api.api.datafeed import DatafeedApi
-from trading_api.core.datafeed_service import DatafeedService
-from trading_api.ws.datafeed import DatafeedWsRouters
+from .api import DatafeedApi
+from .service import DatafeedService
+from .ws import DatafeedWsRouters
 
 
 class DatafeedModule:

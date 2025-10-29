@@ -13,12 +13,12 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from trading_api.core import BrokerService
 from trading_api.models.broker import (
     AccountMetainfo,
     Brackets,
     Execution,
     LeverageInfo,
+    LeverageInfoParams,
     LeveragePreviewResult,
     LeverageSetParams,
     LeverageSetResult,
@@ -32,9 +32,7 @@ from trading_api.models.broker import (
     SuccessResponse,
 )
 
-# router = APIRouter(prefix="/broker", tags=["broker"])
-
-# self.broker_service = BrokerService()
+from .service import BrokerService
 
 
 class BrokerApi(APIRouter):
@@ -301,8 +299,6 @@ class BrokerApi(APIRouter):
             Returns:
                 LeverageInfo: Current leverage, min, max, and step values
             """
-            from trading_api.models.broker import LeverageInfoParams
-
             params = LeverageInfoParams(
                 symbol=symbol, orderType=orderType, side=side, customFields=None
             )

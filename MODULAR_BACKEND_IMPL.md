@@ -11,7 +11,7 @@
 > - Move next task to "In Progress"
 > - Commit the updated MODULAR_BACKEND_IMPL.md with task changes
 
-### ✅ Completed (13/20 tasks)
+### ✅ Completed (15/21 tasks)
 
 1. **Pre-Migration Validation** ✅ - Completed 2025-10-29
 
@@ -121,6 +121,7 @@
     - Committed: 112cf77
 
 13. **Phase 3: Move API Infrastructure to shared/api/** ✅ - Completed 2025-10-29
+
     - Created `shared/api/__init__.py` directory structure
     - Moved `api/health.py` → `shared/api/health.py`
     - Moved `api/versions.py` → `shared/api/versions.py`
@@ -133,15 +134,43 @@
     - Linting passes (black, isort, flake8 all green)
     - Committed: 112cf77
 
+14. **Phase 3: Move Datafeed Module Files** ✅ - Completed 2025-10-29
+
+    - Moved `core/datafeed_service.py` → `modules/datafeed/service.py`
+    - Moved `api/datafeed.py` → `modules/datafeed/api.py`
+    - Moved `ws/datafeed.py` → `modules/datafeed/ws.py`
+    - Updated imports to use `trading_api.shared.ws.router_interface`
+    - Updated `modules/datafeed/__init__.py` to import from local files
+    - Added backward compatibility re-exports in `core/__init__.py`, `api/__init__.py`, `ws/__init__.py`
+    - Generated WebSocket routers into `modules/datafeed/ws_generated/` (2 routers)
+    - All 48 tests pass (48 passed in 0.32s)
+    - Type checking passes (mypy: no issues found in 59 source files)
+    - Linting passes (black, isort, flake8 all green)
+    - Committed: f8bbf4f
+
+15. **Phase 3: Move Broker Module Files** ✅ - Completed 2025-10-29
+    - Moved `core/broker_service.py` → `modules/broker/service.py`
+    - Moved `api/broker.py` → `modules/broker/api.py`
+    - Moved `ws/broker.py` → `modules/broker/ws.py`
+    - Updated imports to use `trading_api.shared.ws.router_interface`
+    - Updated `modules/broker/__init__.py` to import from local files
+    - Updated backward compatibility re-exports in `core/__init__.py`, `api/__init__.py`, `ws/__init__.py`
+    - Generated WebSocket routers into `modules/broker/ws_generated/` (5 routers)
+    - Deleted old broker files from `core/`, `api/`, `ws/`
+    - All 48 tests pass (48 passed in 0.32s)
+    - Type checking passes (mypy: no issues found in 65 source files)
+    - Linting passes (black, isort, flake8 all green)
+    - Committed: f8bbf4f
+
 ### 🔄 In Progress (0/20 tasks)
 
-**Phase 3: Move Shared and Module Infrastructure** - In Progress
+**Phase 3: Move Shared and Module Infrastructure** - Complete
 
 **Next Steps:**
 
-- Start Task 14: Move datafeed module files (service, api, ws)
+- Start Task 16: Clean up legacy source files and folders
 
-### 📋 Pending (7/20 tasks)
+### 📋 Pending (6/21 tasks)
 
 **Phase 0 (Complete):**
 
@@ -157,22 +186,23 @@
 
 **Phase 3 (Move Shared and Module Infrastructure):**
 
-- [x] Task 11: Move plugins to shared/plugins/ ✅ **COMPLETED**
-- [x] Task 12: Refactor WS router generation for modular architecture ✅ **COMPLETED**
-- [x] Task 13: Move api (health, versions) to shared/api/ ✅ **COMPLETED**
-- [ ] Task 14: Move datafeed module files (service, api, ws)
-- [ ] Task 15: Move broker module files (service, api, ws)
-- [ ] Task 16: Verify WS router generation for modules
-- [ ] Task 17: Test OpenAPI spec generation with module configurations
-- [ ] Task 18: Test AsyncAPI spec generation with module configurations
+- [x] Task 11: Move plugins to shared/plugins/ ✅ **COMPLETED** (Committed: 112cf77)
+- [x] Task 12: Refactor WS router generation for modular architecture ✅ **COMPLETED** (Committed: 112cf77)
+- [x] Task 13: Move api (health, versions) to shared/api/ ✅ **COMPLETED** (Committed: 112cf77)
+- [x] Task 14: Move datafeed module files (service, api, ws) ✅ **COMPLETED** (Committed: f8bbf4f)
+- [x] Task 15: Move broker module files (service, api, ws) ✅ **COMPLETED** (Committed: f8bbf4f)
+- [ ] Task 16: Clean up legacy source files and folders
+- [ ] Task 17: Verify WS router generation for modules
+- [ ] Task 18: Test OpenAPI spec generation with module configurations
+- [ ] Task 19: Test AsyncAPI spec generation with module configurations
 
 **Phase 4 (Switch to Factory):**
 
-- [ ] Task 19: Update fixtures to use factory and move tests to module directories
+- [ ] Task 20: Update fixtures to use factory and move tests to module directories
 
 **Phase 5-7 (Finalize):**
 
-- [ ] Task 20: Finalize and validate main.py, update build system and CI, full verification and documentation
+- [ ] Task 21: Finalize and validate main.py, update build system and CI, full verification and documentation
 
 ---
 
@@ -715,7 +745,123 @@ make test
 - Update `modules/broker/__init__.py` to import from new locations
 - All tests should still pass
 
-**Task 16: Verify WS Router Generation for Modules**
+**Task 16: Clean Up Legacy Source Files and Folders**
+
+**Objective**: Remove all legacy source files and backward compatibility re-exports now that all module files have been migrated.
+
+**Implementation**:
+
+1. **Remove legacy core/ files and directory**:
+
+   ```bash
+   cd backend/src/trading_api
+
+   # Verify backward compatibility re-exports are in place
+   grep -q "from ..modules.datafeed.service import DatafeedService" core/__init__.py
+   grep -q "from ..modules.broker.service import BrokerService" core/__init__.py
+
+   # Remove the core/ directory (only __init__.py with re-exports remains)
+   rm -rf core/
+   ```
+
+2. **Remove legacy api/ files (keep **init**.py with re-exports)**:
+
+   ```bash
+   # The api/__init__.py contains backward compatibility re-exports
+   # We'll keep it temporarily but verify it only has re-exports
+
+   # Verify no other files exist in api/ except __init__.py
+   ls -la api/  # Should only show __init__.py
+   ```
+
+3. **Remove legacy ws/ files (keep **init**.py with re-exports)**:
+
+   ```bash
+   # The ws/__init__.py contains backward compatibility re-exports
+   # Verify no other files exist in ws/ except __init__.py
+
+   ls -la ws/  # Should only show __init__.py and no generated/ directory
+
+   # Verify centralized ws/generated/ directory was removed
+   test ! -d ws/generated/ && echo "✓ Centralized ws/generated/ removed"
+   ```
+
+4. **Remove legacy plugins/ directory**:
+
+   ```bash
+   # Verify backward compatibility re-export exists
+   grep -q "from trading_api.shared.plugins.fastws_adapter import FastWSAdapter" plugins/__init__.py
+
+   # Remove the plugins/ directory
+   rm -rf plugins/
+   ```
+
+5. **Update imports in main.py to remove backward compatibility layer**:
+
+   ```python
+   # Before (using backward compatibility re-exports):
+   from trading_api.core import BrokerService, DatafeedService
+   from trading_api.api import BrokerApi, DatafeedApi
+
+   # After (direct imports from modules):
+   # main.py uses app_factory, which imports directly from modules
+   # No changes needed to main.py at this stage
+   ```
+
+6. **Verify directory structure**:
+   ```bash
+   # Expected structure after cleanup:
+   tree -L 2 src/trading_api/
+   # Should show:
+   # ├── shared/          (plugins/, api/, ws/)
+   # ├── modules/         (datafeed/, broker/)
+   # ├── models/          (broker/, market/, etc.)
+   # ├── app_factory.py
+   # ├── main.py
+   # ├── api/             (REMOVED - only __init__.py with re-exports gone)
+   # ├── core/            (REMOVED completely)
+   # ├── ws/              (REMOVED - only __init__.py with re-exports gone)
+   # └── plugins/         (REMOVED completely)
+   ```
+
+**Validation**:
+
+```bash
+# Run all tests - should still pass with direct module imports
+make test  # All 48 tests pass
+
+# Verify type checking passes
+make lint-check  # mypy should pass
+
+# Verify no legacy imports remain in codebase
+grep -r "from trading_api.core import" src/trading_api/ && echo "❌ Legacy core imports found" || echo "✓ No legacy core imports"
+grep -r "from trading_api.api import" src/trading_api/ && echo "❌ Legacy api imports found" || echo "✓ No legacy api imports"
+grep -r "from trading_api.ws import" src/trading_api/ && echo "❌ Legacy ws imports found" || echo "✓ No legacy ws imports"
+grep -r "from trading_api.plugins import" src/trading_api/ && echo "❌ Legacy plugins imports found" || echo "✓ No legacy plugins imports"
+```
+
+**Expected Outcome**:
+
+- All legacy directories removed (`core/`, `plugins/`)
+- Only minimal backward compatibility re-exports remain in `api/__init__.py` and `ws/__init__.py` (to be removed in Task 19)
+- All tests passing (48/48)
+- Type checking clean
+- No legacy imports in source code
+
+**Commit Message**:
+
+```
+chore: Phase 3 Task 16 - Remove legacy source files and directories
+
+- Remove core/ directory (services moved to modules/)
+- Remove plugins/ directory (moved to shared/plugins/)
+- Verify api/ and ws/ contain only backward compatibility re-exports
+- Verify ws/generated/ centralized directory removed
+- All tests passing (48/48)
+- Type checking clean
+```
+
+**Task 17: Verify WS Router Generation for Modules**
 
 - Run `make generate-ws-routers` to generate module-specific routers
 - Verify `modules/datafeed/ws_generated/` contains all datafeed routers
@@ -748,7 +894,7 @@ make type-check     # mypy passes
 make generate-ws-routers
 ```
 
-**Task 17: Test OpenAPI Spec Generation with Module Configurations**
+**Task 18: Test OpenAPI Spec Generation with Module Configurations**
 
 **Objective**: Verify OpenAPI spec generation works correctly with different module configurations (all modules, datafeed-only, broker-only)
 
@@ -815,7 +961,7 @@ rm -f openapi-datafeed.json openapi-broker.json
 
 ---
 
-**Task 18: Test AsyncAPI Spec Generation with Module Configurations**
+**Task 19: Test AsyncAPI Spec Generation with Module Configurations**
 
 **Objective**: Verify AsyncAPI spec generation works correctly with different module configurations (all modules, datafeed-only, broker-only)
 
@@ -962,7 +1108,7 @@ make generate-ws-routers  # Generates all module routers
 
 ### Phase 4: Switch Fixtures to Factory and Reorganize Tests
 
-**Task 19: Update Fixtures and Move Tests**
+**Task 20: Update Fixtures and Move Tests**
 
 **Prerequisite**: Phase 3 completed (all module files moved, spec generation tested)
 
@@ -1016,7 +1162,7 @@ make generate-ws-routers  # Generates all module routers
 
 ### Phase 5: Finalize and Validate
 
-**Task 20: Finalize main.py, Update Build System, and Full Verification**
+**Task 21: Finalize main.py, Update Build System, and Full Verification**
 
 **Part 1: Finalize main.py**
 
@@ -1059,14 +1205,155 @@ python -c "from trading_api.main import apiApp; print('✓')"  # Should print �
 - Update WS generation script paths
 - Update CI workflow for parallel testing
 
-**Part 3: Full Verification and Documentation**
+**Part 3: Full Verification**
 
 - Run full test suite: `make test`
 - Verify module isolation: `make test-datafeed`, `make test-broker`
 - Test deployments: datafeed-only, broker-only, full-stack
 - Validate client generation (should be identical)
-- Update documentation
 - Remove old directories after validation
+
+---
+
+### Phase 6: Documentation Updates
+
+**Task 22: Update All Documentation to Reflect Modular Architecture**
+
+**Objective**: Update all project documentation to reflect the new modular architecture, remove references to legacy structure, and document the new patterns.
+
+**Implementation**:
+
+1. **Update ARCHITECTURE.md**:
+
+   - Document the modular architecture with modules/, shared/, and models/ structure
+   - Add dependency rules and import boundaries
+   - Document the Module Protocol pattern
+   - Add diagrams showing the new dependency graph
+   - Remove references to legacy core/, api/, ws/ structure
+   - Document the application factory pattern
+   - Add examples of module-specific deployments
+
+2. **Update backend/README.md**:
+
+   - Update directory structure documentation
+   - Document new development workflow with modules
+   - Update testing commands (test-shared, test-datafeed, test-broker)
+   - Document ENABLED_MODULES environment variable
+   - Add examples of running specific modules
+   - Update WebSocket router generation documentation
+
+3. **Update docs/DEVELOPMENT.md**:
+
+   - Document how to add new modules
+   - Explain the Module Protocol implementation
+   - Document lazy loading pattern
+   - Add troubleshooting section for common module issues
+   - Document module isolation testing
+
+4. **Update docs/TESTING.md**:
+
+   - Document the new fixture-based testing approach
+   - Explain module-specific test fixtures (datafeed_only_app, broker_only_app)
+   - Document how to test individual modules
+   - Update test organization (shared/tests/, modules/\*/tests/)
+   - Document parallel test execution in CI
+
+5. **Create modules/README.md**:
+
+   - Explain the modular architecture philosophy
+   - Document how to create a new module
+   - List all available modules with descriptions
+   - Document module dependencies and boundaries
+   - Provide template for new module creation
+
+6. **Update WEBSOCKET-METHODOLOGY.md**:
+
+   - Document new module-specific ws_generated/ directories
+   - Update WebSocket router generation workflow
+   - Remove references to centralized ws/generated/
+   - Document TypeAlias pattern in modules/\*/ws.py
+   - Add examples from datafeed and broker modules
+
+7. **Update API-METHODOLOGY.md**:
+
+   - Document module-based API organization
+   - Explain shared vs. module-specific APIs
+   - Document how modules register API routers
+   - Update versioning strategy for modular APIs
+
+8. **Update docs/CLIENT-GENERATION.md**:
+
+   - Confirm that client generation is unchanged
+   - Document that specs are generated from composed application
+   - Add note about module-specific spec generation (optional)
+   - Document ENABLED_MODULES impact on generated specs
+
+9. **Update .github/CI-TROUBLESHOOTING.md** (if exists):
+
+   - Document new parallel test jobs
+   - Add troubleshooting for module-specific test failures
+   - Document how to run module-specific CI checks locally
+
+10. **Update frontend documentation** (BROKER-TERMINAL-SERVICE.md, etc.):
+
+    - Confirm no changes to frontend integration
+    - Document that backend modular architecture is transparent to frontend
+    - Note that WebSocket and API contracts remain unchanged
+
+11. **Create MIGRATION-GUIDE.md** (new):
+
+    - Document the migration from monolithic to modular architecture
+    - List all breaking changes (if any)
+    - Provide migration path for external integrations
+    - Document backward compatibility period and deprecation timeline
+    - Include before/after import examples
+
+12. **Update MODULAR_BACKEND_IMPL.md**:
+    - Mark all tasks as completed
+    - Update status to "Complete"
+    - Add final verification checklist
+    - Document lessons learned
+    - Archive as historical record
+
+**Validation**:
+
+```bash
+# Verify all documentation files are updated
+grep -r "core/broker_service" docs/ && echo "❌ Legacy references found" || echo "✓ No legacy core/ references"
+grep -r "api/broker" docs/ && echo "❌ Legacy references found" || echo "✓ No legacy api/ references"
+grep -r "ws/generated" docs/ && echo "❌ Legacy references found" || echo "✓ No legacy ws/generated references"
+
+# Verify new patterns are documented
+grep -r "modules/" docs/ && echo "✓ Modular architecture documented"
+grep -r "Module Protocol" docs/ && echo "✓ Module Protocol documented"
+grep -r "ENABLED_MODULES" docs/ && echo "✓ Module selection documented"
+
+# Verify documentation builds/renders correctly (if using doc generators)
+make docs  # If applicable
+```
+
+**Expected Outcome**:
+
+- All documentation updated to reflect modular architecture
+- No references to legacy structure (core/, api/, ws/, plugins/)
+- Clear guidance for developers on working with modules
+- Migration guide for external teams
+- Updated diagrams and examples throughout
+
+**Commit Message**:
+
+```
+docs: Phase 6 Task 22 - Update all documentation for modular architecture
+
+- Update ARCHITECTURE.md with modular structure and dependency rules
+- Update backend/README.md with new directory structure
+- Update DEVELOPMENT.md, TESTING.md with module patterns
+- Create modules/README.md with module creation guide
+- Update WebSocket and API methodology docs
+- Create MIGRATION-GUIDE.md for external teams
+- Remove all legacy structure references
+- Add module-specific deployment examples
+```
 
 ---
 
@@ -1542,16 +1829,16 @@ find tests -name 'test_*.py' -exec grep -l '^def test_' {} \; | wc -l  # Count t
 
 **Total Duration**: 5 weeks (safer approach with continuous testing)
 
-**Total Tasks**: 20 tasks
+**Total Tasks**: 21 tasks
 
 - Phase 0: 2 tasks (fixtures infrastructure)
 - Phase 1: 4 tasks (core infrastructure)
 - Phase 2: 2 tasks (module classes)
-- Phase 3: 6 tasks (move files + verify generation + test specs)
+- Phase 3: 7 tasks (move files + cleanup legacy + verify generation + test specs)
 - Phase 4: 1 task (switch to factory)
 - Phase 5: 1 task (finalize + verify)
 
-**Key Additions**: Tasks 17-18 ensure spec generation works correctly with modular architecture across all deployment configurations (full, datafeed-only, broker-only).
+**Key Additions**: Task 16 removes all legacy source files and folders. Tasks 18-19 ensure spec generation works correctly with modular architecture across all deployment configurations (full, datafeed-only, broker-only).
 
 ### First Steps
 

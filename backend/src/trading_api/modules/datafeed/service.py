@@ -20,7 +20,7 @@ from trading_api.models import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.ws import WsRouteService
+from trading_api.shared.ws.router_interface import WsRouteService
 
 logger = logging.getLogger(__name__)
 

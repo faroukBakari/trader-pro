@@ -7,8 +7,7 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from ..core.datafeed_service import DatafeedService
-from ..models import (
+from trading_api.models import (
     DatafeedConfiguration,
     DatafeedHealthResponse,
     GetBarsResponse,
@@ -18,11 +17,7 @@ from ..models import (
     SymbolInfo,
 )
 
-# router = APIRouter(prefix="/datafeed", tags=["datafeed"])
-
-# # Initialize the datafeed service
-# # In production, you might want to inject this as a dependency
-# datafeed_service = DatafeedService()
+from .service import DatafeedService
 
 
 class DatafeedApi(APIRouter):
