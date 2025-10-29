@@ -11,7 +11,7 @@
 > - Move next task to "In Progress"
 > - Commit the updated MODULAR_BACKEND_IMPL.md with task changes
 
-### ✅ Completed (20/21 tasks)
+### ✅ Completed (20/28 tasks)
 
 1. **Pre-Migration Validation** ✅ - Completed 2025-10-29
 
@@ -228,21 +228,25 @@
     - Added `execute_all_working_orders()` method to BrokerService
     - Updated pytest config to discover tests from module directories
     - Added WebSocket endpoint registration to app_factory
-    - Updated mypy.ini to allow flexible typing in test files
+    - Added complete type annotations to all test files and fixtures
+    - All conftest files properly typed with AsyncGenerator, FastAPI, FastWSAdapter, TestClient, AsyncClient
+    - All test function signatures properly typed with parameter and return types
     - All 48 tests passing (48 passed in 2.35s)
+    - Type checking passes (mypy: no issues found in 65 source files)
     - Tests follow architectural constraints (no service access, factory pattern only)
-    - Committed: 0530b5f
+    - Committed: b46afb8
 
-### 🔄 In Progress (0/21 tasks)
+### 🔄 In Progress (0/28 tasks)
 
-**Phase 4: Switch Fixtures to Factory and Reorganize Tests** - Complete ✅
+**Phase 4: Complete** ✅
 
 **Next Steps:**
 
-- Phase 4: Complete Task 20 - Fix remaining broker tests and pytest config
-- Phase 5: Tasks 21-24 - Import boundaries, Makefile targets, CI/CD, pre-commit hooks
+- Phase 5: Tasks 21-22 - Refactor main.py and remove legacy directories
+- Phase 5: Tasks 23-27 - Integration tests, import boundaries, Makefile targets, CI/CD, pre-commit hooks
+- Phase 6: Task 28 - Final validation and documentation update
 
-### 📋 Pending (6/26 tasks)
+### 📋 Pending (8/28 tasks)
 
 **Phase 0 (Complete):**
 
@@ -260,21 +264,25 @@
 
 ✅ All Phase 3 tasks completed (Tasks 11-19)
 
-**Phase 4 (Switch to Factory):**
+**Phase 4 (Complete):**
 
-- [ ] Task 20: Update fixtures to use factory and move tests to module directories
-- [ ] Task 21: Create integration test suite for multi-module scenarios
+✅ All Phase 4 tasks completed
 
-**Phase 5 (Enforce Boundaries & Build System):**
+- [x] Task 20: Update fixtures to use factory and move tests to module directories (Completed: b46afb8)
 
-- [ ] Task 22: Implement import boundary enforcement test
-- [ ] Task 23: Add generic module-aware Makefile targets
-- [ ] Task 24: Update CI/CD workflow for generic parallel module-aware testing
-- [ ] Task 25: Update pre-commit hooks for module validation
+**Phase 5 (Finalize Factory Pattern & Enforce Boundaries):**
+
+- [ ] Task 21: Refactor main.py to use app_factory pattern (remove global instances)
+- [ ] Task 22: Remove legacy directories and backward compatibility (api/, core/, plugins/, ws/)
+- [ ] Task 23: Create integration test suite for multi-module scenarios
+- [ ] Task 24: Implement import boundary enforcement test
+- [ ] Task 25: Add generic module-aware Makefile targets
+- [ ] Task 26: Update CI/CD workflow for generic parallel module-aware testing
+- [ ] Task 27: Update pre-commit hooks for module validation
 
 **Phase 6 (Finalize):**
 
-- [ ] Task 26: Final validation and documentation update
+- [ ] Task 28: Final validation and documentation update
 
 ---
 
@@ -1771,11 +1779,307 @@ feat: Phase 4 Task 21 - Create integration test suite
 
 ---
 
-### Phase 5: Enforce Boundaries & Build System
+### Phase 5: Finalize Factory Pattern & Enforce Boundaries
 
-**Task 22: Implement Import Boundary Enforcement**
+**Task 21: Refactor main.py to Use app_factory Pattern**
+
+**Objective**: Remove global service instances from `main.py` and switch to using `create_app()` from `app_factory.py`. This completes the factory pattern migration and eliminates the last remaining monolithic code.
+
+**Current State**:
+
+- `main.py` still has global service instances: `datafeed_service = DatafeedService()`, `broker_service = BrokerService()`
+- Direct imports from legacy paths: `from .api import ...`, `from .core import ...`, `from .plugins import ...`, `from .ws import ...`
+- Module composition happens at import time (not runtime)
+
+**Target State**:
+
+- `main.py` calls `create_app()` to get configured application
+- No global service instances
+- Support for `ENABLED_MODULES` environment variable
+- Minimal, clean entry point
+
+**Implementation**:
+
+1. **Update main.py to use factory pattern**:
+
+   ```python
+   """Main FastAPI application entry point."""
+   import os
+   from typing import Annotated
+
+   from fastapi import Depends
+   from external_packages.fastws import Client
+   from trading_api.app_factory import create_app
+
+   # Parse ENABLED_MODULES environment variable
+   enabled_modules_str = os.getenv("ENABLED_MODULES", "all")
+   if enabled_modules_str != "all":
+       enabled_modules = [m.strip() for m in enabled_modules_str.split(",")]
+   else:
+       enabled_modules = None  # None = all modules
+
+   # Create application using factory
+   apiApp, wsApp = create_app(enabled_modules=enabled_modules)
+
+
+   # Register the WebSocket endpoint
+   @apiApp.websocket("/api/v1/ws")
+   async def websocket_endpoint(
+       client: Annotated[Client, Depends(wsApp.manage)],
+   ) -> None:
+       """WebSocket endpoint for real-time data streaming"""
+       await wsApp.serve(client)
+
+
+   # CRITICAL: Maintain backward compatibility for spec export scripts
+   # scripts/export_openapi_spec.py and scripts/export_asyncapi_spec.py
+   # import apiApp directly from main.py
+   app = apiApp  # ✅ REQUIRED - DO NOT REMOVE
+   ```
+
+2. **Verify ENABLED_MODULES functionality**:
+
+   ```bash
+   # Test all modules (default)
+   cd backend
+   poetry run uvicorn trading_api.main:app --host 0.0.0.0 --port 8000
+   curl http://localhost:8000/api/v1/health  # Should work
+   curl http://localhost:8000/api/v1/datafeed/config  # Should work
+   curl http://localhost:8000/api/v1/broker/orders  # Should work
+
+   # Test datafeed-only
+   ENABLED_MODULES=datafeed poetry run uvicorn trading_api.main:app --host 0.0.0.0 --port 8000
+   curl http://localhost:8000/api/v1/datafeed/config  # Should work
+   curl http://localhost:8000/api/v1/broker/orders  # Should 404
+
+   # Test broker-only
+   ENABLED_MODULES=broker poetry run uvicorn trading_api.main:app --host 0.0.0.0 --port 8000
+   curl http://localhost:8000/api/v1/broker/orders  # Should work
+   curl http://localhost:8000/api/v1/datafeed/config  # Should 404
+   ```
+
+3. **Verify spec export still works**:
+
+   ```bash
+   # OpenAPI spec
+   make export-openapi-spec
+   python -c "import json; json.load(open('openapi.json'))" && echo "✓ Valid JSON"
+
+   # AsyncAPI spec
+   make export-asyncapi-spec
+   python -c "import json; json.load(open('asyncapi.json'))" && echo "✓ Valid JSON"
+
+   # Frontend client generation
+   cd ../frontend
+   make generate-openapi-client
+   make generate-asyncapi-types
+   make type-check  # Should pass
+   ```
+
+**Validation**:
+
+```bash
+# All tests should still pass
+cd backend
+make test  # All 48 tests pass
+
+# Type checking should pass
+make lint-check  # mypy passes
+
+# Spec generation should work
+make export-openapi-spec
+make export-asyncapi-spec
+```
+
+**Expected Outcome**:
+
+- `main.py` reduced from ~200 lines to ~30 lines
+- No global service instances
+- Clean factory pattern usage
+- ENABLED_MODULES environment variable works
+- All tests pass
+- Spec generation unchanged
+- Frontend clients generate correctly
+
+**Commit Message**:
+
+```
+feat: Phase 5 Task 21 - Refactor main.py to use app_factory pattern
+
+- Remove global service instances from main.py
+- Switch to create_app() factory pattern
+- Add ENABLED_MODULES environment variable support
+- Reduce main.py to minimal entry point (~30 lines)
+- Maintain backward compatibility for spec exports
+- All 48 tests passing
+- Spec generation unchanged
+```
+
+**Risk**: 🟢 LOW (factory pattern already tested, main.py just switches to it)
+
+---
+
+**Task 22: Remove Legacy Directories and Backward Compatibility**
+
+**Objective**: Remove `api/`, `core/`, `plugins/`, `ws/` directories now that all code has migrated to `modules/` and `shared/`. Clean up backward compatibility re-exports.
+
+**Current State**:
+
+- `api/`, `core/`, `plugins/`, `ws/` directories exist with only `__init__.py` re-export files
+- `main.py` imports from these legacy paths (will be fixed in Task 21)
+- `ws/WS-ROUTER-GENERATION.md` documentation file exists
+
+**Target State**:
+
+- All legacy directories removed
+- No imports from legacy paths anywhere in codebase
+- Documentation moved to appropriate location
+- Clean module structure
+
+**Implementation**:
+
+1. **Verify no imports from legacy paths** (after Task 21 completed):
+
+   ```bash
+   cd backend/src/trading_api
+
+   # Should return nothing
+   grep -r "from trading_api.api import" . --include="*.py" || echo "✓ No legacy api imports"
+   grep -r "from trading_api.core import" . --include="*.py" || echo "✓ No legacy core imports"
+   grep -r "from trading_api.plugins import" . --include="*.py" || echo "✓ No legacy plugins imports"
+   grep -r "from trading_api.ws import" . --include="*.py" || echo "✓ No legacy ws imports"
+
+   # Check for relative imports too
+   grep -r "from \.api import" . --include="*.py" || echo "✓ No relative api imports"
+   grep -r "from \.core import" . --include="*.py" || echo "✓ No relative core imports"
+   grep -r "from \.plugins import" . --include="*.py" || echo "✓ No relative plugins imports"
+   grep -r "from \.ws import" . --include="*.py" || echo "✓ No relative ws imports"
+   ```
+
+2. **Move WS-ROUTER-GENERATION.md documentation**:
+
+   ```bash
+   # Move to shared/ws/ since that's where the router infrastructure lives
+   mv src/trading_api/ws/WS-ROUTER-GENERATION.md src/trading_api/shared/ws/
+
+   # Update any references in other docs
+   grep -r "ws/WS-ROUTER-GENERATION.md" docs/ backend/ --include="*.md"
+   # Update paths to shared/ws/WS-ROUTER-GENERATION.md
+   ```
+
+3. **Remove legacy directories**:
+
+   ```bash
+   cd backend/src/trading_api
+
+   # Remove legacy directories
+   rm -rf api/
+   rm -rf core/
+   rm -rf plugins/
+   rm -rf ws/
+   ```
+
+4. **Verify project structure**:
+
+   ```bash
+   tree -L 2 src/trading_api/
+   # Expected structure:
+   # src/trading_api/
+   # ├── __init__.py
+   # ├── main.py
+   # ├── app_factory.py
+   # ├── models/
+   # │   ├── broker/
+   # │   ├── market/
+   # │   ├── common.py
+   # │   ├── health.py
+   # │   └── versioning.py
+   # ├── shared/
+   # │   ├── api/
+   # │   ├── ws/
+   # │   ├── plugins/
+   # │   ├── tests/
+   # │   ├── module_interface.py
+   # │   └── module_registry.py
+   # └── modules/
+   #     ├── datafeed/
+   #     └── broker/
+   ```
+
+5. **Update documentation references**:
+
+   ```bash
+   # Update DOCUMENTATION-GUIDE.md
+   # Change: backend/src/trading_api/ws/WS-ROUTER-GENERATION.md
+   # To:     backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md
+
+   # Update any other docs that reference old structure
+   ```
+
+**Validation**:
+
+```bash
+# All tests should still pass
+cd backend
+make test  # All 48 tests pass
+
+# Type checking should pass
+make lint-check  # mypy passes
+
+# Verify no legacy directories exist
+test ! -d "src/trading_api/api" && echo "✓ api/ removed"
+test ! -d "src/trading_api/core" && echo "✓ core/ removed"
+test ! -d "src/trading_api/plugins" && echo "✓ plugins/ removed"
+test ! -d "src/trading_api/ws" && echo "✓ ws/ removed"
+
+# Verify documentation moved
+test -f "src/trading_api/shared/ws/WS-ROUTER-GENERATION.md" && echo "✓ WS docs moved"
+
+# Spec generation still works
+make export-openapi-spec
+make export-asyncapi-spec
+```
+
+**Expected Outcome**:
+
+- Legacy directories completely removed
+- Clean module structure
+- Documentation properly organized
+- All tests passing
+- No breaking changes to functionality
+
+**Commit Message**:
+
+```
+chore: Phase 5 Task 22 - Remove legacy directories
+
+- Remove api/, core/, plugins/, ws/ directories
+- Move WS-ROUTER-GENERATION.md to shared/ws/
+- Update documentation references
+- Verify no legacy imports remain
+- All 48 tests passing
+- Clean modular structure achieved
+```
+
+**Risk**: 🟢 LOW (purely cleanup after Task 21, no functional changes)
+
+---
+
+**Task 23: Create Integration Test Suite for Multi-Module Scenarios**
+
+**Objective**: Create comprehensive integration tests that validate cross-module interactions and full-stack scenarios with all modules enabled
+
+**Note**: This task was renumbered from Task 21 to Task 23 after adding Tasks 21-22 for main.py refactoring and legacy cleanup.
+
+[Rest of Task 23 content continues as previously documented for Task 21...]
+
+---
+
+**Task 24: Implement Import Boundary Enforcement**
 
 **Objective**: Create automated validation to enforce module dependency rules and prevent cross-module imports
+
+**Note**: This task was renumbered from Task 22 to Task 24 after adding Tasks 21-22 for main.py refactoring and legacy cleanup.
 
 **Implementation**:
 
@@ -1989,7 +2293,7 @@ feat: Phase 5 Task 22 - Implement import boundary enforcement
 
 ---
 
-**Task 23: Add Generic Module-Aware Makefile Targets**
+**Task 25: Add Generic Module-Aware Makefile Targets**
 
 **Objective**: Create sustainable Makefile targets that auto-discover modules and work regardless of module additions/removals
 
@@ -2130,7 +2434,7 @@ rm -rf src/trading_api/modules/new_module  # Cleanup
 **Commit Message**:
 
 ```
-feat: Phase 5 Task 23 - Add generic module-aware Makefile targets
+feat: Phase 5 Task 25 - Add generic module-aware Makefile targets
 
 - Implement dynamic module discovery in Makefile
 - Add test-shared, test-modules, test-integration targets
@@ -2141,7 +2445,7 @@ feat: Phase 5 Task 23 - Add generic module-aware Makefile targets
 
 ---
 
-**Task 24: Update CI/CD workflow for generic parallel module-aware testing**
+**Task 26: Update CI/CD workflow for generic parallel module-aware testing**
 
 **Objective**: Configure GitHub Actions to run module tests in parallel and enforce import boundaries
 
@@ -2318,7 +2622,7 @@ yamllint .github/workflows/ci.yml
 **Commit Message**:
 
 ```
-feat: Phase 5 Task 23 - Update CI/CD for parallel module testing
+feat: Phase 5 Task 26 - Update CI/CD for parallel module testing
 
 - Add dynamic module discovery job
 - Implement parallel module test matrix
@@ -2329,7 +2633,7 @@ feat: Phase 5 Task 23 - Update CI/CD for parallel module testing
 
 ---
 
-**Task 24: Update Pre-commit Hooks for Module Validation**
+**Task 27: Update Pre-commit Hooks for Module Validation**
 
 **Objective**: Enforce module boundaries and standards at commit time
 
@@ -2463,7 +2767,7 @@ git checkout src/trading_api/modules/broker/service.py  # Revert
 **Commit Message**:
 
 ```
-feat: Phase 5 Task 24 - Update pre-commit hooks for module validation
+feat: Phase 5 Task 27 - Update pre-commit hooks for module validation
 
 - Add import boundary validation to pre-commit
 - Check only changed Python files (performance)
@@ -2476,15 +2780,13 @@ feat: Phase 5 Task 24 - Update pre-commit hooks for module validation
 
 ### Phase 6: Final Validation and Documentation
 
----
-
-### Phase 6: Final Validation and Documentation
-
-**Task 25: Final Validation and Documentation Update**
+**Task 28: Final Validation and Documentation Update**
 
 **Objective**: Comprehensive validation of the modular architecture and complete documentation update
 
-**Part 1: Validate main.py Factory Integration**
+**Note**: This task was renumbered from Task 26 to Task 28 after adding Tasks 21-22 for main.py refactoring and legacy cleanup.
+
+**Part 1: Validate main.py Factory Integration** (completed in Task 21)
 
 ```python
 # main.py structure after Phases 1-5:
@@ -3352,25 +3654,31 @@ find tests -name 'test_*.py' -exec grep -l '^def test_' {} \; | wc -l  # Count t
 
 **Total Duration**: 6 weeks (comprehensive approach with validation and tooling)
 
-**Total Tasks**: 25 tasks
+**Total Tasks**: 28 tasks
 
 - Phase 0: 2 tasks (fixtures infrastructure)
 - Phase 1: 4 tasks (core infrastructure)
 - Phase 2: 2 tasks (module classes)
 - Phase 3: 9 tasks (move files + cleanup + verify + test specs)
-- Phase 4: 1 task (switch to factory)
-- Phase 5: 4 tasks (boundaries + Makefile + CI + hooks)
+- Phase 4: 1 task (switch fixtures to factory + reorganize tests)
+- Phase 5: 7 tasks (refactor main.py + remove legacy + integration tests + boundaries + Makefile + CI/CD + pre-commit)
 - Phase 6: 1 task (final validation + docs)
 
-**New Tasks Added (4):**
+**New Tasks Added (7):**
 
-- Task 21: Import boundary enforcement (test + Makefile target)
-- Task 22: Generic module-aware Makefile targets
-- Task 23: CI/CD workflow with parallel module testing
-- Task 24: Pre-commit hooks for module validation
+- Task 21: Refactor main.py to use app_factory pattern (NEW - critical for completing factory migration)
+- Task 22: Remove legacy directories and backward compatibility (NEW - cleanup after main.py refactor)
+- Task 23: Create integration test suite for multi-module scenarios
+- Task 24: Import boundary enforcement (test + Makefile target)
+- Task 25: Generic module-aware Makefile targets
+- Task 26: CI/CD workflow with parallel module testing
+- Task 27: Pre-commit hooks for module validation
+- Task 28: Final validation and documentation update
 
 **Key Improvements:**
 
+- ✅ **Complete Factory Migration**: main.py now uses app_factory (no more global instances)
+- ✅ **Clean Architecture**: Legacy directories removed, modular structure complete
 - ✅ **Sustainable Makefile**: Dynamic module discovery, no hardcoded names
 - ✅ **Import Boundary Enforcement**: AST-based validation, runs in CI and pre-commit
 - ✅ **Parallel CI**: Module tests run in parallel (faster builds)
