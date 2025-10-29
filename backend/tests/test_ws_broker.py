@@ -12,17 +12,12 @@ Note: Broadcast/update tests are not included as broadcasting mechanics
 are not implemented yet. This tests routing endpoints only.
 """
 
-from fastapi.testclient import TestClient
-
-from trading_api.main import apiApp
-
 
 class TestOrdersWebSocket:
     """Tests for orders WebSocket endpoint"""
 
-    def test_subscribe_to_orders(self):
+    def test_subscribe_to_orders(self, client):
         """Test subscribing to order updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Send subscribe message
@@ -41,9 +36,8 @@ class TestOrdersWebSocket:
             assert response["payload"]["topic"] == 'orders:{"accountId":"TEST-001"}'
             assert "Subscribed" in response["payload"]["message"]
 
-    def test_unsubscribe_from_orders(self):
+    def test_unsubscribe_from_orders(self, client):
         """Test unsubscribing from order updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # First subscribe
@@ -68,9 +62,8 @@ class TestOrdersWebSocket:
             )
             assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
-    def test_subscribe_multiple_accounts(self):
+    def test_subscribe_multiple_accounts(self, client):
         """Test subscribing to orders for multiple accounts"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             accounts = ["DEMO-001", "DEMO-002", "DEMO-003"]
@@ -90,9 +83,8 @@ class TestOrdersWebSocket:
 class TestPositionsWebSocket:
     """Tests for positions WebSocket endpoint"""
 
-    def test_subscribe_to_positions(self):
+    def test_subscribe_to_positions(self, client):
         """Test subscribing to position updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Send subscribe message
@@ -111,9 +103,8 @@ class TestPositionsWebSocket:
             assert response["payload"]["topic"] == 'positions:{"accountId":"TEST-001"}'
             assert "Subscribed" in response["payload"]["message"]
 
-    def test_unsubscribe_from_positions(self):
+    def test_unsubscribe_from_positions(self, client):
         """Test unsubscribing from position updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # First subscribe
@@ -142,9 +133,8 @@ class TestPositionsWebSocket:
 class TestExecutionsWebSocket:
     """Tests for executions WebSocket endpoint"""
 
-    def test_subscribe_to_executions(self):
+    def test_subscribe_to_executions(self, client):
         """Test subscribing to execution updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Send subscribe message
@@ -164,9 +154,8 @@ class TestExecutionsWebSocket:
             assert '"accountId":"TEST-001"' in response["payload"]["topic"]
             assert "Subscribed" in response["payload"]["message"]
 
-    def test_subscribe_to_executions_with_symbol_filter(self):
+    def test_subscribe_to_executions_with_symbol_filter(self, client):
         """Test subscribing to executions with optional symbol filter"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Send subscribe message with symbol filter
@@ -185,9 +174,8 @@ class TestExecutionsWebSocket:
             # Topic format includes the symbol parameter
             assert "TEST-001" in response["payload"]["topic"]
 
-    def test_unsubscribe_from_executions(self):
+    def test_unsubscribe_from_executions(self, client):
         """Test unsubscribing from execution updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # First subscribe
@@ -217,9 +205,8 @@ class TestExecutionsWebSocket:
 class TestEquityWebSocket:
     """Tests for equity/balance WebSocket endpoint"""
 
-    def test_subscribe_to_equity(self):
+    def test_subscribe_to_equity(self, client):
         """Test subscribing to equity updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Send subscribe message
@@ -238,9 +225,8 @@ class TestEquityWebSocket:
             assert response["payload"]["topic"] == 'equity:{"accountId":"TEST-001"}'
             assert "Subscribed" in response["payload"]["message"]
 
-    def test_unsubscribe_from_equity(self):
+    def test_unsubscribe_from_equity(self, client):
         """Test unsubscribing from equity updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # First subscribe
@@ -269,9 +255,8 @@ class TestEquityWebSocket:
 class TestBrokerConnectionWebSocket:
     """Tests for broker connection status WebSocket endpoint"""
 
-    def test_subscribe_to_broker_connection(self):
+    def test_subscribe_to_broker_connection(self, client):
         """Test subscribing to broker connection status updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Send subscribe message
@@ -293,9 +278,8 @@ class TestBrokerConnectionWebSocket:
             )
             assert "Subscribed" in response["payload"]["message"]
 
-    def test_unsubscribe_from_broker_connection(self):
+    def test_unsubscribe_from_broker_connection(self, client):
         """Test unsubscribing from broker connection status updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # First subscribe
@@ -332,17 +316,15 @@ class TestBrokerConnectionWebSocket:
 class TestBrokerWebSocketGeneral:
     """General tests for broker WebSocket functionality"""
 
-    def test_websocket_connection(self):
+    def test_websocket_connection(self, client):
         """Test basic WebSocket connection still works with broker routes"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Connection successful if we get here
             assert websocket is not None
 
-    def test_subscribe_to_all_broker_endpoints(self):
+    def test_subscribe_to_all_broker_endpoints(self, client):
         """Test subscribing to all broker endpoints in one session"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             endpoints = [

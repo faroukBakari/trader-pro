@@ -4,10 +4,6 @@ Integration tests for WebSocket endpoints
 
 import json
 
-from fastapi.testclient import TestClient
-
-from trading_api.main import apiApp
-
 
 def build_topic(symbol: str, resolution: str) -> str:
     """Build standardized topic string matching backend format"""
@@ -19,17 +15,15 @@ def build_topic(symbol: str, resolution: str) -> str:
 class TestBarsWebSocketIntegration:
     """Integration tests for bars WebSocket endpoint"""
 
-    def test_websocket_connection(self):
+    def test_websocket_connection(self, client):
         """Test basic WebSocket connection to /api/v1/ws"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Connection successful if we get here
             assert websocket is not None
 
-    def test_subscribe_to_bars(self):
+    def test_subscribe_to_bars(self, client):
         """Test subscribing to bar updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Send subscribe message
@@ -51,9 +45,8 @@ class TestBarsWebSocketIntegration:
             )
             assert "Subscribed" in response["payload"]["message"]
 
-    def test_subscribe_with_different_resolutions(self):
+    def test_subscribe_with_different_resolutions(self, client):
         """Test subscribing to different resolutions creates different topics"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Subscribe to 1-minute bars
@@ -82,9 +75,8 @@ class TestBarsWebSocketIntegration:
                 == 'bars:{"resolution":"D","symbol":"AAPL"}'
             )
 
-    def test_unsubscribe_from_bars(self):
+    def test_unsubscribe_from_bars(self, client):
         """Test unsubscribing from bar updates"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # First subscribe
@@ -115,9 +107,8 @@ class TestBarsWebSocketIntegration:
             )
             assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
-    def test_multiple_symbols_subscription(self):
+    def test_multiple_symbols_subscription(self, client):
         """Test subscribing to multiple symbols"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             symbols = ["AAPL", "GOOGL", "MSFT"]
@@ -136,9 +127,8 @@ class TestBarsWebSocketIntegration:
                     == f'bars:{{"resolution":"1","symbol":"{symbol}"}}'
                 )
 
-    def test_subscribe_with_explicit_resolution(self):
+    def test_subscribe_with_explicit_resolution(self, client):
         """Test that subscribing with explicit resolution works correctly"""
-        client = TestClient(apiApp)
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Subscribe with explicit resolution
