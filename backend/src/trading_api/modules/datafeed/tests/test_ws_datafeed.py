@@ -4,6 +4,8 @@ Integration tests for WebSocket endpoints
 
 import json
 
+from fastapi.testclient import TestClient
+
 
 def build_topic(symbol: str, resolution: str) -> str:
     """Build standardized topic string matching backend format"""
@@ -15,14 +17,14 @@ def build_topic(symbol: str, resolution: str) -> str:
 class TestBarsWebSocketIntegration:
     """Integration tests for bars WebSocket endpoint"""
 
-    def test_websocket_connection(self, client):
+    def test_websocket_connection(self, client: TestClient) -> None:
         """Test basic WebSocket connection to /api/v1/ws"""
 
         with client.websocket_connect("/api/v1/ws") as websocket:
             # Connection successful if we get here
             assert websocket is not None
 
-    def test_subscribe_to_bars(self, client):
+    def test_subscribe_to_bars(self, client: TestClient) -> None:
         """Test subscribing to bar updates"""
 
         with client.websocket_connect("/api/v1/ws") as websocket:
@@ -45,7 +47,7 @@ class TestBarsWebSocketIntegration:
             )
             assert "Subscribed" in response["payload"]["message"]
 
-    def test_subscribe_with_different_resolutions(self, client):
+    def test_subscribe_with_different_resolutions(self, client: TestClient) -> None:
         """Test subscribing to different resolutions creates different topics"""
 
         with client.websocket_connect("/api/v1/ws") as websocket:
@@ -75,7 +77,7 @@ class TestBarsWebSocketIntegration:
                 == 'bars:{"resolution":"D","symbol":"AAPL"}'
             )
 
-    def test_unsubscribe_from_bars(self, client):
+    def test_unsubscribe_from_bars(self, client: TestClient) -> None:
         """Test unsubscribing from bar updates"""
 
         with client.websocket_connect("/api/v1/ws") as websocket:
@@ -107,7 +109,7 @@ class TestBarsWebSocketIntegration:
             )
             assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
-    def test_multiple_symbols_subscription(self, client):
+    def test_multiple_symbols_subscription(self, client: TestClient) -> None:
         """Test subscribing to multiple symbols"""
 
         with client.websocket_connect("/api/v1/ws") as websocket:
@@ -127,7 +129,7 @@ class TestBarsWebSocketIntegration:
                     == f'bars:{{"resolution":"1","symbol":"{symbol}"}}'
                 )
 
-    def test_subscribe_with_explicit_resolution(self, client):
+    def test_subscribe_with_explicit_resolution(self, client: TestClient) -> None:
         """Test that subscribing with explicit resolution works correctly"""
 
         with client.websocket_connect("/api/v1/ws") as websocket:

@@ -8,12 +8,13 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Annotated, AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
+from external_packages.fastws import Client
 from trading_api.models import APIVersion
 from trading_api.shared import FastWSAdapter, HealthApi, ModuleRegistry, VersionApi
 
@@ -76,11 +77,15 @@ def create_app(
         >>> # Load only datafeed module
         >>> api_app, ws_app = create_app(enabled_modules=["datafeed"])
     """
-    # TODO: Import and register modules here once Phase 2 is complete
-    # from trading_api.modules.datafeed import DatafeedModule
-    # from trading_api.modules.broker import BrokerModule
-    # registry.register(DatafeedModule())
-    # registry.register(BrokerModule())
+    # Register all available modules
+    from trading_api.modules.broker import BrokerModule
+    from trading_api.modules.datafeed import DatafeedModule
+
+    # Clear registry to allow fresh registration (important for tests)
+    registry.clear()
+
+    registry.register(DatafeedModule())
+    registry.register(BrokerModule())
 
     # Filter modules if enabled_modules is specified
     if enabled_modules is not None:
@@ -196,6 +201,14 @@ def create_app(
 
         # Call configure_app hook
         module.configure_app(api_app, ws_app)
+
+    # Register the WebSocket endpoint
+    @api_app.websocket(ws_url)
+    async def websocket_endpoint(
+        client: Annotated[Client, Depends(ws_app.manage)],
+    ) -> None:
+        """WebSocket endpoint for real-time bar data streaming"""
+        await ws_app.serve(client)
 
     # Add root endpoint
     @api_app.get("/", tags=["root"])

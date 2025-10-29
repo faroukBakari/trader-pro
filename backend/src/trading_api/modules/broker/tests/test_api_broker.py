@@ -3,10 +3,11 @@ Tests for broker API endpoints
 """
 
 import pytest
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_place_order_endpoint(async_client):
+async def test_place_order_endpoint(async_client: AsyncClient) -> None:
     """Test placing a new order"""
     response = await async_client.post(
         "/api/v1/broker/orders",
@@ -26,7 +27,7 @@ async def test_place_order_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_preview_order_endpoint(async_client):
+async def test_preview_order_endpoint(async_client: AsyncClient) -> None:
     """Test previewing order costs and requirements"""
     response = await async_client.post(
         "/api/v1/broker/orders/preview",
@@ -68,7 +69,7 @@ async def test_preview_order_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_preview_market_order_warning(async_client):
+async def test_preview_market_order_warning(async_client: AsyncClient) -> None:
     """Test that market orders get appropriate warnings"""
     response = await async_client.post(
         "/api/v1/broker/orders/preview",
@@ -90,7 +91,7 @@ async def test_preview_market_order_warning(async_client):
 
 
 @pytest.mark.asyncio
-async def test_preview_large_order_warning(async_client):
+async def test_preview_large_order_warning(async_client: AsyncClient) -> None:
     """Test that large orders get slippage warnings"""
     response = await async_client.post(
         "/api/v1/broker/orders/preview",
@@ -113,7 +114,7 @@ async def test_preview_large_order_warning(async_client):
 
 
 @pytest.mark.asyncio
-async def test_get_orders_endpoint(async_client):
+async def test_get_orders_endpoint(async_client: AsyncClient) -> None:
     """Test getting all orders"""
     # First place an order
     await async_client.post(
@@ -137,7 +138,7 @@ async def test_get_orders_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_modify_order_endpoint(async_client):
+async def test_modify_order_endpoint(async_client: AsyncClient) -> None:
     """Test modifying an existing order"""
     # First place an order
     place_response = await async_client.post(
@@ -168,7 +169,7 @@ async def test_modify_order_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_cancel_order_endpoint(async_client):
+async def test_cancel_order_endpoint(async_client: AsyncClient) -> None:
     """Test canceling an order"""
     # First place an order
     place_response = await async_client.post(
@@ -190,7 +191,7 @@ async def test_cancel_order_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_get_positions_endpoint(async_client):
+async def test_get_positions_endpoint(async_client: AsyncClient) -> None:
     """Test getting all positions"""
     response = await async_client.get("/api/v1/broker/positions")
 
@@ -200,7 +201,7 @@ async def test_get_positions_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_get_executions_endpoint(async_client):
+async def test_get_executions_endpoint(async_client: AsyncClient) -> None:
     """Test getting executions for a symbol"""
     response = await async_client.get("/api/v1/broker/executions/AAPL")
 
@@ -210,7 +211,7 @@ async def test_get_executions_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_get_account_info_endpoint(async_client):
+async def test_get_account_info_endpoint(async_client: AsyncClient) -> None:
     """Test getting account information"""
     response = await async_client.get("/api/v1/broker/account")
 
@@ -221,25 +222,39 @@ async def test_get_account_info_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_close_position_endpoint(async_client):
+async def test_close_position_endpoint(async_client: AsyncClient) -> None:
     """Test closing a position (full close) - verify closing order is created"""
     # Reset broker state
     await async_client.post("/api/v1/broker/debug/reset")
 
-    # Manually create a position (bypass execution simulation)
-    from trading_api.main import broker_service
-    from trading_api.models.broker import Position, Side
-
-    position_id = "AAPL-POS"
-    broker_service._positions[position_id] = Position(
-        id=position_id,
-        symbol="AAPL",
-        qty=100.0,
-        side=Side.BUY,
-        avgPrice=100.0,
+    # Create a position via proper API flow (place order → execution → position)
+    # Step 1: Place a BUY order
+    place_response = await async_client.post(
+        "/api/v1/broker/orders",
+        json={
+            "symbol": "AAPL",
+            "type": 2,  # MARKET order (will execute immediately)
+            "side": 1,  # BUY
+            "qty": 100.0,
+        },
     )
+    assert place_response.status_code == 200
 
-    # Close the position
+    # Step 2: Execute the order immediately (for testing)
+    execute_response = await async_client.post("/api/v1/broker/debug/execute-orders")
+    assert execute_response.status_code == 200
+
+    # Step 3: Verify position was created
+    positions_response = await async_client.get("/api/v1/broker/positions")
+    positions = positions_response.json()
+    assert len(positions) == 1
+    position = positions[0]
+    position_id = position["id"]
+    assert position["symbol"] == "AAPL"
+    assert position["qty"] == 100.0
+    assert position["side"] == 1  # BUY
+
+    # Step 4: Close the position
     close_response = await async_client.delete(
         f"/api/v1/broker/positions/{position_id}"
     )
@@ -247,12 +262,13 @@ async def test_close_position_endpoint(async_client):
     data = close_response.json()
     assert data["success"] is True
 
-    # Verify closing order was created
+    # Step 5: Verify closing order was created
     orders_response = await async_client.get("/api/v1/broker/orders")
     orders = orders_response.json()
-    # Should have 1 closing SELL order
-    assert len(orders) == 1
-    closing_order = orders[0]
+    # Should have 2 orders: original BUY (filled) + closing SELL (working)
+    assert len(orders) == 2
+    closing_order = next((o for o in orders if o["side"] == -1), None)
+    assert closing_order is not None
     assert closing_order["symbol"] == "AAPL"
     assert closing_order["side"] == -1  # SELL (opposite of BUY)
     assert closing_order["qty"] == 100.0
@@ -261,36 +277,51 @@ async def test_close_position_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_close_position_partial_endpoint(async_client):
+async def test_close_position_partial_endpoint(async_client: AsyncClient) -> None:
     """Test partially closing a position - verify partial closing order is created"""
     # Reset broker state
     await async_client.post("/api/v1/broker/debug/reset")
 
-    # Manually create a position (bypass execution simulation)
-    from trading_api.main import broker_service
-    from trading_api.models.broker import Position, Side
-
-    position_id = "AAPL-POS"
-    broker_service._positions[position_id] = Position(
-        id=position_id,
-        symbol="AAPL",
-        qty=100.0,
-        side=Side.BUY,
-        avgPrice=100.0,
+    # Create a position via proper API flow (place order → execution → position)
+    # Step 1: Place a BUY order
+    place_response = await async_client.post(
+        "/api/v1/broker/orders",
+        json={
+            "symbol": "AAPL",
+            "type": 2,  # MARKET order (will execute immediately)
+            "side": 1,  # BUY
+            "qty": 100.0,
+        },
     )
+    assert place_response.status_code == 200
 
-    # Partially close position (50 units)
+    # Step 2: Execute the order immediately (for testing)
+    execute_response = await async_client.post("/api/v1/broker/debug/execute-orders")
+    assert execute_response.status_code == 200
+
+    # Step 3: Verify position was created
+    positions_response = await async_client.get("/api/v1/broker/positions")
+    positions = positions_response.json()
+    assert len(positions) == 1
+    position = positions[0]
+    position_id = position["id"]
+    assert position["symbol"] == "AAPL"
+    assert position["qty"] == 100.0
+    assert position["side"] == 1  # BUY
+
+    # Step 4: Partially close position (50 units)
     close_response = await async_client.delete(
         f"/api/v1/broker/positions/{position_id}?amount=50"
     )
     assert close_response.status_code == 200
 
-    # Verify closing order was created for partial amount
+    # Step 5: Verify closing order was created for partial amount
     orders_response = await async_client.get("/api/v1/broker/orders")
     orders = orders_response.json()
-    # Should have 1 partial closing SELL order
-    assert len(orders) == 1
-    closing_order = orders[0]
+    # Should have 2 orders: original BUY (filled) + partial closing SELL (working)
+    assert len(orders) == 2
+    closing_order = next((o for o in orders if o["side"] == -1), None)
+    assert closing_order is not None
     assert closing_order["symbol"] == "AAPL"
     assert closing_order["side"] == -1  # SELL (opposite of BUY)
     assert closing_order["qty"] == 50.0  # Partial close amount
@@ -299,25 +330,39 @@ async def test_close_position_partial_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_edit_position_brackets_endpoint(async_client):
+async def test_edit_position_brackets_endpoint(async_client: AsyncClient) -> None:
     """Test editing position brackets (stop-loss, take-profit) - verify bracket orders are created"""
     # Reset broker state
     await async_client.post("/api/v1/broker/debug/reset")
 
-    # Manually create a position (bypass execution simulation)
-    from trading_api.main import broker_service
-    from trading_api.models.broker import Position, Side
-
-    position_id = "AAPL-POS"
-    broker_service._positions[position_id] = Position(
-        id=position_id,
-        symbol="AAPL",
-        qty=100.0,
-        side=Side.BUY,
-        avgPrice=100.0,
+    # Create a position via proper API flow (place order → execution → position)
+    # Step 1: Place a BUY order
+    place_response = await async_client.post(
+        "/api/v1/broker/orders",
+        json={
+            "symbol": "AAPL",
+            "type": 2,  # MARKET order (will execute immediately)
+            "side": 1,  # BUY
+            "qty": 100.0,
+        },
     )
+    assert place_response.status_code == 200
 
-    # Edit position brackets
+    # Step 2: Execute the order immediately (for testing)
+    execute_response = await async_client.post("/api/v1/broker/debug/execute-orders")
+    assert execute_response.status_code == 200
+
+    # Step 3: Verify position was created
+    positions_response = await async_client.get("/api/v1/broker/positions")
+    positions = positions_response.json()
+    assert len(positions) == 1
+    position = positions[0]
+    position_id = position["id"]
+    assert position["symbol"] == "AAPL"
+    assert position["qty"] == 100.0
+    assert position["side"] == 1  # BUY
+
+    # Step 4: Edit position brackets
     brackets_response = await async_client.put(
         f"/api/v1/broker/positions/{position_id}/brackets",
         json={
@@ -333,13 +378,15 @@ async def test_edit_position_brackets_endpoint(async_client):
     data = brackets_response.json()
     assert data["success"] is True
 
-    # Verify bracket orders were created
+    # Step 5: Verify bracket orders were created
     orders_response = await async_client.get("/api/v1/broker/orders")
     orders = orders_response.json()
-    # Should have 2 bracket orders: stop loss SELL, take profit SELL
-    assert len(orders) == 2
+    # Should have 3 orders: original BUY (filled) + 2 bracket orders (stop loss + take profit)
+    assert len(orders) == 3
 
-    bracket_orders = orders
+    # Filter to bracket orders only (exclude filled BUY order)
+    bracket_orders = [o for o in orders if o["status"] == 6]  # WORKING status
+    assert len(bracket_orders) == 2
 
     # Find stop loss order (STOP type with stopPrice)
     stop_loss_order = next(
@@ -365,7 +412,7 @@ async def test_edit_position_brackets_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_leverage_info_endpoint(async_client):
+async def test_leverage_info_endpoint(async_client: AsyncClient) -> None:
     """Test getting leverage information for a symbol"""
     response = await async_client.get(
         "/api/v1/broker/leverage/info",
@@ -386,7 +433,7 @@ async def test_leverage_info_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_set_leverage_endpoint(async_client):
+async def test_set_leverage_endpoint(async_client: AsyncClient) -> None:
     """Test setting leverage for a symbol"""
     response = await async_client.put(
         "/api/v1/broker/leverage/set",
@@ -414,7 +461,7 @@ async def test_set_leverage_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_set_leverage_invalid_range_endpoint(async_client):
+async def test_set_leverage_invalid_range_endpoint(async_client: AsyncClient) -> None:
     """Test setting leverage with invalid value"""
     # Test leverage too high
     response = await async_client.put(
@@ -432,7 +479,7 @@ async def test_set_leverage_invalid_range_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_preview_leverage_endpoint(async_client):
+async def test_preview_leverage_endpoint(async_client: AsyncClient) -> None:
     """Test previewing leverage changes"""
     # Test moderate leverage
     response = await async_client.post(
@@ -462,7 +509,9 @@ async def test_preview_leverage_endpoint(async_client):
 
 
 @pytest.mark.asyncio
-async def test_preview_leverage_high_leverage_warning(async_client):
+async def test_preview_leverage_high_leverage_warning(
+    async_client: AsyncClient,
+) -> None:
     """Test leverage preview shows warning for high leverage"""
     response = await async_client.post(
         "/api/v1/broker/leverage/preview",
@@ -482,7 +531,7 @@ async def test_preview_leverage_high_leverage_warning(async_client):
 
 
 @pytest.mark.asyncio
-async def test_preview_leverage_invalid_range(async_client):
+async def test_preview_leverage_invalid_range(async_client: AsyncClient) -> None:
     """Test leverage preview shows error for invalid range"""
     response = await async_client.post(
         "/api/v1/broker/leverage/preview",
