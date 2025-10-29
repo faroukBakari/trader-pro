@@ -57,7 +57,7 @@ async def test_position_tracking_with_executions(async_client: AsyncClient) -> N
     )
     assert order_response.status_code == 200
     order = order_response.json()
-    order_id = order["orderId"]
+    order["orderId"]
 
     # Execute the order via debug endpoint
     execute_response = await async_client.post("/api/v1/broker/debug/execute-orders")

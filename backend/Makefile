@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 BACKEND_APP_NAME ?= app
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-cov test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-boundaries test-cov test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
 
 # Default target
 help:
@@ -13,7 +13,8 @@ help:
 	@echo "  ensure-python-ci  Ensure Python 3.11+ is installed (CI mode, no prompts)"
 	@echo "  ensure-poetry     Ensure Poetry is installed (auto-installs if needed)"
 	@echo "  install           Install backend dependencies"
-	@echo "  test              Run backend tests"
+	@echo "  test              Run backend tests (includes boundary validation)"
+	@echo "  test-boundaries   Validate import boundaries between modules"
 	@echo "  test-cov          Run backend tests with coverage"
 	@echo "  test-integration  Run integration tests"
 	@echo "  test-integration-verbose  Run integration tests with detailed output"
@@ -195,7 +196,11 @@ install-ci: ensure-python-ci ensure-poetry
 	poetry install --no-interaction
 
 # Testing
-test:
+test-boundaries:
+	@echo "Validating import boundaries..."
+	poetry run pytest tests/test_import_boundaries.py -v
+
+test: test-boundaries
 	@echo "Running backend tests..."
 	poetry run pytest -v -x
 
