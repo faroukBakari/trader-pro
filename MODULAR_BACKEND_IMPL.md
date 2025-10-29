@@ -247,8 +247,10 @@
     - All 48 tests passing (48 passed in 2.36s)
     - Type checking passes (mypy: no issues found in 61 source files)
     - Spec generation unchanged (OpenAPI and AsyncAPI)
+    - Committed: 52c17f3
 
 22. **Phase 5: Remove legacy directories and backward compatibility** ✅ - Completed 2025-10-29
+
     - Moved `ws/WS-ROUTER-GENERATION.md` → `shared/ws/WS-ROUTER-GENERATION.md`
     - Removed `api/` directory (only backward compatibility re-exports)
     - Removed `core/` directory (services moved to modules/)
@@ -259,6 +261,7 @@
     - All 48 tests passing (48 passed in 2.36s)
     - Type checking passes (mypy: no issues found in 61 source files)
     - Spec generation unchanged
+    - Committed: 52c17f3
 
 ### 🔄 In Progress (0/28 tasks)
 
@@ -290,23 +293,14 @@
 
 **Phase 4 (Complete):**
 
-✅ All Phase 4 tasks completed (Task 20)
-
-**Phase 5 (Partially Complete):**
-
-- [x] Task 21: Refactor main.py to use app_factory pattern (Completed: 2025-10-29)
-- [x] Task 22: Remove legacy directories and backward compatibility (Completed: 2025-10-29)
-
-**Phase 4 (Complete):**
-
 ✅ All Phase 4 tasks completed
 
 - [x] Task 20: Update fixtures to use factory and move tests to module directories (Completed: b46afb8)
 
 **Phase 5 (Finalize Factory Pattern & Enforce Boundaries):**
 
-- [ ] Task 21: Refactor main.py to use app_factory pattern (remove global instances)
-- [ ] Task 22: Remove legacy directories and backward compatibility (api/, core/, plugins/, ws/)
+- [x] Task 21: Refactor main.py to use app_factory pattern (Completed: 2025-10-29)
+- [x] Task 22: Remove legacy directories and backward compatibility (Completed: 2025-10-29)
 - [ ] Task 23: Create integration test suite for multi-module scenarios
 - [ ] Task 24: Implement import boundary enforcement test
 - [ ] Task 25: Add generic module-aware Makefile targets
