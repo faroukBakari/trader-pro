@@ -4,7 +4,7 @@
 BACKEND_PORT ?= 8000
 BACKEND_APP_NAME ?= app
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-cov lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-cov test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers
 
 # Default target
 help:
@@ -15,6 +15,8 @@ help:
 	@echo "  install           Install backend dependencies"
 	@echo "  test              Run backend tests"
 	@echo "  test-cov          Run backend tests with coverage"
+	@echo "  test-integration  Run integration tests"
+	@echo "  test-integration-verbose  Run integration tests with detailed output"
 	@echo "  lint              Run backend linting (check only)"
 	@echo "  lint-check        Run backend linting with type checking"
 	@echo "  format            Format backend code"
@@ -200,6 +202,14 @@ test:
 test-cov:
 	@echo "Running backend tests with coverage..."
 	poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
+
+test-integration:
+	@echo "Running integration tests..."
+	poetry run pytest tests/integration/ -v -x -m integration
+
+test-integration-verbose:
+	@echo "Running integration tests with detailed output..."
+	poetry run pytest tests/integration/ -v -s -m integration
 
 # Linting and formatting
 lint:
