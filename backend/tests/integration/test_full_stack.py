@@ -195,7 +195,7 @@ async def test_multi_module_workflow_end_to_end(async_client: AsyncClient) -> No
     )
     assert order_response.status_code == 200
     order = order_response.json()
-    order_id = order["orderId"]
+    order["orderId"]
 
     # 5. Execute the order
     execute_response = await async_client.post("/api/v1/broker/debug/execute-orders")
