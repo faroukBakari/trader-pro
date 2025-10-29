@@ -698,6 +698,17 @@ class BrokerService(WsRouteService):
         )
         self._update_callbacks = {}
 
+    async def execute_all_working_orders(self) -> None:
+        """Execute all working orders immediately (for testing purposes)."""
+        working_order_ids = [
+            order_id
+            for order_id, order in self._orders.items()
+            if order.status == OrderStatus.WORKING
+        ]
+
+        for order_id in working_order_ids:
+            await self._simulate_execution(order_id)
+
     # ========================== WEBSOCKET STREAMING ==========================#
 
     async def create_topic(self, topic: str, topic_update: Callable) -> None:

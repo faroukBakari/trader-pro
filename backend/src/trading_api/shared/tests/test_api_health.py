@@ -1,10 +1,11 @@
 """Tests for health endpoint."""
 
 import pytest
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_healthcheck_returns_200_and_payload(async_client) -> None:
+async def test_healthcheck_returns_200_and_payload(async_client: AsyncClient) -> None:
     """Test that health endpoint returns status 200 with correct payload."""
     response = await async_client.get("/api/v1/health")
 

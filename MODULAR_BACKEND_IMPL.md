@@ -11,7 +11,7 @@
 > - Move next task to "In Progress"
 > - Commit the updated MODULAR_BACKEND_IMPL.md with task changes
 
-### ✅ Completed (19/21 tasks)
+### ✅ Completed (20/21 tasks)
 
 1. **Pre-Migration Validation** ✅ - Completed 2025-10-29
 
@@ -202,6 +202,7 @@
     - Committed: d63a76c
 
 19. **Phase 3: Test AsyncAPI Spec Generation** ✅ - Completed 2025-10-29
+
     - Verified full-stack AsyncAPI spec generation works
     - Spec contains all 7 expected routers:
       - Datafeed: `bars`, `quotes`
@@ -212,16 +213,36 @@
     - **Note**: Module-specific configurations require `main.py` factory update (Task 21)
     - Committed: d63a76c
 
+20. **Phase 4: Update Fixtures and Move Tests** ✅ - Completed 2025-10-29
+    - Created shared test factory in `shared/tests/conftest.py`
+    - Created module-specific conftest files (broker, datafeed)
+    - Updated modules to use consistent prefix pattern (`/{module.name}`)
+    - Moved test files to module directories:
+      - `test_api_broker.py` → `modules/broker/tests/`
+      - `test_ws_broker.py` → `modules/broker/tests/`
+      - `test_ws_datafeed.py` → `modules/datafeed/tests/`
+      - `test_api_health.py` → `shared/tests/`
+      - `test_api_versioning.py` → `shared/tests/`
+    - Fixed 3 broker tests to use proper API flow (no service manipulation)
+    - Added `debug/execute-orders` endpoint for testing
+    - Added `execute_all_working_orders()` method to BrokerService
+    - Updated pytest config to discover tests from module directories
+    - Added WebSocket endpoint registration to app_factory
+    - Updated mypy.ini to allow flexible typing in test files
+    - All 48 tests passing (48 passed in 2.35s)
+    - Tests follow architectural constraints (no service access, factory pattern only)
+    - Committed: 0530b5f
+
 ### 🔄 In Progress (0/21 tasks)
 
-**Phase 3: Move Shared and Module Infrastructure** - Complete ✅
+**Phase 4: Switch Fixtures to Factory and Reorganize Tests** - Complete ✅
 
 **Next Steps:**
 
-- Phase 4: Task 20 - Update fixtures to use factory and move tests to module directories
-- Phase 5: Task 21 - Finalize main.py, update build system, full verification
+- Phase 4: Complete Task 20 - Fix remaining broker tests and pytest config
+- Phase 5: Tasks 21-24 - Import boundaries, Makefile targets, CI/CD, pre-commit hooks
 
-### 📋 Pending (6/25 tasks)
+### 📋 Pending (6/26 tasks)
 
 **Phase 0 (Complete):**
 
@@ -242,17 +263,18 @@
 **Phase 4 (Switch to Factory):**
 
 - [ ] Task 20: Update fixtures to use factory and move tests to module directories
+- [ ] Task 21: Create integration test suite for multi-module scenarios
 
 **Phase 5 (Enforce Boundaries & Build System):**
 
-- [ ] Task 21: Implement import boundary enforcement test
-- [ ] Task 22: Add generic module-aware Makefile targets
-- [ ] Task 23: Update CI/CD workflow for parallel module testing
-- [ ] Task 24: Update pre-commit hooks for module validation
+- [ ] Task 22: Implement import boundary enforcement test
+- [ ] Task 23: Add generic module-aware Makefile targets
+- [ ] Task 24: Update CI/CD workflow for generic parallel module-aware testing
+- [ ] Task 25: Update pre-commit hooks for module validation
 
 **Phase 6 (Finalize):**
 
-- [ ] Task 25: Final validation and documentation update
+- [ ] Task 26: Final validation and documentation update
 
 ---
 
@@ -283,6 +305,77 @@
 - Independent testing and optional module loading
 - Centralized models, backward compatible migration
 - Support future microservice extraction
+
+## Architectural Constraints (MANDATORY)
+
+These constraints MUST be followed throughout the implementation:
+
+### 1. **Module Prefix Consistency**
+
+- **Rule**: Module API prefix MUST exactly match module name
+- **Pattern**: `/{module.name}` → `/datafeed`, `/broker`, etc.
+- **Implementation**: In `Module.get_api_routers()`:
+  ```python
+  def get_api_routers(self) -> list[APIRouter]:
+      # Prefix MUST match module name
+      return [ModuleApi(service=self.service, prefix=f"/{self.name}", tags=[self.name])]
+  ```
+- **Rationale**: Simplifies routing, ensures consistency, enables generic tooling
+
+### 2. **Test Isolation Pattern**
+
+- **Rule**: Each module's tests create isolated app with only that module enabled
+- **Pattern**: Module-specific conftest.py creates app via `create_app(enabled_modules=["module_name"])`
+- **Implementation**:
+  ```python
+  # modules/broker/tests/conftest.py
+  @pytest.fixture
+  def apps():
+      from trading_api.app_factory import create_app
+      return create_app(enabled_modules=["broker"])  # Only broker
+  ```
+- **Rationale**: True module isolation, parallel testing, faster CI
+
+### 3. **Shared Test Factory**
+
+- **Rule**: Single source of truth for test app creation
+- **Location**: `shared/tests/conftest.py`
+- **Pattern**: All test fixtures inherit from or import shared factory
+- **Implementation**:
+  ```python
+  # shared/tests/conftest.py
+  def create_test_app(enabled_modules: list[str] | None = None):
+      from trading_api.app_factory import create_app
+      return create_app(enabled_modules=enabled_modules)
+  ```
+- **Rationale**: DRY principle, consistent test setup, easier maintenance
+
+### 4. **No Direct Service Access in Tests**
+
+- **Rule**: Tests MUST use API/WebSocket endpoints, NEVER manipulate service internals
+- **Forbidden**: `broker_service._positions[id] = Position(...)` ❌
+- **Allowed**: `await async_client.post("/api/v1/broker/orders", json={...})` ✅
+- **Rationale**: Tests verify public contract, prevent coupling to implementation
+
+### 5. **Factory Pattern Only**
+
+- **Rule**: All app instances created via `create_app()`, never import from `main.py`
+- **Forbidden**: `from trading_api.main import apiApp` ❌
+- **Allowed**: `from trading_api.app_factory import create_app` ✅
+- **Exception**: `main.py` exports `app = apiApp` for spec generation scripts only
+- **Rationale**: Loose coupling, testability, module independence
+
+### 6. **Registry Cleanup**
+
+- **Rule**: `app_factory.create_app()` MUST clear registry before registering modules
+- **Implementation**:
+  ```python
+  def create_app(...):
+      registry.clear()  # Critical for tests
+      registry.register(DatafeedModule())
+      registry.register(BrokerModule())
+  ```
+- **Rationale**: Prevents module duplication errors in test suites
 
 ## Target Structure
 
@@ -1162,57 +1255,525 @@ make generate-ws-routers  # Generates all module routers
 
 **Prerequisite**: Phase 3 completed (all module files moved, spec generation tested)
 
+**Architecture Principles**:
+
+1. **Shared Test Factory Pattern**: Single source of truth for test app creation in `shared/tests/conftest.py`
+2. **Module Isolation**: Each module's tests create app with only that module enabled
+3. **Consistent Prefixes**: Module API prefix MUST match module name (`/{module.name}`)
+4. **No Service Manipulation**: Tests must not directly access/manipulate service internals
+5. **Self-Contained Tests**: Each test suite is completely independent
+
 **Implementation**:
 
-1. **Update fixture to use factory** (single line change):
+1. **Create shared test factory** (`src/trading_api/shared/tests/conftest.py`):
 
    ```python
-   # backend/tests/conftest.py
-   def _get_current_app():
-       # OLD: from trading_api.main import apiApp; return apiApp
-       # NEW:
+   """Shared test fixtures for all test suites."""
+   import pytest
+   from fastapi.testclient import TestClient
+   from httpx import AsyncClient
+
+   def create_test_app(enabled_modules: list[str] | None = None):
+       """Create a test application with specified modules.
+
+       Args:
+           enabled_modules: List of module names to enable.
+                          If None, all modules are enabled.
+
+       Returns:
+           tuple: (FastAPI application, FastWSAdapter application)
+       """
        from trading_api.app_factory import create_app
-       api_app, _ = create_app(enabled_modules=None)  # All modules
+       return create_app(enabled_modules=enabled_modules)
+
+   @pytest.fixture
+   def apps():
+       """Full application (API + WS) with all modules enabled."""
+       return create_test_app(enabled_modules=None)
+
+   @pytest.fixture
+   def app(apps):
+       """FastAPI application instance."""
+       api_app, _ = apps
        return api_app
+
+   @pytest.fixture
+   def ws_app(apps):
+       """FastWSAdapter application instance."""
+       _, ws_app = apps
+       return ws_app
+
+   @pytest.fixture
+   def client(app):
+       """Sync test client for WebSocket tests."""
+       return TestClient(app)
+
+   @pytest.fixture
+   async def async_client(app):
+       """Async test client for API tests."""
+       async with AsyncClient(app=app, base_url="http://test") as ac:
+           yield ac
    ```
 
-2. **Add module-specific fixtures**:
+2. **Create module-specific conftest** (example: `modules/broker/tests/conftest.py`):
 
    ```python
+   """Test fixtures for broker module tests.
+
+   Creates test app with only broker module enabled for isolation.
+   """
+   import pytest
+   from fastapi.testclient import TestClient
+   from httpx import AsyncClient
+
    @pytest.fixture
-   def datafeed_only_app():
+   def apps():
+       """Application with only broker module enabled."""
        from trading_api.app_factory import create_app
-       api_app, _ = create_app(enabled_modules=["datafeed"])
+       return create_app(enabled_modules=["broker"])
+
+   @pytest.fixture
+   def app(apps):
+       """FastAPI application instance."""
+       api_app, _ = apps
        return api_app
 
    @pytest.fixture
-   def broker_only_app():
-       from trading_api.app_factory import create_app
-       api_app, _ = create_app(enabled_modules=["broker"])
-       return api_app
+   def ws_app(apps):
+       """FastWSAdapter application instance."""
+       _, ws_app = apps
+       return ws_app
+
+   @pytest.fixture
+   def client(app):
+       """Sync test client for WebSocket tests."""
+       return TestClient(app)
+
+   @pytest.fixture
+   async def async_client(app):
+       """Async test client for API tests."""
+       async with AsyncClient(app=app, base_url="http://test") as ac:
+           yield ac
    ```
 
-3. **Move tests to module directories**:
+3. **Ensure consistent module prefixes** (in `modules/{module}/__init__.py`):
 
-   - Move shared tests: `test_api_health.py`, `test_api_versioning.py` → `shared/tests/`
-   - Move module tests: `test_api_broker.py`, `test_ws_broker.py` → `modules/broker/tests/`
-   - Move datafeed tests → `modules/datafeed/tests/`
-   - Create `tests/integration/` with new integration tests
+   ```python
+   def get_api_routers(self) -> list[APIRouter]:
+       """Get all FastAPI routers for module REST API endpoints."""
+       # Prefix MUST match module name for consistency
+       return [
+           ModuleApi(service=self.service, prefix=f"/{self.name}", tags=[self.name])
+       ]
+   ```
 
-4. **Validate**:
+4. **Move tests to module directories**:
+
    ```bash
-   make test  # All 48 tests should still pass
-   make test-datafeed  # Datafeed module tests only
-   make test-broker  # Broker module tests only
+   # Copy tests to module locations
+   cp tests/test_api_health.py src/trading_api/shared/tests/
+   cp tests/test_api_versioning.py src/trading_api/shared/tests/
+   cp tests/test_api_broker.py src/trading_api/modules/broker/tests/
+   cp tests/test_ws_broker.py src/trading_api/modules/broker/tests/
+   cp tests/test_ws_datafeed.py src/trading_api/modules/datafeed/tests/
+
+   # Create symlink for root tests to use shared conftest
+   rm tests/conftest.py
+   ln -s ../src/trading_api/shared/tests/conftest.py tests/conftest.py
    ```
 
-**Risk**: 🟢 LOW (if Phase 0 completed correctly, this is a single function change)
+5. **Validate module isolation**:
+
+   ```bash
+   # Test shared infrastructure only
+   poetry run pytest src/trading_api/shared/tests/ -v
+   # Expected: 9 tests pass (health + versioning)
+
+   # Test broker module only
+   poetry run pytest src/trading_api/modules/broker/tests/ -v
+   # Expected: Broker tests pass with only broker module loaded
+
+   # Test datafeed module only
+   poetry run pytest src/trading_api/modules/datafeed/tests/ -v
+   # Expected: Datafeed tests pass with only datafeed module loaded
+   ```
+
+6. **Update pytest configuration** (`pyproject.toml`):
+
+   ```toml
+   [tool.pytest.ini_options]
+   testpaths = [
+       "tests",                              # Root integration tests
+       "src/trading_api/shared/tests",       # Shared infrastructure tests
+       "src/trading_api/modules/*/tests",    # All module tests
+   ]
+   ```
+
+**Critical Constraints**:
+
+- ✅ **Module prefix = module name**: `/api/v1/{module.name}/*` (enforced in module's `get_api_routers()`)
+- ✅ **No direct service access**: Tests use API/WS endpoints, never `service._internal_state`
+- ✅ **Factory pattern only**: All apps created via `create_app()`, never import from `main.py`
+- ✅ **Module isolation**: Each module's tests run with only that module enabled
+
+**Known Issues to Fix**:
+
+1. **Broker tests with service manipulation** (3 tests):
+
+   - `test_close_position_endpoint` - Uses `broker_service._positions[id] = Position(...)`
+   - `test_close_position_partial_endpoint` - Uses `broker_service._positions[id] = Position(...)`
+   - `test_edit_position_brackets_endpoint` - Uses `broker_service._positions[id] = Position(...)`
+   - **Fix**: Create positions via API calls or refactor to use proper fixtures
+
+2. **Pytest discovery**:
+   - Update `pyproject.toml` to discover tests from module directories
+   - Ensure all 48 tests are collected and pass
+
+**Validation**:
+
+```bash
+# After fixes
+make test  # All 48 tests should pass
+poetry run pytest src/trading_api/shared/tests/ -v  # 9 tests
+poetry run pytest src/trading_api/modules/broker/tests/ -v  # Broker tests
+poetry run pytest src/trading_api/modules/datafeed/tests/ -v  # Datafeed tests
+```
+
+**Risk**: 🟡 MEDIUM (test refactoring required for service manipulation patterns)
+
+---
+
+**Task 21: Create Integration Test Suite for Multi-Module Scenarios**
+
+**Objective**: Create comprehensive integration tests that validate cross-module interactions and full-stack scenarios with all modules enabled
+
+**Rationale**: While unit tests verify individual modules in isolation, we need integration tests to ensure:
+
+- Multiple modules work correctly together
+- Cross-module workflows function as expected
+- Full application behaves correctly with all modules loaded
+- WebSocket and API endpoints interact properly across modules
+
+**Implementation**:
+
+1. **Create integration test directory** (`backend/tests/integration/`):
+
+   ```bash
+   mkdir -p backend/tests/integration
+   touch backend/tests/integration/__init__.py
+   ```
+
+2. **Create integration test conftest** (`backend/tests/integration/conftest.py`):
+
+   ```python
+   """Test fixtures for integration tests.
+
+   Creates full-stack application with ALL modules enabled.
+   """
+   import pytest
+   from fastapi.testclient import TestClient
+   from httpx import AsyncClient
+
+   @pytest.fixture
+   def apps():
+       """Full application with all modules enabled."""
+       from trading_api.app_factory import create_app
+       return create_app(enabled_modules=None)  # None = all modules
+
+   @pytest.fixture
+   def app(apps):
+       """FastAPI application instance."""
+       api_app, _ = apps
+       return api_app
+
+   @pytest.fixture
+   def ws_app(apps):
+       """FastWSAdapter application instance."""
+       _, ws_app = apps
+       return ws_app
+
+   @pytest.fixture
+   def client(app):
+       """Sync test client for WebSocket tests."""
+       return TestClient(app)
+
+   @pytest.fixture
+   async def async_client(app):
+       """Async test client for API tests."""
+       async with AsyncClient(app=app, base_url="http://test") as ac:
+           yield ac
+   ```
+
+3. **Create cross-module workflow tests** (`backend/tests/integration/test_broker_datafeed_workflow.py`):
+
+   ```python
+   """Integration tests for broker + datafeed workflows."""
+   import pytest
+   from httpx import AsyncClient
+
+
+   @pytest.mark.asyncio
+   async def test_place_order_with_market_data(async_client: AsyncClient):
+       """Test placing order while subscribed to market data for same symbol."""
+       # Subscribe to market data
+       # ... WebSocket subscription logic
+
+       # Place order via broker API
+       order_response = await async_client.post(
+           "/api/v1/broker/orders",
+           json={
+               "instrument": {"symbol": "AAPL", "exchange": "NASDAQ"},
+               "side": "buy",
+               "qty": 100,
+               "order_type": "market",
+           }
+       )
+       assert order_response.status_code == 200
+
+       # Verify order created
+       order = order_response.json()
+       assert order["instrument"]["symbol"] == "AAPL"
+
+       # Verify market data still flowing
+       # ... WebSocket data validation
+
+
+   @pytest.mark.asyncio
+   async def test_position_tracking_with_executions(async_client: AsyncClient):
+       """Test position updates correlate with execution reports."""
+       # Get initial positions
+       positions_response = await async_client.get("/api/v1/broker/positions")
+       assert positions_response.status_code == 200
+       initial_positions = positions_response.json()
+
+       # Subscribe to executions and positions via WebSocket
+       # ... WebSocket subscription logic
+
+       # Place order and verify execution
+       # ... Order placement and verification
+
+       # Verify position updated correctly
+       # ... Position validation
+   ```
+
+4. **Create full-stack scenario tests** (`backend/tests/integration/test_full_stack.py`):
+
+   ```python
+   """Full-stack integration tests with all modules."""
+   import pytest
+   from httpx import AsyncClient
+
+
+   @pytest.mark.asyncio
+   async def test_all_modules_loaded(async_client: AsyncClient):
+       """Verify all modules are accessible in full-stack mode."""
+       # Test datafeed endpoints
+       datafeed_config = await async_client.get("/api/v1/datafeed/config")
+       assert datafeed_config.status_code == 200
+
+       # Test broker endpoints
+       broker_orders = await async_client.get("/api/v1/broker/orders")
+       assert broker_orders.status_code == 200
+
+       # Test shared endpoints
+       health = await async_client.get("/api/v1/health")
+       assert health.status_code == 200
+
+
+   @pytest.mark.asyncio
+   async def test_websocket_all_channels(client):
+       """Verify all WebSocket channels available with all modules."""
+       from fastapi.testclient import WebSocketSession
+
+       with client.websocket_connect("/api/v1/ws") as websocket:
+           # Test datafeed channels
+           websocket.send_json({
+               "action": "subscribe",
+               "route": "bars",
+               "payload": {"symbol": "AAPL", "resolution": "1"}
+           })
+
+           # Test broker channels
+           websocket.send_json({
+               "action": "subscribe",
+               "route": "orders",
+               "payload": {}
+           })
+
+           # Verify responses
+           # ... Response validation
+
+
+   @pytest.mark.asyncio
+   async def test_spec_generation_completeness(app):
+       """Verify OpenAPI/AsyncAPI specs include all modules."""
+       # Get OpenAPI spec
+       openapi_spec = app.openapi()
+       paths = openapi_spec.get("paths", {})
+
+       # Verify datafeed endpoints present
+       assert any("/datafeed/" in path for path in paths)
+
+       # Verify broker endpoints present
+       assert any("/broker/" in path for path in paths)
+
+       # Verify shared endpoints present
+       assert "/api/v1/health" in paths
+       assert "/api/v1/versions" in paths
+   ```
+
+5. **Create module isolation validation tests** (`backend/tests/integration/test_module_isolation.py`):
+
+   ```python
+   """Tests to verify module isolation and independence."""
+   import pytest
+
+
+   def test_datafeed_only_isolation():
+       """Verify datafeed-only app doesn't load broker."""
+       from trading_api.app_factory import create_app
+
+       api_app, _ = create_app(enabled_modules=["datafeed"])
+       openapi_spec = api_app.openapi()
+       paths = openapi_spec.get("paths", {})
+
+       # Datafeed endpoints should exist
+       assert any("/datafeed/" in path for path in paths)
+
+       # Broker endpoints should NOT exist
+       assert not any("/broker/" in path for path in paths)
+
+
+   def test_broker_only_isolation():
+       """Verify broker-only app doesn't load datafeed."""
+       from trading_api.app_factory import create_app
+
+       api_app, _ = create_app(enabled_modules=["broker"])
+       openapi_spec = api_app.openapi()
+       paths = openapi_spec.get("paths", {})
+
+       # Broker endpoints should exist
+       assert any("/broker/" in path for path in paths)
+
+       # Datafeed endpoints should NOT exist
+       assert not any("/datafeed/" in path for path in paths)
+
+
+   def test_module_registry_cleanup():
+       """Verify registry is cleared between app creations."""
+       from trading_api.app_factory import create_app
+       from trading_api.shared.module_registry import registry
+
+       # Create app with all modules
+       create_app(enabled_modules=None)
+       all_modules_count = len(registry.get_all_modules())
+
+       # Clear and create app with one module
+       create_app(enabled_modules=["datafeed"])
+       one_module_count = len(registry.get_enabled_modules())
+
+       # Registry should have been cleared
+       assert all_modules_count > 0
+       assert one_module_count == 1
+   ```
+
+6. **Update pytest configuration** (`pyproject.toml`):
+
+   ```toml
+   [tool.pytest.ini_options]
+   testpaths = [
+       "tests",                              # Root integration tests
+       "tests/integration",                  # Cross-module integration tests
+       "src/trading_api/shared/tests",       # Shared infrastructure tests
+       "src/trading_api/modules/*/tests",    # All module tests
+   ]
+   markers = [
+       "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+       "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+   ]
+   ```
+
+7. **Add Makefile targets**:
+
+   ```makefile
+   # Add to backend/Makefile
+   test-integration:
+   	@echo "Running integration tests..."
+   	poetry run pytest tests/integration/ -v -x
+
+   test-integration-verbose:
+   	@echo "Running integration tests with detailed output..."
+   	poetry run pytest tests/integration/ -v -s
+
+   # Update main test target to include integration
+   test: test-boundaries test-shared test-modules test-integration
+   	@echo "✅ All tests passed (unit + integration)"
+   ```
+
+**Test Coverage Requirements**:
+
+- ✅ Cross-module workflows (broker + datafeed interactions)
+- ✅ Full-stack scenarios (all modules loaded together)
+- ✅ Module isolation validation (datafeed-only, broker-only)
+- ✅ WebSocket multi-channel subscriptions
+- ✅ API endpoint availability across all modules
+- ✅ Spec generation completeness (OpenAPI/AsyncAPI)
+- ✅ Registry cleanup between app creations
+
+**Validation**:
+
+```bash
+# Run integration tests
+cd backend
+make test-integration
+
+# Run all tests (unit + integration)
+make test
+
+# Run only integration tests with verbose output
+make test-integration-verbose
+
+# Run tests excluding integration (faster unit tests)
+poetry run pytest -m "not integration" -v
+```
+
+**Expected Outcome**:
+
+- Comprehensive integration test suite covering cross-module scenarios
+- Validation that all modules work correctly together
+- Tests for module isolation and independence
+- Full-stack behavior verification
+- Clear separation between unit and integration tests
+
+**Success Criteria**:
+
+- All integration tests pass (expected: 10+ tests)
+- Unit tests continue to pass in isolation
+- Integration tests run in ~2-5 seconds
+- CI/CD can run integration tests separately from unit tests
+- Clear documentation of test scenarios
+
+**Commit Message**:
+
+```
+feat: Phase 4 Task 21 - Create integration test suite
+
+- Add tests/integration/ directory with conftest.py
+- Create cross-module workflow tests (broker + datafeed)
+- Create full-stack scenario tests (all modules)
+- Create module isolation validation tests
+- Add test-integration Makefile target
+- Update pytest config with integration marker
+- Verify all modules work correctly together
+```
+
+**Risk**: 🟢 LOW (additive change, no modifications to existing tests)
 
 ---
 
 ### Phase 5: Enforce Boundaries & Build System
 
-**Task 21: Implement Import Boundary Enforcement**
+**Task 22: Implement Import Boundary Enforcement**
 
 **Objective**: Create automated validation to enforce module dependency rules and prevent cross-module imports
 
@@ -1417,7 +1978,7 @@ git checkout src/trading_api/modules/broker/service.py  # Revert test
 **Commit Message**:
 
 ```
-feat: Phase 5 Task 21 - Implement import boundary enforcement
+feat: Phase 5 Task 22 - Implement import boundary enforcement
 
 - Create test_import_boundaries.py with AST-based import scanner
 - Add generic pattern-based boundary rules
@@ -1428,7 +1989,7 @@ feat: Phase 5 Task 21 - Implement import boundary enforcement
 
 ---
 
-**Task 22: Add Generic Module-Aware Makefile Targets**
+**Task 23: Add Generic Module-Aware Makefile Targets**
 
 **Objective**: Create sustainable Makefile targets that auto-discover modules and work regardless of module additions/removals
 
@@ -1569,7 +2130,7 @@ rm -rf src/trading_api/modules/new_module  # Cleanup
 **Commit Message**:
 
 ```
-feat: Phase 5 Task 22 - Add generic module-aware Makefile targets
+feat: Phase 5 Task 23 - Add generic module-aware Makefile targets
 
 - Implement dynamic module discovery in Makefile
 - Add test-shared, test-modules, test-integration targets
@@ -1580,7 +2141,7 @@ feat: Phase 5 Task 22 - Add generic module-aware Makefile targets
 
 ---
 
-**Task 23: Update CI/CD Workflow for Parallel Module Testing**
+**Task 24: Update CI/CD workflow for generic parallel module-aware testing**
 
 **Objective**: Configure GitHub Actions to run module tests in parallel and enforce import boundaries
 

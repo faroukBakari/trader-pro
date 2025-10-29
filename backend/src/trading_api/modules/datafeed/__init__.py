@@ -65,7 +65,10 @@ class DatafeedModule:
         Returns:
             list[APIRouter]: List containing the DatafeedApi router
         """
-        return [DatafeedApi(service=self.service)]
+        # Prefix MUST match module name for consistency
+        return [
+            DatafeedApi(service=self.service, prefix=f"/{self.name}", tags=[self.name])
+        ]
 
     def get_ws_routers(self) -> list[Any]:
         """Get all WebSocket routers for datafeed real-time endpoints.

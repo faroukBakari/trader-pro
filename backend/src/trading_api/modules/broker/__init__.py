@@ -66,7 +66,10 @@ class BrokerModule:
         Returns:
             list[APIRouter]: List containing the BrokerApi router
         """
-        return [BrokerApi(service=self.service)]
+        # Prefix MUST match module name for consistency
+        return [
+            BrokerApi(service=self.service, prefix=f"/{self.name}", tags=[self.name])
+        ]
 
     def get_ws_routers(self) -> list[Any]:
         """Get all WebSocket routers for broker real-time endpoints.

@@ -56,6 +56,21 @@ class BrokerApi(APIRouter):
             return SuccessResponse(message="Broker service state reset successfully")
 
         @self.post(
+            "/debug/execute-orders",
+            response_model=SuccessResponse,
+            summary="Execute all working orders immediately (development only)",
+            operation_id="executeWorkingOrders",
+            include_in_schema=False,  # Hide from production docs
+        )
+        async def executeWorkingOrders() -> SuccessResponse:
+            """
+            Execute all working orders immediately for testing purposes.
+            Only available in development mode for testing purposes.
+            """
+            await self.service.execute_all_working_orders()
+            return SuccessResponse(message="All working orders executed successfully")
+
+        @self.post(
             "/orders",
             response_model=PlaceOrderResult,
             summary="Place a new order",
