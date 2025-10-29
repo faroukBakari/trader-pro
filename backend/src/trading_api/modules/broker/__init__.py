@@ -86,7 +86,6 @@ class BrokerModule:
             api_app: FastAPI application instance
             ws_app: FastWSAdapter WebSocket application instance
         """
-        pass
 
 
 __all__ = ["BrokerModule"]

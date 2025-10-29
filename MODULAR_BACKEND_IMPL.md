@@ -11,7 +11,7 @@
 > - Move next task to "In Progress"
 > - Commit the updated MODULAR_BACKEND_IMPL.md with task changes
 
-### ✅ Completed (8/20 tasks)
+### ✅ Completed (10/20 tasks)
 
 1. **Pre-Migration Validation** ✅ - Completed 2025-10-29
 
@@ -73,29 +73,48 @@
    - Type checking passes (mypy: no issues found in 50 source files)
 
 8. **Phase 1: Validate Infrastructure** ✅ - Completed 2025-10-29
+
    - All 48 tests pass (48 passed in 0.28s)
    - Type checking passes (mypy: no issues found in 50 source files)
    - Linting passes (black, isort, flake8 all green)
    - No regressions introduced
    - Committed: bef3726
 
+9. **Phase 2: Create DatafeedModule** ✅ - Completed 2025-10-29
+
+   - Created `modules/datafeed/__init__.py` with DatafeedModule class
+   - Implements Module Protocol with lazy-loaded service
+   - Methods: `get_api_routers()`, `get_ws_routers()`, `configure_app()`
+   - All 48 tests pass (48 passed in 0.31s)
+   - Type checking passes (mypy: no issues found in 50 source files)
+   - Committed: d60aebd
+
+10. **Phase 2: Create BrokerModule** ✅ - Completed 2025-10-29
+    - Created `modules/broker/__init__.py` with BrokerModule class
+    - Implements Module Protocol with lazy-loaded service
+    - Methods: `get_api_routers()`, `get_ws_routers()`, `configure_app()`
+    - All 48 tests pass (48 passed in 0.30s)
+    - Type checking passes (mypy: no issues found in 50 source files)
+    - Committed: d60aebd
+
 ### 🔄 In Progress (0/20 tasks)
 
-**Phase 1 Complete! ✅**
+**Phase 2 Complete! ✅**
 
-All infrastructure is in place:
+Both module classes are implemented:
 
-- ✅ Module Protocol defines the contract
-- ✅ ModuleRegistry manages module lifecycle
-- ✅ Application Factory composes apps dynamically
-- ✅ Directory structure ready for module implementations
-- ✅ All tests pass, no regressions
+- ✅ DatafeedModule implements Module Protocol
+- ✅ BrokerModule implements Module Protocol
+- ✅ Lazy-loaded services for resource efficiency
+- ✅ All routers (API + WebSocket) properly registered
+- ✅ All 48 tests pass, no regressions
+- ✅ Type checking passes, linting green
 
 **Next Steps:**
 
-- Phase 2: Implement module classes (DatafeedModule, BrokerModule)
+- Phase 3: Move shared infrastructure (plugins, ws, api)
 
-### 📋 Pending (12/20 tasks)
+### 📋 Pending (10/20 tasks)
 
 **Phase 0 (Complete):**
 
@@ -105,10 +124,9 @@ All infrastructure is in place:
 
 ✅ All Phase 1 tasks completed
 
-**Phase 2 (Module Classes):**
+**Phase 2 (Complete):**
 
-- [ ] Task 9: Create DatafeedModule class
-- [ ] Task 10: Create BrokerModule class
+✅ All Phase 2 tasks completed
 
 **Phase 3 (Move Shared):**
 
