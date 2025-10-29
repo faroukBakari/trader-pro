@@ -13,7 +13,8 @@ env:
   FRONTEND_URL: http://localhost:5173
 
 jobs:
-  backend:
+  # Backend setup and linting (runs once)
+  backend-setup:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -54,13 +55,183 @@ jobs:
         git config core.hooksPath .githooks
         chmod +x .githooks/*
 
-    - name: Run backend tests with coverage
-      working-directory: backend
-      run: make test-cov
-
     - name: Run backend linting
       working-directory: backend
       run: make lint-check
+
+  # Backend boundary tests (runs once, enforces module isolation)
+  backend-boundaries:
+    runs-on: ubuntu-latest
+    needs: [backend-setup]
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v3
+      with:
+        path: backend/.venv
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+
+    - name: Install backend dependencies
+      working-directory: backend
+      run: make install-ci
+
+    - name: Generate WebSocket routers
+      working-directory: backend
+      run: make generate-ws-routers
+
+    - name: Run import boundary tests
+      working-directory: backend
+      run: make test-boundaries
+
+  # Backend shared infrastructure tests (runs once)
+  backend-shared:
+    runs-on: ubuntu-latest
+    needs: [backend-setup]
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v3
+      with:
+        path: backend/.venv
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+
+    - name: Install backend dependencies
+      working-directory: backend
+      run: make install-ci
+
+    - name: Generate WebSocket routers
+      working-directory: backend
+      run: make generate-ws-routers
+
+    - name: Run shared infrastructure tests
+      working-directory: backend
+      run: make test-shared
+
+  # Backend module tests (runs in parallel per module)
+  backend-modules:
+    runs-on: ubuntu-latest
+    needs: [backend-setup]
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11"]
+        module: ["broker", "datafeed"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v3
+      with:
+        path: backend/.venv
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+
+    - name: Install backend dependencies
+      working-directory: backend
+      run: make install-ci
+
+    - name: Generate WebSocket routers
+      working-directory: backend
+      run: make generate-ws-routers
+
+    - name: Run ${{ matrix.module }} module tests
+      working-directory: backend
+      run: make test-module-${{ matrix.module }}
+
+  # Backend integration tests (runs once, requires all modules)
+  backend-integration:
+    runs-on: ubuntu-latest
+    needs: [backend-boundaries, backend-shared, backend-modules]
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v3
+      with:
+        path: backend/.venv
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+
+    - name: Install backend dependencies
+      working-directory: backend
+      run: make install-ci
+
+    - name: Generate WebSocket routers
+      working-directory: backend
+      run: make generate-ws-routers
+
+    - name: Run integration tests
+      working-directory: backend
+      run: make test-integration
+
+    - name: Run all tests with coverage (final report)
+      working-directory: backend
+      run: make test-cov
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
@@ -71,7 +242,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
-    needs: [backend]
+    needs: [backend-integration]
     strategy:
       matrix:
         node-version: ["22"]
@@ -151,7 +322,7 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend-integration, frontend]
     if: github.event_name == 'push' || github.event_name == 'pull_request'
 
     steps:
