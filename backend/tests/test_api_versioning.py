@@ -1,9 +1,7 @@
 """Tests for API versioning functionality."""
 
 import pytest
-from httpx import AsyncClient
 
-from trading_api.main import apiApp
 from trading_api.models.versioning import APIVersion
 
 
@@ -11,10 +9,9 @@ class TestAPIVersioning:
     """Test API versioning functionality."""
 
     @pytest.mark.asyncio
-    async def test_root_endpoint_includes_version_info(self) -> None:
+    async def test_root_endpoint_includes_version_info(self, async_client) -> None:
         """Test that root endpoint includes version information."""
-        async with AsyncClient(app=apiApp, base_url="http://test") as ac:
-            response = await ac.get("/")
+        response = await async_client.get("/")
 
         assert response.status_code == 200
         data = response.json()
@@ -27,10 +24,9 @@ class TestAPIVersioning:
         assert "versions" in data
 
     @pytest.mark.asyncio
-    async def test_versions_endpoint(self) -> None:
+    async def test_versions_endpoint(self, async_client) -> None:
         """Test the versions endpoint returns all available versions."""
-        async with AsyncClient(app=apiApp, base_url="http://test") as ac:
-            response = await ac.get("/api/v1/versions")
+        response = await async_client.get("/api/v1/versions")
 
         assert response.status_code == 200
         data = response.json()
@@ -55,10 +51,9 @@ class TestAPIVersioning:
         assert "release_date" in v1_info
 
     @pytest.mark.asyncio
-    async def test_current_version_endpoint(self) -> None:
+    async def test_current_version_endpoint(self, async_client) -> None:
         """Test the current version endpoint."""
-        async with AsyncClient(app=apiApp, base_url="http://test") as ac:
-            response = await ac.get("/api/v1/version")
+        response = await async_client.get("/api/v1/version")
 
         assert response.status_code == 200
         data = response.json()
@@ -69,10 +64,9 @@ class TestAPIVersioning:
         assert isinstance(data["breaking_changes"], list)
 
     @pytest.mark.asyncio
-    async def test_health_endpoint_includes_version(self) -> None:
+    async def test_health_endpoint_includes_version(self, async_client) -> None:
         """Test that health endpoint includes version information."""
-        async with AsyncClient(app=apiApp, base_url="http://test") as ac:
-            response = await ac.get("/api/v1/health")
+        response = await async_client.get("/api/v1/health")
 
         assert response.status_code == 200
         data = response.json()
@@ -86,10 +80,9 @@ class TestAPIVersioning:
         assert "release_date" in version_info
 
     @pytest.mark.asyncio
-    async def test_openapi_spec_includes_version_info(self) -> None:
+    async def test_openapi_spec_includes_version_info(self, async_client) -> None:
         """Test that OpenAPI spec includes proper version information."""
-        async with AsyncClient(app=apiApp, base_url="http://test") as ac:
-            response = await ac.get("/api/v1/openapi.json")
+        response = await async_client.get("/api/v1/openapi.json")
 
         assert response.status_code == 200
         spec = response.json()
@@ -123,14 +116,13 @@ class TestAPIVersioning:
         assert len(all_versions) == 2
 
     @pytest.mark.asyncio
-    async def test_version_consistency_across_endpoints(self) -> None:
+    async def test_version_consistency_across_endpoints(self, async_client) -> None:
         """Test that version information is consistent across all endpoints."""
-        async with AsyncClient(app=apiApp, base_url="http://test") as ac:
-            # Get version info from different endpoints
-            root_response = await ac.get("/")
-            versions_response = await ac.get("/api/v1/versions")
-            version_response = await ac.get("/api/v1/version")
-            health_response = await ac.get("/api/v1/health")
+        # Get version info from different endpoints
+        root_response = await async_client.get("/")
+        versions_response = await async_client.get("/api/v1/versions")
+        version_response = await async_client.get("/api/v1/version")
+        health_response = await async_client.get("/api/v1/health")
 
         # All should return 200
         assert root_response.status_code == 200
@@ -152,10 +144,9 @@ class TestAPIVersioning:
         assert health_data["api_version"] == current_version
 
     @pytest.mark.asyncio
-    async def test_api_tags_include_version(self) -> None:
+    async def test_api_tags_include_version(self, async_client) -> None:
         """Test that API endpoints are properly tagged with version."""
-        async with AsyncClient(app=apiApp, base_url="http://test") as ac:
-            response = await ac.get("/api/v1/openapi.json")
+        response = await async_client.get("/api/v1/openapi.json")
 
         spec = response.json()
 

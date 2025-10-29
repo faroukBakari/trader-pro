@@ -11,7 +11,7 @@
 > - Move next task to "In Progress"
 > - Commit the updated MODULAR_BACKEND_IMPL.md with task changes
 
-### ✅ Completed (2/20 tasks)
+### ✅ Completed (3/20 tasks)
 
 1. **Pre-Migration Validation** ✅ - Completed 2025-10-29
 
@@ -23,19 +23,30 @@
    - Current state: 43 Python files, 5 test files
 
 2. **Phase 0: Create Fixtures** ✅ - Completed 2025-10-29
+
    - Created `backend/tests/conftest.py` with parallel fixtures
    - Fixtures: `app`, `client`, `async_client`, `datafeed_only_app`, `broker_only_app`
    - All 48 tests still pass with conftest.py
    - Committed: 6c16a67
 
+3. **Phase 0: Update Test Files** ✅ - Completed 2025-10-29
+   - Updated `test_api_health.py` to use `async_client` fixture
+   - Updated `test_api_versioning.py` to use `async_client` fixture
+   - Updated `test_api_broker.py` to use `async_client` fixture
+   - Updated `test_ws_broker.py` to use `client` fixture
+   - Updated `test_ws_datafeed.py` to use `client` fixture
+   - All 48 tests pass with fixtures (48 passed in 0.37s)
+   - All test files now decoupled from main.py globals
+
 ### 🔄 In Progress (0/20 tasks)
 
-**Next: Task 3 - Phase 0: Update Test Files**
+**Next: Task 4 - Phase 0: Validate all tests pass with fixtures**
 
-- Replace direct imports from `main.py` with fixture usage
-- Files to update: `test_api_health.py`, `test_api_versioning.py`, `test_api_broker.py`, `test_ws_broker.py`, `test_ws_datafeed.py`
+- Run full test suite with coverage
+- Verify coverage matches baseline (74%)
+- Commit Phase 0 completion
 
-### 📋 Pending (18/20 tasks)
+### 📋 Pending (17/20 tasks)
 
 **Phase 0 (Remaining):**
 
