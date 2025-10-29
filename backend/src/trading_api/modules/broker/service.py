@@ -54,7 +54,7 @@ from trading_api.models.broker import (
     PreOrder,
     Side,
 )
-from trading_api.ws.router_interface import WsRouteService
+from trading_api.shared.ws.router_interface import WsRouteService
 
 logger = logging.getLogger(__name__)
 

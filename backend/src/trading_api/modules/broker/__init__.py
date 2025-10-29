@@ -8,9 +8,9 @@ from typing import Any
 
 from fastapi.routing import APIRouter
 
-from trading_api.api.broker import BrokerApi
-from trading_api.core.broker_service import BrokerService
-from trading_api.ws.broker import BrokerWsRouters
+from .api import BrokerApi
+from .service import BrokerService
+from .ws import BrokerWsRouters
 
 
 class BrokerModule:

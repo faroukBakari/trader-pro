@@ -23,9 +23,8 @@ from trading_api.models.broker import (
     Position,
     PositionSubscriptionRequest,
 )
-
-from .generic_route import WsRouter
-from .router_interface import WsRouterInterface, WsRouteService
+from trading_api.shared.ws.generic_route import WsRouter
+from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
 
 # Type aliases for code generation
 if TYPE_CHECKING:
@@ -36,19 +35,18 @@ if TYPE_CHECKING:
     BrokerConnectionWsRouter: TypeAlias = WsRouter[
         BrokerConnectionSubscriptionRequest, BrokerConnectionStatus
     ]
+else:
+    from .ws_generated import (
+        BrokerConnectionWsRouter,
+        EquityWsRouter,
+        ExecutionWsRouter,
+        OrderWsRouter,
+        PositionWsRouter,
+    )
 
 
 class BrokerWsRouters(list[WsRouterInterface]):
     def __init__(self, broker_service: WsRouteService):
-        # Import generated routers locally to avoid circular import
-        from .generated import (
-            BrokerConnectionWsRouter,
-            EquityWsRouter,
-            ExecutionWsRouter,
-            OrderWsRouter,
-            PositionWsRouter,
-        )
-
         # Instantiate routers
         order_router = OrderWsRouter(
             route="orders", tags=["broker"], service=broker_service

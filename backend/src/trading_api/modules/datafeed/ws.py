@@ -10,8 +10,8 @@ from trading_api.models import (
     QuoteData,
     QuoteDataSubscriptionRequest,
 )
-from trading_api.ws.generic_route import WsRouter
-from trading_api.ws.router_interface import WsRouterInterface, WsRouteService
+from trading_api.shared.ws.generic_route import WsRouter
+from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
 
 if TYPE_CHECKING:
     BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 class DatafeedWsRouters(list[WsRouterInterface]):
     def __init__(self, datafeed_service: WsRouteService):
         # Import generated routers locally to avoid circular import
-        from .generated import BarWsRouter, QuoteWsRouter
+        if not TYPE_CHECKING:
+            from .ws_generated import BarWsRouter, QuoteWsRouter
 
         # Instantiate routers
         bar_router = BarWsRouter(
