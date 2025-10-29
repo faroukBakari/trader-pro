@@ -11,11 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from external_packages.fastws import Client
-from trading_api.plugins.fastws_adapter import FastWSAdapter
 
 from .api import BrokerApi, DatafeedApi, HealthApi, VersionApi
 from .core import BrokerService, DatafeedService
 from .models import APIVersion
+from .plugins import FastWSAdapter
 from .ws import BrokerWsRouters, DatafeedWsRouters
 
 # Configure logging for the application
