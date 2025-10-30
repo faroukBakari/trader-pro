@@ -65,8 +65,8 @@ make test              # Run tests
 make test-cov          # Tests with coverage
 
 # Quality
-make lint              # Flake8
-make lint-check        # All linters (black, isort, flake8, mypy)
+make lint              # Flake8 only
+make lint-check        # All linters + type checkers (black, isort, flake8, mypy, pyright)
 make format            # Format with black + isort
 
 # Build
@@ -74,15 +74,30 @@ make build             # Build package
 make clean             # Clean artifacts
 
 # API
-make health            # Check API health
-make clients           # Generate clients
-make export-openapi    # Export OpenAPI spec
+make health                    # Check API health
+make generate-python-clients   # Generate HTTP clients (includes format & validation)
+make export-openapi-spec       # Export OpenAPI spec
+make export-asyncapi-spec      # Export AsyncAPI spec
+make validate-package-names    # Validate client package names
 ```
 
 ### Module-Specific Targets
 
 ```bash
 cd backend
+
+# Package Name Validation
+make validate-package-names   # Validate client package names
+                              # Checks uniqueness and module correspondence
+                              # Runs automatically before client generation
+                              # OpenAPI: @trader-pro/client-{module}
+                              # AsyncAPI: ws-types-{module}
+                              # Python: {Module}Client
+
+# Python HTTP Client Generation
+make generate-python-clients  # Generate type-safe HTTP clients
+                              # Automatically validates, formats, and type-checks
+                              # Used for inter-module communication
 
 # WebSocket Router Generation
 make generate-ws-routers      # Generate concrete WS router classes

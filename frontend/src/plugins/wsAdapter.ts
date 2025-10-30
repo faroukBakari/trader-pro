@@ -7,9 +7,18 @@ import type {
   Position,
   QuoteData,
 } from '@public/trading_terminal/charting_library';
+
+// Per-module WebSocket types (microservice-ready architecture)
+// Datafeed module types
 import {
   type Bar as Bar_Ws_Backend,
   type BarsSubscriptionRequest as BarsSubscriptionRequest_Ws_Backend,
+  type QuoteData as QuoteData_Ws_Backend,
+  type QuoteDataSubscriptionRequest as QuoteDataSubscriptionRequest_Ws_Backend,
+} from '../clients/ws-types-datafeed/index.js';
+
+// Broker module types
+import {
   type BrokerConnectionStatus as BrokerConnectionStatus_Ws_Backend,
   type BrokerConnectionSubscriptionRequest as BrokerConnectionSubscriptionRequest_Ws_Backend,
   type EquityData as EquityData_Ws_Backend,
@@ -20,9 +29,8 @@ import {
   type PlacedOrder as PlacedOrder_Ws_Backend,
   type Position as Position_Ws_Backend,
   type PositionSubscriptionRequest as PositionSubscriptionRequest_Ws_Backend,
-  type QuoteData as QuoteData_Ws_Backend,
-  type QuoteDataSubscriptionRequest as QuoteDataSubscriptionRequest_Ws_Backend,
-} from '../clients/ws-types-generated/index.js';
+} from '../clients/ws-types-broker/index.js';
+
 import {
   mapBrokerConnectionStatus,
   mapEquityData,

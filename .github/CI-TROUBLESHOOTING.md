@@ -314,6 +314,121 @@ npm run test:unit src/services/__tests__/brokerTerminalService.spec.ts
 - Type errors in test code
 - Mock setup broken
 
+### 13. Per-Module Spec Generation Issues (Phase 4)
+
+**Error**: Module specs not found or artifacts missing
+
+**Common causes**:
+
+- Backend specs not exported correctly
+- Artifact download path mismatch
+- Module discovery failed
+
+**Solutions**:
+
+```bash
+# Verify per-module specs are generated
+cd backend
+make export-openapi-spec export-asyncapi-spec
+ls -la src/trading_api/modules/*/specs/*.json
+
+# Should see:
+# broker/specs/openapi.json
+# broker/specs/asyncapi.json
+# datafeed/specs/openapi.json
+# datafeed/specs/asyncapi.json
+```
+
+**Debug artifact paths**:
+
+```yaml
+# In CI, artifacts are uploaded from:
+path: backend/src/trading_api/modules/*/specs/*.json
+
+# Downloaded to:
+path: backend/src/trading_api/modules/
+# This recreates the directory structure
+```
+
+### 14. Python Client Generation Failures (Phase 4)
+
+**Error**: Backend Python clients not generated or type checks fail
+
+**Common causes**:
+
+- Specs not available (missing artifact download)
+- Jinja2 template errors
+- Model import issues
+- Type annotation problems
+
+**Solutions**:
+
+```bash
+# Test locally
+cd backend
+make generate-python-clients
+
+# Should see:
+# ✅ Generated broker_client.py
+# ✅ Generated datafeed_client.py
+# ✅ All type checks pass
+
+# Verify clients exist
+ls -la src/trading_api/clients/
+# broker_client.py
+# datafeed_client.py
+# __init__.py
+```
+
+**Debug type checking**:
+
+```bash
+cd backend
+poetry run mypy src/trading_api/clients/
+poetry run pyright src/trading_api/clients/
+```
+
+### 15. Frontend Per-Module Client Generation Issues (Phase 4)
+
+**Error**: Frontend clients not generated correctly
+
+**Common causes**:
+
+- Backend specs not downloaded
+- Script fails to find module specs
+- Client directory naming mismatch
+- Type generation errors
+
+**Solutions**:
+
+```bash
+# Test locally
+cd frontend
+make generate-openapi-client
+make generate-asyncapi-types
+
+# Verify clients exist
+ls -la src/clients/
+# Should see:
+# trader-client-broker/
+# trader-client-datafeed/
+# ws-types-broker/
+# ws-types-datafeed/
+
+# Run type checks
+make type-check
+```
+
+**Debug CI verification**:
+
+```yaml
+# CI checks for these directories
+if [ ! -d "src/clients/trader-client-broker" ]; then
+  echo "❌ Broker client generation failed"
+  exit 1
+fi
+```
+
 ---
 
 ## Emergency Procedures

@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec validate-package-names docs-html generate-ws-routers $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -42,8 +42,8 @@ help:
 	done
 	@echo ""
 	@echo "Other targets:"
-	@echo "  lint              Run backend linting (check only)"
-	@echo "  lint-check        Run backend linting with type checking"
+	@echo "  lint              Run backend linting (flake8 only)"
+	@echo "  lint-check        Run backend linting with type checking (black, isort, flake8, mypy, pyright)"
 	@echo "  format            Format backend code"
 	@echo "  build             Build backend package"
 	@echo "  dev               Start backend development server with debugpy"
@@ -54,6 +54,8 @@ help:
 	@echo "  health            Check backend health"
 	@echo "  export-openapi-spec   Export OpenAPI specification (offline)"
 	@echo "  export-asyncapi-spec  Export AsyncAPI specification (offline)"
+	@echo "  validate-package-names  Validate package names for generated clients"
+	@echo "  generate-python-clients  Generate Python HTTP clients (includes format & validation)"
 	@echo "  docs-html         Generate static HTML documentation"
 	@echo "  generate-ws-routers Generate WebSocket router classes"
 	@echo ""
@@ -292,6 +294,8 @@ lint-check:
 	poetry run isort --check-only src/ tests/
 	poetry run flake8 src/ tests/
 	poetry run mypy src/
+	@echo "Running pyright type checking..."
+	poetry run pyright src/
 
 lint-response-models:
 	@echo "Validating FastAPI response models..."
@@ -417,6 +421,30 @@ export-openapi-spec:
 export-asyncapi-spec:
 	@echo "Exporting AsyncAPI specification (offline)..."
 	poetry run python scripts/export_asyncapi_spec.py
+
+# Validate package names for generated clients
+validate-package-names:
+	@echo "Validating package names for generated clients..."
+	poetry run python scripts/validate_package_names.py
+
+# Generate Python HTTP clients from per-module OpenAPI specs
+generate-python-clients:
+	@echo "Generating Python HTTP clients..."
+	poetry run python scripts/generate_python_clients.py
+	@echo ""
+	@echo "Formatting generated clients..."
+	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive src/trading_api/clients/
+	poetry run black src/trading_api/clients/
+	poetry run isort src/trading_api/clients/
+	@echo ""
+	@echo "Validating generated clients..."
+	poetry run black --check src/trading_api/clients/
+	poetry run isort --check-only src/trading_api/clients/
+	poetry run flake8 src/trading_api/clients/
+	poetry run mypy src/trading_api/clients/
+	poetry run pyright src/trading_api/clients/
+	@echo ""
+	@echo "✅ Client generation complete and validated!"
 
 # Generate static HTML documentation
 docs-html:

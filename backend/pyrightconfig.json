@@ -9,8 +9,13 @@
   ],
   "pythonVersion": "3.11",
   "pythonPlatform": "Linux",
-  "typeCheckingMode": "basic",
-  "reportMissingImports": true,
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "error",
   "reportMissingTypeStubs": false,
+  "reportAttributeAccessIssue": "error",
+  "reportUnknownMemberType": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownArgumentType": "none",
   "extraPaths": [".", "src", "external_packages"]
 }

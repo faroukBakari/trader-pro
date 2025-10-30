@@ -8,24 +8,39 @@ const currentDir = dirname(fileURLToPath(import.meta.url))
 
 /**
  * Verify generated client files exist before running tests
- * This ensures tests have the required API client generated
+ * This ensures tests have the required API clients generated
+ *
+ * Note: We now use per-module clients (trader-client-broker, trader-client-datafeed)
+ * instead of a monolithic trader-client-generated
  */
 beforeAll(() => {
   const clientsDir = join(currentDir, 'clients')
-  const traderClientDir = join(clientsDir, 'trader-client-generated')
-  const wsClientDir = join(clientsDir, 'ws-types-generated')
 
-  if (!existsSync(traderClientDir)) {
+  // Required per-module OpenAPI clients
+  const requiredOpenAPIClients = ['trader-client-broker', 'trader-client-datafeed']
+  const missingOpenAPIClients = requiredOpenAPIClients.filter(
+    (client) => !existsSync(join(clientsDir, client)),
+  )
+
+  if (missingOpenAPIClients.length > 0) {
     throw new Error(
-      '❌ API client not generated! Run client generation before running tests.',
+      `❌ OpenAPI clients not generated! Missing: ${missingOpenAPIClients.join(', ')}\n` +
+      'Run client generation before running tests: make generate-clients',
     )
   }
 
-  if (!existsSync(wsClientDir)) {
+  // Required per-module AsyncAPI types
+  const requiredAsyncAPIClients = ['ws-types-broker', 'ws-types-datafeed']
+  const missingAsyncAPIClients = requiredAsyncAPIClients.filter(
+    (client) => !existsSync(join(clientsDir, client)),
+  )
+
+  if (missingAsyncAPIClients.length > 0) {
     throw new Error(
-      '❌ WebSocket types not generated! Run client generation before running tests.',
+      `❌ AsyncAPI types not generated! Missing: ${missingAsyncAPIClients.join(', ')}\n` +
+      'Run client generation before running tests: make generate-clients',
     )
   }
 
-  console.log('✓ Generated clients verified')
+  console.log('✓ Generated per-module clients verified (broker, datafeed)')
 })
