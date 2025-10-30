@@ -29,9 +29,13 @@ coverage
 
 # Generated API client
 src/clients/trader-client-generated/
+# Generated per-module API clients
+src/clients/trader-client-*/
 
 # Generated WebSocket types
 src/clients/ws-types-generated/
+# Generated per-module WebSocket types
+src/clients/ws-types-*/
 
 # Generated WebSocket client
 src/clients/ws-generated/

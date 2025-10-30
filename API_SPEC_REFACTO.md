@@ -16,11 +16,17 @@ Per-module OpenAPI/AsyncAPI specs with auto-discovery:
 ## Target Structure
 
 ```
-backend/specs/
-├── openapi-broker.json
-├── openapi-datafeed.json
-├── asyncapi-broker.json
-└── asyncapi-datafeed.json
+backend/src/trading_api/modules/
+├── broker/
+│   ├── specs/
+│   │   ├── openapi.json
+│   │   └── asyncapi.json
+│   └── ...
+└── datafeed/
+    ├── specs/
+    │   ├── openapi.json
+    │   └── asyncapi.json
+    └── ...
 
 backend/src/trading_api/clients/
 ├── broker_client/
@@ -45,18 +51,18 @@ frontend/src/clients/
 
 #### Tasks
 
-- [ ] **0.1** Create helper functions in `backend/src/trading_api/shared/utils.py`
+- [x] **0.1** Create helper functions in `backend/src/trading_api/shared/utils.py`
   - `discover_modules(base_dir: Path) -> list[str]`
   - `discover_modules_with_websockets(base_dir: Path) -> list[str]`
-- [ ] **0.2** Create directory structure
-  - `mkdir -p backend/specs`
+- [x] **0.2** Create directory structure
+  - `mkdir -p backend/src/trading_api/modules/{broker,datafeed}/specs`
   - `mkdir -p backend/src/trading_api/clients`
-- [ ] **0.3** Update `.gitignore`
-  - Add `backend/specs/`
+- [x] **0.3** Update `.gitignore`
+  - Add `backend/src/trading_api/modules/*/specs/`
   - Add `backend/src/trading_api/clients/*_client/`
   - Add `frontend/src/clients/trader-client-*/`
   - Add `frontend/src/clients/ws-types-*/`
-- [ ] **0.4** Validate selective loading
+- [x] **0.4** Validate selective loading
   - Test: `ENABLED_MODULES=broker make test-module-broker`
   - Test: `ENABLED_MODULES=datafeed make test-module-datafeed`
   - Test: `ENABLED_MODULES=broker,datafeed make test`
@@ -71,34 +77,34 @@ frontend/src/clients/
 
 #### Tasks: OpenAPI (2 days)
 
-- [ ] **1.1** Update `backend/scripts/export_openapi_spec.py`
+- [x] **1.1** Update `backend/scripts/export_openapi_spec.py`
   - Add `discover_modules()` import
   - Add `module_name: str | None` parameter
   - Implement single-module export logic
   - Implement all-modules loop
-  - Output to `specs/openapi-{module}.json`
-- [ ] **1.2** Update `backend/Makefile`
+  - Output to `modules/{module}/specs/openapi.json`
+- [x] **1.2** Update `backend/Makefile`
   - Add `export-openapi-specs` target
   - Update `export-specs` to call new target
-- [ ] **1.3** Validate generation
+- [x] **1.3** Validate generation
   - Run: `make export-openapi-specs`
-  - Verify: `ls backend/specs/openapi-*.json`
+  - Verify: `ls backend/src/trading_api/modules/*/specs/openapi.json`
   - Check: Both broker and datafeed specs exist
 
 #### Tasks: AsyncAPI (1 day)
 
-- [ ] **1.4** Update `backend/scripts/export_asyncapi_spec.py`
+- [x] **1.4** Update `backend/scripts/export_asyncapi_spec.py`
   - Add `discover_modules_with_websockets()` import
   - Add `module_name: str | None` parameter
   - Implement single-module export logic
   - Implement all-modules loop
-  - Output to `specs/asyncapi-{module}.json`
-- [ ] **1.5** Update `backend/Makefile`
+  - Output to `modules/{module}/specs/asyncapi.json`
+- [x] **1.5** Update `backend/Makefile`
   - Add `export-asyncapi-specs` target
   - Update `export-specs` to call new target
-- [ ] **1.6** Validate generation
+- [x] **1.6** Validate generation
   - Run: `make export-asyncapi-specs`
-  - Verify: `ls backend/specs/asyncapi-*.json`
+  - Verify: `ls backend/src/trading_api/modules/*/specs/asyncapi.json`
   - Check: Both broker and datafeed specs exist
 
 **Completion**: All specs generated ✅
@@ -140,13 +146,13 @@ frontend/src/clients/
 #### Tasks
 
 - [ ] **3.1** Update `frontend/scripts/generate-openapi-client.sh`
-  - Loop over `../backend/specs/openapi-*.json`
-  - Extract module name from filename
+  - Loop over `../backend/src/trading_api/modules/*/specs/openapi.json`
+  - Extract module name from directory path
   - Generate to `src/clients/trader-client-{module}/`
   - Use `typescript-axios` generator
 - [ ] **3.2** Update `frontend/scripts/generate-asyncapi-types.sh`
-  - Loop over `../backend/specs/asyncapi-*.json`
-  - Extract module name from filename
+  - Loop over `../backend/src/trading_api/modules/*/specs/asyncapi.json`
+  - Extract module name from directory path
   - Generate to `src/clients/ws-types-{module}/`
   - Use existing type generation logic
 - [ ] **3.3** Update `frontend/Makefile`
@@ -214,12 +220,12 @@ frontend/src/clients/
 
 ### Breaking Changes
 
-| Component     | Old                       | New                             |
-| ------------- | ------------------------- | ------------------------------- |
-| Backend specs | `backend/openapi.json`    | `backend/specs/openapi-*.json`  |
-| Backend specs | `backend/asyncapi.json`   | `backend/specs/asyncapi-*.json` |
-| Frontend REST | `trader-client-generated` | `trader-client-{module}`        |
-| Frontend WS   | `ws-types-generated`      | `ws-types-{module}`             |
+| Component     | Old                       | New                                              |
+| ------------- | ------------------------- | ------------------------------------------------ |
+| Backend specs | `backend/openapi.json`    | `backend/src/trading_api/modules/*/specs/*.json` |
+| Backend specs | `backend/asyncapi.json`   | `backend/src/trading_api/modules/*/specs/*.json` |
+| Frontend REST | `trader-client-generated` | `trader-client-{module}`                         |
+| Frontend WS   | `ws-types-generated`      | `ws-types-{module}`                              |
 
 ### Rollout
 
