@@ -4,13 +4,22 @@
 // for speed and simplicity, we allow typecasting. Not casting of complex objects.
 // only simple enum/string/number conversions are done here.
 // the best approach is to implement mappers that insure type safety, at runtime (but can be time consuming)
-import { Configuration, V1Api } from '@clients/trader-client-generated/';
+
+// Per-module API clients (microservice-ready architecture)
+import {
+  Configuration as BrokerConfiguration,
+  V1Api as BrokerV1Api
+} from '@clients/trader-client-broker';
+import {
+  Configuration as DatafeedConfiguration,
+  V1Api as DatafeedV1Api
+} from '@clients/trader-client-datafeed';
+
 import type {
   AccountMetainfo,
   Bar,
   Brackets,
   CustomInputFieldsValues,
-  DatafeedConfiguration,
   Execution,
   LeverageInfo,
   LeverageInfoParams,
@@ -25,6 +34,7 @@ import type {
   PreOrder,
   QuoteData,
   SearchSymbolResultItem,
+  DatafeedConfiguration as TradingViewDatafeedConfiguration,
 } from '@public/trading_terminal/charting_library';
 import { AxiosError } from 'axios';
 import {
@@ -139,49 +149,61 @@ function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
 }
 
 export class ApiAdapter {
-  private rawApi: V1Api
-  private apiConfig: Configuration
+  private brokerApi: BrokerV1Api
+  private datafeedApi: DatafeedV1Api
+  private brokerConfig: BrokerConfiguration
+  private datafeedConfig: DatafeedConfiguration
+
   constructor() {
-    this.apiConfig = new Configuration({
-      basePath: import.meta.env.TRADER_API_BASE_PATH || '',
-    })
-    this.rawApi = new V1Api(
-      this.apiConfig
-    )
+    const basePath = import.meta.env.TRADER_API_BASE_PATH || ''
+
+    // Initialize per-module configurations
+    // In multi-process mode, these could point to different services:
+    // broker: http://broker-service:8001
+    // datafeed: http://datafeed-service:8002
+    this.brokerConfig = new BrokerConfiguration({ basePath })
+    this.datafeedConfig = new DatafeedConfiguration({ basePath })
+
+    // Initialize per-module API clients
+    this.brokerApi = new BrokerV1Api(this.brokerConfig)
+    this.datafeedApi = new DatafeedV1Api(this.datafeedConfig)
   }
 
   @ApiErrorHandler('/health')
   async getHealthStatus(): ApiPromise<HealthResponse> {
-    const response = await this.rawApi.getHealthStatus()
+    // TODO: In future, aggregate health from both broker and datafeed modules
+    const response = await this.brokerApi.getHealthStatus()
     return response
   }
 
   @ApiErrorHandler('/versions')
   async getAPIVersions(): ApiPromise<APIMetadata> {
-    return await this.rawApi.getAPIVersions()
+    // TODO: In future, aggregate versions from both broker and datafeed modules
+    return await this.brokerApi.getAPIVersions()
   }
 
   @ApiErrorHandler('/config')
-  async getConfig(): ApiPromise<DatafeedConfiguration> {
-    const response = await this.rawApi.getConfig()
+  async getConfig(): ApiPromise<TradingViewDatafeedConfiguration> {
+    const response = await this.datafeedApi.getConfig()
     return {
       status: response.status,
       data: {
         ...response.data,
-        supported_resolutions: response.data.supported_resolutions as unknown as DatafeedConfiguration['supported_resolutions'],
+        supported_resolutions: response.data.supported_resolutions as unknown as TradingViewDatafeedConfiguration['supported_resolutions'],
       }
     }
   }
+  // Datafeed module endpoints
   @ApiErrorHandler((...args) => `/symbols/${args[0]}`)
   async resolveSymbol(symbol: string): ApiPromise<LibrarySymbolInfo> {
-    const response = await this.rawApi.resolveSymbol(symbol)
+    const response = await this.datafeedApi.resolveSymbol(symbol)
     return {
       status: response.status,
       data: {
         ...response.data,
         timezone: response.data.timezone as unknown as LibrarySymbolInfo['timezone'],
         format: response.data.format as unknown as LibrarySymbolInfo['format'],
-        supported_resolutions: response.data.supported_resolutions as unknown as DatafeedConfiguration['supported_resolutions'],
+        supported_resolutions: response.data.supported_resolutions as unknown as TradingViewDatafeedConfiguration['supported_resolutions'],
       }
     }
   }
@@ -192,7 +214,7 @@ export class ApiAdapter {
     symbolType?: string,
     maxResults?: number,
   ): ApiPromise<Array<SearchSymbolResultItem>> {
-    return await this.rawApi.searchSymbols(userInput, exchange, symbolType, maxResults)
+    return await this.datafeedApi.searchSymbols(userInput, exchange, symbolType, maxResults)
   }
   @ApiErrorHandler((...args) => `/history?symbol=${args[0]}&resolution=${args[1]}`)
   async getBars(
@@ -202,20 +224,22 @@ export class ApiAdapter {
     toTime: number,
     countBack?: number | null,
   ): ApiPromise<GetBarsResponse> {
-    return await this.rawApi.getBars(symbol, resolution, fromTime, toTime, countBack)
+    return await this.datafeedApi.getBars(symbol, resolution, fromTime, toTime, countBack)
   }
   @ApiErrorHandler('/quotes')
   async getQuotes(getQuotesRequest: GetQuotesRequest): ApiPromise<Array<QuoteData>> {
-    const response = await this.rawApi.getQuotes(getQuotesRequest)
+    const response = await this.datafeedApi.getQuotes(getQuotesRequest)
 
     return {
       status: response.status,
       data: response.data.map(mapQuoteData),
     }
   }
+
+  // Broker module endpoints
   @ApiErrorHandler('/orders')
   async placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult> {
-    const response = await this.rawApi.placeOrder(mapPreOrder(order))
+    const response = await this.brokerApi.placeOrder(mapPreOrder(order))
 
     return {
       status: response.status,
@@ -224,7 +248,7 @@ export class ApiAdapter {
   }
   @ApiErrorHandler('/orders/preview')
   async previewOrder(order: PreOrder): ApiPromise<OrderPreviewResult> {
-    const response = await this.rawApi.previewOrder(mapPreOrder(order))
+    const response = await this.brokerApi.previewOrder(mapPreOrder(order))
 
     return {
       status: response.status,
@@ -235,7 +259,7 @@ export class ApiAdapter {
   @ApiErrorHandler((...args) => `/orders/${(args[1] as string | undefined) ?? (args[0] as Order).id}`)
   async modifyOrder(order: Order, confirmId?: string): ApiPromise<void> {
     const orderId = confirmId ?? order.id
-    const response = await this.rawApi.modifyOrder(mapPreOrder(order), orderId)
+    const response = await this.brokerApi.modifyOrder(mapPreOrder(order), orderId)
 
     return {
       status: response.status,
@@ -245,7 +269,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler((...args) => `/orders/${args[0]}`)
   async cancelOrder(orderId: string): ApiPromise<void> {
-    const response = await this.rawApi.cancelOrder(orderId)
+    const response = await this.brokerApi.cancelOrder(orderId)
 
     return {
       status: response.status,
@@ -255,7 +279,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler('/orders')
   async getOrders(): ApiPromise<Order[]> {
-    const response = await this.rawApi.getOrders()
+    const response = await this.brokerApi.getOrders()
 
     // Note: Backend returns PlacedOrder[], frontend expects Order[] (union type)
     // Order is a union including BracketOrder which requires parentId/parentType
@@ -269,7 +293,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler('/positions')
   async getPositions(): ApiPromise<Position[]> {
-    const response = await this.rawApi.getPositions()
+    const response = await this.brokerApi.getPositions()
 
     return {
       status: response.status,
@@ -282,7 +306,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler((...args) => `/executions?symbol=${args[0]}`)
   async getExecutions(symbol: string): ApiPromise<Execution[]> {
-    const response = await this.rawApi.getExecutions(symbol)
+    const response = await this.brokerApi.getExecutions(symbol)
 
     return {
       status: response.status,
@@ -295,7 +319,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler('/accounts')
   async getAccountInfo(): ApiPromise<AccountMetainfo> {
-    const response = await this.rawApi.getAccountInfo()
+    const response = await this.brokerApi.getAccountInfo()
 
     return {
       status: response.status,
@@ -305,7 +329,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler((...args) => `/positions/${args[0]}`)
   async closePosition(positionId: string, amount?: number): ApiPromise<void> {
-    const response = await this.rawApi.closePosition(positionId, amount)
+    const response = await this.brokerApi.closePosition(positionId, amount)
     return {
       status: response.status,
       data: undefined as void,
@@ -314,7 +338,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler((...args) => `/positions/${args[0]}/brackets`)
   async editPositionBrackets(positionId: string, brackets: Brackets, customFields?: CustomInputFieldsValues): ApiPromise<void> {
-    const response = await this.rawApi.editPositionBrackets(
+    const response = await this.brokerApi.editPositionBrackets(
       {
         brackets: {
           stopLoss: brackets.stopLoss ?? null,
@@ -334,7 +358,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler("/leverage/info")
   async leverageInfo(leverageInfoParams: LeverageInfoParams): ApiPromise<LeverageInfo> {
-    const response = await this.rawApi.leverageInfo(
+    const response = await this.brokerApi.leverageInfo(
       leverageInfoParams.symbol,
       leverageInfoParams.orderType as unknown as number,
       leverageInfoParams.side as unknown as number
@@ -347,7 +371,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler("/leverage/set")
   async setLeverage(leverageSetParams: LeverageSetParams): ApiPromise<LeverageSetResult> {
-    const response = await this.rawApi.setLeverage({
+    const response = await this.brokerApi.setLeverage({
       symbol: leverageSetParams.symbol,
       orderType: leverageSetParams.orderType as unknown as number,
       side: leverageSetParams.side as unknown as number,
@@ -362,7 +386,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler("/leverage/preview")
   async previewLeverage(leverageSetParams: LeverageSetParams): ApiPromise<LeveragePreviewResult> {
-    const response = await this.rawApi.previewLeverage({
+    const response = await this.brokerApi.previewLeverage({
       symbol: leverageSetParams.symbol,
       orderType: leverageSetParams.orderType as unknown as number,
       side: leverageSetParams.side as unknown as number,

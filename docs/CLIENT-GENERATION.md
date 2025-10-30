@@ -39,11 +39,83 @@ Frontend Build → Export Backend Specs → Generate Clients → Build/Dev
                  │
                  ▼
 ┌─────────────────────────────────────────┐
+│ Backend: Validate Package Names         │
+│ • Runs scripts/validate_package_names.py│
+│ • Checks package name uniqueness        │
+│ • Validates module name correspondence  │
+│ • Prevents naming conflicts             │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
 │ Frontend: Generate TypeScript Clients   │
 │ • REST Client (OpenAPI spec)            │
 │ • WebSocket Types (AsyncAPI spec)       │
 └─────────────────────────────────────────┘
 ```
+
+### REST API Client
+
+### Package Name Validation
+
+Before generating any clients, the system validates that package names are unique and follow module naming conventions:
+
+**Validation Rules:**
+
+1. **OpenAPI Clients**: Package names must follow `@trader-pro/client-{module}` pattern
+2. **AsyncAPI Types**: Package names must follow `ws-types-{module}` pattern
+3. **Python Clients**: Class names must follow `{Module}Client` pattern
+4. **Uniqueness**: No duplicate package names across all client types
+5. **Module Correspondence**: Package names must match their source module names
+
+**Validation Command:**
+
+```bash
+# Standalone validation (from backend directory)
+make validate-package-names
+```
+
+**Automatic Validation:**
+
+Package name validation runs automatically before:
+
+- Frontend OpenAPI client generation (`make generate-openapi-client`)
+- Frontend AsyncAPI type generation (`make generate-asyncapi-types`)
+- Backend Python client generation (`make generate-python-clients`)
+
+**Example Output:**
+
+```
+🔍 Validating package names for generated clients...
+
+======================================================================
+📋 Package Name Validation Results
+======================================================================
+
+✅ OpenAPI Clients (2 modules):
+   broker          → @trader-pro/client-broker
+   datafeed        → @trader-pro/client-datafeed
+
+✅ AsyncAPI Types (2 modules):
+   broker          → ws-types-broker
+   datafeed        → ws-types-datafeed
+
+✅ Python Clients (2 modules):
+   broker          → BrokerClient
+   datafeed        → DatafeedClient
+
+======================================================================
+✅ All package name validations passed!
+```
+
+**Error Detection:**
+
+The validation catches common issues:
+
+- ❌ Duplicate package names
+- ❌ Package names not matching module names
+- ❌ Inconsistent naming conventions
+- ⚠️ Spec titles not indicating module names
 
 ### REST API Client
 

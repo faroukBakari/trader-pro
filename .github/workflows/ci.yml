@@ -240,27 +240,21 @@ jobs:
         flags: backend
         name: codecov-backend
 
-  frontend:
+  # Backend export per-module specs (NEW for Phase 4)
+  backend-export-specs:
     runs-on: ubuntu-latest
     needs: [backend-integration]
     strategy:
       matrix:
-        node-version: ["22"]
+        python-version: ["3.11"]
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
-        python-version: "3.11"
-
-    - name: Set up Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v4
-      with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
+        python-version: ${{ matrix.python-version }}
 
     - name: Install Poetry
       uses: snok/install-poetry@v1
@@ -269,7 +263,14 @@ jobs:
         virtualenvs-create: true
         virtualenvs-in-project: true
 
-    - name: Install backend dependencies (for offline spec generation)
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v3
+      with:
+        path: backend/.venv
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+
+    - name: Install backend dependencies
       working-directory: backend
       run: make install-ci
 
@@ -277,21 +278,167 @@ jobs:
       working-directory: backend
       run: make generate-ws-routers
 
-    - name: Export backend API specs
+    - name: Export per-module OpenAPI specs
+      working-directory: backend
+      run: make export-openapi-spec
+
+    - name: Export per-module AsyncAPI specs
+      working-directory: backend
+      run: make export-asyncapi-spec
+
+    - name: Verify specs generated
       working-directory: backend
       run: |
-        make export-openapi-spec
-        make export-asyncapi-spec
+        echo "Verifying per-module specs..."
+        if [ ! -f "src/trading_api/modules/broker/specs/openapi.json" ]; then
+          echo "❌ Broker OpenAPI spec not found"
+          exit 1
+        fi
+        if [ ! -f "src/trading_api/modules/datafeed/specs/openapi.json" ]; then
+          echo "❌ Datafeed OpenAPI spec not found"
+          exit 1
+        fi
+        if [ ! -f "src/trading_api/modules/broker/specs/asyncapi.json" ]; then
+          echo "❌ Broker AsyncAPI spec not found"
+          exit 1
+        fi
+        if [ ! -f "src/trading_api/modules/datafeed/specs/asyncapi.json" ]; then
+          echo "❌ Datafeed AsyncAPI spec not found"
+          exit 1
+        fi
+        echo "✅ All per-module specs generated successfully"
+
+    - name: Upload backend specs as artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: backend-specs
+        path: |
+          backend/src/trading_api/modules/*/specs/*.json
+        retention-days: 7
+
+  # Backend generate Python HTTP clients (NEW for Phase 4)
+  backend-generate-python-clients:
+    runs-on: ubuntu-latest
+    needs: [backend-export-specs]
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Load cached venv
+      id: cached-poetry-dependencies
+      uses: actions/cache@v3
+      with:
+        path: backend/.venv
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+
+    - name: Install backend dependencies
+      working-directory: backend
+      run: make install-ci
+
+    - name: Download backend specs
+      uses: actions/download-artifact@v3
+      with:
+        name: backend-specs
+        path: backend/src/trading_api/modules/
+
+    - name: Generate Python HTTP clients
+      working-directory: backend
+      run: make generate-python-clients
+
+    - name: Verify Python clients generated
+      working-directory: backend
+      run: |
+        echo "Verifying Python HTTP clients..."
+        if [ ! -f "src/trading_api/clients/broker_client.py" ]; then
+          echo "❌ Broker client not found"
+          exit 1
+        fi
+        if [ ! -f "src/trading_api/clients/datafeed_client.py" ]; then
+          echo "❌ Datafeed client not found"
+          exit 1
+        fi
+        if [ ! -f "src/trading_api/clients/__init__.py" ]; then
+          echo "❌ Clients __init__.py not found"
+          exit 1
+        fi
+        echo "✅ All Python HTTP clients generated successfully"
+
+    - name: Upload Python clients as artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: backend-python-clients
+        path: |
+          backend/src/trading_api/clients/
+        retention-days: 7
+
+  frontend:
+    runs-on: ubuntu-latest
+    needs: [backend-export-specs]
+    strategy:
+      matrix:
+        node-version: ["22"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Download backend specs
+      uses: actions/download-artifact@v3
+      with:
+        name: backend-specs
+        path: backend/src/trading_api/modules/
 
     - name: Install frontend dependencies
       working-directory: frontend
       run: make install-ci
 
-    - name: Generate frontend clients from backend specs (offline)
+    - name: Generate per-module frontend clients (offline from specs)
       working-directory: frontend
       run: |
         make generate-openapi-client
         make generate-asyncapi-types
+
+    - name: Verify per-module client generation
+      working-directory: frontend
+      run: |
+        if [ ! -d "src/clients/trader-client-broker" ]; then
+          echo "❌ Broker client generation failed - no trader-client-broker directory"
+          exit 1
+        fi
+        if [ ! -d "src/clients/trader-client-datafeed" ]; then
+          echo "❌ Datafeed client generation failed - no trader-client-datafeed directory"
+          exit 1
+        fi
+        if [ ! -d "src/clients/ws-types-broker" ]; then
+          echo "❌ Broker WebSocket types generation failed - no ws-types-broker directory"
+          exit 1
+        fi
+        if [ ! -d "src/clients/ws-types-datafeed" ]; then
+          echo "❌ Datafeed WebSocket types generation failed - no ws-types-datafeed directory"
+          exit 1
+        fi
+        echo "✅ Per-module REST clients and WebSocket types generated successfully"
 
     - name: Install Git hooks
       run: |
@@ -355,34 +502,42 @@ jobs:
       working-directory: backend
       run: make generate-ws-routers
 
-    - name: Export backend API specs
-      working-directory: backend
-      run: |
-        make export-openapi-spec
-        make export-asyncapi-spec
+    - name: Download backend specs
+      uses: actions/download-artifact@v3
+      with:
+        name: backend-specs
+        path: backend/src/trading_api/modules/
 
     - name: Install frontend dependencies
       working-directory: frontend
       run: make install-ci
 
-    - name: Generate frontend clients from backend specs (offline)
+    - name: Generate per-module frontend clients (offline from specs)
       working-directory: frontend
       run: |
         make generate-openapi-client
         make generate-asyncapi-types
 
-    - name: Verify client generation
+    - name: Verify per-module client generation
       working-directory: frontend
       run: |
-        if [ ! -f "src/clients/trader-client-generated/index.ts" ]; then
-          echo "❌ Client generation failed - no trader-client-generated/index.ts file"
+        if [ ! -d "src/clients/trader-client-broker" ]; then
+          echo "❌ Broker client generation failed - no trader-client-broker directory"
           exit 1
         fi
-        if [ ! -f "src/clients/ws-types-generated/index.ts" ]; then
-          echo "❌ WebSocket types generation failed - no ws-types-generated/index.ts file"
+        if [ ! -d "src/clients/trader-client-datafeed" ]; then
+          echo "❌ Datafeed client generation failed - no trader-client-datafeed directory"
           exit 1
         fi
-        echo "✅ REST client and WebSocket types generated successfully from backend specs"
+        if [ ! -d "src/clients/ws-types-broker" ]; then
+          echo "❌ Broker WebSocket types generation failed - no ws-types-broker directory"
+          exit 1
+        fi
+        if [ ! -d "src/clients/ws-types-datafeed" ]; then
+          echo "❌ Datafeed WebSocket types generation failed - no ws-types-datafeed directory"
+          exit 1
+        fi
+        echo "✅ Per-module REST clients and WebSocket types generated successfully"
 
     - name: Start backend server
       working-directory: backend
