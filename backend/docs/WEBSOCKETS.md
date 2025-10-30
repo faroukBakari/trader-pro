@@ -1,10 +1,10 @@
 # WebSocket Real-Time Data Streaming
 
-**Version**: 1.0.0
-**Last Updated**: October 27, 2025
+**Version**: 2.0.0 (Modular Architecture)
+**Last Updated**: October 30, 2025
 **Status**: ✅ Production Ready
 
-> ⚠️ **CRITICAL**: When implementing new WebSocket features or routers, you **MUST** follow the router code generation mechanism documented in [`backend/src/trading_api/ws/WS-ROUTER-GENERATION.md`](../src/trading_api/ws/WS-ROUTER-GENERATION.md). This ensures type safety, eliminates generic overhead, and maintains consistency across all WebSocket operations. **Never create WebSocket routers manually**.
+> ⚠️ **CRITICAL**: When implementing new WebSocket features or routers, you **MUST** follow the router code generation mechanism documented in [`backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md`](../src/trading_api/shared/ws/WS-ROUTER-GENERATION.md). This ensures type safety, eliminates generic overhead, and maintains consistency across all WebSocket operations. **Never create WebSocket routers manually**.
 
 ## Overview
 
@@ -89,7 +89,7 @@ broker-connection:{"accountId":"TEST-001"}
 
 #### Implementation (Python)
 
-**Location**: `backend/src/trading_api/ws/router_interface.py`
+**Location**: `backend/src/trading_api/shared/ws/router_interface.py`
 
 ```python
 def buildTopicParams(obj: Any) -> str:
@@ -784,40 +784,63 @@ FastWS is an open-source WebSocket framework built on top of FastAPI, similar to
 
 **To add a new WebSocket router**:
 
-1. Update `ROUTER_SPECS` in `scripts/generate_ws_router.py`
+1. Add TypeAlias declaration in your module's `ws.py` file (e.g., `modules/datafeed/ws.py`)
 2. Run `make generate-ws-routers`
-3. Use generated router from `ws/generated/`
+3. Use generated router from your module's `ws_generated/` directory
 
-**Complete documentation**: See [`backend/src/trading_api/ws/WS-ROUTER-GENERATION.md`](../src/trading_api/ws/WS-ROUTER-GENERATION.md) for the full guide.
+**Complete documentation**: See [`backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md`](../src/trading_api/shared/ws/WS-ROUTER-GENERATION.md) for the full guide.
 
 ### Project Structure
 
 ```
 backend/src/trading_api/
-├── main.py                         # WebSocket app initialization
-├── core/
-│   ├── broker_service.py           # BrokerService implements WsRouteService Protocol
-│   └── datafeed_service.py         # DatafeedService implements WsRouteService Protocol
-├── plugins/
-│   └── fastws_adapter.py          # FastWSAdapter with publish() helper
-└── ws/
-    ├── __init__.py                # Module exports (BrokerWsRouters, DatafeedWsRouters)
-    ├── router_interface.py        # WsRouterInterface, WsRouteService Protocol
-    ├── generic_route.py           # Generic WsRouter template (source of truth) ⚠️
-    ├── broker.py                  # BrokerWsRouters factory class
-    ├── datafeed.py                # DatafeedWsRouters factory class
-    └── generated/                 # Auto-generated routers ⚠️
-        ├── __init__.py            # Generated exports
-        └── barwsrouter.py         # Generated BarWsRouter class
+├── main.py                              # Minimal entrypoint (calls create_app)
+├── app_factory.py                       # Application factory
+├── models/                              # Centralized models (shared)
+│   ├── broker/                         # Order, Position, Execution models
+│   └── market/                         # Bar, Quote, Instrument models
+├── shared/                              # Always loaded
+│   ├── module_interface.py             # Module Protocol definition
+│   ├── module_registry.py              # Module Registry
+│   ├── api/                            # Shared API (health, versions)
+│   ├── plugins/
+│   │   └── fastws_adapter.py          # FastWSAdapter with publish() helper
+│   ├── ws/                             # WebSocket infrastructure
+│   │   ├── router_interface.py        # WsRouterInterface, WsRouteService Protocol
+│   │   ├── generic_route.py           # Generic WsRouter template (source of truth) ⚠️
+│   │   └── WS-ROUTER-GENERATION.md    # Router generation documentation
+│   └── tests/                          # Shared test fixtures
+└── modules/                             # Pluggable modules
+    ├── datafeed/                       # Market data module
+    │   ├── __init__.py                 # DatafeedModule
+    │   ├── service.py                  # DatafeedService (implements WsRouteService)
+    │   ├── api.py                      # DatafeedApi (REST endpoints)
+    │   ├── ws.py                       # DatafeedWsRouters + TypeAlias declarations
+    │   ├── ws_generated/               # Auto-generated routers ⚠️
+    │   │   ├── __init__.py
+    │   │   ├── barwsrouter.py          # Generated BarWsRouter class
+    │   │   └── quotewsrouter.py        # Generated QuoteWsRouter class
+    │   └── tests/                      # Module-specific tests
+    └── broker/                         # Trading module
+        ├── __init__.py                 # BrokerModule
+        ├── service.py                  # BrokerService (implements WsRouteService)
+        ├── api.py                      # BrokerApi (REST endpoints)
+        ├── ws.py                       # BrokerWsRouters + TypeAlias declarations
+        ├── ws_generated/               # Auto-generated routers ⚠️
+        │   ├── __init__.py
+        │   ├── orderwsrouter.py        # Generated OrderWsRouter class
+        │   ├── positionwsrouter.py     # Generated PositionWsRouter class
+        │   └── ...                     # Other broker routers
+        └── tests/                      # Module-specific tests
 ```
 
-⚠️ **Router Generation**: The `generated/` directory contains auto-generated concrete router classes from the `generic_route.py` template. See [`WS-ROUTER-GENERATION.md`](../src/trading_api/ws/WS-ROUTER-GENERATION.md) for details.
+⚠️ **Router Generation**: Each module owns its generated routers in `modules/{module}/ws_generated/`. Routers are auto-generated from the `shared/ws/generic_route.py` template. See [`WS-ROUTER-GENERATION.md`](../src/trading_api/shared/ws/WS-ROUTER-GENERATION.md) for details.
 
 ### Key Components
 
 #### WsRouteService - Protocol-Based Service Architecture
 
-**Location**: `ws/router_interface.py`
+**Location**: `shared/ws/router_interface.py`
 
 The `WsRouteService` is a Protocol that defines the contract for services providing WebSocket topic management:
 
@@ -836,8 +859,8 @@ class WsRouteService(Protocol):
 
 **Implementations**:
 
-- `BrokerService` - Broker operations (orders, positions, executions)
-- `DatafeedService` - Market data (bars, quotes)
+- `modules/broker/service.py::BrokerService` - Broker operations (orders, positions, executions)
+- `modules/datafeed/service.py::DatafeedService` - Market data (bars, quotes)
 
 **Service Pattern**:
 
@@ -885,7 +908,7 @@ class DatafeedService:
 Service generator → topic_update(data) → Router updates_queue → FastWSAdapter → Clients
 ```
 
-#### FastWSAdapter (plugins/fastws_adapter.py)
+#### FastWSAdapter (shared/plugins/fastws_adapter.py)
 
 **Self-Contained WebSocket Adapter with Broadcasting**
 
@@ -938,7 +961,7 @@ class FastWSAdapter(FastWS):
 
 #### WsRouter - Generic WebSocket Router
 
-**Location**: `ws/generic_route.py`
+**Location**: `shared/ws/generic_route.py`
 
 The `WsRouter` is a generic implementation that handles subscription management with reference counting:
 
@@ -1020,12 +1043,23 @@ Second Client → unsubscribe → topic_trackers[topic] = 0 → service.remove_t
 
 #### Router Factory Classes
 
-**Location**: `ws/broker.py`, `ws/datafeed.py`
+**Location**: `modules/broker/ws.py`, `modules/datafeed/ws.py`
 
 Router factories instantiate and inject services:
 
 ```python
-# ws/broker.py
+# modules/broker/ws.py
+from typing import TYPE_CHECKING, TypeAlias
+from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
+
+if TYPE_CHECKING:
+    # TypeAlias declarations for code generation
+    OrderWsRouter: TypeAlias = WsRouter[OrderSubscriptionRequest, PlacedOrder]
+    PositionWsRouter: TypeAlias = WsRouter[PositionSubscriptionRequest, Position]
+else:
+    # Runtime imports from generated routers
+    from .ws_generated import OrderWsRouter, PositionWsRouter
+
 class BrokerWsRouters(list[WsRouterInterface]):
     def __init__(self, broker_service: WsRouteService):
         order_router = OrderWsRouter(
@@ -1036,7 +1070,18 @@ class BrokerWsRouters(list[WsRouterInterface]):
         )
         super().__init__([order_router, position_router, ...])
 
-# ws/datafeed.py
+# modules/datafeed/ws.py
+from typing import TYPE_CHECKING, TypeAlias
+from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
+
+if TYPE_CHECKING:
+    # TypeAlias declarations for code generation
+    BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
+    QuoteWsRouter: TypeAlias = WsRouter[QuoteSubscriptionRequest, Quote]
+else:
+    # Runtime imports from generated routers
+    from .ws_generated import BarWsRouter, QuoteWsRouter
+
 class DatafeedWsRouters(list[WsRouterInterface]):
     def __init__(self, datafeed_service: WsRouteService):
         bar_router = BarWsRouter(
@@ -1055,50 +1100,90 @@ class DatafeedWsRouters(list[WsRouterInterface]):
 - Easy testing (mock services)
 - Service lifecycle tied to routers
 
-#### Integration (main.py)
+#### Integration (app_factory.py + main.py)
 
 ```python
-# Import services and router factories
-from trading_api.core import BrokerService, DatafeedService
-from trading_api.ws import BrokerWsRouters, DatafeedWsRouters
-from trading_api.plugins.fastws_adapter import FastWSAdapter
+# app_factory.py - Application Factory Pattern
+from trading_api.shared.module_registry import ModuleRegistry
+from trading_api.modules.datafeed import DatafeedModule
+from trading_api.modules.broker import BrokerModule
+from trading_api.shared.plugins.fastws_adapter import FastWSAdapter
 
-# Create services (implement WsRouteService Protocol)
-datafeed_service = DatafeedService()
-broker_service = BrokerService()
+def create_app(enabled_modules: list[str] | None = None):
+    """Create FastAPI application with enabled modules.
 
-# Create WebSocket routers with injected services
-ws_routers = [
-    *DatafeedWsRouters(datafeed_service),
-    *BrokerWsRouters(broker_service),
-]
+    Args:
+        enabled_modules: List of module names to enable.
+                        If None, all modules are enabled.
+    """
+    # Create module registry
+    registry = ModuleRegistry()
+    registry.clear()  # Clean slate for each app instance
 
-# Create WebSocket adapter with broadcasting
-wsApp = FastWSAdapter(...)
+    # Register modules
+    registry.register(DatafeedModule())
+    registry.register(BrokerModule())
 
-# Include all WebSocket routers (starts broadcast tasks)
-for ws_router in ws_routers:
-    wsApp.include_router(ws_router)
+    # Filter modules if specified
+    if enabled_modules:
+        for module in registry.get_all_modules():
+            module._enabled = module.name in enabled_modules
 
-# Register AsyncAPI docs
-wsApp.setup(apiApp)
+    # Create FastAPI and WebSocket apps
+    api_app = FastAPI(...)
+    ws_app = FastWSAdapter(...)
 
-# Define endpoint
-@apiApp.websocket("/api/v1/ws")
-async def websocket_endpoint(
-    client: Annotated[Client, Depends(wsApp.manage)]
-):
-    await wsApp.serve(client)
+    # Load enabled modules
+    for module in registry.get_enabled_modules():
+        # Include API routers
+        for router in module.get_api_routers():
+            api_app.include_router(router, prefix="/api/v1")
+
+        # Include WebSocket routers
+        for ws_router in module.get_ws_routers():
+            ws_app.include_router(ws_router)
+
+    # Register AsyncAPI docs
+    ws_app.setup(api_app)
+
+    # Define WebSocket endpoint
+    @api_app.websocket("/api/v1/ws")
+    async def websocket_endpoint(
+        client: Annotated[Client, Depends(ws_app.manage)]
+    ):
+        await ws_app.serve(client)
+
+    return api_app, ws_app
+
+# main.py - Minimal Entrypoint
+import os
+from trading_api.app_factory import create_app
+
+# Parse enabled modules from environment
+enabled_modules = os.getenv("ENABLED_MODULES", "all")
+if enabled_modules != "all":
+    enabled_modules = [m.strip() for m in enabled_modules.split(",")]
+else:
+    enabled_modules = None
+
+# Create application
+apiApp, wsApp = create_app(enabled_modules=enabled_modules)
+
+# Export for spec generation scripts
+app = apiApp  # Required for scripts/export_openapi_spec.py
 ```
 
 **Architecture Benefits**:
 
-1. **No Global State**: Services and routers created and injected explicitly
-2. **Protocol-Based**: Services implement simple `create_topic`/`remove_topic` contract
-3. **Testable**: Easy to mock services in tests
-4. **Clean Lifecycle**: Services manage their own generator tasks
-5. **Type Safe**: Full type inference from service to router to client
-6. **Scalable Broadcasting**: FastWSAdapter handles per-router message queues
+1. **Modular**: Each module (datafeed, broker) is independently loadable
+2. **Factory Pattern**: Applications created via `create_app()` for full control
+3. **Protocol-Based**: Services implement simple `create_topic`/`remove_topic` contract
+4. **Testable**: Easy to create isolated test apps with specific modules
+5. **No Global State**: Services lazy-loaded per module instance
+6. **Clean Lifecycle**: Services manage their own generator tasks
+7. **Type Safe**: Full type inference from service to router to client
+8. **Scalable Broadcasting**: FastWSAdapter handles per-router message queues
+9. **Configuration-Driven**: Load specific modules via `ENABLED_MODULES` environment variable
 
 ## Performance Considerations
 
@@ -1239,20 +1324,27 @@ setInterval(() => {
 - **Interactive Docs**: http://localhost:8000/api/v1/ws/asyncapi
 - **Architecture**: See `ARCHITECTURE.md` (Real-Time Architecture section)
 - **Backend README**: `backend/README.md`
-- **Router Generation**: `backend/src/trading_api/ws/WS-ROUTER-GENERATION.md` (backend code generation)
+- **Router Generation**: `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` (backend code generation)
 - **Frontend Client Generation**: `frontend/WS-CLIENT-AUTO-GENERATION.md` (frontend type-safe clients)
 
 ### Code References
 
 - **Main App**: `backend/src/trading_api/main.py`
-- **FastWS Adapter**: `backend/src/trading_api/plugins/fastws_adapter.py`
-- **Router Interface**: `backend/src/trading_api/ws/router_interface.py`
-- **Generic Router**: `backend/src/trading_api/ws/generic_route.py`
-- **Datafeed Routers**: `backend/src/trading_api/ws/datafeed.py`
-- **Broker Routers**: `backend/src/trading_api/ws/broker.py`
-- **Services**: `backend/src/trading_api/core/datafeed_service.py`, `backend/src/trading_api/core/broker_service.py`
-- **Configuration**: `backend/src/trading_api/core/config.py`
-- **Tests**: `backend/tests/test_ws_datafeed.py`, `backend/tests/test_ws_broker.py`
+- **App Factory**: `backend/src/trading_api/app_factory.py`
+- **Module Interface**: `backend/src/trading_api/shared/module_interface.py`
+- **Module Registry**: `backend/src/trading_api/shared/module_registry.py`
+- **FastWS Adapter**: `backend/src/trading_api/shared/plugins/fastws_adapter.py`
+- **Router Interface**: `backend/src/trading_api/shared/ws/router_interface.py`
+- **Generic Router**: `backend/src/trading_api/shared/ws/generic_route.py`
+- **Datafeed Module**: `backend/src/trading_api/modules/datafeed/__init__.py`
+- **Datafeed Service**: `backend/src/trading_api/modules/datafeed/service.py`
+- **Datafeed Routers**: `backend/src/trading_api/modules/datafeed/ws.py`
+- **Broker Module**: `backend/src/trading_api/modules/broker/__init__.py`
+- **Broker Service**: `backend/src/trading_api/modules/broker/service.py`
+- **Broker Routers**: `backend/src/trading_api/modules/broker/ws.py`
+- **Shared Tests**: `backend/src/trading_api/shared/tests/`
+- **Datafeed Tests**: `backend/src/trading_api/modules/datafeed/tests/`
+- **Broker Tests**: `backend/src/trading_api/modules/broker/tests/`
 
 ### Frontend Integration
 
@@ -1273,8 +1365,51 @@ setInterval(() => {
 - **AsyncAPI Spec**: https://www.asyncapi.com/docs/reference/specification/v2.4.0
 - **WebSocket Protocol**: https://datatracker.ietf.org/doc/html/rfc6455
 
+## Modular Architecture Notes
+
+### Module Independence
+
+Each module (datafeed, broker) is completely self-contained:
+
+- **Service**: Implements `WsRouteService` Protocol
+- **API**: REST endpoints for module operations
+- **WebSocket**: Real-time data streaming routers
+- **Tests**: Module-specific isolated tests
+- **Generated Routers**: Auto-generated in `modules/{module}/ws_generated/`
+
+### Configuration-Driven Loading
+
+Load specific modules via environment variable:
+
+```bash
+# Start with all modules (default)
+make dev
+
+# Start with datafeed only
+ENABLED_MODULES=datafeed make dev
+
+# Start with broker only
+ENABLED_MODULES=broker make dev
+
+# Start with multiple specific modules
+ENABLED_MODULES=datafeed,broker make dev
+```
+
+### Adding New Modules
+
+To add a new WebSocket-enabled module:
+
+1. Create module directory: `modules/new_module/`
+2. Implement `Module` Protocol in `modules/new_module/__init__.py`
+3. Create service implementing `WsRouteService` in `modules/new_module/service.py`
+4. Add WebSocket routers with TypeAlias declarations in `modules/new_module/ws.py`
+5. Run `make generate-ws-routers` to generate concrete routers
+6. Register module in `app_factory.py::create_app()`
+
+See `ARCHITECTURE.md` and `API-METHODOLOGY.md` for detailed module implementation guides.
+
 ---
 
-**Last Updated**: October 12, 2025
+**Last Updated**: October 30, 2025
 **Maintainer**: Development Team
-**Version**: 1.0.0 (Stable)
+**Version**: 2.0.0 (Modular Architecture)

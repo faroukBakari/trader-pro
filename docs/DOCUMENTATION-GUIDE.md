@@ -37,10 +37,10 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### backend/ (Backend Root)
 
-| File                                                   | Purpose                                    |
-| ------------------------------------------------------ | ------------------------------------------ |
-| **backend/README.md**                                  | Backend overview, setup, and API reference |
-| **backend/src/trading_api/ws/WS-ROUTER-GENERATION.md** | WebSocket router auto-generation           |
+| File                                                          | Purpose                                    |
+| ------------------------------------------------------------- | ------------------------------------------ |
+| **backend/README.md**                                         | Backend overview, setup, and API reference |
+| **backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md** | WebSocket router auto-generation           |
 
 ### backend/docs/ (Backend-Specific)
 
@@ -203,7 +203,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### WebSocket & Real-Time
 
-- **backend/src/trading_api/ws/WS-ROUTER-GENERATION.md** - ⚠️ **WebSocket router code generation (CRITICAL for new features)**
+- **backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md** - ⚠️ **WebSocket router code generation (CRITICAL for new features)**
 - **docs/WEBSOCKET-CLIENTS.md** - WebSocket overview
 - **backend/docs/WEBSOCKETS.md** - Backend WebSocket API
 - **frontend/WEBSOCKET-CLIENT-PATTERN.md** - Frontend patterns
@@ -228,7 +228,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 - **MAKEFILE-GUIDE.md** - Makefile commands
 - **.github/CI-TROUBLESHOOTING.md** - CI/CD issues
-- **backend/src/trading_api/ws/WS-ROUTER-GENERATION.md** - Router generation
+- **backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md** - Router generation
 
 ### Code Quality
 

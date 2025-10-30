@@ -5,10 +5,16 @@ Environment variables for configuring ports, URLs, and settings across developme
 ## Environment Variables
 
 ### Backend
+
 - **`BACKEND_PORT`** (default: `8000`) - FastAPI server port
+- **`ENABLED_MODULES`** (default: all modules) - Comma-separated list of modules to load
+  - Example: `ENABLED_MODULES=broker,datafeed`
+  - Used for: Module-specific deployment, testing isolated modules
+  - Available modules: `broker`, `datafeed`
 - Used by: Backend Makefile, dev scripts, CI/CD
 
 ### Frontend
+
 - **`FRONTEND_PORT`** (default: `5173`) - Vite dev server port
 - **`VITE_API_URL`** (default: `http://localhost:8000`) - API base URL
   - Must start with `VITE_` to be accessible in frontend code
@@ -17,12 +23,14 @@ Environment variables for configuring ports, URLs, and settings across developme
   - Used by: Smoke tests, integration tests
 
 ### Bar Broadcaster
+
 - **`BAR_BROADCASTER_ENABLED`** (default: `true`) - Enable/disable broadcaster
 - **`BAR_BROADCASTER_INTERVAL`** (default: `2.0`) - Broadcast interval (seconds)
 - **`BAR_BROADCASTER_SYMBOLS`** (default: `AAPL,GOOGL,MSFT`) - Symbols to broadcast
 - **`BAR_BROADCASTER_RESOLUTIONS`** (default: `1`) - Resolutions (comma-separated)
 
 ### Mock Services
+
 - **`VITE_USE_MOCK_BROKER`** (default: `true`) - Use mock broker service
 - **`VITE_USE_MOCK_DATAFEED`** (default: `true`) - Use mock datafeed service
 
@@ -61,6 +69,7 @@ The frontend uses an efficient file-based approach:
 4. **Relative URLs**: Generated client uses `basePath: ""` for same-origin requests
 
 **Benefits**:
+
 - No server spam
 - Efficient file monitoring
 - Only regenerates on actual schema changes

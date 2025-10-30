@@ -57,46 +57,46 @@ __all__ = [
 
 ### Step 3: Create Router File with TypeAlias
 
-Create a new file (or add to existing topical file) with TypeAlias declaration:
+Create a new file (or add to existing modular file) with TypeAlias declaration:
 
 ```python
-# backend/src/trading_api/ws/trading.py (new file for trading operations)
+# backend/src/trading_api/modules/trading/ws.py (new module for trading operations)
 from typing import TYPE_CHECKING, TypeAlias
 
 from trading_api.models.market import Trade, TradeSubscriptionRequest
-from .generic import WsRouter
-from .router_interface import WsRouterInterface
+from trading_api.shared.ws.generic_route import WsRouter
+from trading_api.shared.ws.router_interface import WsRouterInterface
 
 if TYPE_CHECKING:
     # TypeAlias for type checkers - generator will auto-discover this!
     TradeWsRouter: TypeAlias = WsRouter[TradeSubscriptionRequest, Trade]
 else:
-    # At runtime: use generated concrete class
-    from .generated import TradeWsRouter
+    # At runtime: use generated concrete class from module-local ws_generated
+    from .ws_generated import TradeWsRouter
 
 # Create router instance
 trade_router = TradeWsRouter(route="trades", tags=["trading"])
 trades_topic_builder = trade_router.topic_builder
 
-# Export routers list (used by ws/__init__.py)
+# Export routers list (used by module __init__.py)
 ws_routers: list[WsRouterInterface] = [trade_router]
 ```
 
-**Note**: You can group related routes in the same file:
+**Note**: You can group related routes in the same module's `ws.py` file:
 
-- `datafeed.py` - Market data routes (bars, quotes) → exports `ws_routers = [bar_router, quote_router]`
-- `trading.py` - Trading routes (trades, orders) → exports `ws_routers = [trade_router, order_router]`
-- `account.py` - Account routes (positions, balance) → exports `ws_routers = [position_router, balance_router]`
+- `modules/datafeed/ws.py` - Market data routes (bars, quotes) → exports `ws_routers = [bar_router, quote_router]`
+- `modules/trading/ws.py` - Trading routes (trades, orders) → exports `ws_routers = [trade_router, order_router]`
+- `modules/account/ws.py` - Account routes (positions, balance) → exports `ws_routers = [position_router, balance_router]`
 
-The generator scans **all** `.py` files in `ws/` directory automatically!
+The generator scans **all** `modules/*/ws.py` files automatically!
 
-**Note**: You can group related routes in the same file:
+**Note**: You can group related routes in the same module's `ws.py` file:
 
-- `datafeed.py` - Market data routes (bars, quotes)
-- `trading.py` - Trading routes (trades, orders)
-- `account.py` - Account routes (positions, balance)
+- `modules/datafeed/ws.py` - Market data routes (bars, quotes)
+- `modules/trading/ws.py` - Trading routes (trades, orders)
+- `modules/account/ws.py` - Account routes (positions, balance)
 
-The generator scans **all** `.py` files in `ws/` directory automatically!
+The generator scans **all** `modules/*/ws.py` files automatically!
 
 ### Step 4: Generate the Router
 
@@ -109,67 +109,72 @@ make generate-ws-routers
 
 **What happens:**
 
-1. Generator scans all `.py` files in `ws/` directory
+1. Generator scans all `modules/*/ws.py` files
 2. Finds `TradeWsRouter: TypeAlias = WsRouter[TradeSubscriptionRequest, Trade]`
-3. Creates `backend/src/trading_api/ws/generated/tradewsrouter.py` with:
+3. Creates `backend/src/trading_api/modules/trading/ws_generated/tradewsrouter.py` with:
    - Concrete `TradeWsRouter` class (no generics)
    - Pre-defined `subscribe`, `unsubscribe`, `update` operations from `generic_route.py`
    - Full type safety and all quality checks passed
 
-### Step 5: Update ws/**init**.py to Export Routers
+### Step 5: Export Routers via Module Protocol
 
-Consolidate all routers in the main ws module:
+Modules expose routers via the `Module Protocol`'s `get_ws_routers()` method:
 
 ```python
-# backend/src/trading_api/ws/__init__.py
-from .datafeed import ws_routers as datafeed_ws_routers
-from .trading import ws_routers as trading_ws_routers  # 👈 Add new import
-from .router_interface import WsRouterInterface
+# backend/src/trading_api/modules/trading/__init__.py
+from typing import List
+from trading_api.shared.ws.router_interface import WsRouterInterface
+from .ws import ws_routers  # Import module's router list
 
-ws_routers: list[WsRouterInterface] = [
-    *datafeed_ws_routers,
-    *trading_ws_routers,  # 👈 Include trading routers
-]
+class TradingModule:
+    def __init__(self):
+        self._service = None
+        self._enabled = True
 
-__all__ = ["ws_routers"]
+    # ... other Module Protocol methods ...
+
+    def get_ws_routers(self) -> List[WsRouterInterface]:
+        """Return all WebSocket routers for this module"""
+        # Pass service instance to router factory
+        from .ws import TradeWsRouter
+        return [TradeWsRouter(route="trades", tags=["trading"], service=self.service)]
 ```
 
-**Pattern**: Each topical file (`datafeed.py`, `trading.py`, etc.) exports its own `ws_routers` list, and `__init__.py` consolidates them all into a single list.
+**Pattern**: Each module's `__init__.py` implements `get_ws_routers()` to provide routers with injected service.
 
-### Step 6: Register All Routers in Main AppRegister all WebSocket routers at once:
+### Step 6: Module Registration (Automatic)
+
+**Note**: In the modular architecture, routers are registered automatically via the Module Protocol.
+
+The application factory (`app_factory.py`) handles registration:
 
 ```python
-# backend/src/trading_api/main.py
-from .ws import ws_routers  # 👈 Single import from ws module
+# backend/src/trading_api/app_factory.py (excerpt)
+from trading_api.shared.module_registry import registry
+from trading_api.modules.trading import TradingModule  # Import new module
 
-# ... existing code ...
+def create_app(enabled_modules: list[str] | None = None):
+    # Register all modules
+    registry.register(DatafeedModule())
+    registry.register(BrokerModule())
+    registry.register(TradingModule())  # 👈 Register new module
 
-# Include all WebSocket routers (consolidated list)
-for ws_router in ws_routers:
-    wsApp.include_router(ws_router)
+    # ... filter enabled modules if specified ...
+
+    # Include all enabled modules' WebSocket routers
+    for module in registry.get_enabled_modules():
+        for ws_router in module.get_ws_routers():
+            ws_app.include_router(ws_router)
+
+    return api_app, ws_app
 ```
 
 **Benefits**:
 
-- ✅ Single import statement in `main.py`
-- ✅ Easy to add new topical files (just update `ws/__init__.py`)
-- ✅ Clear separation: each topic file manages its own routers
-- ✅ Type-safe: `ws_routers` is typed as `list[WsRouterInterface]`
-
-**File Organization**:
-
-- `datafeed.py` exports `ws_routers = [bar_router, quote_router]`
-- `trading.py` exports `ws_routers = [trade_router, order_router]`
-- `account.py` exports `ws_routers = [position_router, balance_router]`
-- `ws/__init__.py` consolidates: `ws_routers = [*datafeed_ws_routers, *trading_ws_routers, *account_ws_routers]`
-
-**File Organization:**
-
-- `datafeed.py` - Groups market data routes (bars, quotes)
-- `trading.py` - Groups trading routes (trades, orders, executions)
-- `account.py` - Groups account routes (positions, balance, leverage)
-
-Each file can have multiple routers! The generator finds all TypeAlias declarations automatically.
+- ✅ Automatic router registration for all enabled modules
+- ✅ Service injection handled by module (lazy-loaded)
+- ✅ Clean separation: modules manage their own routers
+- ✅ Type-safe: `get_ws_routers()` returns `list[WsRouterInterface]`
 
 ### Step 7: Verify and Test
 
@@ -252,35 +257,55 @@ class MarketDataService(WsRouteService):
 ## Backend Architecture
 
 ```
-backend/src/trading_api/ws/
-├── __init__.py            # 👈 Consolidates all ws_routers (main export)
-├── generic_route.py              # Generic template (pre-defined operations)
-├── router_interface.py     # Base interface and topic builder logic
-├── datafeed.py            # Market data routers (bars, quotes)
-├── trading.py             # Trading routers (trades, orders) - add as needed
-├── account.py             # Account routers (positions, balance) - add as needed
-└── generated/             # Auto-generated concrete classes
-    ├── __init__.py        # Generated exports (auto-updated)
-    ├── barwsrouter.py     # Generated from datafeed.py
-    ├── quotewsrouter.py   # Generated from datafeed.py
-    └── tradewsrouter.py   # Generated from trading.py (when you add it)
+backend/src/trading_api/
+├── shared/
+│   ├── ws/
+│   │   ├── __init__.py
+│   │   ├── generic_route.py       # Generic template (pre-defined operations)
+│   │   ├── router_interface.py    # Base interface and topic builder logic
+│   │   └── WS-ROUTER-GENERATION.md # This file
+│   └── ...
+├── modules/
+│   ├── datafeed/              # Market data module
+│   │   ├── __init__.py            # DatafeedModule (Module Protocol)
+│   │   ├── ws.py                  # Market data routers (bars, quotes)
+│   │   └── ws_generated/          # Auto-generated concrete classes
+│   │       ├── __init__.py        # Generated exports (auto-updated)
+│   │       ├── barwsrouter.py     # Generated from datafeed/ws.py
+│   │       └── quotewsrouter.py   # Generated from datafeed/ws.py
+│   ├── broker/                # Trading module
+│   │   ├── __init__.py            # BrokerModule (Module Protocol)
+│   │   ├── ws.py                  # Trading routers (orders, positions, etc.)
+│   │   └── ws_generated/          # Auto-generated concrete classes
+│   │       ├── __init__.py
+│   │       ├── orderwsrouter.py
+│   │       ├── positionwsrouter.py
+│   │       └── ...
+│   └── trading/               # Additional module (when you add it)
+│       ├── __init__.py            # TradingModule (Module Protocol)
+│       ├── ws.py                  # Trading routers (trades, orders)
+│       └── ws_generated/          # Auto-generated concrete classes
+│           ├── __init__.py
+│           └── tradewsrouter.py   # Generated from trading/ws.py
+├── app_factory.py             # Application factory (registers modules)
+└── main.py                    # Minimal entrypoint
 ```
 
 **File Organization Pattern:**
 
-- Group related routes by topic in separate files
-- Each file exports its own `ws_routers: list[WsRouterInterface]`
-- `ws/__init__.py` consolidates all into single `ws_routers` list
-- `main.py` imports and registers: `from .ws import ws_routers`
-- Generator automatically finds all TypeAlias declarations across all files
-- `generated/` directory is auto-managed (cleared and regenerated each time)
+- Each module (`modules/{module}/`) has its own `ws.py` with TypeAlias declarations
+- Generator scans all `modules/*/ws.py` files automatically
+- Routers generated into module-specific `ws_generated/` directories
+- Modules expose routers via `get_ws_routers()` method (Module Protocol)
+- Application factory automatically registers all enabled modules' routers
+- `shared/ws/` contains infrastructure (generic template, router interface)
 
 **File Organization Pattern:**
 
-- Group related routes by topic in separate files
-- Each file can contain multiple TypeAlias declarations
-- Generator automatically finds all TypeAlias declarations across all files
-- `generated/` directory is auto-managed (cleared and regenerated each time)
+- Group related routes by module in separate directories
+- Each module's `ws.py` can contain multiple TypeAlias declarations
+- Generator automatically finds all TypeAlias declarations across all modules
+- `ws_generated/` directories are auto-managed (cleared and regenerated each time)
 
 ## How It Works
 
@@ -312,22 +337,22 @@ class WsRouter(OperationRouter, Generic[__TRequest, __TData]):
 
 ### 2. Auto-Discovery Pattern
 
-Developers declare routers using `TypeAlias` with `TYPE_CHECKING` guard:
+Developers declare routers using `TypeAlias` with `TYPE_CHECKING` guard in their module's `ws.py`:
 
 ```python
-# backend/src/trading_api/ws/datafeed.py
+# backend/src/trading_api/modules/datafeed/ws.py
 if TYPE_CHECKING:
     BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
     QuoteWsRouter: TypeAlias = WsRouter[QuoteDataSubscriptionRequest, QuoteData]
 else:
-    from .generated import BarWsRouter, QuoteWsRouter
+    from .ws_generated import BarWsRouter, QuoteWsRouter
 ```
 
 ### 3. Generator Script (scripts/generate_ws_router.py)
 
-The generator **automatically scans** `ws/` directory for TypeAlias patterns:
+The generator **automatically scans** `modules/*/ws.py` files for TypeAlias patterns:
 
-1. **Scans** all `.py` files (except `__init__.py`, `generic_route.py`, `router_interface.py`)
+1. **Scans** all `modules/*/ws.py` files (not `shared/ws/` - that's infrastructure)
 2. **Finds** regex pattern: `BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]`
 3. **Extracts** class name, request type, and data type
 4. **Generates** concrete class by:
@@ -335,9 +360,9 @@ The generator **automatically scans** `ws/` directory for TypeAlias patterns:
    - Replacing `__TRequest` → `BarsSubscriptionRequest`
    - Replacing `__TData` → `Bar`
    - Keeping all pre-defined operations from template
-5. **Outputs** to `ws/generated/barwsrouter.py`
+5. **Outputs** to `modules/{module}/ws_generated/barwsrouter.py`
 
-**No manual configuration needed!** Just write the TypeAlias and run `make generate-ws-routers`.
+**No manual configuration needed!** Just write the TypeAlias in your module's `ws.py` and run `make generate-ws-routers`.
 
 ### 3. Wrapper Script (scripts/generate-ws-routers.sh)
 
@@ -365,14 +390,14 @@ This pattern provides the best of both worlds: type checking during development 
 from typing import TYPE_CHECKING, TypeAlias
 
 from trading_api.models import Bar, BarsSubscriptionRequest
-from .generic import WsRouter
+from trading_api.shared.ws.generic_route import WsRouter
 
 if TYPE_CHECKING:
     # For type checkers (mypy, IDE): use generic version
     BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
 else:
-    # At runtime: use generated concrete class (better performance)
-    from .generated import BarWsRouter
+    # At runtime: use generated concrete class (from module-local ws_generated)
+    from .ws_generated import BarWsRouter
 
 # Instantiate with parameters
 router = BarWsRouter(route="bars", tags=["datafeed"])
@@ -393,7 +418,7 @@ bars_topic_builder = router.topic_builder
 For simpler use cases where you don't need the generic type hints:
 
 ```python
-from .generated import BarWsRouter
+from .ws_generated import BarWsRouter
 
 router = BarWsRouter(route="bars", tags=["datafeed"])
 bars_topic_builder = router.topic_builder
@@ -469,26 +494,27 @@ def orderbook_topic_builder(symbol: str, params: dict) -> str:
 make generate-ws-routers
 
 # What it does:
-# 1. Scans ws/*.py files for TypeAlias patterns
-# 2. Auto-discovers all router specifications
-# 3. Generates concrete classes in ws/generated/
+# 1. Scans modules/*/ws.py files for TypeAlias patterns
+# 2. Auto-discovers all router specifications across all modules
+# 3. Generates concrete classes in modules/{module}/ws_generated/
 # 4. Runs all formatters (Black, isort, Ruff)
 # 5. Runs all linters (Flake8, Ruff)
 # 6. Runs type checker (mypy)
 # 7. Verifies imports work correctly
 ```
 
-**No manual configuration needed** - just add TypeAlias declarations to your files!
+**No manual configuration needed** - just add TypeAlias declarations to your module's `ws.py`!
 
 ### Verify Generation
 
 ```bash
-# Check generated files
-ls -la backend/src/trading_api/ws/generated/
+# Check generated files (module-specific)
+ls -la backend/src/trading_api/modules/datafeed/ws_generated/
+ls -la backend/src/trading_api/modules/broker/ws_generated/
 
 # Test imports
 cd backend
-poetry run python -c "from trading_api.ws.generated import BarWsRouter; print('OK')"
+poetry run python -c "from trading_api.modules.datafeed.ws_generated import BarWsRouter; print('OK')"
 
 # Run tests
 make test
@@ -497,8 +523,11 @@ make test
 ### Clean Generated Files
 
 ```bash
-# Remove generated routers (will be regenerated on next make generate-ws-routers)
-rm -rf backend/src/trading_api/ws/generated/*.py
+# Remove all generated routers (will be regenerated on next make generate-ws-routers)
+rm -rf backend/src/trading_api/modules/*/ws_generated/*.py
+
+# Or clean specific module
+rm -rf backend/src/trading_api/modules/datafeed/ws_generated/*.py
 ```
 
 ## Benefits
@@ -593,8 +622,9 @@ def news_topic_builder(symbol: str, params: dict) -> str:
 ### Broadcasting from Services
 
 ```python
-# In your service implementation
-from trading_api.ws.router_interface import WsRouteService
+# In your module's service implementation
+# Example: backend/src/trading_api/modules/datafeed/service.py
+from trading_api.shared.ws.router_interface import WsRouteService
 from typing import Callable
 
 class MarketDataService(WsRouteService):
@@ -690,26 +720,25 @@ async def subscribe(
 ```
 1. Define Pydantic models (backend)
    ↓
-2. Add TypeAlias declaration in ws/{topic}.py (backend)
+2. Add TypeAlias declaration in modules/{module}/ws.py (backend)
    ↓
 3. Generate router: make generate-ws-routers (backend)
    → Auto-discovers TypeAlias
    → Generates concrete class with pre-defined operations
+   → Outputs to modules/{module}/ws_generated/
    ↓
-4. Export router in ws_routers list in topical file
+4. Module implements get_ws_routers() method (Module Protocol)
    ↓
-5. Update ws/__init__.py to include new topical file
+5. Register module in app_factory.py (registry.register(YourModule()))
    ↓
-6. Register all routers in main.py (from .ws import ws_routers)
+6. Start backend (generates AsyncAPI spec)
    ↓
-7. Start backend (generates AsyncAPI spec)
+7. Frontend auto-generates TypeScript types
    ↓
-8. Frontend auto-generates TypeScript types
-   ↓
-9. Use type-safe WebSocket client in frontend
+8. Use type-safe WebSocket client in frontend
 ```
 
-**Key Difference**: No manual operation implementation needed - they're in the template!
+**Key Difference**: No manual operation implementation or router registration needed - Module Protocol handles it!
 
 ### Frontend Usage After Generation
 

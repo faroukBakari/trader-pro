@@ -2,7 +2,7 @@
 
 This document provides practical examples of integrating FastWS WebSocket framework into the Trading API.
 
-> ⚠️ **CRITICAL**: Before implementing WebSocket routers, you **MUST** follow the router code generation mechanism documented in [`../src/trading_api/ws/WS-ROUTER-GENERATION.md`](../src/trading_api/ws/WS-ROUTER-GENERATION.md). The examples below show patterns and usage, but **actual router creation should always use code generation** to ensure type safety and consistency.
+> ⚠️ **CRITICAL**: Before implementing WebSocket routers, you **MUST** follow the router code generation mechanism documented in [`../src/trading_api/shared/ws/WS-ROUTER-GENERATION.md`](../src/trading_api/shared/ws/WS-ROUTER-GENERATION.md). The examples below show patterns and usage, but **actual router creation should always use code generation** to ensure type safety and consistency.
 
 ## Table of Contents
 
@@ -765,6 +765,6 @@ async def operation(payload: Request) -> Response:
 
 **See Also**:
 
-- `docs/websockets.md` - Complete WebSocket API documentation
+- `docs/WEBSOCKETS.md` - Complete WebSocket API documentation
 - `external_packages/fastws/README.md` - FastWS framework documentation
 - `tests/test_ws_datafeed.py` - Working test examples

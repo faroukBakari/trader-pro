@@ -15,8 +15,8 @@ FastAPI backend that powers the Trading Pro platform. It exposes a RESTful API f
 
 - `ARCHITECTURE.md` – end-to-end system architecture
   - **Backend Models Architecture** section – topic-based organization principles for Pydantic models
-- `docs/versioning.md` – API versioning strategy and lifecycle
-- `docs/websockets.md` – WebSocket real-time data streaming guide
+- `docs/VERSIONING.md` – API versioning strategy and lifecycle
+- `docs/WEBSOCKETS.md` – WebSocket real-time data streaming guide
 - `backend/README.md` (this file) – backend setup and reference
 - `frontend/CLIENT-GENERATION.md` – TypeScript client generation that consumes the backend OpenAPI spec
 - `MAKEFILE-GUIDE.md` – consolidated command reference for the whole project
@@ -75,7 +75,20 @@ poetry run uvicorn "trading_api.main:$BACKEND_APP_NAME" --reload
 ### Run tests and quality checks
 
 ```bash
-make test              # pytest -v
+# Run all tests (boundaries + shared + modules + integration)
+make test
+
+# Run specific test suites
+make test-boundaries          # Import boundary validation
+make test-shared              # Shared infrastructure tests
+make test-module-broker       # Broker module tests only
+make test-module-datafeed     # Datafeed module tests only
+make test-integration         # Cross-module integration tests
+
+# Run tests for specific modules
+make test-modules modules=broker,datafeed
+
+# Code quality
 make lint              # flake8
 make lint-check        # black --check + isort --check-only + flake8 + mypy
 make format            # black + isort
@@ -120,11 +133,56 @@ The backend publishes OpenAPI and AsyncAPI documentation at startup. After runni
 | `bars.unsubscribe` | SEND    | Unsubscribe from bar updates                    |
 | `bars.update`      | RECEIVE | Real-time OHLC bar data broadcast               |
 
-⚠️ **IMPORTANT**: When implementing WebSocket features, always use the router code generation mechanism. See `src/trading_api/ws/WS-ROUTER-GENERATION.md` for the complete guide on creating type-safe WebSocket routers.
+⚠️ **IMPORTANT**: When implementing WebSocket features, always use the router code generation mechanism. See `src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` for the complete guide on creating type-safe WebSocket routers.
 
-See `docs/websockets.md` for detailed WebSocket documentation including the WsRouteService Protocol architecture.
+See `docs/WEBSOCKETS.md` for detailed WebSocket documentation including the WsRouteService Protocol architecture.
 
 ## Architecture Overview
+
+### Modular Factory-Based Architecture
+
+The backend uses a **modular factory-based architecture** enabling independent development, testing, and deployment of feature modules:
+
+**Core Components**:
+
+1. **Application Factory** (`app_factory.py`) - Dynamic composition with `create_app()`
+2. **Module System** - Protocol-based pluggable modules (broker, datafeed)
+3. **Shared Infrastructure** (`shared/`) - Always-loaded core (health, versioning, WS framework)
+4. **Centralized Models** (`models/`) - Topic-based Pydantic models
+5. **Test Isolation** - Factory-based fixtures for independent module testing
+
+**Module Architecture**:
+
+```
+modules/
+├── datafeed/              # Market data module
+│   ├── __init__.py       # DatafeedModule (implements Module Protocol)
+│   ├── service.py        # Business logic
+│   ├── api.py            # REST endpoints
+│   ├── ws.py             # WebSocket routers
+│   ├── ws_generated/     # Auto-generated WS routers
+│   └── tests/            # Module-specific tests
+└── broker/               # Trading operations module
+    ├── __init__.py       # BrokerModule (implements Module Protocol)
+    ├── service.py        # Business logic
+    ├── api.py            # REST endpoints
+    ├── ws.py             # WebSocket routers
+    ├── ws_generated/     # Auto-generated WS routers
+    └── tests/            # Module-specific tests
+```
+
+**Module-Specific Deployment**:
+
+```bash
+# Start with only datafeed module
+ENABLED_MODULES=datafeed make dev
+
+# Start with only broker module
+ENABLED_MODULES=broker make dev
+
+# Start with all modules (default)
+make dev
+```
 
 ### Protocol-Based WebSocket Architecture
 
@@ -208,51 +266,74 @@ backend/
 ├── pyproject.toml
 ├── src/trading_api/
 │   ├── __init__.py
-│   ├── main.py                # FastAPI + FastWS application factory
-│   ├── api/
-│   │   ├── broker.py          # BrokerApi class (REST endpoints)
-│   │   ├── datafeed.py        # DatafeedApi class (TradingView-compatible REST)
-│   │   ├── health.py          # HealthApi class (service heartbeat)
-│   │   └── versions.py        # VersionApi class (API version catalogue)
-│   ├── ws/
-│   │   ├── __init__.py        # WebSocket module exports
-│   │   ├── router_interface.py # WsRouterInterface, WsRouteService Protocol
-│   │   ├── generic_route.py   # Generic WsRouter implementation
-│   │   ├── broker.py          # BrokerWsRouters factory
-│   │   ├── datafeed.py        # DatafeedWsRouters factory
-│   │   └── generated/         # Auto-generated concrete router classes
-│   ├── plugins/
-│   │   └── fastws_adapter.py  # FastWS integration adapter
-│   ├── core/
-│   │   ├── broker_service.py      # BrokerService (implements WsRouteService Protocol)
-│   │   └── datafeed_service.py    # DatafeedService (implements WsRouteService Protocol)
-│   └── models/
-│       ├── __init__.py
-│       ├── common.py          # BaseApiResponse, SubscriptionResponse, SubscriptionUpdate
-│       ├── health.py          # HealthResponse
-│       ├── versioning.py      # API version models
-│       ├── broker/
-│       │   ├── common.py      # SuccessResponse
-│       │   ├── orders.py      # Order models (REST + WebSocket)
-│       │   ├── positions.py   # Position models (REST + WebSocket)
-│       │   ├── executions.py  # Execution models (REST + WebSocket)
-│       │   ├── account.py     # Account/equity models (REST + WebSocket)
-│       │   ├── connection.py  # Connection status models (WebSocket)
-│       │   └── leverage.py    # Leverage models (REST)
-│       └── market/
-│           ├── bars.py        # Bar, BarsSubscriptionRequest
-│           ├── configuration.py
-│           ├── instruments.py
-│           ├── quotes.py
-│           └── search.py
+│   ├── main.py                # Minimal entrypoint - calls create_app()
+│   ├── app_factory.py         # Application factory with module composition
+│   ├── models/                # Centralized Pydantic models
+│   │   ├── __init__.py
+│   │   ├── common.py          # BaseApiResponse, SubscriptionResponse, SubscriptionUpdate
+│   │   ├── health.py          # HealthResponse
+│   │   ├── versioning.py      # API version models
+│   │   ├── broker/
+│   │   │   ├── common.py      # SuccessResponse
+│   │   │   ├── orders.py      # Order models (REST + WebSocket)
+│   │   │   ├── positions.py   # Position models (REST + WebSocket)
+│   │   │   ├── executions.py  # Execution models (REST + WebSocket)
+│   │   │   ├── account.py     # Account/equity models (REST + WebSocket)
+│   │   │   ├── connection.py  # Connection status models (WebSocket)
+│   │   │   └── leverage.py    # Leverage models (REST)
+│   │   └── market/
+│   │       ├── bars.py        # Bar, BarsSubscriptionRequest
+│   │       ├── configuration.py
+│   │       ├── instruments.py
+│   │       ├── quotes.py
+│   │       └── search.py
+│   ├── shared/                # Always-loaded shared infrastructure
+│   │   ├── module_interface.py  # Module Protocol
+│   │   ├── module_registry.py   # ModuleRegistry
+│   │   ├── api/
+│   │   │   ├── health.py      # HealthApi class (service heartbeat)
+│   │   │   └── versions.py    # VersionApi class (API version catalogue)
+│   │   ├── ws/
+│   │   │   ├── router_interface.py  # WsRouterInterface, WsRouteService Protocol
+│   │   │   └── generic_route.py     # Generic WsRouter implementation
+│   │   ├── plugins/
+│   │   │   └── fastws_adapter.py  # FastWS integration adapter
+│   │   └── tests/
+│   │       └── conftest.py    # Shared test fixtures
+│   └── modules/               # Pluggable feature modules
+│       ├── datafeed/
+│       │   ├── __init__.py    # DatafeedModule
+│       │   ├── service.py     # DatafeedService (implements WsRouteService)
+│       │   ├── api.py         # DatafeedApi (TradingView-compatible REST)
+│       │   ├── ws.py          # DatafeedWsRouters factory
+│       │   ├── ws_generated/  # Auto-generated concrete router classes
+│       │   └── tests/
+│       │       ├── conftest.py
+│       │       └── test_ws_datafeed.py
+│       └── broker/
+│           ├── __init__.py    # BrokerModule
+│           ├── service.py     # BrokerService (implements WsRouteService)
+│           ├── api.py         # BrokerApi (REST endpoints)
+│           ├── ws.py          # BrokerWsRouters factory
+│           ├── ws_generated/  # Auto-generated concrete router classes
+│           └── tests/
+│               ├── conftest.py
+│               ├── test_api_broker.py
+│               └── test_ws_broker.py
 ├── external_packages/
 │   └── fastws/                # FastWS framework (vendored)
 ├── tests/
-│   ├── test_api_broker.py
+│   ├── conftest.py            # Root test configuration
+│   ├── test_import_boundaries.py  # Import boundary enforcement
+│   └── integration/           # Cross-module integration tests
+│       ├── conftest.py
+│       ├── test_broker_datafeed_workflow.py
+│       ├── test_full_stack.py
+│       └── test_module_isolation.py
+├── shared/tests/
+│   ├── conftest.py            # Shared test factory
 │   ├── test_api_health.py
-│   ├── test_api_versioning.py
-│   ├── test_ws_broker.py
-│   └── test_ws_datafeed.py    # WebSocket integration tests
+│   └── test_api_versioning.py
 ├── docs/
 │   ├── VERSIONING.md
 │   └── WEBSOCKETS.md          # WebSocket streaming guide + WsRouteService docs
@@ -267,5 +348,5 @@ backend/
 
 ## Next Steps
 
-- Track API changes in `docs/versioning.md`
+- Track API changes in `docs/VERSIONING.md`
 - Coordinate with the frontend when updating models so that TypeScript clients remain in sync
