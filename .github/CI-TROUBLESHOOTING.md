@@ -424,8 +424,8 @@ make type-check
 ```yaml
 # CI checks for these directories
 if [ ! -d "src/clients/trader-client-broker" ]; then
-  echo "❌ Broker client generation failed"
-  exit 1
+echo "❌ Broker client generation failed"
+exit 1
 fi
 ```
 
