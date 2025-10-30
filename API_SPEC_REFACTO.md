@@ -6,12 +6,61 @@
 
 ## Goal
 
+**CRITICAL: Prepare for multi-process architecture where each module runs as a separate service.**
+
 Per-module OpenAPI/AsyncAPI specs with auto-discovery:
 
-- Self-contained specs per module
-- Inter-module HTTP communication (Python clients)
-- Frontend tree-shaking (module-specific imports)
-- Microservice-ready architecture
+- **Self-contained specs per module** → Each module has its own OpenAPI/AsyncAPI spec
+- **Inter-module HTTP communication** → Modules communicate via HTTP (not direct Python imports)
+- **Python HTTP clients** → Type-safe clients for inter-module calls (e.g., broker calls datafeed)
+- **Frontend tree-shaking** → Module-specific TypeScript clients (import only what you need)
+- **Microservice-ready** → Each module CAN run as separate process/container
+
+## Architecture Transition
+
+### Current (Monolith - Single Process)
+
+```
+┌─────────────────────────────────────┐
+│  FastAPI App (Single Process)      │
+│  ┌──────────┐     ┌──────────┐    │
+│  │  Broker  │ ──▶ │ Datafeed │    │  Direct Python imports
+│  │  Module  │     │  Module  │    │  (from trading_api.modules.datafeed...)
+│  └──────────┘     └──────────┘    │
+└─────────────────────────────────────┘
+```
+
+### Target (Multi-Process - Microservices)
+
+```
+┌──────────────────┐         ┌──────────────────┐
+│ Broker Service   │         │ Datafeed Service │
+│ (Process 1)      │  HTTP   │ (Process 2)      │
+│ Port: 8001       │ ──────▶ │ Port: 8002       │
+│                  │ Client  │                  │
+│ Uses:            │         │ Exposes:         │
+│ datafeed_client  │         │ /api/v1/symbols  │
+└──────────────────┘         └──────────────────┘
+         │                            │
+         │         HTTP               │
+         └────────────┬───────────────┘
+                      ▼
+              ┌──────────────┐
+              │   Frontend   │
+              │ trader-client│
+              │   -broker    │
+              │ trader-client│
+              │   -datafeed  │
+              └──────────────┘
+```
+
+## Why This Refactoring?
+
+1. **Enable independent scaling** → Scale datafeed separately from broker
+2. **Independent deployment** → Deploy broker without restarting datafeed
+3. **Technology flexibility** → Future modules can use different languages
+4. **Fault isolation** → Datafeed crash doesn't take down broker
+5. **Development isolation** → Teams can work on modules independently
 
 ## Target Structure
 
@@ -29,8 +78,9 @@ backend/src/trading_api/modules/
     └── ...
 
 backend/src/trading_api/clients/
-├── broker_client/
-└── datafeed_client/
+├── __init__.py
+├── broker_client.py
+└── datafeed_client.py
 
 frontend/src/clients/
 ├── trader-client-broker/
@@ -59,7 +109,7 @@ frontend/src/clients/
   - `mkdir -p backend/src/trading_api/clients`
 - [x] **0.3** Update `.gitignore`
   - Add `backend/src/trading_api/modules/*/specs/`
-  - Add `backend/src/trading_api/clients/*_client/`
+  - Add `backend/src/trading_api/clients/*_client.py`
   - Add `frontend/src/clients/trader-client-*/`
   - Add `frontend/src/clients/ws-types-*/`
 - [x] **0.4** Validate selective loading
@@ -113,35 +163,99 @@ frontend/src/clients/
 
 ### Phase 2: Backend Python Client Generation (3 days)
 
-**Goal**: Type-safe inter-module HTTP clients
+**Goal**: Type-safe HTTP clients for inter-module communication when running as separate processes
+
+**WHY THIS IS CRITICAL:**
+When modules run as separate processes, they can't use direct Python imports. Instead:
+
+```python
+# ❌ Won't work in multi-process (different memory space)
+from trading_api.modules.datafeed.api import get_symbols
+
+# ✅ HTTP client for inter-process communication
+from trading_api.clients.datafeed_client import DatafeedClient
+client = DatafeedClient(base_url="http://datafeed-service:8002")
+symbols = await client.get_symbols()
+```
+
+**USE CASE EXAMPLE:**
+Broker module needs to fetch symbols from Datafeed module:
+
+- **Monolith**: Direct import works (same process)
+- **Multi-process**: HTTP client required (different processes)
+
+**IMPLEMENTATION APPROACH:**
+
+- **Tool**: Custom Python script (no external code generation tools)
+- **Design**: Flat structure with clear naming (`{module}_client.py`)
+- **Output**: Thin HTTP client wrappers only, models imported from `trading_api.models.*`
+- **Key Constraint**: Models already exist in `backend/src/trading_api/models/` (broker/, market/, common.py)
 
 #### Tasks
 
-- [ ] **2.1** Create `backend/scripts/generate-python-client.sh`
-  - Accept MODULE_NAME parameter
-  - Use OpenAPI Generator Docker image
-  - Output to `src/trading_api/clients/{module}_client/`
-  - Set package name to `{module}_client`
-- [ ] **2.2** Make script executable
-  - `chmod +x backend/scripts/generate-python-client.sh`
-- [ ] **2.3** Update `backend/Makefile`
-  - Add `generate-python-clients` target
-  - Depend on `export-openapi-specs`
-  - Loop over `specs/openapi-*.json` files
-  - Extract module name and call generation script
-- [ ] **2.4** Validate generation
+- [ ] **2.1** Create custom client generator script
+  - Create `backend/scripts/generate_python_clients.py`
+  - Parse OpenAPI specs from `modules/{module}/specs/openapi.json`
+  - Extract operations (operationId, HTTP method, path, parameters, request/response schemas)
+  - Map schema references to existing models in `trading_api.models.*`
+  - Generate client classes with async httpx methods
+- [ ] **2.2** Create Jinja2 templates
+  - Create `backend/scripts/templates/python_client.py.j2`
+  - Template generates single file: `{module}_client.py`
+  - **Critical**: Import models from `trading_api.models.*` (no model generation)
+  - Template includes: client class, async methods, type hints, docstrings
+  - **Example imports**: `from trading_api.models import SymbolInfo, QuoteData, PlacedOrder`
+- [ ] **2.3** Implement generator logic
+  - Auto-discover modules with OpenAPI specs
+  - For each module, generate `src/trading_api/clients/{module}_client.py`
+  - Create `src/trading_api/clients/__init__.py` with exports
+  - **File structure**: Flat, no subdirectories per client
+  - **Naming convention**: `broker_client.py`, `datafeed_client.py`
+- [ ] **2.4** Create Makefile target
+  - Add `generate-python-clients` target to `backend/Makefile`
+  - Command: `poetry run python scripts/generate_python_clients.py`
+  - Add to `export-specs` dependency chain
+- [ ] **2.5** Validate generation
+  - **Cleanup first**: `rm -f backend/src/trading_api/clients/*_client.py` (remove old files)
   - Run: `make generate-python-clients`
-  - Verify: `ls src/trading_api/clients/*/`
-  - Check: Both broker_client and datafeed_client exist
-  - Test import: `from trading_api.clients.datafeed_client import DefaultApi`
+  - Verify files exist: `ls src/trading_api/clients/{broker,datafeed}_client.py`
+  - **Critical check**: Clients import from `trading_api.models` (NOT local models)
+  - **Critical check**: Clients have async HTTP methods (using httpx)
+  - Test import: `from trading_api.clients.datafeed_client import DatafeedClient`
+  - Test type checking: `poetry run mypy src/trading_api/clients/`
+- [ ] **2.6** Integration test - Multi-process communication
+  - Start datafeed service: `ENABLED_MODULES=datafeed uvicorn trading_api.main:app --port 8002`
+  - Start broker service: `ENABLED_MODULES=broker uvicorn trading_api.main:app --port 8001`
+  - Test: Broker uses `DatafeedClient(base_url="http://localhost:8002")` to call datafeed
+  - Verify: HTTP communication works, models serialize/deserialize correctly
+  - Verify: Type safety maintained across process boundary
 
-**Completion**: Python clients generated and importable ✅
+**Completion**: HTTP clients generated, reuse existing models, multi-process communication validated ✅
 
 ---
 
 ### Phase 3: Frontend Multi-Client Generation (2 days)
 
-**Goal**: Tree-shakeable TypeScript clients per module
+**Goal**: Tree-shakeable TypeScript clients per module (import only broker OR datafeed, not both)
+
+**WHY THIS IS CRITICAL:**
+Frontend needs to call different module services independently:
+
+```typescript
+// ✅ Import only what you need - smaller bundle size
+import { BrokerApi } from "@/clients/trader-client-broker";
+import { DatafeedApi } from "@/clients/trader-client-datafeed";
+
+// Broker service at http://broker-service:8001
+const brokerApi = new BrokerApi({ basePath: "http://broker-service:8001" });
+
+// Datafeed service at http://datafeed-service:8002
+const datafeedApi = new DatafeedApi({
+  basePath: "http://datafeed-service:8002",
+});
+```
+
+**BENEFIT**: TradingView chart only needs datafeed client, not broker → smaller bundle
 
 #### Tasks
 
@@ -220,12 +334,13 @@ frontend/src/clients/
 
 ### Breaking Changes
 
-| Component     | Old                       | New                                              |
-| ------------- | ------------------------- | ------------------------------------------------ |
-| Backend specs | `backend/openapi.json`    | `backend/src/trading_api/modules/*/specs/*.json` |
-| Backend specs | `backend/asyncapi.json`   | `backend/src/trading_api/modules/*/specs/*.json` |
-| Frontend REST | `trader-client-generated` | `trader-client-{module}`                         |
-| Frontend WS   | `ws-types-generated`      | `ws-types-{module}`                              |
+| Component       | Old                       | New                                              |
+| --------------- | ------------------------- | ------------------------------------------------ |
+| Backend specs   | `backend/openapi.json`    | `backend/src/trading_api/modules/*/specs/*.json` |
+| Backend specs   | `backend/asyncapi.json`   | `backend/src/trading_api/modules/*/specs/*.json` |
+| Backend clients | N/A (direct imports)      | `trading_api.clients.{module}_client`            |
+| Frontend REST   | `trader-client-generated` | `trader-client-{module}`                         |
+| Frontend WS     | `ws-types-generated`      | `ws-types-{module}`                              |
 
 ### Rollout
 

@@ -22,13 +22,35 @@ fi
 STASH_NAME="pre-commit-$(date +%s)"
 STASHED=0
 
-log_info "Stashing unstaged changes..."
-if git diff --quiet; then
-    log_info "No unstaged changes to stash"
+log_info "Checking working directory state..."
+
+# Check for untracked files in source directories
+untracked_in_src=$(git ls-files --others --exclude-standard -- \
+    'backend/src/**/*.py' \
+    'frontend/src/**/*.ts' \
+    'frontend/src/**/*.vue' \
+    'frontend/src/**/*.js' 2>/dev/null || true)
+
+if [[ -n "$untracked_in_src" ]]; then
+    untracked_count=$(echo "$untracked_in_src" | wc -l)
+    log_warning "⚠️  Found $untracked_count untracked source file(s):"
+    echo "$untracked_in_src" | head -5
+    if [[ $untracked_count -gt 5 ]]; then
+        echo "   ... and $((untracked_count - 5)) more"
+    fi
+    log_warning "These files will be stashed during checks but are NOT being committed"
+    log_warning "Consider: 'git add <file>' to include OR add to .gitignore"
+    echo ""
+fi
+
+# Stash unstaged and untracked changes
+log_info "Stashing unstaged and untracked changes..."
+if git diff --quiet && [[ -z "$untracked_in_src" ]]; then
+    log_info "No unstaged or untracked changes to stash"
 else
     git stash push -k -u -m "$STASH_NAME" >/dev/null 2>&1 || true
     STASHED=1
-    log_success "Unstaged changes stashed"
+    log_success "Unstaged and untracked changes stashed (will be restored after checks)"
 fi
 
 # Setup trap to ALWAYS restore stashed changes
