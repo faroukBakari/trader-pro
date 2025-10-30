@@ -1,9 +1,10 @@
 # Backend Service Implementation Methodology (TDD with Dual-Client Architecture)
 
-**Template Version**: 2.0  
-**Status**: Generic Reusable Template  
+**Template Version**: 3.0  
+**Status**: Generic Reusable Template (Modular Architecture)  
 **Original Implementation**: Broker Terminal Service  
-**Applicable To**: Any backend service implementation (broker, datafeed, notifications, user management, etc.)
+**Applicable To**: Any backend service implementation (broker, datafeed, notifications, user management, etc.)  
+**Architecture**: Modular backend with factory-based pattern
 
 ---
 
@@ -166,11 +167,13 @@ npm run type-check  # No TypeScript errors
 
 **Goal**: Create backend API structure matching the client interface, generate OpenAPI client, verify interface alignment.
 
-> ⚠️ **WebSocket Features**: If implementing WebSocket operations (not REST), use the router code generation mechanism documented in [`backend/src/trading_api/ws/WS-ROUTER-GENERATION.md`](backend/src/trading_api/ws/WS-ROUTER-GENERATION.md) instead of creating routers manually. This ensures type safety and consistency.
+> ⚠️ **WebSocket Features**: If implementing WebSocket operations (not REST), use the router code generation mechanism documented in [`backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md`](backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md) instead of creating routers manually. Module-specific WebSocket routers are generated into `modules/{module}/ws_generated/`. This ensures type safety and consistency.
 
 ### Step 2.1: Create Backend Models
 
-**Location Pattern**: `backend/src/{api_name}/models/{service_name}/`
+**Location Pattern**: `backend/src/trading_api/models/{domain}/`
+
+**Note**: Models are organized by business domain (broker, market, user, etc.), not by service name. This supports model reuse across modules.
 
 **Model Design Guidelines**:
 
@@ -254,7 +257,9 @@ class ResourceList(BaseModel):
 
 ### Step 2.2: Create REST API Endpoints (Empty Stubs)
 
-**Location Pattern**: `backend/src/{api_name}/api/{service_name}.py`
+**Location Pattern**: `backend/src/trading_api/modules/{module}/api.py`
+
+**Note**: Each module has its own `api.py` file. Shared/cross-cutting APIs go in `shared/api/` (e.g., health, versions).
 
 **Endpoint Design Guidelines**:
 
@@ -270,11 +275,11 @@ class ResourceList(BaseModel):
 from fastapi import APIRouter, HTTPException, Query, Path
 from typing import List, Optional
 from pydantic import BaseModel
-from {api_name}.models.{service_name} import (
+from trading_api.models.{domain} import (
     ResourceRequest,
     ResourceResponse,
     ResourceOperationResult,
-    # ... import all models
+    # ... import all models from appropriate domain folder
 )
 
 class SuccessResponse(BaseModel):
@@ -379,23 +384,33 @@ async def customAction(
     raise NotImplementedError("Service API not yet implemented")
 ```
 
-**Real-world examples**:
+**Real-world examples** (modular architecture):
 
-- **Broker**: POST `/orders`, PUT `/orders/{id}`, DELETE `/orders/{id}`, GET `/positions`
-- **Datafeed**: GET `/symbols/{symbol}`, GET `/history`, POST `/quotes`
-- **User**: POST `/users`, GET `/users/{id}`, PUT `/users/{id}/profile`
+- **Broker module**: `modules/broker/api.py` - POST `/broker/orders`, PUT `/broker/orders/{id}`, DELETE `/broker/orders/{id}`, GET `/broker/positions`
+- **Datafeed module**: `modules/datafeed/api.py` - GET `/datafeed/config`, POST `/datafeed/quotes`
+- **Shared APIs**: `shared/api/health.py` - GET `/health`, `shared/api/versions.py` - GET `/versions`
+
+**Note**: Module prefix (e.g., `/broker`, `/datafeed`) is added by the module's `get_api_routers()` method.
 
 ---
 
-### Step 2.3: Register Router in Main App
+### Step 2.3: Register Module in Application Factory
 
-**Location Pattern**: `backend/src/{api_name}/main.py`
+**Location Pattern**: `backend/src/trading_api/app_factory.py`
+
+**Note**: In the modular architecture, modules are registered via the factory pattern, not directly in main.py.
 
 ```python
-from {api_name}.api import {service_name} as {service_name}_api
+# Modules register themselves via Module Protocol
+from trading_api.modules.{module} import {Module}Module
 
-# Register service router
-apiApp.include_router({service_name}_api.router)
+# In app_factory.py create_app() function:
+registry.register({Module}Module())
+
+# Module's get_api_routers() returns routers to include
+for module in registry.get_enabled_modules():
+    for router in module.get_api_routers():
+        api_app.include_router(router, prefix="/api/v1")
 ```
 
 **Verification**:
@@ -948,7 +963,9 @@ VITE_USE_MOCK_{SERVICE}=false make test  # Tests will FAIL ❌
 
 ### Step 4.1: Create Service Layer
 
-**Location Pattern**: `backend/src/{api_name}/core/{service_name}_service.py`
+**Location Pattern**: `backend/src/trading_api/modules/{module}/service.py`
+
+**Note**: Each module has its own `service.py` file containing the service implementation. Services are lazy-loaded by the module.
 
 **Service Design Guidelines**:
 
@@ -964,12 +981,12 @@ VITE_USE_MOCK_{SERVICE}=false make test  # Tests will FAIL ❌
 import asyncio
 import time
 from typing import Dict, List, Optional
-from {api_name}.models.{service_name} import (
+from trading_api.models.{domain} import (
     ResourceRequest,
     ResourceResponse,
     ResourceOperationResult,
     ResourceStatus,
-    # ... import all models
+    # ... import all models from appropriate domain
 )
 
 class {ServiceName}Service:
@@ -1049,25 +1066,42 @@ class {ServiceName}Service:
         del self._resources[resource_id]
 ```
 
-**Real-world example (broker service)**:
+**Real-world example (broker module)**:
 
+- Location: `backend/src/trading_api/modules/broker/service.py`
 - In-memory maps: `_orders`, `_positions`, `_executions`
 - Async processing: `_simulate_execution()` with delay
 - Business logic: `_update_position()` from executions
+- Module: `modules/broker/` (api.py, service.py, ws.py, tests/)
 
 ---
 
 ### Step 4.2: Wire Service to API Endpoints
 
-**Location Pattern**: `backend/src/{api_name}/api/{service_name}.py`
+**Location Pattern**: `backend/src/trading_api/modules/{module}/api.py`
+
+**Note**: In modular architecture, the service is accessed via the module instance, not as a global singleton.
 
 Replace `NotImplementedError` stubs with actual service calls:
 
 ```python
-from {api_name}.core.{service_name}_service import {ServiceName}Service
+# Import service from module-local service.py
+from .service import {ServiceName}Service
 
-# Create singleton service instance
-service_instance = {ServiceName}Service()
+# Service instance is passed from module __init__.py
+# Module creates and manages service lifecycle
+
+class {Module}Api:
+    def __init__(self, service: {ServiceName}Service, prefix: str = "/{module}", tags: list[str] | None = None):
+        self.service = service
+        self.router = APIRouter(prefix=prefix, tags=tags or ["{module}"])
+        self._register_routes()
+
+    def _register_routes(self):
+        @self.router.post("/resources", response_model=ResourceOperationResult)
+        async def createResource(resource: ResourceRequest) -> ResourceOperationResult:
+            """Create a new resource"""
+            return await self.service.create_resource(resource)  # 👈 Use injected service
 
 @router.post("/resources", response_model=ResourceOperationResult)
 async def createResource(resource: ResourceRequest) -> ResourceOperationResult:
@@ -1122,14 +1156,16 @@ VITE_USE_MOCK_{SERVICE}=false make test
 
 ### Step 5.2: Write Backend Unit Tests
 
-**Location Pattern**: `backend/tests/test_{service_name}_service.py`
+**Location Pattern**: `backend/src/trading_api/modules/{module}/tests/test_service.py`
+
+**Note**: Tests are co-located with modules. Each module has its own `tests/` directory.
 
 **Test Pattern**:
 
 ```python
 import pytest
-from {api_name}.core.{service_name}_service import {ServiceName}Service
-from {api_name}.models.{service_name} import ResourceRequest, ResourceStatus
+from trading_api.modules.{module}.service import {ServiceName}Service
+from trading_api.models.{domain} import ResourceRequest, ResourceStatus
 
 @pytest.fixture
 async def service():
@@ -1194,11 +1230,12 @@ async def test_delete_resource(service):
         await service.get_resource(result.id)
 ```
 
-**Real-world example (broker tests)**:
+**Real-world example (broker module tests)**:
 
-- File: `backend/tests/test_api_broker.py`
+- File: `backend/src/trading_api/modules/broker/tests/test_api.py`
 - Tests cover: place_order, get_orders, get_positions, get_executions, modify_order, cancel_order
-- Uses TestClient with FastAPI app for integration testing
+- Uses factory-based fixtures with isolated module loading: `create_app(enabled_modules=["broker"])`
+- Fixtures defined in: `modules/broker/tests/conftest.py` (module-specific) and `shared/tests/conftest.py` (shared factory)
 
 **Verification**:
 
@@ -1211,16 +1248,18 @@ make test  # All backend tests should pass
 
 ### Step 5.3: Write Backend API Integration Tests
 
-**Location Pattern**: `backend/tests/test_api_{service_name}.py`
+**Location Pattern**: `backend/src/trading_api/modules/{module}/tests/test_api.py`
+
+**Note**: Module tests use factory-based fixtures with isolated module loading.
 
 ```python
 import pytest
 from httpx import AsyncClient
-from {api_name}.main import apiApp
 
 @pytest.mark.asyncio
-async def test_create_resource_endpoint():
-    async with AsyncClient(app=apiApp, base_url="http://test") as client:
+async def test_create_resource_endpoint(async_client):
+    # async_client fixture from conftest.py creates app with only this module
+    # Uses: create_app(enabled_modules=["{module}"])
         response = await client.post("/api/v1/{service}/resources", json={
             "name": "Test Resource",
             "type": "STANDARD",
@@ -1417,16 +1456,18 @@ Use this checklist to track implementation progress for any service:
 
 When implementing a new service, replace these placeholders:
 
-| Placeholder       | Example (Broker)    | Description                        |
-| ----------------- | ------------------- | ---------------------------------- |
-| `{service_name}`  | `broker`            | Lowercase service name             |
-| `{serviceName}`   | `brokerTerminal`    | camelCase service name             |
-| `{ServiceName}`   | `BrokerService`     | PascalCase service class name      |
-| `{SERVICE}`       | `BROKER`            | Uppercase for env vars             |
-| `{api_name}`      | `trading_api`       | Backend API package name           |
-| `{resource}`      | `order`, `position` | Generic resource type              |
-| `{Resource}`      | `Order`, `Position` | PascalCase resource type           |
-| `ExternalLibrary` | `TradingView`       | Third-party library/framework name |
+| Placeholder       | Example (Broker)    | Description                             |
+| ----------------- | ------------------- | --------------------------------------- |
+| `{module}`        | `broker`            | Lowercase module name                   |
+| `{Module}`        | `Broker`            | PascalCase module name                  |
+| `{service_name}`  | `broker`            | Lowercase service name (same as module) |
+| `{serviceName}`   | `brokerTerminal`    | camelCase service name (frontend)       |
+| `{ServiceName}`   | `BrokerService`     | PascalCase service class name           |
+| `{SERVICE}`       | `BROKER`            | Uppercase for env vars                  |
+| `{domain}`        | `broker`, `market`  | Business domain for models folder       |
+| `{resource}`      | `order`, `position` | Generic resource type                   |
+| `{Resource}`      | `Order`, `Position` | PascalCase resource type                |
+| `ExternalLibrary` | `TradingView`       | Third-party library/framework name      |
 
 ---
 
@@ -1442,6 +1483,7 @@ When implementing a new service, replace these placeholders:
 
 ---
 
-**Document Version**: 2.0 (Generic Template)  
-**Last Updated**: October 21, 2025  
-**Original Implementation**: Broker Terminal Service
+**Document Version**: 3.0 (Generic Template - Modular Architecture)  
+**Last Updated**: October 30, 2025  
+**Original Implementation**: Broker Terminal Service  
+**Migration**: Updated for modular backend architecture with factory pattern

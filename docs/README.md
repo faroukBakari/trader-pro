@@ -76,9 +76,9 @@ Located in the project root:
 
 Located in `backend/docs/`:
 
-- **websockets.md** - WebSocket API reference
-- **versioning.md** - API versioning strategy
-- **ws-router-generation.md** - Router generation details
+- **WEBSOCKETS.md** - WebSocket API reference
+- **VERSIONING.md** - API versioning strategy
+- **WS-ROUTER-GENERATION.md** - Router generation details
 
 ### Frontend Documentation
 
@@ -119,8 +119,8 @@ Located in `frontend/`:
 ### For Backend Developers
 
 1. **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development setup
-2. **[../backend/docs/websockets.md](../backend/docs/websockets.md)** - WebSocket API
-3. **[../backend/docs/versioning.md](../backend/docs/versioning.md)** - API versioning
+2. **[../backend/docs/WEBSOCKETS.md](../backend/docs/WEBSOCKETS.md)** - WebSocket API
+3. **[../backend/docs/VERSIONING.md](../backend/docs/VERSIONING.md)** - API versioning
 4. **[TESTING.md](TESTING.md)** - Testing strategy
 
 **Time**: ~20-30 minutes

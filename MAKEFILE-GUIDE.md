@@ -79,6 +79,24 @@ make clients           # Generate clients
 make export-openapi    # Export OpenAPI spec
 ```
 
+### Module-Specific Targets
+
+```bash
+cd backend
+
+# WebSocket Router Generation
+make generate-ws-routers      # Generate concrete WS router classes
+make watch-ws-routers         # Watch and auto-regenerate routers
+make verify-ws-routers        # Verify all routers are up-to-date
+
+# Import Boundary Validation
+make test-boundaries          # Verify module import boundaries
+                              # Enforces: modules → shared/models only
+                              # Prevents: cross-module imports
+```
+
+**Note**: WebSocket router generation is critical for maintaining type safety. See `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` for details.
+
 ## Frontend Commands
 
 **Location**: `frontend/Makefile`

@@ -1,7 +1,7 @@
 # Trading Pro - Architecture Documentation
 
-**Version**: 3.0.0
-**Last Updated**: October 27, 2025
+**Version**: 4.0.0 (Modular Architecture)
+**Last Updated**: October 30, 2025
 **Status**: ✅ Production Ready
 
 ## Overview
@@ -262,22 +262,9 @@ Backend Job → Export Specs → Frontend Job → Generate Clients → Type Chec
 
 ```
 src/trading_api/
-├── main.py              # App lifecycle, routing, specs
-├── api/                 # REST endpoints (class-based APIRouter)
-│   ├── broker.py        # BrokerApi class - Broker operations (orders, positions, leverage)
-│   ├── datafeed.py      # DatafeedApi class - Market data endpoints
-│   ├── health.py        # HealthApi class - Health checks
-│   └── versions.py      # VersionApi class - API versioning
-├── ws/                  # WebSocket operations (router factories)
-│   ├── router_interface.py  # WsRouterInterface, WsRouteService Protocol
-│   ├── generic_route.py     # Generic WsRouter implementation
-│   ├── broker.py            # BrokerWsRouters factory (orders, positions, executions, equity, connection)
-│   ├── datafeed.py          # DatafeedWsRouters factory (bars, quotes)
-│   └── generated/           # Auto-generated concrete router classes
-├── core/                # Business logic services
-│   ├── broker_service.py      # BrokerService (implements WsRouteService Protocol)
-│   └── datafeed_service.py    # DatafeedService (implements WsRouteService Protocol)
-├── models/              # Pydantic models (topic-based organization)
+├── main.py              # Minimal entrypoint - calls create_app()
+├── app_factory.py       # Application factory with module composition
+├── models/              # Centralized Pydantic models (topic-based organization)
 │   ├── common.py        # Shared types (BaseApiResponse, SubscriptionUpdate, etc.)
 │   ├── health.py        # Health check models
 │   ├── versioning.py    # API version models
@@ -295,16 +282,201 @@ src/trading_api/
 │       ├── instruments.py  # Symbol/instrument models (REST)
 │       ├── search.py       # Search models (REST)
 │       └── configuration.py # Datafeed config models (REST)
-└── plugins/
-    └── fastws_adapter.py  # FastWS integration adapter
+├── shared/              # Always-loaded shared infrastructure
+│   ├── module_interface.py  # Module Protocol definition
+│   ├── module_registry.py   # Module registry for dynamic composition
+│   ├── api/                 # Shared REST endpoints
+│   │   ├── health.py        # HealthApi class - Health checks
+│   │   └── versions.py      # VersionApi class - API versioning
+│   ├── ws/                  # Shared WebSocket infrastructure
+│   │   ├── router_interface.py  # WsRouterInterface, WsRouteService Protocol
+│   │   └── generic_route.py     # Generic WsRouter implementation
+│   ├── plugins/
+│   │   └── fastws_adapter.py  # FastWS integration adapter
+│   └── tests/
+│       └── conftest.py      # Shared test fixtures
+└── modules/             # Pluggable feature modules
+    ├── datafeed/        # Market data module
+    │   ├── __init__.py     # DatafeedModule class (implements Module Protocol)
+    │   ├── service.py      # DatafeedService (implements WsRouteService Protocol)
+    │   ├── api.py          # DatafeedApi class - Market data REST endpoints
+    │   ├── ws.py           # DatafeedWsRouters factory (bars, quotes)
+    │   ├── ws_generated/   # Auto-generated concrete WS router classes
+    │   │   ├── barwsrouter.py
+    │   │   └── quotewsrouter.py
+    │   └── tests/          # Module-specific tests
+    │       ├── conftest.py
+    │       └── test_ws_datafeed.py
+    └── broker/          # Trading operations module
+        ├── __init__.py     # BrokerModule class (implements Module Protocol)
+        ├── service.py      # BrokerService (implements WsRouteService Protocol)
+        ├── api.py          # BrokerApi class - Broker REST endpoints
+        ├── ws.py           # BrokerWsRouters factory (orders, positions, etc.)
+        ├── ws_generated/   # Auto-generated concrete WS router classes
+        │   ├── orderwsrouter.py
+        │   ├── positionwsrouter.py
+        │   ├── executionwsrouter.py
+        │   ├── equitywsrouter.py
+        │   └── brokerconnectionwsrouter.py
+        └── tests/          # Module-specific tests
+            ├── conftest.py
+            ├── test_api_broker.py
+            └── test_ws_broker.py
 
 tests/
-├── test_api_broker.py   # Broker API tests
+├── conftest.py          # Root test configuration
+├── test_import_boundaries.py  # Import boundary enforcement
+└── integration/         # Cross-module integration tests
+    ├── conftest.py
+    ├── test_broker_datafeed_workflow.py
+    ├── test_full_stack.py
+    └── test_module_isolation.py
+
+shared/tests/
+├── conftest.py          # Shared test factory
 ├── test_api_health.py   # Health endpoint tests
-├── test_api_versioning.py # Versioning API tests
-├── test_ws_broker.py    # Broker WebSocket tests
-└── test_ws_datafeed.py  # Datafeed WebSocket tests
+└── test_api_versioning.py  # Versioning API tests
 ```
+
+### Modular Backend Architecture
+
+**Architectural Pattern**: The backend follows a **modular factory-based architecture** enabling independent development, testing, and deployment of feature modules.
+
+#### Module System Design
+
+**Core Components**:
+
+1. **Module Protocol** (`shared/module_interface.py`) - Defines standard interface for all modules
+2. **Module Registry** (`shared/module_registry.py`) - Centralized module management
+3. **Application Factory** (`app_factory.py`) - Dynamic composition with selective loading
+4. **Shared Infrastructure** (`shared/`) - Always-loaded core functionality
+5. **Feature Modules** (`modules/`) - Pluggable business domain implementations
+
+**Module Protocol Definition**:
+
+```python
+# shared/module_interface.py
+class Module(Protocol):
+    @property
+    def name(self) -> str:
+        """Unique module identifier (e.g., 'broker', 'datafeed')"""
+        ...
+
+    @property
+    def enabled(self) -> bool:
+        """Whether module is currently active"""
+        ...
+
+    def get_api_routers(self) -> list[APIRouter]:
+        """Return module's REST API routers"""
+        ...
+
+    def get_ws_routers(self) -> list[WsRouterInterface]:
+        """Return module's WebSocket routers"""
+        ...
+
+    def configure_app(self, api_app: FastAPI, ws_app: FastWSAdapter) -> None:
+        """Optional module-specific app configuration"""
+        ...
+```
+
+**Module Implementation Pattern**:
+
+```python
+# modules/broker/__init__.py
+class BrokerModule:
+    def __init__(self):
+        self._service: BrokerService | None = None
+        self._enabled = True
+
+    @property
+    def name(self) -> str:
+        return \"broker\"
+
+    @property
+    def service(self) -> BrokerService:
+        if self._service is None:
+            self._service = BrokerService()  # Lazy load
+        return self._service
+
+    def get_api_routers(self) -> list[APIRouter]:
+        return [BrokerApi(service=self.service, prefix=f\"/{self.name}\")]
+
+    def get_ws_routers(self) -> list[WsRouterInterface]:
+        return BrokerWsRouters(broker_service=self.service)
+```
+
+**Application Factory Pattern**:
+
+```python
+# app_factory.py
+def create_app(enabled_modules: list[str] | None = None) -> tuple[FastAPI, FastWSAdapter]:
+    registry = ModuleRegistry()
+    registry.clear()  # Critical for test isolation
+
+    # Register all available modules
+    registry.register(DatafeedModule())
+    registry.register(BrokerModule())
+
+    # Filter modules if specified
+    if enabled_modules:
+        for module in registry._modules.values():
+            module._enabled = module.name in enabled_modules
+
+    # Create apps
+    api_app = FastAPI(...)
+    ws_app = FastWSAdapter(...)
+
+    # Include shared infrastructure (always loaded)
+    api_app.include_router(HealthApi(...), ...)
+    api_app.include_router(VersionApi(...), ...)
+
+    # Load enabled modules dynamically
+    for module in registry.get_enabled_modules():
+        for router in module.get_api_routers():
+            api_app.include_router(router, prefix=f\"/api/v1/{module.name}\", ...)
+        for ws_router in module.get_ws_routers():
+            ws_app.include_router(ws_router)
+        module.configure_app(api_app, ws_app)
+
+    return api_app, ws_app
+```
+
+**Module-Specific Deployment**:
+
+```bash
+# Start with only datafeed module
+ENABLED_MODULES=datafeed uvicorn trading_api.main:app
+
+# Start with only broker module
+ENABLED_MODULES=broker uvicorn trading_api.main:app
+
+# Start with all modules (default)
+uvicorn trading_api.main:app
+```
+
+**Benefits**:
+
+- \u2705 **Independent Development**: Modules developed and tested in isolation
+- \u2705 **Lazy Loading**: Services created only when module enabled
+- \u2705 **Zero Configuration**: New modules auto-discovered via registry
+- \u2705 **Microservice Ready**: Modules can be extracted to separate services
+- \u2705 **Test Isolation**: Each module tested independently with factory pattern
+- \u2705 **Import Boundaries**: Automated enforcement prevents cross-module coupling
+
+**Import Boundary Enforcement**:
+
+```python
+# Enforced rules (AST-based validation)
+\u2705 modules/*  \u2192 models/*, shared/*      # Modules can import shared infrastructure
+\u2705 shared/*   \u2192 models/*               # Shared can import models only
+\u2705 models/*   \u2192 (nothing)               # Models are pure data
+
+\u274c modules/broker \u2192 modules/datafeed   # Cross-module imports forbidden
+\u274c shared/*       \u2192 modules/*          # Shared cannot depend on modules
+```
+
+Validation: `make test-boundaries` (runs automatically in CI/CD)
 
 ### Backend Models Architecture
 
@@ -429,18 +601,18 @@ models/
 **Model-to-Router Flow**:
 
 ```
-Topic File (orders.py) → Router File (ws/broker.py) → Generated Router
-        ↓                          ↓                          ↓
-  OrderSubscriptionRequest    TypeAlias definition      OrderWsRouter
-  PlacedOrder                 Generic parameters        (concrete class)
+Topic File (models/broker/orders.py) → Router File (modules/broker/ws.py) → Generated Router
+        ↓                                      ↓                                  ↓
+  OrderSubscriptionRequest              TypeAlias definition              OrderWsRouter
+  PlacedOrder                           Generic parameters                (concrete class in ws_generated/)
 ```
 
 **Integration Pattern**:
 
-1. **Business concept** defines all related models in one topic file
-2. **Router factory** imports subscription request + update model from topic file
+1. **Business concept** defines all related models in one topic file (`models/broker/orders.py`)
+2. **Router factory** imports subscription request + update model from topic file (`modules/broker/ws.py`)
 3. **Type alias** declares generic router with topic-specific types
-4. **Code generator** creates concrete router class
+4. **Code generator** creates concrete router class in `modules/broker/ws_generated/`
 5. **Type safety** ensured across REST and WebSocket operations
 
 **Benefits**:
@@ -473,7 +645,7 @@ The backend implements a **Protocol-based WebSocket service architecture** where
 
 **1. `WsRouteService` (Protocol)**
 
-**Location**: `ws/router_interface.py`
+**Location**: `shared/ws/router_interface.py`
 
 **Protocol Methods**:
 
@@ -492,7 +664,7 @@ The backend implements a **Protocol-based WebSocket service architecture** where
 
 **Service Layer (Self-Managed Generators)**
 
-**Locations**: `core/datafeed_service.py`, `core/broker_service.py`
+**Locations**: `modules/datafeed/service.py`, `modules/broker/service.py`
 
 **Service Architecture**:
 
@@ -555,7 +727,7 @@ Execution Simulator → _simulate_execution()
 
 **3. `WsRouter` (Generic Implementation with Reference Counting)**
 
-**Location**: `ws/generic_route.py`
+**Location**: `shared/ws/generic_route.py`
 
 **Router Responsibilities**:
 
@@ -599,7 +771,7 @@ Unsubscribe Request
 
 **4. `FastWSAdapter` (Broadcasting with Per-Router Queues)**
 
-**Location**: `plugins/fastws_adapter.py`
+**Location**: `shared/plugins/fastws_adapter.py`
 
 **Adapter Responsibilities**:
 
@@ -720,10 +892,10 @@ Service generator calls topic_update(data)
 - Clean lifecycle management
 
 ```python
-# api/broker.py
+# modules/broker/api.py
 class BrokerApi(APIRouter):
-    def __init__(self, broker_service: BrokerService):
-        super().__init__(prefix="/broker", tags=["broker"])
+    def __init__(self, broker_service: BrokerService, prefix: str = "/broker"):
+        super().__init__(prefix=prefix, tags=["broker"])
         self.broker_service = broker_service
         # Define routes in __init__
 ```
@@ -731,7 +903,7 @@ class BrokerApi(APIRouter):
 **WebSocket Router Factories**:
 
 ```python
-# ws/broker.py
+# modules/broker/ws.py
 class BrokerWsRouters(list[WsRouterInterface]):
     def __init__(self, broker_service: WsRouteService):
         order_router = OrderWsRouter(route="orders", service=broker_service)
@@ -1692,7 +1864,7 @@ Services Layer
 **Framework**: FastWS 0.1.7
 **Documentation**: AsyncAPI at `/api/v1/ws/asyncapi`
 
-> ⚠️ **IMPORTANT**: All WebSocket routers are generated using code generation from a generic template. When implementing WebSocket features, always follow the router generation mechanism documented in [`backend/src/trading_api/ws/WS-ROUTER-GENERATION.md`](backend/src/trading_api/ws/WS-ROUTER-GENERATION.md). This ensures type safety, consistency, and passes all quality checks.
+> ⚠️ **IMPORTANT**: All WebSocket routers are generated using code generation from a generic template. When implementing WebSocket features, always follow the router generation mechanism documented in [`backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md`](backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md). This ensures type safety, consistency, and passes all quality checks.
 
 ### Centralized Adapter Pattern
 
@@ -1756,7 +1928,7 @@ Services Layer
 
 **⚠️ Topic Builder Compliance**: The topic builder algorithm MUST be **identical** in backend (Python) and frontend (TypeScript). See:
 
-- Backend: `backend/src/trading_api/ws/router_interface.py` - `buildTopicParams()`
+- Backend: `backend/src/trading_api/shared/ws/router_interface.py` - `buildTopicParams()`
 - Frontend: `frontend/src/plugins/wsClientBase.ts` - `buildTopicParams()`
 - Documentation: `backend/docs/WEBSOCKETS.md` and `docs/WEBSOCKET-CLIENTS.md`
 
