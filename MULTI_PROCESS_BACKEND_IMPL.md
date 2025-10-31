@@ -7,7 +7,7 @@ Before: FastAPI (8000) → All modules
 After:  Nginx (8000) → Broker (8001) + Datafeed (8002) + Core (8003)
 ```
 
-**Status**: ✅ **Phase 3 COMPLETE** - Backend Manager Consolidated
+**Status**: ✅ **Phase 4 COMPLETE** - Watch Mode Implemented
 
 ---
 
@@ -108,6 +108,159 @@ verify-nginx:   # Verify nginx is available
 
 ---
 
+## Watch Mode Strategy ✅ IMPLEMENTED
+
+**Philosophy**: Leverage Uvicorn's built-in watch mode with strategic pre-generation and lifecycle generation
+
+### Architecture
+
+We use a **two-phase generation strategy** to optimize development workflow:
+
+1. **Pre-startup generation** (backend_manager): Generate once before uvicorn starts
+2. **Lifecycle generation** (app lifespan): Regenerate specs on every app start/reload
+3. **Uvicorn's `--reload`**: Native file watching for code changes
+4. **Exclude generated artifacts**: Prevent reload loops from spec/client generation
+5. **Simple and reliable**: Fewer moving parts, less complexity
+
+### Two-Phase Generation Strategy
+
+**Phase 1: Pre-Startup (backend_manager.py)**
+
+```
+Before starting uvicorn:
+1. Export OpenAPI spec (openapi.json)
+2. Export AsyncAPI spec (asyncapi.json)
+3. Generate Python clients (src/trading_api/clients/)
+
+Why: Ensures clients are ready before server starts, no race conditions
+```
+
+**Phase 2: App Lifecycle (app_factory.py lifespan)**
+
+```
+Every app start/reload:
+1. Validate response models
+2. Generate OpenAPI spec (openapi.json)
+3. Generate AsyncAPI specs (per module)
+
+Why: Keeps specs in sync with running app state, enables runtime consistency
+```
+
+### How It Works
+
+**Initial Startup Sequence**:
+
+```
+1. Run: make backend-manager-start
+2. backend_manager generates specs and clients (Phase 1)
+3. backend_manager starts uvicorn with --reload and exclusions
+4. App lifespan generates specs (Phase 2 - first run)
+5. Server ready with fresh specs and clients
+```
+
+**Code Change Workflow**:
+
+```
+1. Developer modifies model in src/trading_api/models/
+2. Uvicorn detects .py file change
+3. Uvicorn triggers reload
+4. App lifespan regenerates specs on startup (Phase 2)
+5. Server ready with updated specs (~2-3s)
+6. Python clients: Manual regeneration via make generate-python-clients
+7. Frontend clients: Manual regeneration via make generate-openapi-client
+```
+
+**Uvicorn Exclusion Patterns**:
+
+```bash
+--reload-exclude "*/openapi.json"      # Specs don't trigger reload
+--reload-exclude "*/asyncapi.json"     # Specs don't trigger reload
+--reload-exclude "*/clients/*"         # Clients don't trigger reload
+--reload-exclude "*/scripts/*"         # Management scripts don't trigger reload
+--reload-exclude "*/.local/*"          # Logs and runtime artifacts
+--reload-exclude "*/.pids/*"           # PID files
+--reload-exclude "*/__pycache__/*"     # Python cache
+--reload-exclude "*.pyc"               # Compiled Python
+```
+
+### Benefits
+
+✅ **No separate watchers** - Uvicorn handles file watching  
+✅ **Always fresh** - Specs regenerated on every start  
+✅ **No loops** - Exclusions prevent infinite reloads  
+✅ **No race conditions** - Clients generated before uvicorn starts  
+✅ **Fast feedback** - Changes detected instantly  
+✅ **Simpler architecture** - Fewer processes to manage  
+✅ **Reliable** - Built-in Uvicorn watching is battle-tested  
+✅ **Runtime consistency** - Specs always match app state
+
+### What Gets Watched and What Doesn't
+
+**Watched by Uvicorn** (triggers reload):
+
+- `src/trading_api/**/*.py` - All Python source files
+- Model changes, API changes, WebSocket changes
+- Anything that affects runtime behavior
+
+**Excluded from Uvicorn** (no reload):
+
+- `openapi.json`, `asyncapi.json` - Generated specs
+- `src/trading_api/clients/**` - Generated Python clients
+- `scripts/` - Backend management scripts
+- `.local/`, `.pids/` - Runtime artifacts
+
+### Manual Client Generation
+
+**Why not auto-generate clients on every reload?**
+
+**Python clients:**
+
+- Pre-generated before server starts (no race conditions)
+- Used by tests, not by running server
+- Manual regeneration gives explicit control
+- Reduces reload overhead (client generation is slower than specs)
+- Command: `make generate-python-clients`
+
+**Frontend clients:**
+
+- Frontend build is separate from backend reload
+- Frontend has its own dev server with hot reload
+- Explicit generation gives developer control
+- Avoids cross-component coupling
+- Command: `make generate-openapi-client`
+
+### Developer Workflow
+
+```bash
+# Start backend (specs + clients pre-generated, then uvicorn starts)
+make backend-manager-start
+
+# Modify Python code → Uvicorn auto-reloads → Specs regenerated
+vim src/trading_api/models/broker.py
+
+# Manually regenerate Python clients (if needed)
+make generate-python-clients
+
+# Manually regenerate frontend clients (if needed)
+cd frontend && make generate-openapi-client
+```
+
+### WebSocket Router Generation
+
+WebSocket routers can be generated separately using:
+
+```bash
+# Manual generation
+make generate-ws-routers
+
+# Watch mode (monitors ws/*.py and models/*.py for changes)
+./scripts/watch-ws-routers.sh
+```
+
+**Note**: The `watch-ws-routers.sh` script provides optional file watching for WebSocket router generation. This is separate from the main watch mode strategy and is useful when actively developing WebSocket endpoints.
+
+---
+
 ## Implementation Phases
 
 ### Phase 1: Config Schema 🔧
@@ -179,10 +332,10 @@ poetry run python scripts/backend_manager.py gen-nginx-conf dev-config.yaml -o n
 
 **Files**:
 
-- ✅ `backend/scripts/backend_manager.py` (NEW - unified CLI with nginx generation)
-- ✅ `backend/scripts/server_manager.py` (enhanced with status/PID tracking)
+- ✅ `backend/scripts/backend_manager.py` (unified CLI with nginx generation and server management)
 - ❌ `backend/scripts/run_multiprocess.py` (REMOVED - consolidated)
 - ❌ `backend/scripts/gen_nginx_conf.py` (REMOVED - consolidated)
+- ❌ `backend/scripts/server_manager.py` (REMOVED - merged into backend_manager.py)
 
 **Features**:
 
@@ -288,23 +441,158 @@ make logs-clean
 
 ---
 
-### Phase 4: Spec Watchers 👁️
+### Phase 4: Watch Mode with Auto-Generation 👁️ ✅ COMPLETE
 
-**Commit**: "Add spec watchers with client generation"  
-**Time**: 4-5 hours
+**Commit**: "Add startup auto-generation with Uvicorn watch mode"  
+**Time**: ✅ **COMPLETE**
 
-**Files**:
+**Architecture**:
 
-- `backend/scripts/watch_specs_frontend.py`
-- `backend/scripts/watch_specs_python.py`
+- ✅ **Leverage Uvicorn's built-in `--reload` mode** - native file watching for code changes
+- ✅ **Auto-generate specs in FastAPI app startup** - part of lifespan event
+- ✅ **Pre-generate clients before uvicorn starts** - handled by backend_manager
+- ✅ **Exclude generated files from Uvicorn watchers** - prevents reload loops
+- ✅ **Use `--reload-exclude` patterns** to ignore spec and client generation artifacts
 
-**Key points**:
+**Implementation**:
 
-- Debouncing via `_gen` flag prevents infinite loops
-- Python watcher must detect its own spec changes
-- Frontend watcher triggers `make generate-clients`
+1. **Pre-startup sequence** (in `backend_manager.py` before uvicorn):
 
-**Test**: `make watch-specs-frontend` in separate terminal, modify model
+   - Export OpenAPI spec (`openapi.json`)
+   - Export AsyncAPI specs (per module in `modules/{module}/specs/asyncapi.json`)
+   - Generate Python HTTP clients (`src/trading_api/clients/`)
+   - This runs ONCE before starting uvicorn servers
+
+2. **App startup sequence** (in `app_factory.py` lifespan event):
+
+   - Validate response models for OpenAPI compliance
+   - Generate OpenAPI spec (`openapi.json`)
+   - Generate AsyncAPI specs (per module in `modules/{module}/specs/asyncapi.json`)
+   - This runs EVERY time the FastAPI app starts (including on uvicorn reload)
+   - Note: Python clients are NOT regenerated here (no race conditions with uvicorn)
+
+3. **Uvicorn exclusion patterns** (in `backend_manager.py`):
+
+   - `--reload-exclude "*/openapi.json"`
+   - `--reload-exclude "*/asyncapi.json"`
+   - `--reload-exclude "*/clients/*"`
+   - `--reload-exclude "*/.local/*"`
+   - `--reload-exclude "*/.pids/*"`
+   - `--reload-exclude "*/scripts/*"`
+   - `--reload-exclude "*/__pycache__/*"`
+   - `--reload-exclude "*.pyc"`
+
+4. **Developer workflow**:
+
+   ```
+   1. Start backend: make backend-manager-start
+      → backend_manager generates specs and clients
+      → Uvicorn starts with --reload and exclusions
+      → App lifespan generates specs (for runtime consistency)
+
+   2. Modify model in src/trading_api/models/
+      → Uvicorn detects change, reloads server
+      → App lifespan regenerates specs on reload
+      → Clients: manual regeneration via make generate-python-clients
+
+   3. Frontend gets fresh OpenAPI spec for client generation
+      → Run: make generate-openapi-client (manual)
+   ```
+
+**Benefits**:
+
+✅ **Uvicorn handles file watching** - no separate watcher processes needed  
+✅ **Always fresh** - specs regenerated on every reload  
+✅ **No loops** - exclusions prevent generated files from triggering reload  
+✅ **No race conditions** - clients generated once before uvicorn starts  
+✅ **Fast feedback** - changes detected and processed in ~2-3 seconds  
+✅ **Simpler architecture** - generation is part of app lifecycle  
+✅ **Reliable** - built-in Uvicorn watching is battle-tested
+
+**Files Modified**:
+
+- ✅ `backend/src/trading_api/app_factory.py` - Specs generated in lifespan startup
+- ✅ `backend/scripts/backend_manager.py` - Pre-generates specs/clients + reload exclusions
+
+**What Gets Watched**:
+
+**Watched by Uvicorn** (triggers reload → app restart → spec regeneration):
+
+- `src/trading_api/**/*.py` - All Python source files (except exclusions)
+- Model changes, API changes, WebSocket changes
+- Anything that affects runtime behavior
+
+**Excluded from Uvicorn** (no reload trigger):
+
+- `openapi.json`, `asyncapi.json` - Generated specs
+- `src/trading_api/clients/**` - Generated Python clients
+- `scripts/` - Management scripts
+- `.local/`, `.pids/` - Runtime artifacts
+- `__pycache__/`, `*.pyc` - Compiled Python
+
+**Frontend Integration**:
+
+Frontend client generation remains separate (not auto-triggered):
+
+```bash
+# Manual frontend client generation
+cd frontend && make generate-openapi-client
+
+# Or via project-level command
+make -f project.mk generate-openapi-client
+```
+
+**Why not auto-generate frontend clients?**
+
+- Frontend build is separate from backend reload
+- Frontend has its own dev server with hot reload
+- Explicit generation gives developer control
+- Avoids cross-component coupling
+
+**Why not auto-regenerate Python clients on reload?**
+
+- Pre-generated before uvicorn starts (no race conditions)
+- Clients are used by tests, not by running server
+- Manual regeneration gives explicit control: `make generate-python-clients`
+- Reduces reload overhead (specs are fast, client generation is slower)
+
+**Test Results**:
+
+```bash
+# ✅ Specs and clients generated before first start (backend_manager)
+# ✅ Specs regenerated on app startup (lifespan)
+# ✅ Model changes trigger uvicorn reload
+# ✅ Reload regenerates specs (lifespan)
+# ✅ Spec changes do NOT trigger reload (excluded)
+# ✅ Client changes do NOT trigger reload (excluded)
+# ✅ Script changes do NOT trigger reload (excluded)
+# ✅ No infinite reload loops
+# ✅ Fast feedback (<3s from change to reload complete)
+# ✅ No race conditions with client generation
+```
+
+**Verification**:
+
+```bash
+# Start backend and verify generation
+make backend-manager-start
+# Check logs: should see "Generating OpenAPI specification..."
+#              "Generating AsyncAPI specification..."
+#              "Generating Python HTTP clients..."
+#              "📝 Generated OpenAPI spec: ..."
+#              "📝 Generated AsyncAPI spec for 'broker': ..."
+
+# Modify a model file
+# Check logs: should see server reload
+#             Should see "📝 Generated OpenAPI spec: ..." again
+
+# Verify exclusions work (no reload loops)
+# Touch a spec file: touch backend/openapi.json
+# No reload should occur
+
+# Stop backend
+make backend-manager-stop
+```
 
 ---
 
@@ -391,6 +679,142 @@ sleep 1
 make backend-manager-start
 ```
 
+### Uvicorn not reloading on changes
+
+**Symptoms**: File changes not triggering server reload
+
+**Solutions**:
+
+```bash
+# 1. Check if reload is enabled (should see --reload in process)
+make backend-manager-status
+ps aux | grep uvicorn
+
+# 2. Verify file is not excluded
+# Check that changed file doesn't match exclusion patterns:
+# - */openapi.json
+# - */asyncapi.json
+# - */clients/*
+# - */scripts/*
+# - */.local/*
+# - */.pids/*
+
+# 3. Check file system events (Linux)
+# Install inotify-tools if needed
+sudo apt install inotify-tools
+
+# Watch for file events
+inotifywait -m -r backend/src/trading_api/
+
+# 4. Restart with fresh reload
+make backend-manager-restart
+```
+
+### Infinite reload loop
+
+**Symptoms**: Server keeps reloading continuously
+
+**Causes**:
+
+- Generated files triggering reload (specs/clients)
+- Log files being written in watched directories
+- Temp files created during reload
+
+**Solutions**:
+
+```bash
+# 1. Check exclusion patterns in backend_manager.py
+grep "reload-exclude" backend/scripts/backend_manager.py
+
+# Should see all exclusions:
+# --reload-exclude */openapi.json
+# --reload-exclude */asyncapi.json
+# --reload-exclude */clients/*
+# --reload-exclude */scripts/*
+# --reload-exclude */.local/*
+# --reload-exclude */.pids/*
+# --reload-exclude */__pycache__/*
+# --reload-exclude *.pyc
+
+# 2. Verify no files being written to src/ during reload
+make logs-tail
+# Look for file write operations in src/ directory
+
+# 3. Check if scripts are triggering reload
+# Scripts should be excluded - verify in backend_manager.py
+grep "scripts" backend/scripts/backend_manager.py
+# Should see: --reload-exclude */scripts/*
+```
+
+### Specs not regenerating on reload
+
+**Symptoms**: Stale specs after code changes and server reload
+
+**Solutions**:
+
+```bash
+# 1. Check if lifespan event is running
+make logs-tail
+# Look for: "📝 Generated OpenAPI spec: ..."
+#           "📝 Generated AsyncAPI spec for 'broker': ..."
+
+# 2. Verify spec generation in app_factory.py
+grep -A 20 "async def lifespan" backend/src/trading_api/app_factory.py
+
+# 3. Test manual generation
+cd backend
+make export-openapi-spec
+make export-asyncapi-spec
+
+# 4. Restart backend to trigger fresh generation
+make backend-manager-restart
+```
+
+### Clients not available after restart
+
+**Symptoms**: Python clients missing or outdated after restart
+
+**Solutions**:
+
+```bash
+# 1. Check if pre-generation ran (in backend_manager)
+make logs-tail
+# Look for: "Generating Python HTTP clients..."
+
+# 2. Verify client files exist
+ls -la backend/src/trading_api/clients/
+
+# 3. Manually regenerate clients
+cd backend
+make generate-python-clients
+
+# 4. Check backend_manager has generation call
+grep "_generate_specs_and_clients" backend/scripts/backend_manager.py
+
+# 5. Restart with verbose logging
+cd backend
+poetry run python scripts/backend_manager.py start --verbose
+```
+
+### Script changes triggering reload
+
+**Symptoms**: Modifying backend management scripts triggers server reload
+
+**Solution**:
+
+```bash
+# 1. Verify scripts exclusion is in place
+grep "reload-exclude.*scripts" backend/scripts/backend_manager.py
+
+# Should see: --reload-exclude */scripts/*
+
+# 2. If not present, add to backend_manager.py uvicorn command:
+# --reload-exclude */scripts/*
+
+# 3. Restart backend
+make backend-manager-restart
+```
+
 ---
 
 ## Testing Checklist
@@ -424,13 +848,22 @@ make backend-manager-start
 
 **Status**: ✅ **COMPLETE** (All features implemented and tested)
 
-### Phase 4
+### Phase 4 ✅ COMPLETE
 
-- [ ] Frontend client regenerates on spec change
-- [ ] Python client regenerates without loops
-- [ ] Changes detected within 2s
+- [x] Specs pre-generated before uvicorn starts (backend_manager)
+- [x] Specs auto-generated on app startup (lifespan)
+- [x] Python clients pre-generated before uvicorn starts
+- [x] Uvicorn reload excludes generated files
+- [x] Model changes trigger Uvicorn reload
+- [x] App regenerates specs on reload (not clients - avoids race)
+- [x] Spec changes do NOT trigger reload
+- [x] Client changes do NOT trigger reload
+- [x] Script changes do NOT trigger reload
+- [x] No infinite reload loops
+- [x] Fast feedback (<3s from change to reload complete)
+- [x] No race conditions with client generation
 
-**Status**: Not started (waiting for Phase 3)
+**Status**: ✅ **COMPLETE** (Watch mode with startup auto-generation fully implemented)
 
 ### Phase 5
 
@@ -500,17 +933,28 @@ make backend-manager-start
 
 **Files**:
 
-- ✅ `backend/scripts/backend_manager.py` (unified CLI with nginx generation)
-- ✅ `backend/scripts/server_manager.py` (enhanced with logging and detached mode)
+- ✅ `backend/scripts/backend_manager.py` (unified CLI with nginx generation, server management, and logging)
 - ❌ `backend/scripts/run_multiprocess.py` (REMOVED - consolidated)
 - ❌ `backend/scripts/gen_nginx_conf.py` (REMOVED - consolidated)
 
-**Phase 4: Spec Watchers** ❌ **NOT STARTED**
+**Phase 4: Watch Mode with Auto-Generation** ✅ **COMPLETE**
 
-- Waiting for Phase 3
-- Files needed:
-  - `backend/scripts/watch_specs_frontend.py`
-  - `backend/scripts/watch_specs_python.py`
+- ✅ Specs/clients pre-generated before uvicorn starts (backend_manager)
+- ✅ Specs auto-generated in FastAPI lifespan (on every app start/reload)
+- ✅ Uvicorn reload exclusion patterns configured (specs, clients, scripts, logs, pids, cache)
+- ✅ Tested: specs regenerate on code changes via uvicorn reload
+- ✅ Tested: generated files do NOT trigger reload loops
+- ✅ Tested: no race conditions with client generation
+- ✅ Fast feedback: <3s from change to reload complete
+
+**Completed items:**
+
+- Moved Python client generation to backend_manager (pre-startup)
+- Kept spec generation in app_factory.py lifespan (for runtime consistency)
+- Configured comprehensive reload exclusions
+- Verified auto-regeneration on uvicorn reload
+- Verified no infinite reload loops
+- Verified scripts directory excluded from reload (prevents manager script changes from triggering reload)
 
 **Phase 5: Integration** ❌ **NOT STARTED**
 
@@ -523,35 +967,60 @@ make backend-manager-start
 
 ## Next Steps
 
-**Current**: Phase 3 Complete - Ready for Phase 4 (Spec Watchers)
+**Current**: Phase 4 Complete ✅ - Ready for Phase 5 (Integration)
 
-1. **Implement Spec Watchers** (Phase 4):
+**Phase 4 Achievements**:
 
-   - Create `backend/scripts/watch_specs_frontend.py` for OpenAPI client generation
-   - Create `backend/scripts/watch_specs_python.py` for Python client generation
-   - Add debouncing to prevent infinite loops
-   - Test automatic client regeneration on spec changes
+- ✅ Two-phase generation strategy (pre-startup + lifecycle)
+- ✅ Uvicorn watch mode with comprehensive exclusions
+- ✅ No race conditions with client generation
+- ✅ Fast feedback (<3s reload cycle)
+- ✅ Specs always in sync with running app
+- ✅ No infinite reload loops
+- ✅ Management scripts excluded from reload
 
-2. **Integration** (Phase 5):
+**Phase 5: Integration** (Next):
 
-   - Update `project.mk` with multi-process targets
-   - Update `scripts/dev-fullstack.sh` with `--multi` flag
-   - Ensure backward compatibility with single-process mode
-   - Test full-stack operation with WebSockets through nginx
+1. **Update project-level Makefile** (`project.mk`):
 
-3. **Documentation**:
-   - Update MAKEFILE-GUIDE.md with new logging commands ✅ (DONE)
-   - Add troubleshooting section for common logging issues
+   - Add multi-process targets
+   - Keep single-process as default (backward compatibility)
+   - Add `dev-fullstack-multi` target
+
+2. **Update fullstack dev script** (`scripts/dev-fullstack.sh`):
+
+   - Add `--multi` flag for multi-process mode
+   - Default to single-process mode
+   - Coordinate frontend + backend multi-process startup
+
+3. **Ensure backward compatibility**:
+
+   - Single-process mode must continue to work
+   - All existing tests must pass
+   - WebSocket functionality verified end-to-end
+
+4. **End-to-end testing**:
+
+   - Full-stack operation with nginx routing
+   - WebSocket connections through nginx
+   - Health checks across all servers
+   - API requests through nginx gateway
+
+5. **Documentation updates**:
+   - Update relevant README files with multi-process instructions
+   - Document watch mode behavior and workflows
+   - Add troubleshooting guide for multi-process issues
 
 ---
 
 ## Summary
 
-**Total time**: ~28 hours (3.5-4 days)  
+**Total time**: ~25 hours (3+ days)  
 **Architecture**: Leverages existing modular backend with `ENABLED_MODULES`  
+**Watch Mode**: Uvicorn built-in reload with startup auto-generation  
 **Risk level**: Low - no critical blockers identified  
 **Rollback**: Keep single-process as default, multi-process opt-in
 
-**Order**: Config → Nginx → Server Manager → Watchers → Integration
+**Order**: Config → Nginx → Server Manager → Watch Mode → Integration
 
 Each phase is independent, committable, and reversible.

@@ -1,5 +1,5 @@
 {
-  "include": ["src"],
+  "include": ["src", "scripts"],
   "exclude": [
     "**/node_modules",
     "**/__pycache__",
@@ -17,5 +17,5 @@
   "reportUnknownParameterType": "none",
   "reportUnknownVariableType": "none",
   "reportUnknownArgumentType": "none",
-  "extraPaths": [".", "src", "external_packages"]
+  "extraPaths": [".", "src", "scripts", "external_packages"]
 }
