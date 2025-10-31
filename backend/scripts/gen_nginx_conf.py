@@ -94,6 +94,9 @@ def generate_websocket_location_block(config: DeploymentConfig) -> str:
     For query parameter routing, we route based on the 'type' query parameter
     which is extracted from the WebSocket upgrade request.
 
+    For path-based routing, we route based on the module path in the URL
+    (e.g., /api/v1/broker/ws, /api/v1/datafeed/ws).
+
     Args:
         config: Deployment configuration
 
@@ -130,11 +133,11 @@ def generate_websocket_location_block(config: DeploymentConfig) -> str:
 
         return map_block + "\n\n" + location_block
     else:
-        # Path-based routing (future implementation)
+        # Path-based routing: /api/v1/{module}/ws -> {server}_backend
         locations = []
-        for route, server_name in config.websocket_routes.items():
-            location = f"""        # WebSocket route: {route}
-        location /api/v1/ws/{route} {{
+        for module, server_name in config.websocket_routes.items():
+            location = f"""        # WebSocket route: {module} module
+        location /api/v1/{module}/ws {{
             proxy_pass http://{server_name}_backend;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -177,6 +180,11 @@ def generate_nginx_config(config: DeploymentConfig, output_file: TextIO) -> None
         else str(config.nginx.worker_processes)
     )
 
+    # Use local log paths for development
+    log_dir = Path(__file__).parent.parent / ".local" / "logs"
+    access_log = log_dir / "nginx-access.log"
+    error_log = log_dir / "nginx-error.log"
+
     # Generate complete configuration
     nginx_config = f"""# Auto-generated nginx configuration for multi-process backend
 # Generated from deployment configuration
@@ -199,9 +207,9 @@ http {{
         listen {config.nginx.port};
         server_name localhost;
 
-        # Access and error logs
-        access_log /var/log/nginx/trader-pro-access.log;
-        error_log /var/log/nginx/trader-pro-error.log;
+        # Access and error logs (local paths for development)
+        access_log {access_log};
+        error_log {error_log};
 
         # REST API routing
 {rest_locations}
@@ -222,6 +230,8 @@ http {{
 def validate_nginx_config(config_path: Path) -> bool:
     """Validate generated nginx configuration.
 
+    Tries to use local nginx binary first, falls back to system nginx.
+
     Args:
         config_path: Path to nginx configuration file
 
@@ -230,11 +240,19 @@ def validate_nginx_config(config_path: Path) -> bool:
     """
     import subprocess
 
+    # Ensure log directory exists
+    log_dir = Path(__file__).parent.parent / ".local" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # Check for local nginx binary first
+    local_nginx = Path(__file__).parent.parent / ".local" / "bin" / "nginx"
+    nginx_cmd = str(local_nginx) if local_nginx.exists() else "nginx"
+
     try:
         # Use absolute path for nginx -t
         abs_config_path = config_path.resolve()
         result = subprocess.run(
-            ["nginx", "-t", "-c", str(abs_config_path)],
+            [nginx_cmd, "-t", "-c", str(abs_config_path)],
             capture_output=True,
             text=True,
             check=False,
@@ -250,7 +268,10 @@ def validate_nginx_config(config_path: Path) -> bool:
             return False
 
     except FileNotFoundError:
-        print("❌ nginx command not found! Install: sudo apt install nginx")
+        print("❌ nginx command not found!")
+        print("Install options:")
+        print("  1. Standalone (no sudo): make install-nginx")
+        print("  2. System package: sudo apt install nginx")
         return False
 
 

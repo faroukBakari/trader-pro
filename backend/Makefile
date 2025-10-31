@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry verify-nginx install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec validate-package-names docs-html generate-ws-routers $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install-nginx check-nginx verify-nginx install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec validate-package-names docs-html generate-ws-routers $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -24,6 +24,8 @@ help:
 	@echo "  ensure-python     Ensure Python 3.11+ is installed (offers auto-install)"
 	@echo "  ensure-python-ci  Ensure Python 3.11+ is installed (CI mode, no prompts)"
 	@echo "  ensure-poetry     Ensure Poetry is installed (auto-installs if needed)"
+	@echo "  install-nginx     Install standalone nginx binary (for multi-process mode)"
+	@echo "  check-nginx       Check if nginx is installed (local or system)"
 	@echo "  verify-nginx      Verify nginx is installed (for multi-process mode)"
 	@echo "  install           Install backend dependencies"
 	@echo ""
@@ -198,13 +200,34 @@ ensure-poetry:
 		echo "Poetry is already installed: $$(poetry --version)"; \
 	fi
 
+# Install standalone nginx binary (no sudo required)
+install-nginx: ensure-poetry
+	@echo "Installing standalone nginx binary..."
+	poetry run python scripts/install_nginx.py
+
+# Check nginx installation (local or system)
+check-nginx: ensure-poetry
+	@poetry run python scripts/install_nginx.py --check-only || \
+		if command -v nginx >/dev/null 2>&1; then \
+			echo "✅ System nginx available: $$(nginx -v 2>&1)"; \
+		else \
+			echo ""; \
+			echo "💡 Install standalone nginx: make install-nginx"; \
+		fi
+
 # Verify nginx is installed (for multi-process mode)
 verify-nginx:
-	@if ! command -v nginx >/dev/null 2>&1; then \
-		echo "❌ nginx not found! Install: sudo apt install nginx"; \
-		exit 1; \
+	@if [ -f ".local/bin/nginx" ]; then \
+		echo "✅ Local nginx available: $$(.local/bin/nginx -v 2>&1)"; \
+	elif command -v nginx >/dev/null 2>&1; then \
+		echo "✅ System nginx available: $$(nginx -v 2>&1)"; \
 	else \
-		echo "✅ nginx available: $$(nginx -v 2>&1)"; \
+		echo "❌ nginx not found!"; \
+		echo ""; \
+		echo "Install options:"; \
+		echo "  1. Standalone (no sudo): make install-nginx"; \
+		echo "  2. System package: sudo apt install nginx"; \
+		exit 1; \
 	fi
 
 # Backend dependency management

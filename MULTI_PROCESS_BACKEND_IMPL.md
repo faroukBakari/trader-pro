@@ -7,41 +7,56 @@ Before: FastAPI (8000) → All modules
 After:  Nginx (8000) → Broker (8001) + Datafeed (8002) + Core (8003)
 ```
 
-**Status**: ✅ Ready for implementation - No critical blockers
+**Status**: ✅ **Phase 2 COMPLETE** - Ready for Phase 3
+
+---
+
+## ✅ Resolved: WebSocket Routing Mismatch
+
+**Solution implemented**: Updated nginx config to use path-based routing (matches frontend)
+
+- **Frontend URLs**: `/api/v1/broker/ws` and `/api/v1/datafeed/ws`
+- **Nginx routing**: Path-based (`/api/v1/{module}/ws`)
+- **Config updated**: `dev-config.yaml` uses `routing_strategy: "path"`
+- **Status**: ✅ Configuration validated and working
 
 ---
 
 ## Prerequisites
 
-### 1. Install nginx
+### 1. Install nginx ✅ COMPLETE
+
+**Standalone nginx installer** (no sudo required):
+
+```bash
+# Install nginx binary to backend/.local/bin/
+cd backend && make install-nginx
+
+# Verify installation
+make check-nginx
+```
+
+**Alternative (system install)**:
 
 ```bash
 # Ubuntu/Debian/WSL
 sudo apt update && sudo apt install nginx -y
-
-# Verify
-nginx -v
 ```
 
-### 2. Add nginx verification to Makefile
+### 2. Nginx verification added to Makefile ✅ COMPLETE
 
 ```makefile
 # backend/Makefile
-verify-nginx:
-	@if ! command -v nginx >/dev/null 2>&1; then \
-		echo "❌ nginx not found! Install: sudo apt install nginx"; exit 1; \
-	else echo "✅ nginx available: $$(nginx -v 2>&1)"; fi
+install-nginx:  # Install standalone nginx binary
+check-nginx:    # Check if nginx is installed (local or system)
+verify-nginx:   # Verify nginx is available
 ```
 
-### 3. Verify WebSocket routing strategy
+### 3. WebSocket routing strategy ✅ RESOLVED
 
-Check frontend WebSocket URLs to determine routing approach:
-
-```bash
-grep -r "new WebSocket" frontend/src/ --include="*.ts" --include="*.vue"
-```
-
-Choose: Query params (`?type=orders`) or path-based (`/ws/orders`)
+- **Verified**: Frontend uses path-based routing (`/api/v1/broker/ws`, `/api/v1/datafeed/ws`)
+- **Updated**: `dev-config.yaml` configured with `routing_strategy: "path"`
+- **Implemented**: nginx generator supports path-based WebSocket routing
 
 ---
 
@@ -69,22 +84,43 @@ Choose: Query params (`?type=orders`) or path-based (`/ws/orders`)
 
 ---
 
-### Phase 2: Nginx Generator 🔄
+### Phase 2: Nginx Generator 🔄 ✅ COMPLETE
 
-**Commit**: "Add nginx config generator"  
-**Time**: 4-5 hours
+**Commit**: "Add nginx config generator with standalone installer"  
+**Time**: 5-6 hours (completed)
 
 **Files**:
 
-- `backend/scripts/gen_nginx_conf.py`
+- `backend/scripts/gen_nginx_conf.py` ✅
+- `backend/scripts/install_nginx.py` ✅ (NEW - standalone nginx installer)
+- `backend/dev-config.yaml` ✅ (updated with path-based routing)
 
 **Key points**:
 
-- WebSocket routing based on `type` query parameter
-- Must use absolute paths in `nginx -t` validation
-- Upstreams created for all servers with instance scaling
+- ✅ Path-based WebSocket routing (`/api/v1/{module}/ws`)
+- ✅ Standalone nginx installer (no sudo required)
+- ✅ Auto-detects OS and architecture (Linux, macOS, Windows)
+- ✅ Downloads from https://github.com/jirutka/nginx-binaries
+- ✅ Local log paths (`backend/.local/logs/`)
+- ✅ Uses local nginx binary if available, falls back to system nginx
+- ✅ Upstreams created for all servers with instance scaling
 
-**Test**: `python scripts/gen_nginx_conf.py dev-config.yaml -o nginx-dev.conf && nginx -t -c $(pwd)/nginx-dev.conf`
+**Test**:
+
+```bash
+# Install nginx
+cd backend && make install-nginx
+
+# Generate and validate config
+poetry run python scripts/gen_nginx_conf.py dev-config.yaml -o nginx-dev.conf --validate
+```
+
+**Validation Results**:
+
+- ✅ nginx 1.28.0 installed successfully
+- ✅ Configuration syntax valid
+- ✅ WebSocket routing matches frontend URLs
+- ✅ REST API routing configured correctly
 
 ---
 
@@ -198,15 +234,18 @@ pkill -9 -f "nginx.*nginx-generated"
 
 ### Phase 1
 
-- [ ] Config loads from YAML
-- [ ] Port conflict detection works
-- [ ] All tests pass
+- [x] Config loads from YAML
+- [x] Port conflict detection works
+- [x] All tests pass
 
-### Phase 2
+### Phase 2 ✅ COMPLETE
 
-- [ ] Generated config passes `nginx -t`
-- [ ] Upstreams include all servers
-- [ ] WebSocket routing matches frontend format
+- [x] Generated config passes `nginx -t`
+- [x] Upstreams include all servers
+- [x] WebSocket routing matches frontend format (path-based)
+- [x] Standalone nginx installer created
+- [x] Local log paths configured
+- [x] Config validated successfully
 
 ### Phase 3
 
@@ -216,11 +255,15 @@ pkill -9 -f "nginx.*nginx-generated"
 - [ ] Core server stops last
 - [ ] Port pre-check prevents partial startup
 
+**Status**: Ready to start (Phase 2 complete)
+
 ### Phase 4
 
 - [ ] Frontend client regenerates on spec change
 - [ ] Python client regenerates without loops
 - [ ] Changes detected within 2s
+
+**Status**: Not started (waiting for Phase 3)
 
 ### Phase 5
 
@@ -228,6 +271,87 @@ pkill -9 -f "nginx.*nginx-generated"
 - [ ] Single-process mode still works
 - [ ] All existing tests pass
 - [ ] WebSockets work through nginx
+
+**Status**: Not started (waiting for Phase 3 & 4)
+
+---
+
+## Progress Summary
+
+**Phase 1: Config Schema** ✅ **COMPLETE**
+
+- All files created and tested
+- Tests passing (verified via `make test`)
+- Port conflict validation working
+- Files: `dev-config.yaml`, `config_schema.py`, `test_deployment_config.py`
+
+**Phase 2: Nginx Generator** ✅ **COMPLETE**
+
+- ✅ Nginx config generator created (`gen_nginx_conf.py`)
+- ✅ Standalone nginx installer created (`install_nginx.py`)
+- ✅ WebSocket routing fixed (path-based routing)
+- ✅ Config validation passing (`nginx -t`)
+- ✅ Makefile targets added (`install-nginx`, `check-nginx`, `verify-nginx`)
+- ✅ Local log paths configured
+- ✅ Multi-platform support (Linux, macOS, Windows)
+
+**Completed items:**
+
+- Fixed WebSocket routing mismatch
+- Installed nginx 1.28.0 standalone binary
+- Generated valid nginx configuration
+- Updated `dev-config.yaml` with path-based routing
+- Verified configuration with `nginx -t`
+
+**Phase 3: Server Manager** ❌ **NOT STARTED**
+
+- Ready to implement (no blockers)
+- Files needed:
+  - `backend/src/trading_api/shared/deployment/server_manager.py`
+  - `backend/scripts/run_multiprocess.py`
+
+**Phase 4: Spec Watchers** ❌ **NOT STARTED**
+
+- Waiting for Phase 3
+- Files needed:
+  - `backend/scripts/watch_specs_frontend.py`
+  - `backend/scripts/watch_specs_python.py`
+
+**Phase 5: Integration** ❌ **NOT STARTED**
+
+- Waiting for Phase 3 & 4
+- Files to update:
+  - `project.mk`
+  - `scripts/dev-fullstack.sh`
+
+---
+
+## Next Steps
+
+**Current**: Ready to implement Phase 3 (Server Manager)
+
+1. **Implement Server Manager** (`backend/src/trading_api/shared/deployment/server_manager.py`):
+
+   - Process orchestration for multiple uvicorn instances
+   - Port conflict checking before startup
+   - Graceful shutdown handling (nginx → modules → core)
+   - Timeout handling with force kill after 10s
+
+2. **Create Multi-Process Runner** (`backend/scripts/run_multiprocess.py`):
+
+   - CLI interface for starting multi-process mode
+   - Integration with server manager
+   - Process monitoring and health checks
+
+3. **Test Server Manager**:
+
+   ```bash
+   cd backend && python scripts/run_multiprocess.py dev-config.yaml
+   # Verify all processes start
+   # Test graceful shutdown with Ctrl+C
+   ```
+
+4. **Complete Phase 3 checklist** before moving to Phase 4
 
 ---
 
