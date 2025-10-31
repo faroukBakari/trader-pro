@@ -529,13 +529,13 @@ run-multi: backend-manager-start
 
 # Logging commands
 logs-tail:
-	@echo "📋 Tailing unified backend log (all servers)..."
+	@echo "📋 Tailing all backend server logs..."
 	@echo "Press Ctrl+C to stop"
 	@echo ""
-	@if [ -f ".local/logs/backend-unified.log" ]; then \
-		tail -f .local/logs/backend-unified.log; \
+	@if [ -d ".local/logs" ] && ls .local/logs/*-*.log >/dev/null 2>&1; then \
+		tail -f .local/logs/broker-*.log .local/logs/datafeed-*.log 2>/dev/null | awk '{print "[" strftime("%H:%M:%S") "] " $$0}'; \
 	else \
-		echo "❌ Unified log file not found: .local/logs/backend-unified.log"; \
+		echo "❌ No server log files found in .local/logs/"; \
 		echo "Start the backend first: make backend-manager-start"; \
 		exit 1; \
 	fi
