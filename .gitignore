@@ -203,4 +203,4 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
-.playwright-mcp
+.playwright-mcp*

@@ -4,18 +4,17 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ## 🎯 Root Level Documentation (Project-Wide)
 
-| File                               | Purpose                                                    |
-| ---------------------------------- | ---------------------------------------------------------- |
-| **README.md**                      | Project overview, quick start, and basic setup             |
-| **ARCHITECTURE.md**                | System architecture, technology stack, design patterns     |
-| **AUTH_IMPLEMENTATION.md**         | Authentication system architecture and implementation plan |
-| **API-METHODOLOGY.md**             | Generic TDD methodology for backend service implementation |
-| **WEBSOCKET-METHODOLOGY.md**       | Generic 6-phase TDD methodology for WebSocket features     |
-| **WORKSPACE-SETUP.md**             | VS Code multi-root workspace configuration guide           |
-| **MAKEFILE-GUIDE.md**              | Makefile commands reference for all components             |
-| **HOOKS-SETUP.md**                 | Git hooks installation and usage                           |
-| **ENVIRONMENT-CONFIG.md**          | Environment variables configuration                        |
-| **PLAYWRIGHT-MCP-instructions.md** | Playwright MCP server usage instructions                   |
+| File                         | Purpose                                                    |
+| ---------------------------- | ---------------------------------------------------------- |
+| **README.md**                | Project overview, quick start, and basic setup             |
+| **ARCHITECTURE.md**          | System architecture, technology stack, design patterns     |
+| **AUTH_IMPLEMENTATION.md**   | Authentication system architecture and implementation plan |
+| **API-METHODOLOGY.md**       | Generic TDD methodology for backend service implementation |
+| **WEBSOCKET-METHODOLOGY.md** | Generic 6-phase TDD methodology for WebSocket features     |
+| **WORKSPACE-SETUP.md**       | VS Code multi-root workspace configuration guide           |
+| **MAKEFILE-GUIDE.md**        | Makefile commands reference for all components             |
+| **HOOKS-SETUP.md**           | Git hooks installation and usage                           |
+| **ENVIRONMENT-CONFIG.md**    | Environment variables configuration                        |
 
 ---
 

@@ -95,6 +95,7 @@ def create_app(
     # Create base URL
     base_url = "/api/v1"
     ws_apps: list[FastWSAdapter] = []  # Collect all module WS apps
+    module_ws_map: dict[str, FastWSAdapter] = {}  # Map module names to WS apps
 
     # Compute OpenAPI tags dynamically from enabled modules
     openapi_tags = [
@@ -126,17 +127,20 @@ def create_app(
         except Exception as e:
             print(f"⚠️  Failed to generate OpenAPI file: {e}")
 
-        # Startup: Generate AsyncAPI specs for each module
-        for idx, ws_app in enumerate(ws_apps):
+        # Startup: Generate AsyncAPI specs for each module in module's specs/ dir
+        modules_dir = backend_dir / "src" / "trading_api" / "modules"
+        for module_name, ws_app in module_ws_map.items():
             asyncapi_schema = ws_app.asyncapi()
-            # Use module-specific filename or numbered if needed
-            asyncapi_file = backend_dir / f"asyncapi-{idx}.json"
+            # Create module specs directory
+            module_specs_dir = modules_dir / module_name / "specs"
+            module_specs_dir.mkdir(parents=True, exist_ok=True)
+            asyncapi_file = module_specs_dir / "asyncapi.json"
             try:
                 with open(asyncapi_file, "w") as f:
                     json.dump(asyncapi_schema, f, indent=2)
-                print(f"📝 Generated AsyncAPI spec: {asyncapi_file}")
+                print(f"📝 Generated AsyncAPI spec for '{module_name}': {asyncapi_file}")
             except Exception as e:
-                print(f"⚠️  Failed to generate AsyncAPI file: {e}")
+                print(f"⚠️  Failed to generate AsyncAPI file for '{module_name}': {e}")
 
         # Setup all WebSocket apps
         for ws_app in ws_apps:
@@ -200,7 +204,9 @@ def create_app(
         # Register module's WebSocket endpoint (if supported)
         if hasattr(module, "register_ws_endpoint"):
             module.register_ws_endpoint(api_app, base_url)
-            ws_apps.append(module.get_ws_app(base_url))
+            ws_app = module.get_ws_app(base_url)
+            ws_apps.append(ws_app)
+            module_ws_map[module.name] = ws_app
 
         # Call configure_app hook - ws_app parameter deprecated
         module.configure_app(api_app, None)

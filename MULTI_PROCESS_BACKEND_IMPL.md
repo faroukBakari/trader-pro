@@ -7,7 +7,50 @@ Before: FastAPI (8000) → All modules
 After:  Nginx (8000) → Broker (8001) + Datafeed (8002) + Core (8003)
 ```
 
-**Status**: ✅ **Phase 2 COMPLETE** - Ready for Phase 3
+**Status**: ✅ **Phase 3 COMPLETE** - Backend Manager Consolidated
+
+---
+
+## ✅ Backend Manager - Unified CLI
+
+**New unified script**: `backend/scripts/backend_manager.py`
+
+Consolidates all multi-process backend management:
+
+- ✅ Start/stop/restart multi-process backend
+- ✅ Generate and validate nginx configuration
+- ✅ Check status of running processes
+- ✅ PID file tracking for all processes
+
+**Commands**:
+
+```bash
+# Using Makefile (recommended)
+make backend-manager-start              # Start backend (config=dev-config.yaml)
+make backend-manager-stop               # Stop all processes
+make backend-manager-status             # Show process status
+make backend-manager-restart            # Restart all processes
+make backend-manager-gen-nginx-conf     # Generate nginx config (debug)
+
+# Using script directly
+poetry run python scripts/backend_manager.py start [config]
+poetry run python scripts/backend_manager.py stop [config]
+poetry run python scripts/backend_manager.py status [config]
+poetry run python scripts/backend_manager.py restart [config]
+poetry run python scripts/backend_manager.py gen-nginx-conf [config] -o [output]
+
+# Examples
+poetry run python scripts/backend_manager.py start dev-config.yaml
+poetry run python scripts/backend_manager.py status
+poetry run python scripts/backend_manager.py stop
+poetry run python scripts/backend_manager.py restart dev-config.yaml --generate-nginx
+poetry run python scripts/backend_manager.py gen-nginx-conf dev-config.yaml -o nginx-dev.conf --validate
+```
+
+**Removed scripts** (consolidated into backend-manager):
+
+- `backend/scripts/run_multiprocess.py` - Removed (use `backend_manager.py start`)
+- `backend/scripts/gen_nginx_conf.py` - Removed (use `backend_manager.py gen-nginx-conf`)
 
 ---
 
@@ -91,8 +134,8 @@ verify-nginx:   # Verify nginx is available
 
 **Files**:
 
-- `backend/scripts/gen_nginx_conf.py` ✅
-- `backend/scripts/install_nginx.py` ✅ (NEW - standalone nginx installer)
+- ~~`backend/scripts/gen_nginx_conf.py`~~ ✅ (consolidated into backend_manager.py)
+- `backend/scripts/install_nginx.py` ✅ (standalone nginx installer)
 - `backend/dev-config.yaml` ✅ (updated with path-based routing)
 
 **Key points**:
@@ -112,7 +155,7 @@ verify-nginx:   # Verify nginx is available
 cd backend && make install-nginx
 
 # Generate and validate config
-poetry run python scripts/gen_nginx_conf.py dev-config.yaml -o nginx-dev.conf --validate
+poetry run python scripts/backend_manager.py gen-nginx-conf dev-config.yaml -o nginx-dev.conf --validate
 ```
 
 **Validation Results**:
@@ -124,41 +167,66 @@ poetry run python scripts/gen_nginx_conf.py dev-config.yaml -o nginx-dev.conf --
 
 ---
 
-### Phase 3: Server Manager 🏗️
+### Phase 3: Server Manager 🏗️ ✅ COMPLETE
 
-**Commit**: "Add multi-process server manager"  
-**Time**: 6-8 hours (most complex)
+**Commit**: "Add backend-manager: unified CLI for multi-process management"
+**Time**: Completed
 
 **Files**:
 
-- `backend/src/trading_api/shared/deployment/server_manager.py`
-- `backend/scripts/run_multiprocess.py`
+- ✅ `backend/scripts/backend_manager.py` (NEW - unified CLI with nginx generation)
+- ✅ `backend/src/trading_api/shared/deployment/server_manager.py` (enhanced with status/PID tracking)
+- ❌ `backend/scripts/run_multiprocess.py` (REMOVED - consolidated)
+- ❌ `backend/scripts/gen_nginx_conf.py` (REMOVED - consolidated)
 
-**Critical enhancements**:
+**Features**:
 
-1. **Port checking before startup**:
-
-```python
-def check_all_ports(config):
-    blocked = []
-    for name, server in config.servers.items():
-        for i in range(server.instances):
-            port = server.port + i
-            if is_port_in_use(port):
-                blocked.append((f"{name}-{i}", port))
-    return len(blocked) == 0
-```
-
-2. **Ordered shutdown**: nginx → functional modules → core
-3. **Timeout handling**: Force kill after 10s
+- ✅ Unified CLI with commands: start, stop, status, restart, gen-nginx-conf
+- ✅ PID file tracking for all processes (nginx and backend instances)
+- ✅ Status reporting with health checks
+- ✅ Standalone stop/status commands (works without active manager instance)
+- ✅ Port checking before startup
+- ✅ Ordered shutdown: nginx → functional modules → core
+- ✅ Timeout handling: Force kill after 10s
+- ✅ Auto-nginx config generation on start
 
 **Test**:
 
 ```bash
-cd backend && make run config=dev-config.yaml
+# Start backend
+make backend-manager-start
+# or: poetry run python scripts/backend_manager.py start
+
+# Check status
+make backend-manager-status
+# or: poetry run python scripts/backend_manager.py status
+
+# Stop backend
+make backend-manager-stop
+# or: poetry run python scripts/backend_manager.py stop
+
+# Restart backend
+make backend-manager-restart
+# or: poetry run python scripts/backend_manager.py restart
+
+# Generate nginx config (debug)
+make backend-manager-gen-nginx-conf
+# or: poetry run python scripts/backend_manager.py gen-nginx-conf --validate
+
 # Verify processes: ps aux | grep uvicorn
 # Test shutdown: Ctrl+C (check no orphans)
 ```
+
+**Checklist**:
+
+- [x] All servers start successfully
+- [x] Health checks respond on all ports
+- [x] Graceful shutdown (no orphaned processes)
+- [x] Core server stops last
+- [x] Port pre-check prevents partial startup
+- [x] Status command shows running processes
+- [x] Stop command works from separate invocation
+- [x] PID files properly cleaned up
 
 ---
 
@@ -287,7 +355,7 @@ pkill -9 -f "nginx.*nginx-generated"
 
 **Phase 2: Nginx Generator** ✅ **COMPLETE**
 
-- ✅ Nginx config generator created (`gen_nginx_conf.py`)
+- ✅ Nginx config generation integrated into backend_manager.py (Phase 2 logic consolidated)
 - ✅ Standalone nginx installer created (`install_nginx.py`)
 - ✅ WebSocket routing fixed (path-based routing)
 - ✅ Config validation passing (`nginx -t`)
