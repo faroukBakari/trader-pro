@@ -5,6 +5,7 @@ Handles process lifecycle, health checks, and graceful shutdown.
 """
 
 import asyncio
+import io
 import logging
 import os
 import signal
@@ -14,11 +15,14 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import httpx
 
-from .config_schema import DeploymentConfig
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+from trading_api.shared.deployment.config_schema import DeploymentConfig
 
 logger = logging.getLogger(__name__)
 
@@ -104,23 +108,31 @@ class ServerManager:
     Handles process lifecycle, health checks, and graceful shutdown.
     """
 
-    def __init__(self, config: DeploymentConfig, nginx_config_path: Path):
+    def __init__(
+        self, config: DeploymentConfig, nginx_config_path: Path, detached: bool = False
+    ):
         """Initialize server manager.
 
         Args:
             config: Deployment configuration
             nginx_config_path: Path to nginx configuration file
+            detached: Run servers in detached background mode (like nohup)
         """
         self.config = config
         self.nginx_config_path = nginx_config_path
         self.nginx_pid_file = nginx_config_path.parent / "nginx.pid"
         self.pid_dir = nginx_config_path.parent / ".pids"
+        self.log_dir = nginx_config_path.parent / ".local" / "logs"
+        self.unified_log_path = self.log_dir / "backend-unified.log"
+        self.detached = detached
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         self.nginx_process: subprocess.Popen[bytes] | None = None
         self._shutdown_requested = False
+        self._log_threads: list[threading.Thread] = []
 
-        # Ensure PID directory exists
+        # Ensure PID and log directories exist
         self.pid_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_nginx_binary(self) -> str:
         """Get nginx binary path (local or system).
@@ -152,6 +164,29 @@ class ServerManager:
             return result.stdout.strip()
         except subprocess.CalledProcessError:
             raise FileNotFoundError("nginx not found. Install with: make install-nginx")
+
+    def _stream_output_to_unified_log(
+        self, stream: io.BufferedReader, prefix: str, unified_log: TextIO
+    ) -> None:
+        """Stream process output to unified log with prefix.
+
+        Runs in a background thread to continuously read from stream
+        and write to unified log with server name prefix.
+
+        Args:
+            stream: Process stdout or stderr stream
+            prefix: Server name prefix (e.g., 'broker-0>>')
+            unified_log: Unified log file handle
+        """
+        try:
+            for line in iter(stream.readline, b""):
+                if line:
+                    decoded_line = line.decode("utf-8", errors="replace").rstrip()
+                    log_entry = f"{prefix} {decoded_line}\n"
+                    unified_log.write(log_entry)
+                    unified_log.flush()
+        except Exception as e:
+            logger.error(f"Error streaming output for {prefix}: {e}")
 
     def _start_server_instance(
         self, name: str, port: int, modules: list[str], reload: bool = True
@@ -190,15 +225,77 @@ class ServerManager:
             f"Starting {name} on port {port} with modules: {modules or 'none (core only)'}"
         )
 
-        process = subprocess.Popen(
-            cmd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        if self.detached:
+            # Detached mode: redirect output to log file, run in background
+            log_file_path = self.log_dir / f"{name}.log"
+            log_file = open(log_file_path, "a")
+            unified_log = open(self.unified_log_path, "a", buffering=1)
 
-        # Write PID file for process tracking
-        self._write_pid_file(name, process.pid)
+            process = subprocess.Popen(
+                cmd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,  # Detach from parent session
+            )
+
+            # Write PID file for process tracking
+            self._write_pid_file(name, process.pid)
+
+            # Start background thread to stream output to both logs
+            # Format prefix: 20 chars total (truncate if >12, pad if <12, then add >>)
+            prefix_name = name[:12] if len(name) > 12 else name
+            prefix = f"{prefix_name:<12}>>"
+
+            def stream_to_logs():
+                try:
+                    if process.stdout:
+                        for line in iter(process.stdout.readline, b""):
+                            if line:
+                                decoded = line.decode(
+                                    "utf-8", errors="replace"
+                                ).rstrip()
+                                # Write to individual log
+                                log_file.write(f"{decoded}\n")
+                                log_file.flush()
+                                # Write to unified log with prefix
+                                unified_log.write(f"{prefix} {decoded}\n")
+                                unified_log.flush()
+                except Exception as e:
+                    logger.error(f"Error streaming output for {prefix}: {e}")
+                finally:
+                    log_file.close()
+                    unified_log.close()
+
+            log_thread = threading.Thread(target=stream_to_logs, daemon=True)
+            log_thread.start()
+            self._log_threads.append(log_thread)
+
+        else:
+            # Interactive mode: keep process attached
+            process = subprocess.Popen(
+                cmd,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+
+            # Write PID file for process tracking
+            self._write_pid_file(name, process.pid)
+
+            # Start background thread to stream output to unified log
+            # Format prefix: 20 chars total (truncate if >12, pad if <12, then add >>)
+            prefix_name = name[:12] if len(name) > 12 else name
+            prefix = f"{prefix_name:<12}>>"
+            unified_log = open(self.unified_log_path, "a", buffering=1)
+
+            log_thread = threading.Thread(
+                target=self._stream_output_to_unified_log,
+                args=(process.stdout, prefix, unified_log),
+                daemon=True,
+            )
+            log_thread.start()
+            self._log_threads.append(log_thread)
 
         return process
 
@@ -218,11 +315,21 @@ class ServerManager:
 
         logger.info(f"Starting nginx on port {self.config.nginx.port}")
 
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        if self.detached:
+            # Detached mode: nginx manages its own logs
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        else:
+            # Interactive mode
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
 
         return process
 
@@ -402,6 +509,34 @@ class ServerManager:
 
         logger.info("All processes stopped")
 
+        # Wait for ports to be released
+        await self._wait_for_ports_release()
+
+    async def _wait_for_ports_release(self, max_wait: float = 2.0) -> None:
+        """Wait for all configured ports to be released.
+
+        Args:
+            max_wait: Maximum time to wait in seconds
+        """
+        start_time = time.time()
+        all_ports = [port for _, port in self.config.get_all_ports()]
+
+        while time.time() - start_time < max_wait:
+            # Check if all ports are free
+            ports_in_use = [port for port in all_ports if is_port_in_use(port)]
+
+            if not ports_in_use:
+                logger.debug("All ports released")
+                return
+
+            # Wait a bit before checking again
+            await asyncio.sleep(0.1)
+
+        # Log warning if some ports are still in use
+        ports_in_use = [port for port in all_ports if is_port_in_use(port)]
+        if ports_in_use:
+            logger.warning(f"Ports still in use after {max_wait}s: {ports_in_use}")
+
     def _stop_process_by_pid(self, pid: int, name: str, timeout: float) -> None:
         """Stop a process by PID.
 
@@ -423,12 +558,12 @@ class ServerManager:
                 if not self._is_process_running(pid):
                     logger.info(f"{name} stopped gracefully")
                     return
-                time.sleep(0.1)
+                time.sleep(0.05)  # Check more frequently
 
             # Force kill if timeout exceeded
             logger.warning(f"{name} did not stop gracefully, force killing")
             os.kill(pid, signal.SIGKILL)
-            time.sleep(0.5)  # Give it a moment to die
+            time.sleep(0.1)  # Brief wait for cleanup
 
         except (OSError, ProcessLookupError) as e:
             logger.warning(f"Error stopping {name}: {e}")
@@ -440,6 +575,12 @@ class ServerManager:
             True if all servers started successfully, False otherwise
         """
         logger.info("Starting multi-process backend...")
+
+        # Initialize unified log file (truncate if exists)
+        with open(self.unified_log_path, "w") as f:
+            f.write(
+                f"=== Backend Unified Log - Started at {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n"
+            )
 
         # Check all ports are available
         all_available, blocked_ports = check_all_ports(self.config)
@@ -567,12 +708,12 @@ class ServerManager:
                     logger.info(f"{name} stopped gracefully")
                     self._remove_pid_file(name)
                     return
-                time.sleep(0.1)
+                time.sleep(0.05)  # Check more frequently
 
             # Force kill if timeout exceeded
             logger.warning(f"{name} did not stop gracefully, force killing")
             process.kill()
-            process.wait(timeout=2)
+            process.wait(timeout=1)  # Reduced from 2s
             self._remove_pid_file(name)
 
         except Exception as e:
@@ -610,7 +751,7 @@ class ServerManager:
                     # Check if process is still running
                     try:
                         os.kill(nginx_pid, 0)  # Check if process exists
-                        time.sleep(0.1)
+                        time.sleep(0.05)  # Check more frequently
                     except OSError:
                         # Process no longer exists
                         logger.info("nginx stopped gracefully")
@@ -674,13 +815,21 @@ class ServerManager:
             if not success:
                 return 1
 
-            # Wait for shutdown signal
-            logger.info("Press Ctrl+C to stop all servers")
-            self.wait_for_shutdown_signal()
+            if self.detached:
+                # Detached mode: return immediately after servers start
+                logger.info("All servers running in background (detached mode)")
+                logger.info(f"Unified log: {self.unified_log_path}")
+                logger.info(f"Tail logs: make logs-tail")
+                logger.info(f"Stop servers: make backend-manager-stop")
+                return 0
+            else:
+                # Interactive mode: wait for shutdown signal
+                logger.info("Press Ctrl+C to stop all servers")
+                self.wait_for_shutdown_signal()
 
-            # Stop all servers
-            await self.stop_all()
-            return 0
+                # Stop all servers
+                await self.stop_all()
+                return 0
 
         except Exception as e:
             logger.error(f"Unexpected error: {e}")

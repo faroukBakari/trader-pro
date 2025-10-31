@@ -35,9 +35,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from trading_api.shared.deployment import (  # noqa: E402
     DeploymentConfig,
-    ServerManager,
     load_config,
 )
+
+# Import ServerManager from scripts (same directory)
+from server_manager import ServerManager, check_all_ports, is_port_in_use  # noqa: E402
 
 # Configure logging
 logging.basicConfig(
@@ -361,8 +363,9 @@ async def cmd_start(args: argparse.Namespace) -> int:
         if not validate_nginx_config(nginx_config_path):
             return 1
 
-    # Create and run server manager
-    manager = ServerManager(config, nginx_config_path)
+    # Create and run server manager (detached mode by default)
+    detached = not args.foreground  # Detached unless --foreground is specified
+    manager = ServerManager(config, nginx_config_path, detached=detached)
 
     logger.info("=" * 60)
     logger.info("Starting multi-process backend...")
@@ -512,8 +515,8 @@ async def cmd_restart(args: argparse.Namespace) -> int:
         logger.error("Failed to stop backend")
         return 1
 
-    # Wait a bit for cleanup
-    await asyncio.sleep(1)
+    # Port release wait is now handled in stop_all_by_pid()
+    # No manual sleep needed
 
     # Start
     start_result = await cmd_start(args)
@@ -620,6 +623,11 @@ Examples:
         action="store_true",
         help="Validate nginx config before starting",
     )
+    start_parser.add_argument(
+        "--foreground",
+        action="store_true",
+        help="Run in foreground (default: run detached in background)",
+    )
 
     # Stop command
     stop_parser = subparsers.add_parser(
@@ -641,8 +649,8 @@ Examples:
     stop_parser.add_argument(
         "--timeout",
         type=float,
-        default=10.0,
-        help="Shutdown timeout in seconds (default: 10)",
+        default=3.0,
+        help="Shutdown timeout in seconds (default: 3)",
     )
 
     # Status command
@@ -683,8 +691,8 @@ Examples:
     restart_parser.add_argument(
         "--timeout",
         type=float,
-        default=10.0,
-        help="Shutdown timeout in seconds (default: 10)",
+        default=3.0,
+        help="Shutdown timeout in seconds (default: 3)",
     )
     restart_parser.add_argument(
         "--generate-nginx",
@@ -695,6 +703,11 @@ Examples:
         "--validate",
         action="store_true",
         help="Validate nginx config before starting",
+    )
+    restart_parser.add_argument(
+        "--foreground",
+        action="store_true",
+        help="Run in foreground (default: run detached in background)",
     )
 
     # Gen-nginx-conf command (debug)

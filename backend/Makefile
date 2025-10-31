@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install-nginx check-nginx verify-nginx install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec validate-package-names docs-html generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install-nginx check-nginx verify-nginx install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec validate-package-names docs-html generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -66,6 +66,11 @@ help:
 	@echo "  generate-python-clients  Generate Python HTTP clients (includes format & validation)"
 	@echo "  docs-html         Generate static HTML documentation"
 	@echo "  generate-ws-routers Generate WebSocket router classes"
+	@echo ""
+	@echo "Logging targets:"
+	@echo "  logs-tail         Tail unified backend log (all servers with prefixes)"
+	@echo "  logs-tail-nginx   Tail nginx logs (access + error)"
+	@echo "  logs-clean        Clean all backend log files"
 	@echo ""
 	@echo "Discovered modules: $(DISCOVERED_MODULES)"
 
@@ -521,3 +526,39 @@ backend-manager-gen-nginx-conf:
 
 # Legacy alias (for backward compatibility)
 run-multi: backend-manager-start
+
+# Logging commands
+logs-tail:
+	@echo "📋 Tailing unified backend log (all servers)..."
+	@echo "Press Ctrl+C to stop"
+	@echo ""
+	@if [ -f ".local/logs/backend-unified.log" ]; then \
+		tail -f .local/logs/backend-unified.log; \
+	else \
+		echo "❌ Unified log file not found: .local/logs/backend-unified.log"; \
+		echo "Start the backend first: make backend-manager-start"; \
+		exit 1; \
+	fi
+
+logs-tail-nginx:
+	@echo "📋 Tailing nginx logs..."
+	@echo "Press Ctrl+C to stop"
+	@echo ""
+	@if [ -f ".local/logs/nginx-access.log" ] || [ -f ".local/logs/nginx-error.log" ]; then \
+		tail -f .local/logs/nginx-*.log 2>/dev/null; \
+	else \
+		echo "❌ Nginx log files not found"; \
+		echo "Start the backend first: make backend-manager-start"; \
+		exit 1; \
+	fi
+
+logs-clean:
+	@echo "🧹 Cleaning backend log files..."
+	@if [ -d ".local/logs" ]; then \
+		for file in .local/logs/*.log; do \
+			[ -f "$$file" ] && > "$$file"; \
+		done; \
+		echo "✅ All log files cleaned (truncated)"; \
+	else \
+		echo "✅ No log directory found (nothing to clean)"; \
+	fi
