@@ -297,7 +297,7 @@
     - Created `test_full_stack.py` with 7 full-stack scenario tests
     - Created `test_module_isolation.py` with 8 module isolation tests
     - Updated `pyproject.toml` with integration test markers and paths
-    - Added `test-integration` and `test-integration-verbose` Makefile targets
+    - Added `test-integration` Makefile target
     - All 20 integration tests passing (20 passed in 1.32s)
     - Tests cover: cross-module workflows, full-stack scenarios, module isolation
     - Validates: all modules work together, independent testing, registry cleanup
@@ -318,7 +318,7 @@
 
     - Implemented dynamic module discovery with SELECTED_MODULES variable
     - Added `modules` parameter support for selective testing
-    - Updated `test-modules` and `test-cov-modules` to support module selection
+    - Updated `test-modules` to support module selection
     - Default behavior: test all discovered modules when no modules parameter
     - Usage: `make test-modules modules=broker,datafeed`
     - Zero configuration for new modules (auto-discovered)
@@ -2147,10 +2147,6 @@ poetry run pytest src/trading_api/modules/datafeed/tests/ -v  # Datafeed tests
    	@echo "Running integration tests..."
    	poetry run pytest tests/integration/ -v -x
 
-   test-integration-verbose:
-   	@echo "Running integration tests with detailed output..."
-   	poetry run pytest tests/integration/ -v -s
-
    # Update main test target to include integration
    test: test-boundaries test-shared test-modules test-integration
    	@echo "✅ All tests passed (unit + integration)"
@@ -2175,9 +2171,6 @@ make test-integration
 
 # Run all tests (unit + integration)
 make test
-
-# Run only integration tests with verbose output
-make test-integration-verbose
 
 # Run tests excluding integration (faster unit tests)
 poetry run pytest -m "not integration" -v
@@ -2788,12 +2781,6 @@ feat: Phase 5 Task 22 - Implement import boundary enforcement
    	@echo "✅ All tests passed (boundaries + shared + modules + integration)"
 
    # Coverage targets
-   test-cov-modules:
-   	@echo "Running module tests with coverage..."
-   	@if [ -d "$(MODULES_DIR)" ]; then \
-   		poetry run pytest $(MODULES_DIR)/*/tests/ --cov=trading_api.modules --cov-report=xml --cov-report=term-missing; \
-   	fi
-
    test-cov: test-boundaries
    	@echo "Running all tests with coverage..."
    	poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing

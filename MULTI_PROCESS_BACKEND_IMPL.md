@@ -74,14 +74,24 @@ poetry run python scripts/backend_manager.py gen-nginx-conf dev-config.yaml -o n
 
 ### 1. Install nginx ✅ COMPLETE
 
-**Standalone nginx installer** (no sudo required):
+**Nginx installation is now integrated into `make install`**:
 
 ```bash
-# Install nginx binary to backend/.local/bin/
-cd backend && make install-nginx
+# Install all dependencies (including optional nginx prompt)
+cd backend && make install
+```
 
-# Verify installation
-make check-nginx
+The `make install` command will:
+1. Check Python 3.11+ availability
+2. Check Poetry installation
+3. Install Python dependencies via Poetry
+4. **Prompt to install nginx** (optional, for multi-process mode)
+
+**Manual nginx installation** (if you skipped the prompt):
+
+```bash
+# Run backend manager with nginx generation
+make backend-manager-start  # Will check for nginx and offer to install if needed
 ```
 
 **Alternative (system install)**:
@@ -91,14 +101,13 @@ make check-nginx
 sudo apt update && sudo apt install nginx -y
 ```
 
-### 2. Nginx verification added to Makefile ✅ COMPLETE
+### 2. Nginx verification integrated into backend-manager ✅ COMPLETE
 
-```makefile
-# backend/Makefile
-install-nginx:  # Install standalone nginx binary
-check-nginx:    # Check if nginx is installed (local or system)
-verify-nginx:   # Verify nginx is available
-```
+Nginx verification is now handled automatically by the backend manager:
+
+- **Start command**: Checks nginx availability before starting
+- **Restart command**: Verifies nginx before restarting processes
+- **Install target**: Prompts for nginx installation during `make install`
 
 ### 3. WebSocket routing strategy ✅ RESOLVED
 
@@ -888,10 +897,9 @@ make backend-manager-restart
 **Phase 2: Nginx Generator** ✅ **COMPLETE**
 
 - ✅ Nginx config generation integrated into backend_manager.py (Phase 2 logic consolidated)
-- ✅ Standalone nginx installer created (`install_nginx.py`)
+- ✅ Standalone nginx installer integrated into `make install` (optional prompt)
 - ✅ WebSocket routing fixed (path-based routing)
 - ✅ Config validation passing (`nginx -t`)
-- ✅ Makefile targets added (`install-nginx`, `check-nginx`, `verify-nginx`)
 - ✅ Local log paths configured
 - ✅ Multi-platform support (Linux, macOS, Windows)
 
@@ -902,6 +910,7 @@ make backend-manager-restart
 - Generated valid nginx configuration
 - Updated `dev-config.yaml` with path-based routing
 - Verified configuration with `nginx -t`
+- Integrated nginx installation into `make install`
 
 **Phase 3: Server Manager** ✅ **COMPLETE**
 

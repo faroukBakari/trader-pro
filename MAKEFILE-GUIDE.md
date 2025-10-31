@@ -54,9 +54,7 @@ make -f project.mk build-all         # Build everything
 cd backend
 
 # Development
-make ensure-python     # Check Python 3.11+ (offers auto-install)
-make ensure-poetry     # Ensure Poetry installed
-make install           # Install dependencies
+make install           # Install dependencies (checks Python/Poetry, optional nginx)
 make dev               # Start dev server (checks port)
 make kill-dev          # Kill backend dev server (port 8000)
 
@@ -86,7 +84,6 @@ make logs-tail-nginx                # Tail nginx logs (access + error)
 make logs-clean                     # Clean all backend log files
 
 # API
-make health                    # Check API health
 make generate-python-clients   # Generate HTTP clients (includes format & validation)
 make export-openapi-spec       # Export OpenAPI spec
 make export-asyncapi-spec      # Export AsyncAPI spec
@@ -163,10 +160,8 @@ Non-interactive versions for CI/CD:
 
 ```bash
 # Backend
-make ensure-python-ci  # Auto-install Python (no prompts)
-make install-ci        # Non-interactive install
+make install-ci        # Non-interactive install (checks Python/Poetry, skips nginx)
 make dev-ci            # Background server
-make health-ci         # Health check (fail on error)
 
 # Frontend
 make install-ci        # Uses npm ci
