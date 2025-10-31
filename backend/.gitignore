@@ -13,3 +13,4 @@ coverage.xml
 .openapi-checksum
 .local/
 nginx.pid
+nginx-dev.conf

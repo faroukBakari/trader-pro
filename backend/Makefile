@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install-nginx check-nginx verify-nginx install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec validate-package-names docs-html generate-ws-routers $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help ensure-python ensure-python-ci ensure-poetry install-nginx check-nginx verify-nginx install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec validate-package-names docs-html generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -52,6 +52,11 @@ help:
 	@echo "  dev               Start backend development server with debugpy"
 	@echo "  dev-no-debug      Start backend development server without debugpy"
 	@echo "  kill-dev          Kill any running backend development server"
+	@echo "  backend-manager-start   Start multi-process backend with nginx (config=dev-config.yaml)"
+	@echo "  backend-manager-stop    Stop multi-process backend"
+	@echo "  backend-manager-status  Show backend process status"
+	@echo "  backend-manager-restart Restart multi-process backend"
+	@echo "  backend-manager-gen-nginx-conf Generate nginx config (debug)"
 	@echo "  clean             Clean build artifacts"
 	@echo "  clean-cache       Clean all Python caches (mypy, pytest, pycache, ruff)"
 	@echo "  health            Check backend health"
@@ -487,3 +492,32 @@ docs-html:
 # Generate WebSocket router classes
 generate-ws-routers:
 	@./scripts/generate-ws-routers.sh
+
+# Multi-process backend management (using backend-manager)
+backend-manager-start: verify-nginx
+	@CONFIG=$${config:-dev-config.yaml}; \
+	echo "Starting multi-process backend with config: $$CONFIG"; \
+	poetry run python scripts/backend_manager.py start $$CONFIG --generate-nginx
+
+backend-manager-stop:
+	@CONFIG=$${config:-dev-config.yaml}; \
+	echo "Stopping multi-process backend..."; \
+	poetry run python scripts/backend_manager.py stop $$CONFIG
+
+backend-manager-status:
+	@CONFIG=$${config:-dev-config.yaml}; \
+	poetry run python scripts/backend_manager.py status $$CONFIG
+
+backend-manager-restart: verify-nginx
+	@CONFIG=$${config:-dev-config.yaml}; \
+	echo "Restarting multi-process backend with config: $$CONFIG"; \
+	poetry run python scripts/backend_manager.py restart $$CONFIG --generate-nginx
+
+backend-manager-gen-nginx-conf:
+	@CONFIG=$${config:-dev-config.yaml}; \
+	OUTPUT=$${output:-nginx-dev.conf}; \
+	echo "Generating nginx config from $$CONFIG to $$OUTPUT"; \
+	poetry run python scripts/backend_manager.py gen-nginx-conf $$CONFIG -o $$OUTPUT --validate
+
+# Legacy alias (for backward compatibility)
+run-multi: backend-manager-start

@@ -73,6 +73,13 @@ make format            # Format with black + isort
 make build             # Build package
 make clean             # Clean artifacts
 
+# Multi-Process Backend (Development)
+make backend-manager-start          # Start multi-process backend with nginx
+make backend-manager-stop           # Stop all backend processes
+make backend-manager-status         # Show process status and health
+make backend-manager-restart        # Restart all processes
+make backend-manager-gen-nginx-conf # Generate nginx config (debug)
+
 # API
 make health                    # Check API health
 make generate-python-clients   # Generate HTTP clients (includes format & validation)

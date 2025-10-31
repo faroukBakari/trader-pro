@@ -510,9 +510,8 @@
 2. `AUTH_IMPLEMENTATION.md` - Planning doc, architecture-agnostic
 3. `WORKSPACE-SETUP.md` - VS Code config, unchanged
 4. `ENVIRONMENT-CONFIG.md` - Environment variables, unchanged
-5. `PLAYWRIGHT-MCP-instructions.md` - MCP server usage, unchanged
-6. `.github/copilot-instructions.md` - Coding guidelines (already updated with modular patterns!)
-7. `.githooks/README.md` - Git hooks implementation, unchanged
+5. `.github/copilot-instructions.md` - Coding guidelines (already updated with modular patterns!)
+6. `.githooks/README.md` - Git hooks implementation, unchanged
 
 **Frontend (7 files)**: 8. `frontend/README.md` - Frontend overview, no backend internals 9. `frontend/BROKER-TERMINAL-SERVICE.md` - TradingView integration, backend-agnostic 10. `frontend/IBROKERCONNECTIONADAPTERHOST.md` - TradingView API reference 11. `frontend/TRADER_TERMINAL_UI_USAGE.md` - Playwright usage, unchanged 12. `frontend/TRADINGVIEW-TYPES.md` - Type definitions, unchanged 13. `frontend/FRONTEND-EXCLUSIONS.md` - Linting exclusions, unchanged 14. `frontend/WEBSOCKET-ARCHITECTURE-DIAGRAMS.md` - Diagrams (verify, likely unchanged)
 
