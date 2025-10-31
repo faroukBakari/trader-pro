@@ -14,7 +14,7 @@ from trading_api.shared import FastWSAdapter
 
 
 @pytest.fixture
-def apps() -> tuple[FastAPI, FastWSAdapter]:
+def apps() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Application with only datafeed module enabled."""
     from trading_api.app_factory import create_app
 
@@ -22,17 +22,17 @@ def apps() -> tuple[FastAPI, FastWSAdapter]:
 
 
 @pytest.fixture
-def app(apps: tuple[FastAPI, FastWSAdapter]) -> FastAPI:
+def app(apps: tuple[FastAPI, list[FastWSAdapter]]) -> FastAPI:
     """FastAPI application instance."""
     api_app, _ = apps
     return api_app
 
 
 @pytest.fixture
-def ws_app(apps: tuple[FastAPI, FastWSAdapter]) -> FastWSAdapter:
-    """FastWSAdapter application instance."""
-    _, ws_app = apps
-    return ws_app
+def ws_app(apps: tuple[FastAPI, list[FastWSAdapter]]) -> FastWSAdapter | None:
+    """FastWSAdapter application instance (first module's ws_app)."""
+    _, ws_apps = apps
+    return ws_apps[0] if ws_apps else None
 
 
 @pytest.fixture

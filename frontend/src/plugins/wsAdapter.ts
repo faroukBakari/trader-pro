@@ -72,27 +72,29 @@ export class WsAdapter implements WsAdapterType {
   brokerConnection: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
 
   constructor() {
-    // Datafeed clients
-    this.bars = new WebSocketClient<BarsSubscriptionRequest, Bar_Ws_Backend, Bar>('bars', data => data)
+    // TODO: make ws urls auto configurable
+    const datafeedWsUrl = '/api/v1/datafeed/ws'
+    this.bars = new WebSocketClient<BarsSubscriptionRequest, Bar_Ws_Backend, Bar>(datafeedWsUrl, 'bars', data => data)
     this.quotes = new WebSocketClient<QuoteDataSubscriptionRequest, QuoteData_Ws_Backend, QuoteData>(
-      'quotes', mapQuoteData
+      datafeedWsUrl, 'quotes', mapQuoteData
     )
 
-    // Broker clients
+    // Broker clients - connect to /api/v1/broker/ws
+    const brokerWsUrl = '/api/v1/broker/ws'
     this.orders = new WebSocketClient<OrderSubscriptionRequest, PlacedOrder_Ws_Backend, PlacedOrder>(
-      'orders', mapOrder
+      brokerWsUrl, 'orders', mapOrder
     )
     this.positions = new WebSocketClient<PositionSubscriptionRequest, Position_Ws_Backend, Position>(
-      'positions', mapPosition
+      brokerWsUrl, 'positions', mapPosition
     )
     this.executions = new WebSocketClient<ExecutionSubscriptionRequest, Execution_Ws_Backend, Execution>(
-      'executions', mapExecution
+      brokerWsUrl, 'executions', mapExecution
     )
     this.equity = new WebSocketClient<EquitySubscriptionRequest, EquityData_Ws_Backend, EquityData>(
-      'equity', mapEquityData
+      brokerWsUrl, 'equity', mapEquityData
     )
     this.brokerConnection = new WebSocketClient<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus_Ws_Backend, BrokerConnectionStatus>(
-      'broker-connection', mapBrokerConnectionStatus
+      brokerWsUrl, 'broker-connection', mapBrokerConnectionStatus
     )
   }
 }

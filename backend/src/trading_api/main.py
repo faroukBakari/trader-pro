@@ -23,7 +23,7 @@ else:
     enabled_modules = None  # None = all modules
 
 # Create application using factory
-apiApp, wsApp = create_app(enabled_modules=enabled_modules)
+apiApp, wsApps = create_app(enabled_modules=enabled_modules)
 
 # CRITICAL: Maintain backward compatibility for spec export scripts
 # scripts/export_openapi_spec.py and scripts/export_asyncapi_spec.py

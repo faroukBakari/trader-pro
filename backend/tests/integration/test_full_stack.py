@@ -41,7 +41,8 @@ async def test_all_modules_loaded(async_client: AsyncClient) -> None:
 @pytest.mark.integration
 def test_websocket_all_channels(client: TestClient) -> None:
     """Verify all WebSocket channels available with all modules."""
-    with client.websocket_connect("/api/v1/ws") as websocket:
+    # Test datafeed WebSocket channels
+    with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
         # Test datafeed channels - bars
         websocket.send_json(
             {
@@ -64,6 +65,8 @@ def test_websocket_all_channels(client: TestClient) -> None:
         assert response["type"] == "quotes.subscribe.response"
         assert response["payload"]["status"] == "ok"
 
+    # Test broker WebSocket channels
+    with client.websocket_connect("/api/v1/broker/ws") as websocket:
         # Test broker channels - orders
         websocket.send_json(
             {"type": "orders.subscribe", "payload": {"accountId": "test"}}

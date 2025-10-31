@@ -1,0 +1,53 @@
+# Multi-Process Backend Development Configuration
+
+# Nginx gateway configuration
+nginx:
+  port: 8000  # Single public-facing port
+  worker_processes: 1  # 'auto' or specific number
+  worker_connections: 1024
+
+# Backend server instances
+servers:
+  # Core server (common features only)
+  core:
+    port: 8003
+    instances: 1
+    modules: []  # No functional modules - just shared infrastructure
+    reload: true
+
+  # Broker operations server
+  broker:
+    port: 8001
+    instances: 1
+    modules:
+      - broker
+    reload: true
+
+  # Market data server
+  datafeed:
+    port: 8002
+    instances: 1
+    modules:
+      - datafeed
+    reload: true
+
+# WebSocket routing strategy
+websocket:
+  # Query parameter-based routing: ws://host/api/v1/ws?type=orders
+  # Path-based routing: ws://host/api/v1/ws/orders
+  routing_strategy: "query_param"  # "query_param" or "path"
+  query_param_name: "type"  # Used when routing_strategy is "query_param"
+
+# Module to server mapping for WebSocket routing
+# Maps WebSocket route names to server names
+websocket_routes:
+  # Broker routes
+  orders: broker
+  positions: broker
+  executions: broker
+  equity: broker
+  connection: broker
+
+  # Datafeed routes
+  bars: datafeed
+  quotes: datafeed

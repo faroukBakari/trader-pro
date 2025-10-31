@@ -67,8 +67,17 @@ def export_single_module(module_name: str | None, output_file: Path) -> int:
     try:
         # Create app with only the specified module (or all if None)
         enabled_modules = [module_name] if module_name else None
-        _, ws_app = create_app(enabled_modules=enabled_modules)
+        _, ws_apps = create_app(enabled_modules=enabled_modules)
 
+        # If specific module, get first ws_app; otherwise merge all
+        if len(ws_apps) == 0:
+            module_desc = module_name if module_name else "all modules"
+            print(f"⚠️  No WebSocket apps found for {module_desc}", file=sys.stderr)
+            return 1
+
+        # For now, export first ws_app (module-specific)
+        # TODO: Support merging multiple AsyncAPI specs
+        ws_app = ws_apps[0]
         asyncapi_schema = ws_app.asyncapi()
 
         # Validate subscription requests before exporting

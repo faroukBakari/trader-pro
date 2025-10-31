@@ -1,0 +1,1889 @@
+{
+  "asyncapi": "2.4.0",
+  "info": {
+    "title": "Broker WebSockets",
+    "version": "1.0.0",
+    "description": "Real-time broker data streaming for orders, positions, and executions"
+  },
+  "channels": {
+    "/": {
+      "subscribe": {
+        "operationId": "processMessage",
+        "summary": "The API user can receive a given message from the server.",
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/components/messages/orders.update"
+            },
+            {
+              "$ref": "#/components/messages/orders.subscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/orders.unsubscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/positions.update"
+            },
+            {
+              "$ref": "#/components/messages/positions.subscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/positions.unsubscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/executions.update"
+            },
+            {
+              "$ref": "#/components/messages/executions.subscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/executions.unsubscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/equity.update"
+            },
+            {
+              "$ref": "#/components/messages/equity.subscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/equity.unsubscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/broker-connection.update"
+            },
+            {
+              "$ref": "#/components/messages/broker-connection.subscribe.response"
+            },
+            {
+              "$ref": "#/components/messages/broker-connection.unsubscribe.response"
+            }
+          ]
+        }
+      },
+      "publish": {
+        "operationId": "sendMessage",
+        "summary": "The API user can send a given message to the server.",
+        "message": {
+          "oneOf": [
+            {
+              "$ref": "#/components/messages/orders.subscribe"
+            },
+            {
+              "$ref": "#/components/messages/orders.unsubscribe"
+            },
+            {
+              "$ref": "#/components/messages/positions.subscribe"
+            },
+            {
+              "$ref": "#/components/messages/positions.unsubscribe"
+            },
+            {
+              "$ref": "#/components/messages/executions.subscribe"
+            },
+            {
+              "$ref": "#/components/messages/executions.unsubscribe"
+            },
+            {
+              "$ref": "#/components/messages/equity.subscribe"
+            },
+            {
+              "$ref": "#/components/messages/equity.unsubscribe"
+            },
+            {
+              "$ref": "#/components/messages/broker-connection.subscribe"
+            },
+            {
+              "$ref": "#/components/messages/broker-connection.unsubscribe"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BrokerConnectionStatus": {
+        "description": "Broker connection status\n\nRepresents the connection state between the backend and the real broker.\nStatus values: 1 = Connected, 0 = Disconnected",
+        "properties": {
+          "status": {
+            "description": "Connection status (1 = Connected, 0 = Disconnected)",
+            "title": "Status",
+            "type": "integer"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Status message",
+            "title": "Message"
+          },
+          "disconnectType": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Type of disconnection",
+            "title": "Disconnecttype"
+          },
+          "timestamp": {
+            "description": "Timestamp in milliseconds",
+            "title": "Timestamp",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "timestamp"
+        ],
+        "title": "BrokerConnectionStatus",
+        "type": "object"
+      },
+      "BrokerConnectionSubscriptionRequest": {
+        "description": "WebSocket subscription request for broker connection status updates",
+        "properties": {
+          "accountId": {
+            "description": "Account ID to subscribe to",
+            "title": "Accountid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountId"
+        ],
+        "title": "BrokerConnectionSubscriptionRequest",
+        "type": "object"
+      },
+      "EquityData": {
+        "description": "Equity and balance data for account\n\nRepresents the current financial state of an account including\nbalance, equity, and profit/loss values.",
+        "properties": {
+          "equity": {
+            "description": "Total account equity",
+            "title": "Equity",
+            "type": "number"
+          },
+          "balance": {
+            "description": "Account balance",
+            "title": "Balance",
+            "type": "number"
+          },
+          "unrealizedPL": {
+            "description": "Unrealized profit/loss",
+            "title": "Unrealizedpl",
+            "type": "number"
+          },
+          "realizedPL": {
+            "description": "Realized profit/loss",
+            "title": "Realizedpl",
+            "type": "number"
+          }
+        },
+        "required": [
+          "equity",
+          "balance",
+          "unrealizedPL",
+          "realizedPL"
+        ],
+        "title": "EquityData",
+        "type": "object"
+      },
+      "EquitySubscriptionRequest": {
+        "description": "WebSocket subscription request for equity/balance updates",
+        "properties": {
+          "accountId": {
+            "description": "Account ID to subscribe to",
+            "title": "Accountid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountId"
+        ],
+        "title": "EquitySubscriptionRequest",
+        "type": "object"
+      },
+      "Execution": {
+        "description": "Trade execution record (matching TradingView Execution)",
+        "properties": {
+          "symbol": {
+            "description": "Symbol name",
+            "title": "Symbol",
+            "type": "string"
+          },
+          "price": {
+            "description": "Execution price",
+            "title": "Price",
+            "type": "number"
+          },
+          "qty": {
+            "description": "Execution quantity",
+            "exclusiveMinimum": 0.0,
+            "title": "Qty",
+            "type": "number"
+          },
+          "side": {
+            "$ref": "#/components/schemas/Side",
+            "description": "Execution side"
+          },
+          "time": {
+            "description": "Time (unix timestamp in milliseconds)",
+            "title": "Time",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "symbol",
+          "price",
+          "qty",
+          "side",
+          "time"
+        ],
+        "title": "Execution",
+        "type": "object"
+      },
+      "ExecutionSubscriptionRequest": {
+        "description": "WebSocket subscription request for execution updates",
+        "properties": {
+          "accountId": {
+            "description": "Account ID to subscribe to",
+            "title": "Accountid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountId"
+        ],
+        "title": "ExecutionSubscriptionRequest",
+        "type": "object"
+      },
+      "OrderStatus": {
+        "description": "Order status enumeration matching TradingView OrderStatus",
+        "enum": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "title": "OrderStatus",
+        "type": "integer"
+      },
+      "OrderSubscriptionRequest": {
+        "description": "WebSocket subscription request for order updates",
+        "properties": {
+          "accountId": {
+            "description": "Account ID to subscribe to",
+            "title": "Accountid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountId"
+        ],
+        "title": "OrderSubscriptionRequest",
+        "type": "object"
+      },
+      "OrderType": {
+        "description": "Order type enumeration matching TradingView OrderType",
+        "enum": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "title": "OrderType",
+        "type": "integer"
+      },
+      "PlacedOrder": {
+        "description": "Complete order with status (matching TradingView PlacedOrder/PlacedOrderBase)\nContains information about a placed order",
+        "properties": {
+          "id": {
+            "description": "Order ID",
+            "title": "Id",
+            "type": "string"
+          },
+          "symbol": {
+            "description": "Symbol name",
+            "title": "Symbol",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/OrderType",
+            "description": "Order type"
+          },
+          "side": {
+            "$ref": "#/components/schemas/Side",
+            "description": "Order side (buy or sell)"
+          },
+          "qty": {
+            "description": "Order quantity",
+            "exclusiveMinimum": 0.0,
+            "title": "Qty",
+            "type": "number"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus",
+            "description": "Order status"
+          },
+          "limitPrice": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Price for the limit order",
+            "title": "Limitprice"
+          },
+          "stopPrice": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Price for the stop order",
+            "title": "Stopprice"
+          },
+          "takeProfit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Take profit price (Brackets)",
+            "title": "Takeprofit"
+          },
+          "stopLoss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Stop loss price (Brackets)",
+            "title": "Stoploss"
+          },
+          "guaranteedStop": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Guaranteed stop loss price (Brackets)",
+            "title": "Guaranteedstop"
+          },
+          "trailingStopPips": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Trailing stop pips value (Brackets)",
+            "title": "Trailingstoppips"
+          },
+          "stopType": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Stop loss type"
+          },
+          "filledQty": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Filled order quantity",
+            "title": "Filledqty"
+          },
+          "avgPrice": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Average fulfilled price for the order",
+            "title": "Avgprice"
+          },
+          "updateTime": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Last update time (unix timestamp in milliseconds)",
+            "title": "Updatetime"
+          }
+        },
+        "required": [
+          "id",
+          "symbol",
+          "type",
+          "side",
+          "qty",
+          "status"
+        ],
+        "title": "PlacedOrder",
+        "type": "object"
+      },
+      "Position": {
+        "description": "Position data (matching TradingView Position/PositionBase)\nDescribes a single position\n\nNote: qty can be 0 when a position is closed. TradingView expects\npositionUpdate with qty=0 to confirm position closure within 10 seconds,\notherwise it shows \"Position closing timeout\" error.",
+        "properties": {
+          "id": {
+            "description": "Position ID (usually equal to symbol)",
+            "title": "Id",
+            "type": "string"
+          },
+          "symbol": {
+            "description": "Symbol name",
+            "title": "Symbol",
+            "type": "string"
+          },
+          "qty": {
+            "description": "Position quantity (0 when closed, positive otherwise)",
+            "minimum": 0.0,
+            "title": "Qty",
+            "type": "number"
+          },
+          "side": {
+            "$ref": "#/components/schemas/Side",
+            "description": "Position side"
+          },
+          "avgPrice": {
+            "description": "Weighted average price of all positions for a symbol (used for position line on chart)",
+            "title": "Avgprice",
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "symbol",
+          "qty",
+          "side",
+          "avgPrice"
+        ],
+        "title": "Position",
+        "type": "object"
+      },
+      "PositionSubscriptionRequest": {
+        "description": "WebSocket subscription request for position updates",
+        "properties": {
+          "accountId": {
+            "description": "Account ID to subscribe to",
+            "title": "Accountid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountId"
+        ],
+        "title": "PositionSubscriptionRequest",
+        "type": "object"
+      },
+      "Side": {
+        "description": "Order/Position side enumeration matching TradingView Side",
+        "enum": [
+          1,
+          -1
+        ],
+        "title": "Side",
+        "type": "integer"
+      },
+      "StopType": {
+        "description": "Stop type enumeration matching TradingView StopType",
+        "enum": [
+          0,
+          1,
+          2
+        ],
+        "title": "StopType",
+        "type": "integer"
+      },
+      "SubscriptionResponse": {
+        "description": "Generic subscription response",
+        "properties": {
+          "status": {
+            "description": "Status",
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "message": {
+            "description": "Status message",
+            "title": "Message",
+            "type": "string"
+          },
+          "topic": {
+            "description": "Subscription topic",
+            "title": "Topic",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "message",
+          "topic"
+        ],
+        "title": "SubscriptionResponse",
+        "type": "object"
+      },
+      "SubscriptionUpdate_BrokerConnectionStatus_": {
+        "properties": {
+          "topic": {
+            "description": "Update type",
+            "title": "Topic",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/BrokerConnectionStatus",
+            "description": "Update payload"
+          }
+        },
+        "required": [
+          "topic",
+          "payload"
+        ],
+        "title": "SubscriptionUpdate[BrokerConnectionStatus]",
+        "type": "object"
+      },
+      "SubscriptionUpdate_EquityData_": {
+        "properties": {
+          "topic": {
+            "description": "Update type",
+            "title": "Topic",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/EquityData",
+            "description": "Update payload"
+          }
+        },
+        "required": [
+          "topic",
+          "payload"
+        ],
+        "title": "SubscriptionUpdate[EquityData]",
+        "type": "object"
+      },
+      "SubscriptionUpdate_Execution_": {
+        "properties": {
+          "topic": {
+            "description": "Update type",
+            "title": "Topic",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Execution",
+            "description": "Update payload"
+          }
+        },
+        "required": [
+          "topic",
+          "payload"
+        ],
+        "title": "SubscriptionUpdate[Execution]",
+        "type": "object"
+      },
+      "SubscriptionUpdate_PlacedOrder_": {
+        "properties": {
+          "topic": {
+            "description": "Update type",
+            "title": "Topic",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/PlacedOrder",
+            "description": "Update payload"
+          }
+        },
+        "required": [
+          "topic",
+          "payload"
+        ],
+        "title": "SubscriptionUpdate[PlacedOrder]",
+        "type": "object"
+      },
+      "SubscriptionUpdate_Position_": {
+        "properties": {
+          "topic": {
+            "description": "Update type",
+            "title": "Topic",
+            "type": "string"
+          },
+          "payload": {
+            "$ref": "#/components/schemas/Position",
+            "description": "Update payload"
+          }
+        },
+        "required": [
+          "topic",
+          "payload"
+        ],
+        "title": "SubscriptionUpdate[Position]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_subscribe___BrokerConnectionSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "broker-connection.subscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrokerConnectionSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['broker-connection.subscribe'], BrokerConnectionSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_subscribe___EquitySubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "equity.subscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EquitySubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['equity.subscribe'], EquitySubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_subscribe___ExecutionSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "executions.subscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['executions.subscribe'], ExecutionSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_subscribe___OrderSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "orders.subscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['orders.subscribe'], OrderSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_subscribe___PositionSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "positions.subscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PositionSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['positions.subscribe'], PositionSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_unsubscribe___BrokerConnectionSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "broker-connection.unsubscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BrokerConnectionSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['broker-connection.unsubscribe'], BrokerConnectionSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_unsubscribe___EquitySubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "equity.unsubscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EquitySubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['equity.unsubscribe'], EquitySubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_unsubscribe___ExecutionSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "executions.unsubscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['executions.unsubscribe'], ExecutionSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_unsubscribe___OrderSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "orders.unsubscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['orders.unsubscribe'], OrderSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_unsubscribe___PositionSubscriptionRequest_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "positions.unsubscribe",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PositionSubscriptionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['positions.unsubscribe'], PositionSubscriptionRequest]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_update___SubscriptionUpdate_BrokerConnectionStatus__": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "broker-connection.update",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionUpdate_BrokerConnectionStatus_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['broker-connection.update'], SubscriptionUpdate[BrokerConnectionStatus]]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_update___SubscriptionUpdate_EquityData__": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "equity.update",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionUpdate_EquityData_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['equity.update'], SubscriptionUpdate[EquityData]]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_update___SubscriptionUpdate_Execution__": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "executions.update",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionUpdate_Execution_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['executions.update'], SubscriptionUpdate[Execution]]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_update___SubscriptionUpdate_PlacedOrder__": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "orders.update",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionUpdate_PlacedOrder_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['orders.update'], SubscriptionUpdate[PlacedOrder]]",
+        "type": "object"
+      },
+      "_MsgWithPayload_Literal_update___SubscriptionUpdate_Position__": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "positions.update",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionUpdate_Position_"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['positions.update'], SubscriptionUpdate[Position]]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__broker-connection__subscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "broker-connection.subscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['broker-connection.subscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__broker-connection__unsubscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "broker-connection.unsubscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['broker-connection.unsubscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__equity__subscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "equity.subscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['equity.subscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__equity__unsubscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "equity.unsubscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['equity.unsubscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__executions__subscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "executions.subscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['executions.subscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__executions__unsubscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "executions.unsubscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['executions.unsubscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__orders__subscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "orders.subscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['orders.subscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__orders__unsubscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "orders.unsubscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['orders.unsubscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__positions__subscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "positions.subscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['positions.subscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      },
+      "external_packages__fastws__routing___MsgWithPayload_Literal__positions__unsubscribe__response___SubscriptionResponse_": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "const": "positions.unsubscribe.response",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Type"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "payload"
+        ],
+        "title": "_MsgWithPayload[Literal['positions.unsubscribe.response'], SubscriptionResponse]",
+        "type": "object"
+      }
+    },
+    "messages": {
+      "orders.update": {
+        "messageId": "orders.update",
+        "name": "update",
+        "title": "Update",
+        "description": "Broadcast data updates to subscribed clients",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_update___SubscriptionUpdate_PlacedOrder__"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "orders.subscribe": {
+        "messageId": "orders.subscribe",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_subscribe___OrderSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/orders.subscribe.response"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "orders.subscribe.response": {
+        "messageId": "orders.subscribe.response",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__orders__subscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "orders.unsubscribe": {
+        "messageId": "orders.unsubscribe",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_unsubscribe___OrderSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/orders.unsubscribe.response"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "orders.unsubscribe.response": {
+        "messageId": "orders.unsubscribe.response",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__orders__unsubscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "positions.update": {
+        "messageId": "positions.update",
+        "name": "update",
+        "title": "Update",
+        "description": "Broadcast data updates to subscribed clients",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_update___SubscriptionUpdate_Position__"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "positions.subscribe": {
+        "messageId": "positions.subscribe",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_subscribe___PositionSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/positions.subscribe.response"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "positions.subscribe.response": {
+        "messageId": "positions.subscribe.response",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__positions__subscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "positions.unsubscribe": {
+        "messageId": "positions.unsubscribe",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_unsubscribe___PositionSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/positions.unsubscribe.response"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "positions.unsubscribe.response": {
+        "messageId": "positions.unsubscribe.response",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__positions__unsubscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "executions.update": {
+        "messageId": "executions.update",
+        "name": "update",
+        "title": "Update",
+        "description": "Broadcast data updates to subscribed clients",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_update___SubscriptionUpdate_Execution__"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "executions.subscribe": {
+        "messageId": "executions.subscribe",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_subscribe___ExecutionSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/executions.subscribe.response"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "executions.subscribe.response": {
+        "messageId": "executions.subscribe.response",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__executions__subscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "executions.unsubscribe": {
+        "messageId": "executions.unsubscribe",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_unsubscribe___ExecutionSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/executions.unsubscribe.response"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "executions.unsubscribe.response": {
+        "messageId": "executions.unsubscribe.response",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__executions__unsubscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "equity.update": {
+        "messageId": "equity.update",
+        "name": "update",
+        "title": "Update",
+        "description": "Broadcast data updates to subscribed clients",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_update___SubscriptionUpdate_EquityData__"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "equity.subscribe": {
+        "messageId": "equity.subscribe",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_subscribe___EquitySubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/equity.subscribe.response"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "equity.subscribe.response": {
+        "messageId": "equity.subscribe.response",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__equity__subscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "equity.unsubscribe": {
+        "messageId": "equity.unsubscribe",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_unsubscribe___EquitySubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/equity.unsubscribe.response"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "equity.unsubscribe.response": {
+        "messageId": "equity.unsubscribe.response",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__equity__unsubscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "broker-connection.update": {
+        "messageId": "broker-connection.update",
+        "name": "update",
+        "title": "Update",
+        "description": "Broadcast data updates to subscribed clients",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_update___SubscriptionUpdate_BrokerConnectionStatus__"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "broker-connection.subscribe": {
+        "messageId": "broker-connection.subscribe",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_subscribe___BrokerConnectionSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/broker-connection.subscribe.response"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "broker-connection.subscribe.response": {
+        "messageId": "broker-connection.subscribe.response",
+        "name": "send_subscribe",
+        "title": "Send Subscribe",
+        "description": "Subscribe to real-time data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__broker-connection__subscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "broker-connection.unsubscribe": {
+        "messageId": "broker-connection.unsubscribe",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/_MsgWithPayload_Literal_unsubscribe___BrokerConnectionSubscriptionRequest_"
+        },
+        "x-response": {
+          "$ref": "#/components/messages/broker-connection.unsubscribe.response"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      },
+      "broker-connection.unsubscribe.response": {
+        "messageId": "broker-connection.unsubscribe.response",
+        "name": "send_unsubscribe",
+        "title": "Send Unsubscribe",
+        "description": "Unsubscribe from data updates",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "#/components/schemas/external_packages__fastws__routing___MsgWithPayload_Literal__broker-connection__unsubscribe__response___SubscriptionResponse_"
+        },
+        "tags": [
+          {
+            "name": "broker"
+          }
+        ]
+      }
+    }
+  },
+  "defaultContentType": "application/json"
+}

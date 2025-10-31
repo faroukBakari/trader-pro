@@ -134,8 +134,9 @@ def test_websocket_routers_module_specific() -> None:
     from trading_api.app_factory import create_app
 
     # Create datafeed-only app
-    _, ws_app_datafeed = create_app(enabled_modules=["datafeed"])
-    datafeed_routes = [route.operation for route in ws_app_datafeed.router.routes]
+    _, ws_apps_datafeed = create_app(enabled_modules=["datafeed"])
+    assert len(ws_apps_datafeed) == 1, "Should have one WebSocket app for datafeed"
+    datafeed_routes = [route.operation for route in ws_apps_datafeed[0].router.routes]
 
     # Should have datafeed routes
     assert "bars.subscribe" in datafeed_routes or "bars.unsubscribe" in datafeed_routes
@@ -149,8 +150,9 @@ def test_websocket_routers_module_specific() -> None:
     assert not any("executions" in route for route in datafeed_routes)
 
     # Create broker-only app
-    _, ws_app_broker = create_app(enabled_modules=["broker"])
-    broker_routes = [route.operation for route in ws_app_broker.router.routes]
+    _, ws_apps_broker = create_app(enabled_modules=["broker"])
+    assert len(ws_apps_broker) == 1, "Should have one WebSocket app for broker"
+    broker_routes = [route.operation for route in ws_apps_broker[0].router.routes]
 
     # Should have broker routes
     assert any("orders" in route for route in broker_routes)
