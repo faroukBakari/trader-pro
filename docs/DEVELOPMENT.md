@@ -61,7 +61,7 @@ For working on backend or frontend separately:
 
 ```bash
 cd backend
-make install  # One-time setup
+make install  # One-time setup (checks Python, Poetry, installs deps, prompts for nginx)
 make dev      # Start server
 make test     # Run tests
 ```
@@ -291,7 +291,7 @@ make -f project.mk dev-fullstack
 
 ```bash
 cd backend
-make ensure-python  # Offers to install Python 3.11+ via pyenv
+make install  # Checks Python 3.11+, offers pyenv install if needed
 ```
 
 ### Node.js Version Issues
@@ -332,7 +332,6 @@ cd frontend && make client-generate
 
 ### Backend
 
-- Use `make dev-no-debug` to skip debugpy overhead
 - Enable `--reload` for auto-restart on changes
 - Use `make test` frequently for fast feedback
 

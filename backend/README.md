@@ -35,38 +35,30 @@ FastAPI backend that powers the Trading Pro platform. It exposes a RESTful API f
 
 ```bash
 cd backend
-make install       # Validates Python 3.11+, offers to install if needed, then installs dependencies
+make install       # Checks Python 3.11+, checks Poetry, installs dependencies, prompts for nginx
 ```
 
 The `make install` command will:
 
 1. **Check Python version** - Validates Python 3.11+ is available
-2. **Auto-install Python** - If wrong version and pyenv is available, **offers to install Python 3.11.7** (with confirmation)
-3. **Install Poetry** - Automatically installs Poetry if missing
-4. **Install dependencies** - Runs `poetry install` to set up the project
+2. **Check Poetry** - Ensures Poetry is installed
+3. **Install dependencies** - Runs `poetry install` to set up the project
+4. **Prompt for nginx** - Asks if you want to install nginx (optional, for multi-process mode)
 
 **Interactive prompts:**
 
 - If Python 3.11+ is not found and pyenv is available, you'll be asked: `"Would you like to install Python 3.11.7 via pyenv? [y/N]"`
 - Type `y` and press Enter to automatically install and activate Python 3.11.7
 - Type `n` to skip and see manual installation instructions
-
-Alternatively, check prerequisites manually:
-
-```bash
-make ensure-python  # Check Python version
-make ensure-poetry  # Ensure Poetry is installed
-poetry install      # Install dependencies
-```
+- After Poetry and dependencies are installed, you'll be asked: `"Would you like to install nginx for multi-process backend? [y/N]"`
+- Type `y` to install standalone nginx binary (no sudo required)
+- Type `n` to skip nginx installation
 
 ### Run the API locally
 
 ```bash
 # Start the development server on http://localhost:8000
 make dev
-
-# Or start without debug tooling
-make dev-no-debug
 
 # Manual start (inside Poetry shell)
 poetry run uvicorn "trading_api.main:$BACKEND_APP_NAME" --reload
@@ -343,8 +335,7 @@ backend/
 ## Troubleshooting
 
 - Ensure the Poetry environment is activated (`poetry shell`) before running manual commands
-- `make lint-response-models` validates that every FastAPI route declares a response model (used in CI)
-- Regenerate the OpenAPI file manually with `make export-openapi` if frontend tooling requires a fresh contract without starting the server
+- Regenerate the OpenAPI file manually with `make export-openapi-spec` if frontend tooling requires a fresh contract without starting the server
 
 ## Next Steps
 
