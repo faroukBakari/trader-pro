@@ -8,14 +8,12 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, AsyncGenerator
+from typing import AsyncGenerator
 
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
-from external_packages.fastws import Client
-from trading_api.models import APIVersion
 from trading_api.shared import FastWSAdapter, HealthApi, ModuleRegistry, VersionApi
 
 # Configure logging for the application
@@ -61,7 +59,7 @@ def validate_response_models(app: FastAPI) -> None:
 
 def create_app(
     enabled_modules: list[str] | None = None,
-) -> tuple[FastAPI, FastWSAdapter]:
+) -> tuple[FastAPI, list[FastWSAdapter]]:
     """Create and configure FastAPI and FastWSAdapter applications.
 
     Args:
@@ -69,13 +67,13 @@ def create_app(
             modules are enabled. Use this to selectively load modules.
 
     Returns:
-        tuple[FastAPI, FastWSAdapter]: Configured API and WebSocket applications
+        tuple[FastAPI, list[FastWSAdapter]]: API app and list of module WS apps
 
     Example:
         >>> # Load all modules
-        >>> api_app, ws_app = create_app()
+        >>> api_app, ws_apps = create_app()
         >>> # Load only datafeed module
-        >>> api_app, ws_app = create_app(enabled_modules=["datafeed"])
+        >>> api_app, ws_apps = create_app(enabled_modules=["datafeed"])
     """
     # Register all available modules
     from trading_api.modules.broker import BrokerModule
@@ -96,21 +94,17 @@ def create_app(
 
     # Create base URL
     base_url = "/api/v1"
+    ws_apps: list[FastWSAdapter] = []  # Collect all module WS apps
 
-    # Create WebSocket adapter (needs to be created before lifespan)
-    ws_url = f"{base_url}/ws"
-    ws_app = FastWSAdapter(
-        title="Trading WebSockets",
-        description=(
-            "Real-time trading data streaming. "
-            "Read the documentation to subscribe to specific data feeds."
-        ),
-        version="1.0.0",
-        asyncapi_url=f"{ws_url}/asyncapi.json",
-        asyncapi_docs_url=f"{ws_url}/asyncapi",
-        heartbeat_interval=30.0,
-        max_connection_lifespan=3600.0,
-    )
+    # Compute OpenAPI tags dynamically from enabled modules
+    openapi_tags = [
+        {"name": "health", "description": "Health check operations"},
+        {"name": "versioning", "description": "API version information"},
+    ] + [
+        tag
+        for module in registry.get_enabled_modules()
+        for tag in module.get_openapi_tags()
+    ]
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -132,18 +126,21 @@ def create_app(
         except Exception as e:
             print(f"⚠️  Failed to generate OpenAPI file: {e}")
 
-        # Startup: Generate asyncapi.json file for file-based watching
-        asyncapi_schema = ws_app.asyncapi()
-        asyncapi_file = backend_dir / "asyncapi.json"
+        # Startup: Generate AsyncAPI specs for each module
+        for idx, ws_app in enumerate(ws_apps):
+            asyncapi_schema = ws_app.asyncapi()
+            # Use module-specific filename or numbered if needed
+            asyncapi_file = backend_dir / f"asyncapi-{idx}.json"
+            try:
+                with open(asyncapi_file, "w") as f:
+                    json.dump(asyncapi_schema, f, indent=2)
+                print(f"📝 Generated AsyncAPI spec: {asyncapi_file}")
+            except Exception as e:
+                print(f"⚠️  Failed to generate AsyncAPI file: {e}")
 
-        try:
-            with open(asyncapi_file, "w") as f:
-                json.dump(asyncapi_schema, f, indent=2)
-            print(f"📝 Generated AsyncAPI spec: {asyncapi_file}")
-        except Exception as e:
-            print(f"⚠️  Failed to generate AsyncAPI file: {e}")
-
-        ws_app.setup(app)
+        # Setup all WebSocket apps
+        for ws_app in ws_apps:
+            ws_app.setup(app)
 
         yield
 
@@ -162,15 +159,7 @@ def create_app(
         openapi_url=f"{base_url}/openapi.json",
         docs_url=f"{base_url}/docs",
         redoc_url=f"{base_url}/redoc",
-        openapi_tags=[
-            {"name": "health", "description": "Health check operations"},
-            {"name": "versioning", "description": "API version information"},
-            {"name": "datafeed", "description": "Market data and symbols operations"},
-            {
-                "name": "broker",
-                "description": "Broker operations (orders, positions, executions)",
-            },
-        ],
+        openapi_tags=openapi_tags,
         lifespan=lifespan,
     )
 
@@ -182,6 +171,19 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Add root endpoint with API information
+    @api_app.get("/", tags=["root"])
+    async def root() -> dict:
+        """Root endpoint providing API metadata and navigation."""
+        return {
+            "name": "Trading API",
+            "version": "1.0.0",
+            "current_api_version": "v1",
+            "documentation": f"{base_url}/docs",
+            "health": f"{base_url}/health",
+            "versions": f"{base_url}/versions",
+        }
 
     # Load shared routers (health, versions) - always available
     api_app.include_router(HealthApi(tags=["health"]), prefix=base_url, tags=["v1"])
@@ -195,41 +197,12 @@ def create_app(
         for router in module.get_api_routers():
             api_app.include_router(router, prefix=base_url, tags=["v1"])
 
-        # Include WebSocket routers
-        for ws_router in module.get_ws_routers():
-            ws_app.include_router(ws_router)
+        # Register module's WebSocket endpoint (if supported)
+        if hasattr(module, "register_ws_endpoint"):
+            module.register_ws_endpoint(api_app, base_url)
+            ws_apps.append(module.get_ws_app(base_url))
 
-        # Call configure_app hook
-        module.configure_app(api_app, ws_app)
+        # Call configure_app hook - ws_app parameter deprecated
+        module.configure_app(api_app, None)
 
-    # Register the WebSocket endpoint
-    @api_app.websocket(ws_url)
-    async def websocket_endpoint(
-        client: Annotated[Client, Depends(ws_app.manage)],
-    ) -> None:
-        """WebSocket endpoint for real-time bar data streaming"""
-        await ws_app.serve(client)
-
-    # Add root endpoint
-    @api_app.get("/", tags=["root"])
-    async def root() -> dict:
-        """Root endpoint with API information."""
-        ws_routers = []
-        for module in registry.get_enabled_modules():
-            ws_routers.extend(module.get_ws_routers())
-
-        return {
-            "name": "Trading API",
-            "version": "1.0.0",
-            "current_api_version": APIVersion.get_latest().value,
-            "documentation": f"{base_url}/docs",
-            "health": f"{base_url}/health",
-            "versions": f"{base_url}/versions",
-            "datafeed": f"{base_url}/datafeed",
-            "websockets": {
-                router.route: router.build_specs(ws_url, ws_app)
-                for router in ws_routers
-            },
-        }
-
-    return api_app, ws_app
+    return api_app, ws_apps

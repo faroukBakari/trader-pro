@@ -18,16 +18,16 @@ class TestBarsWebSocketIntegration:
     """Integration tests for bars WebSocket endpoint"""
 
     def test_websocket_connection(self, client: TestClient) -> None:
-        """Test basic WebSocket connection to /api/v1/ws"""
+        """Test basic WebSocket connection to /api/v1/datafeed/ws"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Connection successful if we get here
             assert websocket is not None
 
     def test_subscribe_to_bars(self, client: TestClient) -> None:
         """Test subscribing to bar updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Send subscribe message
             subscribe_msg = {
                 "type": "bars.subscribe",
@@ -50,7 +50,7 @@ class TestBarsWebSocketIntegration:
     def test_subscribe_with_different_resolutions(self, client: TestClient) -> None:
         """Test subscribing to different resolutions creates different topics"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Subscribe to 1-minute bars
             websocket.send_json(
                 {
@@ -80,7 +80,7 @@ class TestBarsWebSocketIntegration:
     def test_unsubscribe_from_bars(self, client: TestClient) -> None:
         """Test unsubscribing from bar updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # First subscribe
             websocket.send_json(
                 {
@@ -112,7 +112,7 @@ class TestBarsWebSocketIntegration:
     def test_multiple_symbols_subscription(self, client: TestClient) -> None:
         """Test subscribing to multiple symbols"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             symbols = ["AAPL", "GOOGL", "MSFT"]
 
             for symbol in symbols:
@@ -132,7 +132,7 @@ class TestBarsWebSocketIntegration:
     def test_subscribe_with_explicit_resolution(self, client: TestClient) -> None:
         """Test that subscribing with explicit resolution works correctly"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Subscribe with explicit resolution
             websocket.send_json(
                 {

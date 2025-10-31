@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec validate-package-names docs-html generate-ws-routers $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help ensure-python ensure-python-ci ensure-poetry verify-nginx install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec validate-package-names docs-html generate-ws-routers $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -24,6 +24,7 @@ help:
 	@echo "  ensure-python     Ensure Python 3.11+ is installed (offers auto-install)"
 	@echo "  ensure-python-ci  Ensure Python 3.11+ is installed (CI mode, no prompts)"
 	@echo "  ensure-poetry     Ensure Poetry is installed (auto-installs if needed)"
+	@echo "  verify-nginx      Verify nginx is installed (for multi-process mode)"
 	@echo "  install           Install backend dependencies"
 	@echo ""
 	@echo "Testing targets:"
@@ -195,6 +196,15 @@ ensure-poetry:
 		echo "Poetry installed successfully!"; \
 	else \
 		echo "Poetry is already installed: $$(poetry --version)"; \
+	fi
+
+# Verify nginx is installed (for multi-process mode)
+verify-nginx:
+	@if ! command -v nginx >/dev/null 2>&1; then \
+		echo "❌ nginx not found! Install: sudo apt install nginx"; \
+		exit 1; \
+	else \
+		echo "✅ nginx available: $$(nginx -v 2>&1)"; \
 	fi
 
 # Backend dependency management

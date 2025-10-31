@@ -20,7 +20,7 @@ from trading_api.shared import FastWSAdapter
 
 def create_test_app(
     enabled_modules: list[str] | None = None,
-) -> tuple[FastAPI, FastWSAdapter]:
+) -> tuple[FastAPI, list[FastWSAdapter]]:
     """Create a test application with specified modules.
 
     Args:
@@ -28,17 +28,17 @@ def create_test_app(
                         If None, all modules are enabled.
 
     Returns:
-        tuple: (FastAPI application, FastWSAdapter application)
+        tuple: (FastAPI application, list of FastWSAdapter applications)
 
     Example:
         # Test with all modules
-        api_app, ws_app = create_test_app()
+        api_app, ws_apps = create_test_app()
 
         # Test with only broker module
-        api_app, ws_app = create_test_app(enabled_modules=["broker"])
+        api_app, ws_apps = create_test_app(enabled_modules=["broker"])
 
         # Test with only shared infrastructure (no modules)
-        api_app, ws_app = create_test_app(enabled_modules=[])
+        api_app, ws_apps = create_test_app(enabled_modules=[])
     """
     from trading_api.app_factory import create_app
 
@@ -46,23 +46,23 @@ def create_test_app(
 
 
 @pytest.fixture
-def apps() -> tuple[FastAPI, FastWSAdapter]:
+def apps() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Full application (API + WS) with all modules enabled."""
     return create_test_app(enabled_modules=None)
 
 
 @pytest.fixture
-def app(apps: tuple[FastAPI, FastWSAdapter]) -> FastAPI:
+def app(apps: tuple[FastAPI, list[FastWSAdapter]]) -> FastAPI:
     """FastAPI application instance."""
     api_app, _ = apps
     return api_app
 
 
 @pytest.fixture
-def ws_app(apps: tuple[FastAPI, FastWSAdapter]) -> FastWSAdapter:
-    """FastWSAdapter application instance."""
-    _, ws_app = apps
-    return ws_app
+def ws_app(apps: tuple[FastAPI, list[FastWSAdapter]]) -> FastWSAdapter | None:
+    """FastWSAdapter application instance (first module's ws_app)."""
+    _, ws_apps = apps
+    return ws_apps[0] if ws_apps else None
 
 
 @pytest.fixture
