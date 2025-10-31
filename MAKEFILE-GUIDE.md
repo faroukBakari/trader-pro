@@ -80,6 +80,11 @@ make backend-manager-status         # Show process status and health
 make backend-manager-restart        # Restart all processes
 make backend-manager-gen-nginx-conf # Generate nginx config (debug)
 
+# Logging
+make logs-tail                      # Tail unified backend log (all servers with prefixes)
+make logs-tail-nginx                # Tail nginx logs (access + error)
+make logs-clean                     # Clean all backend log files
+
 # API
 make health                    # Check API health
 make generate-python-clients   # Generate HTTP clients (includes format & validation)

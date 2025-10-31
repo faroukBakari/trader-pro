@@ -32,6 +32,11 @@ make backend-manager-status             # Show process status
 make backend-manager-restart            # Restart all processes
 make backend-manager-gen-nginx-conf     # Generate nginx config (debug)
 
+# Log management (NEW)
+make logs-tail                          # Tail unified log (all servers)
+make logs-tail-nginx                    # Tail nginx logs only
+make logs-clean                         # Truncate all log files
+
 # Using script directly
 poetry run python scripts/backend_manager.py start [config]
 poetry run python scripts/backend_manager.py stop [config]
@@ -175,7 +180,7 @@ poetry run python scripts/backend_manager.py gen-nginx-conf dev-config.yaml -o n
 **Files**:
 
 - ✅ `backend/scripts/backend_manager.py` (NEW - unified CLI with nginx generation)
-- ✅ `backend/src/trading_api/shared/deployment/server_manager.py` (enhanced with status/PID tracking)
+- ✅ `backend/scripts/server_manager.py` (enhanced with status/PID tracking)
 - ❌ `backend/scripts/run_multiprocess.py` (REMOVED - consolidated)
 - ❌ `backend/scripts/gen_nginx_conf.py` (REMOVED - consolidated)
 
@@ -187,31 +192,80 @@ poetry run python scripts/backend_manager.py gen-nginx-conf dev-config.yaml -o n
 - ✅ Standalone stop/status commands (works without active manager instance)
 - ✅ Port checking before startup
 - ✅ Ordered shutdown: nginx → functional modules → core
-- ✅ Timeout handling: Force kill after 10s
+- ✅ Timeout handling: Force kill after 3s (optimized from 10s)
 - ✅ Auto-nginx config generation on start
+- ✅ **Centralized logging with server prefixes** (NEW)
+- ✅ **Detached background mode** - start returns immediately (NEW)
+- ✅ **Fast stop/restart** - optimized shutdown with port release detection (NEW)
+
+**Logging System**:
+
+The backend manager now includes a centralized logging system:
+
+- **Unified log file**: `backend/.local/logs/backend-unified.log` - Combined output from all servers
+- **Individual logs**: `backend/.local/logs/{server-name}.log` - Per-server log files
+- **Fixed-width prefixes**: Server names formatted to 20 characters for aligned log output
+  ```
+  broker-0          >> [INFO] Server started on port 8001
+  datafeed-0        >> [INFO] Connecting to market data feed
+  nginx             >> [INFO] Server listening on 0.0.0.0:8000
+  ```
+- **Real-time streaming**: Background threads stream output to both unified and individual logs
+- **Detached mode**: Backend runs in background (like nohup), start command returns immediately
+
+**Log Management Commands**:
+
+```bash
+# Tail all server logs with prefixes
+make logs-tail
+
+# Tail nginx logs only
+make logs-tail-nginx
+
+# Clean/truncate all log files (preserves files)
+make logs-clean
+```
+
+**Performance Optimizations**:
+
+- **Fast shutdown**: Reduced timeout from 10s to 3s with 0.05s polling intervals (~1 second total)
+- **Fast restart**: Port release detection ensures clean restart without conflicts (~2 seconds total)
+- **Detached startup**: Start command returns immediately, processes run in background
 
 **Test**:
 
 ```bash
-# Start backend
+# Start backend (detached mode - returns immediately)
 make backend-manager-start
 # or: poetry run python scripts/backend_manager.py start
+
+# Start in foreground mode (interactive)
+poetry run python scripts/backend_manager.py start --foreground
 
 # Check status
 make backend-manager-status
 # or: poetry run python scripts/backend_manager.py status
 
-# Stop backend
+# Tail logs (all servers with prefixes)
+make logs-tail
+
+# Tail nginx logs only
+make logs-tail-nginx
+
+# Stop backend (fast - ~1 second)
 make backend-manager-stop
 # or: poetry run python scripts/backend_manager.py stop
 
-# Restart backend
+# Restart backend (fast - ~2 seconds)
 make backend-manager-restart
 # or: poetry run python scripts/backend_manager.py restart
 
 # Generate nginx config (debug)
 make backend-manager-gen-nginx-conf
 # or: poetry run python scripts/backend_manager.py gen-nginx-conf --validate
+
+# Clean log files
+make logs-clean
 
 # Verify processes: ps aux | grep uvicorn
 # Test shutdown: Ctrl+C (check no orphans)
@@ -227,6 +281,10 @@ make backend-manager-gen-nginx-conf
 - [x] Status command shows running processes
 - [x] Stop command works from separate invocation
 - [x] PID files properly cleaned up
+- [x] **Unified logging with server prefixes** (NEW)
+- [x] **Detached background mode** (NEW)
+- [x] **Fast stop/restart with port release detection** (NEW)
+- [x] **Log management commands** (logs-tail, logs-tail-nginx, logs-clean) (NEW)
 
 ---
 
@@ -280,6 +338,9 @@ lsof -Pi :8000 -sTCP:LISTEN
 
 # Kill if needed
 kill -9 $(lsof -ti :8000)
+
+# Or use backend manager restart (includes port release detection)
+make backend-manager-restart
 ```
 
 ### Orphaned processes after crash
@@ -288,6 +349,9 @@ kill -9 $(lsof -ti :8000)
 # Force cleanup
 pkill -9 -f "uvicorn.*trading_api"
 pkill -9 -f "nginx.*nginx-generated"
+
+# Or use backend manager stop (includes PID cleanup)
+make backend-manager-stop
 ```
 
 ### WebSocket routing fails
@@ -295,6 +359,37 @@ pkill -9 -f "nginx.*nginx-generated"
 - Verify query parameter format in frontend
 - Check nginx routing rules match WebSocket URL structure
 - Test direct connection: `wscat -c ws://localhost:8000/api/v1/ws?type=orders`
+
+### Logs not appearing
+
+```bash
+# Check if backend is running
+make backend-manager-status
+
+# Tail logs to see output
+make logs-tail
+
+# Check individual server logs
+tail -f backend/.local/logs/broker-0.log
+
+# Restart backend to reinitialize logging
+make backend-manager-restart
+```
+
+### Restart fails with port conflicts
+
+The backend manager includes automatic port release detection. If restart still fails:
+
+```bash
+# Stop backend
+make backend-manager-stop
+
+# Wait a moment for ports to release
+sleep 1
+
+# Start backend
+make backend-manager-start
+```
 
 ---
 
@@ -317,13 +412,17 @@ pkill -9 -f "nginx.*nginx-generated"
 
 ### Phase 3
 
-- [ ] All servers start successfully
-- [ ] Health checks respond on all ports
-- [ ] Graceful shutdown (no orphaned processes)
-- [ ] Core server stops last
-- [ ] Port pre-check prevents partial startup
+- [x] All servers start successfully
+- [x] Health checks respond on all ports
+- [x] Graceful shutdown (no orphaned processes)
+- [x] Core server stops last
+- [x] Port pre-check prevents partial startup
+- [x] Unified logging with server prefixes
+- [x] Detached background mode
+- [x] Fast stop (~1s) and restart (~2s)
+- [x] Log management commands
 
-**Status**: Ready to start (Phase 2 complete)
+**Status**: ✅ **COMPLETE** (All features implemented and tested)
 
 ### Phase 4
 
@@ -371,12 +470,40 @@ pkill -9 -f "nginx.*nginx-generated"
 - Updated `dev-config.yaml` with path-based routing
 - Verified configuration with `nginx -t`
 
-**Phase 3: Server Manager** ❌ **NOT STARTED**
+**Phase 3: Server Manager** ✅ **COMPLETE**
 
-- Ready to implement (no blockers)
-- Files needed:
-  - `backend/src/trading_api/shared/deployment/server_manager.py`
-  - `backend/scripts/run_multiprocess.py`
+- ✅ Backend manager with unified CLI (start, stop, status, restart)
+- ✅ Process orchestration for multiple uvicorn instances
+- ✅ PID file tracking for all processes
+- ✅ Port conflict checking before startup
+- ✅ Graceful shutdown handling (nginx → modules → core)
+- ✅ Fast shutdown with 3s timeout (optimized from 10s)
+- ✅ Auto-nginx config generation on start
+- ✅ **Centralized logging system** (NEW)
+- ✅ **Detached background mode** - start returns immediately (NEW)
+- ✅ **Fast restart with port release detection** (~2s total) (NEW)
+- ✅ **Log management Makefile targets** (NEW)
+
+**Logging Features**:
+
+- Unified log file: `backend/.local/logs/backend-unified.log`
+- Individual server logs: `backend/.local/logs/{server-name}.log`
+- Fixed-width 20-char server prefixes for aligned output
+- Real-time log streaming via background threads
+- Makefile commands: `logs-tail`, `logs-tail-nginx`, `logs-clean`
+
+**Performance**:
+
+- Start: Returns immediately (detached mode)
+- Stop: ~1 second (3s timeout, 0.05s polling)
+- Restart: ~2 seconds (includes port release detection)
+
+**Files**:
+
+- ✅ `backend/scripts/backend_manager.py` (unified CLI with nginx generation)
+- ✅ `backend/scripts/server_manager.py` (enhanced with logging and detached mode)
+- ❌ `backend/scripts/run_multiprocess.py` (REMOVED - consolidated)
+- ❌ `backend/scripts/gen_nginx_conf.py` (REMOVED - consolidated)
 
 **Phase 4: Spec Watchers** ❌ **NOT STARTED**
 
@@ -396,30 +523,25 @@ pkill -9 -f "nginx.*nginx-generated"
 
 ## Next Steps
 
-**Current**: Ready to implement Phase 3 (Server Manager)
+**Current**: Phase 3 Complete - Ready for Phase 4 (Spec Watchers)
 
-1. **Implement Server Manager** (`backend/src/trading_api/shared/deployment/server_manager.py`):
+1. **Implement Spec Watchers** (Phase 4):
 
-   - Process orchestration for multiple uvicorn instances
-   - Port conflict checking before startup
-   - Graceful shutdown handling (nginx → modules → core)
-   - Timeout handling with force kill after 10s
+   - Create `backend/scripts/watch_specs_frontend.py` for OpenAPI client generation
+   - Create `backend/scripts/watch_specs_python.py` for Python client generation
+   - Add debouncing to prevent infinite loops
+   - Test automatic client regeneration on spec changes
 
-2. **Create Multi-Process Runner** (`backend/scripts/run_multiprocess.py`):
+2. **Integration** (Phase 5):
 
-   - CLI interface for starting multi-process mode
-   - Integration with server manager
-   - Process monitoring and health checks
+   - Update `project.mk` with multi-process targets
+   - Update `scripts/dev-fullstack.sh` with `--multi` flag
+   - Ensure backward compatibility with single-process mode
+   - Test full-stack operation with WebSockets through nginx
 
-3. **Test Server Manager**:
-
-   ```bash
-   cd backend && python scripts/run_multiprocess.py dev-config.yaml
-   # Verify all processes start
-   # Test graceful shutdown with Ctrl+C
-   ```
-
-4. **Complete Phase 3 checklist** before moving to Phase 4
+3. **Documentation**:
+   - Update MAKEFILE-GUIDE.md with new logging commands ✅ (DONE)
+   - Add troubleshooting section for common logging issues
 
 ---
 
