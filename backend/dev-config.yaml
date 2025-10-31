@@ -8,13 +8,6 @@ nginx:
 
 # Backend server instances
 servers:
-  # Core server (common features only)
-  core:
-    port: 8003
-    instances: 1
-    modules: []  # No functional modules - just shared infrastructure
-    reload: true
-
   # Broker operations server
   broker:
     port: 8001
@@ -34,20 +27,15 @@ servers:
 # WebSocket routing strategy
 websocket:
   # Query parameter-based routing: ws://host/api/v1/ws?type=orders
-  # Path-based routing: ws://host/api/v1/ws/orders
-  routing_strategy: "query_param"  # "query_param" or "path"
+  # Path-based routing: ws://host/api/v1/broker/ws (matches frontend URLs)
+  routing_strategy: "path"  # "query_param" or "path"
   query_param_name: "type"  # Used when routing_strategy is "query_param"
 
 # Module to server mapping for WebSocket routing
-# Maps WebSocket route names to server names
+# Maps WebSocket module paths to server names (for path-based routing)
 websocket_routes:
-  # Broker routes
-  orders: broker
-  positions: broker
-  executions: broker
-  equity: broker
-  connection: broker
+  # Broker module - all routes go to /api/v1/broker/ws
+  broker: broker
 
-  # Datafeed routes
-  bars: datafeed
-  quotes: datafeed
+  # Datafeed module - all routes go to /api/v1/datafeed/ws
+  datafeed: datafeed

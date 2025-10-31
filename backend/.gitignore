@@ -11,3 +11,5 @@ asyncapi.json
 .ruff_cache
 coverage.xml
 .openapi-checksum
+.local/
+nginx.pid
