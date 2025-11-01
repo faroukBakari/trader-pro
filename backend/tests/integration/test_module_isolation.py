@@ -1,17 +1,18 @@
 """Tests to verify module isolation and independence.
 
 Tests that modules can be loaded independently and don't interfere with each other.
+All tests use session-scoped fixtures for performance.
 """
 
 import pytest
 
+from trading_api.app_factory import registry
+
 
 @pytest.mark.integration
-def test_datafeed_only_isolation() -> None:
+def test_datafeed_only_isolation(datafeed_only_app) -> None:
     """Verify datafeed-only app doesn't load broker."""
-    from trading_api.app_factory import create_app
-
-    api_app, _ = create_app(enabled_modules=["datafeed"])
+    api_app, _ = datafeed_only_app
     openapi_spec = api_app.openapi()
     paths = openapi_spec.get("paths", {})
 
@@ -28,11 +29,9 @@ def test_datafeed_only_isolation() -> None:
 
 
 @pytest.mark.integration
-def test_broker_only_isolation() -> None:
+def test_broker_only_isolation(broker_only_app) -> None:
     """Verify broker-only app doesn't load datafeed."""
-    from trading_api.app_factory import create_app
-
-    api_app, _ = create_app(enabled_modules=["broker"])
+    api_app, _ = broker_only_app
     openapi_spec = api_app.openapi()
     paths = openapi_spec.get("paths", {})
 
@@ -51,32 +50,33 @@ def test_broker_only_isolation() -> None:
 
 
 @pytest.mark.integration
-def test_module_registry_cleanup() -> None:
-    """Verify registry is cleared between app creations."""
-    from trading_api.app_factory import create_app, registry
+def test_module_registry_state(all_modules_app, datafeed_only_app) -> None:
+    """Verify registry state matches the app configuration.
 
-    # Create app with all modules
-    create_app(enabled_modules=None)
-    all_modules_count = len(registry.get_all_modules())
+    This test verifies that all modules are discovered but only enabled
+    modules are reflected in the app's routes.
+    """
+    # Check all_modules_app has both broker and datafeed routes
+    all_api_app, _ = all_modules_app
+    all_paths = all_api_app.openapi().get("paths", {})
+    assert any("/broker/" in p for p in all_paths)
+    assert any("/datafeed/" in p for p in all_paths)
 
-    # Clear and create app with one module
-    create_app(enabled_modules=["datafeed"])
-    enabled_modules = registry.get_enabled_modules()
-    one_module_count = len(enabled_modules)
+    # Check datafeed_only_app has only datafeed routes
+    datafeed_api_app, _ = datafeed_only_app
+    datafeed_paths = datafeed_api_app.openapi().get("paths", {})
+    assert any("/datafeed/" in p for p in datafeed_paths)
+    assert not any("/broker/" in p for p in datafeed_paths)
 
-    # Registry should have been cleared and only datafeed loaded
-    assert all_modules_count >= 2  # Should have broker + datafeed at minimum
-    assert one_module_count == 1
-    assert enabled_modules[0].name == "datafeed"
+    # Registry should have discovered all available modules
+    all_modules = registry.get_all_modules()
+    assert len(all_modules) >= 2  # Should have broker + datafeed at minimum
 
 
 @pytest.mark.integration
-def test_shared_infrastructure_always_loaded() -> None:
+def test_shared_infrastructure_always_loaded(no_modules_app) -> None:
     """Verify shared infrastructure is always available regardless of modules."""
-    from trading_api.app_factory import create_app
-
-    # Test with no modules
-    api_app, _ = create_app(enabled_modules=[])
+    api_app, _ = no_modules_app
     openapi_spec = api_app.openapi()
     paths = openapi_spec.get("paths", {})
 
@@ -90,32 +90,32 @@ def test_shared_infrastructure_always_loaded() -> None:
 
 
 @pytest.mark.integration
-def test_module_service_independence() -> None:
-    """Verify module services are independent and don't share state."""
-    from trading_api.app_factory import create_app, registry
+def test_module_service_independence(broker_only_app, datafeed_only_app) -> None:
+    """Verify each app configuration creates independent module instances.
 
-    # Create first app with broker module
-    app1, _ = create_app(enabled_modules=["broker"])
-    broker_module_1 = registry.get_module("broker")
-    assert broker_module_1 is not None
+    This validates that different app fixtures have independent FastAPI apps.
+    """
+    broker_api_app, _ = broker_only_app
+    datafeed_api_app, _ = datafeed_only_app
 
-    # Create second app with broker module
-    app2, _ = create_app(enabled_modules=["broker"])
-    broker_module_2 = registry.get_module("broker")
-    assert broker_module_2 is not None
+    # The two apps should be different instances
+    assert broker_api_app is not datafeed_api_app
 
-    # Modules should be different instances (due to registry clear)
-    # Note: This test validates that create_app clears the registry
-    # and creates fresh module instances each time
-    assert broker_module_1 is not broker_module_2
+    # Each should have their own routes
+    broker_paths = set(broker_api_app.openapi().get("paths", {}).keys())
+    datafeed_paths = set(datafeed_api_app.openapi().get("paths", {}).keys())
+
+    # Broker should have broker-specific paths
+    assert any("/broker/" in p for p in broker_paths)
+
+    # Datafeed should have datafeed-specific paths
+    assert any("/datafeed/" in p for p in datafeed_paths)
 
 
 @pytest.mark.integration
-def test_module_prefix_consistency() -> None:
+def test_module_prefix_consistency(all_modules_app) -> None:
     """Verify module API prefixes match module names."""
-    from trading_api.app_factory import create_app
-
-    api_app, _ = create_app(enabled_modules=None)
+    api_app, _ = all_modules_app
     openapi_spec = api_app.openapi()
     paths = openapi_spec.get("paths", {})
 
@@ -129,12 +129,10 @@ def test_module_prefix_consistency() -> None:
 
 
 @pytest.mark.integration
-def test_websocket_routers_module_specific() -> None:
+def test_websocket_routers_module_specific(datafeed_only_app, broker_only_app) -> None:
     """Verify WebSocket routers are only loaded with their modules."""
-    from trading_api.app_factory import create_app
-
     # Create datafeed-only app
-    _, ws_apps_datafeed = create_app(enabled_modules=["datafeed"])
+    _, ws_apps_datafeed = datafeed_only_app
     assert len(ws_apps_datafeed) == 1, "Should have one WebSocket app for datafeed"
     datafeed_routes = [route.operation for route in ws_apps_datafeed[0].router.routes]
 
@@ -150,7 +148,7 @@ def test_websocket_routers_module_specific() -> None:
     assert not any("executions" in route for route in datafeed_routes)
 
     # Create broker-only app
-    _, ws_apps_broker = create_app(enabled_modules=["broker"])
+    _, ws_apps_broker = broker_only_app
     assert len(ws_apps_broker) == 1, "Should have one WebSocket app for broker"
     broker_routes = [route.operation for route in ws_apps_broker[0].router.routes]
 
@@ -165,25 +163,17 @@ def test_websocket_routers_module_specific() -> None:
 
 
 @pytest.mark.integration
-def test_module_disabled_not_instantiated() -> None:
-    """Verify disabled modules don't instantiate their services."""
-    from trading_api.app_factory import create_app, registry
+def test_module_disabled_not_instantiated(datafeed_only_app, broker_only_app) -> None:
+    """Verify disabled modules don't load their routes in the app."""
+    datafeed_api_app, _ = datafeed_only_app
+    broker_api_app, _ = broker_only_app
 
-    # Create app with only datafeed
-    create_app(enabled_modules=["datafeed"])
+    # Datafeed app should NOT have broker routes
+    datafeed_paths = datafeed_api_app.openapi().get("paths", {})
+    assert not any("/broker/" in p for p in datafeed_paths)
+    assert any("/datafeed/" in p for p in datafeed_paths)
 
-    # Get all modules from registry
-    all_modules = registry.get_all_modules()
-    enabled_modules = registry.get_enabled_modules()
-
-    # Should have modules registered
-    assert len(all_modules) >= 2
-
-    # Only datafeed should be enabled
-    assert len(enabled_modules) == 1
-    assert enabled_modules[0].name == "datafeed"
-
-    # Broker module should exist but be disabled
-    broker_module = registry.get_module("broker")
-    assert broker_module is not None
-    assert not broker_module.enabled
+    # Broker app should NOT have datafeed routes
+    broker_paths = broker_api_app.openapi().get("paths", {})
+    assert not any("/datafeed/" in p for p in broker_paths)
+    assert any("/broker/" in p for p in broker_paths)

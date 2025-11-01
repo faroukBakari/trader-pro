@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from trading_api.shared import FastWSAdapter, HealthApi, ModuleRegistry, VersionApi
+from trading_api.shared.ws.module_router_generator import generate_module_routers
 
 # Configure logging for the application
 logging.basicConfig(
@@ -81,35 +82,12 @@ def create_app(
     # Clear registry to allow fresh registration (important for tests)
     registry.clear()
 
-    # STEP 1: Generate WebSocket routers for all modules BEFORE auto-discovery
-    # This ensures generated routers exist when modules try to import them
-    from trading_api.shared.ws.module_router_generator import generate_module_routers
-
     modules_dir = Path(__file__).parent / "modules"
-    if modules_dir.exists():
-        for module_path in modules_dir.iterdir():
-            if module_path.is_dir() and not module_path.name.startswith("_"):
-                module_name = module_path.name
-                try:
-                    generated = generate_module_routers(
-                        module_name,
-                        silent=True,  # Silent mode - only show errors
-                        skip_quality_checks=False,  # Always run quality checks
-                    )
-                    if generated:
-                        logger.info(f"Generated WS routers for module '{module_name}'")
-                except RuntimeError as e:
-                    # Fail loudly with module context
-                    logger.error(
-                        f"WebSocket router generation failed for module '{module_name}'!"
-                    )
-                    logger.error(str(e))
-                    raise
 
-    # STEP 2: Auto-discover and register all available modules
+    # Auto-discover and register all available modules
     registry.auto_discover(modules_dir)
 
-    # STEP 3: Set which modules should be enabled
+    # Set which modules should be enabled
     registry.set_enabled_modules(enabled_modules)
 
     # Create base URL
@@ -220,6 +198,19 @@ def create_app(
 
     # Load enabled modules
     for module in registry.get_enabled_modules():
+        # Generate WebSocket routers for module
+        try:
+            generated = generate_module_routers(module.name)
+            if generated:
+                logger.info(f"Generated WS routers for module '{module.name}'")
+        except RuntimeError as e:
+            # Fail loudly with module context
+            logger.error(
+                f"WebSocket router generation failed for module '{module.name}'!"
+            )
+            logger.error(str(e))
+            raise
+
         # Include API routers
         for router in module.get_api_routers():
             api_app.include_router(router, prefix=base_url, tags=["v1"])
