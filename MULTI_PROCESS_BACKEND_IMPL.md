@@ -9,6 +9,8 @@ After:  Nginx (8000) → Broker (8001) + Datafeed (8002) + Core (8003)
 
 **Status**: ✅ **Phase 4 COMPLETE** - Watch Mode Implemented
 
+**Last Updated**: November 1, 2025 - Updated to reflect automatic WebSocket router generation (no separate watchers needed)
+
 ---
 
 ## ✅ Backend Manager - Unified CLI
@@ -126,11 +128,12 @@ Nginx verification is now handled automatically by the backend manager:
 
 We use a **two-phase generation strategy** to optimize development workflow:
 
-1. **Pre-startup generation** (backend_manager): Generate once before uvicorn starts
-2. **Lifecycle generation** (app lifespan): Regenerate specs on every app start/reload
-3. **Uvicorn's `--reload`**: Native file watching for code changes
-4. **Exclude generated artifacts**: Prevent reload loops from spec/client generation
-5. **Simple and reliable**: Fewer moving parts, less complexity
+1. **Pre-startup generation** (backend_manager): Generate specs and clients once before uvicorn starts
+2. **Lifecycle generation** (app lifespan): Regenerate OpenAPI + per-module AsyncAPI specs on every app start/reload
+3. **Automatic WS router generation**: Routers auto-generate during module loading (before app starts)
+4. **Uvicorn's `--reload`**: Native file watching for code changes
+5. **Exclude generated artifacts**: Prevent reload loops from spec/client generation
+6. **Simple and reliable**: Fewer moving parts, less complexity
 
 ### Two-Phase Generation Strategy
 
@@ -138,11 +141,11 @@ We use a **two-phase generation strategy** to optimize development workflow:
 
 ```
 Before starting uvicorn:
-1. Export OpenAPI spec (openapi.json)
-2. Export AsyncAPI spec (asyncapi.json)
-3. Generate Python clients (src/trading_api/clients/)
+1. Export OpenAPI spec (openapi.json) - all modules
+2. Export AsyncAPI spec (asyncapi.json) - legacy format
+3. Generate Python HTTP clients (src/trading_api/clients/)
 
-Why: Ensures clients are ready before server starts, no race conditions
+Why: Ensures specs and clients are ready before server starts, no race conditions
 ```
 
 **Phase 2: App Lifecycle (app_factory.py lifespan)**
@@ -150,10 +153,22 @@ Why: Ensures clients are ready before server starts, no race conditions
 ```
 Every app start/reload:
 1. Validate response models
-2. Generate OpenAPI spec (openapi.json)
-3. Generate AsyncAPI specs (per module)
+2. Generate OpenAPI spec (openapi.json) - for file-based watching
+3. Generate per-module AsyncAPI specs (modules/{module}/specs/asyncapi.json)
 
 Why: Keeps specs in sync with running app state, enables runtime consistency
+Note: Python clients are NOT regenerated here (avoids race conditions with uvicorn)
+```
+
+**Phase 0: Module Loading (before app factory)**
+
+```
+During module initialization (ws.py files):
+1. Auto-generate WebSocket routers from ws_generated/
+2. Happens BEFORE uvicorn starts
+3. No file watching needed
+
+Why: Routers must exist before app loads them, automatic on every server start
 ```
 
 ### How It Works
@@ -171,13 +186,14 @@ Why: Keeps specs in sync with running app state, enables runtime consistency
 **Code Change Workflow**:
 
 ```
-1. Developer modifies model in src/trading_api/models/
+1. Developer modifies model in src/trading_api/models/ or ws.py handlers
 2. Uvicorn detects .py file change
 3. Uvicorn triggers reload
-4. App lifespan regenerates specs on startup (Phase 2)
-5. Server ready with updated specs (~2-3s)
-6. Python clients: Manual regeneration via make generate-python-clients
-7. Frontend clients: Manual regeneration via make generate-openapi-client
+4. Module loading: WS routers auto-regenerate (if ws.py changed)
+5. App lifespan regenerates OpenAPI + AsyncAPI specs (Phase 2)
+6. Server ready with updated specs and routers (~2-3s)
+7. Python clients: Manual regeneration via make generate-python-clients
+8. Frontend clients: Manual regeneration via make generate-openapi-client
 ```
 
 **Uvicorn Exclusion Patterns**:
@@ -185,39 +201,51 @@ Why: Keeps specs in sync with running app state, enables runtime consistency
 ```bash
 --reload-exclude "*/openapi.json"      # Specs don't trigger reload
 --reload-exclude "*/asyncapi.json"     # Specs don't trigger reload
---reload-exclude "*/clients/*"         # Clients don't trigger reload
+--reload-exclude "*/clients/*"         # Generated HTTP clients don't trigger reload
 --reload-exclude "*/scripts/*"         # Management scripts don't trigger reload
 --reload-exclude "*/.local/*"          # Logs and runtime artifacts
 --reload-exclude "*/.pids/*"           # PID files
 --reload-exclude "*/__pycache__/*"     # Python cache
 --reload-exclude "*.pyc"               # Compiled Python
+
+Note: ws_generated/ is NOT excluded - WS routers auto-regenerate on module load
 ```
 
 ### Benefits
 
 ✅ **No separate watchers** - Uvicorn handles file watching  
-✅ **Always fresh** - Specs regenerated on every start  
+✅ **Always fresh** - Specs and routers regenerated on every start  
 ✅ **No loops** - Exclusions prevent infinite reloads  
 ✅ **No race conditions** - Clients generated before uvicorn starts  
 ✅ **Fast feedback** - Changes detected instantly  
 ✅ **Simpler architecture** - Fewer processes to manage  
 ✅ **Reliable** - Built-in Uvicorn watching is battle-tested  
-✅ **Runtime consistency** - Specs always match app state
+✅ **Runtime consistency** - Specs always match app state  
+✅ **Automatic WS routers** - No manual generation needed
 
 ### What Gets Watched and What Doesn't
 
 **Watched by Uvicorn** (triggers reload):
 
-- `src/trading_api/**/*.py` - All Python source files
-- Model changes, API changes, WebSocket changes
+- `src/trading_api/**/*.py` - All Python source files (including ws.py handlers)
+- `src/trading_api/**/ws_generated/**` - Generated WS routers (triggers reload but regenerate on startup)
+- Model changes, API changes, WebSocket handler changes
 - Anything that affects runtime behavior
 
 **Excluded from Uvicorn** (no reload):
 
-- `openapi.json`, `asyncapi.json` - Generated specs
-- `src/trading_api/clients/**` - Generated Python clients
+- `openapi.json`, `asyncapi.json` - Generated specs (regenerate in lifespan)
+- `modules/*/specs/*.json` - Per-module AsyncAPI specs
+- `src/trading_api/clients/**` - Generated Python HTTP clients
 - `scripts/` - Backend management scripts
 - `.local/`, `.pids/` - Runtime artifacts
+
+**Auto-Generated on Module Load** (before reload loop):
+
+- `src/trading_api/modules/*/ws_generated/**` - WebSocket routers
+  - Generated during `ws.py` RouterFactory initialization
+  - Happens BEFORE imports, no race conditions
+  - Changes to ws.py trigger reload → routers regenerate → server starts
 
 ### Manual Client Generation
 
@@ -248,6 +276,9 @@ make backend-manager-start
 # Modify Python code → Uvicorn auto-reloads → Specs regenerated
 vim src/trading_api/models/broker.py
 
+# Modify WebSocket handlers → Uvicorn auto-reloads → Routers + Specs regenerated
+vim src/trading_api/modules/broker/ws.py
+
 # Manually regenerate Python clients (if needed)
 make generate-python-clients
 
@@ -257,17 +288,31 @@ cd frontend && make generate-openapi-client
 
 ### WebSocket Router Generation
 
-WebSocket routers can be generated separately using:
+WebSocket routers are **automatically generated** during module loading:
 
-```bash
-# Manual generation (uses module-based generator)
-make generate-ws-routers
-
-# Generation happens automatically during app startup
-# See SYSTEMATIC_WS_ROUTER_GEN.md for details
+```python
+# modules/{module}/ws.py - RouterFactory.__init__()
+generate_module_routers(module_name)  # Creates ws_generated/
+from .ws_generated import BarWsRouter  # Import succeeds!
 ```
 
-**Note**: WebSocket routers are automatically generated per module during app startup. Manual generation is still available via `make generate-ws-routers` but is optional since Phases 1-3 of the systematic router generation are complete.
+**Manual generation** (optional, for debugging or fresh clone):
+
+```bash
+# Generate for all modules
+make generate-ws-routers
+
+# Generate for specific module
+make generate-ws-routers module=broker
+```
+
+**Key Points**:
+
+- ✅ Routers auto-generate on **every server start** (before imports)
+- ✅ No file watching needed - happens during module initialization
+- ✅ Changes to `ws.py` trigger uvicorn reload → routers regenerate → server starts
+- ✅ Manual generation useful for pre-commit checks or CI/CD
+- ✅ See `SYSTEMATIC_WS_ROUTER_GEN.md` for implementation details
 
 ---
 
@@ -704,10 +749,11 @@ ps aux | grep uvicorn
 # Check that changed file doesn't match exclusion patterns:
 # - */openapi.json
 # - */asyncapi.json
-# - */clients/*
+# - */clients/*  (Generated HTTP clients)
 # - */scripts/*
 # - */.local/*
 # - */.pids/*
+# Note: ws_generated/ is NOT excluded - routers regenerate on module load
 
 # 3. Check file system events (Linux)
 # Install inotify-tools if needed
@@ -825,6 +871,59 @@ grep "reload-exclude.*scripts" backend/scripts/backend_manager.py
 make backend-manager-restart
 ```
 
+### WebSocket routers not regenerating
+
+**Symptoms**: Changes to ws.py handlers not reflected in ws_generated/
+
+**Solutions**:
+
+```bash
+# 1. Check if routers are being generated on module load
+make logs-tail
+# Look for generation messages during module loading
+
+# 2. Manually regenerate routers (for debugging)
+cd backend
+make generate-ws-routers
+
+# 3. Check for generation errors
+make generate-ws-routers module=broker
+# Look for syntax errors or import issues
+
+# 4. Verify ws.py file has proper TypeAlias definitions
+# RouterFactory looks for: TypeAlias = Annotated[...]
+
+# 5. Restart backend to trigger fresh generation
+make backend-manager-restart
+```
+
+### WebSocket router import errors
+
+**Symptoms**: ImportError from ws_generated/ after code changes
+
+**Solutions**:
+
+```bash
+# 1. Routers regenerate automatically on module load
+# Just restart the backend:
+make backend-manager-restart
+
+# 2. If error persists, check router generation manually
+cd backend
+make generate-ws-routers module=broker
+
+# 3. Look for syntax errors in generated code
+cat src/trading_api/modules/broker/ws_generated/routers.py
+
+# 4. Check quality checks pass
+cd backend
+poetry run python -c "
+from trading_api.shared.ws.module_router_generator import generate_module_routers
+result = generate_module_routers('broker', silent=False, skip_quality_checks=False)
+print('Success!' if result else 'Failed!')
+"
+```
+
 ---
 
 ## Testing Checklist
@@ -861,19 +960,21 @@ make backend-manager-restart
 ### Phase 4 ✅ COMPLETE
 
 - [x] Specs pre-generated before uvicorn starts (backend_manager)
-- [x] Specs auto-generated on app startup (lifespan)
-- [x] Python clients pre-generated before uvicorn starts
-- [x] Uvicorn reload excludes generated files
-- [x] Model changes trigger Uvicorn reload
-- [x] App regenerates specs on reload (not clients - avoids race)
+- [x] Specs auto-generated on app startup (lifespan - OpenAPI + per-module AsyncAPI)
+- [x] Python HTTP clients pre-generated before uvicorn starts
+- [x] WebSocket routers auto-generate during module loading (before app starts)
+- [x] Uvicorn reload excludes generated specs and clients
+- [x] Model/handler changes trigger Uvicorn reload
+- [x] App regenerates specs + WS routers on reload
 - [x] Spec changes do NOT trigger reload
 - [x] Client changes do NOT trigger reload
 - [x] Script changes do NOT trigger reload
 - [x] No infinite reload loops
 - [x] Fast feedback (<3s from change to reload complete)
-- [x] No race conditions with client generation
+- [x] No race conditions with client or router generation
+- [x] No separate file watchers for WebSocket routers
 
-**Status**: ✅ **COMPLETE** (Watch mode with startup auto-generation fully implemented)
+**Status**: ✅ **COMPLETE** (Watch mode with automatic generation fully implemented)
 
 ### Phase 5
 
@@ -981,12 +1082,14 @@ make backend-manager-restart
 
 **Phase 4 Achievements**:
 
-- ✅ Two-phase generation strategy (pre-startup + lifecycle)
+- ✅ Three-phase generation strategy (module loading + pre-startup + lifecycle)
+- ✅ Automatic WebSocket router generation on module load
 - ✅ Uvicorn watch mode with comprehensive exclusions
-- ✅ No race conditions with client generation
+- ✅ No race conditions with client or router generation
 - ✅ Fast feedback (<3s reload cycle)
-- ✅ Specs always in sync with running app
+- ✅ Specs and routers always in sync with running app
 - ✅ No infinite reload loops
+- ✅ No separate file watchers needed
 - ✅ Management scripts excluded from reload
 
 **Phase 5: Integration** (Next):
