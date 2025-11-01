@@ -107,12 +107,13 @@ if [[ -n "$backend_files" ]]; then
         exit 1
     fi
 
-    # Stage any formatting changes
-    if [[ -n "$(git diff --name-only $backend_files)" ]]; then
-        log_info "Staging backend formatting changes..."
-        echo "$backend_files" | xargs git add
-        log_success "Backend formatting changes staged"
-    fi
+    # Re-stage ALL originally staged backend files (to include formatting changes)
+    log_info "Re-staging backend files to include formatting changes..."
+    cd "$repo_root"
+    echo "$backend_files" | xargs git add
+    log_success "Backend files re-staged with formatting changes"
+
+    cd "$repo_root/backend"
 
     # Lint backend code (flake8 + mypy)
     if ! run_check "Backend linting" "make type-check" "$repo_root/backend"; then
@@ -159,18 +160,19 @@ if [[ -n "$frontend_files" ]]; then
         npm install
     fi
 
-    # Linting (includes client generation)
+    # Linting (includes client generation and auto-fix)
     if ! run_check "Frontend linting" "make lint" "$repo_root/frontend"; then
         log_warning "Run 'cd frontend && make lint' to fix linting issues"
         exit 1
     fi
 
-    # Stage any linting/formatting changes
-    if [[ -n "$(git diff --name-only $frontend_files)" ]]; then
-        log_info "Staging frontend formatting/linting changes..."
-        echo "$frontend_files" | xargs git add
-        log_success "Frontend formatting/linting changes staged"
-    fi
+    # Re-stage ALL originally staged frontend files (to include linting/formatting changes)
+    log_info "Re-staging frontend files to include linting/formatting changes..."
+    cd "$repo_root"
+    echo "$frontend_files" | xargs git add
+    log_success "Frontend files re-staged with linting/formatting changes"
+
+    cd "$repo_root/frontend"
 
     # TypeScript type checking (includes client generation)
     if ! run_check "TypeScript type checking" "make type-check" "$repo_root/frontend"; then

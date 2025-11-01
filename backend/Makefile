@@ -406,6 +406,9 @@ format:
 	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive src/ tests/
 	poetry run black src/ tests/
 	poetry run isort src/ tests/
+	@echo "Removing trailing whitespace..."
+	@find src/ tests/ -name "*.py" -type f -exec sed -i 's/[[:space:]]*$$//' {} +
+	@echo "✅ Backend formatting complete"
 
 # Development server
 dev:
