@@ -30,6 +30,9 @@ logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 # Global registry instance
 registry = ModuleRegistry()
 
+# Module logger for app_factory
+logger = logging.getLogger(__name__)
+
 
 def validate_response_models(app: FastAPI) -> None:
     """Validate that all routes have response_model defined for OpenAPI compliance."""
@@ -78,11 +81,35 @@ def create_app(
     # Clear registry to allow fresh registration (important for tests)
     registry.clear()
 
-    # Auto-discover and register all available modules
+    # STEP 1: Generate WebSocket routers for all modules BEFORE auto-discovery
+    # This ensures generated routers exist when modules try to import them
+    from trading_api.shared.ws.module_router_generator import generate_module_routers
+
     modules_dir = Path(__file__).parent / "modules"
+    if modules_dir.exists():
+        for module_path in modules_dir.iterdir():
+            if module_path.is_dir() and not module_path.name.startswith("_"):
+                module_name = module_path.name
+                try:
+                    generated = generate_module_routers(
+                        module_name,
+                        silent=True,  # Silent mode - only show errors
+                        skip_quality_checks=False,  # Always run quality checks
+                    )
+                    if generated:
+                        logger.info(f"Generated WS routers for module '{module_name}'")
+                except RuntimeError as e:
+                    # Fail loudly with module context
+                    logger.error(
+                        f"WebSocket router generation failed for module '{module_name}'!"
+                    )
+                    logger.error(str(e))
+                    raise
+
+    # STEP 2: Auto-discover and register all available modules
     registry.auto_discover(modules_dir)
 
-    # Set which modules should be enabled
+    # STEP 3: Set which modules should be enabled
     registry.set_enabled_modules(enabled_modules)
 
     # Create base URL

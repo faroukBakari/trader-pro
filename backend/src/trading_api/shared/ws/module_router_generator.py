@@ -1,0 +1,347 @@
+#!/usr/bin/env python3
+"""
+Module-scoped WebSocket Router Generator
+
+Generates WebSocket routers for individual modules on-demand during app initialization.
+Integrated into the module loading process for fail-fast error detection.
+
+Key features:
+- Module-scoped generation (one module at a time)
+- Auto-detection (checks for modules/<module_name>/ws.py)
+- Fail-fast with detailed error messages
+- Quality checks (Black, Ruff, Flake8, Mypy, Isort)
+- Optional silent mode for production
+
+Usage:
+    >>> from trading_api.shared.ws.module_router_generator import generate_module_routers
+    >>> # Generate routers for datafeed module
+    >>> generated = generate_module_routers("datafeed")
+    >>> print(generated)  # True if routers generated, False if no ws.py
+"""
+
+import logging
+import re
+import shutil
+import subprocess
+from pathlib import Path
+from typing import NamedTuple
+
+logger = logging.getLogger(__name__)
+
+
+class RouterSpec(NamedTuple):
+    """Specification for generating a router."""
+
+    class_name: str
+    request_type: str
+    data_type: str
+    module_name: str
+
+
+def parse_router_specs_from_file(file_path: Path, module_name: str) -> list[RouterSpec]:
+    """
+    Parse TypeAlias declarations from a ws.py file.
+
+    Args:
+        file_path: Path to the ws.py file
+        module_name: Name of the module (e.g., 'datafeed', 'broker')
+
+    Returns:
+        List of RouterSpec instances
+
+    Example:
+        >>> # Parse datafeed/ws.py
+        >>> specs = parse_router_specs_from_file(
+        ...     Path("modules/datafeed/ws.py"),
+        ...     "datafeed"
+        ... )
+        >>> print(specs[0].class_name)  # "BarWsRouter"
+    """
+    router_specs = []
+    # Pattern matches both single-line and multi-line TypeAlias declarations
+    # Examples:
+    #   BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
+    #   BrokerConnectionWsRouter: TypeAlias = WsRouter[
+    #       BrokerConnectionSubscriptionRequest, BrokerConnectionStatus
+    #   ]
+    pattern = re.compile(
+        r"^\s*(\w+):\s*TypeAlias\s*=\s*WsRouter\[\s*(\w+)\s*,\s*(\w+)\s*\]",
+        re.MULTILINE | re.DOTALL,
+    )
+
+    content = file_path.read_text()
+
+    # Find all matches in the file
+    for match in pattern.finditer(content):
+        class_name = match.group(1)
+        request_type = match.group(2)
+        data_type = match.group(3)
+
+        router_specs.append(
+            RouterSpec(
+                class_name=class_name,
+                request_type=request_type,
+                data_type=data_type,
+                module_name=module_name,
+            )
+        )
+
+    return router_specs
+
+
+def generate_router_code(spec: RouterSpec, template: str) -> str:
+    """
+    Generate concrete router code from template and spec.
+
+    Args:
+        spec: Router specification
+        template: Template code from generic_route.py
+
+    Returns:
+        Generated router code as string
+
+    The function:
+    1. Replaces _TRequest with spec.request_type
+    2. Replaces _TData with spec.data_type
+    3. Removes TypeVar declarations
+    4. Removes Generic and TypeVar imports
+    5. Updates class declaration
+    """
+    lines = template.split("\n")
+    result_lines = [
+        f"from trading_api.models import {spec.request_type}, {spec.data_type}"
+    ]
+    for line in lines:
+        # Skip TypeVar declarations
+        if "TypeVar(" in line:
+            continue
+        # Skip Generic and TypeVar imports, but keep Any
+        if "from typing import" in line and ("Generic" in line or "TypeVar" in line):
+            # Extract only the 'Any' import if present
+            if "Any" in line:
+                result_lines.append("from typing import Any")
+            continue
+        # Skip BaseModel import if it only imports BaseModel (we don't need it)
+        if line.strip() == "from pydantic import BaseModel":
+            continue
+        # Replace class declaration
+        if "class WsRouter(" in line:
+            result_lines.append(f"class {spec.class_name}(WsRouterInterface):")
+            continue
+        # Replace type parameters
+        modified_line = line.replace("_TRequest", spec.request_type)
+        modified_line = modified_line.replace("_TData", spec.data_type)
+        result_lines.append(modified_line)
+    return "\n".join(result_lines)
+
+
+def generate_init_file(specs: list[RouterSpec]) -> str:
+    """
+    Generate __init__.py for the ws_generated package.
+
+    Args:
+        specs: List of router specifications
+
+    Returns:
+        __init__.py content as string
+    """
+    imports = []
+    exports = []
+
+    for spec in specs:
+        module_name = spec.class_name.lower()
+        imports.append(f"from .{module_name} import {spec.class_name}")
+        exports.append(f'"{spec.class_name}"')
+
+    imports_str = "\n".join(imports)
+    exports_str = ",\n    ".join(exports)
+
+    return f'''"""
+Auto-generated WebSocket routers.
+
+DO NOT EDIT MANUALLY - Generated by module_router_generator.py
+"""
+
+{imports_str}
+
+__all__ = [
+    {exports_str},
+]
+'''
+
+
+def run_quality_checks_for_module(
+    module_name: str,
+    generated_dir: Path,
+) -> None:
+    """
+    Run formatters and linters on generated code for one module.
+
+    Quality checks pipeline:
+    1. Black formatting
+    2. Ruff formatting
+    3. Ruff auto-fix
+    4. Flake8 linting
+    5. Ruff linting
+    6. Mypy type checking
+    7. Isort import sorting
+
+    Args:
+        module_name: Name of the module
+        generated_dir: Path to the ws_generated directory
+
+    Raises:
+        RuntimeError: If any check fails with detailed error message
+
+    Example:
+        >>> run_quality_checks_for_module(
+        ...     "datafeed",
+        ...     Path("src/trading_api/modules/datafeed/ws_generated")
+        ... )
+    """
+    checks = [
+        (["poetry", "run", "black", str(generated_dir)], "Black formatting"),
+        (["poetry", "run", "ruff", "format", str(generated_dir)], "Ruff formatting"),
+        (
+            ["poetry", "run", "ruff", "check", str(generated_dir), "--fix"],
+            "Ruff auto-fix",
+        ),
+        (["poetry", "run", "flake8", str(generated_dir)], "Flake8 linting"),
+        (["poetry", "run", "ruff", "check", str(generated_dir)], "Ruff linting"),
+        (["poetry", "run", "mypy", str(generated_dir)], "Mypy type checking"),
+        (["poetry", "run", "isort", str(generated_dir)], "Isort import sorting"),
+    ]
+
+    for cmd, name in checks:
+        try:
+            subprocess.run(
+                cmd,
+                cwd=generated_dir.parent.parent.parent.parent.parent,  # backend/
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"{name} failed for module '{module_name}'!\n"
+                f"Command: {' '.join(cmd)}\n"
+                f"STDOUT:\n{e.stdout}\n"
+                f"STDERR:\n{e.stderr}"
+            ) from e
+
+
+def generate_module_routers(
+    module_name: str,
+    *,
+    silent: bool = True,
+    skip_quality_checks: bool = False,
+) -> bool:
+    """
+    Generate WebSocket routers for a specific module.
+
+    Detection:
+    1. Check if modules/<module_name>/ws.py exists
+    2. If not found, return False (no generation needed)
+    3. If found, parse TypeAlias declarations and generate
+
+    Generation:
+    1. Parse router specs from ws.py
+    2. Load template from shared/ws/generic_route.py
+    3. Generate concrete router classes
+    4. Generate __init__.py with exports
+    5. Optionally run quality checks
+
+    Args:
+        module_name: Name of the module (e.g., 'datafeed', 'broker')
+        silent: If True, suppress output except errors (default: True)
+        skip_quality_checks: If True, skip formatters/linters for faster iteration
+            (default: False)
+
+    Returns:
+        bool: True if routers were generated, False if no ws.py found
+
+    Raises:
+        RuntimeError: If generation or quality checks fail
+
+    Example:
+        >>> # Generate routers for datafeed module
+        >>> generate_module_routers("datafeed")
+        True
+        >>> # Module without ws.py
+        >>> generate_module_routers("auth")
+        False
+        >>> # Development mode (skip quality checks for speed)
+        >>> generate_module_routers("datafeed", silent=False, skip_quality_checks=True)
+        True
+    """
+    # Detect module ws.py file
+    base_dir = Path(__file__).parent.parent.parent.parent.parent  # backend/
+    module_ws_file = base_dir / f"src/trading_api/modules/{module_name}/ws.py"
+
+    if not module_ws_file.exists():
+        return False  # No ws.py, no generation needed
+
+    # Parse router specs
+    try:
+        router_specs = parse_router_specs_from_file(module_ws_file, module_name)
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to parse ws.py for module '{module_name}': {e}"
+        ) from e
+
+    if not router_specs:
+        return False  # No routers defined
+
+    # Load template
+    template_path = base_dir / "src/trading_api/shared/ws/generic_route.py"
+    template = template_path.read_text()
+
+    # Output directory
+    output_dir = base_dir / f"src/trading_api/modules/{module_name}/ws_generated"
+
+    # Completely remove and recreate to ensure clean state
+    # This removes all generated files, __pycache__, and any leftover artifacts
+    if output_dir.exists():
+        shutil.rmtree(output_dir, ignore_errors=True)
+
+    # Ensure parent module's __pycache__ is also cleared to avoid import issues
+    module_dir = base_dir / f"src/trading_api/modules/{module_name}"
+    pycache_dir = module_dir / "__pycache__"
+    if pycache_dir.exists():
+        # Remove any cached imports of ws_generated
+        for cache_file in pycache_dir.glob("*ws_generated*"):
+            cache_file.unlink(missing_ok=True)
+
+    # Create fresh directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not silent:
+        print(f"📁 Generating routers for module '{module_name}'")
+
+    # Generate each router
+    for spec in router_specs:
+        module_file_name = spec.class_name.lower()
+        output_file = output_dir / f"{module_file_name}.py"
+        content = generate_router_code(spec, template)
+        output_file.write_text(content)
+        if not silent:
+            print(f"  ✓ {spec.class_name}")
+
+    # Generate __init__.py
+    init_file = output_dir / "__init__.py"
+    init_content = generate_init_file(router_specs)
+    init_file.write_text(init_content)
+
+    # Quality checks
+    if not skip_quality_checks:
+        try:
+            run_quality_checks_for_module(module_name, output_dir)
+        except RuntimeError:
+            # Clean up on failure
+            shutil.rmtree(output_dir)
+            raise
+
+    if not silent:
+        logger.info(f"✓ Generated WS routers for '{module_name}'")
+
+    return True
