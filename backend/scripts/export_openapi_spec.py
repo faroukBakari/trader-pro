@@ -32,7 +32,7 @@ def export_single_module(module_name: str | None, output_file: Path) -> int:
     try:
         # Create app with only the specified module (or all if None)
         enabled_modules = [module_name] if module_name else None
-        api_app, _ = create_app(enabled_modules=enabled_modules)
+        api_app, _ = create_app(enabled_module_names=enabled_modules)
 
         openapi_schema = api_app.openapi()
 

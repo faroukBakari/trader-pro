@@ -2,6 +2,9 @@
 Integration tests for Python HTTP clients in multi-process architecture.
 
 Tests inter-module communication when broker and datafeed run as separate services.
+
+NOTE: These tests require Python clients to be generated first.
+Run: make generate-python-clients
 """
 
 import asyncio
