@@ -67,7 +67,7 @@ def export_single_module(module_name: str | None, output_file: Path) -> int:
     try:
         # Create app with only the specified module (or all if None)
         enabled_modules = [module_name] if module_name else None
-        _, ws_apps = create_app(enabled_modules=enabled_modules)
+        _, ws_apps = create_app(enabled_module_names=enabled_modules)
 
         # If specific module, get first ws_app; otherwise merge all
         if len(ws_apps) == 0:

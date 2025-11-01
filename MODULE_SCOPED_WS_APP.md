@@ -1,9 +1,25 @@
 # Module-Scoped WebSocket Apps - Implementation Guide
 
-> **Document Status**: ✅ Implementation completed and verified. All module-scoped WebSocket endpoints are working.
+> **⚠️ DEPRECATED - Historical Reference Only**
+>
+> **This document describes the initial planning for module-scoped WebSocket apps.** > **The actual implementation evolved into a different pattern. See [MODULAR_FASTAPI_MIGRATION.md](MODULAR_FASTAPI_MIGRATION.md) for the current architecture.**
+>
+> **Key Differences from Actual Implementation:**
+>
+> - ❌ This document: Modules have `get_ws_app()` and `register_ws_endpoint()` methods
+> - ✅ Actual implementation: Modules have `create_app()` method that creates both REST and WebSocket internally
+> - ❌ This document: Factory calls `module.register_ws_endpoint(api_app, base_url)`
+> - ✅ Actual implementation: Modules register their own WebSocket endpoint inside `create_app()`
+> - ❌ This document: Factory calls `module.configure_app(api_app, ws_app)`
+> - ✅ Actual implementation: No `configure_app()` - modules handle everything in `create_app()`
+>
+> **Current Architecture**: See `backend/src/trading_api/shared/module_interface.py` for the `Module.create_app()` pattern.
+>
+> **Document Status**: ✅ Module-scoped WebSocket endpoints are working, but implementation differs from this plan.
 >
 > **Related Documents**:
 >
+> - [Modular FastAPI Migration](MODULAR_FASTAPI_MIGRATION.md) - **Current architecture (READ THIS FIRST)**
 > - [API Methodology](API-METHODOLOGY.md) - REST API design patterns
 > - [WebSocket Methodology](WEBSOCKET-METHODOLOGY.md) - WebSocket design patterns
 > - [Architecture](ARCHITECTURE.md) - Overall system architecture

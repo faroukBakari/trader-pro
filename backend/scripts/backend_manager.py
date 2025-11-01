@@ -324,6 +324,8 @@ class ServerManager:
                     "--reload-exclude",
                     "*/clients/*",
                     "--reload-exclude",
+                    "*/ws_generated/*",
+                    "--reload-exclude",
                     "*/.local/*",
                     "--reload-exclude",
                     "*/.pids/*",

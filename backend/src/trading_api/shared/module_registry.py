@@ -31,18 +31,16 @@ class ModuleRegistry:
         self._instances: Dict[str, Module] = {}
         self._enabled_modules: set[str] | None = None
 
-    def register(self, module_class: type[Module]) -> None:
+    def register(self, module_class: type[Module], module_name: str) -> None:
         """Register a module class with the registry.
 
         Args:
             module_class: Module class implementing the Module protocol
+            module_name: Name of the module
 
         Raises:
             ValueError: If a module with the same name is already registered
         """
-        # Create temporary instance to get module name
-        temp_instance = module_class()
-        module_name = temp_instance.name
 
         if module_name in self._module_classes:
             raise ValueError(f"Module '{module_name}' is already registered")
@@ -73,7 +71,7 @@ class ModuleRegistry:
                 )
                 # Get module class: BrokerModule
                 module_class = getattr(module_import, class_name)
-                self.register(module_class)
+                self.register(module_class, module_name)
                 logger.info(f"Auto-discovered module: {module_name}")
             except (ImportError, AttributeError) as e:
                 logger.warning(f"Failed to auto-discover module '{module_name}': {e}")
@@ -93,13 +91,10 @@ class ModuleRegistry:
             instance = module_class()
 
             # Set enabled state based on registry's enabled modules list
-            if hasattr(instance, "_enabled"):
-                if self._enabled_modules is None:
-                    # None means all modules enabled
-                    instance._enabled = True
-                else:
-                    # Only enable if in the enabled modules set
-                    instance._enabled = module_name in self._enabled_modules
+            # Only enable if in the enabled modules set
+            if self._enabled_modules is None or module_name in self._enabled_modules:
+                # None means all modules enabled
+                instance.enable()
 
             self._instances[module_name] = instance
             logger.debug(f"Lazy-loaded module instance: {module_name}")

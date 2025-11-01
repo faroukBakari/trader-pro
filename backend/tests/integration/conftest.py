@@ -29,7 +29,7 @@ def datafeed_only_app() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Session-scoped datafeed-only app for isolation tests."""
     from trading_api.app_factory import create_app
 
-    return create_app(enabled_modules=["datafeed"])
+    return create_app(enabled_module_names=["datafeed"])
 
 
 @pytest.fixture(scope="session")
@@ -37,7 +37,7 @@ def broker_only_app() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Session-scoped broker-only app for isolation tests."""
     from trading_api.app_factory import create_app
 
-    return create_app(enabled_modules=["broker"])
+    return create_app(enabled_module_names=["broker"])
 
 
 @pytest.fixture(scope="session")
@@ -45,7 +45,7 @@ def all_modules_app() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Session-scoped app with all modules for isolation tests."""
     from trading_api.app_factory import create_app
 
-    return create_app(enabled_modules=None)
+    return create_app(enabled_module_names=None)
 
 
 @pytest.fixture(scope="session")
@@ -53,7 +53,7 @@ def no_modules_app() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Session-scoped app with no modules (shared infrastructure only)."""
     from trading_api.app_factory import create_app
 
-    return create_app(enabled_modules=[])
+    return create_app(enabled_module_names=[])
 
 
 # ============================================================================
@@ -106,7 +106,7 @@ def apps() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Full application with all modules enabled (shared per test module)."""
     from trading_api.app_factory import create_app
 
-    return create_app(enabled_modules=None)  # None = all modules
+    return create_app(enabled_module_names=None)  # None = all modules
 
 
 @pytest.fixture(scope="module")

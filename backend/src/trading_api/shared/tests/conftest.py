@@ -37,7 +37,7 @@ def create_test_app(
     """
     from trading_api.app_factory import create_app
 
-    return create_app(enabled_modules=enabled_modules)
+    return create_app(enabled_module_names=enabled_modules)
 
 
 @pytest.fixture(scope="session")

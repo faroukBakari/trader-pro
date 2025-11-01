@@ -33,7 +33,7 @@ def broker_app() -> FastAPI:
     """Create broker app once per class (optimized)."""
     from trading_api.app_factory import create_app
 
-    api_app, _ = create_app(enabled_modules=["broker"])
+    api_app, _ = create_app(enabled_module_names=["broker"])
     return api_app
 
 
@@ -42,7 +42,7 @@ def datafeed_app() -> FastAPI:
     """Create datafeed app once per class (optimized)."""
     from trading_api.app_factory import create_app
 
-    api_app, _ = create_app(enabled_modules=["datafeed"])
+    api_app, _ = create_app(enabled_module_names=["datafeed"])
     return api_app
 
 
@@ -51,7 +51,7 @@ def full_app() -> FastAPI:
     """Create full app once per class (optimized)."""
     from trading_api.app_factory import create_app
 
-    api_app, _ = create_app(enabled_modules=None)
+    api_app, _ = create_app(enabled_module_names=None)
     return api_app
 
 
