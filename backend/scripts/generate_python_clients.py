@@ -443,11 +443,11 @@ def main() -> None:
     template_dir = backend_root / "scripts" / "templates"
 
     # Validate package names before generation
-    print("🔍 Validating package names...")
+    print("🔍 Validating backend modules...")
     import subprocess
 
     validation_result = subprocess.run(
-        ["poetry", "run", "python", "scripts/validate_package_names.py"],
+        ["poetry", "run", "python", "scripts/validate_modules.py"],
         cwd=backend_root,
         capture_output=True,
         text=True,

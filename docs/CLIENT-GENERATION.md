@@ -40,7 +40,7 @@ Frontend Build → Export Backend Specs → Generate Clients → Build/Dev
                  ▼
 ┌─────────────────────────────────────────┐
 │ Backend: Validate Package Names         │
-│ • Runs scripts/validate_package_names.py│
+│ • Runs scripts/validate_modules.py│
 │ • Checks package name uniqueness        │
 │ • Validates module name correspondence  │
 │ • Prevents naming conflicts             │
@@ -68,13 +68,6 @@ Before generating any clients, the system validates that package names are uniqu
 4. **Uniqueness**: No duplicate package names across all client types
 5. **Module Correspondence**: Package names must match their source module names
 
-**Validation Command:**
-
-```bash
-# Standalone validation (from backend directory)
-make validate-package-names
-```
-
 **Automatic Validation:**
 
 Package name validation runs automatically before:
@@ -86,7 +79,7 @@ Package name validation runs automatically before:
 **Example Output:**
 
 ```
-🔍 Validating package names for generated clients...
+🔍 Validating backend modules for generated clients...
 
 ======================================================================
 📋 Package Name Validation Results

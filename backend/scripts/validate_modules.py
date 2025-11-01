@@ -8,8 +8,8 @@ This script ensures that:
 3. No package name conflicts exist
 
 Usage:
-    poetry run python scripts/validate_package_names.py
-    poetry run python scripts/validate_package_names.py --check-only
+    poetry run python scripts/validate_modules.py
+    poetry run python scripts/validate_modules.py --check-only
 
 Exit Codes:
     0: All validations passed
@@ -281,7 +281,7 @@ class PackageNameValidator:
         Returns:
             True if all validations passed, False otherwise
         """
-        print("🔍 Validating package names for generated clients...")
+        print("🔍 Validating backend modules for generated clients...")
         print()
 
         # Validate each client type

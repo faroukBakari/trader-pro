@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-shared test-modules test-cov test-integration lint type-check format build clean clean-cache dev dev-ci kill-dev health-ci export-openapi-spec export-asyncapi-spec validate-package-names generate-python-clients generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help install install-ci test test-boundaries test-shared test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci export-openapi-spec export-asyncapi-spec generate-python-clients generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -59,11 +59,11 @@ help:
 	@echo "  build             Build backend package"
 	@echo "  clean             Clean build artifacts"
 	@echo "  clean-cache       Clean all Python caches (mypy, pytest, pycache, ruff)"
+	@echo "  clean-generated   Clean all generated files (WS routers, specs, Python clients)"
 	@echo ""
 	@echo "Code generation targets:"
 	@echo "  export-openapi-spec   Export OpenAPI specification (offline)"
 	@echo "  export-asyncapi-spec  Export AsyncAPI specification (offline)"
-	@echo "  validate-package-names  Validate package names for generated clients"
 	@echo "  generate-python-clients  Generate Python HTTP clients (includes format & validation)"
 	@echo "  generate-ws-routers   Generate WebSocket router classes (use module=<name> for specific module)"
 	@echo ""
@@ -494,6 +494,53 @@ clean-cache:
 	@echo "   Press Ctrl+Shift+P → 'Developer: Reload Window'"
 	@echo "   Or run: 'Python: Restart Language Server'"
 
+# Clean all generated files (WS routers, specs, Python clients)
+clean-generated:
+	@echo "🧹 Cleaning all generated files..."
+	@echo ""
+	@echo "Removing WebSocket routers..."
+	@for module in $(DISCOVERED_MODULES); do \
+		if [ -d "$(MODULES_DIR)/$$module/ws_generated" ]; then \
+			echo "  ✓ Removing ws_generated/ in $$module module"; \
+			rm -rf "$(MODULES_DIR)/$$module/ws_generated"; \
+		fi; \
+	done
+	@echo ""
+	@echo "Removing API specs..."
+	@if [ -f "openapi.json" ]; then \
+		echo "  ✓ Removing root openapi.json"; \
+		rm -f openapi.json; \
+	fi
+	@if [ -f "asyncapi.json" ]; then \
+		echo "  ✓ Removing root asyncapi.json"; \
+		rm -f asyncapi.json; \
+	fi
+	@for module in $(DISCOVERED_MODULES); do \
+		if [ -f "$(MODULES_DIR)/$$module/specs/openapi.json" ]; then \
+			echo "  ✓ Removing specs/openapi.json in $$module module"; \
+			rm -f "$(MODULES_DIR)/$$module/specs/openapi.json"; \
+		fi; \
+		if [ -f "$(MODULES_DIR)/$$module/specs/asyncapi.json" ]; then \
+			echo "  ✓ Removing specs/asyncapi.json in $$module module"; \
+			rm -f "$(MODULES_DIR)/$$module/specs/asyncapi.json"; \
+		fi; \
+	done
+	@echo ""
+	@echo "Removing Python HTTP clients..."
+	@if [ -d "src/trading_api/clients" ]; then \
+		echo "  ✓ Removing src/trading_api/clients/"; \
+		rm -rf src/trading_api/clients; \
+	fi
+	@echo ""
+	@echo "✅ All generated files removed!"
+	@echo ""
+	@echo "💡 Tip: Regenerate files with:"
+	@echo "   make generate-ws-routers       # WebSocket routers"
+	@echo "   make export-openapi-spec       # OpenAPI specs"
+	@echo "   make export-asyncapi-spec      # AsyncAPI specs"
+	@echo "   make generate-python-clients   # Python HTTP clients"
+
+
 # Export OpenAPI specification (offline)
 export-openapi-spec:
 	@echo "Exporting OpenAPI specification (offline)..."
@@ -503,11 +550,6 @@ export-openapi-spec:
 export-asyncapi-spec:
 	@echo "Exporting AsyncAPI specification (offline)..."
 	poetry run python scripts/export_asyncapi_spec.py
-
-# Validate package names for generated clients
-validate-package-names:
-	@echo "Validating package names for generated clients..."
-	poetry run python scripts/validate_package_names.py
 
 # Generate Python HTTP clients from per-module OpenAPI specs
 generate-python-clients:

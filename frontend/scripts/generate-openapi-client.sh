@@ -24,8 +24,8 @@ echo -e "${BLUE}🚀 OpenAPI Client Generator - Per-Module${NC}"
 echo ""
 
 # Validate package names before generation
-echo -e "${BLUE}🔍 Validating package names...${NC}"
-if ! (cd "$BACKEND_DIR" && poetry run python scripts/validate_package_names.py); then
+echo -e "${BLUE}🔍 Validating backend modules...${NC}"
+if ! (cd "$BACKEND_DIR" && poetry run python scripts/validate_modules.py); then
     echo -e "${RED}❌ Package name validation failed!${NC}"
     echo -e "${YELLOW}💡 Fix package naming issues before generating clients${NC}"
     exit 1
