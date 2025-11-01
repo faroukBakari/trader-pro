@@ -107,6 +107,13 @@ if [[ -n "$backend_files" ]]; then
         exit 1
     fi
 
+    # Stage any formatting changes
+    if [[ -n "$(git diff --name-only $backend_files)" ]]; then
+        log_info "Staging backend formatting changes..."
+        echo "$backend_files" | xargs git add
+        log_success "Backend formatting changes staged"
+    fi
+
     # Lint backend code (flake8 + mypy)
     if ! run_check "Backend linting" "make type-check" "$repo_root/backend"; then
         exit 1
@@ -156,6 +163,13 @@ if [[ -n "$frontend_files" ]]; then
     if ! run_check "Frontend linting" "make lint" "$repo_root/frontend"; then
         log_warning "Run 'cd frontend && make lint' to fix linting issues"
         exit 1
+    fi
+
+    # Stage any linting/formatting changes
+    if [[ -n "$(git diff --name-only $frontend_files)" ]]; then
+        log_info "Staging frontend formatting/linting changes..."
+        echo "$frontend_files" | xargs git add
+        log_success "Frontend formatting/linting changes staged"
     fi
 
     # TypeScript type checking (includes client generation)

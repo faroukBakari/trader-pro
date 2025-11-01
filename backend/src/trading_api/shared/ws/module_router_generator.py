@@ -233,7 +233,7 @@ def run_quality_checks_for_module(
 def generate_module_routers(
     module_name: str,
     *,
-    silent: bool = True,
+    silent: bool = False,
     skip_quality_checks: bool = False,
 ) -> bool:
     """
