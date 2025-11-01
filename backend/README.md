@@ -82,7 +82,7 @@ make test-modules modules=broker,datafeed
 
 # Code quality
 make lint              # flake8
-make lint-check        # black --check + isort --check-only + flake8 + mypy
+make type-check        # black --check + isort --check-only + flake8 + mypy
 make format            # black + isort
 ```
 
@@ -248,7 +248,7 @@ See `docs/WEBSOCKETS.md` and `ARCHITECTURE.md` for detailed documentation.
 1. Write a failing test in `backend/tests`
 2. Implement the minimal change under `src/trading_api`
 3. Keep imports tidy and run formatters via `make format`
-4. Use `make lint-check` before raising a pull request
+4. Use `make type-check` before raising a pull request
 
 ## Project Layout
 

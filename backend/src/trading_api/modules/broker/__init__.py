@@ -10,14 +10,15 @@ from fastapi import Depends, FastAPI
 from fastapi.routing import APIRouter
 
 from external_packages.fastws import Client
-from trading_api.shared import FastWSAdapter
+from trading_api.shared import FastWSAdapter, Module
+from trading_api.shared.ws.router_interface import WsRouterInterface
 
 from .api import BrokerApi
 from .service import BrokerService
 from .ws import BrokerWsRouters
 
 
-class BrokerModule:
+class BrokerModule(Module):
     """Broker module implementation.
 
     Implements the Module Protocol for pluggable broker functionality.
@@ -76,11 +77,11 @@ class BrokerModule:
             BrokerApi(service=self.service, prefix=f"/{self.name}", tags=[self.name])
         ]
 
-    def get_ws_routers(self) -> list[Any]:
+    def get_ws_routers(self) -> list[WsRouterInterface]:
         """Get all WebSocket routers for broker real-time endpoints.
 
         Returns:
-            list[Any]: List of WebSocket router instances for orders,
+            list[WsRouterInterface]: List of WebSocket router instances for orders,
                       positions, executions, equity, and broker connection
         """
         return BrokerWsRouters(broker_service=self.service)
@@ -141,14 +142,13 @@ class BrokerModule:
             f"""WebSocket endpoint for {self.name} real-time streaming"""
             await ws_app.serve(client)
 
-    def configure_app(self, api_app: Any, ws_app: Any) -> None:
+    def configure_app(self, api_app: FastAPI) -> None:
         """Optional hook for custom application configuration.
 
         Currently no custom configuration needed for broker module.
 
         Args:
             api_app: FastAPI application instance
-            ws_app: FastWSAdapter WebSocket application instance (deprecated)
         """
 
 

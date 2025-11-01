@@ -161,7 +161,7 @@ jobs:
     steps:
       - run: make install-ci
       - run: make test
-      - run: make lint-check
+      - run: make type-check
 
   frontend:
     runs-on: ubuntu-latest

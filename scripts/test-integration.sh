@@ -83,7 +83,7 @@ else
 fi
 
 echo "🔍 Running backend linting..."
-if make lint-check > /dev/null 2>&1; then
+if make type-check > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Backend linting passed${NC}"
 else
     echo -e "${RED}❌ Backend linting failed${NC}"

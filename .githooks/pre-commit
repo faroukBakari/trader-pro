@@ -108,7 +108,7 @@ if [[ -n "$backend_files" ]]; then
     fi
 
     # Lint backend code (flake8 + mypy)
-    if ! run_check "Backend linting" "make lint-check" "$repo_root/backend"; then
+    if ! run_check "Backend linting" "make type-check" "$repo_root/backend"; then
         exit 1
     fi
 

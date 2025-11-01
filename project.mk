@@ -7,15 +7,13 @@ FRONTEND_PORT ?= 5173
 # Module discovery
 BACKEND_MODULES = $(shell find backend/src/trading_api/modules -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -v __pycache__ || echo "")
 
-.PHONY: help setup install install-hooks uninstall-hooks dev-backend dev-frontend dev-fullstack kill-dev test-all test-backend-modules test-smoke lint-all format-all build-all clean-all clean-generated health test-integration generate-ws-routers generate-openapi-client generate-asyncapi-types
+.PHONY: help install install-hooks dev-backend dev-frontend dev-fullstack kill-dev test-all test-backend-modules test-smoke lint-all format-all build-all clean-all test-integration generate-ws-routers generate-openapi-client generate-asyncapi-types
 
 # Default target
 help:
 	@echo "Project-wide targets:"
 	@echo "  install           Install Git hooks + all dependencies (backend + frontend)"
-	@echo "  setup             Same as install (alias for convenience)"
 	@echo "  install-hooks     Install Git hooks for pre-commit checks only"
-	@echo "  uninstall-hooks   Remove Git hooks"
 	@echo "  dev-backend       Start backend development server"
 	@echo "  dev-frontend      Start frontend development server"
 	@echo "  dev-fullstack     Start backend, generate client, then start frontend"
@@ -60,11 +58,6 @@ install-hooks:
 	@echo "Git hooks installed successfully!"
 	@echo "Hooks location: $$(git config --get core.hooksPath)"
 
-uninstall-hooks:
-	@echo "Removing Git hooks..."
-	git config --unset core.hooksPath || true
-	@echo "Git hooks removed."
-
 # Install all dependencies
 install:
 	@echo "Installing all project dependencies..."
@@ -87,15 +80,6 @@ install:
 	@echo "  make dev-backend    # Start backend server (port 8000)"
 	@echo "  make dev-frontend   # Start frontend server (port 5173)"
 	@echo "  make dev-fullstack  # Start both servers"
-
-# Project setup (alias for install)
-setup: install
-	@echo ""
-	@echo "Project setup complete!"
-	@echo ""
-	@echo "Next steps:"
-	@echo "  make dev-backend    # Start backend server (port 8000)"
-	@echo "  make dev-frontend   # Start frontend server (port 5173)"
 
 # Development servers
 dev-backend:
@@ -168,7 +152,7 @@ test-integration:
 lint-all:
 	@echo "Running all linters..."
 	@echo "Backend linting:"
-	make -C backend lint-check
+	make -C backend type-check
 	@echo ""
 	@echo "Frontend linting:"
 	make -C frontend lint
@@ -202,31 +186,11 @@ clean-all:
 	@echo "🧹 Cleaning project-level generated files..."
 	rm -f backend/openapi.json backend/asyncapi.json
 	rm -rf frontend/src/clients/*
-	@echo "🧹 Cleaning smoke test artifacts..."
-	rm -rf smoke-tests/test-results smoke-tests/playwright-report
-	@echo "Clean complete."
-
-# Clean only generated files (lighter cleanup)
-clean-generated:
-	@echo "Cleaning generated files..."
-	@echo "🧹 Removing backend spec files..."
-	rm -f backend/openapi.json backend/asyncapi.json
-	@echo "🧹 Removing frontend generated clients..."
-	rm -rf frontend/src/clients/*
 	@echo "🧹 Removing frontend build cache..."
 	rm -rf frontend/node_modules/.vite
 	@echo "🧹 Removing test artifacts..."
 	rm -rf smoke-tests/test-results smoke-tests/playwright-report
-	@echo "Generated files cleanup complete."
-
-# Health check
-health:
-	@echo "Checking project health..."
-	@echo "Backend health:"
-	make -C backend health
-	@echo ""
-	@echo "Frontend health:"
-	@curl -f http://localhost:$(FRONTEND_PORT) 2>/dev/null >/dev/null && echo "Frontend running" || echo "Frontend not running"
+	@echo "Clean complete."
 
 # Code generation targets
 generate-ws-routers:

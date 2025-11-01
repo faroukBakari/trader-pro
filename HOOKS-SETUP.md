@@ -84,10 +84,6 @@ SKIP_HOOKS=true git commit
 make lint && make format && make test
 ```
 
-### Remove Hooks
-
-```bash
-make -f project.mk uninstall-hooks
 ```
 
 ## Benefits
@@ -104,3 +100,4 @@ make -f project.mk uninstall-hooks
 1. Clone repo
 2. Run `make -f project.mk install`
 3. Start coding - hooks run automatically!
+```
