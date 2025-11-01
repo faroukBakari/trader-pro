@@ -458,8 +458,9 @@ dev-ci:
 # Build
 build:
 	@echo "Building backend package..."
+	@echo "Generating WebSocket routers..."
+	@$(MAKE) generate-ws-routers
 	poetry build
-	@./scripts/generate-ws-routers.sh
 
 # CI health check
 health-ci:

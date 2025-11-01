@@ -110,7 +110,8 @@ make generate-python-clients  # Generate type-safe HTTP clients
 
 # WebSocket Router Generation
 make generate-ws-routers      # Generate concrete WS router classes
-make watch-ws-routers         # Watch and auto-regenerate routers
+                              # Optional: Routers auto-generate on app startup
+                              # Use for: CI/CD, debugging, or manual verification
 make verify-ws-routers        # Verify all routers are up-to-date
 
 # Import Boundary Validation

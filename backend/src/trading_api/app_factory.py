@@ -15,7 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from trading_api.shared import FastWSAdapter, HealthApi, ModuleRegistry, VersionApi
-from trading_api.shared.ws.module_router_generator import generate_module_routers
 
 # Configure logging for the application
 logging.basicConfig(
@@ -198,19 +197,6 @@ def create_app(
 
     # Load enabled modules
     for module in registry.get_enabled_modules():
-        # Generate WebSocket routers for module
-        try:
-            generated = generate_module_routers(module.name)
-            if generated:
-                logger.info(f"Generated WS routers for module '{module.name}'")
-        except RuntimeError as e:
-            # Fail loudly with module context
-            logger.error(
-                f"WebSocket router generation failed for module '{module.name}'!"
-            )
-            logger.error(str(e))
-            raise
-
         # Include API routers
         for router in module.get_api_routers():
             api_app.include_router(router, prefix=base_url, tags=["v1"])

@@ -248,14 +248,14 @@ npm run generate-asyncapi-types
 
 ```bash
 # Check router type aliases
-grep "TypeAlias = WsRouter" backend/src/trading_api/ws/*.py
+grep "TypeAlias = WsRouter" backend/src/trading_api/modules/*/ws.py
 
-# Run generation with verbose output
+# Run generation (uses new module-based generator)
 cd backend
-python src/trading_api/scripts/generate_ws_router.py --verbose
+make generate-ws-routers
 
 # Verify generated routers
-ls -la src/trading_api/ws/generated/
+ls -la src/trading_api/modules/*/ws_generated/
 
 # Check for syntax errors in generated files
 cd backend && make lint
