@@ -9,9 +9,96 @@ This project uses code generation for both backend routers and frontend clients 
 
 The backend uses a code generation approach to create concrete (non-generic) WebSocket router classes from a generic template. This provides better IDE support, type checking, and eliminates generic type parameters at runtime.
 
+**Generation Modes:**
+
+- **Automatic**: Routers generate per-module during app startup (⚠️ requires pre-generation on first run)
+- **Manual**: Run `make generate-ws-routers` for specific workflows (CI/CD, debugging, fresh setup)
+
 ### Frontend: Client Generation
 
 The frontend automatically generates TypeScript types and client factories from the AsyncAPI specification. See `frontend/WS-CLIENT-AUTO-GENERATION.md` for details.
+
+---
+
+## Automatic Generation (App Startup)
+
+**Status**: ✅ Fully Functional - No Pre-Generation Required
+
+WebSocket routers are automatically generated per module when the app starts. Generation happens in each module's `ws.py` file when the router factory class is instantiated, **before** importing from `ws_generated`.
+
+### How It Works
+
+```python
+# modules/datafeed/ws.py - Router factory pattern
+class DatafeedWsRouters(list[WsRouterInterface]):
+    def __init__(self, datafeed_service: WsRouteService):
+        # STEP 1: Generate routers (creates ws_generated/ directory)
+        module_name = os.path.basename(os.path.dirname(__file__))
+        generated = generate_module_routers(module_name)
+
+        # STEP 2: Import from generated directory (now exists!)
+        from .ws_generated import BarWsRouter, QuoteWsRouter
+
+        # STEP 3: Instantiate routers with service
+        bar_router = BarWsRouter(route="bars", service=datafeed_service)
+        super().__init__([bar_router, ...])
+```
+
+**Detection:** Automatically scans for `modules/{module}/ws.py` files
+**Output:** Generates to `modules/{module}/ws_generated/`
+**Quality:** Runs all formatters and linters (Black, Ruff, Flake8, Mypy, Isort)
+**Fail-fast:** Clear module-specific errors if generation fails
+
+### Timeline
+
+```
+create_app() execution:
+├─ 1. registry.auto_discover()                  ← Discovers modules
+├─ 2. registry.set_enabled_modules()
+├─ 3. For each enabled module:
+│  ├─ 3a. module.get_ws_routers()              ← Instantiates router factory
+│  │  ├─ DatafeedWsRouters.__init__()          ← Calls generate_module_routers()
+│  │  │  ├─ generate_module_routers()          ← Creates ws_generated/
+│  │  │  └─ from .ws_generated import ...      ← Import succeeds!
+│  │  └─ Instantiate routers
+│  └─ ws_app.include_router()
+└─ 4. Start lifespan
+```
+
+### Benefits of Automatic Generation
+
+- ✅ **Zero setup**: No pre-generation required, works on fresh clone
+- ✅ **Always up-to-date**: Routers regenerate on every app startup
+- ✅ **Module-scoped**: Clear errors identify which module failed
+- ✅ **Quality assured**: All checks run automatically
+- ✅ **Developer-friendly**: Edit TypeAlias → restart app → done---
+
+## Manual Generation (make generate-ws-routers)
+
+**When to use manual generation:**
+
+- First-time setup (before first app run)
+- CI/CD workflows (pre-build step)
+- Debugging generation issues
+- When you want to see generation output
+
+### Command
+
+```bash
+cd backend
+make generate-ws-routers
+
+# What it does:
+# 1. Scans modules/*/ws.py files for TypeAlias patterns
+# 2. Auto-discovers all router specifications
+# 3. Generates concrete classes in modules/{module}/ws_generated/
+# 4. Runs all formatters (Black, isort, Ruff)
+# 5. Runs all linters (Flake8, Ruff)
+# 6. Runs type checker (mypy)
+# 7. Verifies imports work correctly
+```
+
+**No manual configuration needed** - just add TypeAlias declarations to your module's `ws.py`!
 
 ---
 
@@ -98,23 +185,33 @@ The generator scans **all** `modules/*/ws.py` files automatically!
 
 The generator scans **all** `modules/*/ws.py` files automatically!
 
-### Step 4: Generate the Router
+### Step 4: Start the App (Automatic Generation)
 
-Run the code generator (it auto-discovers your TypeAlias):
+**No manual generation needed!** Just start the app:
 
 ```bash
 cd backend
-make generate-ws-routers
+make dev
 ```
 
-**What happens:**
+**What happens automatically:**
 
-1. Generator scans all `modules/*/ws.py` files
-2. Finds `TradeWsRouter: TypeAlias = WsRouter[TradeSubscriptionRequest, Trade]`
-3. Creates `backend/src/trading_api/modules/trading/ws_generated/tradewsrouter.py` with:
-   - Concrete `TradeWsRouter` class (no generics)
-   - Pre-defined `subscribe`, `unsubscribe`, `update` operations from `generic_route.py`
-   - Full type safety and all quality checks passed
+1. App starts and discovers modules
+2. When `DatafeedWsRouters` class is instantiated:
+   - Calls `generate_module_routers("datafeed")`
+   - Creates `modules/datafeed/ws_generated/` directory
+   - Generates `BarWsRouter` and `QuoteWsRouter` concrete classes
+   - Runs all quality checks (Black, Ruff, Flake8, Mypy, Isort)
+   - Imports generated classes
+3. Router factory instantiates routers with service
+4. App includes routers in WebSocket application
+
+**Optional**: You can also pre-generate manually for debugging:
+
+```bash
+cd backend
+make generate-ws-routers  # Manual generation (optional)
+```
 
 ### Step 5: Export Routers via Module Protocol
 
@@ -348,9 +445,9 @@ else:
     from .ws_generated import BarWsRouter, QuoteWsRouter
 ```
 
-### 3. Generator Script (scripts/generate_ws_router.py)
+### 3. Module Router Generator (shared/ws/module_router_generator.py)
 
-The generator **automatically scans** `modules/*/ws.py` files for TypeAlias patterns:
+The module-scoped generator **automatically scans** `modules/*/ws.py` files for TypeAlias patterns:
 
 1. **Scans** all `modules/*/ws.py` files (not `shared/ws/` - that's infrastructure)
 2. **Finds** regex pattern: `BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]`
@@ -361,24 +458,27 @@ The generator **automatically scans** `modules/*/ws.py` files for TypeAlias patt
    - Replacing `__TData` → `Bar`
    - Keeping all pre-defined operations from template
 5. **Outputs** to `modules/{module}/ws_generated/barwsrouter.py`
+6. **Runs quality checks** - Black, Ruff, Flake8, Mypy, Isort
 
-**No manual configuration needed!** Just write the TypeAlias in your module's `ws.py` and run `make generate-ws-routers`.
+**No manual configuration needed!** Just write the TypeAlias in your module's `ws.py` and:
 
-### 3. Wrapper Script (scripts/generate-ws-routers.sh)
+- **Automatic**: Routers generate during app startup (per module)
+- **Manual**: Run `make generate-ws-routers` for specific needs
 
-The bash wrapper orchestrates the complete workflow with all pre-commit tools:
+### 3. Automatic Generation During App Startup
 
-1. **Generate code** - Runs Python generator
-2. **Black formatting** - Formats with `poetry run black`
-3. **Import sorting (isort)** - Sorts imports with `poetry run isort`
-4. **Ruff formatting** - Additional formatting with `poetry run ruff format`
-5. **Auto-fix linter issues** - Applies `poetry run ruff check --fix`
-6. **Flake8 linting** - Validates with `poetry run flake8`
-7. **Ruff linting** - Final validation with `poetry run ruff check`
-8. **Type checking** - Validates with `poetry run mypy`
-9. **Import verification** - Tests that generated code imports and works correctly
+Generation happens automatically per module when the app starts:
 
-This ensures generated code passes **all** pre-commit hook checks.
+1. **Module loading** - App factory loads each enabled module
+2. **Detection** - Checks if `modules/{module}/ws.py` exists
+3. **Generation** - Calls `generate_module_routers(module_name)`
+4. **Quality checks** - Runs all formatters and linters
+5. **Fail-fast** - Clear module-specific errors if generation fails
+6. **Import verification** - Module imports from `ws_generated/`
+
+This ensures generated code passes **all** pre-commit hook checks and is always up-to-date.
+
+See `backend/SYSTEMATIC_WS_ROUTER_GEN.md` for complete implementation details.
 
 ## Usage Patterns
 
@@ -768,18 +868,40 @@ export class DataService {
 
 ## Troubleshooting
 
-### Issue: Import errors after generation
+### Issue: Import errors on app startup
 
-**Symptom**: `ImportError: cannot import name 'YourWsRouter' from 'trading_api.ws.generated'`
+**Symptom**: `ImportError: cannot import name 'YourWsRouter' from 'trading_api.modules.{module}.ws_generated'`
 
-**Solution**: Regenerate routers with auto-fixing:
+**Possible Causes:**
+
+1. **Generation failed silently**: Check app startup logs for generation errors
+2. **Invalid TypeAlias syntax**: Verify TypeAlias declaration in `ws.py`
+3. **Quality checks failed**: Review error output for linting/formatting issues
+
+**Solution**: Check logs and fix any errors reported during generation:
 
 ```bash
 cd backend
+# View detailed generation output
+make dev
+
+# Or manually generate to see errors
 make generate-ws-routers
 ```
 
-**Root cause**: Models may have changed, or generation was interrupted.
+---
+
+### Issue: Import errors after changing models
+
+**Symptom**: Type errors or import errors after updating Pydantic models
+
+**Solution**: Routers auto-regenerate on next `make dev`. If using a running dev server, restart it:
+
+```bash
+cd backend
+make kill-dev  # Stop current server
+make dev       # Restart (triggers regeneration)
+```
 
 ---
 

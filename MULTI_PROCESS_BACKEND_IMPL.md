@@ -82,6 +82,7 @@ cd backend && make install
 ```
 
 The `make install` command will:
+
 1. Check Python 3.11+ availability
 2. Check Poetry installation
 3. Install Python dependencies via Poetry
@@ -259,14 +260,14 @@ cd frontend && make generate-openapi-client
 WebSocket routers can be generated separately using:
 
 ```bash
-# Manual generation
+# Manual generation (uses module-based generator)
 make generate-ws-routers
 
-# Watch mode (monitors ws/*.py and models/*.py for changes)
-./scripts/watch-ws-routers.sh
+# Generation happens automatically during app startup
+# See SYSTEMATIC_WS_ROUTER_GEN.md for details
 ```
 
-**Note**: The `watch-ws-routers.sh` script provides optional file watching for WebSocket router generation. This is separate from the main watch mode strategy and is useful when actively developing WebSocket endpoints.
+**Note**: WebSocket routers are automatically generated per module during app startup. Manual generation is still available via `make generate-ws-routers` but is optional since Phases 1-3 of the systematic router generation are complete.
 
 ---
 

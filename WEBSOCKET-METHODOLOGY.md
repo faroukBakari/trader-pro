@@ -123,18 +123,25 @@ class DatafeedWsRouters(list[WsRouterInterface]):
 - Group related routers in a factory class
 - Pass service implementing `WsRouteService` Protocol
 
-### Step 1.3: Generate Concrete Routers
+### Step 1.3: Start the App (Automatic Generation)
 
-Run code generation to create non-generic router classes:
+**No manual generation needed!** Routers automatically generate when you start the app:
+
+```bash
+cd backend
+make dev
+```
+
+This triggers automatic router generation when each module's router factory is instantiated. The generator scans all `modules/*/ws.py` files for `TypeAlias = WsRouter[...]` patterns and generates concrete classes in `modules/{module}/ws_generated/` **before** they are imported.
+
+**Optional - Manual Generation**: For debugging or pre-build scenarios:
 
 ```bash
 cd backend
 make generate-ws-routers
 ```
 
-This scans all `modules/*/ws.py` files for `TypeAlias = WsRouter[...]` patterns and generates concrete classes in `modules/{module}/ws_generated/`.
-
-**See**: `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` for details
+**See**: `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` for complete generation guide and troubleshooting
 
 ### Step 1.4: Register Routers
 
@@ -692,6 +699,13 @@ Use this checklist when implementing new WebSocket features:
 - Ensure backend is running when generating types
 - Check strict naming conventions in mappers
 - Verify AsyncAPI spec is up to date
+
+**Routers not generated**
+
+- For first-time setup: Run `make generate-ws-routers` manually before `make dev`
+- After initial setup: Routers auto-regenerate on app startup
+- Check `modules/{module}/ws.py` has valid `TypeAlias` declarations
+- Verify generation output for errors
 
 **No updates received**
 

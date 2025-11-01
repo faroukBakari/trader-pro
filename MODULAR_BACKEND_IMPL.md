@@ -133,18 +133,17 @@
     - No test changes required
     - Committed: 112cf77
 
-12. **Phase 3: Refactor WS Router Generation** ✅ - Completed 2025-10-29
+12. **Phase 3: Refactor WS Router Generation** ✅ - Completed 2025-10-29 → ⚡ Superseded 2025-11-01
 
-    - Updated `ws/generic_route.py` to import from `shared/ws/router_interface`
-    - Updated `scripts/generate_ws_router.py` to support both legacy and modular architectures
-    - Added `find_module_ws_files()` to scan `modules/*/ws.py` files
-    - Added `generate_for_module()` to generate into `modules/{module}/ws_generated/`
-    - Updated `scripts/generate-ws-routers.sh` to format all generated directories (legacy + modular)
-    - Updated `scripts/verify_ws_routers.py` to verify both architectures
-    - Fallback to legacy `ws/generated/` when no module ws.py files found
-    - All 48 tests pass (48 passed in 0.37s)
-    - Generation tested and working in legacy mode
-    - Committed: 112cf77
+    - ~~Updated `scripts/generate_ws_router.py` to support both legacy and modular architectures~~
+    - ~~Updated `scripts/generate-ws-routers.sh` to format all generated directories~~
+    - **Superseded by**: Systematic router generation (see `backend/SYSTEMATIC_WS_ROUTER_GEN.md`)
+    - **New approach**: Module-scoped generator integrated into app factory
+    - **Created**: `shared/ws/module_router_generator.py` with automatic generation
+    - **Removed**: Legacy scripts (`generate_ws_router.py`, `generate-ws-routers.sh`, `watch-ws-routers.sh`)
+    - **Phase 4 cleanup**: Completed 2025-11-01
+    - Generation now happens automatically per module during app startup
+    - Manual generation still available via `make generate-ws-routers`
 
 13. **Phase 3: Move API Infrastructure to shared/api/** ✅ - Completed 2025-10-29
 
