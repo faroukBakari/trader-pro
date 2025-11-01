@@ -70,6 +70,8 @@ make format            # Format with black + isort
 # Build
 make build             # Build package
 make clean             # Clean artifacts
+make clean-cache       # Clean all Python caches
+make clean-generated   # Clean all generated files (WS routers, specs, Python clients)
 
 # Multi-Process Backend (Development)
 make backend-manager-start          # Start multi-process backend with nginx
@@ -87,21 +89,12 @@ make logs-clean                     # Clean all backend log files
 make generate-python-clients   # Generate HTTP clients (includes format & validation)
 make export-openapi-spec       # Export OpenAPI spec
 make export-asyncapi-spec      # Export AsyncAPI spec
-make validate-package-names    # Validate client package names
 ```
 
 ### Module-Specific Targets
 
 ```bash
 cd backend
-
-# Package Name Validation
-make validate-package-names   # Validate client package names
-                              # Checks uniqueness and module correspondence
-                              # Runs automatically before client generation
-                              # OpenAPI: @trader-pro/client-{module}
-                              # AsyncAPI: ws-types-{module}
-                              # Python: {Module}Client
 
 # Python HTTP Client Generation
 make generate-python-clients  # Generate type-safe HTTP clients
