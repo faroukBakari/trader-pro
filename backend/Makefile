@@ -65,7 +65,7 @@ help:
 	@echo "  export-asyncapi-spec  Export AsyncAPI specification (offline)"
 	@echo "  validate-package-names  Validate package names for generated clients"
 	@echo "  generate-python-clients  Generate Python HTTP clients (includes format & validation)"
-	@echo "  generate-ws-routers Generate WebSocket router classes"
+	@echo "  generate-ws-routers   Generate WebSocket router classes (use module=<name> for specific module)"
 	@echo ""
 	@echo "Logging targets:"
 	@echo "  logs-tail         Tail unified backend log (all servers with prefixes)"
@@ -525,8 +525,32 @@ generate-python-clients:
 	@echo "✅ Client generation complete and validated!"
 
 # Generate WebSocket router classes
+# Usage: make generate-ws-routers [module=<module_name>]
+# Examples:
+#   make generate-ws-routers              # Generate for all modules
+#   make generate-ws-routers module=broker
+#   make generate-ws-routers module=datafeed
 generate-ws-routers:
-	@./scripts/generate-ws-routers.sh
+	@if [ -n "$(module)" ]; then \
+		echo "Generating WebSocket routers for module: $(module)"; \
+		poetry run python -c "\
+from trading_api.shared.ws.module_router_generator import generate_module_routers; \
+import sys; \
+result = generate_module_routers('$(module)', silent=False, skip_quality_checks=False); \
+sys.exit(0 if result else 1)"; \
+	else \
+		echo "Generating WebSocket routers for all modules with ws.py files..."; \
+		for mod in $(DISCOVERED_MODULES); do \
+			echo ""; \
+			echo "Checking module: $$mod"; \
+			poetry run python -c "\
+from trading_api.shared.ws.module_router_generator import generate_module_routers; \
+result = generate_module_routers('$$mod', silent=False, skip_quality_checks=False); \
+exit(0)" || true; \
+		done; \
+		echo ""; \
+		echo "✅ Router generation complete!"; \
+	fi
 
 # Multi-process backend management (using backend-manager)
 backend-manager-start:
