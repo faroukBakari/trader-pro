@@ -113,7 +113,7 @@ cd backend && make test-cov
 make -f project.mk lint-all
 
 # Backend only
-cd backend && make lint-check
+cd backend && make type-check
 
 # Frontend only
 cd frontend && make lint

@@ -64,7 +64,7 @@ make test-cov          # Tests with coverage
 
 # Quality
 make lint              # Flake8 only
-make lint-check        # All linters + type checkers (black, isort, flake8, mypy, pyright)
+make type-check        # All linters + type checkers (black, isort, flake8, mypy, pyright)
 make format            # Format with black + isort
 
 # Build

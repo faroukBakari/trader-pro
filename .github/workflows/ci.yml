@@ -57,7 +57,7 @@ jobs:
 
     - name: Run backend linting
       working-directory: backend
-      run: make lint-check
+      run: make type-check
 
   # Backend boundary tests (runs once, enforces module isolation)
   backend-boundaries:

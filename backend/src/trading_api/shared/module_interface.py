@@ -4,12 +4,16 @@ Defines the interface that all modules (datafeed, broker, etc.) must implement
 to integrate with the application factory pattern.
 """
 
-from typing import Any, Protocol
+from typing import Protocol, runtime_checkable
 
 from fastapi import FastAPI
 from fastapi.routing import APIRouter
 
+from trading_api.shared.plugins.fastws_adapter import FastWSAdapter
+from trading_api.shared.ws.router_interface import WsRouterInterface
 
+
+@runtime_checkable
 class Module(Protocol):
     """Protocol defining the interface for pluggable modules.
 
@@ -58,11 +62,11 @@ class Module(Protocol):
         """
         ...
 
-    def get_ws_routers(self) -> list[Any]:
+    def get_ws_routers(self) -> list[WsRouterInterface]:
         """Get all WebSocket routers for this module's real-time endpoints.
 
         Returns:
-            list[Any]: List of WebSocket router instances
+            list[WsRouterInterface]: List of WebSocket router instances
         """
         ...
 
@@ -75,7 +79,7 @@ class Module(Protocol):
         """
         ...
 
-    def get_ws_app(self, base_url: str) -> Any:
+    def get_ws_app(self, base_url: str) -> FastWSAdapter:
         """Get or create module's WebSocket application.
 
         Args:
@@ -95,11 +99,11 @@ class Module(Protocol):
         """
         ...
 
-    def configure_app(self, api_app: Any, ws_app: Any) -> None:
+    def configure_app(self, api_app: FastAPI) -> None:
         """Optional hook for custom application configuration.
 
         Args:
             api_app: FastAPI application instance
-            ws_app: FastWSAdapter WebSocket application instance
         """
+        ...
         ...

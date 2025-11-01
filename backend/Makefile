@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-shared test-modules test-cov test-integration lint lint-check format build clean clean-cache dev dev-ci kill-dev health-ci export-openapi-spec export-asyncapi-spec validate-package-names generate-python-clients generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help install install-ci test test-boundaries test-shared test-modules test-cov test-integration lint type-check format build clean clean-cache dev dev-ci kill-dev health-ci export-openapi-spec export-asyncapi-spec validate-package-names generate-python-clients generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -39,7 +39,7 @@ help:
 	@echo ""
 	@echo "Code quality targets:"
 	@echo "  lint              Run backend linting (flake8 only)"
-	@echo "  lint-check        Run backend linting with type checking (black, isort, flake8, mypy, pyright)"
+	@echo "  type-check        Run backend linting with type checking (black, isort, flake8, mypy, pyright)"
 	@echo "  format            Format backend code"
 	@echo ""
 	@echo "Development targets:"
@@ -392,7 +392,7 @@ lint:
 	@echo "Running backend linting..."
 	poetry run flake8 src/ tests/
 
-lint-check:
+type-check:
 	@echo "Running backend linting with full checks..."
 	poetry run black --check src/ tests/
 	poetry run isort --check-only src/ tests/

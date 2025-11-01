@@ -1420,7 +1420,7 @@ make test
 make test  # All 48 tests pass
 
 # Verify type checking passes
-make lint-check  # mypy should pass
+make type-check  # mypy should pass
 
 # Verify no legacy imports remain in codebase
 grep -r "from trading_api.core import" src/trading_api/ && echo "❌ Legacy core imports found" || echo "✓ No legacy core imports"
@@ -1476,7 +1476,7 @@ test ! -d src/trading_api/ws/generated/ && echo "✓ Centralized generated/ remo
 
 # Run all quality checks
 make test           # All 48 tests pass
-make lint-check     # All linters pass
+make type-check     # All linters pass
 make type-check     # mypy passes
 
 # Verify WS router generation works
@@ -2315,7 +2315,7 @@ cd backend
 make test  # All 48 tests pass
 
 # Type checking should pass
-make lint-check  # mypy passes
+make type-check  # mypy passes
 
 # Spec generation should work
 make export-openapi-spec
@@ -2455,7 +2455,7 @@ cd backend
 make test  # All 48 tests pass
 
 # Type checking should pass
-make lint-check  # mypy passes
+make type-check  # mypy passes
 
 # Verify no legacy directories exist
 test ! -d "src/trading_api/api" && echo "✓ api/ removed"
@@ -3011,7 +3011,7 @@ feat: Phase 5 Task 25 - Add generic module-aware Makefile targets
            run: make install-ci
          - name: Run linting
            working-directory: backend
-           run: make lint-check
+           run: make type-check
 
      # Frontend (unchanged but depends on backend validation)
      frontend:
@@ -3414,7 +3414,7 @@ make test-boundaries || exit 1
 make test || exit 1
 
 echo "2. Linting..."
-make lint-check || exit 1
+make type-check || exit 1
 
 echo "3. Spec generation..."
 make export-openapi-spec || exit 1

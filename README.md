@@ -116,7 +116,7 @@ make -f project.mk lint-all
 make -f project.mk format-all
 
 # Backend only
-make -C backend lint-check
+make -C backend type-check
 make -C backend format
 ```
 

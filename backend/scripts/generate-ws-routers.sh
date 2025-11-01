@@ -98,7 +98,7 @@ for GENERATED_DIR in "${GENERATED_DIRS[@]}"; do
         echo -e "${GREEN}✅ All ruff checks passed${NC}"
     else
         echo -e "${RED}❌ Ruff checks failed${NC}"
-        echo -e "${YELLOW}Run 'make lint-check' for details${NC}"
+        echo -e "${YELLOW}Run 'make type-check' for details${NC}"
         exit 1
     fi
     echo ""

@@ -9,14 +9,15 @@ from fastapi import Depends, FastAPI
 from fastapi.routing import APIRouter
 
 from external_packages.fastws import Client
-from trading_api.shared import FastWSAdapter
+from trading_api.shared import FastWSAdapter, Module
+from trading_api.shared.ws.router_interface import WsRouterInterface
 
 from .api import DatafeedApi
 from .service import DatafeedService
 from .ws import DatafeedWsRouters
 
 
-class DatafeedModule:
+class DatafeedModule(Module):
     """Datafeed module implementation.
 
     Implements the Module Protocol for pluggable datafeed functionality.
@@ -75,11 +76,11 @@ class DatafeedModule:
             DatafeedApi(service=self.service, prefix=f"/{self.name}", tags=[self.name])
         ]
 
-    def get_ws_routers(self) -> list[Any]:
+    def get_ws_routers(self) -> list[WsRouterInterface]:
         """Get all WebSocket routers for datafeed real-time endpoints.
 
         Returns:
-            list[Any]: List of WebSocket router instances for bars and quotes
+            list[WsRouterInterface]: List of WebSocket router instances for bars and quotes
         """
         return DatafeedWsRouters(datafeed_service=self.service)
 
@@ -139,14 +140,13 @@ class DatafeedModule:
             f"""WebSocket endpoint for {self.name} real-time streaming"""
             await ws_app.serve(client)
 
-    def configure_app(self, api_app: Any, ws_app: Any) -> None:
+    def configure_app(self, api_app: FastAPI) -> None:
         """Optional hook for custom application configuration.
 
         Currently no custom configuration needed for datafeed module.
 
         Args:
             api_app: FastAPI application instance
-            ws_app: FastWSAdapter WebSocket application instance (deprecated)
         """
 
 

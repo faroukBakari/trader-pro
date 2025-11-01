@@ -75,26 +75,18 @@ def create_app(
         >>> # Load only datafeed module
         >>> api_app, ws_apps = create_app(enabled_modules=["datafeed"])
     """
-    # Register all available modules
-    from trading_api.modules.broker import BrokerModule
-    from trading_api.modules.datafeed import DatafeedModule
-
     # Clear registry to allow fresh registration (important for tests)
     registry.clear()
 
-    registry.register(DatafeedModule())
-    registry.register(BrokerModule())
+    # Auto-discover and register all available modules
+    modules_dir = Path(__file__).parent / "modules"
+    registry.auto_discover(modules_dir)
 
-    # Filter modules if enabled_modules is specified
-    if enabled_modules is not None:
-        for module in registry.get_all_modules():
-            # Enable module if it's in the enabled list
-            if hasattr(module, "_enabled"):
-                module._enabled = module.name in enabled_modules
+    # Set which modules should be enabled
+    registry.set_enabled_modules(enabled_modules)
 
     # Create base URL
     base_url = "/api/v1"
-    ws_apps: list[FastWSAdapter] = []  # Collect all module WS apps
     module_ws_map: dict[str, FastWSAdapter] = {}  # Map module names to WS apps
 
     # Compute OpenAPI tags dynamically from enabled modules
@@ -147,7 +139,7 @@ def create_app(
         # This lifespan only generates AsyncAPI specs which require the running app.
 
         # Setup all WebSocket apps
-        for ws_app in ws_apps:
+        for ws_app in module_ws_map.values():
             ws_app.setup(app)
 
         yield
@@ -206,13 +198,12 @@ def create_app(
             api_app.include_router(router, prefix=base_url, tags=["v1"])
 
         # Register module's WebSocket endpoint (if supported)
-        if hasattr(module, "register_ws_endpoint"):
-            module.register_ws_endpoint(api_app, base_url)
-            ws_app = module.get_ws_app(base_url)
-            ws_apps.append(ws_app)
+        module.register_ws_endpoint(api_app, base_url)
+        ws_app = module.get_ws_app(base_url)
+        if ws_app:
             module_ws_map[module.name] = ws_app
 
         # Call configure_app hook - ws_app parameter deprecated
-        module.configure_app(api_app, None)
+        module.configure_app(api_app)
 
-    return api_app, ws_apps
+    return api_app, list(module_ws_map.values())

@@ -114,6 +114,36 @@ async def handle_order(event: OrderEvent):
 
 ---
 
+### Python and Node.js execution (MANDATORY)
+
+**Backend Python commands:**
+- ✅ **ALWAYS use `poetry run <command>`** for Python scripts in backend
+- ✅ Example: `poetry run python -c "..."`
+- ✅ Example: `poetry run python scripts/some_script.py`
+- ❌ **NEVER use bare `python` or `python3`** - it may use wrong environment
+
+**Frontend Node.js commands:**
+- ✅ **ALWAYS source `.nvmrc` first** to ensure correct Node version
+- ✅ Example: `source ~/.nvm/nvm.sh && nvm use && npm run dev`
+- ✅ For direct node execution: `source ~/.nvm/nvm.sh && nvm use && node script.js`
+- ❌ **NEVER use bare `npm` or `node`** without loading nvm first
+
+**Quick reference:**
+```bash
+# Backend (from backend/ directory)
+cd backend
+poetry run python -c "import sys; print(sys.version)"
+poetry run pytest tests/
+
+# Frontend (from frontend/ directory)
+cd frontend
+source ~/.nvm/nvm.sh && nvm use
+npm install
+npm run dev
+```
+
+---
+
 ### Project and documentation rules
 
 - Keep docs/DOCUMENTATION-GUIDE.md updated with all relevant documentation files and their purposes.
@@ -190,7 +220,7 @@ Frontend
 - Remove unused code and clean up after any change.
 
 **Makefile command reference (use these, NOT npm/poetry directly):**
-- Backend: `make test`, `make lint`, `make format`, `make type-check` (via mypy in lint-check)
+- Backend: `make test`, `make lint`, `make format`, `make type-check` (via mypy in type-check)
 - Frontend: `make test`, `make lint`, `make format`, `make type-check`
 - Root: `make -f project.mk test-all`, `make -f project.mk lint-all`, `make -f project.mk format-all`
 
