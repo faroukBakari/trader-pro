@@ -6,7 +6,7 @@ All tests use session-scoped fixtures for performance.
 
 import pytest
 
-from trading_api.app_factory import registry
+from trading_api.app_factory import AppFactory
 
 
 @pytest.mark.integration
@@ -68,9 +68,11 @@ def test_module_registry_state(all_modules_app, datafeed_only_app) -> None:
     assert any("/datafeed/" in p for p in datafeed_paths)
     assert not any("/broker/" in p for p in datafeed_paths)
 
-    # Registry should have discovered all available modules
-    all_modules = registry.get_all_modules()
-    assert len(all_modules) >= 2  # Should have broker + datafeed at minimum
+    # Verify module discovery by creating a factory and checking its registry
+    factory = AppFactory()
+    factory.registry.auto_discover(factory.modules_dir)
+    all_modules = factory.registry.get_all_modules()
+    assert len(all_modules) >= 3  # Should have core + broker + datafeed at minimum
 
 
 @pytest.mark.integration
@@ -175,5 +177,7 @@ def test_module_disabled_not_instantiated(datafeed_only_app, broker_only_app) ->
 
     # Broker app should NOT have datafeed routes
     broker_paths = broker_api_app.openapi().get("paths", {})
+    assert not any("/datafeed/" in p for p in broker_paths)
+    assert any("/broker/" in p for p in broker_paths)
     assert not any("/datafeed/" in p for p in broker_paths)
     assert any("/broker/" in p for p in broker_paths)
