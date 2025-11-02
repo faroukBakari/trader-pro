@@ -147,7 +147,8 @@ async def test_broker_client_http_communication() -> None:
         assert service_ready, "Broker service failed to start"
 
         # Test HTTP client communication
-        async with BrokerClient(base_url=broker_url) as client:
+        # Client expects paths without /api/v1/broker prefix, so we add it to base_url
+        async with BrokerClient(base_url=f"{broker_url}/api/v1/broker") as client:
             # Test getting orders
             orders = await client.getOrders()
             assert isinstance(orders, list)
@@ -182,7 +183,8 @@ async def test_datafeed_client_http_communication() -> None:
         assert service_ready, "Datafeed service failed to start"
 
         # Test HTTP client communication
-        async with DatafeedClient(base_url=datafeed_url) as client:
+        # Client expects paths without /api/v1/datafeed prefix, so we add it to base_url
+        async with DatafeedClient(base_url=f"{datafeed_url}/api/v1/datafeed") as client:
             # Test getting config
             config = await client.getConfig()
             assert config.supported_resolutions is not None
@@ -235,7 +237,10 @@ async def test_broker_calls_datafeed_multi_process() -> None:
         assert datafeed_ready, "Datafeed service failed to start"
 
         # Simulate broker calling datafeed
-        async with DatafeedClient(base_url=datafeed_url) as datafeed_client:
+        # Client expects paths without /api/v1/datafeed prefix, so we add it to base_url
+        async with DatafeedClient(
+            base_url=f"{datafeed_url}/api/v1/datafeed"
+        ) as datafeed_client:
             # Broker would use this to fetch symbols for order validation
             symbols = await datafeed_client.searchSymbols(user_input="AAPL")
             assert len(symbols) > 0
@@ -247,7 +252,10 @@ async def test_broker_calls_datafeed_multi_process() -> None:
             assert symbol_detail.ticker == "AAPL"
 
         # Verify broker service is also running independently
-        async with BrokerClient(base_url=broker_url) as broker_client:
+        # Client expects paths without /api/v1/broker prefix, so we add it to base_url
+        async with BrokerClient(
+            base_url=f"{broker_url}/api/v1/broker"
+        ) as broker_client:
             orders = await broker_client.getOrders()
             assert isinstance(orders, list)
 
@@ -281,7 +289,8 @@ async def test_client_context_manager() -> None:
         assert service_ready
 
         # Test context manager properly closes client
-        async with DatafeedClient(base_url=datafeed_url) as client:
+        # Client expects paths without /api/v1/datafeed prefix, so we add it to base_url
+        async with DatafeedClient(base_url=f"{datafeed_url}/api/v1/datafeed") as client:
             # Test module-specific endpoint
             config = await client.getConfig()
             assert config.supported_resolutions is not None
