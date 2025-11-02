@@ -175,7 +175,7 @@ router = WsRouteInterface(route='')
 # Expected: ValueError: Router 'route' must be a non-empty string
 
 # Verify app creation still works
-poetry run python -c "from trading_api.app_factory import mount_modules; mount_modules()"
+poetry run python -c "from trading_api.app_factory import mount_app_modules; mount_app_modules()"
 ```
 
 ---

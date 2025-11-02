@@ -35,9 +35,9 @@ def create_test_app(
         # Test with only shared infrastructure (no modules)
         api_app, ws_apps = create_test_app(enabled_modules=[])
     """
-    from trading_api.app_factory import mount_modules
+    from trading_api.app_factory import mount_app_modules
 
-    return mount_modules(enabled_module_names=enabled_modules)
+    return mount_app_modules(enabled_module_names=enabled_modules)
 
 
 @pytest.fixture(scope="session")

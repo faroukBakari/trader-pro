@@ -51,7 +51,7 @@ def _ensure_clients_generated() -> None:
 
             # Create app first (required for gen_specs_and_clients)
             print(f"\n  Generating for {module_name}...")
-            api_app, ws_app = module_instance.create_app(base_path="/api/v1")
+            api_app, ws_app = module_instance.create_app()
 
             # Generate specs and clients using the created app
             module_instance.gen_specs_and_clients(

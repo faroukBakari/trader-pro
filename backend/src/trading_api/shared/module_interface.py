@@ -258,9 +258,7 @@ class Module(ABC):
                                     f"✅ No changes in AsyncAPI spec for '{self.name}'"
                                 )
                     except Exception as e:
-                        logger.warning(
-                            f"⚠️  Could not read existing AsyncAPI spec: {e}"
-                        )
+                        logger.warning(f"⚠️  Could not read existing AsyncAPI spec: {e}")
                 else:
                     logger.info(f"📝 Creating new AsyncAPI spec for '{self.name}'")
 
@@ -275,43 +273,12 @@ class Module(ABC):
                     f"⚠️  Failed to process AsyncAPI spec for '{self.name}': {e}"
                 )
 
-    def create_ws_app(self, ws_url: str) -> FastWSAdapter:
-        """Get or create the module's WebSocket application.
-
-        Lazy loads the WebSocket app on first access for resource efficiency.
-
-        Args:
-            base_app: The main FastAPI application instance
-
-        Returns:
-            FastWSAdapter: The WebSocket application instance
-        """
-
-        # create new WS app
-        ws_app = FastWSAdapter(
-            title=f"{self.name.title()} WebSockets",
-            description=f"Real-time WebSocket app for {self.name} module",
-            version="1.0.0",
-            asyncapi_url=f"{ws_url}/asyncapi.json",
-            asyncapi_docs_url=f"{ws_url}/asyncapi",
-            heartbeat_interval=30.0,
-            max_connection_lifespan=3600.0,
-        )
-        # Register module's WS routers
-        for ws_router in self.ws_routers:
-            ws_app.include_router(ws_router)
-        return ws_app
-
     def create_app(
         self,
-        base_path: str,
     ) -> tuple[FastAPI, FastWSAdapter | None]:
         """Get or create the module's FastAPI application.
 
         Lazy loads the app on first access for resource efficiency.
-
-        Args:
-            base_path: Base URL prefix (e.g., "/api/v1")
 
         Returns:
             tuple[FastAPI, FastWSAdapter | None]: The FastAPI application
@@ -337,30 +304,36 @@ class Module(ABC):
             # Shutdown: Cleanup is handled by FastAPIAdapter
             logger.info(f"🛑 FastAPI <{self.name}> application shutdown complete")
 
-        # OpenAPI URLs should reflect the actual mounted paths
-        module_path = f"{base_path}/{self.name}"
-
         app = FastAPI(
             title=f"{self.name.title()} API",
             description=f"REST API app for {self.name} module",
             version="1.0.0",
-            openapi_url=f"{module_path}/openapi.json",
-            docs_url=f"{module_path}/docs",
-            redoc_url=f"{module_path}/redoc",
+            openapi_url="/openapi.json",
+            docs_url="/docs",
+            redoc_url="/redoc",
             openapi_tags=self.openapi_tags,
             lifespan=lifespan,
         )
         # Register module's API routers with module_path prefix
         # so OpenAPI spec reflects the real accessible routes
         for api_router in self.api_routers:
-            app.include_router(api_router, prefix=module_path)
+            app.include_router(api_router)
 
         if self.ws_routers:
-            # WebSocket URL includes the full path
-            ws_url: str = f"{module_path}/ws"
-            ws_app = self.create_ws_app(ws_url)
+            ws_app = FastWSAdapter(
+                title=f"{self.name.title()} WebSockets",
+                description=f"Real-time WebSocket app for {self.name} module",
+                version="1.0.0",
+                asyncapi_url="ws/asyncapi.json",
+                asyncapi_docs_url="ws/asyncapi",
+                heartbeat_interval=30.0,
+                max_connection_lifespan=3600.0,
+            )
 
-            @app.websocket(ws_url)
+            for ws_router in self.ws_routers:
+                ws_app.include_router(ws_router)
+
+            @app.websocket("/ws")
             async def _(
                 client: Annotated[Client, Depends(ws_app.manage)],
             ) -> None:

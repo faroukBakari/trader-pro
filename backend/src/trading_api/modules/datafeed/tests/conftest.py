@@ -13,6 +13,6 @@ from trading_api.shared import FastWSAdapter
 @pytest.fixture(scope="session")
 def apps() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Application with only datafeed module enabled (shared across session)."""
-    from trading_api.app_factory import mount_modules
+    from trading_api.app_factory import mount_app_modules
 
-    return mount_modules(enabled_module_names=["datafeed"])
+    return mount_app_modules(enabled_module_names=["datafeed"])

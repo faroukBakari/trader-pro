@@ -39,7 +39,7 @@ def main() -> None:
         module = module_class()
 
         # Create apps (WS routers already generated at this point)
-        api_app, ws_app = module.create_app(base_path="/api/v1")
+        api_app, ws_app = module.create_app()
 
         # Build kwargs
         kwargs = {
