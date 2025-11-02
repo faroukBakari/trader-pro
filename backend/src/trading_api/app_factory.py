@@ -59,6 +59,61 @@ def validate_response_models(app: FastAPI) -> None:
     print("✅ All FastAPI routes have response_model defined")
 
 
+def merge_openapi_specs(
+    main_app: FastAPI,
+    module_apps: list[tuple[FastAPI, str]],
+    base_url: str,
+) -> None:
+    """Override main app's openapi() to include mounted module specs.
+
+    Merges OpenAPI specifications from mounted module sub-applications into the
+    main application's OpenAPI schema. This ensures all endpoints are visible
+    in a single unified API documentation.
+
+    Args:
+        main_app: Main FastAPI application
+        module_apps: List of (module_app, module_name) tuples
+        base_url: Base URL prefix (e.g., '/api/v1')
+    """
+    # Store reference to original openapi method
+    original_openapi = main_app.openapi
+
+    def custom_openapi() -> dict:
+        """Generate merged OpenAPI schema including all mounted modules."""
+        if main_app.openapi_schema:
+            return main_app.openapi_schema
+
+        # Get main app's OpenAPI schema
+        openapi_schema = original_openapi()
+
+        # Merge each mounted module's schema
+        for module_app, module_name in module_apps:
+            mount_path = f"{base_url}/{module_name}"
+            module_schema = module_app.openapi()
+
+            # Merge paths with mount path prefix
+            for path, path_item in module_schema.get("paths", {}).items():
+                full_path = f"{mount_path}{path}"
+                openapi_schema["paths"][full_path] = path_item
+
+            # Merge components (schemas, security schemes, etc.)
+            module_components = module_schema.get("components", {})
+            if module_components:
+                if "components" not in openapi_schema:
+                    openapi_schema["components"] = {}
+                for comp_type, comp_data in module_components.items():
+                    if comp_type not in openapi_schema["components"]:
+                        openapi_schema["components"][comp_type] = {}
+                    openapi_schema["components"][comp_type].update(comp_data)
+
+        # Cache the merged schema
+        main_app.openapi_schema = openapi_schema
+        return openapi_schema
+
+    # Override the openapi method (type: ignore needed for method reassignment)
+    main_app.openapi = custom_openapi  # type: ignore[method-assign]
+
+
 def mount_app_modules(
     enabled_module_names: list[str] | None = None,
 ) -> tuple[FastAPI, list[FastWSAdapter]]:
@@ -167,5 +222,15 @@ def mount_app_modules(
 
     for module_app, module in zip(module_api_apps, enabled_modules):
         api_app.mount(f"{base_url}/{module.name}", module_app)
+
+    # Merge OpenAPI specs from mounted modules into main app
+    merge_openapi_specs(
+        main_app=api_app,
+        module_apps=[
+            (mod_app, mod.name)
+            for mod_app, mod in zip(module_api_apps, enabled_modules)
+        ],
+        base_url=base_url,
+    )
 
     return api_app, module_ws_apps
