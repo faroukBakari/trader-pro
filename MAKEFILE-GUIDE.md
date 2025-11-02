@@ -35,9 +35,8 @@ make -f project.mk dev-frontend      # Frontend only
 make -f project.mk kill-dev          # Kill all dev servers (frontend + backend)
 
 # Code Generation
-make -f project.mk generate-ws-routers        # WebSocket routers
-make -f project.mk generate-openapi-client    # REST client
-make -f project.mk generate-asyncapi-types    # WS types
+make -f project.mk generate-openapi-client    # REST client (frontend)
+make -f project.mk generate-asyncapi-types    # WS types (frontend)
 
 # Quality
 make -f project.mk test-all          # Run all tests
@@ -73,6 +72,24 @@ make clean             # Clean artifacts
 make clean-cache       # Clean all Python caches
 make clean-generated   # Clean all generated files (WS routers, specs, Python clients)
 
+# Code Generation (NEW - Unified approach)
+make list-modules             # List all discovered modules
+make generate                 # Generate specs & clients for all modules
+make generate modules=broker  # Generate for specific module(s)
+make generate output_dir=/tmp/custom  # Use custom output directory
+make generate modules=broker output_dir=/tmp/custom  # Combine options
+# Generates:
+#   - OpenAPI specs (REST API documentation)
+#   - AsyncAPI specs (WebSocket API documentation)
+#   - Python HTTP clients (for inter-module communication)
+# Note: WebSocket routers auto-generate at module init (no manual step needed)
+
+# Code Generation (DEPRECATED - Use 'make generate' instead)
+make export-openapi-spec      # [DEPRECATED] Use 'make generate'
+make export-asyncapi-spec     # [DEPRECATED] Use 'make generate'
+make generate-python-clients  # [DEPRECATED] Use 'make generate'
+make generate-ws-routers      # [DEPRECATED] Auto-generates at module init
+
 # Multi-Process Backend (Development)
 make backend-manager-start          # Start multi-process backend with nginx
 make backend-manager-stop           # Stop all backend processes
@@ -96,16 +113,26 @@ make export-asyncapi-spec      # Export AsyncAPI spec
 ```bash
 cd backend
 
-# Python HTTP Client Generation
-make generate-python-clients  # Generate type-safe HTTP clients
-                              # Automatically validates, formats, and type-checks
-                              # Used for inter-module communication
+# Unified Code Generation (Recommended)
+make list-modules             # List all discovered modules
+make generate                 # Generate all: OpenAPI specs, AsyncAPI specs, Python clients
+make generate modules=broker  # Generate for specific module
+make generate modules=broker,datafeed  # Generate for multiple modules
+make generate output_dir=/tmp/custom   # Use custom output directory
+make generate modules=broker output_dir=/custom/path  # Combine options
 
-# WebSocket Router Generation
-make generate-ws-routers      # Generate concrete WS router classes
-                              # Optional: Routers auto-generate on app startup
-                              # Use for: CI/CD, debugging, or manual verification
-make verify-ws-routers        # Verify all routers are up-to-date
+# What gets generated:
+# - OpenAPI specs: REST API documentation (specs_generated/*.json)
+# - AsyncAPI specs: WebSocket API documentation (specs_generated/*.json)
+# - Python HTTP clients: Type-safe inter-module communication (client_generated/*.py)
+# - WebSocket routers: Auto-generated at module init (ws_generated/*.py)
+
+# Legacy Commands (Deprecated)
+# These still work but show deprecation warnings:
+make export-openapi-spec      # Use 'make generate' instead
+make export-asyncapi-spec     # Use 'make generate' instead
+make generate-python-clients  # Use 'make generate' instead
+make generate-ws-routers      # WebSocket routers auto-generate at module init
 
 # Import Boundary Validation
 make test-boundaries          # Verify module import boundaries
@@ -113,7 +140,25 @@ make test-boundaries          # Verify module import boundaries
                               # Prevents: cross-module imports
 ```
 
-**Note**: WebSocket router generation is critical for maintaining type safety. See `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` for details.
+**Migration Guide:**
+
+```bash
+# Old way (multiple commands)
+make export-openapi-spec
+make export-asyncapi-spec
+make generate-python-clients
+make generate-ws-routers
+
+# New way (single command)
+make generate
+
+# Selective generation
+make generate modules=broker
+
+# Custom output directory
+make generate output_dir=/path/to/output
+make generate modules=broker output_dir=/custom/path
+```
 
 ## Frontend Commands
 

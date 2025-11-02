@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-shared test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci export-openapi-spec export-asyncapi-spec generate-python-clients generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help install install-ci test test-boundaries test-shared test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules generate export-openapi-spec export-asyncapi-spec generate-python-clients generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -59,13 +59,17 @@ help:
 	@echo "  build             Build backend package"
 	@echo "  clean             Clean build artifacts"
 	@echo "  clean-cache       Clean all Python caches (mypy, pytest, pycache, ruff)"
-	@echo "  clean-generated   Clean all generated files (WS routers, specs, Python clients)"
+	@echo "  clean-generated   Clean all *_generated* files and directories"
 	@echo ""
 	@echo "Code generation targets:"
-	@echo "  export-openapi-spec   Export OpenAPI specification (offline)"
-	@echo "  export-asyncapi-spec  Export AsyncAPI specification (offline)"
-	@echo "  generate-python-clients  Generate Python HTTP clients (includes format & validation)"
-	@echo "  generate-ws-routers   Generate WebSocket router classes (use module=<name> for specific module)"
+	@echo "  list-modules          List all discovered modules"
+	@echo "  generate              Generate specs & clients for all modules"
+	@echo "                        Options: modules=mod1,mod2  (specific modules)"
+	@echo "                                 output_dir=/path   (custom output directory)"
+	@echo "  export-openapi-spec   [DEPRECATED] Export OpenAPI specification (use: make generate)"
+	@echo "  export-asyncapi-spec  [DEPRECATED] Export AsyncAPI specification (use: make generate)"
+	@echo "  generate-python-clients  [DEPRECATED] Generate Python HTTP clients (use: make generate)"
+	@echo "  generate-ws-routers   [DEPRECATED] WS routers auto-generate at module init (no manual generation needed)"
 	@echo ""
 	@echo "Logging targets:"
 	@echo "  logs-tail         Tail unified backend log (all servers with prefixes)"
@@ -73,6 +77,36 @@ help:
 	@echo "  logs-clean        Clean all backend log files"
 	@echo ""
 	@echo "Discovered modules: $(DISCOVERED_MODULES)"
+
+# List all discovered modules
+list-modules:
+	@echo "📦 Discovered modules:"
+	@for module in $(DISCOVERED_MODULES); do \
+		echo "  - $$module"; \
+	done
+
+# Unified generation command
+# Usage: make generate [modules=mod1,mod2] [output_dir=/path/to/output]
+generate:
+	@echo "🔨 Generating for modules: $(SELECTED_MODULES)"
+	@if [ -n "$(output_dir)" ]; then \
+		echo "📁 Output directory: $(output_dir)"; \
+	fi
+	@for module in $(SELECTED_MODULES); do \
+		echo ""; \
+		echo "======================================================================"; \
+		echo "🔨 Generating for module: $$module"; \
+		echo "======================================================================"; \
+		if [ -n "$(output_dir)" ]; then \
+			poetry run python scripts/module_codegen.py "$$module" "$(output_dir)" || { echo "❌ Failed for $$module"; exit 1; }; \
+		else \
+			poetry run python scripts/module_codegen.py "$$module" || { echo "❌ Failed for $$module"; exit 1; }; \
+		fi; \
+	done
+	@echo ""
+	@echo "======================================================================"
+	@echo "✅ Generation complete for all modules"
+	@echo "======================================================================"
 
 # Backend dependency management
 install:
@@ -507,43 +541,20 @@ clean-cache:
 	@echo "   Press Ctrl+Shift+P → 'Developer: Reload Window'"
 	@echo "   Or run: 'Python: Restart Language Server'"
 
-# Clean all generated files (WS routers, specs, Python clients)
+# Clean all generated files using *_generated* pattern
 clean-generated:
 	@echo "🧹 Cleaning all generated files..."
 	@echo ""
-	@echo "Removing WebSocket routers..."
-	@for module in $(DISCOVERED_MODULES); do \
-		if [ -d "$(MODULES_DIR)/$$module/ws_generated" ]; then \
-			echo "  ✓ Removing ws_generated/ in $$module module"; \
-			rm -rf "$(MODULES_DIR)/$$module/ws_generated"; \
+	@echo "Searching for *_generated* files and directories..."
+	@find . -name "*_generated*" -type f -o -name "*_generated*" -type d | while read item; do \
+		if [ -f "$$item" ]; then \
+			echo "  ✓ Removing file: $$item"; \
+			rm -f "$$item"; \
+		elif [ -d "$$item" ]; then \
+			echo "  ✓ Removing directory: $$item"; \
+			rm -rf "$$item"; \
 		fi; \
 	done
-	@echo ""
-	@echo "Removing API specs..."
-	@if [ -f "openapi.json" ]; then \
-		echo "  ✓ Removing root openapi.json"; \
-		rm -f openapi.json; \
-	fi
-	@if [ -f "asyncapi.json" ]; then \
-		echo "  ✓ Removing root asyncapi.json"; \
-		rm -f asyncapi.json; \
-	fi
-	@for module in $(DISCOVERED_MODULES); do \
-		if [ -f "$(MODULES_DIR)/$$module/specs/openapi.json" ]; then \
-			echo "  ✓ Removing specs/openapi.json in $$module module"; \
-			rm -f "$(MODULES_DIR)/$$module/specs/openapi.json"; \
-		fi; \
-		if [ -f "$(MODULES_DIR)/$$module/specs/asyncapi.json" ]; then \
-			echo "  ✓ Removing specs/asyncapi.json in $$module module"; \
-			rm -f "$(MODULES_DIR)/$$module/specs/asyncapi.json"; \
-		fi; \
-	done
-	@echo ""
-	@echo "Removing Python HTTP clients..."
-	@if [ -d "src/trading_api/clients" ]; then \
-		echo "  ✓ Removing src/trading_api/clients/"; \
-		rm -rf src/trading_api/clients; \
-	fi
 	@echo ""
 	@echo "✅ All generated files removed!"
 	@echo ""
@@ -554,19 +565,67 @@ clean-generated:
 	@echo "   make generate-python-clients   # Python HTTP clients"
 
 
-# Export OpenAPI specification (offline)
+# Export OpenAPI specification (offline) - DEPRECATED
 export-openapi-spec:
-	@echo "Exporting OpenAPI specification (offline)..."
+	@echo "⚠️  ========================================================================="
+	@echo "⚠️  DEPRECATED: 'make export-openapi-spec' is deprecated"
+	@echo "⚠️  "
+	@echo "⚠️  Use instead:"
+	@echo "⚠️    make generate              # Generate for all modules"
+	@echo "⚠️    make generate modules=broker  # Generate for specific module"
+	@echo "⚠️  "
+	@echo "⚠️  The new 'make generate' command generates:"
+	@echo "⚠️    - OpenAPI specs"
+	@echo "⚠️    - AsyncAPI specs"
+	@echo "⚠️    - Python HTTP clients"
+	@echo "⚠️  "
+	@echo "⚠️  Note: WebSocket routers auto-generate at module init (no manual step needed)"
+	@echo "⚠️  ========================================================================="
+	@echo ""
+	@sleep 3
+	@echo "Running legacy export-openapi-spec script..."
 	poetry run python scripts/export_openapi_spec.py
 
-# Export AsyncAPI specification (offline)
+# Export AsyncAPI specification (offline) - DEPRECATED
 export-asyncapi-spec:
-	@echo "Exporting AsyncAPI specification (offline)..."
+	@echo "⚠️  ========================================================================="
+	@echo "⚠️  DEPRECATED: 'make export-asyncapi-spec' is deprecated"
+	@echo "⚠️  "
+	@echo "⚠️  Use instead:"
+	@echo "⚠️    make generate              # Generate for all modules"
+	@echo "⚠️    make generate modules=broker  # Generate for specific module"
+	@echo "⚠️  "
+	@echo "⚠️  The new 'make generate' command generates:"
+	@echo "⚠️    - OpenAPI specs"
+	@echo "⚠️    - AsyncAPI specs"
+	@echo "⚠️    - Python HTTP clients"
+	@echo "⚠️  "
+	@echo "⚠️  Note: WebSocket routers auto-generate at module init (no manual step needed)"
+	@echo "⚠️  ========================================================================="
+	@echo ""
+	@sleep 3
+	@echo "Running legacy export-asyncapi-spec script..."
 	poetry run python scripts/export_asyncapi_spec.py
 
-# Generate Python HTTP clients from per-module OpenAPI specs
+# Generate Python HTTP clients from per-module OpenAPI specs - DEPRECATED
 generate-python-clients:
-	@echo "Generating Python HTTP clients..."
+	@echo "⚠️  ========================================================================="
+	@echo "⚠️  DEPRECATED: 'make generate-python-clients' is deprecated"
+	@echo "⚠️  "
+	@echo "⚠️  Use instead:"
+	@echo "⚠️    make generate              # Generate for all modules"
+	@echo "⚠️    make generate modules=broker  # Generate for specific module"
+	@echo "⚠️  "
+	@echo "⚠️  The new 'make generate' command generates:"
+	@echo "⚠️    - OpenAPI specs"
+	@echo "⚠️    - AsyncAPI specs"
+	@echo "⚠️    - Python HTTP clients"
+	@echo "⚠️  "
+	@echo "⚠️  Note: WebSocket routers auto-generate at module init (no manual step needed)"
+	@echo "⚠️  ========================================================================="
+	@echo ""
+	@sleep 3
+	@echo "Running legacy generate-python-clients script..."
 	poetry run python scripts/generate_python_clients.py
 	@echo ""
 	@echo "Formatting generated clients..."
@@ -583,13 +642,25 @@ generate-python-clients:
 	@echo ""
 	@echo "✅ Client generation complete and validated!"
 
-# Generate WebSocket router classes
+# Generate WebSocket router classes - DEPRECATED
 # Usage: make generate-ws-routers [module=<module_name>]
-# Examples:
-#   make generate-ws-routers              # Generate for all modules
-#   make generate-ws-routers module=broker
-#   make generate-ws-routers module=datafeed
+# Note: WebSocket routers are now generated automatically at module initialization
 generate-ws-routers:
+	@echo "⚠️  ========================================================================="
+	@echo "⚠️  DEPRECATED: 'make generate-ws-routers' is deprecated"
+	@echo "⚠️  "
+	@echo "⚠️  WebSocket routers are now generated automatically at module init!"
+	@echo "⚠️  "
+	@echo "⚠️  Router generation happens in ws.py files when you:"
+	@echo "⚠️    - Import the module"
+	@echo "⚠️    - Start the backend server"
+	@echo "⚠️    - Run make generate (triggers module initialization)"
+	@echo "⚠️  "
+	@echo "⚠️  No manual generation needed anymore!"
+	@echo "⚠️  ========================================================================="
+	@echo ""
+	@sleep 3
+	@echo "Running legacy generate-ws-routers for compatibility..."
 	@if [ -n "$(module)" ]; then \
 		echo "Generating WebSocket routers for module: $(module)"; \
 		poetry run python -c "\
