@@ -177,36 +177,19 @@ class ServerManager:
         backend_dir = Path(__file__).parent.parent
 
         try:
-            # Export OpenAPI spec
-            logger.info("Generating OpenAPI specification...")
+            logger.info("Generating specs and clients...")
             subprocess.run(
-                [sys.executable, str(backend_dir / "scripts/export_openapi_spec.py")],
+                ["make", "generate"],
+                cwd=backend_dir,
                 check=True,
                 capture_output=True,
+                text=True,
             )
-
-            # Export AsyncAPI spec
-            logger.info("Generating AsyncAPI specification...")
-            subprocess.run(
-                [sys.executable, str(backend_dir / "scripts/export_asyncapi_spec.py")],
-                check=True,
-                capture_output=True,
-            )
-
-            # Generate Python clients
-            logger.info("Generating Python HTTP clients...")
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(backend_dir / "scripts/generate_python_clients.py"),
-                ],
-                check=True,
-                capture_output=True,
-            )
-
             logger.info("✅ Specs and clients generated successfully")
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to generate specs/clients: {e}")
+            logger.error(f"STDOUT: {e.stdout}")
+            logger.error(f"STDERR: {e.stderr}")
             # Continue anyway - server can start without fresh clients
 
     def _get_nginx_binary(self) -> str:

@@ -618,3 +618,240 @@ class TestGeneratedCodeStructure:
         assert "__all__" in init_content
         assert '"BarRouter"' in init_content
         assert '"QuoteRouter"' in init_content
+
+
+class TestRouterVerification:
+    """Test suite for router verification functionality."""
+
+    @pytest.fixture
+    def backend_dir(self) -> Path:
+        """Get backend directory path."""
+        return Path(__file__).parent.parent
+
+    @pytest.fixture
+    def test_module_name(self) -> str:
+        """Name for temporary test module."""
+        return "test_ws_verify"
+
+    @pytest.fixture
+    def test_module_dir(
+        self, backend_dir: Path, test_module_name: str
+    ) -> Generator[Path, None, None]:
+        """Create temporary test module directory."""
+        module_dir = backend_dir / f"src/trading_api/modules/{test_module_name}"
+        module_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create module __init__.py with service
+        (module_dir / "__init__.py").write_text(
+            f'''"""Test module for verification."""
+from pathlib import Path
+from typing import Any
+from fastapi import APIRouter
+from trading_api.shared.module_interface import Module
+from trading_api.shared.ws.router_interface import WsRouteInterface
+
+
+class TestWsVerifyService:
+    """Concrete service implementation for testing."""
+    pass
+
+
+class Test_ws_verifyModule(Module):
+    """Test module with service."""
+
+    def __init__(self):
+        super().__init__()
+        self._service = TestWsVerifyService()
+
+    @property
+    def name(self) -> str:
+        return "{test_module_name}"
+
+    @property
+    def module_dir(self) -> Path:
+        return Path(__file__).parent
+
+    @property
+    def service(self) -> Any:
+        return self._service
+
+    @property
+    def api_routers(self) -> list[APIRouter]:
+        return []
+
+    @property
+    def ws_routers(self) -> list[WsRouteInterface]:
+        return []
+
+    @property
+    def openapi_tags(self) -> list[dict[str, str]]:
+        return []
+'''
+        )
+
+        yield module_dir
+
+        # Cleanup after test
+        if module_dir.exists():
+            shutil.rmtree(module_dir)
+
+    @pytest.fixture
+    def cleanup_generated_dirs(self, backend_dir: Path):
+        """Cleanup generated directories after tests."""
+        yield
+        # Clean up any test-generated directories
+        modules_dir = backend_dir / "src/trading_api/modules"
+        for module_dir in modules_dir.glob("*/"):
+            if module_dir.name.startswith("test_"):
+                ws_gen = module_dir / "ws_generated"
+                if ws_gen.exists():
+                    shutil.rmtree(ws_gen, ignore_errors=True)
+
+    def test_verify_router_succeeds_for_valid_router(
+        self,
+        test_module_dir: Path,
+        test_module_name: str,
+        cleanup_generated_dirs,
+    ):
+        """Verify _verify_router succeeds for a valid generated router."""
+        from trading_api.shared.ws.module_router_generator import (
+            _verify_router,
+            generate_module_routers,
+        )
+
+        # Create ws.py with valid TypeAlias
+        ws_file = test_module_dir / "ws.py"
+        ws_file.write_text(
+            '''"""WebSocket router definitions."""
+from typing import TYPE_CHECKING, TypeAlias
+from trading_api.shared.ws.generic_route import WsRouter
+from trading_api.models import Bar, BarsSubscriptionRequest
+
+if TYPE_CHECKING:
+    TestRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
+'''
+        )
+
+        # Generate routers (skip quality checks for speed)
+        result = generate_module_routers(
+            test_module_name,
+            silent=True,
+            skip_quality_checks=True,
+        )
+        assert result is True
+
+        # Verify the router
+        ws_gen = test_module_dir / "ws_generated"
+        success, message = _verify_router(
+            module_name=test_module_name,
+            router_class_name="TestRouter",
+            output_dir=ws_gen,
+        )
+
+        assert success is True
+        assert "✓ TestRouter verified" in message
+
+    def test_verify_router_fails_for_missing_router(
+        self,
+        test_module_dir: Path,
+        test_module_name: str,
+        cleanup_generated_dirs,
+    ):
+        """Verify _verify_router fails when router doesn't exist."""
+        from trading_api.shared.ws.module_router_generator import _verify_router
+
+        ws_gen = test_module_dir / "ws_generated"
+        ws_gen.mkdir(parents=True, exist_ok=True)
+
+        # Try to verify non-existent router
+        success, message = _verify_router(
+            module_name=test_module_name,
+            router_class_name="NonExistentRouter",
+            output_dir=ws_gen,
+        )
+
+        assert success is False
+        assert "Import failed" in message or "failed" in message.lower()
+
+    def test_generate_module_routers_calls_verification(
+        self,
+        test_module_dir: Path,
+        test_module_name: str,
+        cleanup_generated_dirs,
+    ):
+        """Verify generate_module_routers calls verification after generation."""
+        from trading_api.shared.ws.module_router_generator import (
+            generate_module_routers,
+        )
+
+        # Create ws.py with valid TypeAlias
+        ws_file = test_module_dir / "ws.py"
+        ws_file.write_text(
+            '''"""WebSocket router definitions."""
+from typing import TYPE_CHECKING, TypeAlias
+from trading_api.shared.ws.generic_route import WsRouter
+from trading_api.models import Bar, BarsSubscriptionRequest
+
+if TYPE_CHECKING:
+    ValidRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
+'''
+        )
+
+        # Generate routers - should include verification
+        result = generate_module_routers(
+            test_module_name,
+            silent=True,
+            skip_quality_checks=True,
+        )
+
+        # Should succeed (verification passed)
+        assert result is True
+
+        # Verify router exists and is importable
+        ws_gen = test_module_dir / "ws_generated"
+        assert (ws_gen / "validrouter.py").exists()
+
+    def test_generate_module_routers_cleans_up_on_verification_failure(
+        self,
+        test_module_dir: Path,
+        test_module_name: str,
+        backend_dir: Path,
+        cleanup_generated_dirs,
+    ):
+        """Verify failed verification cleans up generated files."""
+        from trading_api.shared.ws.module_router_generator import (
+            generate_module_routers,
+        )
+
+        # Create ws.py with router that will fail verification
+        # (using undefined types that will cause import errors)
+        ws_file = test_module_dir / "ws.py"
+        ws_file.write_text(
+            '''"""WebSocket router with types that will cause verification to fail."""
+from typing import TYPE_CHECKING, TypeAlias
+from trading_api.shared.ws.generic_route import WsRouter
+
+if TYPE_CHECKING:
+    BrokenRouter: TypeAlias = WsRouter[UndefinedRequest, UndefinedData]
+'''
+        )
+
+        # Generation should fail during verification
+        with pytest.raises(RuntimeError) as exc_info:
+            generate_module_routers(
+                test_module_name,
+                silent=True,
+                skip_quality_checks=True,  # Skip quality checks to reach verification
+            )
+
+        # Verify error mentions verification
+        assert (
+            "verification failed" in str(exc_info.value).lower()
+            or "import failed" in str(exc_info.value).lower()
+        )
+
+        # Verify cleanup happened - no generated directory left behind
+        ws_gen = test_module_dir / "ws_generated"
+        assert (
+            not ws_gen.exists()
+        ), "Failed verification should clean up generated files"

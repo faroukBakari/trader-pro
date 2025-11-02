@@ -190,4 +190,7 @@ def create_app(
         # Merge WebSocket setup from module apps
         # (WebSocket endpoints are already registered as routes above)
 
+    # Note: Router validation happens automatically in WsRouter.__init__ and WsRouteInterface.__init__
+    # If any router is invalid, it will fail during module.create_app() above with clear error messages
+
     return api_app, module_ws_apps

@@ -10,13 +10,18 @@ Key features:
 - Auto-detection (checks for modules/<module_name>/ws.py)
 - Fail-fast with detailed error messages
 - Quality checks (Black, Ruff, Flake8, Mypy, Isort)
-- Optional silent mode for production
+- Import verification during generation (lightweight)
+- Automatic validation in base classes (WsRouter, WsRouteInterface)
 
 Usage:
     >>> from trading_api.shared.ws.module_router_generator import generate_module_routers
     >>> # Generate routers for datafeed module
     >>> generated = generate_module_routers("datafeed")
     >>> print(generated)  # True if routers generated, False if no ws.py
+
+    >>> # Validation happens automatically during router instantiation
+    >>> # If service doesn't implement WsRouteService protocol -> TypeError
+    >>> # If route is empty or invalid -> ValueError
 """
 
 import logging
@@ -230,6 +235,52 @@ def run_quality_checks_for_module(
             ) from e
 
 
+def verify_router_imports(
+    module_name: str,
+    router_class_name: str,
+) -> tuple[bool, str]:
+    """Verify a generated router can be imported (lightweight check).
+
+    This is a lightweight verification that only checks if the router class
+    can be imported from the ws_generated package. It does NOT instantiate
+    the module or service to avoid circular dependencies.
+
+    For full end-to-end verification (including instantiation), use the
+    verify_generated_routers() function after app creation.
+
+    Args:
+        module_name: Name of the module (e.g., 'datafeed', 'broker')
+        router_class_name: Name of the router class (e.g., 'BarWsRouter')
+
+    Returns:
+        Tuple of (success: bool, message: str)
+
+    Example:
+        >>> success, msg = verify_router_imports("datafeed", "BarWsRouter")
+        >>> print(success, msg)  # True, "✓ BarWsRouter imports successfully"
+    """
+    try:
+        # Dynamically import module's generated package
+        module_path = f"trading_api.modules.{module_name}.ws_generated"
+        generated_module = __import__(module_path, fromlist=[router_class_name])
+
+        # Verify router class exists
+        router_class = getattr(generated_module, router_class_name)
+
+        # Basic sanity checks without instantiation
+        if not hasattr(router_class, "__init__"):
+            return False, "Router class missing __init__ method"
+
+        return True, f"✓ {router_class_name} imports successfully"
+
+    except ImportError as e:
+        return False, f"Import failed: {e}"
+    except AttributeError as e:
+        return False, f"Router class not found: {e}"
+    except Exception as e:
+        return False, f"Verification failed: {e}"
+
+
 def generate_module_routers(
     module_name: str,
     *,
@@ -340,6 +391,26 @@ def generate_module_routers(
             # Clean up on failure
             shutil.rmtree(output_dir)
             raise
+
+    # Lightweight verification: check that routers can be imported
+    # (does NOT instantiate modules/services to avoid circular dependencies)
+    if not silent:
+        print("  🧪 Verifying router imports...")
+
+    for spec in router_specs:
+        success, message = verify_router_imports(
+            module_name=module_name,
+            router_class_name=spec.class_name,
+        )
+        if not success:
+            # Clean up on verification failure
+            shutil.rmtree(output_dir)
+            raise RuntimeError(
+                f"Router import verification failed for '{spec.class_name}' "
+                f"in module '{module_name}': {message}"
+            )
+        if not silent:
+            print(f"    {message}")
 
     if not silent:
         logger.info(f"✓ Generated WS routers for '{module_name}'")

@@ -30,9 +30,15 @@ def main() -> None:
         # Import and instantiate module
         module_pkg = __import__(module_path, fromlist=[module_class_name])
         module_class = getattr(module_pkg, module_class_name)
+
+        # NOTE: WS routers are automatically generated during module instantiation!
+        # When module_class() is called, the module's __init__ creates WsRouters,
+        # which triggers generate_module_routers() to generate concrete router classes
+        # from TypeAlias declarations in the module's ws.py file.
+        # This ensures WS routers exist before create_app() is called.
         module = module_class()
 
-        # Create apps
+        # Create apps (WS routers already generated at this point)
         api_app, ws_app = module.create_app(base_path="/api/v1")
 
         # Build kwargs
