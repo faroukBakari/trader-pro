@@ -7,13 +7,16 @@ nginx:
   worker_connections: 1024
 
 # Backend server instances
+# NOTE: The 'core' module is automatically included in all servers
+# (it provides health checks, version endpoints, and API docs).
+# You only need to specify feature modules (broker, datafeed, etc.)
 servers:
   # Broker operations server
   broker:
     port: 8001
     instances: 1
     modules:
-      - broker
+      - broker  # Core module is auto-included
     reload: true
 
   # Market data server
@@ -21,7 +24,7 @@ servers:
     port: 8002
     instances: 1
     modules:
-      - datafeed
+      - datafeed  # Core module is auto-included
     reload: true
 
 # WebSocket routing strategy

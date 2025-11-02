@@ -111,7 +111,7 @@ Code generation is the **foundational mechanism** that maintains type coherence 
 
 ### 1. Backend Spec Generation (Offline Mode)
 
-**Command**: `make export-openapi-spec` and `make export-asyncapi-spec` (backend)
+**Command**: `make generate` (backend - unified generation for all specs and clients)
 
 **Process Flow**:
 
@@ -152,7 +152,7 @@ AsyncAPI Spec → Custom Type Extractor → TypeScript Interfaces
 
 ### 3. Backend WebSocket Router Generation
 
-**Command**: `make generate-ws-routers` (backend)
+**Command**: Auto-generated at module initialization (no manual command needed)
 
 **Purpose**: Generate concrete (non-generic) router classes from generic template
 
@@ -1207,8 +1207,8 @@ scripts/
          │                                             │ Monitor specs   │
          ▼                                             └────────┬────────┘
 ┌─────────────────┐                                             │
-│ Spec Export     │  make export-openapi-spec                   │
-│ (Offline Mode)  │  make export-asyncapi-spec                  │
+│ Spec Export     │  make generate (unified)                    │
+│ (Offline Mode)  │  Generates OpenAPI, AsyncAPI, Python clients│
 │                 │  • scripts/export_openapi_spec.py           │
 │                 │  • scripts/export_asyncapi_spec.py          │
 └────────┬────────┘                                             │
@@ -1631,7 +1631,7 @@ Key Features:
 │        parentOrderId: str | None = None  # NEW FIELD                    │
 │                                                                         │
 │ 2. Spec Regeneration (automatic):                                       │
-│    File watcher detects change → make export-openapi-spec               │
+│    File watcher detects change → make generate                          │
 │    backend/openapi.json updated with new field                          │
 │                                                                         │
 │ 3. Frontend Client Generation (automatic):                              │

@@ -7,7 +7,7 @@ FRONTEND_PORT ?= 5173
 # Module discovery
 BACKEND_MODULES = $(shell find backend/src/trading_api/modules -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -v __pycache__ || echo "")
 
-.PHONY: help install install-hooks dev-backend dev-frontend dev-fullstack kill-dev test-all test-backend-modules test-smoke lint-all format-all build-all clean-all test-integration generate-ws-routers generate-openapi-client generate-asyncapi-types
+.PHONY: help install install-hooks dev-backend dev-frontend dev-fullstack kill-dev test-all test-backend-modules test-smoke lint-all format-all build-all clean-all test-integration generate generate-openapi-client generate-asyncapi-types
 
 # Default target
 help:
@@ -35,7 +35,7 @@ help:
 	@echo "  clean-all         Clean all build artifacts (full cleanup)"
 	@echo ""
 	@echo "Code generation targets:"
-	@echo "  generate-ws-routers       Generate WebSocket router classes (backend)"
+	@echo "  generate                  Generate all backend specs and clients (unified)"
 	@echo "  generate-openapi-client   Generate TypeScript REST client (frontend)"
 	@echo "  generate-asyncapi-types   Generate TypeScript WebSocket types (frontend)"
 	@echo ""
@@ -193,9 +193,9 @@ clean-all:
 	@echo "Clean complete."
 
 # Code generation targets
-generate-ws-routers:
-	@echo "Generating WebSocket routers..."
-	make -C backend generate-ws-routers
+generate:
+	@echo "Generating all backend specs and clients..."
+	make -C backend generate
 
 generate-openapi-client:
 	@echo "Generating OpenAPI client..."

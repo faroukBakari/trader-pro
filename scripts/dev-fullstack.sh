@@ -199,11 +199,11 @@ rm -f backend/openapi.json backend/asyncapi.json
 rm -rf frontend/src/clients/*
 rm -rf frontend/dist frontend/node_modules/.vite
 
-print_step "   🔧 Generating WebSocket routers..."
-if make -f project.mk generate-ws-routers >/dev/null 2>&1; then
-    print_success "   WebSocket routers generated"
+print_step "   🔧 Generating all specs and clients..."
+if make -f project.mk generate >/dev/null 2>&1; then
+    print_success "   All specs and clients generated"
 else
-    print_error "   WebSocket router generation failed!"
+    print_error "   Spec and client generation failed!"
     exit 1
 fi
 

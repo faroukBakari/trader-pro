@@ -38,7 +38,7 @@ OPENAPI_SPECS=$(find "$BACKEND_MODULES_DIR" -type f -path "*/specs/openapi.json"
 
 if [ -z "$OPENAPI_SPECS" ]; then
     echo -e "${RED}❌ No OpenAPI specifications found in: $BACKEND_MODULES_DIR${NC}"
-    echo -e "${YELLOW}💡 Generate them first: cd ../backend && make export-openapi-specs${NC}"
+    echo -e "${YELLOW}💡 Generate them first: cd ../backend && make generate${NC}"
     exit 1
 fi
 

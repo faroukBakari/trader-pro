@@ -178,7 +178,6 @@ Module Initialization
 > **The single point of access for all spec and client generation operations.**
 >
 > This command is your go-to tool for generating OpenAPI/AsyncAPI specs and Python clients.
-> It replaces all deprecated commands (`export-openapi-spec`, `export-asyncapi-spec`, `generate-python-clients`).
 
 ---
 
@@ -844,17 +843,15 @@ done
 ⚠️ **These commands are DEPRECATED** - use `make generate` instead:
 
 ```bash
-# ❌ DEPRECATED
-make export-openapi-spec
-make export-asyncapi-spec
-make generate-python-clients
-make generate-ws-routers  # WebSocket routers auto-generate now
-
-# ✅ USE INSTEAD
+# ✅ CURRENT APPROACH
 make generate
-```
 
-The old commands will show deprecation warnings and may be removed in future versions.
+# Note: The following commands have been removed:
+# - make export-openapi-spec (removed)
+# - make export-asyncapi-spec (removed)
+# - make generate-python-clients (removed)
+# - make generate-ws-routers (removed - now auto-generates on app startup)
+```
 
 #### Troubleshooting
 

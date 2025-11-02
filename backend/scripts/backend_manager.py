@@ -271,14 +271,23 @@ class ServerManager:
         Args:
             name: Server instance name
             port: Port to bind to
-            modules: List of enabled modules
+            modules: List of enabled modules (core is always added if not present)
             reload: Enable auto-reload
 
         Returns:
             Started process
         """
         env = os.environ.copy()
-        env["ENABLED_MODULES"] = ",".join(modules) if modules else ""
+
+        # CRITICAL: Ensure core module is always included
+        # Core provides health checks and version endpoints required by nginx
+        # AppFactory will auto-include core, but we set it explicitly for clarity
+        if modules and "core" not in modules:
+            modules = ["core"] + modules
+        elif not modules:
+            modules = ["core"]
+
+        env["ENABLED_MODULES"] = ",".join(modules)
 
         # Create log file path and uvicorn logging config
         log_file_path = self.log_dir / f"{name}.log"
@@ -1011,14 +1020,17 @@ def generate_rest_location_blocks(config: DeploymentConfig) -> str:
     """
     locations = []
 
-    # Core server handles shared endpoints (health, versions, docs)
-    # If no core server, use the first available server as fallback
+    # Core endpoints routing
+    # NOTE: All servers include the core module automatically, so we can route
+    # core endpoints to any backend server. We prefer a dedicated 'core' server
+    # if it exists, otherwise use the first available server.
     fallback_server = (
         "core" if "core" in config.servers else list(config.servers.keys())[0]
     )
 
     core_location = f"""        # Core endpoints (health, versions, docs)
-        location ~ ^/api/v1/(health|version|versions|docs|redoc|openapi.json)$ {{
+        # All servers have core module, routing to {fallback_server}
+        location ~ ^/api/v1/(core/health|core/version|core/versions|health|version|versions|docs|redoc|openapi.json)$ {{
             proxy_pass http://{fallback_server}_backend;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;

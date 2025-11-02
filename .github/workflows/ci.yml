@@ -46,9 +46,9 @@ jobs:
       working-directory: backend
       run: make install-ci
 
-    - name: Generate WebSocket routers
+    - name: Generate all specs and clients
       working-directory: backend
-      run: make generate-ws-routers
+      run: make generate
 
     - name: Install Git hooks
       run: |
@@ -93,9 +93,9 @@ jobs:
       working-directory: backend
       run: make install-ci
 
-    - name: Generate WebSocket routers
+    - name: Generate all specs and clients
       working-directory: backend
-      run: make generate-ws-routers
+      run: make generate
 
     - name: Run import boundary tests
       working-directory: backend
@@ -135,9 +135,9 @@ jobs:
       working-directory: backend
       run: make install-ci
 
-    - name: Generate WebSocket routers
+    - name: Generate all specs and clients
       working-directory: backend
-      run: make generate-ws-routers
+      run: make generate
 
     - name: Run shared infrastructure tests
       working-directory: backend
@@ -179,9 +179,9 @@ jobs:
       working-directory: backend
       run: make install-ci
 
-    - name: Generate WebSocket routers
+    - name: Generate all specs and clients
       working-directory: backend
-      run: make generate-ws-routers
+      run: make generate
 
     - name: Run ${{ matrix.module }} module tests
       working-directory: backend
@@ -221,9 +221,9 @@ jobs:
       working-directory: backend
       run: make install-ci
 
-    - name: Generate WebSocket routers
+    - name: Generate all specs and clients
       working-directory: backend
-      run: make generate-ws-routers
+      run: make generate
 
     - name: Run integration tests
       working-directory: backend
@@ -274,17 +274,9 @@ jobs:
       working-directory: backend
       run: make install-ci
 
-    - name: Generate WebSocket routers
+    - name: Generate all specs and clients (unified)
       working-directory: backend
-      run: make generate-ws-routers
-
-    - name: Export per-module OpenAPI specs
-      working-directory: backend
-      run: make export-openapi-spec
-
-    - name: Export per-module AsyncAPI specs
-      working-directory: backend
-      run: make export-asyncapi-spec
+      run: make generate
 
     - name: Verify specs generated
       working-directory: backend
@@ -316,8 +308,8 @@ jobs:
           backend/src/trading_api/modules/*/specs/*.json
         retention-days: 7
 
-  # Backend generate Python HTTP clients (NEW for Phase 4)
-  backend-generate-python-clients:
+  # Backend code generation (unified command)
+  backend-generate:
     runs-on: ubuntu-latest
     needs: [backend-export-specs]
     strategy:
@@ -356,9 +348,9 @@ jobs:
         name: backend-specs
         path: backend/src/trading_api/modules/
 
-    - name: Generate Python HTTP clients
+    - name: Generate all specs and clients (unified)
       working-directory: backend
-      run: make generate-python-clients
+      run: make generate
 
     - name: Verify Python clients generated
       working-directory: backend
@@ -498,9 +490,9 @@ jobs:
       working-directory: backend
       run: make install-ci
 
-    - name: Generate WebSocket routers
+    - name: Generate all specs and clients
       working-directory: backend
-      run: make generate-ws-routers
+      run: make generate
 
     - name: Download backend specs
       uses: actions/download-artifact@v3

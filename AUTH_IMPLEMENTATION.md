@@ -458,7 +458,7 @@ async def get_current_session(x_session_id: str) -> Session:
 When auth models and endpoints are created, they automatically appear in the OpenAPI spec:
 
 ```bash
-# Backend generates spec (automatic on startup or via make export-openapi-spec)
+# Backend generates spec (automatic on startup or via make generate)
 backend/openapi.json
   ├── components.schemas.MockLoginRequest
   ├── components.schemas.LoginResponse

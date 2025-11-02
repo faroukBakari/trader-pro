@@ -134,13 +134,6 @@ make dev
 
 This triggers automatic router generation when each module's router factory is instantiated. The generator scans all `modules/*/ws.py` files for `TypeAlias = WsRouter[...]` patterns and generates concrete classes in `modules/{module}/ws_generated/` **before** they are imported.
 
-**Optional - Manual Generation**: For debugging or pre-build scenarios:
-
-```bash
-cd backend
-make generate-ws-routers
-```
-
 **See**: `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` for complete generation guide and troubleshooting
 
 ### Step 1.4: Register Routers
@@ -616,7 +609,7 @@ Use this checklist when implementing new WebSocket features:
 
 - [ ] Models defined in `models/{domain}/`
 - [ ] Router factory created in `ws/{domain}.py`
-- [ ] Routers generated (`make generate-ws-routers`)
+- [ ] Routers auto-generated (via `make dev`)
 - [ ] Routers registered in `main.py`
 - [ ] Backend tests written and passing
 - [ ] AsyncAPI spec includes operations
@@ -701,10 +694,10 @@ Use this checklist when implementing new WebSocket features:
 
 **Routers not generated**
 
-- For first-time setup: Run `make generate-ws-routers` manually before `make dev`
-- After initial setup: Routers auto-regenerate on app startup
+- Routers auto-generate on app startup via `make dev`
 - Check `modules/{module}/ws.py` has valid `TypeAlias` declarations
 - Verify generation output for errors
+- Review `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` for details
 
 **No updates received**
 

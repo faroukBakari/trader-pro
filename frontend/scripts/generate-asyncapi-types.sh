@@ -36,7 +36,7 @@ ASYNCAPI_SPECS=$(find "$BACKEND_MODULES_DIR" -type f -path "*/specs/asyncapi.jso
 
 if [ -z "$ASYNCAPI_SPECS" ]; then
     echo -e "${RED}❌ No AsyncAPI specifications found in: $BACKEND_MODULES_DIR${NC}"
-    echo -e "${YELLOW}💡 Generate them first: cd ../backend && make export-asyncapi-specs${NC}"
+    echo -e "${YELLOW}💡 Generate them first: cd ../backend && make generate${NC}"
     exit 1
 fi
 
