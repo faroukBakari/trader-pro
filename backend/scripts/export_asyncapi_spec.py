@@ -16,7 +16,7 @@ backend_dir = Path(__file__).parent.parent
 src_dir = backend_dir / "src"
 sys.path.insert(0, str(src_dir))
 
-from trading_api.app_factory import mount_modules
+from trading_api.app_factory import mount_app_modules
 from trading_api.shared.utils import discover_modules_with_websockets
 
 
@@ -67,7 +67,7 @@ def export_single_module(module_name: str | None, output_file: Path) -> int:
     try:
         # Create app with only the specified module (or all if None)
         enabled_modules = [module_name] if module_name else None
-        _, ws_apps = mount_modules(enabled_module_names=enabled_modules)
+        _, ws_apps = mount_app_modules(enabled_module_names=enabled_modules)
 
         # If specific module, get first ws_app; otherwise merge all
         if len(ws_apps) == 0:

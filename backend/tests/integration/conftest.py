@@ -27,33 +27,33 @@ from trading_api.shared import FastWSAdapter
 @pytest.fixture(scope="session")
 def datafeed_only_app() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Session-scoped datafeed-only app for isolation tests."""
-    from trading_api.app_factory import mount_modules
+    from trading_api.app_factory import mount_app_modules
 
-    return mount_modules(enabled_module_names=["datafeed"])
+    return mount_app_modules(enabled_module_names=["datafeed"])
 
 
 @pytest.fixture(scope="session")
 def broker_only_app() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Session-scoped broker-only app for isolation tests."""
-    from trading_api.app_factory import mount_modules
+    from trading_api.app_factory import mount_app_modules
 
-    return mount_modules(enabled_module_names=["broker"])
+    return mount_app_modules(enabled_module_names=["broker"])
 
 
 @pytest.fixture(scope="session")
 def all_modules_app() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Session-scoped app with all modules for isolation tests."""
-    from trading_api.app_factory import mount_modules
+    from trading_api.app_factory import mount_app_modules
 
-    return mount_modules(enabled_module_names=None)
+    return mount_app_modules(enabled_module_names=None)
 
 
 @pytest.fixture(scope="session")
 def no_modules_app() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Session-scoped app with no modules (shared infrastructure only)."""
-    from trading_api.app_factory import mount_modules
+    from trading_api.app_factory import mount_app_modules
 
-    return mount_modules(enabled_module_names=[])
+    return mount_app_modules(enabled_module_names=[])
 
 
 # ============================================================================
@@ -104,9 +104,9 @@ def wait_for_service_sync(base_url: str, max_attempts: int = 30) -> bool:
 @pytest.fixture(scope="module")
 def apps() -> tuple[FastAPI, list[FastWSAdapter]]:
     """Full application with all modules enabled (shared per test module)."""
-    from trading_api.app_factory import mount_modules
+    from trading_api.app_factory import mount_app_modules
 
-    return mount_modules(enabled_module_names=None)  # None = all modules
+    return mount_app_modules(enabled_module_names=None)  # None = all modules
 
 
 @pytest.fixture(scope="module")

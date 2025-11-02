@@ -31,27 +31,27 @@ from scripts.export_openapi_spec import (  # type: ignore[import-untyped]
 @pytest.fixture(scope="class")
 def broker_app() -> FastAPI:
     """Create broker app once per class (optimized)."""
-    from trading_api.app_factory import mount_modules
+    from trading_api.app_factory import mount_app_modules
 
-    api_app, _ = mount_modules(enabled_module_names=["broker"])
+    api_app, _ = mount_app_modules(enabled_module_names=["broker"])
     return api_app
 
 
 @pytest.fixture(scope="class")
 def datafeed_app() -> FastAPI:
     """Create datafeed app once per class (optimized)."""
-    from trading_api.app_factory import mount_modules
+    from trading_api.app_factory import mount_app_modules
 
-    api_app, _ = mount_modules(enabled_module_names=["datafeed"])
+    api_app, _ = mount_app_modules(enabled_module_names=["datafeed"])
     return api_app
 
 
 @pytest.fixture(scope="class")
 def full_app() -> FastAPI:
     """Create full app once per class (optimized)."""
-    from trading_api.app_factory import mount_modules
+    from trading_api.app_factory import mount_app_modules
 
-    api_app, _ = mount_modules(enabled_module_names=None)
+    api_app, _ = mount_app_modules(enabled_module_names=None)
     return api_app
 
 

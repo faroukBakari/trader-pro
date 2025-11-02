@@ -59,7 +59,7 @@ def validate_response_models(app: FastAPI) -> None:
     print("✅ All FastAPI routes have response_model defined")
 
 
-def mount_modules(
+def mount_app_modules(
     enabled_module_names: list[str] | None = None,
 ) -> tuple[FastAPI, list[FastWSAdapter]]:
     """Create and configure FastAPI and FastWSAdapter applications.
@@ -73,9 +73,9 @@ def mount_modules(
 
     Example:
         >>> # Load all modules
-        >>> api_app, ws_apps = mount_modules()
+        >>> api_app, ws_apps = mount_app_modules()
         >>> # Load only datafeed module
-        >>> api_app, ws_apps = mount_modules(enabled_modules=["datafeed"])
+        >>> api_app, ws_apps = mount_app_modules(enabled_modules=["datafeed"])
     """
     # Clear registry to allow fresh registration (important for tests)
     registry.clear()
@@ -104,7 +104,7 @@ def mount_modules(
     module_ws_apps: list[FastWSAdapter] = []
 
     for module in enabled_modules:
-        api_app, ws_app = module.create_app(base_url)
+        api_app, ws_app = module.create_app()
         module_api_apps.append(api_app)
         if ws_app:
             module_ws_apps.append(ws_app)
@@ -112,21 +112,11 @@ def mount_modules(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         """Handle application startup and shutdown events."""
-        # Startup: Trigger module app lifespans to generate/compare specs
-        module_lifespan_cms = []
-        for module_app in module_api_apps:
-            cm = module_app.router.lifespan_context(module_app)
-            module_lifespan_cms.append(cm)
-            await cm.__aenter__()
 
         # Validate all routes have response models
         validate_response_models(app)
 
         yield
-
-        # Shutdown: Clean up module lifespans
-        for cm in module_lifespan_cms:
-            await cm.__aexit__(None, None, None)
 
         # Shutdown: Cleanup is handled by FastAPIAdapter
         print("🛑 FastAPI application shutdown complete")
@@ -175,22 +165,7 @@ def mount_modules(
             "versions": f"{base_url}/versions",
         }
 
-    # Include module routers directly (not mounting sub-apps)
-    # Module apps already have routes with full prefix (e.g., /api/v1/broker/*)
-    # so we merge them into the main app's route table
     for module_app, module in zip(module_api_apps, enabled_modules):
-        # Copy routes from module app to main app
-        for route in module_app.routes:
-            # Skip the default OpenAPI/docs routes from module apps
-            route_path = getattr(route, "path", "")
-            if route_path in ["/openapi.json", "/docs", "/redoc"]:
-                continue
-            api_app.router.routes.append(route)
-
-        # Merge WebSocket setup from module apps
-        # (WebSocket endpoints are already registered as routes above)
-
-    # Note: Router validation happens automatically in WsRouter.__init__ and WsRouteInterface.__init__
-    # If any router is invalid, it will fail during module.create_app() above with clear error messages
+        api_app.mount(f"{base_url}/{module.name}", module_app)
 
     return api_app, module_ws_apps
