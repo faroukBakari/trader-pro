@@ -30,6 +30,7 @@ class BrokerModule(Module):
 
     def __init__(self) -> None:
         """Initialize the broker module with service and routers."""
+        super().__init__()
         self._service: BrokerService = BrokerService()
         # Router has NO prefix - routes are at root level within module app
         # The module app will be mounted at /api/v1/broker by the factory

@@ -28,6 +28,7 @@ class DatafeedModule(Module):
 
     def __init__(self) -> None:
         """Initialize the datafeed module with lazy service loading."""
+        super().__init__()
         self._service: DatafeedService = DatafeedService()
         # Router has NO prefix - routes are at root level within module app
         # The module app will be mounted at /api/v1/datafeed by the factory

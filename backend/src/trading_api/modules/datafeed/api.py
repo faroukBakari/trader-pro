@@ -2,14 +2,12 @@
 Datafeed API endpoints
 """
 
-from datetime import datetime
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
 from trading_api.models import (
     DatafeedConfiguration,
-    DatafeedHealthResponse,
     GetBarsResponse,
     GetQuotesRequest,
     QuoteData,
@@ -156,31 +154,4 @@ class DatafeedApi(APIRouter):
             except Exception as e:
                 raise HTTPException(
                     status_code=500, detail=f"Error getting quotes: {str(e)}"
-                )
-
-        @self.get(
-            "/health",
-            response_model=DatafeedHealthResponse,
-            summary="Datafeed health check",
-            operation_id="datafeedHealthCheck",
-        )
-        async def datafeed_health() -> DatafeedHealthResponse:
-            """
-            Health check endpoint for the datafeed service.
-            """
-            try:
-                # Simple health check - verify service can load symbols
-                symbols_count = len(service._symbols)
-                bars_count = len(service._sample_bars)
-
-                return DatafeedHealthResponse(
-                    status="ok",
-                    message="Datafeed service is running",
-                    symbols_loaded=symbols_count,
-                    bars_count=bars_count,
-                    timestamp=datetime.now().isoformat(),
-                )
-            except Exception as e:
-                raise HTTPException(
-                    status_code=500, detail=f"Datafeed service error: {str(e)}"
                 )

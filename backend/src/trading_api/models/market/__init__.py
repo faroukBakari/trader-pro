@@ -6,7 +6,7 @@ quotes, bars, and datafeed configuration.
 """
 
 from .bars import Bar, BarsSubscriptionRequest, GetBarsRequest, GetBarsResponse
-from .configuration import DatafeedConfiguration, DatafeedHealthResponse
+from .configuration import DatafeedConfiguration
 from .instruments import (
     DatafeedSymbolType,
     Exchange,
@@ -40,6 +40,5 @@ __all__: list[str] = [
     "SearchSymbolsRequest",
     # Configuration and health
     "DatafeedConfiguration",
-    "DatafeedHealthResponse",
     "QuoteDataSubscriptionRequest",
 ]

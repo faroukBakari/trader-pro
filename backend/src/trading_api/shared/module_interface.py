@@ -15,6 +15,7 @@ from fastapi import Depends, FastAPI
 from fastapi.routing import APIRouter
 
 from external_packages.fastws import Client
+from trading_api.shared.client_generation_service import ClientGenerationService
 from trading_api.shared.plugins.fastws_adapter import FastWSAdapter
 from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
 
@@ -117,6 +118,246 @@ class Module(ABC):
     def __init__(self) -> None:
         self._enabled: bool = False
 
+    def gen_specs_and_clients(
+        self,
+        api_app: FastAPI,
+        ws_app: FastWSAdapter | None = None,
+        clean_first: bool = False,
+    ) -> None:
+        """Generate OpenAPI/AsyncAPI specs and Python HTTP client for this module.
+
+        This method generates the module's OpenAPI specification and corresponding
+        Python HTTP client from the provided FastAPI app instance.
+        If ws_app is provided, also generates AsyncAPI specification.
+        Uses the same logic as the lifespan event for consistency.
+
+        Args:
+            api_app: FastAPI app instance with all routers registered
+            ws_app: Optional FastWSAdapter instance for WebSocket spec generation
+            clean_first: If True, removes existing specs and clients before generation
+        """
+        import shutil
+
+        module_specs_dir = self.module_dir / "specs"
+        backend_root = Path(__file__).parent.parent.parent.parent
+        clients_dir = backend_root / "src" / "trading_api" / "clients"
+
+        # Clean existing files if requested
+        if clean_first:
+            if module_specs_dir.exists():
+                shutil.rmtree(module_specs_dir)
+                logger.info(f"🧹 Cleaned specs for '{self.name}'")
+
+            # Clean this module's client file
+            client_file = clients_dir / f"{self.name}_client.py"
+            if client_file.exists():
+                client_file.unlink()
+                logger.info(f"🧹 Cleaned client for '{self.name}'")
+
+        # Generate OpenAPI spec from the provided app
+        openapi_schema = api_app.openapi()
+        module_specs_dir.mkdir(parents=True, exist_ok=True)
+        openapi_file = module_specs_dir / "openapi.json"
+
+        # Compare with existing spec (same logic as lifespan)
+        should_update_openapi: bool = True
+        if openapi_file.exists() and not clean_first:
+            try:
+                with open(openapi_file, "r") as f:
+                    existing_openapi = json.load(f)
+                    differences = _compare_specs(existing_openapi, openapi_schema)
+                    if len(differences) > 0:
+                        logger.info(
+                            f"🔄 OpenAPI spec changes detected for '{self.name}':"
+                        )
+                        for diff in differences:
+                            logger.info(f"   • {diff}")
+                    else:
+                        should_update_openapi = False
+                        logger.info(f"✅ No changes in OpenAPI spec for '{self.name}'")
+            except Exception as e:
+                logger.warning(f"⚠️  Could not read existing OpenAPI spec: {e}")
+        else:
+            logger.info(f"📝 Creating new OpenAPI spec for '{self.name}'")
+
+        # Write spec only if needed
+        if should_update_openapi:
+            with open(openapi_file, "w") as f:
+                json.dump(openapi_schema, f, indent=2)
+            logger.info(f"✅ Updated OpenAPI spec: {openapi_file}")
+
+            # Generate Python HTTP client from updated spec (same logic as lifespan)
+            try:
+                templates_dir = backend_root / "scripts" / "templates"
+
+                client_gen = ClientGenerationService(
+                    clients_dir=clients_dir, templates_dir=templates_dir
+                )
+
+                success, missing = client_gen.generate_module_client(
+                    self.name, openapi_file
+                )
+
+                if success:
+                    # Format generated code
+                    if client_gen.format_generated_code(self.name):
+                        logger.info(f"✅ Generated Python client for '{self.name}'")
+                    else:
+                        logger.warning(
+                            f"⚠️  Generated Python client for '{self.name}' "
+                            "(formatting failed)"
+                        )
+
+                    # Update clients __init__.py with all available clients
+                    client_gen.update_clients_index()
+                else:
+                    logger.warning(
+                        f"⚠️  Python client for '{self.name}' missing routes: {missing}"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"⚠️  Failed to generate Python client for '{self.name}': {e}"
+                )
+                raise
+
+        # Generate AsyncAPI spec if ws_app is provided (same logic as lifespan)
+        if ws_app is not None:
+            asyncapi_schema = ws_app.asyncapi()
+            asyncapi_file = module_specs_dir / "asyncapi.json"
+
+            try:
+                # Compare specs if existing spec was loaded
+                should_update_asyncapi: bool = True
+                if asyncapi_file.exists() and not clean_first:
+                    try:
+                        with open(asyncapi_file, "r") as f:
+                            existing_asyncapi = json.load(f)
+                            differences = _compare_specs(
+                                existing_asyncapi, asyncapi_schema
+                            )
+                            if len(differences) > 0:
+                                logger.info(
+                                    f"🔄 AsyncAPI spec changes detected for '{self.name}':"
+                                )
+                                for diff in differences:
+                                    logger.info(f"   • {diff}")
+                            else:
+                                should_update_asyncapi = False
+                                logger.info(
+                                    f"✅ No changes in AsyncAPI spec for '{self.name}'"
+                                )
+                    except Exception as e:
+                        logger.warning(
+                            f"⚠️  Could not read existing AsyncAPI spec: {e}"
+                        )
+                else:
+                    logger.info(f"📝 Creating new AsyncAPI spec for '{self.name}'")
+
+                # Write spec only if needed
+                if should_update_asyncapi:
+                    with open(asyncapi_file, "w") as f:
+                        json.dump(asyncapi_schema, f, indent=2)
+                    logger.info(f"✅ Updated AsyncAPI spec: {asyncapi_file}")
+
+            except Exception as e:
+                logger.error(
+                    f"⚠️  Failed to process AsyncAPI spec for '{self.name}': {e}"
+                )
+
+    def create_ws_app(self, ws_url: str) -> FastWSAdapter:
+        """Get or create the module's WebSocket application.
+
+        Lazy loads the WebSocket app on first access for resource efficiency.
+
+        Args:
+            base_app: The main FastAPI application instance
+
+        Returns:
+            FastWSAdapter: The WebSocket application instance
+        """
+
+        # create new WS app
+        ws_app = FastWSAdapter(
+            title=f"{self.name.title()} WebSockets",
+            description=f"Real-time WebSocket app for {self.name} module",
+            version="1.0.0",
+            asyncapi_url=f"{ws_url}/asyncapi.json",
+            asyncapi_docs_url=f"{ws_url}/asyncapi",
+            heartbeat_interval=30.0,
+            max_connection_lifespan=3600.0,
+        )
+        # Register module's WS routers
+        for ws_router in self.ws_routers:
+            ws_app.include_router(ws_router)
+        return ws_app
+
+    def create_app(
+        self,
+        base_path: str,
+    ) -> tuple[FastAPI, FastWSAdapter | None]:
+        """Get or create the module's FastAPI application.
+
+        Lazy loads the app on first access for resource efficiency.
+
+        Args:
+            base_path: Base URL prefix (e.g., "/api/v1")
+
+        Returns:
+            tuple[FastAPI, FastWSAdapter | None]: The FastAPI application
+            instance and optional WebSocket adapter
+        """
+
+        ws_app: FastWSAdapter | None = None
+
+        @asynccontextmanager
+        async def lifespan(api_app: FastAPI) -> AsyncGenerator[None, None]:
+            nonlocal ws_app
+            """Handle module application startup and shutdown events."""
+
+            # Generate specs and clients using the app being created
+            # This ensures consistent logic and avoids redundant app creation
+            self.gen_specs_and_clients(api_app=api_app, ws_app=ws_app)
+
+            if ws_app is not None:
+                ws_app.setup(api_app)
+
+            yield
+
+            # Shutdown: Cleanup is handled by FastAPIAdapter
+            logger.info(f"🛑 FastAPI <{self.name}> application shutdown complete")
+
+        # OpenAPI URLs should reflect the actual mounted paths
+        module_path = f"{base_path}/{self.name}"
+
+        app = FastAPI(
+            title=f"{self.name.title()} API",
+            description=f"REST API app for {self.name} module",
+            version="1.0.0",
+            openapi_url=f"{module_path}/openapi.json",
+            docs_url=f"{module_path}/docs",
+            redoc_url=f"{module_path}/redoc",
+            openapi_tags=self.openapi_tags,
+            lifespan=lifespan,
+        )
+        # Register module's API routers with module_path prefix
+        # so OpenAPI spec reflects the real accessible routes
+        for api_router in self.api_routers:
+            app.include_router(api_router, prefix=module_path)
+
+        if self.ws_routers:
+            # WebSocket URL includes the full path
+            ws_url: str = f"{module_path}/ws"
+            ws_app = self.create_ws_app(ws_url)
+
+            @app.websocket(ws_url)
+            async def _(
+                client: Annotated[Client, Depends(ws_app.manage)],
+            ) -> None:
+                f"""WebSocket endpoint for {self.name} real-time streaming"""
+                await ws_app.serve(client)
+
+        return app, ws_app
+
     def enable(self) -> None:
         """Enable the module for loading."""
         self._enabled = True
@@ -191,175 +432,3 @@ class Module(ABC):
             list[dict[str, str]]: List of OpenAPI tag dictionaries with 'name'
         """
         ...
-
-    def create_ws_app(self, ws_url: str) -> FastWSAdapter:
-        """Get or create the module's WebSocket application.
-
-        Lazy loads the WebSocket app on first access for resource efficiency.
-
-        Args:
-            base_app: The main FastAPI application instance
-
-        Returns:
-            FastWSAdapter: The WebSocket application instance
-        """
-
-        # create new WS app
-        ws_app = FastWSAdapter(
-            title=f"{self.name.title()} WebSockets",
-            description=f"Real-time WebSocket app for {self.name} module",
-            version="1.0.0",
-            asyncapi_url=f"{ws_url}/asyncapi.json",
-            asyncapi_docs_url=f"{ws_url}/asyncapi",
-            heartbeat_interval=30.0,
-            max_connection_lifespan=3600.0,
-        )
-        # Register module's WS routers
-        for ws_router in self.ws_routers:
-            ws_app.include_router(ws_router)
-        return ws_app
-
-    def create_app(
-        self,
-        base_path: str,
-    ) -> tuple[FastAPI, FastWSAdapter | None]:
-        """Get or create the module's FastAPI application.
-
-        Lazy loads the app on first access for resource efficiency.
-
-        Args:
-            base_path: Base URL prefix (e.g., "/api/v1")
-
-        Returns:
-            tuple[FastAPI, FastWSAdapter | None]: The FastAPI application
-            instance and optional WebSocket adapter
-        """
-
-        ws_app: FastWSAdapter | None = None
-
-        @asynccontextmanager
-        async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-            nonlocal ws_app
-            """Handle module application startup and shutdown events."""
-
-            module_specs_dir = self.module_dir / "specs"
-            # Create module specs directory
-            module_specs_dir.mkdir(parents=True, exist_ok=True)
-
-            # Startup: Generate openapi.json file for file-based watching
-            openapi_schema = app.openapi()
-            openapi_file = module_specs_dir / "openapi.json"
-
-            try:
-                # Compare specs if existing spec was loaded
-                should_update_openapi: bool = True
-                if openapi_file.exists():
-                    try:
-                        with open(openapi_file, "r") as f:
-                            existing_openapi = json.load(f)
-                            differences = _compare_specs(
-                                existing_openapi, openapi_schema
-                            )
-                            if len(differences) > 0:
-                                logger.info(
-                                    f"🔄 OpenAPI spec changes detected for '{self.name}':"
-                                )
-                                for diff in differences:
-                                    logger.info(f"   • {diff}")
-                            else:
-                                should_update_openapi = False
-                    except Exception as e:
-                        logger.warning(f"⚠️  Could not read existing OpenAPI spec: {e}")
-                else:
-                    logger.info(f"📝 Creating new OpenAPI spec for '{self.name}'")
-
-                # Write spec only if needed
-                if should_update_openapi:
-                    with open(openapi_file, "w") as f:
-                        json.dump(openapi_schema, f, indent=2)
-                    logger.info(f"✅ Updated OpenAPI spec: {openapi_file}")
-
-            except Exception as e:
-                logger.error(
-                    f"⚠️  Failed to process OpenAPI spec for '{self.name}': {e}"
-                )
-
-            # Startup: Generate AsyncAPI specs for each module in module's specs/ dir
-            if ws_app is not None:
-                asyncapi_schema = ws_app.asyncapi()
-                asyncapi_file = module_specs_dir / "asyncapi.json"
-
-                try:
-                    # Compare specs if existing spec was loaded
-                    should_update_asyncapi: bool = True
-                    if asyncapi_file.exists():
-                        try:
-                            with open(asyncapi_file, "r") as f:
-                                existing_asyncapi = json.load(f)
-                                differences = _compare_specs(
-                                    existing_asyncapi, asyncapi_schema
-                                )
-                                if len(differences) > 0:
-                                    logger.info(
-                                        f"🔄 AsyncAPI spec changes detected for '{self.name}':"
-                                    )
-                                    for diff in differences:
-                                        logger.info(f"   • {diff}")
-                                else:
-                                    should_update_asyncapi = False
-                        except Exception as e:
-                            logger.warning(
-                                f"⚠️  Could not read existing AsyncAPI spec: {e}"
-                            )
-                    else:
-                        logger.info(f"📝 Creating new AsyncAPI spec for '{self.name}'")
-
-                    # Write spec only if needed
-                    if should_update_asyncapi:
-                        with open(asyncapi_file, "w") as f:
-                            json.dump(asyncapi_schema, f, indent=2)
-                        logger.info(f"✅ Updated AsyncAPI spec: {asyncapi_file}")
-
-                except Exception as e:
-                    logger.error(
-                        f"⚠️  Failed to process AsyncAPI spec for '{self.name}': {e}"
-                    )
-
-                ws_app.setup(app)
-
-            yield
-
-            # Shutdown: Cleanup is handled by FastAPIAdapter
-            logger.info(f"🛑 FastAPI <{self.name}> application shutdown complete")
-
-        # OpenAPI URLs should reflect the actual mounted paths
-        module_path = f"{base_path}/{self.name}"
-
-        app = FastAPI(
-            title=f"{self.name.title()} API",
-            description=f"REST API app for {self.name} module",
-            version="1.0.0",
-            openapi_url=f"{module_path}/openapi.json",
-            docs_url=f"{module_path}/docs",
-            redoc_url=f"{module_path}/redoc",
-            openapi_tags=self.openapi_tags,
-            lifespan=lifespan,
-        )
-        # Register module's API routers with module_path prefix
-        # so OpenAPI spec reflects the real accessible routes
-        for api_router in self.api_routers:
-            app.include_router(api_router, prefix=module_path)
-
-        if self.ws_routers:
-            # WebSocket URL includes the full path
-            ws_url: str = f"{module_path}/ws"
-            ws_app = self.create_ws_app(ws_url)
-
-            @app.websocket(ws_url)
-            async def _(
-                client: Annotated[Client, Depends(ws_app.manage)],
-            ) -> None:
-                f"""WebSocket endpoint for {self.name} real-time streaming"""
-                await ws_app.serve(client)
-
-        return app, ws_app
