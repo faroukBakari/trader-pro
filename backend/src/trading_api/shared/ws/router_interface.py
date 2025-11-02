@@ -39,6 +39,12 @@ class WsRouteService(Protocol):
 # TODO: add clear subscriptions method to use on FastWSAdapter when client disconnects
 class WsRouteInterface(OperationRouter):
     def __init__(self, route: str, *args: Any, **kwargs: Any):
+        # Validate route parameter
+        if not route or not isinstance(route, str):
+            raise ValueError(
+                f"Router 'route' must be a non-empty string. Got: {route!r}"
+            )
+
         super().__init__(prefix=f"{route}.", *args, **kwargs)
         self.route: str = route
         self.updates_queue = asyncio.Queue[SubscriptionUpdate[BaseModel]](maxsize=1000)

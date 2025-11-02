@@ -130,8 +130,10 @@ Location: `src/trading_api/shared/ws/module_router_generator.py`
 
 **Used by:**
 
-- `make generate-ws-routers` ✅
-- Not integrated into `Module.gen_specs_and_clients()` ❌
+- `make generate-ws-routers` ✅ (deprecated)
+- **Module `__init__` (automatic)** ✅ - Called when `WsRouters` class is instantiated
+- **IMPORTANT:** WS routers are generated automatically during module instantiation,
+  BEFORE `create_app()` or `gen_specs_and_clients()` are called. No separate generation step needed!
 
 ---
 
@@ -156,29 +158,24 @@ make generate modules=broker,datafeed   # Generate for multiple modules
 make list-modules                       # List all discovered modules
 ```
 
-### **2. Integrate WebSocket Router Generation**
+### **2. WebSocket Router Generation (ALREADY INTEGRATED)**
 
-**Gap:** `gen_specs_and_clients()` doesn't generate WS routers
+**Status:** ✅ **COMPLETE** - WS routers are automatically generated during module instantiation
 
-**Proposed Enhancement:**
+**How it works:**
 
-```python
-class Module:
-    def gen_specs_and_clients(
-        self,
-        api_app: FastAPI,
-        ws_app: FastWSAdapter | None = None,
-        clean_first: bool = False,
-        output_dir: Path | None = None,
-        generate_ws_routers: bool = True,  # NEW
-    ) -> None:
-        # ... existing logic ...
+1. When `module_codegen.py` instantiates a module: `module = BrokerModule()`
+2. The module's `__init__` creates WS routers: `self._ws_routers = BrokerWsRouters(service=self.service)`
+3. `BrokerWsRouters.__init__()` calls: `generate_module_routers(module_name)`
+4. Generated router classes are created in `modules/{module}/ws_generated/`
+5. Router instances are created and stored in `self._ws_routers`
 
-        # NEW: Generate WS routers if requested
-        if generate_ws_routers and self.ws_routers:
-            from trading_api.shared.ws.module_router_generator import generate_module_routers
-            generate_module_routers(self.name, silent=False)
-```
+**Benefits:**
+
+- ✅ Systematic and automatic - no manual step needed
+- ✅ Fail-fast - errors caught during module instantiation
+- ✅ Happens BEFORE `create_app()` - routers ready when needed
+- ✅ No integration with `gen_specs_and_clients()` required
 
 ### **3. Create Offline Generation Script**
 

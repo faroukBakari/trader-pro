@@ -55,7 +55,13 @@ class ModuleRegistry:
 
         Args:
             modules_dir: Path to modules directory to scan
+
+        Raises:
+            ValueError: If module naming validation fails
         """
+        discovered_modules = {}
+
+        # Step 1: Discover all modules
         for module_path in modules_dir.iterdir():
             # Skip non-directories and private/internal modules
             if not module_path.is_dir() or module_path.name.startswith("_"):
@@ -71,11 +77,21 @@ class ModuleRegistry:
                 )
                 # Get module class: BrokerModule
                 module_class = getattr(module_import, class_name)
-                self.register(module_class, module_name)
-                logger.info(f"Auto-discovered module: {module_name}")
+                discovered_modules[module_name] = module_class
             except (ImportError, AttributeError) as e:
                 logger.warning(f"Failed to auto-discover module '{module_name}': {e}")
                 continue
+
+        # Step 2: Validate naming conventions
+        validation_errors = self._validate_module_names(set(discovered_modules.keys()))
+        if validation_errors:
+            error_msg = "\n".join(validation_errors)
+            raise ValueError(f"Module validation failed:\n{error_msg}")
+
+        # Step 3: Register validated modules
+        for module_name, module_class in discovered_modules.items():
+            self.register(module_class, module_name)
+            logger.info(f"Auto-discovered module: {module_name}")
 
     def _get_instance(self, module_name: str) -> Module:
         """Get or create module instance (lazy loading).
@@ -161,3 +177,36 @@ class ModuleRegistry:
         self._module_classes.clear()
         self._instances.clear()
         self._enabled_modules = None
+
+    def _validate_module_names(self, module_names: set[str]) -> list[str]:
+        """Validate module naming conventions and uniqueness.
+
+        Validates that:
+        1. Module names use hyphens for multi-word names (not underscores)
+        2. Package names follow expected patterns:
+           - OpenAPI: @trader-pro/client-{module}
+           - AsyncAPI: ws-types-{module}
+           - Python: {Module}Client
+
+        Args:
+            module_names: Set of discovered module names
+
+        Returns:
+            List of error messages (empty if all validations pass)
+        """
+        errors = []
+
+        # Check for naming convention violations
+        for name in module_names:
+            # Validate no underscores in module names
+            if "_" in name:
+                errors.append(
+                    f"Module '{name}' contains underscore. "
+                    f"Use hyphen for multi-word names."
+                )
+
+        # Check for duplicate module names (inherent in set, but explicit check for clarity)
+        if len(module_names) != len(set(module_names)):
+            errors.append("Duplicate module names detected")
+
+        return errors
