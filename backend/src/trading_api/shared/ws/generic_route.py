@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from external_packages.fastws import Client
 from trading_api.models import SubscriptionResponse, SubscriptionUpdate
-from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
+from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ _TData = TypeVar("_TData", bound=BaseModel)
 
 # TODO : implement secure route that encapsulates authentication/authorization per client
 # TODO : implement server side subscription cancelation
-class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
+class WsRouter(WsRouteInterface, Generic[_TRequest, _TData]):
     def __init__(self, service: WsRouteService, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.service = service

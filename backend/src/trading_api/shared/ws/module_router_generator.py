@@ -126,7 +126,7 @@ def generate_router_code(spec: RouterSpec, template: str) -> str:
             continue
         # Replace class declaration
         if "class WsRouter(" in line:
-            result_lines.append(f"class {spec.class_name}(WsRouterInterface):")
+            result_lines.append(f"class {spec.class_name}(WsRouteInterface):")
             continue
         # Replace type parameters
         modified_line = line.replace("_TRequest", spec.request_type)

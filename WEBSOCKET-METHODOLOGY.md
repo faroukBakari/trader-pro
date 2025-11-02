@@ -98,7 +98,7 @@ Use the router factory pattern with TYPE_CHECKING:
 # backend/src/trading_api/modules/datafeed/ws.py
 from typing import TYPE_CHECKING, TypeAlias
 from trading_api.models.market import Bar, BarsSubscriptionRequest
-from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
+from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
 from trading_api.shared.ws.generic_route import WsRouter
 
 if TYPE_CHECKING:
@@ -108,7 +108,7 @@ else:
     # Runtime: use generated concrete class from module-local ws_generated
     from .ws_generated import BarWsRouter
 
-class DatafeedWsRouters(list[WsRouterInterface]):
+class DatafeedWsRouters(list[WsRouteInterface]):
     """Factory creating all datafeed WebSocket routers"""
 
     def __init__(self, datafeed_service: WsRouteService):
@@ -153,7 +153,7 @@ make generate-ws-routers
 # backend/src/trading_api/modules/datafeed/__init__.py
 from typing import List
 from fastapi import APIRouter
-from trading_api.shared.ws.router_interface import WsRouterInterface
+from trading_api.shared.ws.router_interface import WsRouteInterface
 from .service import DatafeedService
 from .api import DatafeedApi
 from .ws import DatafeedWsRouters
@@ -176,7 +176,7 @@ class DatafeedModule:
     def get_api_routers(self) -> List[APIRouter]:
         return [DatafeedApi(service=self.service, prefix=f"/{self.name}", tags=[self.name])]
 
-    def get_ws_routers(self) -> List[WsRouterInterface]:
+    def get_ws_routers(self) -> List[WsRouteInterface]:
         return DatafeedWsRouters(self.service)
 
     def configure_app(self, api_app, ws_app) -> None:

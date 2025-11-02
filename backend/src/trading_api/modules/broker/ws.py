@@ -27,7 +27,7 @@ from trading_api.models.broker import (
 )
 from trading_api.shared.ws.generic_route import WsRouter
 from trading_api.shared.ws.module_router_generator import generate_module_routers
-from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
+from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
 
 # Type aliases for code generation
 if TYPE_CHECKING:
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BrokerWsRouters(list[WsRouterInterface]):
+class BrokerWsRouters(list[WsRouteInterface]):
     def __init__(self, broker_service: WsRouteService):
         # Generate WebSocket routers for module
         module_name = os.path.basename(os.path.dirname(__file__))

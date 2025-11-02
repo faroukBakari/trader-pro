@@ -37,7 +37,7 @@ class WsRouteService(Protocol):
 
 
 # TODO: add clear subscriptions method to use on FastWSAdapter when client disconnects
-class WsRouterInterface(OperationRouter):
+class WsRouteInterface(OperationRouter):
     def __init__(self, route: str, *args: Any, **kwargs: Any):
         super().__init__(prefix=f"{route}.", *args, **kwargs)
         self.route: str = route

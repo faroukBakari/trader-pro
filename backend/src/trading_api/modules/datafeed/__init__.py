@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi.routing import APIRouter
 
 from trading_api.shared import Module
-from trading_api.shared.ws.router_interface import WsRouterInterface
+from trading_api.shared.ws.router_interface import WsRouteInterface
 
 from .api import DatafeedApi
 from .service import DatafeedService
@@ -35,7 +35,7 @@ class DatafeedModule(Module):
         self._api_routers: list[APIRouter] = [
             DatafeedApi(service=self.service, prefix="", tags=[self.name])
         ]
-        self._ws_routers: list[WsRouterInterface] = DatafeedWsRouters(
+        self._ws_routers: list[WsRouteInterface] = DatafeedWsRouters(
             datafeed_service=self.service
         )
 
@@ -93,11 +93,11 @@ class DatafeedModule(Module):
         return self._api_routers
 
     @property
-    def ws_routers(self) -> list[WsRouterInterface]:
+    def ws_routers(self) -> list[WsRouteInterface]:
         """Get all WebSocket routers for datafeed real-time endpoints.
 
         Returns:
-            list[WsRouterInterface]: List of WebSocket router instances for bars and quotes
+            list[WsRouteInterface]: List of WebSocket router instances for bars and quotes
         """
         return self._ws_routers
 
