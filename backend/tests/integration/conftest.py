@@ -30,7 +30,7 @@ def datafeed_only_app() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    modular_app = factory.create_apps(enabled_module_names=["datafeed"])
+    modular_app = factory.create_app(enabled_module_names=["datafeed"])
     return modular_app, modular_app.ws_apps
 
 
@@ -40,7 +40,7 @@ def broker_only_app() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    modular_app = factory.create_apps(enabled_module_names=["broker"])
+    modular_app = factory.create_app(enabled_module_names=["broker"])
     return modular_app, modular_app.ws_apps
 
 
@@ -50,7 +50,7 @@ def all_modules_app() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    modular_app = factory.create_apps(enabled_module_names=None)
+    modular_app = factory.create_app(enabled_module_names=None)
     return modular_app, modular_app.ws_apps
 
 
@@ -60,7 +60,7 @@ def no_modules_app() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    modular_app = factory.create_apps(enabled_module_names=[])
+    modular_app = factory.create_app(enabled_module_names=[])
     return modular_app, modular_app.ws_apps
 
 
@@ -115,7 +115,7 @@ def apps() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    modular_app = factory.create_apps(enabled_module_names=None)  # None = all modules
+    modular_app = factory.create_app(enabled_module_names=None)  # None = all modules
     return modular_app, modular_app.ws_apps
 
 

@@ -247,7 +247,7 @@ class AppFactory:
         self.registry = ModuleRegistry()
         self.modules_dir = modules_dir or Path(__file__).parent / "modules"
 
-    def create_apps(
+    def create_app(
         self,
         enabled_module_names: list[str] | None = None,
     ) -> ModularFastAPI:
@@ -269,13 +269,13 @@ class AppFactory:
         Example:
             >>> factory = AppFactory()
             >>> # Load all modules (core + all feature modules)
-            >>> app, ws_apps = factory.create_apps()
+            >>> app, ws_apps = factory.create_app()
             >>> # Access WebSocket apps via ModularApp
             >>> assert app.ws_apps == ws_apps
             >>> # Load core + datafeed only
-            >>> app, ws_apps = factory.create_apps(["datafeed"])
+            >>> app, ws_apps = factory.create_app(["datafeed"])
             >>> # Load only core module
-            >>> app, ws_apps = factory.create_apps([])
+            >>> app, ws_apps = factory.create_app([])
         """
         # Clear registry to allow fresh registration (important for tests)
         self.registry.clear()

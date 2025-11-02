@@ -36,7 +36,7 @@ def create_test_app(
         api_app, ws_apps = create_test_app(enabled_modules=[])
     """
     factory = AppFactory()
-    modular_app = factory.create_apps(enabled_module_names=enabled_modules)
+    modular_app = factory.create_app(enabled_module_names=enabled_modules)
     return modular_app, modular_app.ws_apps
 
 

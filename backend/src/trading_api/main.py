@@ -24,4 +24,4 @@ else:
 
 # Create application using factory
 factory = AppFactory()
-app = factory.create_apps(enabled_module_names=enabled_modules)
+app = factory.create_app(enabled_module_names=enabled_modules)
