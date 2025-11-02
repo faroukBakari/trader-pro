@@ -7,13 +7,13 @@ Supports selective module enabling via configuration.
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator, Dict
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
-from trading_api.shared import FastWSAdapter, ModuleRegistry
+from trading_api.shared import FastWSAdapter, Module, ModuleRegistry
 
 # Configure logging for the application
 logging.basicConfig(
@@ -28,6 +28,126 @@ logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
 # Module logger for app_factory
 logger = logging.getLogger(__name__)
+
+
+class ModuleApp:
+    def __init__(self, module: Module):
+        self.module = module
+        self.api_app, self.ws_app = module.create_app()
+
+
+class ModularFastAPI(FastAPI):
+    """FastAPI application with integrated WebSocket apps tracking.
+
+    Extends FastAPI to provide centralized management of WebSocket applications
+    alongside the REST API. This class maintains a list of FastWSAdapter instances
+    and provides convenient access to both REST and WebSocket functionality.
+
+    Example:
+        >>> app = ModularApp(title="Trading API")
+        >>> # Access WebSocket apps
+        >>> for ws_app in app.ws_apps:
+        >>>     ws_app.setup(app)
+        >>> # Use like regular FastAPI
+        >>> @app.get("/health")
+        >>> async def health():
+        >>>     return {"status": "ok"}
+    """
+
+    def __init__(self, modules: list[Module], base_url: str, *args: Any, **kwargs: Any):
+        """Initialize ModularFastAPI with empty WebSocket apps list.
+
+        Args:
+            *args: Positional arguments passed to FastAPI
+            **kwargs: Keyword arguments passed to FastAPI
+        """
+        self.base_url = base_url
+        self._modules_apps: list[ModuleApp] = [ModuleApp(module) for module in modules]
+        super().__init__(
+            *args,
+            openapi_url=f"{base_url}/openapi.json",
+            docs_url=f"{base_url}/docs",
+            redoc_url=f"{base_url}/redoc",
+            openapi_tags=[
+                tag
+                for module in self.modules_apps
+                if module.api_app.openapi_tags
+                for tag in module.api_app.openapi_tags
+            ],
+            **kwargs,
+        )
+        for module_app in self._modules_apps:
+            mount_path = f"{self.base_url}/{module_app.module.name}"
+            self.mount(mount_path, module_app.api_app)
+            logger.info(f"📦 Mounted module '{module_app.module.name}' at {mount_path}")
+
+    @property
+    def modules_apps(self) -> list[ModuleApp]:
+        """Get list of module applications.
+
+        Returns:
+            list[ModuleApp]: Read-only list of module apps
+        """
+        return self._modules_apps
+
+    def openapi(self) -> Dict[str, Any]:
+        """Generate merged OpenAPI schema including all mounted modules."""
+
+        # Get main app's OpenAPI schema
+        if self.openapi_schema:
+            return self.openapi_schema
+
+        openapi_schema = super().openapi()
+
+        # Merge each mounted module's schema
+        for module_app in self._modules_apps:
+            mount_path = f"{self.base_url}/{module_app.module.name}"
+            module_schema = module_app.api_app.openapi()
+
+            # Merge paths with mount path prefix
+            for path, path_item in module_schema.get("paths", {}).items():
+                full_path = f"{mount_path}{path}"
+                openapi_schema["paths"][full_path] = path_item
+
+            # Merge components (schemas, security schemes, etc.)
+            module_components = module_schema.get("components", {})
+            if module_components:
+                if "components" not in openapi_schema:
+                    openapi_schema["components"] = {}
+                for comp_type, comp_data in module_components.items():
+                    if comp_type not in openapi_schema["components"]:
+                        openapi_schema["components"][comp_type] = {}
+                    openapi_schema["components"][comp_type].update(comp_data)
+
+        self.openapi_schema = openapi_schema
+        return openapi_schema
+
+    def validate_response_models(self) -> None:
+        """Validate that all routes have response_model defined for OpenAPI compliance."""
+        missing_models = []
+
+        for route in self.routes:
+            if isinstance(route, APIRoute):
+                if route.response_model is None:
+                    # Skip OPTIONS method as it's auto-generated
+                    methods = route.methods or set()
+                    if methods and "OPTIONS" not in methods:
+                        endpoint_name = getattr(route.endpoint, "__name__", "unknown")
+                        path = route.path
+                        missing_models.append(
+                            f"{list(methods)} {path} -> {endpoint_name}"
+                        )
+
+        if missing_models:
+            error_msg = (
+                "❌ FastAPI Response Model Violations Found:\n"
+                + "\n".join(f"  - {model}" for model in missing_models)
+                + "\n\nAll FastAPI routes must have response_model"
+                + " defined for OpenAPI compliance."
+            )
+            raise ValueError(error_msg)
+
+        print("✅ All FastAPI routes have response_model defined")
 
 
 class AppFactory:
@@ -59,8 +179,8 @@ class AppFactory:
     def create_apps(
         self,
         enabled_module_names: list[str] | None = None,
-    ) -> tuple[FastAPI, list[FastWSAdapter]]:
-        """Create and configure FastAPI and FastWSAdapter applications.
+    ) -> ModularFastAPI:
+        """Create and configure ModularApp (FastAPI + WebSocket apps).
 
         The core module is always enabled and loaded first, regardless of the
         enabled_module_names parameter. This ensures health checks and versioning
@@ -72,16 +192,19 @@ class AppFactory:
                 Use this to selectively load feature modules.
 
         Returns:
-            tuple[FastAPI, list[FastWSAdapter]]: API app and list of module WS apps
+            tuple[ModularApp, list[FastWSAdapter]]: ModularApp instance (with ws_apps
+                tracked internally) and list of module WS apps for backward compatibility
 
         Example:
             >>> factory = AppFactory()
             >>> # Load all modules (core + all feature modules)
-            >>> api_app, ws_apps = factory.create_apps()
+            >>> app, ws_apps = factory.create_apps()
+            >>> # Access WebSocket apps via ModularApp
+            >>> assert app.ws_apps == ws_apps
             >>> # Load core + datafeed only
-            >>> api_app, ws_apps = factory.create_apps(["datafeed"])
+            >>> app, ws_apps = factory.create_apps(["datafeed"])
             >>> # Load only core module
-            >>> api_app, ws_apps = factory.create_apps([])
+            >>> app, ws_apps = factory.create_apps([])
         """
         # Clear registry to allow fresh registration (important for tests)
         self.registry.clear()
@@ -100,36 +223,25 @@ class AppFactory:
         base_url = "/api/v1"
 
         # Compute OpenAPI tags dynamically from enabled modules (including core)
-        openapi_tags = [
-            tag
-            for module in self.registry.get_enabled_modules()
-            for tag in module.openapi_tags
-        ]
 
         enabled_modules = self.registry.get_enabled_modules()
-        module_api_apps: list[FastAPI] = []
-        module_ws_apps: list[FastWSAdapter] = []
-
-        for module in enabled_modules:
-            api_app, ws_app = module.create_app()
-            module_api_apps.append(api_app)
-            if ws_app:
-                module_ws_apps.append(ws_app)
 
         @asynccontextmanager
-        async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        async def lifespan(app: ModularFastAPI) -> AsyncGenerator[None, None]:
             """Handle application startup and shutdown events."""
 
             # Validate all routes have response models
-            validate_response_models(app)
+            app.validate_response_models()
 
             yield
 
             # Shutdown: Cleanup is handled by FastAPIAdapter
             print("🛑 FastAPI application shutdown complete")
 
-        # Create FastAPI app
-        api_app = FastAPI(
+        # Create ModularApp (FastAPI + WebSocket tracking)
+        modular_app = ModularFastAPI(
+            modules=enabled_modules,
+            base_url=base_url,
             title="Trading API",
             description=(
                 "A comprehensive trading API server with market data "
@@ -137,15 +249,11 @@ class AppFactory:
                 "backwards compatibility."
             ),
             version="1.0.0",
-            openapi_url=f"{base_url}/openapi.json",
-            docs_url=f"{base_url}/docs",
-            redoc_url=f"{base_url}/redoc",
-            openapi_tags=openapi_tags,
             lifespan=lifespan,
         )
 
         # Add CORS middleware
-        api_app.add_middleware(
+        modular_app.add_middleware(
             CORSMiddleware,
             allow_origins=["*"],  # Allow all origins for development
             allow_credentials=True,
@@ -154,119 +262,25 @@ class AppFactory:
         )
 
         # Add root endpoint with API information
-        @api_app.get("/", tags=["root"])
-        async def root() -> dict:
-            """Root endpoint providing API metadata and navigation."""
+        @modular_app.get("/", include_in_schema=False)
+        async def root() -> dict[str, Any]:
+            """Root endpoint with API version and navigation information."""
             return {
                 "name": "Trading API",
                 "version": "1.0.0",
                 "current_api_version": "v1",
                 "documentation": f"{base_url}/docs",
-                "health": f"{base_url}/health",
-                "versions": f"{base_url}/versions",
+                "health": f"{base_url}/core/health",
+                "versions": f"{base_url}/core/versions",
             }
 
-        for module_app, module in zip(module_api_apps, enabled_modules):
-            api_app.mount(f"{base_url}/{module.name}", module_app)
-
-        # Merge OpenAPI specs from mounted modules into main app
-        merge_openapi_specs(
-            main_app=api_app,
-            module_apps=[
-                (mod_app, mod.name)
-                for mod_app, mod in zip(module_api_apps, enabled_modules)
-            ],
-            base_url=base_url,
-        )
-
-        return api_app, module_ws_apps
-
-
-def validate_response_models(app: FastAPI) -> None:
-    """Validate that all routes have response_model defined for OpenAPI compliance."""
-    missing_models = []
-
-    for route in app.routes:
-        if isinstance(route, APIRoute):
-            if route.response_model is None:
-                # Skip OPTIONS method as it's auto-generated
-                methods = route.methods or set()
-                if methods and "OPTIONS" not in methods:
-                    endpoint_name = getattr(route.endpoint, "__name__", "unknown")
-                    path = route.path
-                    missing_models.append(f"{list(methods)} {path} -> {endpoint_name}")
-
-    if missing_models:
-        error_msg = (
-            "❌ FastAPI Response Model Violations Found:\n"
-            + "\n".join(f"  - {model}" for model in missing_models)
-            + "\n\nAll FastAPI routes must have response_model"
-            + " defined for OpenAPI compliance."
-        )
-        raise ValueError(error_msg)
-
-    print("✅ All FastAPI routes have response_model defined")
-
-
-def merge_openapi_specs(
-    main_app: FastAPI,
-    module_apps: list[tuple[FastAPI, str]],
-    base_url: str,
-) -> None:
-    """Override main app's openapi() to include mounted module specs.
-
-    Merges OpenAPI specifications from mounted module sub-applications into the
-    main application's OpenAPI schema. This ensures all endpoints are visible
-    in a single unified API documentation.
-
-    Args:
-        main_app: Main FastAPI application
-        module_apps: List of (module_app, module_name) tuples
-        base_url: Base URL prefix (e.g., '/api/v1')
-    """
-    # Store reference to original openapi method
-    original_openapi = main_app.openapi
-
-    def custom_openapi() -> dict:
-        """Generate merged OpenAPI schema including all mounted modules."""
-        if main_app.openapi_schema:
-            return main_app.openapi_schema
-
-        # Get main app's OpenAPI schema
-        openapi_schema = original_openapi()
-
-        # Merge each mounted module's schema
-        for module_app, module_name in module_apps:
-            mount_path = f"{base_url}/{module_name}"
-            module_schema = module_app.openapi()
-
-            # Merge paths with mount path prefix
-            for path, path_item in module_schema.get("paths", {}).items():
-                full_path = f"{mount_path}{path}"
-                openapi_schema["paths"][full_path] = path_item
-
-            # Merge components (schemas, security schemes, etc.)
-            module_components = module_schema.get("components", {})
-            if module_components:
-                if "components" not in openapi_schema:
-                    openapi_schema["components"] = {}
-                for comp_type, comp_data in module_components.items():
-                    if comp_type not in openapi_schema["components"]:
-                        openapi_schema["components"][comp_type] = {}
-                    openapi_schema["components"][comp_type].update(comp_data)
-
-        # Cache the merged schema
-        main_app.openapi_schema = openapi_schema
-        return openapi_schema
-
-    # Override the openapi method (type: ignore needed for method reassignment)
-    main_app.openapi = custom_openapi  # type: ignore[method-assign]
+        return modular_app
 
 
 def mount_app_modules(
     enabled_module_names: list[str] | None = None,
-) -> tuple[FastAPI, list[FastWSAdapter]]:
-    """Create and configure FastAPI and FastWSAdapter applications.
+) -> tuple[ModularFastAPI, list[FastWSAdapter]]:
+    """Create and configure ModularApp (FastAPI + WebSocket apps).
 
     LEGACY FUNCTION: Maintained for backward compatibility with existing code.
     New code should use AppFactory directly for better encapsulation.
@@ -281,17 +295,25 @@ def mount_app_modules(
             Use this to selectively load feature modules.
 
     Returns:
-        tuple[FastAPI, list[FastWSAdapter]]: API app and list of module WS apps
+        tuple[ModularApp, list[FastWSAdapter]]: ModularApp instance (with ws_apps
+            tracked internally) and list of module WS apps for backward compatibility
 
     Example:
         >>> # Load all modules (core + all feature modules)
-        >>> api_app, ws_apps = mount_app_modules()
+        >>> app, ws_apps = mount_app_modules()
+        >>> # Access WebSocket apps via ModularApp
+        >>> assert app.ws_apps == ws_apps
         >>> # Load core + datafeed only
-        >>> api_app, ws_apps = mount_app_modules(enabled_modules=["datafeed"])
+        >>> app, ws_apps = mount_app_modules(enabled_modules=["datafeed"])
         >>> # Load only core module
-        >>> api_app, ws_apps = mount_app_modules(enabled_modules=[])
+        >>> app, ws_apps = mount_app_modules(enabled_modules=[])
     """
     # Create a fresh factory instance for each call
     # This ensures test isolation (each test gets independent apps)
     factory = AppFactory()
-    return factory.create_apps(enabled_module_names)
+    modular_app = factory.create_apps(enabled_module_names)
+    return modular_app, [
+        module_app.ws_app
+        for module_app in modular_app.modules_apps
+        if module_app.ws_app
+    ]

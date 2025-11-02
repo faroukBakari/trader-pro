@@ -72,7 +72,7 @@ make test
 
 # Run specific test suites
 make test-boundaries          # Import boundary validation
-make test-shared              # Shared infrastructure tests
+
 make test-module-broker       # Broker module tests only
 make test-module-datafeed     # Datafeed module tests only
 make test-integration         # Cross-module integration tests

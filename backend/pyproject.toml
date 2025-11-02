@@ -78,7 +78,6 @@ asyncio_mode = "auto"
 testpaths = [
     "tests",
     "tests/integration",
-    "src/trading_api/shared/tests",
     "src/trading_api/modules/*/tests",
 ]
 markers = [
