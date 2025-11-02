@@ -513,8 +513,7 @@ health-ci:
 # Cleanup
 clean:
 	@echo "Cleaning backend build artifacts..."
-	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage clients/ src/trading_api/ws/generated/ openapi.json asyncapi.json
-	@echo "Backend clean complete."
+	@echo "⚠️ DECOMMISSINED!! Need to reimplement WITH EXISTING COMMANDS ⚠️"
 
 # Clean all Python caches
 clean-cache:
@@ -579,7 +578,7 @@ export-openapi-spec:
 	@echo ""
 	@sleep 3
 	@echo "Running legacy export-openapi-spec script..."
-	poetry run python scripts/export_openapi_spec.py
+	@echo "⚠️ DECOMMISSINED!! Need to reimplement with new generate command ⚠️"
 
 # Export AsyncAPI specification (offline) - DEPRECATED
 export-asyncapi-spec:
@@ -599,8 +598,7 @@ export-asyncapi-spec:
 	@echo "⚠️  ========================================================================="
 	@echo ""
 	@sleep 3
-	@echo "Running legacy export-asyncapi-spec script..."
-	poetry run python scripts/export_asyncapi_spec.py
+	@echo "⚠️ DECOMMISSINED!! Need to reimplement with new generate command ⚠️"
 
 # Generate Python HTTP clients from per-module OpenAPI specs - DEPRECATED
 generate-python-clients:
@@ -618,24 +616,7 @@ generate-python-clients:
 	@echo "⚠️  "
 	@echo "⚠️  Note: WebSocket routers auto-generate at module init (no manual step needed)"
 	@echo "⚠️  ========================================================================="
-	@echo ""
-	@sleep 3
-	@echo "Running legacy generate-python-clients script..."
-	poetry run python scripts/generate_python_clients.py
-	@echo ""
-	@echo "Formatting generated clients..."
-	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive src/trading_api/clients/
-	poetry run black src/trading_api/clients/
-	poetry run isort src/trading_api/clients/
-	@echo ""
-	@echo "Validating generated clients..."
-	poetry run black --check src/trading_api/clients/
-	poetry run isort --check-only src/trading_api/clients/
-	poetry run flake8 src/trading_api/clients/
-	poetry run mypy src/trading_api/clients/
-	poetry run pyright src/trading_api/clients/
-	@echo ""
-	@echo "✅ Client generation complete and validated!"
+	@echo "⚠️ DECOMMISSINED!! Need to reimplement with new generate command ⚠️"
 
 # Generate WebSocket router classes - DEPRECATED
 # Usage: make generate-ws-routers [module=<module_name>]
@@ -653,29 +634,7 @@ generate-ws-routers:
 	@echo "⚠️  "
 	@echo "⚠️  No manual generation needed anymore!"
 	@echo "⚠️  ========================================================================="
-	@echo ""
-	@sleep 3
-	@echo "Running legacy generate-ws-routers for compatibility..."
-	@if [ -n "$(module)" ]; then \
-		echo "Generating WebSocket routers for module: $(module)"; \
-		poetry run python -c "\
-from trading_api.shared.ws.module_router_generator import generate_module_routers; \
-import sys; \
-result = generate_module_routers('$(module)', silent=False, skip_quality_checks=False); \
-sys.exit(0 if result else 1)"; \
-	else \
-		echo "Generating WebSocket routers for all modules with ws.py files..."; \
-		for mod in $(DISCOVERED_MODULES); do \
-			echo ""; \
-			echo "Checking module: $$mod"; \
-			poetry run python -c "\
-from trading_api.shared.ws.module_router_generator import generate_module_routers; \
-result = generate_module_routers('$$mod', silent=False, skip_quality_checks=False); \
-exit(0)" || true; \
-		done; \
-		echo ""; \
-		echo "✅ Router generation complete!"; \
-	fi
+	@echo "⚠️ DECOMMISSINED!! NOT NEEDED ANYMORE ⚠️"
 
 # Multi-process backend management (using backend-manager)
 backend-manager-start:
