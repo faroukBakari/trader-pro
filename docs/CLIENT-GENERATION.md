@@ -74,7 +74,7 @@ Package name validation runs automatically before:
 
 - Frontend OpenAPI client generation (`make generate-openapi-client`)
 - Frontend AsyncAPI type generation (`make generate-asyncapi-types`)
-- Backend Python client generation (`make generate-python-clients`)
+- Backend code generation (`make generate` - unified command for all specs and clients)
 
 **Example Output:**
 

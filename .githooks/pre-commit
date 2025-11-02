@@ -127,17 +127,8 @@ if [[ -n "$backend_files" ]]; then
         fi
     fi
 
-    # Validate API specifications (always run to catch schema issues)
-    if ! run_check "OpenAPI spec validation" "make export-openapi-spec" "$repo_root/backend"; then
-        log_error "OpenAPI spec export/validation failed"
-        log_error "This usually means there are issues with your API models or routes"
-        exit 1
-    fi
-
-    if ! run_check "AsyncAPI spec validation" "make export-asyncapi-spec" "$repo_root/backend"; then
-        log_error "AsyncAPI spec export/validation failed"
-        log_error "This usually means there are issues with your WebSocket models"
-        log_error "Check for optional parameters in subscription request models"
+    if ! run_check "OpenAPI/AsyncAPI specs & PythonClients validation" "make generate" "$repo_root/backend"; then
+        log_error "OpenAPI/AsyncAPI spec and/or PythonClients export/validation failed [make generate]"
         exit 1
     fi
 fi

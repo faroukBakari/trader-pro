@@ -33,8 +33,7 @@ chmod +x .githooks/*
 - ✅ isort import sorting
 - ✅ Flake8 linting
 - ✅ MyPy type checking
-- ✅ OpenAPI spec validation (`make export-openapi-spec`)
-- ✅ AsyncAPI spec validation (`make export-asyncapi-spec`)
+- ✅ Spec and client generation (`make generate` - unified command)
 - ✅ Pytest tests (local only)
 
 **Note on spec validation**:

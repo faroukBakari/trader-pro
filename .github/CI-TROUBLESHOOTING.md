@@ -236,7 +236,7 @@ npm run generate-asyncapi-types
 
 ### 10. WebSocket Router Generation Failures
 
-**Error**: `make generate-ws-routers` fails in backend
+**Error**: `make generate` fails in backend
 
 **Common causes**:
 
@@ -250,9 +250,9 @@ npm run generate-asyncapi-types
 # Check router type aliases
 grep "TypeAlias = WsRouter" backend/src/trading_api/modules/*/ws.py
 
-# Run generation (uses new module-based generator)
+# Run generation (uses unified generation command)
 cd backend
-make generate-ws-routers
+make generate
 
 # Verify generated routers
 ls -la src/trading_api/modules/*/ws_generated/
@@ -329,7 +329,7 @@ npm run test:unit src/services/__tests__/brokerTerminalService.spec.ts
 ```bash
 # Verify per-module specs are generated
 cd backend
-make export-openapi-spec export-asyncapi-spec
+make generate  # Unified: generates OpenAPI, AsyncAPI, Python clients
 ls -la src/trading_api/modules/*/specs/*.json
 
 # Should see:
@@ -366,7 +366,7 @@ path: backend/src/trading_api/modules/
 ```bash
 # Test locally
 cd backend
-make generate-python-clients
+make generate  # Includes Python client generation
 
 # Should see:
 # ✅ Generated broker_client.py

@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules generate export-openapi-spec export-asyncapi-spec generate-python-clients generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -65,10 +65,6 @@ help:
 	@echo "  generate              Generate specs & clients for all modules"
 	@echo "                        Options: modules=mod1,mod2  (specific modules)"
 	@echo "                                 output_dir=/path   (custom output directory)"
-	@echo "  export-openapi-spec   [DEPRECATED] Export OpenAPI specification (use: make generate)"
-	@echo "  export-asyncapi-spec  [DEPRECATED] Export AsyncAPI specification (use: make generate)"
-	@echo "  generate-python-clients  [DEPRECATED] Generate Python HTTP clients (use: make generate)"
-	@echo "  generate-ws-routers   [DEPRECATED] WS routers auto-generate at module init (no manual generation needed)"
 	@echo ""
 	@echo "Logging targets:"
 	@echo "  logs-tail         Tail unified backend log (all servers with prefixes)"
@@ -500,8 +496,6 @@ dev-ci:
 # Build
 build:
 	@echo "Building backend package..."
-	@echo "Generating WebSocket routers..."
-	@$(MAKE) generate-ws-routers
 	poetry build
 
 # CI health check
@@ -513,7 +507,11 @@ health-ci:
 # Cleanup
 clean:
 	@echo "Cleaning backend build artifacts..."
-	@echo "⚠️ DECOMMISSINED!! Need to reimplement WITH EXISTING COMMANDS ⚠️"
+	@echo "Removing build directories..."
+	@rm -rf dist/ build/ *.egg-info
+	@echo "Removing generated files..."
+	@$(MAKE) clean-generated
+	@echo "✅ Clean complete"
 
 # Clean all Python caches
 clean-cache:
@@ -553,88 +551,8 @@ clean-generated:
 	@echo "✅ All generated files removed!"
 	@echo ""
 	@echo "💡 Tip: Regenerate files with:"
-	@echo "   make generate-ws-routers       # WebSocket routers"
-	@echo "   make export-openapi-spec       # OpenAPI specs"
-	@echo "   make export-asyncapi-spec      # AsyncAPI specs"
-	@echo "   make generate-python-clients   # Python HTTP clients"
-
-
-# Export OpenAPI specification (offline) - DEPRECATED
-export-openapi-spec:
-	@echo "⚠️  ========================================================================="
-	@echo "⚠️  DEPRECATED: 'make export-openapi-spec' is deprecated"
-	@echo "⚠️  "
-	@echo "⚠️  Use instead:"
-	@echo "⚠️    make generate              # Generate for all modules"
-	@echo "⚠️    make generate modules=broker  # Generate for specific module"
-	@echo "⚠️  "
-	@echo "⚠️  The new 'make generate' command generates:"
-	@echo "⚠️    - OpenAPI specs"
-	@echo "⚠️    - AsyncAPI specs"
-	@echo "⚠️    - Python HTTP clients"
-	@echo "⚠️  "
-	@echo "⚠️  Note: WebSocket routers auto-generate at module init (no manual step needed)"
-	@echo "⚠️  ========================================================================="
-	@echo ""
-	@sleep 3
-	@echo "Running legacy export-openapi-spec script..."
-	@echo "⚠️ DECOMMISSINED!! Need to reimplement with new generate command ⚠️"
-
-# Export AsyncAPI specification (offline) - DEPRECATED
-export-asyncapi-spec:
-	@echo "⚠️  ========================================================================="
-	@echo "⚠️  DEPRECATED: 'make export-asyncapi-spec' is deprecated"
-	@echo "⚠️  "
-	@echo "⚠️  Use instead:"
-	@echo "⚠️    make generate              # Generate for all modules"
-	@echo "⚠️    make generate modules=broker  # Generate for specific module"
-	@echo "⚠️  "
-	@echo "⚠️  The new 'make generate' command generates:"
-	@echo "⚠️    - OpenAPI specs"
-	@echo "⚠️    - AsyncAPI specs"
-	@echo "⚠️    - Python HTTP clients"
-	@echo "⚠️  "
-	@echo "⚠️  Note: WebSocket routers auto-generate at module init (no manual step needed)"
-	@echo "⚠️  ========================================================================="
-	@echo ""
-	@sleep 3
-	@echo "⚠️ DECOMMISSINED!! Need to reimplement with new generate command ⚠️"
-
-# Generate Python HTTP clients from per-module OpenAPI specs - DEPRECATED
-generate-python-clients:
-	@echo "⚠️  ========================================================================="
-	@echo "⚠️  DEPRECATED: 'make generate-python-clients' is deprecated"
-	@echo "⚠️  "
-	@echo "⚠️  Use instead:"
-	@echo "⚠️    make generate              # Generate for all modules"
-	@echo "⚠️    make generate modules=broker  # Generate for specific module"
-	@echo "⚠️  "
-	@echo "⚠️  The new 'make generate' command generates:"
-	@echo "⚠️    - OpenAPI specs"
-	@echo "⚠️    - AsyncAPI specs"
-	@echo "⚠️    - Python HTTP clients"
-	@echo "⚠️  "
-	@echo "⚠️  Note: WebSocket routers auto-generate at module init (no manual step needed)"
-	@echo "⚠️  ========================================================================="
-	@echo "⚠️ DECOMMISSINED!! Need to reimplement with new generate command ⚠️"
-
-# Generate WebSocket router classes - DEPRECATED
-# Usage: make generate-ws-routers [module=<module_name>]
-# Note: WebSocket routers are now generated automatically at module initialization
-generate-ws-routers:
-	@echo "⚠️  ========================================================================="
-	@echo "⚠️  DEPRECATED: 'make generate-ws-routers' is deprecated"
-	@echo "⚠️  "
-	@echo "⚠️  WebSocket routers are now generated automatically at module init!"
-	@echo "⚠️  "
-	@echo "⚠️  Router generation happens in ws.py files when you:"
-	@echo "⚠️    - Import the module"
-	@echo "⚠️    - Start the backend server"
-	@echo "⚠️    - Run make generate (triggers module initialization)"
-	@echo "⚠️  "
-	@echo "⚠️  No manual generation needed anymore!"
-	@echo "⚠️  ========================================================================="
-	@echo "⚠️ DECOMMISSINED!! NOT NEEDED ANYMORE ⚠️"
+	@echo "   make generate                  # All specs, clients, and routers"
+	@echo "   make generate modules=broker   # Specific module only"
 
 # Multi-process backend management (using backend-manager)
 backend-manager-start:

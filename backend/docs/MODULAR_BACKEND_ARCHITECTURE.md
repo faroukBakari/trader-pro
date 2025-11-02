@@ -455,7 +455,7 @@ When creating a new module:
 - [ ] Create `service.py` with business logic
 - [ ] Create `api.py` with `APIRouter` subclass (REST endpoints)
 - [ ] (Optional) Create `ws.py` with WebSocket router TypeAliases
-- [ ] (Optional) Run `make generate-ws-routers` for WebSocket routers
+- [ ] (Optional) WebSocket routers auto-generate on `make dev`
 - [ ] Add module tests in `tests/` directory
 - [ ] Verify with `make test-module-{module_name}`
 
@@ -599,7 +599,7 @@ class BarsSubscribeRouter(WsRouteInterface):
     ...
 ```
 
-**Generation Command**: `make generate-ws-routers`
+**Generation**: Automatic on app startup (`make dev`)
 
 ---
 

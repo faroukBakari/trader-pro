@@ -84,11 +84,7 @@ make generate modules=broker output_dir=/tmp/custom  # Combine options
 #   - Python HTTP clients (for inter-module communication)
 # Note: WebSocket routers auto-generate at module init (no manual step needed)
 
-# Code Generation (DEPRECATED - Use 'make generate' instead)
-make export-openapi-spec      # [DEPRECATED] Use 'make generate'
-make export-asyncapi-spec     # [DEPRECATED] Use 'make generate'
-make generate-python-clients  # [DEPRECATED] Use 'make generate'
-make generate-ws-routers      # [DEPRECATED] Auto-generates at module init
+
 
 # Multi-Process Backend (Development)
 make backend-manager-start          # Start multi-process backend with nginx
@@ -101,11 +97,6 @@ make backend-manager-gen-nginx-conf # Generate nginx config (debug)
 make logs-tail                      # Tail unified backend log (all servers with prefixes)
 make logs-tail-nginx                # Tail nginx logs (access + error)
 make logs-clean                     # Clean all backend log files
-
-# API
-make generate-python-clients   # Generate HTTP clients (includes format & validation)
-make export-openapi-spec       # Export OpenAPI spec
-make export-asyncapi-spec      # Export AsyncAPI spec
 ```
 
 ### Module-Specific Targets
@@ -127,12 +118,7 @@ make generate modules=broker output_dir=/custom/path  # Combine options
 # - Python HTTP clients: Type-safe inter-module communication (client_generated/*.py)
 # - WebSocket routers: Auto-generated at module init (ws_generated/*.py)
 
-# Legacy Commands (Deprecated)
-# These still work but show deprecation warnings:
-make export-openapi-spec      # Use 'make generate' instead
-make export-asyncapi-spec     # Use 'make generate' instead
-make generate-python-clients  # Use 'make generate' instead
-make generate-ws-routers      # WebSocket routers auto-generate at module init
+
 
 # Import Boundary Validation
 make test-boundaries          # Verify module import boundaries
@@ -140,16 +126,10 @@ make test-boundaries          # Verify module import boundaries
                               # Prevents: cross-module imports
 ```
 
-**Migration Guide:**
+**Usage Examples:**
 
 ```bash
-# Old way (multiple commands)
-make export-openapi-spec
-make export-asyncapi-spec
-make generate-python-clients
-make generate-ws-routers
-
-# New way (single command)
+# Generate for all modules
 make generate
 
 # Selective generation
