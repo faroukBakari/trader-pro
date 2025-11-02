@@ -78,7 +78,8 @@ def _ensure_clients_generated() -> None:
 _ensure_clients_generated()
 
 # Now import the clients (they should exist after generation)
-from trading_api.clients import BrokerClient, DatafeedClient  # noqa: E402
+from trading_api.modules.broker.client_generated import BrokerClient  # noqa: E402
+from trading_api.modules.datafeed.client_generated import DatafeedClient  # noqa: E402
 
 
 def run_service(module_name: str, port: int) -> None:

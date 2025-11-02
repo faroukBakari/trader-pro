@@ -123,6 +123,7 @@ class Module(ABC):
         api_app: FastAPI,
         ws_app: FastWSAdapter | None = None,
         clean_first: bool = False,
+        output_dir: Path | None = None,
     ) -> None:
         """Generate OpenAPI/AsyncAPI specs and Python HTTP client for this module.
 
@@ -131,33 +132,45 @@ class Module(ABC):
         If ws_app is provided, also generates AsyncAPI specification.
         Uses the same logic as the lifespan event for consistency.
 
+        Note: WebSocket routers are generated automatically at module initialization
+        (see ws.py files), so this method does not need to generate them.
+
         Args:
             api_app: FastAPI app instance with all routers registered
             ws_app: Optional FastWSAdapter instance for WebSocket spec generation
             clean_first: If True, removes existing specs and clients before generation
+            output_dir: Optional directory for output files (defaults to self.module_dir)
+                       Generates:
+                       - ${output_dir}/specs_generated/${module_name}_openapi.json
+                       - ${output_dir}/specs_generated/${module_name}_asyncapi.json
+                       - ${output_dir}/client_generated/${module_name}_client.py
+                       - ${output_dir}/client_generated/__init__.py
         """
         import shutil
 
-        module_specs_dir = self.module_dir / "specs"
-        backend_root = Path(__file__).parent.parent.parent.parent
-        clients_dir = backend_root / "src" / "trading_api" / "clients"
+        # Use module_dir if output_dir not provided
+        if output_dir is None:
+            output_dir = self.module_dir
+
+        specs_dir = output_dir / "specs_generated"
+        clients_dir = output_dir / "client_generated"
+        templates_dir = Path(__file__).parent / "templates"
 
         # Clean existing files if requested
         if clean_first:
-            if module_specs_dir.exists():
-                shutil.rmtree(module_specs_dir)
+            if specs_dir.exists():
+                shutil.rmtree(specs_dir)
                 logger.info(f"🧹 Cleaned specs for '{self.name}'")
 
-            # Clean this module's client file
-            client_file = clients_dir / f"{self.name}_client.py"
-            if client_file.exists():
-                client_file.unlink()
-                logger.info(f"🧹 Cleaned client for '{self.name}'")
+            # Clean this module's client directory
+            if clients_dir.exists():
+                shutil.rmtree(clients_dir)
+                logger.info(f"🧹 Cleaned clients for '{self.name}'")
 
         # Generate OpenAPI spec from the provided app
         openapi_schema = api_app.openapi()
-        module_specs_dir.mkdir(parents=True, exist_ok=True)
-        openapi_file = module_specs_dir / "openapi.json"
+        specs_dir.mkdir(parents=True, exist_ok=True)
+        openapi_file = specs_dir / f"{self.name}_openapi.json"
 
         # Compare with existing spec (same logic as lifespan)
         should_update_openapi: bool = True
@@ -188,8 +201,6 @@ class Module(ABC):
 
             # Generate Python HTTP client from updated spec (same logic as lifespan)
             try:
-                templates_dir = backend_root / "scripts" / "templates"
-
                 client_gen = ClientGenerationService(
                     clients_dir=clients_dir, templates_dir=templates_dir
                 )
@@ -223,7 +234,7 @@ class Module(ABC):
         # Generate AsyncAPI spec if ws_app is provided (same logic as lifespan)
         if ws_app is not None:
             asyncapi_schema = ws_app.asyncapi()
-            asyncapi_file = module_specs_dir / "asyncapi.json"
+            asyncapi_file = specs_dir / f"{self.name}_asyncapi.json"
 
             try:
                 # Compare specs if existing spec was loaded
