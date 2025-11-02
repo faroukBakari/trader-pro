@@ -68,8 +68,8 @@ async def handle_order(event: OrderEvent):
 - ✅ Avoids breaking established conventions
 
 **Examples of when to consult DOCUMENTATION-GUIDE.md:**
-- Adding a new API endpoint → Read API-METHODOLOGY.md, backend/docs/VERSIONING.md
-- Adding WebSocket feature → Read WEBSOCKET-METHODOLOGY.md, backend/docs/WEBSOCKETS.md, frontend/WEBSOCKET-CLIENT-PATTERN.md
+- Adding a new API endpoint → Read API-METHODOLOGY.md, backend/docs/SPECS_AND_CLIENT_GEN.md
+- Adding WebSocket feature → Read WEBSOCKET-METHODOLOGY.md, backend/docs/WS_ROUTERS_GEN.md, frontend/WEBSOCKET-CLIENT-PATTERN.md
 - TradingView integration → Read frontend/BROKER-TERMINAL-SERVICE.md, frontend/IBROKERCONNECTIONADAPTERHOST.md
 - Testing issues → Read docs/TESTING.md, relevant test README files
 - CI/CD problems → Read .github/CI-TROUBLESHOOTING.md

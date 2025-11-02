@@ -1930,7 +1930,7 @@ Services Layer
 
 - Backend: `backend/src/trading_api/shared/ws/router_interface.py` - `buildTopicParams()`
 - Frontend: `frontend/src/plugins/wsClientBase.ts` - `buildTopicParams()`
-- Documentation: `backend/docs/WEBSOCKETS.md` and `docs/WEBSOCKET-CLIENTS.md`
+- Documentation: `docs/WEBSOCKET-CLIENTS.md`
 
 **Features**:
 
