@@ -83,7 +83,7 @@
 
 6. **Phase 1: Create Application Factory** ✅ - Completed 2025-10-29
 
-   - Created `app_factory.py` with `create_app()` function
+   - Created `app_factory.py` with `mount_modules()` function
    - Supports `enabled_modules` parameter for selective loading
    - Includes lifespan management, spec generation, CORS middleware
    - All 48 tests pass (48 passed in 0.28s)
@@ -265,7 +265,7 @@
 21. **Phase 5: Refactor main.py to use app_factory pattern** ✅ - Completed 2025-10-29
 
     - Removed global service instances from main.py
-    - Switched to create_app() factory pattern
+    - Switched to mount_modules() factory pattern
     - Added ENABLED_MODULES environment variable support
     - Reduced main.py from ~200 lines to ~30 lines
     - Maintained backward compatibility for spec exports (app = apiApp)
@@ -588,7 +588,7 @@ backend/src/trading_api/
 
 - **Module Protocol** (`shared/module_interface.py`) - Protocol-based module interface
 - **Module Registry** (`shared/module_registry.py`) - Centralized module management
-- **Application Factory** (`app_factory.py`) - Dynamic app composition with `create_app()`
+- **Application Factory** (`app_factory.py`) - Dynamic app composition with `mount_modules()`
 - **Test Fixtures Pattern** - Module-isolated testing with factory-based fixtures
 - **Import Boundary Enforcement** - AST-based validation preventing cross-module imports
 - **Parallel Module Testing** - CI/CD optimization with matrix strategy
@@ -607,7 +607,7 @@ from trading_api.plugins import FastWSAdapter
 from trading_api.modules.broker import BrokerModule
 from trading_api.modules.datafeed import DatafeedModule
 from trading_api.shared.plugins import FastWSAdapter
-from trading_api.app_factory import create_app
+from trading_api.app_factory import mount_modules
 
 # Module-internal imports (within modules/broker/)
 from .service import BrokerService
@@ -770,14 +770,14 @@ These constraints MUST be followed throughout the implementation:
 ### 2. **Test Isolation Pattern**
 
 - **Rule**: Each module's tests create isolated app with only that module enabled
-- **Pattern**: Module-specific conftest.py creates app via `create_app(enabled_modules=["module_name"])`
+- **Pattern**: Module-specific conftest.py creates app via `mount_modules(enabled_modules=["module_name"])`
 - **Implementation**:
   ```python
   # modules/broker/tests/conftest.py
   @pytest.fixture
   def apps():
-      from trading_api.app_factory import create_app
-      return create_app(enabled_modules=["broker"])  # Only broker
+      from trading_api.app_factory import mount_modules
+      return mount_modules(enabled_modules=["broker"])  # Only broker
   ```
 - **Rationale**: True module isolation, parallel testing, faster CI
 
@@ -790,8 +790,8 @@ These constraints MUST be followed throughout the implementation:
   ```python
   # shared/tests/conftest.py
   def create_test_app(enabled_modules: list[str] | None = None):
-      from trading_api.app_factory import create_app
-      return create_app(enabled_modules=enabled_modules)
+      from trading_api.app_factory import mount_modules
+      return mount_modules(enabled_modules=enabled_modules)
   ```
 - **Rationale**: DRY principle, consistent test setup, easier maintenance
 
@@ -804,18 +804,18 @@ These constraints MUST be followed throughout the implementation:
 
 ### 5. **Factory Pattern Only**
 
-- **Rule**: All app instances created via `create_app()`, never import from `main.py`
+- **Rule**: All app instances created via `mount_modules()`, never import from `main.py`
 - **Forbidden**: `from trading_api.main import apiApp` ❌
-- **Allowed**: `from trading_api.app_factory import create_app` ✅
+- **Allowed**: `from trading_api.app_factory import mount_modules` ✅
 - **Exception**: `main.py` exports `app = apiApp` for spec generation scripts only
 - **Rationale**: Loose coupling, testability, module independence
 
 ### 6. **Registry Cleanup**
 
-- **Rule**: `app_factory.create_app()` MUST clear registry before registering modules
+- **Rule**: `app_factory.mount_modules()` MUST clear registry before registering modules
 - **Implementation**:
   ```python
-  def create_app(...):
+  def mount_modules(...):
       registry.clear()  # Critical for tests
       registry.register(DatafeedModule())
       registry.register(BrokerModule())
@@ -826,7 +826,7 @@ These constraints MUST be followed throughout the implementation:
 
 ```
 backend/src/trading_api/
-├── main.py                  # Minimal - calls create_app()
+├── main.py                  # Minimal - calls mount_modules()
 ├── app_factory.py           # Application factory
 ├── models/                  # Centralized models
 │   ├── broker/             # ... orders, positions, executions, etc.
@@ -899,7 +899,7 @@ class DatafeedModule:
 
 ```python
 # app_factory.py (sample)
-def create_app(enabled_modules: List[str] | None = None) -> tuple[FastAPI, FastWSAdapter]:
+def mount_modules(enabled_modules: List[str] | None = None) -> tuple[FastAPI, FastWSAdapter]:
     registry.register(DatafeedModule())
     registry.register(BrokerModule())
 
@@ -932,7 +932,7 @@ import os
 from typing import Annotated
 from fastapi import Depends
 from external_packages.fastws import Client
-from trading_api.app_factory import create_app
+from trading_api.app_factory import mount_modules
 
 enabled_modules = os.getenv("ENABLED_MODULES", "all")
 if enabled_modules != "all":
@@ -940,7 +940,7 @@ if enabled_modules != "all":
 else:
     enabled_modules = None
 
-apiApp, wsApp = create_app(enabled_modules=enabled_modules)
+apiApp, wsApp = mount_modules(enabled_modules=enabled_modules)
 
 @apiApp.websocket("/api/v1/ws")
 async def websocket_endpoint(client: Annotated[Client, Depends(wsApp.manage)]):
@@ -1024,7 +1024,7 @@ from trading_api.modules.datafeed import DatafeedService  # ❌ VIOLATION
 
 ## Key Design Principles
 
-1. **Application Factory** - Dynamic module composition via `create_app()`
+1. **Application Factory** - Dynamic module composition via `mount_modules()`
 2. **Protocol-Based** - Type-safe contracts without inheritance
 3. **Lazy Loading** - Services created only when module enabled
 4. **Module Registry** - Centralized management, auto-discovery ready
@@ -1060,7 +1060,7 @@ from trading_api.main import apiApp  # ← Also depends on this export
 
 ```python
 # main.py (final lines)
-apiApp, wsApp = create_app(enabled_modules=enabled_modules)
+apiApp, wsApp = mount_modules(enabled_modules=enabled_modules)
 
 @apiApp.websocket("/api/v1/ws")
 async def websocket_endpoint(...):
@@ -1103,8 +1103,8 @@ def _get_current_app():
 
 # Phase 6: Switch to factory (just update this function)
 # def _get_current_app():
-#     from trading_api.app_factory import create_app
-#     api_app, _ = create_app(enabled_modules=None)
+#     from trading_api.app_factory import mount_modules
+#     api_app, _ = mount_modules(enabled_modules=None)
 #     return api_app
 
 @pytest.fixture
@@ -1728,8 +1728,8 @@ make generate-ws-routers  # Generates all module routers
        Returns:
            tuple: (FastAPI application, FastWSAdapter application)
        """
-       from trading_api.app_factory import create_app
-       return create_app(enabled_modules=enabled_modules)
+       from trading_api.app_factory import mount_modules
+       return mount_modules(enabled_modules=enabled_modules)
 
    @pytest.fixture
    def apps():
@@ -1774,8 +1774,8 @@ make generate-ws-routers  # Generates all module routers
    @pytest.fixture
    def apps():
        """Application with only broker module enabled."""
-       from trading_api.app_factory import create_app
-       return create_app(enabled_modules=["broker"])
+       from trading_api.app_factory import mount_modules
+       return mount_modules(enabled_modules=["broker"])
 
    @pytest.fixture
    def app(apps):
@@ -1858,7 +1858,7 @@ make generate-ws-routers  # Generates all module routers
 
 - ✅ **Module prefix = module name**: `/api/v1/{module.name}/*` (enforced in module's `get_api_routers()`)
 - ✅ **No direct service access**: Tests use API/WS endpoints, never `service._internal_state`
-- ✅ **Factory pattern only**: All apps created via `create_app()`, never import from `main.py`
+- ✅ **Factory pattern only**: All apps created via `mount_modules()`, never import from `main.py`
 - ✅ **Module isolation**: Each module's tests run with only that module enabled
 
 **Known Issues to Fix**:
@@ -1922,8 +1922,8 @@ poetry run pytest src/trading_api/modules/datafeed/tests/ -v  # Datafeed tests
    @pytest.fixture
    def apps():
        """Full application with all modules enabled."""
-       from trading_api.app_factory import create_app
-       return create_app(enabled_modules=None)  # None = all modules
+       from trading_api.app_factory import mount_modules
+       return mount_modules(enabled_modules=None)  # None = all modules
 
    @pytest.fixture
    def app(apps):
@@ -2076,9 +2076,9 @@ poetry run pytest src/trading_api/modules/datafeed/tests/ -v  # Datafeed tests
 
    def test_datafeed_only_isolation():
        """Verify datafeed-only app doesn't load broker."""
-       from trading_api.app_factory import create_app
+       from trading_api.app_factory import mount_modules
 
-       api_app, _ = create_app(enabled_modules=["datafeed"])
+       api_app, _ = mount_modules(enabled_modules=["datafeed"])
        openapi_spec = api_app.openapi()
        paths = openapi_spec.get("paths", {})
 
@@ -2091,9 +2091,9 @@ poetry run pytest src/trading_api/modules/datafeed/tests/ -v  # Datafeed tests
 
    def test_broker_only_isolation():
        """Verify broker-only app doesn't load datafeed."""
-       from trading_api.app_factory import create_app
+       from trading_api.app_factory import mount_modules
 
-       api_app, _ = create_app(enabled_modules=["broker"])
+       api_app, _ = mount_modules(enabled_modules=["broker"])
        openapi_spec = api_app.openapi()
        paths = openapi_spec.get("paths", {})
 
@@ -2106,15 +2106,15 @@ poetry run pytest src/trading_api/modules/datafeed/tests/ -v  # Datafeed tests
 
    def test_module_registry_cleanup():
        """Verify registry is cleared between app creations."""
-       from trading_api.app_factory import create_app
+       from trading_api.app_factory import mount_modules
        from trading_api.shared.module_registry import registry
 
        # Create app with all modules
-       create_app(enabled_modules=None)
+       mount_modules(enabled_modules=None)
        all_modules_count = len(registry.get_all_modules())
 
        # Clear and create app with one module
-       create_app(enabled_modules=["datafeed"])
+       mount_modules(enabled_modules=["datafeed"])
        one_module_count = len(registry.get_enabled_modules())
 
        # Registry should have been cleared
@@ -2213,7 +2213,7 @@ feat: Phase 4 Task 21 - Create integration test suite
 
 **Task 21: Refactor main.py to Use app_factory Pattern**
 
-**Objective**: Remove global service instances from `main.py` and switch to using `create_app()` from `app_factory.py`. This completes the factory pattern migration and eliminates the last remaining monolithic code.
+**Objective**: Remove global service instances from `main.py` and switch to using `mount_modules()` from `app_factory.py`. This completes the factory pattern migration and eliminates the last remaining monolithic code.
 
 **Current State**:
 
@@ -2223,7 +2223,7 @@ feat: Phase 4 Task 21 - Create integration test suite
 
 **Target State**:
 
-- `main.py` calls `create_app()` to get configured application
+- `main.py` calls `mount_modules()` to get configured application
 - No global service instances
 - Support for `ENABLED_MODULES` environment variable
 - Minimal, clean entry point
@@ -2239,7 +2239,7 @@ feat: Phase 4 Task 21 - Create integration test suite
 
    from fastapi import Depends
    from external_packages.fastws import Client
-   from trading_api.app_factory import create_app
+   from trading_api.app_factory import mount_modules
 
    # Parse ENABLED_MODULES environment variable
    enabled_modules_str = os.getenv("ENABLED_MODULES", "all")
@@ -2249,7 +2249,7 @@ feat: Phase 4 Task 21 - Create integration test suite
        enabled_modules = None  # None = all modules
 
    # Create application using factory
-   apiApp, wsApp = create_app(enabled_modules=enabled_modules)
+   apiApp, wsApp = mount_modules(enabled_modules=enabled_modules)
 
 
    # Register the WebSocket endpoint
@@ -2337,7 +2337,7 @@ make export-asyncapi-spec
 feat: Phase 5 Task 21 - Refactor main.py to use app_factory pattern
 
 - Remove global service instances from main.py
-- Switch to create_app() factory pattern
+- Switch to mount_modules() factory pattern
 - Add ENABLED_MODULES environment variable support
 - Reduce main.py to minimal entry point (~30 lines)
 - Maintain backward compatibility for spec exports
@@ -3218,7 +3218,7 @@ import os
 from typing import Annotated
 from fastapi import Depends
 from external_packages.fastws import Client
-from trading_api.app_factory import create_app
+from trading_api.app_factory import mount_modules
 
 enabled_modules = os.getenv("ENABLED_MODULES", "all")
 if enabled_modules != "all":
@@ -3226,7 +3226,7 @@ if enabled_modules != "all":
 else:
     enabled_modules = None
 
-apiApp, wsApp = create_app(enabled_modules=enabled_modules)
+apiApp, wsApp = mount_modules(enabled_modules=enabled_modules)
 
 @apiApp.websocket("/api/v1/ws")
 async def websocket_endpoint(client: Annotated[Client, Depends(wsApp.manage)]):
@@ -3622,7 +3622,7 @@ make test-integration # Full stack with all modules
 # backend/tests/conftest.py (sample)
 @pytest.fixture
 def datafeed_only_app():
-    api_app, ws_app = create_app(enabled_modules=["datafeed"])
+    api_app, ws_app = mount_modules(enabled_modules=["datafeed"])
     return api_app
 
 @pytest.fixture
@@ -3851,7 +3851,7 @@ Key Issues:
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        main.py (Minimal Root)                        │
 │  - Parses ENABLED_MODULES env var                                   │
-│  - Calls create_app(enabled_modules)                                │
+│  - Calls mount_modules(enabled_modules)                                │
 │  - Registers WebSocket endpoint                                     │
 │  - NO service instances, NO global state                            │
 └──────────────────────┬──────────────────────────────────────────────┘
@@ -3918,7 +3918,7 @@ Import Dependency Flow (Target):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 main.py
-  └─> app_factory.create_app()
+  └─> app_factory.mount_modules()
         │
         ├─> shared.module_registry
         │     └─> shared.module_interface (Module Protocol)

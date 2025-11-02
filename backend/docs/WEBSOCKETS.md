@@ -1157,7 +1157,7 @@ def create_app(enabled_modules: list[str] | None = None):
 
 # main.py - Minimal Entrypoint
 import os
-from trading_api.app_factory import create_app
+from trading_api.app_factory import mount_modules
 
 # Parse enabled modules from environment
 enabled_modules = os.getenv("ENABLED_MODULES", "all")
@@ -1167,7 +1167,7 @@ else:
     enabled_modules = None
 
 # Create application
-apiApp, wsApp = create_app(enabled_modules=enabled_modules)
+apiApp, wsApp = mount_modules(enabled_modules=enabled_modules)
 
 # Export for spec generation scripts
 app = apiApp  # Required for scripts/export_openapi_spec.py
@@ -1176,7 +1176,7 @@ app = apiApp  # Required for scripts/export_openapi_spec.py
 **Architecture Benefits**:
 
 1. **Modular**: Each module (datafeed, broker) is independently loadable
-2. **Factory Pattern**: Applications created via `create_app()` for full control
+2. **Factory Pattern**: Applications created via `mount_modules()` for full control
 3. **Protocol-Based**: Services implement simple `create_topic`/`remove_topic` contract
 4. **Testable**: Easy to create isolated test apps with specific modules
 5. **No Global State**: Services lazy-loaded per module instance

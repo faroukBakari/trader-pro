@@ -255,10 +255,10 @@ if TYPE_CHECKING:
 
         TODO: Move generation BEFORE auto_discover to fix this (see Phase 2 notes).
         """
-        from trading_api.app_factory import create_app
+        from trading_api.app_factory import mount_modules
 
         # Create app - routers should already exist or be generated during module loading
-        api_app, ws_apps = create_app()
+        api_app, ws_apps = mount_modules()
 
         # Verify generated directories exist for both modules
         datafeed_ws_gen = backend_dir / "src/trading_api/modules/datafeed/ws_generated"

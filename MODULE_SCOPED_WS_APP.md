@@ -222,7 +222,7 @@ class BrokerModule:
 
 ```python
 # app_factory.py
-def create_app(enabled_modules: list[str] | None = None) -> tuple[FastAPI, list[FastWSAdapter]]:
+def mount_modules(enabled_modules: list[str] | None = None) -> tuple[FastAPI, list[FastWSAdapter]]:
     base_url = "/api/v1"
     ws_apps = []  # Collect all module WS apps
 
