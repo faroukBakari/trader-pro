@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
-from trading_api.shared import FastWSAdapter, HealthApi, ModuleRegistry, VersionApi
+from trading_api.shared import FastWSAdapter, ModuleRegistry
 
 # Configure logging for the application
 logging.basicConfig(
@@ -119,18 +119,25 @@ def mount_app_modules(
 ) -> tuple[FastAPI, list[FastWSAdapter]]:
     """Create and configure FastAPI and FastWSAdapter applications.
 
+    The core module is always enabled and loaded first, regardless of the
+    enabled_module_names parameter. This ensures health checks and versioning
+    are always available.
+
     Args:
         enabled_module_names: List of module names to enable. If None, all registered
-            modules are enabled. Use this to selectively load modules.
+            modules (except core) are enabled. Core is always enabled automatically.
+            Use this to selectively load feature modules.
 
     Returns:
         tuple[FastAPI, list[FastWSAdapter]]: API app and list of module WS apps
 
     Example:
-        >>> # Load all modules
+        >>> # Load all modules (core + all feature modules)
         >>> api_app, ws_apps = mount_app_modules()
-        >>> # Load only datafeed module
+        >>> # Load core + datafeed only
         >>> api_app, ws_apps = mount_app_modules(enabled_modules=["datafeed"])
+        >>> # Load only core module
+        >>> api_app, ws_apps = mount_app_modules(enabled_modules=[])
     """
     # Clear registry to allow fresh registration (important for tests)
     registry.clear()
@@ -140,17 +147,18 @@ def mount_app_modules(
     # Auto-discover and register all available modules
     registry.auto_discover(modules_dir)
 
-    # Set which modules should be enabled
+    # Core module is ALWAYS enabled - ensure it's in the enabled list
+    if not (enabled_module_names is None or "core" in enabled_module_names):
+        enabled_module_names.append("core")
+
+    # Set which modules should be enabled (core will be included)
     registry.set_enabled_modules(enabled_module_names)
 
     # Create base URL
     base_url = "/api/v1"
 
-    # Compute OpenAPI tags dynamically from enabled modules
+    # Compute OpenAPI tags dynamically from enabled modules (including core)
     openapi_tags = [
-        {"name": "health", "description": "Health check operations"},
-        {"name": "versioning", "description": "API version information"},
-    ] + [
         tag for module in registry.get_enabled_modules() for tag in module.openapi_tags
     ]
 
@@ -199,12 +207,6 @@ def mount_app_modules(
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-    )
-
-    # Include shared API routers (always available)
-    api_app.include_router(HealthApi(tags=["health"]), prefix=base_url, tags=["v1"])
-    api_app.include_router(
-        VersionApi(tags=["versioning"]), prefix=base_url, tags=["v1"]
     )
 
     # Add root endpoint with API information

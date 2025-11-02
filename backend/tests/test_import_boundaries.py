@@ -70,8 +70,32 @@ def get_applicable_rule(relative_path: str) -> dict | None:
     return None
 
 
-def validate_import(import_name: str, allowed: list[str], forbidden: list[str]) -> bool:
-    """Check if import violates boundary rules."""
+def validate_import(
+    import_name: str,
+    allowed: list[str],
+    forbidden: list[str],
+    file_path: str = "",
+) -> bool:
+    """Check if import violates boundary rules.
+
+    Args:
+        import_name: The import being checked
+        allowed: List of allowed import patterns
+        forbidden: List of forbidden import patterns
+        file_path: Relative path of the file being checked (for context-aware rules)
+    """
+    # Special case: Test files can import from their own module
+    if "/tests/" in file_path:
+        # Extract module name from file path (e.g., "modules/core/tests/..." -> "core")
+        parts = file_path.split("/")
+        if "modules" in parts:
+            module_idx = parts.index("modules")
+            if module_idx + 1 < len(parts):
+                own_module = parts[module_idx + 1]
+                # Allow imports from the same module in test files
+                if import_name.startswith(f"trading_api.modules.{own_module}"):
+                    return True
+
     # Check forbidden patterns first
     for pattern in forbidden:
         # Direct pattern match
@@ -121,7 +145,10 @@ def test_import_boundaries():
                 continue  # Only validate internal imports
 
             is_valid = validate_import(
-                import_name, rule["allowed_patterns"], rule["forbidden_patterns"]
+                import_name,
+                rule["allowed_patterns"],
+                rule["forbidden_patterns"],
+                relative_path,
             )
 
             if not is_valid:

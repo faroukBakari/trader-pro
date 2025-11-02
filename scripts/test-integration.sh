@@ -101,7 +101,7 @@ SERVER_STARTED=true
 
 echo "⏳ Waiting for server to be ready..."
 for i in {1..20}; do
-    if curl -sf http://localhost:$BACKEND_PORT/api/v1/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:$BACKEND_PORT/api/v1/core/health > /dev/null 2>&1; then
         echo -e "${GREEN}✅ Backend server is ready${NC}"
         break
     fi
@@ -113,9 +113,9 @@ for i in {1..20}; do
 done
 
 echo "🩺 Testing API endpoints..."
-if curl -sf http://localhost:$BACKEND_PORT/api/v1/health > /dev/null 2>&1 && \
-    curl -sf http://localhost:$BACKEND_PORT/api/v1/version > /dev/null 2>&1 && \
-    curl -sf http://localhost:$BACKEND_PORT/api/v1/versions > /dev/null 2>&1; then
+if curl -sf http://localhost:$BACKEND_PORT/api/v1/core/health > /dev/null 2>&1 && \
+    curl -sf http://localhost:$BACKEND_PORT/api/v1/core/version > /dev/null 2>&1 && \
+    curl -sf http://localhost:$BACKEND_PORT/api/v1/core/versions > /dev/null 2>&1; then
     echo -e "${GREEN}✅ All API endpoints responding${NC}"
 else
     echo -e "${RED}❌ Some API endpoints failed${NC}"

@@ -217,7 +217,7 @@ print_step "   Backend started with PID: $BACKEND_PID"
 print_step "3. Waiting for backend to be ready..."
 timeout=60
 while [ $timeout -gt 0 ]; do
-    if curl -f http://localhost:$BACKEND_PORT/api/v1/health >/dev/null 2>&1; then
+    if curl -f http://localhost:$BACKEND_PORT/api/v1/core/health >/dev/null 2>&1; then
         print_success "Backend is ready and responding"
         break
     fi

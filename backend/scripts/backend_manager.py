@@ -115,7 +115,9 @@ async def wait_for_health(
     async with httpx.AsyncClient() as client:
         for attempt in range(max_attempts):
             try:
-                response = await client.get(f"{base_url}/api/v1/health", timeout=2.0)
+                response = await client.get(
+                    f"{base_url}/api/v1/core/health", timeout=2.0
+                )
                 if response.status_code == 200:
                     logger.info(f"Service at {base_url} is healthy")
                     return True
@@ -504,7 +506,7 @@ class ServerManager:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
-                    f"http://127.0.0.1:{port}/api/v1/health", timeout=2.0
+                    f"http://127.0.0.1:{port}/api/v1/core/health", timeout=2.0
                 )
                 return response.status_code == 200
             except Exception:

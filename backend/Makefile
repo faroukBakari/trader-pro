@@ -512,8 +512,8 @@ build:
 # CI health check
 health-ci:
 	@echo "Testing API endpoints for CI..."
-	curl -f http://localhost:$(BACKEND_PORT)/api/v1/health || exit 1
-	curl -f http://localhost:$(BACKEND_PORT)/api/v1/version || exit 1
+	curl -f http://localhost:$(BACKEND_PORT)/api/v1/core/health || exit 1
+	curl -f http://localhost:$(BACKEND_PORT)/api/v1/core/version || exit 1
 
 # Cleanup
 clean:

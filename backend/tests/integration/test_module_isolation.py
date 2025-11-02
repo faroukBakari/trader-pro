@@ -24,8 +24,8 @@ def test_datafeed_only_isolation(datafeed_only_app) -> None:
     assert not any("/broker/" in path for path in paths)
 
     # Shared endpoints should still exist
-    assert "/api/v1/health" in paths
-    assert "/api/v1/versions" in paths
+    assert "/api/v1/core/health" in paths
+    assert "/api/v1/core/versions" in paths
 
 
 @pytest.mark.integration
@@ -45,8 +45,8 @@ def test_broker_only_isolation(broker_only_app) -> None:
     assert not any("/datafeed/" in path for path in paths)
 
     # Shared endpoints should still exist
-    assert "/api/v1/health" in paths
-    assert "/api/v1/versions" in paths
+    assert "/api/v1/core/health" in paths
+    assert "/api/v1/core/versions" in paths
 
 
 @pytest.mark.integration
@@ -81,8 +81,8 @@ def test_shared_infrastructure_always_loaded(no_modules_app) -> None:
     paths = openapi_spec.get("paths", {})
 
     # Shared endpoints should always exist
-    assert "/api/v1/health" in paths
-    assert "/api/v1/versions" in paths
+    assert "/api/v1/core/health" in paths
+    assert "/api/v1/core/versions" in paths
 
     # No module endpoints should exist
     assert not any("/broker/" in path for path in paths)
