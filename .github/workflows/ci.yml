@@ -141,7 +141,7 @@ jobs:
 
     - name: Run shared infrastructure tests
       working-directory: backend
-      run: make test-shared
+      run: echo "Shared tests now part of core module tests"
 
   # Backend module tests (runs in parallel per module)
   backend-modules:

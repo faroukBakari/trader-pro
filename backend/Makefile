@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-shared test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules generate export-openapi-spec export-asyncapi-spec generate-python-clients generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules generate export-openapi-spec export-asyncapi-spec generate-python-clients generate-ws-routers backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -25,9 +25,8 @@ help:
 	@echo "  install-ci        Install backend dependencies for CI (non-interactive)"
 	@echo ""
 	@echo "Testing targets:"
-	@echo "  test              Run all tests (boundaries + shared + modules + integration)"
+	@echo "  test              Run all tests (boundaries + modules + integration)"
 	@echo "  test-boundaries   Validate import boundaries between modules"
-	@echo "  test-shared       Run shared infrastructure tests"
 	@echo "  test-modules      Run all module tests (use modules=mod1,mod2 to select specific)"
 	@echo "  test-integration  Run integration tests"
 	@echo "  test-cov          Run all tests with coverage"
@@ -380,10 +379,6 @@ test-boundaries:
 	@echo "Validating import boundaries..."
 	poetry run pytest tests/test_import_boundaries.py -v
 
-test-shared:
-	@echo "Running shared infrastructure tests..."
-	poetry run pytest src/trading_api/shared/tests/ -v -x
-
 test-modules:
 	@echo "Running module tests..."
 	@if [ -z "$(SELECTED_MODULES)" ]; then \
@@ -413,8 +408,8 @@ test-integration:
 	@echo "Running integration tests..."
 	poetry run pytest tests/integration/ -v -x -m integration
 
-test: test-boundaries test-shared test-modules test-integration
-	@echo "✅ All tests passed (boundaries + shared + modules + integration)"
+test: test-boundaries test-modules test-integration
+	@echo "✅ All tests passed (boundaries + modules + integration)"
 
 # Coverage targets
 test-cov: test-boundaries
