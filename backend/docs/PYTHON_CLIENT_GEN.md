@@ -3,6 +3,11 @@
 ## ✅ Generation Status
 
 **Status**: All checks passed successfully!
+**Mode**: Automatic per-module generation during startup
+
+### Overview
+
+Python HTTP clients are **automatically generated** during module startup when OpenAPI specifications change. Each module's lifespan handler detects spec changes and triggers client generation using the `ClientGenerationService`.
 
 ### Generated Clients
 
@@ -148,31 +153,40 @@ client = BrokerClient(base_url="http://localhost:9999", timeout=5.0)
 
 ```
 ┌─────────────────────────────────────┐
-│ Module OpenAPI Specs                │
-│ - broker/specs/openapi.json         │
-│ - datafeed/specs/openapi.json       │
+│ Module Startup (per module)        │
+│ - Module.create_app() called       │
+│ - Lifespan handler starts          │
 └──────────────┬──────────────────────┘
                │
                ▼
 ┌─────────────────────────────────────┐
-│ Package Name Validation             │
-│ - Unique package names              │
-│ - Naming convention compliance      │
-│ - Module correspondence             │
+│ OpenAPI Spec Generation             │
+│ - app.openapi() extracts schema    │
+│ - Compare with existing spec       │
+│ - Write to module/specs/openapi.json│
 └──────────────┬──────────────────────┘
                │
                ▼
 ┌─────────────────────────────────────┐
-│ Client Generation                   │
-│ - Extract operations from specs     │
+│ Detect Spec Changes                 │
+│ - Compare old vs new spec           │
+│ - Log detected differences          │
+│ - Trigger client gen if changed    │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│ Client Generation (Automatic)       │
+│ - ClientGenerationService           │
+│ - Extract operations from spec     │
 │ - Collect model imports             │
-│ - Render Jinja2 templates           │
-│ - Generate typed Python classes     │
+│ - Render Jinja2 template            │
+│ - Generate typed Python class       │
 └──────────────┬──────────────────────┘
                │
                ▼
 ┌─────────────────────────────────────┐
-│ Code Formatting                     │
+│ Code Formatting (Automatic)         │
 │ - autoflake (cleanup)               │
 │ - black (format)                    │
 │ - isort (imports)                   │
@@ -180,12 +194,10 @@ client = BrokerClient(base_url="http://localhost:9999", timeout=5.0)
                │
                ▼
 ┌─────────────────────────────────────┐
-│ Validation                          │
-│ - black --check                     │
-│ - isort --check                     │
-│ - flake8                            │
-│ - mypy                              │
-│ - pyright                           │
+│ Update Clients Index                │
+│ - Scan all *_client.py files       │
+│ - Regenerate __init__.py            │
+│ - Export all available clients      │
 └──────────────┬──────────────────────┘
                │
                ▼
@@ -193,12 +205,61 @@ client = BrokerClient(base_url="http://localhost:9999", timeout=5.0)
 │ ✅ Ready to Use                     │
 │ - Import from trading_api.clients   │
 │ - Type-safe async HTTP clients      │
+│ - Auto-updated on API changes       │
 └─────────────────────────────────────┘
 ```
 
-## 🚀 Regeneration
+## 🔄 Automatic Generation Workflow
 
-To regenerate clients after API changes:
+### Module-Scoped Generation
+
+Each module independently generates its Python client during startup:
+
+1. **Spec Comparison**: Module compares new OpenAPI spec with existing file
+2. **Change Detection**: Logs specific changes (new endpoints, models, etc.)
+3. **Client Generation**: If changes detected, generates updated client
+4. **Code Formatting**: Applies autoflake, black, and isort automatically
+5. **Index Update**: Updates global `__init__.py` with all available clients
+
+### When Clients Are Generated
+
+✅ **Automatic triggers**:
+
+- First module startup (no existing spec)
+- API endpoint added/removed/modified
+- Request/response model changes
+- OpenAPI version changes
+
+❌ **Not triggered**:
+
+- No spec changes detected
+- Only metadata changes (timestamps, etc.)
+
+### Logging Output
+
+During module startup, you'll see:
+
+```
+📝 Creating new OpenAPI spec for 'broker'
+✅ Updated OpenAPI spec: /path/to/broker/specs/openapi.json
+✅ Generated Python client for 'broker'
+✅ Updated clients index: 2 clients
+```
+
+Or when changes are detected:
+
+```
+🔄 OpenAPI spec changes detected for 'broker':
+   • Added endpoints: /api/v1/broker/positions/{id}/brackets
+   • Added models: PositionBrackets
+✅ Updated OpenAPI spec: /path/to/broker/specs/openapi.json
+✅ Generated Python client for 'broker'
+✅ Updated clients index: 2 clients
+```
+
+## 🚀 Manual Regeneration (Optional)
+
+While clients are generated automatically during module startup, you can still manually regenerate all clients:
 
 ```bash
 # From backend directory
@@ -208,26 +269,45 @@ make generate-python-clients
 cd backend && make generate-python-clients
 ```
 
-The Makefile target automatically:
+The Makefile target:
 
-1. Runs package name validation
-2. Generates client code
-3. Formats the code
-4. Validates with all linters and type checkers
+- Validates package names
+- Generates clients for all modules
+- Formats and validates code
+- Useful for batch regeneration or CI/CD
+
+### When to Use Manual Regeneration
+
+✅ **Use manual regeneration when**:
+
+- Batch updating all clients at once
+- Running in CI/CD pipeline
+- Validating client generation without starting server
+- Troubleshooting generation issues
+
+❌ **Not needed when**:
+
+- Starting development server (automatic)
+- Developing APIs (automatic on changes)
+- Normal development workflow
 
 ## 📝 Notes
 
-- Clients are **auto-generated** - do not edit manually
-- Regenerate after any OpenAPI spec changes
+- Clients are **auto-generated** during module startup - do not edit manually
+- Automatic regeneration when OpenAPI specs change
 - All models imported from `trading_api.models` for consistency
 - Designed for multi-process backend architecture
 - Full async/await support with httpx
+- Generation logic in `trading_api.shared.client_generation_service`
+- Template located at `backend/scripts/templates/python_client.py.j2`
 
 ## 🔗 Related Documentation
 
 - `docs/CLIENT-GENERATION.md` - Overall client generation guide
-- `backend/scripts/generate_python_clients.py` - Generation script
+- `backend/src/trading_api/shared/client_generation_service.py` - Generation service
+- `backend/src/trading_api/shared/module_interface.py` - Module lifespan integration
 - `backend/scripts/templates/python_client.py.j2` - Jinja2 template
+- `backend/scripts/generate_python_clients.py` - Manual generation script (optional)
 - `backend/scripts/validate_modules.py` - Package validation script
 
 ---

@@ -411,7 +411,7 @@ format:
 	@echo "✅ Backend formatting complete"
 
 # Development server
-dev:
+dev: clean-generated
 	@echo "Starting backend development server with debugpy on http://localhost:$(BACKEND_PORT)"
 	@echo "🔍 Checking if backend port is available..."
 	@if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \

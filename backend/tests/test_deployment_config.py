@@ -297,7 +297,6 @@ class TestLoadConfig:
 
         # Validate structure matches expectations
         assert config.nginx.port == 8000
-        assert "core" in config.servers
         assert "broker" in config.servers
         assert "datafeed" in config.servers
 
@@ -306,5 +305,6 @@ class TestLoadConfig:
         port_numbers = [p[1] for p in ports]
         assert len(port_numbers) == len(set(port_numbers))  # No duplicates
 
-        # Validate core server has no modules
-        assert config.servers["core"].modules == []
+        # Validate module servers have their respective modules configured
+        assert config.servers["broker"].modules == ["broker"]
+        assert config.servers["datafeed"].modules == ["datafeed"]

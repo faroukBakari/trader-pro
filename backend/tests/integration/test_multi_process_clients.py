@@ -3,18 +3,82 @@ Integration tests for Python HTTP clients in multi-process architecture.
 
 Tests inter-module communication when broker and datafeed run as separate services.
 
-NOTE: These tests require Python clients to be generated first.
-Run: make generate-python-clients
+This test automatically generates Python clients before running tests.
 """
 
 import asyncio
 import multiprocessing
+import sys
+from pathlib import Path
 
 import httpx
 import pytest
 import uvicorn
 
-from trading_api.clients import BrokerClient, DatafeedClient
+from trading_api.shared.module_interface import Module
+
+
+def _ensure_clients_generated() -> None:
+    """Ensure Python HTTP clients are freshly generated before tests run.
+
+    Uses the module's gen_specs_and_clients() method to generate specs and
+    clients without needing external processes or starting the full backend.
+    """
+    # Add backend to path for imports
+    backend_root = Path(__file__).parent.parent.parent
+    sys.path.insert(0, str(backend_root / "src"))
+
+    from trading_api.shared.utils import discover_modules
+
+    print("\n📝 Generating specs and clients for all modules...")
+
+    # Discover and instantiate modules
+    modules_dir = backend_root / "src" / "trading_api" / "modules"
+    module_names = discover_modules(modules_dir)
+    generated_count = 0
+
+    for module_name in module_names:
+        try:
+            # Import the module class from __init__.py
+            module_package = f"trading_api.modules.{module_name}"
+            module_module = __import__(module_package, fromlist=["*"])
+            module_class: type[Module] = getattr(
+                module_module, f"{module_name.capitalize()}Module"
+            )
+
+            # Instantiate the module
+            module_instance = module_class()
+
+            # Create app first (required for gen_specs_and_clients)
+            print(f"\n  Generating for {module_name}...")
+            api_app, ws_app = module_instance.create_app(base_path="/api/v1")
+
+            # Generate specs and clients using the created app
+            module_instance.gen_specs_and_clients(
+                api_app=api_app, ws_app=ws_app, clean_first=True
+            )
+            generated_count += 1
+            print(f"  ✅ Generated specs and client for {module_name}")
+
+        except Exception as e:
+            print(f"  ⚠️  Failed to generate for {module_name}: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    if generated_count == 0:
+        raise RuntimeError("Failed to generate specs and clients for any module")
+
+    print(
+        f"\n✅ Successfully generated specs and clients for {generated_count} module(s)"
+    )
+
+
+# Generate clients before any tests run
+_ensure_clients_generated()
+
+# Now import the clients (they should exist after generation)
+from trading_api.clients import BrokerClient, DatafeedClient  # noqa: E402
 
 
 def run_service(module_name: str, port: int) -> None:
@@ -39,11 +103,14 @@ def run_service(module_name: str, port: int) -> None:
     )
 
 
-async def wait_for_service(base_url: str, max_attempts: int = 30) -> bool:
+async def wait_for_service(
+    base_url: str, module_name: str, max_attempts: int = 30
+) -> bool:
     """Wait for a service to become available.
 
     Args:
         base_url: Base URL of the service
+        module_name: Name of the module (broker, datafeed, etc.)
         max_attempts: Maximum number of connection attempts
 
     Returns:
@@ -52,6 +119,7 @@ async def wait_for_service(base_url: str, max_attempts: int = 30) -> bool:
     async with httpx.AsyncClient() as client:
         for _ in range(max_attempts):
             try:
+                # Health endpoint is at server level, not module level
                 response = await client.get(f"{base_url}/api/v1/health")
                 if response.status_code == 200:
                     return True
@@ -74,15 +142,11 @@ async def test_broker_client_http_communication() -> None:
     try:
         # Wait for service to start
         broker_url = f"http://127.0.0.1:{broker_port}"
-        service_ready = await wait_for_service(broker_url)
+        service_ready = await wait_for_service(broker_url, "broker")
         assert service_ready, "Broker service failed to start"
 
         # Test HTTP client communication
         async with BrokerClient(base_url=broker_url) as client:
-            # Test health endpoint
-            health = await client.getHealthStatus()
-            assert health.status == "ok"
-
             # Test getting orders
             orders = await client.getOrders()
             assert isinstance(orders, list)
@@ -113,15 +177,11 @@ async def test_datafeed_client_http_communication() -> None:
     try:
         # Wait for service to start
         datafeed_url = f"http://127.0.0.1:{datafeed_port}"
-        service_ready = await wait_for_service(datafeed_url)
+        service_ready = await wait_for_service(datafeed_url, "datafeed")
         assert service_ready, "Datafeed service failed to start"
 
         # Test HTTP client communication
         async with DatafeedClient(base_url=datafeed_url) as client:
-            # Test health endpoint
-            health = await client.getHealthStatus()
-            assert health.status == "ok"
-
             # Test getting config
             config = await client.getConfig()
             assert config.supported_resolutions is not None
@@ -167,8 +227,8 @@ async def test_broker_calls_datafeed_multi_process() -> None:
         broker_url = f"http://127.0.0.1:{broker_port}"
         datafeed_url = f"http://127.0.0.1:{datafeed_port}"
 
-        broker_ready = await wait_for_service(broker_url)
-        datafeed_ready = await wait_for_service(datafeed_url)
+        broker_ready = await wait_for_service(broker_url, "broker")
+        datafeed_ready = await wait_for_service(datafeed_url, "datafeed")
 
         assert broker_ready, "Broker service failed to start"
         assert datafeed_ready, "Datafeed service failed to start"
@@ -216,13 +276,14 @@ async def test_client_context_manager() -> None:
 
     try:
         datafeed_url = f"http://127.0.0.1:{datafeed_port}"
-        service_ready = await wait_for_service(datafeed_url)
+        service_ready = await wait_for_service(datafeed_url, "datafeed")
         assert service_ready
 
         # Test context manager properly closes client
         async with DatafeedClient(base_url=datafeed_url) as client:
-            health = await client.getHealthStatus()
-            assert health.status == "ok"
+            # Test module-specific endpoint
+            config = await client.getConfig()
+            assert config.supported_resolutions is not None
             assert client._client is not None
 
         # Client should be closed after context
@@ -232,4 +293,5 @@ async def test_client_context_manager() -> None:
         datafeed_process.terminate()
         datafeed_process.join(timeout=5)
         if datafeed_process.is_alive():
+            datafeed_process.kill()
             datafeed_process.kill()

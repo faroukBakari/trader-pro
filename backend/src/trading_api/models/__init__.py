@@ -53,7 +53,6 @@ from .market import (
     Bar,
     BarsSubscriptionRequest,
     DatafeedConfiguration,
-    DatafeedHealthResponse,
     DatafeedSymbolType,
     Exchange,
     GetBarsRequest,
@@ -80,7 +79,6 @@ __all__ = [
     # Market data models
     "Bar",
     "DatafeedConfiguration",
-    "DatafeedHealthResponse",
     "DatafeedSymbolType",
     "Exchange",
     "GetBarsRequest",
