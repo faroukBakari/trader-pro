@@ -6,7 +6,7 @@ Supports selective module loading via the ENABLED_MODULES environment variable.
 
 import os
 
-from trading_api.app_factory import mount_app_modules
+from trading_api.app_factory import AppFactory
 
 # Parse ENABLED_MODULES environment variable
 # Examples:
@@ -23,9 +23,5 @@ else:
     enabled_modules = None  # None = all modules
 
 # Create application using factory
-apiApp, wsApps = mount_app_modules(enabled_module_names=enabled_modules)
-
-# CRITICAL: Maintain backward compatibility for spec export scripts
-# scripts/export_openapi_spec.py and scripts/export_asyncapi_spec.py
-# import apiApp directly from main.py
-app = apiApp  # ✅ REQUIRED - DO NOT REMOVE
+factory = AppFactory()
+app = factory.create_apps(enabled_module_names=enabled_modules)

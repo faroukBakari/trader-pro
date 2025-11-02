@@ -376,8 +376,8 @@ install-ci:
 	@echo "✅ CI installation complete!"
 
 test-boundaries:
-	@echo "Validating import boundaries..."
-	poetry run pytest tests/test_import_boundaries.py -v
+	@echo "Running root-level tests..."
+	poetry run pytest tests/ -v --ignore=tests/integration/
 
 test-modules:
 	@echo "Running module tests..."
