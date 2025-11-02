@@ -17,7 +17,7 @@ from fastapi.routing import APIRouter
 from external_packages.fastws import Client
 from trading_api.shared.client_generation_service import ClientGenerationService
 from trading_api.shared.plugins.fastws_adapter import FastWSAdapter
-from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
+from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
 
 # Module logger for app_factory
 logger = logging.getLogger(__name__)
@@ -426,11 +426,11 @@ class Module(ABC):
 
     @property
     @abstractmethod
-    def ws_routers(self, *args: Any, **kwargs: Any) -> list[WsRouterInterface]:
+    def ws_routers(self, *args: Any, **kwargs: Any) -> list[WsRouteInterface]:
         """Get all WebSocket routers for this module's real-time endpoints.
 
         Returns:
-            list[WsRouterInterface]: List of WebSocket router instances
+            list[WsRouteInterface]: List of WebSocket router instances
         """
         ...
 

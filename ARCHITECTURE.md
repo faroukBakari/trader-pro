@@ -289,7 +289,7 @@ src/trading_api/
 │   │   ├── health.py        # HealthApi class - Health checks
 │   │   └── versions.py      # VersionApi class - API versioning
 │   ├── ws/                  # Shared WebSocket infrastructure
-│   │   ├── router_interface.py  # WsRouterInterface, WsRouteService Protocol
+│   │   ├── router_interface.py  # WsRouteInterface, WsRouteService Protocol
 │   │   └── generic_route.py     # Generic WsRouter implementation
 │   ├── plugins/
 │   │   └── fastws_adapter.py  # FastWS integration adapter
@@ -371,7 +371,7 @@ class Module(Protocol):
         """Return module's REST API routers"""
         ...
 
-    def get_ws_routers(self) -> list[WsRouterInterface]:
+    def get_ws_routers(self) -> list[WsRouteInterface]:
         """Return module's WebSocket routers"""
         ...
 
@@ -402,7 +402,7 @@ class BrokerModule:
     def get_api_routers(self) -> list[APIRouter]:
         return [BrokerApi(service=self.service, prefix=f\"/{self.name}\")]
 
-    def get_ws_routers(self) -> list[WsRouterInterface]:
+    def get_ws_routers(self) -> list[WsRouteInterface]:
         return BrokerWsRouters(broker_service=self.service)
 ```
 
@@ -775,13 +775,13 @@ Unsubscribe Request
 
 **Adapter Responsibilities**:
 
-| Component            | Purpose                     | Details                                                      |
-| -------------------- | --------------------------- | ------------------------------------------------------------ |
-| Background Tasks     | Broadcasting workers        | `_broadcast_tasks: list[asyncio.Task]`                       |
-| Router Registration  | `include_router()` override | Registers router, stores broadcast coroutine                 |
-| Setup Method         | `setup()` override          | Starts all pending broadcast tasks                           |
-| Message Broadcasting | Background task per router  | Polls router.updates_queue, sends via FastWS                 |
-| Queue Management     | Per-router message queues   | `router.updates_queue: asyncio.Queue` (in WsRouterInterface) |
+| Component            | Purpose                     | Details                                                     |
+| -------------------- | --------------------------- | ----------------------------------------------------------- |
+| Background Tasks     | Broadcasting workers        | `_broadcast_tasks: list[asyncio.Task]`                      |
+| Router Registration  | `include_router()` override | Registers router, stores broadcast coroutine                |
+| Setup Method         | `setup()` override          | Starts all pending broadcast tasks                          |
+| Message Broadcasting | Background task per router  | Polls router.updates_queue, sends via FastWS                |
+| Queue Management     | Per-router message queues   | `router.updates_queue: asyncio.Queue` (in WsRouteInterface) |
 
 **Broadcasting Flow**:
 
@@ -813,7 +813,7 @@ Service generator calls topic_update(data)
 │                                                                 │
 │  2. WsRouter (Subscription Management)                         │
 │     └─> topic_update callback enqueues to updates_queue        │
-│     └─> updates_queue: asyncio.Queue in WsRouterInterface      │
+│     └─> updates_queue: asyncio.Queue in WsRouteInterface      │
 │                                                                 │
 │  3. FastWSAdapter (Broadcasting Layer)                         │
 │     └─> include_router() override registers routers            │
@@ -878,7 +878,7 @@ Service generator calls topic_update(data)
 
 **WebSocket Router Factory Pattern**:
 
-- Inherits from `list[WsRouterInterface]`
+- Inherits from `list[WsRouteInterface]`
 - Constructor creates multiple related routers
 - Each router configured with shared service
 - Returns list for registration
@@ -904,7 +904,7 @@ class BrokerApi(APIRouter):
 
 ```python
 # modules/broker/ws.py
-class BrokerWsRouters(list[WsRouterInterface]):
+class BrokerWsRouters(list[WsRouteInterface]):
     def __init__(self, broker_service: WsRouteService):
         order_router = OrderWsRouter(route="orders", service=broker_service)
         position_router = PositionWsRouter(route="positions", service=broker_service)

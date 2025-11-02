@@ -81,7 +81,7 @@ create_app() execution:
 
 ```python
 # modules/datafeed/ws.py
-class DatafeedWsRouters(list[WsRouterInterface]):
+class DatafeedWsRouters(list[WsRouteInterface]):
     def __init__(self, datafeed_service: WsRouteService):
         # STEP 1: Generate routers (creates ws_generated/)
         module_name = os.path.basename(os.path.dirname(__file__))

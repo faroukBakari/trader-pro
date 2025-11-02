@@ -1646,7 +1646,7 @@ modules/
 
 shared/
 └── ws/
-    ├── router_interface.py  # WsRouterInterface, WsRouteService (shared)
+    ├── router_interface.py  # WsRouteInterface, WsRouteService (shared)
     └── generic_route.py     # WsRouter template (shared)
 ```
 
@@ -1671,7 +1671,7 @@ shared/
 
 3. Module uses local imports:
    ```python
-   class DatafeedWsRouters(list[WsRouterInterface]):
+   class DatafeedWsRouters(list[WsRouteInterface]):
        def __init__(self, datafeed_service: WsRouteService):
            from .ws_generated import BarWsRouter, QuoteWsRouter  # Local!
            bar_router = BarWsRouter(route="bars", service=datafeed_service)
@@ -3782,7 +3782,7 @@ make test        # All tests should pass
 
 ┌───────────────────────────────────────────────────────────────┐
 │                   plugins/fastws_adapter.py                    │
-│  - Imports: ws.router_interface (WsRouterInterface)           │
+│  - Imports: ws.router_interface (WsRouteInterface)           │
 │  - Orchestrates broadcast tasks for all routers               │
 └───────────────────────────────────────────────────────────────┘
 
@@ -3831,7 +3831,7 @@ main.py
   │           └─> ws.generated.* (imports generated routers)
   │
   ├─> plugins/fastws_adapter.py
-  │     └─> ws.router_interface (WsRouterInterface)
+  │     └─> ws.router_interface (WsRouteInterface)
   │
   └─> models/__init__.py
         └─> models.{broker,market,common,health,versioning}

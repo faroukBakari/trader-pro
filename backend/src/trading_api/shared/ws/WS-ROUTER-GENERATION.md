@@ -30,7 +30,7 @@ WebSocket routers are automatically generated per module when the app starts. Ge
 
 ```python
 # modules/datafeed/ws.py - Router factory pattern
-class DatafeedWsRouters(list[WsRouterInterface]):
+class DatafeedWsRouters(list[WsRouteInterface]):
     def __init__(self, datafeed_service: WsRouteService):
         # STEP 1: Generate routers (creates ws_generated/ directory)
         module_name = os.path.basename(os.path.dirname(__file__))
@@ -152,7 +152,7 @@ from typing import TYPE_CHECKING, TypeAlias
 
 from trading_api.models.market import Trade, TradeSubscriptionRequest
 from trading_api.shared.ws.generic_route import WsRouter
-from trading_api.shared.ws.router_interface import WsRouterInterface
+from trading_api.shared.ws.router_interface import WsRouteInterface
 
 if TYPE_CHECKING:
     # TypeAlias for type checkers - generator will auto-discover this!
@@ -166,7 +166,7 @@ trade_router = TradeWsRouter(route="trades", tags=["trading"])
 trades_topic_builder = trade_router.topic_builder
 
 # Export routers list (used by module __init__.py)
-ws_routers: list[WsRouterInterface] = [trade_router]
+ws_routers: list[WsRouteInterface] = [trade_router]
 ```
 
 **Note**: You can group related routes in the same module's `ws.py` file:
@@ -220,7 +220,7 @@ Modules expose routers via the `Module Protocol`'s `get_ws_routers()` method:
 ```python
 # backend/src/trading_api/modules/trading/__init__.py
 from typing import List
-from trading_api.shared.ws.router_interface import WsRouterInterface
+from trading_api.shared.ws.router_interface import WsRouteInterface
 from .ws import ws_routers  # Import module's router list
 
 class TradingModule:
@@ -230,7 +230,7 @@ class TradingModule:
 
     # ... other Module Protocol methods ...
 
-    def get_ws_routers(self) -> List[WsRouterInterface]:
+    def get_ws_routers(self) -> List[WsRouteInterface]:
         """Return all WebSocket routers for this module"""
         # Pass service instance to router factory
         from .ws import TradeWsRouter
@@ -271,7 +271,7 @@ def create_app(enabled_modules: list[str] | None = None):
 - ✅ Automatic router registration for all enabled modules
 - ✅ Service injection handled by module (lazy-loaded)
 - ✅ Clean separation: modules manage their own routers
-- ✅ Type-safe: `get_ws_routers()` returns `list[WsRouterInterface]`
+- ✅ Type-safe: `get_ws_routers()` returns `list[WsRouteInterface]`
 
 ### Step 7: Verify and Test
 
@@ -981,7 +981,7 @@ curl http://localhost:8000/api/v1/ws/asyncapi.json
 # backend/src/trading_api/ws/trades.py
 from .generated.tradewsrouter import TradeWsRouter
 
-trades_ws_routers: list[WsRouterInterface] = [
+trades_ws_routers: list[WsRouteInterface] = [
     TradeWsRouter(
         topic_builder=trades_topic_builder,
         subscribe_request_handler=subscribe_trades_handler,
@@ -993,7 +993,7 @@ trades_ws_routers: list[WsRouterInterface] = [
 from .datafeed import datafeed_ws_routers
 from .trades import trades_ws_routers  # Add this
 
-ws_routers: list[WsRouterInterface] = [
+ws_routers: list[WsRouteInterface] = [
     *datafeed_ws_routers,
     *trades_ws_routers,  # Add this
 ]

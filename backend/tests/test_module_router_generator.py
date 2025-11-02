@@ -590,7 +590,7 @@ class TestGeneratedCodeStructure:
 
         # Verify imports
         assert "from trading_api.models import TestRequest, TestData" in code
-        assert "class TestRouter(WsRouterInterface):" in code
+        assert "class TestRouter(WsRouteInterface):" in code
         # Verify no TypeVar declarations
         assert "TypeVar(" not in code
         # Verify no Generic imports

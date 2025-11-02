@@ -86,7 +86,7 @@ class BrokerModule:
     def get_api_routers(self) -> list[APIRouter]:
         return [BrokerApi(self.service, prefix="/broker")]
 
-    def get_ws_routers(self) -> list[WsRouterInterface]:
+    def get_ws_routers(self) -> list[WsRouteInterface]:
         return BrokerWsRouters(self.service)
 
     def get_ws_app(self, base_url: str) -> FastWSAdapter:
@@ -139,7 +139,7 @@ class BrokerModule(Module):
         return self._api_routers  # Cached routers
 
     @property
-    def ws_routers(self) -> list[WsRouterInterface]:
+    def ws_routers(self) -> list[WsRouteInterface]:
         return self._ws_routers  # Cached routers
 
     def create_ws_app(self, ws_url: str) -> FastWSAdapter:
@@ -316,7 +316,7 @@ class Module(ABC):
 
     @property
     @abstractmethod
-    def ws_routers(self) -> list[WsRouterInterface]:
+    def ws_routers(self) -> list[WsRouteInterface]:
         """WebSocket routers."""
         ...
 
@@ -379,7 +379,7 @@ class BrokerModule(Module):
         self._api_routers: list[APIRouter] = [
             BrokerApi(service=self.service, prefix=f"/{self.name}", tags=[self.name])
         ]
-        self._ws_routers: list[WsRouterInterface] = BrokerWsRouters(
+        self._ws_routers: list[WsRouteInterface] = BrokerWsRouters(
             broker_service=self.service
         )
 
@@ -404,7 +404,7 @@ class BrokerModule(Module):
         return self._api_routers
 
     @property
-    def ws_routers(self) -> list[WsRouterInterface]:
+    def ws_routers(self) -> list[WsRouteInterface]:
         return self._ws_routers
 ```
 
@@ -671,7 +671,7 @@ class Module(ABC):
 
     @property
     @abstractmethod
-    def ws_routers(self) -> list[WsRouterInterface]:
+    def ws_routers(self) -> list[WsRouteInterface]:
         """WebSocket routers for this module."""
         ...
 

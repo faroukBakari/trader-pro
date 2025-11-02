@@ -114,7 +114,7 @@ def buildTopicParams(obj: Any) -> str:
     # Compact JSON: no whitespace, separators=(",", ":")
     return json.dumps(sorted_obj, separators=(",", ":"))
 
-class WsRouterInterface(OperationRouter):
+class WsRouteInterface(OperationRouter):
     def topic_builder(self, params: BaseModel) -> str:
         return f"{self.route}:{buildTopicParams(params.model_dump())}"
 ```
@@ -255,7 +255,7 @@ topic = `${route}:${buildTopicParams(params)}`
 
 When implementing WebSocket features:
 
-- [ ] Backend uses `WsRouterInterface.topic_builder()`
+- [ ] Backend uses `WsRouteInterface.topic_builder()`
 - [ ] Frontend uses `buildTopicParams()` helper
 - [ ] Both sort object keys alphabetically
 - [ ] Both use compact JSON (no whitespace)
@@ -806,7 +806,7 @@ backend/src/trading_api/
 │   ├── plugins/
 │   │   └── fastws_adapter.py          # FastWSAdapter with publish() helper
 │   ├── ws/                             # WebSocket infrastructure
-│   │   ├── router_interface.py        # WsRouterInterface, WsRouteService Protocol
+│   │   ├── router_interface.py        # WsRouteInterface, WsRouteService Protocol
 │   │   ├── generic_route.py           # Generic WsRouter template (source of truth) ⚠️
 │   │   └── WS-ROUTER-GENERATION.md    # Router generation documentation
 │   └── tests/                          # Shared test fixtures
@@ -923,7 +923,7 @@ class FastWSAdapter(FastWS):
         self._pending_routers: list[Callable] = []
         self._broadcast_tasks: list[asyncio.Task] = []
 
-    def include_router(self, router: WsRouterInterface) -> None:
+    def include_router(self, router: WsRouteInterface) -> None:
         """Override to register router and store broadcast coroutine."""
         super().include_router(router)
 
@@ -966,7 +966,7 @@ class FastWSAdapter(FastWS):
 The `WsRouter` is a generic implementation that handles subscription management with reference counting:
 
 ```python
-class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
+class WsRouter(WsRouteInterface, Generic[_TRequest, _TData]):
     def __init__(
         self,
         *,
@@ -1050,7 +1050,7 @@ Router factories instantiate and inject services:
 ```python
 # modules/broker/ws.py
 from typing import TYPE_CHECKING, TypeAlias
-from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
+from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
 
 if TYPE_CHECKING:
     # TypeAlias declarations for code generation
@@ -1060,7 +1060,7 @@ else:
     # Runtime imports from generated routers
     from .ws_generated import OrderWsRouter, PositionWsRouter
 
-class BrokerWsRouters(list[WsRouterInterface]):
+class BrokerWsRouters(list[WsRouteInterface]):
     def __init__(self, broker_service: WsRouteService):
         order_router = OrderWsRouter(
             route="orders", tags=["broker"], service=broker_service
@@ -1072,7 +1072,7 @@ class BrokerWsRouters(list[WsRouterInterface]):
 
 # modules/datafeed/ws.py
 from typing import TYPE_CHECKING, TypeAlias
-from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
+from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
 
 if TYPE_CHECKING:
     # TypeAlias declarations for code generation
@@ -1082,7 +1082,7 @@ else:
     # Runtime imports from generated routers
     from .ws_generated import BarWsRouter, QuoteWsRouter
 
-class DatafeedWsRouters(list[WsRouterInterface]):
+class DatafeedWsRouters(list[WsRouteInterface]):
     def __init__(self, datafeed_service: WsRouteService):
         bar_router = BarWsRouter(
             route="bars", tags=["datafeed"], service=datafeed_service

@@ -14,7 +14,7 @@ from trading_api.models import (
 )
 from trading_api.shared.ws.generic_route import WsRouter
 from trading_api.shared.ws.module_router_generator import generate_module_routers
-from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
+from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
 
 if TYPE_CHECKING:
     BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class DatafeedWsRouters(list[WsRouterInterface]):
+class DatafeedWsRouters(list[WsRouteInterface]):
     def __init__(self, datafeed_service: WsRouteService):
         # Import generated routers locally to avoid circular import
         module_name = os.path.basename(os.path.dirname(__file__))

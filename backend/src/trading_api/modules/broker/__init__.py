@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi.routing import APIRouter
 
 from trading_api.shared import Module
-from trading_api.shared.ws.router_interface import WsRouterInterface
+from trading_api.shared.ws.router_interface import WsRouteInterface
 
 from .api import BrokerApi
 from .service import BrokerService
@@ -37,7 +37,7 @@ class BrokerModule(Module):
         self._api_routers: list[APIRouter] = [
             BrokerApi(service=self.service, prefix="", tags=[self.name])
         ]
-        self._ws_routers: list[WsRouterInterface] = BrokerWsRouters(
+        self._ws_routers: list[WsRouteInterface] = BrokerWsRouters(
             broker_service=self.service
         )
 
@@ -93,11 +93,11 @@ class BrokerModule(Module):
         return self._api_routers
 
     @property
-    def ws_routers(self) -> list[WsRouterInterface]:
+    def ws_routers(self) -> list[WsRouteInterface]:
         """Get all WebSocket routers for broker real-time endpoints.
 
         Returns:
-            list[WsRouterInterface]: List of WebSocket router instances for orders,
+            list[WsRouteInterface]: List of WebSocket router instances for orders,
                       positions, executions, equity, and broker connection
         """
         return self._ws_routers

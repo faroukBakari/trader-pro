@@ -286,7 +286,7 @@ backend/
 │   │   │   ├── health.py      # HealthApi class (service heartbeat)
 │   │   │   └── versions.py    # VersionApi class (API version catalogue)
 │   │   ├── ws/
-│   │   │   ├── router_interface.py  # WsRouterInterface, WsRouteService Protocol
+│   │   │   ├── router_interface.py  # WsRouteInterface, WsRouteService Protocol
 │   │   │   └── generic_route.py     # Generic WsRouter implementation
 │   │   ├── plugins/
 │   │   │   └── fastws_adapter.py  # FastWS integration adapter
