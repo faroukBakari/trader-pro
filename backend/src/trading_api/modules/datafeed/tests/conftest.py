@@ -5,14 +5,14 @@ Other fixtures (app, ws_app, client, async_client) are inherited from shared/tes
 """
 
 import pytest
-from fastapi import FastAPI
 
+from trading_api.app_factory import AppFactory, ModularFastAPI
 from trading_api.shared import FastWSAdapter
 
 
 @pytest.fixture(scope="session")
-def apps() -> tuple[FastAPI, list[FastWSAdapter]]:
+def apps() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     """Application with only datafeed module enabled (shared across session)."""
-    from trading_api.app_factory import mount_app_modules
-
-    return mount_app_modules(enabled_module_names=["datafeed"])
+    factory = AppFactory()
+    modular_app = factory.create_apps(enabled_module_names=["datafeed"])
+    return modular_app, modular_app.ws_apps

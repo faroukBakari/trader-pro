@@ -13,10 +13,10 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 import uvicorn
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
+from trading_api.app_factory import ModularFastAPI
 from trading_api.shared import FastWSAdapter
 
 # ============================================================================
@@ -25,35 +25,43 @@ from trading_api.shared import FastWSAdapter
 
 
 @pytest.fixture(scope="session")
-def datafeed_only_app() -> tuple[FastAPI, list[FastWSAdapter]]:
+def datafeed_only_app() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     """Session-scoped datafeed-only app for isolation tests."""
-    from trading_api.app_factory import mount_app_modules
+    from trading_api.app_factory import AppFactory
 
-    return mount_app_modules(enabled_module_names=["datafeed"])
+    factory = AppFactory()
+    modular_app = factory.create_apps(enabled_module_names=["datafeed"])
+    return modular_app, modular_app.ws_apps
 
 
 @pytest.fixture(scope="session")
-def broker_only_app() -> tuple[FastAPI, list[FastWSAdapter]]:
+def broker_only_app() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     """Session-scoped broker-only app for isolation tests."""
-    from trading_api.app_factory import mount_app_modules
+    from trading_api.app_factory import AppFactory
 
-    return mount_app_modules(enabled_module_names=["broker"])
+    factory = AppFactory()
+    modular_app = factory.create_apps(enabled_module_names=["broker"])
+    return modular_app, modular_app.ws_apps
 
 
 @pytest.fixture(scope="session")
-def all_modules_app() -> tuple[FastAPI, list[FastWSAdapter]]:
+def all_modules_app() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     """Session-scoped app with all modules for isolation tests."""
-    from trading_api.app_factory import mount_app_modules
+    from trading_api.app_factory import AppFactory
 
-    return mount_app_modules(enabled_module_names=None)
+    factory = AppFactory()
+    modular_app = factory.create_apps(enabled_module_names=None)
+    return modular_app, modular_app.ws_apps
 
 
 @pytest.fixture(scope="session")
-def no_modules_app() -> tuple[FastAPI, list[FastWSAdapter]]:
+def no_modules_app() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     """Session-scoped app with no modules (shared infrastructure only)."""
-    from trading_api.app_factory import mount_app_modules
+    from trading_api.app_factory import AppFactory
 
-    return mount_app_modules(enabled_module_names=[])
+    factory = AppFactory()
+    modular_app = factory.create_apps(enabled_module_names=[])
+    return modular_app, modular_app.ws_apps
 
 
 # ============================================================================
@@ -102,35 +110,37 @@ def wait_for_service_sync(base_url: str, max_attempts: int = 30) -> bool:
 
 
 @pytest.fixture(scope="module")
-def apps() -> tuple[FastAPI, list[FastWSAdapter]]:
+def apps() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     """Full application with all modules enabled (shared per test module)."""
-    from trading_api.app_factory import mount_app_modules
+    from trading_api.app_factory import AppFactory
 
-    return mount_app_modules(enabled_module_names=None)  # None = all modules
+    factory = AppFactory()
+    modular_app = factory.create_apps(enabled_module_names=None)  # None = all modules
+    return modular_app, modular_app.ws_apps
 
 
 @pytest.fixture(scope="module")
-def app(apps: tuple[FastAPI, list[FastWSAdapter]]) -> FastAPI:
-    """FastAPI application instance (shared per test module)."""
+def app(apps: tuple[ModularFastAPI, list[FastWSAdapter]]) -> ModularFastAPI:
+    """ModularFastAPI application instance (shared per test module)."""
     api_app, _ = apps
     return api_app
 
 
 @pytest.fixture(scope="module")
-def ws_app(apps: tuple[FastAPI, list[FastWSAdapter]]) -> FastWSAdapter | None:
+def ws_app(apps: tuple[ModularFastAPI, list[FastWSAdapter]]) -> FastWSAdapter | None:
     """FastWSAdapter application instance (shared per test module)."""
     _, ws_apps = apps
     return ws_apps[0] if ws_apps else None
 
 
 @pytest.fixture
-def client(app: FastAPI) -> TestClient:
+def client(app: ModularFastAPI) -> TestClient:
     """Sync test client for WebSocket tests."""
     return TestClient(app)
 
 
 @pytest.fixture
-async def async_client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+async def async_client(app: ModularFastAPI) -> AsyncGenerator[AsyncClient, None]:
     """Async test client for API tests."""
     async with AsyncClient(app=app, base_url="http://test") as ac:
         yield ac

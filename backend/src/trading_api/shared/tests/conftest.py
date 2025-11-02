@@ -8,14 +8,14 @@ Each test suite can create an app with only the modules it needs for isolation.
 """
 
 import pytest
-from fastapi import FastAPI
 
+from trading_api.app_factory import AppFactory, ModularFastAPI
 from trading_api.shared import FastWSAdapter
 
 
 def create_test_app(
     enabled_modules: list[str] | None = None,
-) -> tuple[FastAPI, list[FastWSAdapter]]:
+) -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     """Create a test application with specified modules.
 
     Args:
@@ -23,7 +23,7 @@ def create_test_app(
                         If None, all modules are enabled.
 
     Returns:
-        tuple: (FastAPI application, list of FastWSAdapter applications)
+        tuple: (ModularFastAPI application, list of FastWSAdapter applications)
 
     Example:
         # Test with all modules
@@ -35,12 +35,12 @@ def create_test_app(
         # Test with only shared infrastructure (no modules)
         api_app, ws_apps = create_test_app(enabled_modules=[])
     """
-    from trading_api.app_factory import mount_app_modules
-
-    return mount_app_modules(enabled_module_names=enabled_modules)
+    factory = AppFactory()
+    modular_app = factory.create_apps(enabled_module_names=enabled_modules)
+    return modular_app, modular_app.ws_apps
 
 
 @pytest.fixture(scope="session")
-def apps() -> tuple[FastAPI, list[FastWSAdapter]]:
+def apps() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     """Full application (API + WS) with all modules enabled (shared across session)."""
     return create_test_app(enabled_modules=None)
