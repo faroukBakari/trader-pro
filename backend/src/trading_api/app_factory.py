@@ -26,11 +26,160 @@ logging.getLogger("trading_api").setLevel(logging.INFO)
 logging.getLogger("uvicorn").setLevel(logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
-# Global registry instance
-registry = ModuleRegistry()
-
 # Module logger for app_factory
 logger = logging.getLogger(__name__)
+
+
+class AppFactory:
+    """Application factory with instance-scoped module registry.
+
+    Creates FastAPI and FastWSAdapter applications with configurable
+    module loading. Each factory instance has its own registry for
+    better test isolation and encapsulation.
+
+    Example:
+        >>> # Create factory and build apps
+        >>> factory = AppFactory()
+        >>> api_app, ws_apps = factory.create_apps(["datafeed"])
+        >>>
+        >>> # Or use the convenience wrapper
+        >>> api_app, ws_apps = mount_app_modules(["datafeed"])
+    """
+
+    def __init__(self, modules_dir: Path | None = None):
+        """Initialize factory with fresh registry.
+
+        Args:
+            modules_dir: Path to modules directory.
+                        Defaults to trading_api/modules/
+        """
+        self.registry = ModuleRegistry()
+        self.modules_dir = modules_dir or Path(__file__).parent / "modules"
+
+    def create_apps(
+        self,
+        enabled_module_names: list[str] | None = None,
+    ) -> tuple[FastAPI, list[FastWSAdapter]]:
+        """Create and configure FastAPI and FastWSAdapter applications.
+
+        The core module is always enabled and loaded first, regardless of the
+        enabled_module_names parameter. This ensures health checks and versioning
+        are always available.
+
+        Args:
+            enabled_module_names: List of module names to enable. If None, all
+                registered modules are enabled. Core is always enabled automatically.
+                Use this to selectively load feature modules.
+
+        Returns:
+            tuple[FastAPI, list[FastWSAdapter]]: API app and list of module WS apps
+
+        Example:
+            >>> factory = AppFactory()
+            >>> # Load all modules (core + all feature modules)
+            >>> api_app, ws_apps = factory.create_apps()
+            >>> # Load core + datafeed only
+            >>> api_app, ws_apps = factory.create_apps(["datafeed"])
+            >>> # Load only core module
+            >>> api_app, ws_apps = factory.create_apps([])
+        """
+        # Clear registry to allow fresh registration (important for tests)
+        self.registry.clear()
+
+        # Auto-discover and register all available modules
+        self.registry.auto_discover(self.modules_dir)
+
+        # Core module is ALWAYS enabled - ensure it's in the enabled list
+        if enabled_module_names is not None and "core" not in enabled_module_names:
+            enabled_module_names.append("core")
+
+        # Set which modules should be enabled (core will be included)
+        self.registry.set_enabled_modules(enabled_module_names)
+
+        # Create base URL
+        base_url = "/api/v1"
+
+        # Compute OpenAPI tags dynamically from enabled modules (including core)
+        openapi_tags = [
+            tag
+            for module in self.registry.get_enabled_modules()
+            for tag in module.openapi_tags
+        ]
+
+        enabled_modules = self.registry.get_enabled_modules()
+        module_api_apps: list[FastAPI] = []
+        module_ws_apps: list[FastWSAdapter] = []
+
+        for module in enabled_modules:
+            api_app, ws_app = module.create_app()
+            module_api_apps.append(api_app)
+            if ws_app:
+                module_ws_apps.append(ws_app)
+
+        @asynccontextmanager
+        async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+            """Handle application startup and shutdown events."""
+
+            # Validate all routes have response models
+            validate_response_models(app)
+
+            yield
+
+            # Shutdown: Cleanup is handled by FastAPIAdapter
+            print("🛑 FastAPI application shutdown complete")
+
+        # Create FastAPI app
+        api_app = FastAPI(
+            title="Trading API",
+            description=(
+                "A comprehensive trading API server with market data "
+                "and portfolio management. Supports multiple API versions for "
+                "backwards compatibility."
+            ),
+            version="1.0.0",
+            openapi_url=f"{base_url}/openapi.json",
+            docs_url=f"{base_url}/docs",
+            redoc_url=f"{base_url}/redoc",
+            openapi_tags=openapi_tags,
+            lifespan=lifespan,
+        )
+
+        # Add CORS middleware
+        api_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],  # Allow all origins for development
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+        # Add root endpoint with API information
+        @api_app.get("/", tags=["root"])
+        async def root() -> dict:
+            """Root endpoint providing API metadata and navigation."""
+            return {
+                "name": "Trading API",
+                "version": "1.0.0",
+                "current_api_version": "v1",
+                "documentation": f"{base_url}/docs",
+                "health": f"{base_url}/health",
+                "versions": f"{base_url}/versions",
+            }
+
+        for module_app, module in zip(module_api_apps, enabled_modules):
+            api_app.mount(f"{base_url}/{module.name}", module_app)
+
+        # Merge OpenAPI specs from mounted modules into main app
+        merge_openapi_specs(
+            main_app=api_app,
+            module_apps=[
+                (mod_app, mod.name)
+                for mod_app, mod in zip(module_api_apps, enabled_modules)
+            ],
+            base_url=base_url,
+        )
+
+        return api_app, module_ws_apps
 
 
 def validate_response_models(app: FastAPI) -> None:
@@ -119,6 +268,9 @@ def mount_app_modules(
 ) -> tuple[FastAPI, list[FastWSAdapter]]:
     """Create and configure FastAPI and FastWSAdapter applications.
 
+    LEGACY FUNCTION: Maintained for backward compatibility with existing code.
+    New code should use AppFactory directly for better encapsulation.
+
     The core module is always enabled and loaded first, regardless of the
     enabled_module_names parameter. This ensures health checks and versioning
     are always available.
@@ -139,100 +291,7 @@ def mount_app_modules(
         >>> # Load only core module
         >>> api_app, ws_apps = mount_app_modules(enabled_modules=[])
     """
-    # Clear registry to allow fresh registration (important for tests)
-    registry.clear()
-
-    modules_dir = Path(__file__).parent / "modules"
-
-    # Auto-discover and register all available modules
-    registry.auto_discover(modules_dir)
-
-    # Core module is ALWAYS enabled - ensure it's in the enabled list
-    if not (enabled_module_names is None or "core" in enabled_module_names):
-        enabled_module_names.append("core")
-
-    # Set which modules should be enabled (core will be included)
-    registry.set_enabled_modules(enabled_module_names)
-
-    # Create base URL
-    base_url = "/api/v1"
-
-    # Compute OpenAPI tags dynamically from enabled modules (including core)
-    openapi_tags = [
-        tag for module in registry.get_enabled_modules() for tag in module.openapi_tags
-    ]
-
-    enabled_modules = registry.get_enabled_modules()
-    module_api_apps: list[FastAPI] = []
-    module_ws_apps: list[FastWSAdapter] = []
-
-    for module in enabled_modules:
-        api_app, ws_app = module.create_app()
-        module_api_apps.append(api_app)
-        if ws_app:
-            module_ws_apps.append(ws_app)
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-        """Handle application startup and shutdown events."""
-
-        # Validate all routes have response models
-        validate_response_models(app)
-
-        yield
-
-        # Shutdown: Cleanup is handled by FastAPIAdapter
-        print("🛑 FastAPI application shutdown complete")
-
-    # Create FastAPI app
-    api_app = FastAPI(
-        title="Trading API",
-        description=(
-            "A comprehensive trading API server with market data "
-            "and portfolio management. Supports multiple API versions for "
-            "backwards compatibility."
-        ),
-        version="1.0.0",
-        openapi_url=f"{base_url}/openapi.json",
-        docs_url=f"{base_url}/docs",
-        redoc_url=f"{base_url}/redoc",
-        openapi_tags=openapi_tags,
-        lifespan=lifespan,
-    )
-
-    # Add CORS middleware
-    api_app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # Allow all origins for development
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    # Add root endpoint with API information
-    @api_app.get("/", tags=["root"])
-    async def root() -> dict:
-        """Root endpoint providing API metadata and navigation."""
-        return {
-            "name": "Trading API",
-            "version": "1.0.0",
-            "current_api_version": "v1",
-            "documentation": f"{base_url}/docs",
-            "health": f"{base_url}/health",
-            "versions": f"{base_url}/versions",
-        }
-
-    for module_app, module in zip(module_api_apps, enabled_modules):
-        api_app.mount(f"{base_url}/{module.name}", module_app)
-
-    # Merge OpenAPI specs from mounted modules into main app
-    merge_openapi_specs(
-        main_app=api_app,
-        module_apps=[
-            (mod_app, mod.name)
-            for mod_app, mod in zip(module_api_apps, enabled_modules)
-        ],
-        base_url=base_url,
-    )
-
-    return api_app, module_ws_apps
+    # Create a fresh factory instance for each call
+    # This ensures test isolation (each test gets independent apps)
+    factory = AppFactory()
+    return factory.create_apps(enabled_module_names)
