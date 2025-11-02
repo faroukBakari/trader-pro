@@ -14,5 +14,5 @@ from trading_api.shared import FastWSAdapter
 def apps() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
     """Application with only broker module enabled (shared across session)."""
     factory = AppFactory()
-    modular_app = factory.create_apps(enabled_module_names=["broker"])
+    modular_app = factory.create_app(enabled_module_names=["broker"])
     return modular_app, modular_app.ws_apps

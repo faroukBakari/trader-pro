@@ -15,7 +15,7 @@ def create_core_test_app() -> ModularFastAPI:
         ModularFastAPI: Application instance with core module
     """
     factory = AppFactory()
-    return factory.create_apps(enabled_module_names=["core"])
+    return factory.create_app(enabled_module_names=["core"])
 
 
 @pytest.fixture(scope="function")

@@ -60,7 +60,7 @@ class BrokerModule(Module):
         return Path(__file__).parent
 
     @property
-    def openapi_tags(self) -> list[dict[str, str]]:
+    def tags(self) -> list[dict[str, str]]:
         """Get OpenAPI tags for broker module.
 
         Returns:

@@ -258,9 +258,7 @@ class Module(ABC):
                                     f"✅ No changes in AsyncAPI spec for '{self.name}'"
                                 )
                     except Exception as e:
-                        logger.warning(
-                            f"⚠️  Could not read existing AsyncAPI spec: {e}"
-                        )
+                        logger.warning(f"⚠️  Could not read existing AsyncAPI spec: {e}")
                 else:
                     logger.info(f"📝 Creating new AsyncAPI spec for '{self.name}'")
 
@@ -313,7 +311,7 @@ class Module(ABC):
             openapi_url="/openapi.json",
             docs_url="/docs",
             redoc_url="/redoc",
-            openapi_tags=self.openapi_tags,
+            openapi_tags=self.tags,
             lifespan=lifespan,
         )
         # Register module's API routers with module_path prefix
@@ -411,7 +409,7 @@ class Module(ABC):
 
     @property
     @abstractmethod
-    def openapi_tags(self) -> list[dict[str, str]]:
+    def tags(self) -> list[dict[str, str]]:
         """Get OpenAPI tags for this module.
 
         Returns:
