@@ -121,7 +121,7 @@ async def wait_for_service(
         for _ in range(max_attempts):
             try:
                 # Health endpoint is at server level, not module level
-                response = await client.get(f"{base_url}/api/v1/health")
+                response = await client.get(f"{base_url}/api/v1/core/health")
                 if response.status_code == 200:
                     return True
             except (httpx.ConnectError, httpx.RemoteProtocolError):

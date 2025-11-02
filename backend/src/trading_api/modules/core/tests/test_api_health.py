@@ -1,4 +1,4 @@
-"""Tests for health endpoint."""
+"""Tests for core health endpoint."""
 
 import pytest
 from httpx import AsyncClient

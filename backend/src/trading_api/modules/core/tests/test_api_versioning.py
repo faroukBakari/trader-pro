@@ -1,4 +1,4 @@
-"""Tests for API versioning functionality."""
+"""Tests for core API versioning functionality."""
 
 import pytest
 from httpx import AsyncClient
@@ -106,9 +106,9 @@ class TestAPIVersioning:
         assert "/api/v1/core/version" in spec["paths"]
         assert "/api/v1/core/health" in spec["paths"]
 
-        # Check versioning tags
+        # Check core tags
         versions_path = spec["paths"]["/api/v1/core/versions"]["get"]
-        assert "versioning" in versions_path["tags"]
+        assert "core" in versions_path["tags"]
 
     def test_api_version_enum(self) -> None:
         """Test APIVersion enum functionality."""
@@ -154,15 +154,15 @@ class TestAPIVersioning:
 
     @pytest.mark.asyncio
     async def test_api_tags_include_version(self, async_client: AsyncClient) -> None:
-        """Test that API endpoints are properly tagged with version."""
+        """Test that API endpoints are properly tagged with core tag."""
         response = await async_client.get("/api/v1/openapi.json")
 
         spec = response.json()
 
-        # Check that health endpoint has v1 tag
+        # Check that health endpoint has core tag (since it's in core module)
         health_operation = spec["paths"]["/api/v1/core/health"]["get"]
-        assert "v1" in health_operation["tags"]
+        assert "core" in health_operation["tags"]
 
-        # Check that versions endpoint has v1 tag
+        # Check that versions endpoint has core tag
         versions_operation = spec["paths"]["/api/v1/core/versions"]["get"]
-        assert "v1" in versions_operation["tags"]
+        assert "core" in versions_operation["tags"]

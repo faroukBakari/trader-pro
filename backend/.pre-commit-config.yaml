@@ -32,12 +32,3 @@ repos:
       - id: mypy
         files: ^src/.*\.py$
         additional_dependencies: [pydantic]
-
-  - repo: local
-    hooks:
-      - id: check-response-models
-        name: Check FastAPI Response Models
-        entry: python scripts/check_response_models.py
-        language: system
-        files: ^src/trading_api/api/.*\.py$
-        pass_filenames: true

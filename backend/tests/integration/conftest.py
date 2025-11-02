@@ -93,7 +93,7 @@ def wait_for_service_sync(base_url: str, max_attempts: int = 30) -> bool:
     """
     for _ in range(max_attempts):
         try:
-            response = httpx.get(f"{base_url}/api/v1/health", timeout=0.2)
+            response = httpx.get(f"{base_url}/api/v1/core/health", timeout=0.2)
             if response.status_code == 200:
                 return True
         except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.ReadTimeout):
