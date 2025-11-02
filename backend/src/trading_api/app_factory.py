@@ -59,7 +59,7 @@ def validate_response_models(app: FastAPI) -> None:
     print("✅ All FastAPI routes have response_model defined")
 
 
-def create_app(
+def mount_modules(
     enabled_module_names: list[str] | None = None,
 ) -> tuple[FastAPI, list[FastWSAdapter]]:
     """Create and configure FastAPI and FastWSAdapter applications.
@@ -73,9 +73,9 @@ def create_app(
 
     Example:
         >>> # Load all modules
-        >>> api_app, ws_apps = create_app()
+        >>> api_app, ws_apps = mount_modules()
         >>> # Load only datafeed module
-        >>> api_app, ws_apps = create_app(enabled_modules=["datafeed"])
+        >>> api_app, ws_apps = mount_modules(enabled_modules=["datafeed"])
     """
     # Clear registry to allow fresh registration (important for tests)
     registry.clear()

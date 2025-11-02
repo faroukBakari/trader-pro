@@ -59,7 +59,7 @@ make generate-ws-routers
 **Current Implementation Flow:**
 
 ```
-create_app() execution:
+mount_modules() execution:
 ├─ 1. registry.clear()
 ├─ 2. registry.auto_discover()              ← L89: Modules discovered
 ├─ 3. registry.set_enabled_modules()
@@ -101,7 +101,7 @@ class DatafeedWsRouters(list[WsRouteInterface]):
 cd backend
 # Test fresh generation (no pre-generation needed)
 rm -rf src/trading_api/modules/*/ws_generated
-poetry run python -c "from trading_api.app_factory import create_app; create_app()"
+poetry run python -c "from trading_api.app_factory import mount_modules; mount_modules()"
 # ✅ Output:
 # INFO - Generated WS routers for module 'datafeed'
 # INFO - Generated WS routers for module 'broker'
@@ -274,7 +274,7 @@ cd backend
 
 # Test fresh generation (no pre-generated routers)
 rm -rf src/trading_api/modules/*/ws_generated
-poetry run python -c "from trading_api.app_factory import create_app; create_app()"
+poetry run python -c "from trading_api.app_factory import mount_modules; mount_modules()"
 # ✅ Output:
 # INFO - ✓ Generated WS routers for 'datafeed'
 # INFO - ✓ Generated WS routers for 'broker'
@@ -705,7 +705,7 @@ def create_app(
 **Timeline:**
 
 ```
-create_app() execution with per-module generation:
+mount_modules() execution with per-module generation:
 ├─ 1. registry.clear()
 ├─ 2. registry.auto_discover()
 ├─ 3. registry.set_enabled_modules()
@@ -870,7 +870,7 @@ if TYPE_CHECKING:
 
 def test_app_factory_generates_routers_on_startup():
     """Verify app creation triggers per-module router generation."""
-    from trading_api.app_factory import create_app
+    from trading_api.app_factory import mount_modules
 
     # Remove existing generated directories
     for module in ["datafeed", "broker"]:
@@ -879,7 +879,7 @@ def test_app_factory_generates_routers_on_startup():
             shutil.rmtree(ws_gen)
 
     # Create app should trigger generation
-    api_app, ws_apps = create_app()
+    api_app, ws_apps = mount_modules()
 
     # Verify generated directories exist
     assert Path("src/trading_api/modules/datafeed/ws_generated").exists()
@@ -1021,7 +1021,7 @@ make dev
 
 WebSocket routers are **automatically generated per module** when the app starts:
 
-1. `create_app()` loads each enabled module
+1. `mount_modules()` loads each enabled module
 2. Before loading, checks if `modules/<module_name>/ws.py` exists
 3. If found, calls `generate_module_routers(module_name)`
 4. Routers are generated with quality checks
