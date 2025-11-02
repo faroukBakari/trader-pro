@@ -34,27 +34,17 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ## 🔧 Backend Documentation
 
-### backend/ (Backend Root)
+### backend/docs/ (Current Backend Documentation)
 
-| File                                                          | Purpose                                    |
-| ------------------------------------------------------------- | ------------------------------------------ |
-| **backend/README.md**                                         | Backend overview, setup, and API reference |
-| **backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md** | WebSocket router auto-generation           |
+| File                                             | Purpose                                        |
+| ------------------------------------------------ | ---------------------------------------------- |
+| **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture and module system |
+| **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules |
+| **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation    |
+| **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide              |
+| **backend/docs/VERSIONING.md**                   | API versioning strategy and implementation     |
 
-### backend/docs/ (Backend-Specific)
-
-| File                           | Purpose                               |
-| ------------------------------ | ------------------------------------- |
-| **backend/docs/WEBSOCKETS.md** | WebSocket API reference and patterns  |
-| **backend/docs/VERSIONING.md** | API versioning strategy and lifecycle |
-
-### backend/examples/ (Implementation Examples)
-
-| File                                        | Purpose                     |
-| ------------------------------------------- | --------------------------- |
-| **backend/examples/FASTWS-INTEGRATION.md**  | FastWS integration examples |
-| **backend/examples/VERSIONING-EXAMPLES.md** | API versioning examples     |
-| **backend/examples/VUE-INTEGRATION.md**     | Vue.js integration examples |
+> **Note**: backend/docs/outdated/ contains historical documentation from previous refactors. These files are kept for reference only and should NOT be used for current implementation guidance.
 
 ### backend/external_packages/ (Third-Party Documentation)
 
@@ -140,12 +130,13 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### Backend Developers
 
-1. **backend/README.md** - Backend overview
-2. **API-METHODOLOGY.md** - TDD implementation workflow
-3. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
-4. **backend/docs/WEBSOCKETS.md** - WebSocket API patterns
-5. **docs/TESTING.md** - Testing strategies
-6. **backend/docs/VERSIONING.md** - API versioning approach
+1. **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** - Modular architecture and module system
+2. **backend/docs/BACKEND_WEBSOCKETS.md** - FastWS integration and creating WebSocket modules
+3. **backend/docs/SPECS_AND_CLIENT_GEN.md** - Spec and client generation flow
+4. **API-METHODOLOGY.md** - TDD implementation workflow
+5. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
+6. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
+7. **docs/TESTING.md** - Testing strategies
 
 ### Frontend Developers
 
@@ -196,15 +187,16 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### API & Client Generation
 
-- **docs/CLIENT-GENERATION.md** - Client auto-generation
-- **backend/docs/VERSIONING.md** - API versioning
+- **backend/docs/SPECS_AND_CLIENT_GEN.md** - ⭐ **Complete generation guide (OpenAPI/AsyncAPI/Python clients)**
+- **docs/CLIENT-GENERATION.md** - Client auto-generation overview
+- **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation guide
 - **frontend/src/clients/trader-client-generated/README.md** - Generated client usage
 
 ### WebSocket & Real-Time
 
-- **backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md** - ⚠️ **WebSocket router code generation (CRITICAL for new features)**
+- **backend/docs/BACKEND_WEBSOCKETS.md** - ⭐ **FastWS integration guide (start here for WebSocket modules)**
+- **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation details
 - **docs/WEBSOCKET-CLIENTS.md** - WebSocket overview
-- **backend/docs/WEBSOCKETS.md** - Backend WebSocket API
 - **frontend/WEBSOCKET-CLIENT-PATTERN.md** - Frontend patterns
 
 ### Testing
@@ -227,7 +219,6 @@ Complete index of all project documentation with descriptions and reading paths.
 
 - **MAKEFILE-GUIDE.md** - Makefile commands
 - **.github/CI-TROUBLESHOOTING.md** - CI/CD issues
-- **backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md** - Router generation
 
 ### Code Quality
 
@@ -243,7 +234,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 - **Root Documentation**: 10 essential project-wide guides
 - **docs/ Folder**: 7 core cross-cutting documentation files
-- **Backend Documentation**: 7 backend-specific guides + 1 third-party doc
+- **Backend Documentation**: 5 current backend guides + 1 third-party doc
 - **Frontend Documentation**: 15 frontend-specific guides + 2 third-party docs
 - **Auto-Generated Docs**: 40+ API model references
 - **DevOps & Git**: 3 setup and operations guides
@@ -251,9 +242,10 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### Total Documentation Files
 
-- **User-Maintained**: ~44 actively maintained documentation files
+- **User-Maintained**: ~40 actively maintained documentation files
 - **Auto-Generated**: 40+ API model documentation files
 - **Third-Party**: 3 external package documentation files
+- **Outdated/Historical**: 13 files in backend/docs/outdated/ (reference only)
 
 ### Maintenance
 
@@ -265,5 +257,5 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ---
 
-**Last Updated**: October 27, 2025
+**Last Updated**: November 2, 2025
 **Maintained by**: Development Team

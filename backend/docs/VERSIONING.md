@@ -1,76 +1,92 @@
-# API Versioning Strategy
+# API Versioning
 
-This document outlines the versioning strategy for the Trading API.
+**Status**: ✅ Production Ready  
+**Last Updated**: November 2, 2025  
+**Current Version**: v1
+
+---
 
 ## Overview
 
-The Trading API uses **URL-based versioning** to ensure backwards compatibility and smooth transitions for API consumers.
+The Trading API uses **URL-based versioning** in a modular architecture. Each module is mounted under a versioned base path (`/api/v1`), ensuring backwards compatibility and smooth transitions for API consumers.
 
-## Version Format
+---
 
-- **Pattern**: `/api/{version}/`
-- **Current**: `/api/v1/`
-- **Future**: `/api/v2/`, `/api/v3/`, etc.
+## Versioning Strategy
 
-## Version Lifecycle
+### URL Structure
 
-### 1. **Stable**
-- Fully supported and recommended for production use
-- No breaking changes will be introduced
-- Bug fixes and minor enhancements only
+**Pattern**: `/api/{version}/{module}/{resource}`
 
-### 2. **Deprecated**
-- Still functional but not recommended for new development
-- Will include deprecation warnings
-- Sunset date announced
+**Examples**:
 
-### 3. **Sunset**
-- Version is no longer supported
-- Endpoints return 410 Gone status
+- `/api/v1/core/health` - Core module health endpoint
+- `/api/v1/broker/orders` - Broker module orders endpoint
+- `/api/v1/datafeed/config` - Datafeed module configuration
 
-## Current Versions
+### Version Format
 
-### Version 1 (v1) - Stable
-- **Release Date**: 2025-10-04
-- **Status**: Stable
-- **Base URL**: `/api/v1/`
-- **Features**:
-  - Health check endpoint
-  - Version information endpoints
-  - OpenAPI documentation
+- **Current**: `v1` (stable)
+- **Future**: `v2`, `v3`, etc.
 
-### Version 2 (v2) - Planned
-- **Status**: Planned
-- **Base URL**: `/api/v2/`
-- **Breaking Changes**:
-  - Authentication required for all endpoints
-  - New response format for error messages
-  - Renamed health endpoint to status
-  - Enhanced error handling structure
+---
 
-## API Endpoints
+## Implementation
 
-### Version Information
-```http
-GET /api/v1/versions
+### Backend Structure
+
+**Location**: `backend/src/trading_api/`
+
+**Versioning is implemented through**:
+
+1. **Base URL in Factory** (`app_factory.py`):
+
+```python
+base_url = "/api/v1"
+modular_app = ModularFastAPI(modules=enabled_modules, base_url=base_url, ...)
 ```
-Returns information about all available API versions.
 
-```http
-GET /api/v1/version
+2. **Module Mounting**:
+
+```python
+for module_app in self._modules_apps:
+    mount_path = f"{self.base_url}/{module_app.module.name}"
+    self.mount(mount_path, module_app.api_app)
+    # Example: /api/v1/broker, /api/v1/datafeed
 ```
-Returns information about the current API version.
 
-### Health Check
-```http
-GET /api/v1/health
+3. **Version Configuration** (`models/versioning.py`):
+
+```python
+class APIVersion(str, Enum):
+    V1 = "v1"
+    V2 = "v2"  # Future
+
+VERSION_CONFIG = {
+    APIVersion.V1: VersionInfo(
+        version=APIVersion.V1,
+        release_date="2025-10-04",
+        status="stable",
+        breaking_changes=[],
+        deprecation_notice=None,
+        sunset_date=None,
+    ),
+    # ... future versions
+}
 ```
-Returns service health status with version information.
 
-## Response Examples
+### Version Information Endpoints
 
-### Version Information Response
+**Endpoints** (Core module):
+
+- `GET /api/v1/core/versions` - All available API versions
+- `GET /api/v1/core/version` - Current API version details
+- `GET /api/v1/core/health` - Health check with version info
+
+**Response Examples**:
+
 ```json
+// GET /api/v1/core/versions
 {
   "current_version": "v1",
   "available_versions": [
@@ -81,31 +97,27 @@ Returns service health status with version information.
       "breaking_changes": [],
       "deprecation_notice": null,
       "sunset_date": null
-    },
-    {
-      "version": "v2",
-      "release_date": "TBD",
-      "status": "planned",
-      "breaking_changes": [
-        "Authentication required for all endpoints",
-        "New response format for error messages",
-        "Renamed health endpoint to status"
-      ],
-      "deprecation_notice": null,
-      "sunset_date": null
     }
   ],
-  "documentation_url": "https://api.trading.com/docs",
-  "support_contact": "support@trading.com"
+  "documentation_url": "/api/v1/docs",
+  "support_contact": "support@trading-pro.nodomainyet"
 }
-```
 
-### Health Check Response
-```json
+// GET /api/v1/core/version
+{
+  "version": "v1",
+  "release_date": "2025-10-04",
+  "status": "stable",
+  "breaking_changes": [],
+  "deprecation_notice": null,
+  "sunset_date": null
+}
+
+// GET /api/v1/core/health
 {
   "status": "ok",
   "message": "Trading API is running",
-  "timestamp": "2025-10-04T14:30:00Z",
+  "timestamp": "2025-11-02T14:30:00Z",
   "api_version": "v1",
   "version_info": {
     "version": "v1",
@@ -116,125 +128,305 @@ Returns service health status with version information.
 }
 ```
 
-## Client Implementation
+---
 
-### Version-Aware Client
-```typescript
-// Vue.js TypeScript Client Example
-import { Configuration, HealthApi, VersionsApi } from '@/api'
+## Version Lifecycle
 
-class TradingApiClient {
-  private config: Configuration
-  private healthApi: HealthApi
-  private versionsApi: VersionsApi
+### Version States
 
-  constructor(baseUrl: string, version: string = 'v1') {
-    this.config = new Configuration({
-      basePath: `${baseUrl}/api/${version}`
-    })
-    this.healthApi = new HealthApi(this.config)
-    this.versionsApi = new VersionsApi(this.config)
-  }
+**1. Stable**
 
-  async checkHealth() {
-    const response = await this.healthApi.getHealthStatus()
-    return response.data
-  }
+- Fully supported and recommended for production
+- No breaking changes introduced
+- Bug fixes and minor enhancements only
 
-  async getVersionInfo() {
-    const response = await this.versionsApi.getAPIVersions()
-    return response.data
-  }
+**2. Deprecated**
 
-  // Check for deprecation warnings
-  async checkForDeprecation() {
-    const versionInfo = await this.getVersionInfo()
-    const currentVersion = versionInfo.available_versions.find(
-      v => v.version === versionInfo.current_version
+- Still functional but not recommended
+- Deprecation warnings included in responses
+- Sunset date announced
+
+**3. Sunset**
+
+- Version no longer supported
+- Endpoints return appropriate error status
+
+---
+
+## Current Version (v1)
+
+**Release Date**: 2025-10-04  
+**Status**: Stable  
+**Base Path**: `/api/v1`
+
+**Available Modules**:
+
+- `core` - Health checks, versioning, system info
+- `broker` - Trading operations (orders, positions, executions)
+- `datafeed` - Market data (quotes, bars, symbols)
+
+**Module Endpoints Pattern**:
+
+- REST: `/api/v1/{module}/{resource}`
+- WebSocket: `/api/v1/{module}/ws`
+- Docs: `/api/v1/docs` (merged OpenAPI)
+- AsyncAPI: `/api/v1/ws/asyncapi.json` (if WebSocket modules enabled)
+
+---
+
+## Adding New Versions
+
+### Step 1: Update Version Models
+
+**Location**: `backend/src/trading_api/models/versioning.py`
+
+```python
+class APIVersion(str, Enum):
+    V1 = "v1"
+    V2 = "v2"  # Add new version
+
+    @classmethod
+    def get_latest(cls) -> "APIVersion":
+        return cls.V2  # Update latest
+
+VERSION_CONFIG = {
+    # Existing v1 config...
+    APIVersion.V2: VersionInfo(
+        version=APIVersion.V2,
+        release_date="2026-01-15",
+        status="stable",
+        breaking_changes=[
+            "Authentication required for all endpoints",
+            "New response format for error messages"
+        ],
+        deprecation_notice=None,
+        sunset_date=None,
+    ),
+}
+```
+
+### Step 2: Update Application Factory
+
+**Location**: `backend/src/trading_api/app_factory.py`
+
+```python
+def create_app(self, api_version: str = "v1", ...) -> ModularFastAPI:
+    # Create base URL from version
+    base_url = f"/api/{api_version}"
+
+    modular_app = ModularFastAPI(
+        modules=enabled_modules,
+        base_url=base_url,
+        ...
     )
+```
 
-    if (currentVersion?.deprecation_notice) {
-      console.warn('API Deprecation Warning:', currentVersion.deprecation_notice)
+### Step 3: Deploy Both Versions
+
+**Option A: Separate Processes** (Recommended)
+
+```bash
+# Run v1 on port 8001
+ENABLED_MODULES=all uvicorn trading_api.main:app --port 8001
+
+# Run v2 on port 8002 (separate codebase or branch)
+ENABLED_MODULES=all uvicorn trading_api.main:app --port 8002
+
+# Nginx routes by path
+location /api/v1/ {
+    proxy_pass http://localhost:8001;
+}
+location /api/v2/ {
+    proxy_pass http://localhost:8002;
+}
+```
+
+**Option B: Single Process with Version Routing** (Future enhancement)
+
+```python
+# Create apps for both versions
+v1_app = factory.create_app(api_version="v1")
+v2_app = factory.create_app(api_version="v2")
+
+# Mount both
+root_app = FastAPI()
+root_app.mount("/api/v1", v1_app)
+root_app.mount("/api/v2", v2_app)
+```
+
+---
+
+## Client Integration
+
+### Auto-Generated Clients
+
+**Frontend clients are generated from OpenAPI specs**:
+
+```bash
+# Generate TypeScript client (frontend)
+cd frontend
+make generate-openapi-client
+
+# Generate Python client (backend)
+cd backend
+make generate modules=broker  # Generates client for each module
+```
+
+**Generated Client Structure**:
+
+```typescript
+// Frontend
+import { Configuration, V1Api } from '@clients/trader-client-generated'
+
+const config = new Configuration({ basePath: '/api/v1' })
+const api = new V1Api(config)
+
+// Backend
+from trading_api.clients import BrokerClient
+
+async with BrokerClient(base_url="http://localhost:8000/api/v1") as client:
+    result = await client.placeOrder(order)
+```
+
+### Version-Aware Client Pattern
+
+```typescript
+class TradingClient {
+  private api: V1Api;
+
+  constructor(version: string = "v1") {
+    const config = new Configuration({
+      basePath: `/api/${version}`,
+    });
+    this.api = new V1Api(config);
+  }
+
+  async checkVersion(): Promise<VersionInfo> {
+    const response = await this.api.getCurrentAPIVersion();
+
+    if (response.data.deprecation_notice) {
+      console.warn("API Deprecation:", response.data.deprecation_notice);
     }
 
-    return currentVersion
+    return response.data;
   }
 }
 ```
 
-### Python Client Example
-```python
-import httpx
-from typing import Optional
+---
 
-class TradingApiClient:
-    def __init__(self, base_url: str, version: str = "v1"):
-        self.base_url = f"{base_url}/api/{version}"
-        self.client = httpx.AsyncClient()
+## Migration Strategy
 
-    async def check_health(self):
-        response = await self.client.get(f"{self.base_url}/health")
-        return response.json()
+### When New Version Released
 
-    async def get_version_info(self):
-        response = await self.client.get(f"{self.base_url}/versions")
-        return response.json()
+**1. Announce Deprecation**
 
-    async def check_for_deprecation(self) -> Optional[str]:
-        version_info = await self.get_version_info()
-        current_version = next(
-            (v for v in version_info["available_versions"]
-             if v["version"] == version_info["current_version"]),
-            None
-        )
+- Update `VERSION_CONFIG` with deprecation notice
+- Set sunset date (minimum 6 months)
+- Notify clients via version endpoints
 
-        if current_version and current_version.get("deprecation_notice"):
-            return current_version["deprecation_notice"]
+**2. Provide Migration Guide**
 
-        return None
-```
+- Document breaking changes
+- Provide code examples
+- Offer migration tools
 
-## Migration Guidelines
+**3. Run Both Versions**
 
-### When a New Version is Released
+- Deploy new version alongside old
+- Monitor usage metrics
+- Support gradual migration
 
-1. **Review Breaking Changes**: Check `/api/v1/versions` for detailed changes
-2. **Test Compatibility**: Run your tests against the new version
-3. **Plan Migration**: Schedule updates based on deprecation timeline
-4. **Update Clients**: Generate new clients from updated OpenAPI spec
-5. **Monitor**: Watch for deprecation notices in current version
+**4. Sunset Old Version**
 
-### Handling Deprecation
+- After sunset date passes
+- Return 410 Gone for deprecated endpoints
+- Redirect to latest version docs
 
-1. **Subscribe to Notifications**: Monitor `/api/v1/versions` endpoint
-2. **Update Code**: Address breaking changes before sunset date
-3. **Test Thoroughly**: Validate all functionality with new version
-4. **Deploy Gradually**: Use feature flags for gradual rollout
+### Breaking Changes Checklist
+
+When introducing breaking changes in new version:
+
+- [ ] Update `VERSION_CONFIG` with breaking changes list
+- [ ] Set deprecation notice on previous version
+- [ ] Update documentation with migration guide
+- [ ] Generate new client libraries
+- [ ] Deploy both versions simultaneously
+- [ ] Monitor adoption metrics
+- [ ] Plan sunset date (6+ months minimum)
+
+---
 
 ## Best Practices
 
 ### For API Consumers
-- Always specify the version in your requests
-- Regularly check for deprecation notices
-- Test against beta versions before they become stable
-- Have a migration plan for version upgrades
+
+- ✅ Always specify version in requests
+- ✅ Monitor version endpoints for deprecation notices
+- ✅ Test against new versions before they're stable
+- ✅ Plan migrations well before sunset dates
+- ✅ Use auto-generated clients for type safety
 
 ### For API Development
-- Never introduce breaking changes within a version
-- Provide advance notice for deprecations (minimum 6 months)
-- Maintain clear documentation of changes
-- Support previous version during transition period
 
-## Support Policy
+- ✅ Never introduce breaking changes within a version
+- ✅ Provide minimum 6 months notice for deprecations
+- ✅ Maintain clear documentation of all changes
+- ✅ Support previous version during transition
+- ✅ Use modular architecture for clean version separation
 
-- **Current Version**: Full support and active development
-- **Previous Version**: Security fixes and critical bugs only
-- **Deprecated Versions**: Limited support, scheduled for sunset
-- **Sunset Versions**: No support, returns 410 Gone
+---
 
-## Contact
+## Related Documentation
 
-For questions about API versioning:
-- Documentation: `/api/v1/docs`
-- Support: support@trading.com
-- Status: `/api/v1/health`
+- **[MODULAR_BACKEND_ARCHITECTURE.md](MODULAR_BACKEND_ARCHITECTURE.md)** - Module system and mounting
+- **[SPECS_AND_CLIENT_GEN.md](SPECS_AND_CLIENT_GEN.md)** - Client generation
+- **[API-METHODOLOGY.md](../../API-METHODOLOGY.md)** - API design patterns
+- **[ARCHITECTURE.md](../../ARCHITECTURE.md)** - Overall system design
+
+---
+
+## Quick Reference
+
+### Version Status Check
+
+```bash
+# Check current version
+curl http://localhost:8000/api/v1/core/version
+
+# Check all available versions
+curl http://localhost:8000/api/v1/core/versions
+
+# Health check with version
+curl http://localhost:8000/api/v1/core/health
+```
+
+### Key Files
+
+```
+backend/src/trading_api/
+├── models/versioning.py         # Version definitions
+├── app_factory.py               # Base URL configuration
+├── modules/core/
+│   ├── api.py                   # Version endpoints
+│   └── service.py               # Version logic
+└── main.py                      # Entry point
+```
+
+### URL Patterns
+
+```
+/api/v1/core/health              # Core health endpoint
+/api/v1/core/version             # Current version info
+/api/v1/core/versions            # All versions info
+/api/v1/broker/orders            # Broker module endpoint
+/api/v1/datafeed/config          # Datafeed module endpoint
+/api/v1/docs                     # Interactive API docs
+/api/v1/openapi.json             # OpenAPI specification
+/api/v1/ws/asyncapi.json         # AsyncAPI specification
+```
+
+---
+
+**Maintainer**: Backend Team  
+**Status**: ✅ Production-ready

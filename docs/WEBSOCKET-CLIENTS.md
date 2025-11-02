@@ -790,7 +790,6 @@ cd frontend && make client-generate
 
 - **Backend Router Generation**: See `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` ⚠️ **CRITICAL for new WebSocket features**
 - **Client Generation**: See `docs/CLIENT-GENERATION.md`
-- **Backend WebSocket API**: See `backend/docs/WEBSOCKETS.md`
 - **WebSocket Client Pattern**: See `frontend/WEBSOCKET-CLIENT-PATTERN.md`
 - **WebSocket Client Base**: See `frontend/WEBSOCKET-CLIENT-BASE.md`
 - **Service Layer**: See `frontend/src/services/README.md`

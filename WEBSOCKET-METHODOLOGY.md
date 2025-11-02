@@ -3,7 +3,7 @@
 **Version**: 4.0.0  
 **Date**: October 30, 2025  
 **Status**: ✅ Production Methodology (Modular Architecture)  
-**Related**: `backend/docs/WEBSOCKETS.md`, `docs/WEBSOCKET-CLIENTS.md`, `ARCHITECTURE.md`  
+**Related**: `docs/WEBSOCKET-CLIENTS.md`, `ARCHITECTURE.md`  
 **Architecture**: Modular backend with factory-based pattern
 
 ---
@@ -681,7 +681,6 @@ Use this checklist when implementing new WebSocket features:
 ### Key Files
 
 - **Modular Router Generation**: `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md`
-- **Backend WebSocket API**: `backend/docs/WEBSOCKETS.md`
 - **Frontend Client Pattern**: `frontend/WEBSOCKET-CLIENT-PATTERN.md`
 - **Frontend Client Base**: `frontend/WEBSOCKET-CLIENT-BASE.md`
 - **System Architecture**: `ARCHITECTURE.md`
