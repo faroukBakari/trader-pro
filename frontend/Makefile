@@ -58,23 +58,26 @@ define ensure-node-version
 	$(1)'
 endef
 
-.PHONY: help ensure-node install install-ci lint type-check test build dev clean generate-openapi-client generate-asyncapi-types
+.PHONY: help ensure-node install install-ci lint type-check test build dev clean client-generate generate-openapi-client generate-asyncapi-types
 
 # Default target
 help:
 	@echo "Frontend targets:"
-	@echo "  ensure-node     Ensure Node.js 22.20+ is installed (offers auto-install)"
-	@echo "  install         Install frontend dependencies"
-	@echo "  install-ci      Install frontend dependencies for CI"
-	@echo "  generate-openapi-client   Generate REST client from OpenAPI spec"
-	@echo "  generate-asyncapi-types   Generate WebSocket types from AsyncAPI spec"
-	@echo "  lint            Run frontend linting and formatting checks"
-	@echo "  type-check      Run TypeScript type checking"
-	@echo "  test            Run frontend tests once"
-	@echo "  test-backend    Run frontend tests with backend API (not mock)"
-	@echo "  build           Build frontend for production"
-	@echo "  dev             Start frontend development server"
-	@echo "  clean           Clean build artifacts"
+	@echo "  ensure-node         Ensure Node.js 22.20+ is installed (offers auto-install)"
+	@echo "  install             Install frontend dependencies"
+	@echo "  install-ci          Install frontend dependencies for CI"
+	@echo ""
+	@echo "Client generation (unified):"
+	@echo "  client-generate     Generate all API clients (REST + WebSocket)"
+	@echo ""
+	@echo "Code quality targets:"
+	@echo "  lint                Run frontend linting and formatting checks"
+	@echo "  type-check          Run TypeScript type checking"
+	@echo "  test                Run frontend tests once"
+	@echo "  test-backend        Run frontend tests with backend API (not mock)"
+	@echo "  build               Build frontend for production"
+	@echo "  dev                 Start frontend development server"
+	@echo "  clean               Clean build artifacts"
 
 # Ensure Node.js 22.20+ is available
 ensure-node:
@@ -147,40 +150,49 @@ install-ci:
 	@echo "Installing frontend dependencies for CI..."
 	@npm ci
 
-# Client generation
-generate-openapi-client:
-	@echo "Generating REST client from OpenAPI spec..."
+# Client generation (unified)
+client-generate:
+	@echo "Generating API clients from backend specs..."
+	@echo ""
+	@echo "Step 1/3: Generating backend specs..."
+	@cd ../backend && $(MAKE) generate
+	@echo ""
+	@echo "Step 2/3: Generating TypeScript REST clients..."
 	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-openapi-client.sh'
-
-generate-asyncapi-types:
-	@echo "Generating WebSocket types from AsyncAPI spec..."
+	@echo ""
+	@echo "Step 3/3: Generating TypeScript WebSocket types..."
 	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-asyncapi-types.sh'
+	@echo ""
+	@echo "✅ All API clients generated successfully"
+
+# Keep old targets as aliases for backward compatibility
+generate-openapi-client: client-generate
+	@echo "✓ OpenAPI client generation complete (via client-generate)"
+
+generate-asyncapi-types: client-generate
+	@echo "✓ AsyncAPI types generation complete (via client-generate)"
 
 # Linting and formatting
 lint:
 	@echo "Running frontend linting and formatting checks..."
-	@$(MAKE) generate-openapi-client
-	@$(MAKE) generate-asyncapi-types
+	@$(MAKE) client-generate
 	$(call ensure-node-version,npm run lint)
 
 # Type checking
 type-check:
 	@echo "Running TypeScript type checking..."
-	@$(MAKE) generate-openapi-client
-	@$(MAKE) generate-asyncapi-types
+	@$(MAKE) client-generate
 	$(call ensure-node-version,npm run type-check)
 
 # Testing
 test:
 	@echo "Running frontend tests..."
-	@$(MAKE) generate-openapi-client
-	@$(MAKE) generate-asyncapi-types
+	@$(MAKE) client-generate
 	$(call ensure-node-version,npm run test:run)
 
 test-backend:
 	@echo "Running frontend tests with backend API (not mock)..."
-	@$(MAKE) generate-openapi-client
-	@$(MAKE) generate-asyncapi-types
+	@$(MAKE) client-generate
 	$(call ensure-node-version,VITE_USE_MOCK_BROKER=false npm run test:run)
 
 # Build

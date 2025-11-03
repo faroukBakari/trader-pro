@@ -23,18 +23,8 @@ NC='\033[0m'
 echo -e "${BLUE}🚀 OpenAPI Client Generator - Per-Module${NC}"
 echo ""
 
-# Validate package names before generation
-echo -e "${BLUE}🔍 Validating backend modules...${NC}"
-if ! (cd "$BACKEND_DIR" && poetry run python scripts/validate_modules.py); then
-    echo -e "${RED}❌ Package name validation failed!${NC}"
-    echo -e "${YELLOW}💡 Fix package naming issues before generating clients${NC}"
-    exit 1
-fi
-echo -e "${GREEN}✅ Package name validation passed${NC}"
-echo ""
-
-# Find all module OpenAPI specs
-OPENAPI_SPECS=$(find "$BACKEND_MODULES_DIR" -type f -path "*/specs/openapi.json" 2>/dev/null || echo "")
+# Find all module OpenAPI specs (UPDATED PATH PATTERN)
+OPENAPI_SPECS=$(find "$BACKEND_MODULES_DIR" -type f -path "*/specs_generated/*_openapi.json" 2>/dev/null || echo "")
 
 if [ -z "$OPENAPI_SPECS" ]; then
     echo -e "${RED}❌ No OpenAPI specifications found in: $BACKEND_MODULES_DIR${NC}"
@@ -53,8 +43,8 @@ FAILED_MODULES=()
 
 # Generate client for each module
 while IFS= read -r SPEC_PATH; do
-    # Extract module name from path: .../modules/{module}/specs/openapi.json
-    MODULE_NAME=$(echo "$SPEC_PATH" | sed -E 's|.*/modules/([^/]+)/specs/openapi\.json|\1|')
+    # Extract module name from filename: {module}_openapi.json (UPDATED)
+    MODULE_NAME=$(basename "$SPEC_PATH" "_openapi.json")
     OUTPUT_DIR="./src/clients/trader-client-${MODULE_NAME}"
     
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
