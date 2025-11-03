@@ -472,9 +472,11 @@ make generate-openapi-client
 
 1. **API Versioning Constraint**:
 
-   - Use versioned API class (e.g., `V1Api`) from generated client
-   - **DO NOT** import individual API modules directly
-   - Supports version upgrade handling through single entry point
+   - Use module-specific API classes (e.g., `BrokerApi`, `DatafeedApi`, `CoreApi`) from generated clients
+   - **DO NOT** import individual API methods directly
+   - Each module generates its own API class matching the module name
+   - Example: `trader-client-broker` → `BrokerApi`, `trader-client-datafeed` → `DatafeedApi`
+   - Supports modular architecture and per-module versioning
 
 2. **Type Casting Safety Constraint**:
    - **Rule**: Unsafe casting (`as unknown as`) **ONLY** for literal/alias/enum fields
@@ -533,19 +535,26 @@ const response = await this.rawApi.createResource(
 
 ```typescript
 /**
- * API Adapter (Consolidated Multi-Service)
+ * API Adapter (Per-Module Architecture)
  *
- * Wraps generated OpenAPI client for type conversion and clean interface.
+ * Wraps generated OpenAPI clients for type conversion and clean interface.
  * Rule: Never import backend models outside this file.
- * Constraint: Use versioned API (V1Api) for all calls.
+ * Constraint: Use module-specific API classes (BrokerApi, DatafeedApi, etc.) for all calls.
  * Type Casting: Only cast enums/literals, never entire objects.
  */
 
 import type {
   ResourceRequest as ResourceRequest_Backend,
   AnotherType as AnotherType_Backend,
-} from "@clients/{generated-client-name}";
-import { Configuration, V1Api } from "@clients/{generated-client-name}/";
+} from "@clients/trader-client-broker";
+import {
+  Configuration as BrokerConfiguration,
+  BrokerApi
+} from "@clients/trader-client-broker/";
+import {
+  Configuration as DatafeedConfiguration,
+  DatafeedApi
+} from "@clients/trader-client-datafeed/";
 import type {
   FrontendResourceRequest,
   FrontendResourceResponse,
@@ -576,13 +585,22 @@ export type ApiPromise<T> = Promise<ApiResponse<T>>;
 import { mapQuoteData, mapPreOrder } from '@/plugins/mappers';
 
 export class ApiAdapter {
-  private rawApi: V1Api;
+  // Per-module API clients
+  private brokerApi: BrokerApi;
+  private datafeedApi: DatafeedApi;
+  private brokerConfig: BrokerConfiguration;
+  private datafeedConfig: DatafeedConfiguration;
 
   constructor() {
-    const apiConfig = new Configuration({
-      basePath: import.meta.env.API_BASE_PATH || '',
-    });
-    this.rawApi = new V1Api(apiConfig);
+    const basePath = import.meta.env.TRADER_API_BASE_PATH || '';
+
+    // Initialize per-module configurations
+    this.brokerConfig = new BrokerConfiguration({ basePath });
+    this.datafeedConfig = new DatafeedConfiguration({ basePath });
+
+    // Initialize per-module API clients
+    this.brokerApi = new BrokerApi(this.brokerConfig);
+    this.datafeedApi = new DatafeedApi(this.datafeedConfig);
   }
 
   // ======================================================================

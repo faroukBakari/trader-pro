@@ -7,12 +7,16 @@
 
 // Per-module API clients (microservice-ready architecture)
 import {
-  Configuration as BrokerConfiguration,
-  V1Api as BrokerV1Api
+  BrokerApi,
+  Configuration as BrokerConfiguration
 } from '@clients/trader-client-broker';
 import {
-  Configuration as DatafeedConfiguration,
-  V1Api as DatafeedV1Api
+  CoreApi,
+  Configuration as CoreConfiguration
+} from '@clients/trader-client-core';
+import {
+  DatafeedApi,
+  Configuration as DatafeedConfiguration
 } from '@clients/trader-client-datafeed';
 
 import type {
@@ -149,9 +153,11 @@ function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
 }
 
 export class ApiAdapter {
-  private brokerApi: BrokerV1Api
-  private datafeedApi: DatafeedV1Api
+  private brokerApi: BrokerApi
+  private coreApi: CoreApi
+  private datafeedApi: DatafeedApi
   private brokerConfig: BrokerConfiguration
+  private coreConfig: CoreConfiguration
   private datafeedConfig: DatafeedConfiguration
 
   constructor() {
@@ -162,24 +168,26 @@ export class ApiAdapter {
     // broker: http://broker-service:8001
     // datafeed: http://datafeed-service:8002
     this.brokerConfig = new BrokerConfiguration({ basePath })
+    this.coreConfig = new CoreConfiguration({ basePath })
     this.datafeedConfig = new DatafeedConfiguration({ basePath })
 
     // Initialize per-module API clients
-    this.brokerApi = new BrokerV1Api(this.brokerConfig)
-    this.datafeedApi = new DatafeedV1Api(this.datafeedConfig)
+    this.brokerApi = new BrokerApi(this.brokerConfig)
+    this.coreApi = new CoreApi(this.coreConfig)
+    this.datafeedApi = new DatafeedApi(this.datafeedConfig)
   }
 
   @ApiErrorHandler('/health')
   async getHealthStatus(): ApiPromise<HealthResponse> {
-    // TODO: In future, aggregate health from both broker and datafeed modules
-    const response = await this.brokerApi.getHealthStatus()
+    // Health check from core module
+    const response = await this.coreApi.getHealthStatus()
     return response
   }
 
   @ApiErrorHandler('/versions')
   async getAPIVersions(): ApiPromise<APIMetadata> {
-    // TODO: In future, aggregate versions from both broker and datafeed modules
-    return await this.brokerApi.getAPIVersions()
+    // Version info from core module
+    return await this.coreApi.getAPIVersions()
   }
 
   @ApiErrorHandler('/config')
