@@ -1,8 +1,8 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: November 2, 2025  
-**Version**: 4.0.0
+**Last Updated**: November 3, 2025  
+**Version**: 4.0.1
 
 ## Table of Contents
 
@@ -257,8 +257,8 @@ class BrokerModule(Module):
     def __init__(self) -> None:
         super().__init__()
         self._service = BrokerService()
-        # NO prefix - routes at root level within module app
-        # Factory will mount at /api/v1/broker
+        # ⚠️ CRITICAL: prefix="" is REQUIRED (routes at root level)
+        # Factory will mount entire app at /api/v1/broker
         self._api_routers = [
             BrokerApi(service=self.service, prefix="", tags=[self.name])
         ]
@@ -322,11 +322,18 @@ Modules create **root-level routes** that get mounted with module prefix:
 The `ModularFastAPI` class extends FastAPI with module management:
 
 ```python
+class ModuleApp:
+    """Wrapper for module's FastAPI and WebSocket apps."""
+    def __init__(self, module: Module):
+        self.module = module
+        self.api_app, self.ws_app = module.create_app()
+
 class ModularFastAPI(FastAPI):
     """FastAPI with integrated module and WebSocket tracking."""
 
     def __init__(self, modules: list[Module], base_url: str, **kwargs):
         self.base_url = base_url
+        # Create ModuleApp wrappers (not just modules)
         self._modules_apps = [ModuleApp(module) for module in modules]
 
         # Create FastAPI with merged OpenAPI tags
@@ -446,6 +453,44 @@ modules/{module_name}/
     └── test_ws.py
 ```
 
+#### Core Module (Always Enabled)
+
+The `core` module is special - it's **always enabled** and provides essential system endpoints:
+
+```python
+# modules/core/__init__.py
+class CoreModule(Module):
+    """Core module - Essential system endpoints.
+
+    Always enabled, provides:
+    - Health checks (/health)
+    - API versioning (/versions)
+    - System information
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Core module has NO WebSocket routers
+        self._ws_routers = []
+
+    @property
+    def name(self) -> str:
+        return "core"
+```
+
+**Key Differences from Feature Modules**:
+
+- No WebSocket support (REST only)
+- Always included in enabled modules
+- Provides infrastructure endpoints
+- No business logic service
+
+**Core Module Endpoints**:
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/v1/core/health` | GET | Health check status |
+| `/api/v1/core/versions` | GET | API version information |
+
 ### Module Creation Checklist
 
 When creating a new module:
@@ -454,6 +499,8 @@ When creating a new module:
 - [ ] Implement `{ModuleName}Module` class with `Module` protocol
 - [ ] Create `service.py` with business logic
 - [ ] Create `api.py` with `APIRouter` subclass (REST endpoints)
+  - [ ] **CRITICAL**: Use `prefix=""` in router initialization (not `prefix="/{module}"`)
+  - [ ] Factory handles mounting at `/api/v1/{module}` automatically
 - [ ] (Optional) Create `ws.py` with WebSocket router TypeAliases
 - [ ] (Optional) WebSocket routers auto-generate on `make dev`
 - [ ] Add module tests in `tests/` directory
@@ -744,8 +791,9 @@ modules/broker/tests/
 - **[ARCHITECTURE.md](../../ARCHITECTURE.md)** - Overall system architecture
 - **[backend/README.md](../README.md)** - Backend setup and reference
 - **[VERSIONING.md](./VERSIONING.md)** - API versioning strategy
-- **[WEBSOCKETS.md](./WEBSOCKETS.md)** - WebSocket implementation guide
-- **[PYTHON_CLIENT_GEN.md](./PYTHON_CLIENT_GEN.md)** - Python client generation
+- **[BACKEND_WEBSOCKETS.md](./BACKEND_WEBSOCKETS.md)** - WebSocket implementation guide
+- **[SPECS_AND_CLIENT_GEN.md](./SPECS_AND_CLIENT_GEN.md)** - Spec and client generation
+- **[WS_ROUTERS_GEN.md](./WS_ROUTERS_GEN.md)** - WebSocket router generation
 - **[docs/DOCUMENTATION-GUIDE.md](../../docs/DOCUMENTATION-GUIDE.md)** - Documentation index
 
 ---

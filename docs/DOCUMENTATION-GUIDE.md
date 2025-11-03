@@ -39,6 +39,7 @@ Complete index of all project documentation with descriptions and reading paths.
 | File                                             | Purpose                                            |
 | ------------------------------------------------ | -------------------------------------------------- |
 | **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture and module system     |
+| **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx        |
 | **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules     |
 | **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation        |
 | **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide                  |
@@ -132,13 +133,14 @@ Complete index of all project documentation with descriptions and reading paths.
 ### Backend Developers
 
 1. **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** - Modular architecture and module system
-2. **backend/docs/BACKEND_WEBSOCKETS.md** - FastWS integration and creating WebSocket modules
-3. **backend/docs/SPECS_AND_CLIENT_GEN.md** - Spec and client generation flow
-4. **API-METHODOLOGY.md** - TDD implementation workflow
-5. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
-6. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
-7. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
-8. **docs/TESTING.md** - General testing strategies
+2. **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process deployment with nginx
+3. **backend/docs/BACKEND_WEBSOCKETS.md** - FastWS integration and creating WebSocket modules
+4. **backend/docs/SPECS_AND_CLIENT_GEN.md** - Spec and client generation flow
+5. **API-METHODOLOGY.md** - TDD implementation workflow
+6. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
+7. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
+8. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
+9. **docs/TESTING.md** - General testing strategies
 
 ### Frontend Developers
 
@@ -152,10 +154,11 @@ Complete index of all project documentation with descriptions and reading paths.
 ### DevOps Engineers
 
 1. **MAKEFILE-GUIDE.md** - Build system commands
-2. **HOOKS-SETUP.md** - Git hooks setup
-3. **ENVIRONMENT-CONFIG.md** - Environment configuration
-4. **.github/CI-TROUBLESHOOTING.md** - CI/CD troubleshooting
-5. **docs/TESTING.md** - Testing infrastructure
+2. **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process backend deployment
+3. **HOOKS-SETUP.md** - Git hooks setup
+4. **ENVIRONMENT-CONFIG.md** - Environment configuration
+5. **.github/CI-TROUBLESHOOTING.md** - CI/CD troubleshooting
+6. **docs/TESTING.md** - Testing infrastructure
 
 ### Full-Stack Developers
 
@@ -221,6 +224,7 @@ Complete index of all project documentation with descriptions and reading paths.
 ### Build & DevOps
 
 - **MAKEFILE-GUIDE.md** - Makefile commands
+- **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process backend management
 - **.github/CI-TROUBLESHOOTING.md** - CI/CD issues
 
 ### Code Quality
@@ -237,7 +241,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 - **Root Documentation**: 10 essential project-wide guides
 - **docs/ Folder**: 7 core cross-cutting documentation files
-- **Backend Documentation**: 6 current backend guides + 1 third-party doc
+- **Backend Documentation**: 7 current backend guides + 1 third-party doc
 - **Frontend Documentation**: 15 frontend-specific guides + 2 third-party docs
 - **Auto-Generated Docs**: 40+ API model references
 - **DevOps & Git**: 3 setup and operations guides
@@ -245,7 +249,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### Total Documentation Files
 
-- **User-Maintained**: ~41 actively maintained documentation files
+- **User-Maintained**: ~42 actively maintained documentation files
 - **Auto-Generated**: 40+ API model documentation files
 - **Third-Party**: 3 external package documentation files
 - **Outdated/Historical**: 13 files in backend/docs/outdated/ (reference only)
