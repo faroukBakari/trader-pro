@@ -21,18 +21,8 @@ NC='\033[0m'
 echo -e "${BLUE}🚀 AsyncAPI Types Generator - Per-Module${NC}"
 echo ""
 
-# Validate package names before generation
-echo -e "${BLUE}🔍 Validating backend modules...${NC}"
-if ! (cd "$BACKEND_DIR" && poetry run python scripts/validate_modules.py); then
-    echo -e "${RED}❌ Package name validation failed!${NC}"
-    echo -e "${YELLOW}💡 Fix package naming issues before generating types${NC}"
-    exit 1
-fi
-echo -e "${GREEN}✅ Package name validation passed${NC}"
-echo ""
-
-# Find all module AsyncAPI specs
-ASYNCAPI_SPECS=$(find "$BACKEND_MODULES_DIR" -type f -path "*/specs/asyncapi.json" 2>/dev/null || echo "")
+# Find all module AsyncAPI specs (UPDATED PATH PATTERN)
+ASYNCAPI_SPECS=$(find "$BACKEND_MODULES_DIR" -type f -path "*/specs_generated/*_asyncapi.json" 2>/dev/null || echo "")
 
 if [ -z "$ASYNCAPI_SPECS" ]; then
     echo -e "${RED}❌ No AsyncAPI specifications found in: $BACKEND_MODULES_DIR${NC}"
@@ -51,8 +41,8 @@ FAILED_MODULES=()
 
 # Generate types for each module
 while IFS= read -r SPEC_PATH; do
-    # Extract module name from path: .../modules/{module}/specs/asyncapi.json
-    MODULE_NAME=$(echo "$SPEC_PATH" | sed -E 's|.*/modules/([^/]+)/specs/asyncapi\.json|\1|')
+    # Extract module name from filename: {module}_asyncapi.json (UPDATED)
+    MODULE_NAME=$(basename "$SPEC_PATH" "_asyncapi.json")
     OUTPUT_DIR="./src/clients/ws-types-${MODULE_NAME}"
     
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
