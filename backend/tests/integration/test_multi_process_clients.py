@@ -8,14 +8,30 @@ This test automatically generates Python clients before running tests.
 
 import asyncio
 import multiprocessing
+import socket
 import sys
+from collections.abc import Generator
 from pathlib import Path
 
 import httpx
+import psutil
 import pytest
 import uvicorn
 
 from trading_api.shared.module_interface import Module
+
+
+def _find_free_port() -> int:
+    """Find a free port by binding to port 0 and letting OS assign one.
+
+    Returns:
+        int: An available port number
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen(1)
+        port: int = s.getsockname()[1]
+    return port
 
 
 def _ensure_clients_generated() -> None:
@@ -104,6 +120,80 @@ def run_service(module_name: str, port: int) -> None:
     )
 
 
+def _cleanup_process(process: multiprocessing.Process, timeout: int = 5) -> None:
+    """Safely cleanup a multiprocessing.Process and its entire process tree.
+
+    Handles daemon processes, detached processes, and child processes spawned
+    by the main process (e.g., uvicorn workers).
+
+    Args:
+        process: The process to cleanup
+        timeout: Timeout in seconds for graceful termination
+    """
+    if not process.is_alive():
+        return
+
+    try:
+        # Get the psutil Process object for the multiprocessing.Process
+        parent = psutil.Process(process.pid)
+
+        # Get all child processes (including detached/daemon children)
+        children = parent.children(recursive=True)
+
+        # Terminate parent process gracefully
+        process.terminate()
+
+        # Also terminate all children
+        for child in children:
+            try:
+                child.terminate()
+            except psutil.NoSuchProcess:
+                pass
+
+        # Wait for graceful shutdown with timeout
+        try:
+            process.join(timeout=timeout)
+        except Exception:
+            pass
+
+        # Force kill if still alive
+        if process.is_alive():
+            # Kill parent
+            try:
+                parent.kill()
+            except psutil.NoSuchProcess:
+                pass
+
+            # Kill all children that are still alive
+            for child in children:
+                try:
+                    if child.is_running():
+                        child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+
+            # Final join attempt
+            try:
+                process.join(timeout=1)
+            except Exception:
+                # Process may not join properly, which is acceptable
+                # as it has been forcefully terminated
+                pass
+
+    except psutil.NoSuchProcess:
+        # Process already terminated
+        pass
+    except Exception as e:
+        # Log but don't fail on cleanup errors
+        print(f"Warning: Error during process cleanup: {e}")
+        # Attempt basic cleanup as fallback
+        try:
+            if process.is_alive():
+                process.kill()
+        except Exception:
+            pass
+
+
 async def wait_for_service(
     base_url: str, module_name: str, max_attempts: int = 30
 ) -> bool:
@@ -129,179 +219,156 @@ async def wait_for_service(
     return False
 
 
+@pytest.fixture
+def broker_service(
+    request: pytest.FixtureRequest,
+) -> Generator[tuple[str, int], None, None]:
+    """Start a broker service on a free port and ensure cleanup.
+
+    Yields:
+        tuple: (base_url, port) of the running broker service
+    """
+    port = _find_free_port()
+    process = multiprocessing.Process(target=run_service, args=("broker", port))
+    process.start()
+
+    # Register cleanup using request.addfinalizer
+    request.addfinalizer(lambda: _cleanup_process(process))
+
+    yield f"http://127.0.0.1:{port}", port
+
+
+@pytest.fixture
+def datafeed_service(
+    request: pytest.FixtureRequest,
+) -> Generator[tuple[str, int], None, None]:
+    """Start a datafeed service on a free port and ensure cleanup.
+
+    Yields:
+        tuple: (base_url, port) of the running datafeed service
+    """
+    port = _find_free_port()
+    process = multiprocessing.Process(target=run_service, args=("datafeed", port))
+    process.start()
+
+    # Register cleanup using request.addfinalizer
+    request.addfinalizer(lambda: _cleanup_process(process))
+
+    yield f"http://127.0.0.1:{port}", port
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_broker_client_http_communication() -> None:
+async def test_broker_client_http_communication(
+    broker_service: tuple[str, int],
+) -> None:
     """Test BrokerClient can communicate with separate broker service via HTTP."""
-    # Start broker service in separate process
-    broker_port = 8001
-    broker_process = multiprocessing.Process(
-        target=run_service, args=("broker", broker_port)
-    )
-    broker_process.start()
+    broker_url, broker_port = broker_service
 
-    try:
-        # Wait for service to start
-        broker_url = f"http://127.0.0.1:{broker_port}"
-        service_ready = await wait_for_service(broker_url, "broker")
-        assert service_ready, "Broker service failed to start"
+    # Wait for service to start
+    service_ready = await wait_for_service(broker_url, "broker")
+    assert service_ready, f"Broker service failed to start on port {broker_port}"
 
-        # Test HTTP client communication
-        # Client expects paths without /api/v1/broker prefix, so we add it to base_url
-        async with BrokerClient(base_url=f"{broker_url}/api/v1/broker") as client:
-            # Test getting orders
-            orders = await client.getOrders()
-            assert isinstance(orders, list)
+    # Test HTTP client communication
+    # Client expects paths without /api/v1/broker prefix, so we add it to base_url
+    async with BrokerClient(base_url=f"{broker_url}/api/v1/broker") as client:
+        # Test getting orders
+        orders = await client.getOrders()
+        assert isinstance(orders, list)
 
-            # Test getting positions
-            positions = await client.getPositions()
-            assert isinstance(positions, list)
-
-    finally:
-        # Cleanup: terminate broker service
-        broker_process.terminate()
-        broker_process.join(timeout=5)
-        if broker_process.is_alive():
-            broker_process.kill()
+        # Test getting positions
+        positions = await client.getPositions()
+        assert isinstance(positions, list)
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_datafeed_client_http_communication() -> None:
+async def test_datafeed_client_http_communication(
+    datafeed_service: tuple[str, int],
+) -> None:
     """Test DatafeedClient can communicate with separate datafeed service via HTTP."""
-    # Start datafeed service in separate process
-    datafeed_port = 8002
-    datafeed_process = multiprocessing.Process(
-        target=run_service, args=("datafeed", datafeed_port)
-    )
-    datafeed_process.start()
+    datafeed_url, datafeed_port = datafeed_service
 
-    try:
-        # Wait for service to start
-        datafeed_url = f"http://127.0.0.1:{datafeed_port}"
-        service_ready = await wait_for_service(datafeed_url, "datafeed")
-        assert service_ready, "Datafeed service failed to start"
+    # Wait for service to start
+    service_ready = await wait_for_service(datafeed_url, "datafeed")
+    assert service_ready, f"Datafeed service failed to start on port {datafeed_port}"
 
-        # Test HTTP client communication
-        # Client expects paths without /api/v1/datafeed prefix, so we add it to base_url
-        async with DatafeedClient(base_url=f"{datafeed_url}/api/v1/datafeed") as client:
-            # Test getting config
-            config = await client.getConfig()
-            assert config.supported_resolutions is not None
+    # Test HTTP client communication
+    # Client expects paths without /api/v1/datafeed prefix, so we add it to base_url
+    async with DatafeedClient(base_url=f"{datafeed_url}/api/v1/datafeed") as client:
+        # Test getting config
+        config = await client.getConfig()
+        assert config.supported_resolutions is not None
 
-            # Test searching symbols
-            results = await client.searchSymbols(user_input="AAPL")
-            assert isinstance(results, list)
-
-    finally:
-        # Cleanup: terminate datafeed service
-        datafeed_process.terminate()
-        datafeed_process.join(timeout=5)
-        if datafeed_process.is_alive():
-            datafeed_process.kill()
+        # Test searching symbols
+        results = await client.searchSymbols(user_input="AAPL")
+        assert isinstance(results, list)
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_broker_calls_datafeed_multi_process() -> None:
+async def test_broker_calls_datafeed_multi_process(
+    broker_service: tuple[str, int],
+    datafeed_service: tuple[str, int],
+) -> None:
     """Test broker service can call datafeed service in multi-process setup.
 
     Simulates the real-world scenario where:
-    - Broker service runs on port 8001
-    - Datafeed service runs on port 8002
+    - Broker service runs on a dynamically assigned port
+    - Datafeed service runs on a dynamically assigned port
     - Broker uses DatafeedClient to fetch symbols from datafeed
     """
-    broker_port = 8001
-    datafeed_port = 8002
+    broker_url, broker_port = broker_service
+    datafeed_url, datafeed_port = datafeed_service
 
-    # Start both services
-    broker_process = multiprocessing.Process(
-        target=run_service, args=("broker", broker_port)
-    )
-    datafeed_process = multiprocessing.Process(
-        target=run_service, args=("datafeed", datafeed_port)
-    )
+    # Wait for both services to start
+    broker_ready = await wait_for_service(broker_url, "broker")
+    datafeed_ready = await wait_for_service(datafeed_url, "datafeed")
 
-    broker_process.start()
-    datafeed_process.start()
+    assert broker_ready, f"Broker service failed to start on port {broker_port}"
+    assert datafeed_ready, f"Datafeed service failed to start on port {datafeed_port}"
 
-    try:
-        # Wait for both services to start
-        broker_url = f"http://127.0.0.1:{broker_port}"
-        datafeed_url = f"http://127.0.0.1:{datafeed_port}"
+    # Simulate broker calling datafeed
+    # Client expects paths without /api/v1/datafeed prefix, so we add it to base_url
+    async with DatafeedClient(
+        base_url=f"{datafeed_url}/api/v1/datafeed"
+    ) as datafeed_client:
+        # Broker would use this to fetch symbols for order validation
+        symbols = await datafeed_client.searchSymbols(user_input="AAPL")
+        assert len(symbols) > 0
+        assert symbols[0].symbol == "AAPL"
 
-        broker_ready = await wait_for_service(broker_url, "broker")
-        datafeed_ready = await wait_for_service(datafeed_url, "datafeed")
+        # Broker would use this to resolve symbol details
+        symbol_detail = await datafeed_client.resolveSymbol(symbol="AAPL")
+        assert symbol_detail.name == "AAPL"
+        assert symbol_detail.ticker == "AAPL"
 
-        assert broker_ready, "Broker service failed to start"
-        assert datafeed_ready, "Datafeed service failed to start"
-
-        # Simulate broker calling datafeed
-        # Client expects paths without /api/v1/datafeed prefix, so we add it to base_url
-        async with DatafeedClient(
-            base_url=f"{datafeed_url}/api/v1/datafeed"
-        ) as datafeed_client:
-            # Broker would use this to fetch symbols for order validation
-            symbols = await datafeed_client.searchSymbols(user_input="AAPL")
-            assert len(symbols) > 0
-            assert symbols[0].symbol == "AAPL"
-
-            # Broker would use this to resolve symbol details
-            symbol_detail = await datafeed_client.resolveSymbol(symbol="AAPL")
-            assert symbol_detail.name == "AAPL"
-            assert symbol_detail.ticker == "AAPL"
-
-        # Verify broker service is also running independently
-        # Client expects paths without /api/v1/broker prefix, so we add it to base_url
-        async with BrokerClient(
-            base_url=f"{broker_url}/api/v1/broker"
-        ) as broker_client:
-            orders = await broker_client.getOrders()
-            assert isinstance(orders, list)
-
-    finally:
-        # Cleanup: terminate both services
-        broker_process.terminate()
-        datafeed_process.terminate()
-
-        broker_process.join(timeout=5)
-        datafeed_process.join(timeout=5)
-
-        if broker_process.is_alive():
-            broker_process.kill()
-        if datafeed_process.is_alive():
-            datafeed_process.kill()
+    # Verify broker service is also running independently
+    # Client expects paths without /api/v1/broker prefix, so we add it to base_url
+    async with BrokerClient(base_url=f"{broker_url}/api/v1/broker") as broker_client:
+        orders = await broker_client.getOrders()
+        assert isinstance(orders, list)
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_client_context_manager() -> None:
+async def test_client_context_manager(
+    datafeed_service: tuple[str, int],
+) -> None:
     """Test clients work correctly with async context manager."""
-    datafeed_port = 8003
-    datafeed_process = multiprocessing.Process(
-        target=run_service, args=("datafeed", datafeed_port)
-    )
-    datafeed_process.start()
+    datafeed_url, datafeed_port = datafeed_service
 
-    try:
-        datafeed_url = f"http://127.0.0.1:{datafeed_port}"
-        service_ready = await wait_for_service(datafeed_url, "datafeed")
-        assert service_ready
+    # Wait for service to start
+    service_ready = await wait_for_service(datafeed_url, "datafeed")
+    assert service_ready, f"Datafeed service failed to start on port {datafeed_port}"
 
-        # Test context manager properly closes client
-        # Client expects paths without /api/v1/datafeed prefix, so we add it to base_url
-        async with DatafeedClient(base_url=f"{datafeed_url}/api/v1/datafeed") as client:
-            # Test module-specific endpoint
-            config = await client.getConfig()
-            assert config.supported_resolutions is not None
-            assert client._client is not None
+    # Test context manager properly closes client
+    # Client expects paths without /api/v1/datafeed prefix, so we add it to base_url
+    async with DatafeedClient(base_url=f"{datafeed_url}/api/v1/datafeed") as client:
+        # Test module-specific endpoint
+        config = await client.getConfig()
+        assert config.supported_resolutions is not None
+        assert client._client is not None
 
-        # Client should be closed after context
-        # (we can't easily verify this without accessing private state)
-
-    finally:
-        datafeed_process.terminate()
-        datafeed_process.join(timeout=5)
-        if datafeed_process.is_alive():
-            datafeed_process.kill()
-            datafeed_process.kill()
+    # Client should be closed after context
+    # (we can't easily verify this without accessing private state)

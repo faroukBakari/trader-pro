@@ -7,8 +7,10 @@ Provides session-scoped module isolation fixtures for fast test execution.
 
 import multiprocessing
 import os
+import sys
 import time
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 import httpx
 import pytest
@@ -18,6 +20,11 @@ from httpx import AsyncClient
 
 from trading_api.app_factory import ModularFastAPI
 from trading_api.shared import FastWSAdapter
+
+# Add backend scripts to path for backend_manager imports
+backend_scripts_dir = Path(__file__).parent.parent.parent / "scripts"
+if str(backend_scripts_dir) not in sys.path:
+    sys.path.insert(0, str(backend_scripts_dir))
 
 # ============================================================================
 # Module Isolation Fixtures (Session-Scoped for Performance)

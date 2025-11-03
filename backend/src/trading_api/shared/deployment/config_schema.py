@@ -91,6 +91,10 @@ class WebSocketConfig(BaseModel):
 class DeploymentConfig(BaseModel):
     """Complete deployment configuration."""
 
+    api_base_url: str = Field(
+        default="/api/v1",
+        description="API base URL prefix for all modules",
+    )
     nginx: NginxConfig = Field(..., description="Nginx gateway configuration")
     servers: dict[str, ServerConfig] = Field(
         ..., description="Server configurations by name"
