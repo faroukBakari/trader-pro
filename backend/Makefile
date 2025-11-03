@@ -415,24 +415,24 @@ test-cov: test-boundaries
 # Linting and formatting
 lint:
 	@echo "Running backend linting..."
-	poetry run flake8 src/ tests/
+	poetry run flake8 src/ tests/ --exclude='ws_generated,rest_generated'
 
 type-check:
 	@echo "Running backend linting with full checks..."
-	poetry run black --check src/ tests/
-	poetry run isort --check-only src/ tests/
-	poetry run flake8 src/ tests/
-	poetry run mypy src/
+	poetry run black --check --extend-exclude='/_generated/' src/ tests/
+	poetry run isort --check-only --extend-skip='ws_generated' --extend-skip='rest_generated' src/ tests/
+	poetry run flake8 src/ tests/ --exclude='ws_generated,rest_generated'
+	poetry run mypy src/ --exclude='.*_generated'
 	@echo "Running pyright type checking..."
 	poetry run pyright src/
 
 format:
 	@echo "Formatting backend code..."
-	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive src/ tests/
-	poetry run black src/ tests/
-	poetry run isort src/ tests/
+	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive --exclude='*_generated' src/ tests/
+	poetry run isort --extend-skip='ws_generated' --extend-skip='rest_generated' src/ tests/
+	poetry run black --extend-exclude='/_generated/' src/ tests/
 	@echo "Removing trailing whitespace..."
-	@find src/ tests/ -name "*.py" -type f -exec sed -i 's/[[:space:]]*$$//' {} +
+	@find src/ tests/ -name "*.py" -type f -not -path '*_generated/*' -exec sed -i 's/[[:space:]]*$$//' {} +
 	@echo "✅ Backend formatting complete"
 
 # Development server

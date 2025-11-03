@@ -107,10 +107,14 @@ if [[ -n "$backend_files" ]]; then
         exit 1
     fi
 
-    # Re-stage ALL originally staged backend files (to include formatting changes)
+    # Re-stage ALL backend Python files that were modified by formatting
+    # (make format runs on all files in src/ and tests/, not just staged ones)
     log_info "Re-staging backend files to include formatting changes..."
     cd "$repo_root"
-    echo "$backend_files" | xargs git add
+    # Add all modified tracked Python files in backend
+    git add -u backend/src/ backend/tests/ 2>/dev/null || true
+    # Also add any new Python files that might have been created
+    git add backend/src/ backend/tests/ 2>/dev/null || true
     log_success "Backend files re-staged with formatting changes"
 
     cd "$repo_root/backend"
@@ -157,10 +161,14 @@ if [[ -n "$frontend_files" ]]; then
         exit 1
     fi
 
-    # Re-stage ALL originally staged frontend files (to include linting/formatting changes)
+    # Re-stage ALL frontend files that were modified by linting/formatting
+    # (make lint runs on all files in src/, not just staged ones)
     log_info "Re-staging frontend files to include linting/formatting changes..."
     cd "$repo_root"
-    echo "$frontend_files" | xargs git add
+    # Add all modified tracked TypeScript/Vue/JS files in frontend
+    git add -u frontend/src/ 2>/dev/null || true
+    # Also add any new files that might have been created
+    git add frontend/src/ 2>/dev/null || true
     log_success "Frontend files re-staged with linting/formatting changes"
 
     cd "$repo_root/frontend"

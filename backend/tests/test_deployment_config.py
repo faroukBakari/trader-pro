@@ -127,6 +127,7 @@ class TestDeploymentConfig:
     def test_valid_config(self) -> None:
         """Test valid deployment configuration."""
         config = DeploymentConfig(
+            api_base_url="/api/v1",
             nginx=NginxConfig(port=8000),
             servers={
                 "core": ServerConfig(port=8003, modules=[]),
@@ -141,6 +142,7 @@ class TestDeploymentConfig:
             },
         )
 
+        assert config.api_base_url == "/api/v1"
         assert config.nginx.port == 8000
         assert len(config.servers) == 3
         assert "core" in config.servers
@@ -148,6 +150,29 @@ class TestDeploymentConfig:
         assert "datafeed" in config.servers
         assert config.websocket_routes["orders"] == "broker"
         assert config.websocket_routes["bars"] == "datafeed"
+
+    def test_default_api_base_url(self) -> None:
+        """Test default api_base_url value."""
+        config = DeploymentConfig(
+            nginx=NginxConfig(port=8000),
+            servers={
+                "broker": ServerConfig(port=8001, modules=["broker"]),
+            },
+        )
+
+        assert config.api_base_url == "/api/v1"
+
+    def test_custom_api_base_url(self) -> None:
+        """Test custom api_base_url value."""
+        config = DeploymentConfig(
+            api_base_url="/api/v2",
+            nginx=NginxConfig(port=8000),
+            servers={
+                "broker": ServerConfig(port=8001, modules=["broker"]),
+            },
+        )
+
+        assert config.api_base_url == "/api/v2"
 
     def test_port_conflict_nginx_server(self) -> None:
         """Test port conflict between nginx and server."""
@@ -306,5 +331,6 @@ class TestLoadConfig:
         assert len(port_numbers) == len(set(port_numbers))  # No duplicates
 
         # Validate module servers have their respective modules configured
-        assert config.servers["broker"].modules == ["broker"]
-        assert config.servers["datafeed"].modules == ["datafeed"]
+        # Note: core is explicitly listed in config (auto-included in each server)
+        assert config.servers["broker"].modules == ["core", "broker"]
+        assert config.servers["datafeed"].modules == ["core", "datafeed"]

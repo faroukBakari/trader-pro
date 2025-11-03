@@ -258,7 +258,9 @@ class Module(ABC):
                                     f"✅ No changes in AsyncAPI spec for '{self.name}'"
                                 )
                     except Exception as e:
-                        logger.warning(f"⚠️  Could not read existing AsyncAPI spec: {e}")
+                        logger.warning(
+                            f"⚠️  Could not read existing AsyncAPI spec: {e}"
+                        )
                 else:
                     logger.info(f"📝 Creating new AsyncAPI spec for '{self.name}'")
 

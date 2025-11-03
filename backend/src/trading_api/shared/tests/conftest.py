@@ -7,10 +7,21 @@ trading_api/conftest.py and are available to all tests via pytest discovery.
 Each test suite can create an app with only the modules it needs for isolation.
 """
 
+import asyncio
+from typing import Generator
+
 import pytest
 
 from trading_api.app_factory import AppFactory, ModularFastAPI
 from trading_api.shared import FastWSAdapter
+
+
+@pytest.fixture(scope="session")
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Create an event loop for the entire test session."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
 
 
 def create_test_app(

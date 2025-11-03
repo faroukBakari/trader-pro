@@ -31,8 +31,8 @@ import signal
 import socket
 import subprocess
 import sys
-import threading
 import time
+from math import pi
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -143,56 +143,43 @@ class ServerManager:
     """Manages multiple backend server processes and nginx gateway.
 
     Handles process lifecycle, health checks, and graceful shutdown.
+    All processes run in detached background mode.
     """
 
-    def __init__(
-        self, config: DeploymentConfig, nginx_config_path: Path, detached: bool = False
-    ):
+    def __init__(self, config: DeploymentConfig):
         """Initialize server manager.
 
         Args:
             config: Deployment configuration
-            nginx_config_path: Path to nginx configuration file
-            detached: Run servers in detached background mode (like nohup)
+            nginx_config_path: Path to nginx configuration file (relative to working directory)
         """
         self.config = config
-        self.nginx_config_path = nginx_config_path
-        self.nginx_pid_file = nginx_config_path.parent / "nginx.pid"
-        self.pid_dir = nginx_config_path.parent / ".pids"
-        self.log_dir = nginx_config_path.parent / ".local" / "logs"
+
+        self.local_dir = Path(".local")
+        self.pid_dir = self.local_dir / "pids"
+        self.log_dir = self.local_dir / "logs"
+
+        self.nginx_config_path = self.local_dir / "nginx.conf"
+        self.nginx_pid_file = self.local_dir / "nginx.pid"
         self.unified_log_path = self.log_dir / "backend-unified.log"
-        self.detached = detached
+
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
-        self.nginx_process: subprocess.Popen[bytes] | None = None
-        self._shutdown_requested = False
 
         # Ensure PID and log directories exist
         self.pid_dir.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
-    def _generate_specs_and_clients(self) -> None:
-        """Generate OpenAPI/AsyncAPI specs and Python clients before startup.
-
-        This ensures specs and clients are always fresh on server start.
-        Runs synchronously before uvicorn starts to avoid race conditions.
-        """
-        backend_dir = Path(__file__).parent.parent
-
-        try:
-            logger.info("Generating specs and clients...")
-            subprocess.run(
-                ["make", "generate"],
-                cwd=backend_dir,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            logger.info("✅ Specs and clients generated successfully")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to generate specs/clients: {e}")
-            logger.error(f"STDOUT: {e.stdout}")
-            logger.error(f"STDERR: {e.stderr}")
-            # Continue anyway - server can start without fresh clients
+        if not self.nginx_config_path.exists():
+            logger.info("Generating nginx configuration...")
+            try:
+                with open(self.nginx_config_path, "w") as f:
+                    generate_nginx_config(config, f, pid_file=self.nginx_pid_file)
+                logger.info(f"Generated nginx config: {self.nginx_config_path}")
+            except Exception as e:
+                logger.error(f"Failed to generate nginx config: {e}")
+        else:
+            if not validate_nginx_config(self.nginx_config_path):
+                raise ValueError("Invalid nginx configuration")
 
     def _get_nginx_binary(self) -> str:
         """Get nginx binary path (local or system).
@@ -280,8 +267,10 @@ class ServerManager:
         env = os.environ.copy()
 
         # CRITICAL: Ensure core module is always included
-        # Core provides health checks and version endpoints required by nginx
-        # AppFactory will auto-include core, but we set it explicitly for clarity
+        # Core provides health checks and version endpoints required by nginx.
+        # This is correct architecture - every server process must host core
+        # for nginx health monitoring to work properly.
+        # AppFactory also auto-includes core, but we set it explicitly here.
         if modules and "core" not in modules:
             modules = ["core"] + modules
         elif not modules:
@@ -337,25 +326,15 @@ class ServerManager:
         )
         logger.info(f"Logs: {log_file_path}")
 
-        # Start process (detached or interactive)
-        if self.detached:
-            # Detached mode: let uvicorn handle all logging via log config
-            process = subprocess.Popen(
-                cmd,
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,  # Detach from parent session
-            )
-        else:
-            # Interactive mode: also let uvicorn handle logging
-            # Process output goes to configured log file
-            process = subprocess.Popen(
-                cmd,
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+        # Start process in detached mode
+        # Let uvicorn handle all logging via log config
+        process = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,  # Detach from parent session
+        )
 
         # Write PID file for process tracking
         self._write_pid_file(name, process.pid)
@@ -366,7 +345,7 @@ class ServerManager:
         """Start nginx gateway.
 
         Returns:
-            Started nginx process
+            Started nginx process (may become invalid after nginx daemonizes)
         """
         nginx_binary = self._get_nginx_binary()
 
@@ -378,82 +357,38 @@ class ServerManager:
 
         logger.info(f"Starting nginx on port {self.config.nginx.port}")
 
-        if self.detached:
-            # Detached mode: nginx manages its own logs
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
+        # Start nginx in detached mode
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        # Wait for nginx to write its PID file (nginx daemonizes quickly)
+        max_attempts = 20
+        for _ in range(max_attempts):
+            if self.nginx_pid_file.exists():
+                logger.debug(f"Nginx PID file created: {self.nginx_pid_file}")
+                break
+            time.sleep(0.05)
         else:
-            # Interactive mode
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
+            logger.warning("Nginx PID file not created within timeout")
 
         return process
 
-    def _get_pid_file(self, instance_name: str) -> Path:
-        """Get PID file path for a server instance.
-
-        Args:
-            instance_name: Server instance name
-
-        Returns:
-            Path to PID file
-        """
-        return self.pid_dir / f"{instance_name}.pid"
-
     def _write_pid_file(self, instance_name: str, pid: int) -> None:
-        """Write PID to file for process tracking.
-
-        Args:
-            instance_name: Server instance name
-            pid: Process ID
-        """
-        pid_file = self._get_pid_file(instance_name)
+        pid_file = self.pid_dir / f"{instance_name}.pid"
         pid_file.write_text(str(pid))
 
     def _read_pid_file(self, instance_name: str) -> int | None:
-        """Read PID from file.
-
-        Args:
-            instance_name: Server instance name
-
-        Returns:
-            Process ID or None if file doesn't exist
-        """
-        pid_file = self._get_pid_file(instance_name)
-        if not pid_file.exists():
-            return None
-
+        pid_file = self.pid_dir / f"{instance_name}.pid"
         try:
             return int(pid_file.read_text().strip())
         except (ValueError, OSError):
             return None
 
-    def _remove_pid_file(self, instance_name: str) -> None:
-        """Remove PID file.
-
-        Args:
-            instance_name: Server instance name
-        """
-        pid_file = self._get_pid_file(instance_name)
-        if pid_file.exists():
-            pid_file.unlink()
-
     def _is_process_running(self, pid: int) -> bool:
-        """Check if a process is running.
-
-        Args:
-            pid: Process ID
-
-        Returns:
-            True if process is running, False otherwise
-        """
         try:
             os.kill(pid, 0)  # Signal 0 just checks if process exists
             return True
@@ -461,15 +396,10 @@ class ServerManager:
             return False
 
     async def _force_kill_port_holders(self, ports: list[int]) -> None:
-        """Force kill processes holding specified ports.
-
-        Args:
-            ports: List of ports to free
-        """
-        killed_any = False
+        # Step 1: Try SIGTERM first (graceful)
+        terminated_any = False
 
         try:
-            # Use lsof to find processes holding the ports
             for port in ports:
                 result = subprocess.run(
                     ["lsof", "-ti", f":{port}"],
@@ -483,7 +413,51 @@ class ServerManager:
                     for pid in pids:
                         if self._is_process_running(pid):
                             logger.warning(
-                                f"Force killing PID {pid} holding port {port}"
+                                f"Sending SIGTERM to PID {pid} holding port {port}"
+                            )
+                            try:
+                                os.kill(pid, signal.SIGTERM)
+                                terminated_any = True
+                            except (OSError, ProcessLookupError) as e:
+                                logger.warning(f"Failed to terminate PID {pid}: {e}")
+
+        except FileNotFoundError:
+            logger.warning("lsof command not available, cannot identify port holders")
+        except Exception as e:
+            logger.warning(f"Error identifying port holders: {e}")
+
+        if terminated_any:
+            # Wait for graceful termination
+            await asyncio.sleep(1.0)
+
+            # Check which ports are still in use
+            remaining_ports = [port for port in ports if is_port_in_use(port)]
+
+            if not remaining_ports:
+                logger.info("All ports freed after SIGTERM")
+                return
+
+            logger.warning(f"Some ports still in use after SIGTERM: {remaining_ports}")
+            ports = remaining_ports
+
+        # Step 2: Force kill with SIGKILL as last resort
+        killed_any = False
+
+        try:
+            for port in ports:
+                result = subprocess.run(
+                    ["lsof", "-ti", f":{port}"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                if result.returncode == 0 and result.stdout.strip():
+                    pids = [int(pid) for pid in result.stdout.strip().split()]
+                    for pid in pids:
+                        if self._is_process_running(pid):
+                            logger.warning(
+                                f"Force killing (SIGKILL) PID {pid} holding port {port}"
                             )
                             try:
                                 os.kill(pid, signal.SIGKILL)
@@ -504,14 +478,6 @@ class ServerManager:
             await asyncio.sleep(0.3)
 
     async def _check_health(self, port: int) -> bool:
-        """Check if a service is healthy.
-
-        Args:
-            port: Port to check
-
-        Returns:
-            True if healthy, False otherwise
-        """
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
@@ -521,112 +487,9 @@ class ServerManager:
             except Exception:
                 return False
 
-    async def get_status(self) -> dict[str, Any]:
-        """Get status of all backend processes.
-
-        Returns:
-            Status dictionary with process information
-        """
-        status: dict[str, Any] = {
-            "running": False,
-            "nginx": {"running": False, "pid": None, "port": None, "healthy": False},
-            "servers": {},
-        }
-
-        # Check nginx status
-        if self.nginx_pid_file.exists():
-            try:
-                nginx_pid = int(self.nginx_pid_file.read_text().strip())
-                if self._is_process_running(nginx_pid):
-                    nginx_port = self.config.nginx.port
-                    status["nginx"] = {
-                        "running": True,
-                        "pid": nginx_pid,
-                        "port": nginx_port,
-                        "healthy": await self._check_health(nginx_port),
-                    }
-                    status["running"] = True
-            except (ValueError, OSError):
-                pass
-
-        # Check server instance statuses
-        for server_name, server_config in self.config.servers.items():
-            server_instances = []
-
-            for instance_idx in range(server_config.instances):
-                port = server_config.port + instance_idx
-                instance_name = f"{server_name}-{instance_idx}"
-                pid = self._read_pid_file(instance_name)
-
-                instance_info = {
-                    "name": instance_name,
-                    "port": port,
-                    "modules": server_config.modules,
-                    "running": False,
-                    "pid": None,
-                    "healthy": False,
-                }
-
-                if pid and self._is_process_running(pid):
-                    instance_info["running"] = True
-                    instance_info["pid"] = pid
-                    instance_info["healthy"] = await self._check_health(port)
-                    status["running"] = True
-
-                server_instances.append(instance_info)
-
-            status["servers"][server_name] = server_instances
-
-        return status
-
-    async def stop_all_by_pid(self, timeout: float = 10.0) -> None:
-        """Stop all processes using PID files.
-
-        This allows stopping processes that were started by another instance
-        of the manager.
-
-        Args:
-            timeout: Maximum time to wait for graceful shutdown
-        """
-        logger.info("Stopping backend processes using PID files...")
-
-        # Step 1: Stop nginx
-        if self.nginx_pid_file.exists():
-            try:
-                nginx_pid = int(self.nginx_pid_file.read_text().strip())
-                if self._is_process_running(nginx_pid):
-                    logger.info(f"Stopping nginx (PID: {nginx_pid})...")
-                    self._stop_process_by_pid(nginx_pid, "nginx", timeout)
-                self.nginx_pid_file.unlink()
-            except (ValueError, OSError) as e:
-                logger.warning(f"Failed to stop nginx: {e}")
-
-        # Step 2: Stop server instances
-        for server_name, server_config in self.config.servers.items():
-            for instance_idx in range(server_config.instances):
-                instance_name = f"{server_name}-{instance_idx}"
-                pid = self._read_pid_file(instance_name)
-
-                if pid and self._is_process_running(pid):
-                    logger.info(f"Stopping {instance_name} (PID: {pid})...")
-                    self._stop_process_by_pid(pid, instance_name, timeout)
-
-                self._remove_pid_file(instance_name)
-
-        logger.info("All processes stopped")
-
-        # Wait for ports to be released
-        await self._wait_for_ports_release()
-
     async def _wait_for_ports_release(
         self, max_wait: float = 2.0, max_retries: int = 3
     ) -> None:
-        """Wait for all configured ports to be released with retry and force kill.
-
-        Args:
-            max_wait: Maximum time to wait per retry in seconds
-            max_retries: Number of retries before giving up
-        """
         all_ports = [port for _, port in self.config.get_all_ports()]
 
         for retry in range(max_retries):
@@ -681,14 +544,7 @@ class ServerManager:
                 logger.error("Manual intervention may be required")
                 logger.error("Try: sudo lsof -ti :<port> | xargs kill -9")
 
-    def _stop_process_by_pid(self, pid: int, name: str, timeout: float) -> None:
-        """Stop a process by PID.
-
-        Args:
-            pid: Process ID
-            name: Process name for logging
-            timeout: Maximum time to wait before force kill
-        """
+    def _stop_process(self, pid: int, name: str, timeout: float) -> None:
         if not self._is_process_running(pid):
             logger.info(f"{name} already stopped")
             return
@@ -702,7 +558,7 @@ class ServerManager:
                 if not self._is_process_running(pid):
                     logger.info(f"{name} stopped gracefully")
                     return
-                time.sleep(0.05)  # Check more frequently
+                time.sleep(0.1)  # Check more frequently
 
             # Force kill if timeout exceeded
             logger.warning(f"{name} did not stop gracefully, force killing")
@@ -712,16 +568,43 @@ class ServerManager:
         except (OSError, ProcessLookupError) as e:
             logger.warning(f"Error stopping {name}: {e}")
 
+    def _stop_nginx(self, timeout: float) -> None:
+        # Always try nginx PID file first (nginx daemonizes, so Popen object is unreliable)
+        if self.nginx_pid_file.exists():
+            with open(self.nginx_pid_file, "r") as f:
+                nginx_pid = int(f.read().strip())
+
+            logger.info(f"Stopping nginx using PID file (PID: {nginx_pid})...")
+
+            # Send QUIT signal for graceful shutdown
+            os.kill(nginx_pid, signal.SIGQUIT)
+
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                # Check if process is still running
+                try:
+                    os.kill(nginx_pid, 0)  # Check if process exists
+                    time.sleep(0.05)  # Check more frequently
+                except OSError:
+                    # Process no longer exists
+                    logger.info("nginx stopped gracefully")
+                    # Clean up PID file if it still exists
+                    if self.nginx_pid_file.exists():
+                        self.nginx_pid_file.unlink()
+                    return
+
+            # Timeout - force kill
+            logger.warning("nginx did not stop gracefully, force killing")
+            os.kill(nginx_pid, signal.SIGKILL)
+            time.sleep(0.1)  # Brief wait for cleanup
+            if self.nginx_pid_file.exists():
+                self.nginx_pid_file.unlink()
+            logger.info("nginx force killed")
+        else:
+            raise RuntimeError("Nginx PID file not found, cannot stop nginx")
+
     async def start_all(self) -> bool:
-        """Start all server instances and nginx gateway.
-
-        Returns:
-            True if all servers started successfully, False otherwise
-        """
         logger.info("Starting multi-process backend...")
-
-        # Generate specs and clients before starting servers
-        self._generate_specs_and_clients()
 
         # Check all ports are available
         all_available, blocked_ports = check_all_ports(self.config)
@@ -773,7 +656,7 @@ class ServerManager:
 
         # Start nginx
         try:
-            self.nginx_process = self._start_nginx()
+            self._start_nginx()
             logger.info("Nginx started successfully")
         except Exception as e:
             logger.error(f"Failed to start nginx: {e}")
@@ -794,158 +677,89 @@ class ServerManager:
         return True
 
     async def stop_all(self, timeout: float = 10.0) -> None:
-        """Stop all servers gracefully.
+        logger.info("Stopping backend processes using PID files...")
 
-        Shutdown order: nginx → functional modules → core
-
-        Args:
-            timeout: Maximum time to wait for graceful shutdown before force kill
-        """
-        if self._shutdown_requested:
-            return
-
-        self._shutdown_requested = True
-        logger.info("Shutting down all servers...")
-
-        # Step 1: Stop nginx first using its PID file (if available)
-        if self.nginx_process:
-            logger.info("Stopping nginx...")
-            self._stop_nginx(timeout)
-            self.nginx_process = None
-
-        # Step 2: Stop functional module servers
-        # Step 3: Stop core server last (if exists)
-        # For now, stop all server processes in reverse order
-        for instance_name in reversed(list(self.processes.keys())):
-            process = self.processes[instance_name]
-            logger.info(f"Stopping {instance_name}...")
-            self._stop_process(process, instance_name, timeout)
-
-        self.processes.clear()
-        logger.info("All servers stopped")
-
-    def _stop_process(
-        self, process: subprocess.Popen[bytes], name: str, timeout: float
-    ) -> None:
-        """Stop a single process gracefully with timeout.
-
-        Args:
-            process: Process to stop
-            name: Process name for logging
-            timeout: Maximum time to wait before force kill
-        """
-        if process.poll() is not None:
-            logger.info(f"{name} already stopped")
-            self._remove_pid_file(name)
-            return
-
-        # Try graceful shutdown
-        try:
-            process.send_signal(signal.SIGTERM)
-            start_time = time.time()
-
-            while time.time() - start_time < timeout:
-                if process.poll() is not None:
-                    logger.info(f"{name} stopped gracefully")
-                    self._remove_pid_file(name)
-                    return
-                time.sleep(0.05)  # Check more frequently
-
-            # Force kill if timeout exceeded
-            logger.warning(f"{name} did not stop gracefully, force killing")
-            process.kill()
-            process.wait(timeout=1)  # Reduced from 2s
-            self._remove_pid_file(name)
-
-        except Exception as e:
-            logger.error(f"Error stopping {name}: {e}")
-            try:
-                process.kill()
-                self._remove_pid_file(name)
-            except Exception:
-                pass
-
-    def _stop_nginx(self, timeout: float) -> None:
-        """Stop nginx using its PID file for proper shutdown.
-
-        Args:
-            timeout: Maximum time to wait before force kill
-        """
-        # Try using nginx's quit signal via PID file first
+        # Step 1: Stop nginx
         if self.nginx_pid_file.exists():
             try:
-                with open(self.nginx_pid_file, "r") as f:
-                    nginx_pid = int(f.read().strip())
+                nginx_pid = int(self.nginx_pid_file.read_text().strip())
+                if self._is_process_running(nginx_pid):
+                    logger.info(f"Stopping nginx (PID: {nginx_pid})...")
+                    self._stop_process(nginx_pid, "nginx", timeout)
+                self.nginx_pid_file.unlink()
+            except (ValueError, OSError) as e:
+                logger.warning(f"Failed to stop nginx: {e}")
 
-                logger.info(f"Stopping nginx using PID file (PID: {nginx_pid})...")
+        # Step 2: Stop server instances
+        for server_name, server_config in self.config.servers.items():
+            for instance_idx in range(server_config.instances):
+                instance_name = f"{server_name}-{instance_idx}"
+                pid = self._read_pid_file(instance_name)
 
-                # Send QUIT signal for graceful shutdown
-                os.kill(nginx_pid, signal.SIGQUIT)
+                if pid and self._is_process_running(pid):
+                    logger.info(f"Stopping {instance_name} (PID: {pid})...")
+                    self._stop_process(pid, instance_name, timeout)
 
-                start_time = time.time()
-                while time.time() - start_time < timeout:
-                    # Check if PID file still exists
-                    if not self.nginx_pid_file.exists():
-                        logger.info("nginx stopped gracefully")
-                        return
+        logger.info("All processes stopped")
 
-                    # Check if process is still running
-                    try:
-                        os.kill(nginx_pid, 0)  # Check if process exists
-                        time.sleep(0.05)  # Check more frequently
-                    except OSError:
-                        # Process no longer exists
-                        logger.info("nginx stopped gracefully")
-                        # Clean up PID file if it still exists
-                        if self.nginx_pid_file.exists():
-                            self.nginx_pid_file.unlink()
-                        return
+        # Wait for ports to be released
+        await self._wait_for_ports_release()
 
-                # Timeout - force kill
-                logger.warning("nginx did not stop gracefully, force killing")
-                try:
-                    os.kill(nginx_pid, signal.SIGKILL)
-                    if self.nginx_pid_file.exists():
-                        self.nginx_pid_file.unlink()
-                except OSError:
-                    pass
+    async def get_status(self) -> dict[str, Any]:
+        status: dict[str, Any] = {
+            "running": False,
+            "nginx": {"running": False, "pid": None, "port": None, "healthy": False},
+            "servers": {},
+        }
 
-            except (ValueError, OSError, FileNotFoundError) as e:
-                logger.warning(f"Failed to stop nginx using PID file: {e}")
-                # Fall back to stopping the process directly
-                if self.nginx_process:
-                    self._stop_process(self.nginx_process, "nginx", timeout)
+        # Check nginx status
+        if self.nginx_pid_file.exists():
+            try:
+                nginx_pid = int(self.nginx_pid_file.read_text().strip())
+                if self._is_process_running(nginx_pid):
+                    nginx_port = self.config.nginx.port
+                    status["nginx"] = {
+                        "running": True,
+                        "pid": nginx_pid,
+                        "port": nginx_port,
+                        "healthy": await self._check_health(nginx_port),
+                    }
+                    status["running"] = True
+            except (ValueError, OSError):
+                pass
 
-        else:
-            # PID file doesn't exist, fall back to process-based stop
-            logger.warning("nginx PID file not found, using process-based stop")
-            if self.nginx_process:
-                self._stop_process(self.nginx_process, "nginx", timeout)
+        # Check server instance statuses
+        for server_name, server_config in self.config.servers.items():
+            server_instances = []
 
-    def wait_for_shutdown_signal(self) -> None:
-        """Wait for shutdown signal (Ctrl+C).
+            for instance_idx in range(server_config.instances):
+                port = server_config.port + instance_idx
+                instance_name = f"{server_name}-{instance_idx}"
+                pid = self._read_pid_file(instance_name)
 
-        Blocks until SIGINT or SIGTERM is received.
-        """
-        shutdown_event = threading.Event()
+                instance_info = {
+                    "name": instance_name,
+                    "port": port,
+                    "modules": server_config.modules,
+                    "running": False,
+                    "pid": None,
+                    "healthy": False,
+                }
 
-        def signal_handler(sig: int, frame: Any) -> None:
-            logger.info(f"Received signal {sig}, initiating shutdown...")
-            shutdown_event.set()
+                if pid and self._is_process_running(pid):
+                    instance_info["running"] = True
+                    instance_info["pid"] = pid
+                    instance_info["healthy"] = await self._check_health(port)
+                    status["running"] = True
 
-        # Register signal handlers
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+                server_instances.append(instance_info)
 
-        # Wait for shutdown signal
-        try:
-            shutdown_event.wait()
-        except KeyboardInterrupt:
-            logger.info("Keyboard interrupt received")
-            shutdown_event.set()
+            status["servers"][server_name] = server_instances
+
+        return status
 
     async def run(self) -> int:
-        """Run the multi-process backend.
+        """Run the multi-process backend in detached mode.
 
         Returns:
             Exit code (0 for success, 1 for failure)
@@ -956,21 +770,12 @@ class ServerManager:
             if not success:
                 return 1
 
-            if self.detached:
-                # Detached mode: return immediately after servers start
-                logger.info("All servers running in background (detached mode)")
-                logger.info(f"Server logs: {self.log_dir}/*.log")
-                logger.info(f"Tail logs: make logs-tail")
-                logger.info(f"Stop servers: make backend-manager-stop")
-                return 0
-            else:
-                # Interactive mode: wait for shutdown signal
-                logger.info("Press Ctrl+C to stop all servers")
-                self.wait_for_shutdown_signal()
-
-                # Stop all servers
-                await self.stop_all()
-                return 0
+            # Return immediately after servers start (detached mode)
+            logger.info("All servers running in background (detached mode)")
+            logger.info(f"Server logs: {self.log_dir}/*.log")
+            logger.info(f"Tail logs: make logs-tail")
+            logger.info(f"Stop servers: make backend-manager-stop")
+            return 0
 
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
@@ -1012,6 +817,13 @@ def generate_upstream_blocks(config: DeploymentConfig) -> str:
 def generate_rest_location_blocks(config: DeploymentConfig) -> str:
     """Generate nginx location blocks for REST API routing.
 
+    All servers host the core module automatically (provides health checks,
+    version info, and docs). Each server also hosts its configured modules.
+
+    Routing strategy: Simple prefix matching by module name.
+    - {api_base_url}/core/* routes to first available server (all have core)
+    - {api_base_url}/{module}/* routes to server hosting that module
+
     Args:
         config: Deployment configuration
 
@@ -1019,34 +831,19 @@ def generate_rest_location_blocks(config: DeploymentConfig) -> str:
         Nginx location configuration blocks
     """
     locations = []
+    processed_modules = set()
 
-    # Core endpoints routing
-    # NOTE: All servers include the core module automatically, so we can route
-    # core endpoints to any backend server. We prefer a dedicated 'core' server
-    # if it exists, otherwise use the first available server.
-    fallback_server = (
-        "core" if "core" in config.servers else list(config.servers.keys())[0]
-    )
-
-    core_location = f"""        # Core endpoints (health, versions, docs)
-        # All servers have core module, routing to {fallback_server}
-        location ~ ^/api/v1/(core/health|core/version|core/versions|health|version|versions|docs|redoc|openapi.json)$ {{
-            proxy_pass http://{fallback_server}_backend;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-        }}"""
-    locations.append(core_location)
-
-    # Module-specific endpoints
+    # Route each server's modules
     for server_name, server_config in config.servers.items():
-        if server_name == "core":
-            continue
-
         for module in server_config.modules:
+            # Skip if we've already routed this module
+            if module in processed_modules:
+                continue
+
+            processed_modules.add(module)
+
             module_location = f"""        # {module.capitalize()} module endpoints
-        location /api/v1/{module}/ {{
+        location {config.api_base_url}/{module}/ {{
             proxy_pass http://{server_name}_backend;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
@@ -1087,8 +884,8 @@ def generate_websocket_location_block(config: DeploymentConfig) -> str:
 {chr(10).join(route_mappings)}
     }}"""
 
-        location_block = """        # WebSocket endpoint with query param routing
-        location /api/v1/ws {
+        location_block = f"""        # WebSocket endpoint with query param routing
+        location {config.api_base_url}/ws {{
             proxy_pass http://$ws_backend;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -1099,7 +896,7 @@ def generate_websocket_location_block(config: DeploymentConfig) -> str:
             proxy_set_header X-Forwarded-Proto $scheme;
             proxy_read_timeout 3600s;
             proxy_send_timeout 3600s;
-        }"""
+        }}"""
 
         return map_block + "\n\n" + location_block
     else:
@@ -1107,7 +904,7 @@ def generate_websocket_location_block(config: DeploymentConfig) -> str:
         locations = []
         for module, server_name in config.websocket_routes.items():
             location = f"""        # WebSocket route: {module} module
-        location /api/v1/{module}/ws {{
+        location {config.api_base_url}/{module}/ws {{
             proxy_pass http://{server_name}_backend;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
@@ -1124,12 +921,15 @@ def generate_websocket_location_block(config: DeploymentConfig) -> str:
         return "\n\n".join(locations)
 
 
-def generate_nginx_config(config: DeploymentConfig, output_file: TextIO) -> None:
+def generate_nginx_config(
+    config: DeploymentConfig, output_file: TextIO, pid_file: Path | None = None
+) -> None:
     """Generate complete nginx configuration.
 
     Args:
         config: Deployment configuration
         output_file: Output file handle
+        pid_file: Optional custom PID file path (defaults to backend_dir/nginx.pid)
     """
     # Generate all configuration sections
     upstreams = generate_upstream_blocks(config)
@@ -1152,12 +952,14 @@ def generate_nginx_config(config: DeploymentConfig, output_file: TextIO) -> None
 
     # Use local log paths for development
     backend_dir = Path(__file__).parent.parent
-    log_dir = backend_dir / ".local" / "logs"
+    local_dir = backend_dir / ".local"
+    log_dir = local_dir / "logs"
     access_log = log_dir / "nginx-access.log"
     error_log = log_dir / "nginx-error.log"
 
-    # PID file path
-    pid_file = backend_dir / "nginx.pid"
+    # PID file path (use custom or default)
+    if pid_file is None:
+        pid_file = local_dir / "nginx.pid"
 
     # Generate complete configuration
     nginx_config = f"""# Auto-generated nginx configuration for multi-process backend
@@ -1193,7 +995,7 @@ http {{
 
         # Root location (redirect to docs)
         location = / {{
-            return 302 /api/v1/docs;
+            return 302 {config.api_base_url}/core/docs;
         }}
     }}
 }}
@@ -1267,39 +1069,12 @@ async def cmd_start(args: argparse.Namespace) -> int:
         logger.error(f"Failed to load configuration: {e}")
         return 1
 
-    # Determine nginx config path
-    nginx_config_path = args.nginx_config
-    if not nginx_config_path:
-        nginx_config_path = Path("nginx-dev.conf")
-
-    # Generate nginx config if it doesn't exist or if requested
-    if args.generate_nginx or not nginx_config_path.exists():
-        logger.info("Generating nginx configuration...")
-        try:
-            with open(nginx_config_path, "w") as f:
-                generate_nginx_config(config, f)
-            logger.info(f"Generated nginx config: {nginx_config_path}")
-        except Exception as e:
-            logger.error(f"Failed to generate nginx config: {e}")
-            return 1
-
-    # Verify nginx config exists
-    if not nginx_config_path.exists():
-        logger.error(f"Nginx config not found: {nginx_config_path}")
-        logger.error("Run with --generate-nginx to create it")
-        return 1
-
-    # Validate nginx config if requested
-    if args.validate:
-        if not validate_nginx_config(nginx_config_path):
-            return 1
-
-    # Create and run server manager (detached mode by default)
-    detached = not args.foreground  # Detached unless --foreground is specified
-    manager = ServerManager(config, nginx_config_path, detached=detached)
+    # Create and run server manager (always runs in detached mode)
+    # The ServerManager handles nginx config generation internally
+    manager = ServerManager(config)
 
     logger.info("=" * 60)
-    logger.info("Starting multi-process backend...")
+    logger.info("Starting multi-process backend (detached mode)...")
     logger.info("=" * 60)
     logger.info(f"Nginx gateway: http://127.0.0.1:{config.nginx.port}")
     logger.info("Backend servers:")
@@ -1337,18 +1112,13 @@ async def cmd_stop(args: argparse.Namespace) -> int:
         logger.error(f"Failed to load configuration: {e}")
         return 1
 
-    # Determine nginx config path
-    nginx_config_path = args.nginx_config
-    if not nginx_config_path:
-        nginx_config_path = Path("nginx-dev.conf")
-
     # Create server manager (without starting)
-    manager = ServerManager(config, nginx_config_path)
+    manager = ServerManager(config)
 
     logger.info("Stopping backend processes...")
 
     # Use stop_all_by_pid to stop processes tracked by PID files
-    await manager.stop_all_by_pid(timeout=args.timeout)
+    await manager.stop_all(timeout=args.timeout)
 
     return 0
 
@@ -1369,13 +1139,8 @@ async def cmd_status(args: argparse.Namespace) -> int:
         logger.error(f"Failed to load configuration: {e}")
         return 1
 
-    # Determine nginx config path
-    nginx_config_path = args.nginx_config
-    if not nginx_config_path:
-        nginx_config_path = Path("nginx-dev.conf")
-
     # Create server manager (without starting)
-    manager = ServerManager(config, nginx_config_path)
+    manager = ServerManager(config)
 
     # Get and display status
     status = await manager.get_status()
@@ -1540,11 +1305,6 @@ Examples:
         help="Deployment configuration file (default: dev-config.yaml)",
     )
     start_parser.add_argument(
-        "--nginx-config",
-        type=Path,
-        help="Nginx configuration file (default: nginx-dev.conf)",
-    )
-    start_parser.add_argument(
         "--generate-nginx",
         action="store_true",
         help="Force regenerate nginx config",
@@ -1553,11 +1313,6 @@ Examples:
         "--validate",
         action="store_true",
         help="Validate nginx config before starting",
-    )
-    start_parser.add_argument(
-        "--foreground",
-        action="store_true",
-        help="Run in foreground (default: run detached in background)",
     )
 
     # Stop command
@@ -1571,11 +1326,6 @@ Examples:
         nargs="?",
         default=Path("dev-config.yaml"),
         help="Deployment configuration file (default: dev-config.yaml)",
-    )
-    stop_parser.add_argument(
-        "--nginx-config",
-        type=Path,
-        help="Nginx configuration file (default: nginx-dev.conf)",
     )
     stop_parser.add_argument(
         "--timeout",
@@ -1596,11 +1346,6 @@ Examples:
         default=Path("dev-config.yaml"),
         help="Deployment configuration file (default: dev-config.yaml)",
     )
-    status_parser.add_argument(
-        "--nginx-config",
-        type=Path,
-        help="Nginx configuration file (default: nginx-dev.conf)",
-    )
 
     # Restart command
     restart_parser = subparsers.add_parser(
@@ -1613,11 +1358,6 @@ Examples:
         nargs="?",
         default=Path("dev-config.yaml"),
         help="Deployment configuration file (default: dev-config.yaml)",
-    )
-    restart_parser.add_argument(
-        "--nginx-config",
-        type=Path,
-        help="Nginx configuration file (default: nginx-dev.conf)",
     )
     restart_parser.add_argument(
         "--timeout",
@@ -1634,11 +1374,6 @@ Examples:
         "--validate",
         action="store_true",
         help="Validate nginx config before starting",
-    )
-    restart_parser.add_argument(
-        "--foreground",
-        action="store_true",
-        help="Run in foreground (default: run detached in background)",
     )
 
     # Gen-nginx-conf command (debug)

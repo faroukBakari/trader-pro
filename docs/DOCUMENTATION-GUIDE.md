@@ -36,13 +36,14 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### backend/docs/ (Current Backend Documentation)
 
-| File                                             | Purpose                                        |
-| ------------------------------------------------ | ---------------------------------------------- |
-| **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture and module system |
-| **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules |
-| **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation    |
-| **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide              |
-| **backend/docs/VERSIONING.md**                   | API versioning strategy and implementation     |
+| File                                             | Purpose                                            |
+| ------------------------------------------------ | -------------------------------------------------- |
+| **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture and module system     |
+| **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules     |
+| **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation        |
+| **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide                  |
+| **backend/docs/VERSIONING.md**                   | API versioning strategy and implementation         |
+| **backend/docs/BACKEND_TESTING.md**              | Backend testing strategy and overhead optimization |
 
 > **Note**: backend/docs/outdated/ contains historical documentation from previous refactors. These files are kept for reference only and should NOT be used for current implementation guidance.
 
@@ -136,7 +137,8 @@ Complete index of all project documentation with descriptions and reading paths.
 4. **API-METHODOLOGY.md** - TDD implementation workflow
 5. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
 6. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
-7. **docs/TESTING.md** - Testing strategies
+7. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
+8. **docs/TESTING.md** - General testing strategies
 
 ### Frontend Developers
 
@@ -201,7 +203,8 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### Testing
 
-- **docs/TESTING.md** - Testing strategies
+- **docs/TESTING.md** - General testing strategies
+- **backend/docs/BACKEND_TESTING.md** - Backend integration testing and overhead optimization
 - **smoke-tests/README.md** - E2E smoke tests
 - **frontend/src/services/**tests**/README.md** - Service testing
 
@@ -234,15 +237,15 @@ Complete index of all project documentation with descriptions and reading paths.
 
 - **Root Documentation**: 10 essential project-wide guides
 - **docs/ Folder**: 7 core cross-cutting documentation files
-- **Backend Documentation**: 5 current backend guides + 1 third-party doc
+- **Backend Documentation**: 6 current backend guides + 1 third-party doc
 - **Frontend Documentation**: 15 frontend-specific guides + 2 third-party docs
 - **Auto-Generated Docs**: 40+ API model references
 - **DevOps & Git**: 3 setup and operations guides
-- **Testing**: 2 testing guides
+- **Testing**: 3 testing guides
 
 ### Total Documentation Files
 
-- **User-Maintained**: ~40 actively maintained documentation files
+- **User-Maintained**: ~41 actively maintained documentation files
 - **Auto-Generated**: 40+ API model documentation files
 - **Third-Party**: 3 external package documentation files
 - **Outdated/Historical**: 13 files in backend/docs/outdated/ (reference only)
@@ -257,5 +260,5 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ---
 
-**Last Updated**: November 2, 2025
+**Last Updated**: November 3, 2025
 **Maintained by**: Development Team
