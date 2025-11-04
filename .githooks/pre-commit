@@ -131,10 +131,25 @@ if [[ -n "$backend_files" ]]; then
         fi
     fi
 
-    if ! run_check "OpenAPI/AsyncAPI specs & PythonClients validation" "make generate" "$repo_root/backend"; then
-        log_error "OpenAPI/AsyncAPI spec and/or PythonClients export/validation failed [make generate]"
+    # Generate backend specs (OpenAPI/AsyncAPI) and validate Python clients
+    if ! run_check "Backend specs & Python clients generation" "make generate" "$repo_root/backend"; then
+        log_error "Backend spec generation and/or Python client validation failed"
         exit 1
     fi
+    
+    # Regenerate frontend TypeScript clients from updated backend specs
+    log_info "Regenerating frontend TypeScript clients from updated backend specs..."
+    if ! run_check "Frontend client generation" "make client-generate" "$repo_root/frontend"; then
+        log_error "Frontend client generation failed (backend specs may be invalid)"
+        exit 1
+    fi
+    
+    # Re-stage generated frontend clients
+    log_info "Re-staging generated frontend TypeScript clients..."
+    cd "$repo_root"
+    git add -u frontend/src/clients/ 2>/dev/null || true
+    git add frontend/src/clients/ 2>/dev/null || true
+    log_success "Frontend clients re-staged"
 fi
 
 # Frontend TypeScript/Vue checks
@@ -155,7 +170,21 @@ if [[ -n "$frontend_files" ]]; then
         npm install
     fi
 
-    # Linting (includes client generation and auto-fix)
+    # Ensure backend specs exist before running frontend checks
+    if ! find "$repo_root/backend/src/trading_api/modules" -type f -path "*/specs_generated/*_openapi.json" 2>/dev/null | grep -q .; then
+        log_error "Backend specs not found! Frontend code requires backend specs."
+        log_info "Generate backend specs first: cd backend && make generate"
+        exit 1
+    fi
+    
+    # Generate/update frontend clients from backend specs
+    log_info "Generating frontend TypeScript clients from backend specs..."
+    if ! run_check "Frontend client generation" "make client-generate" "$repo_root/frontend"; then
+        log_error "Frontend client generation failed"
+        exit 1
+    fi
+    
+    # Linting (auto-fix)
     if ! run_check "Frontend linting" "make lint" "$repo_root/frontend"; then
         log_warning "Run 'cd frontend && make lint' to fix linting issues"
         exit 1
