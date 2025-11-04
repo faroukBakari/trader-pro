@@ -161,7 +161,7 @@ export class ApiAdapter {
   private datafeedConfig: DatafeedConfiguration
 
   constructor() {
-    const basePath = import.meta.env.TRADER_API_BASE_PATH || ''
+    const basePath = import.meta.env.VITE_TRADER_API_BASE_PATH || ''
 
     // Initialize per-module configurations
     // In multi-process mode, these could point to different services:

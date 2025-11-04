@@ -4,14 +4,14 @@
 #
 # Usage:
 #   ./scripts/generate-openapi-client.sh
-#   TRADER_API_BASE_PATH="/api" ./scripts/generate-openapi-client.sh
+#   VITE_TRADER_API_BASE_PATH="/api" ./scripts/generate-openapi-client.sh
 
 set -e
 
 # Configuration
 BACKEND_DIR="../backend"
 BACKEND_MODULES_DIR="$BACKEND_DIR/src/trading_api/modules"
-BASE_PATH="${TRADER_API_BASE_PATH:-}"
+BASE_PATH="${VITE_TRADER_API_BASE_PATH:-}"
 
 # Colors for output
 GREEN='\033[0;32m'

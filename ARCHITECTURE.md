@@ -2078,6 +2078,91 @@ Services Layer
 - **backend/docs/** - Backend-specific docs
 - **frontend/** - Frontend implementation docs
 
+## Development Environment
+
+### Vite Development Proxy
+
+**Purpose**: The frontend uses Vite's built-in proxy to forward API requests to the backend during development, avoiding CORS issues and simplifying configuration.
+
+**Configuration** (`frontend/vite.config.ts`):
+
+```typescript
+server: {
+  port: parseInt(process.env.FRONTEND_PORT || '5173'),
+  proxy: {
+    '/api/': {
+      target: process.env.VITE_API_URL || 'http://localhost:8000',
+      changeOrigin: true,
+      secure: false,
+      ws: true, // Enable WebSocket proxying
+    },
+  },
+}
+```
+
+**How It Works**:
+
+| Request Path                       | Proxied To                         | Notes                 |
+| ---------------------------------- | ---------------------------------- | --------------------- |
+| `http://localhost:5173/api/v1/...` | `http://localhost:8000/api/v1/...` | REST API calls        |
+| `ws://localhost:5173/api/v1/ws`    | `ws://localhost:8000/api/v1/ws`    | WebSocket connections |
+| `http://localhost:5173/health`     | `http://localhost:8000/health`     | Health checks         |
+| `http://localhost:5173/src/...`    | (No proxy - served by Vite)        | Frontend assets       |
+
+**Environment Variables**:
+
+- **`VITE_API_URL`**: Backend URL for proxy target (default: `http://localhost:8000`)
+
+  - **MUST** have `VITE_` prefix to be accessible in browser code
+  - Used by Vite proxy configuration at build time
+  - Example: `VITE_API_URL=http://localhost:8000`
+
+- **`VITE_TRADER_API_BASE_PATH`**: API base path for generated clients (default: empty string)
+  - **MUST** have `VITE_` prefix to be exposed to frontend
+  - Used by OpenAPI clients for constructing request URLs
+  - Empty in development (relies on Vite proxy at `/api/`)
+  - Set for production: `VITE_TRADER_API_BASE_PATH=/api`
+
+**Development Flow**:
+
+```
+Frontend Code (Browser)
+    ↓
+apiAdapter.ts → new BrokerApi(basePath: '')
+    ↓
+HTTP Request: GET http://localhost:5173/orders
+    ↓
+Vite Proxy (intercepts /api/* pattern)
+    ↓
+Forward to: GET http://localhost:8000/orders
+    ↓
+Backend FastAPI (handles request)
+```
+
+**Benefits**:
+
+- ✅ **No CORS Issues**: Same-origin requests from browser perspective
+- ✅ **Simple Configuration**: Single environment variable
+- ✅ **WebSocket Support**: Proxy handles both HTTP and WS
+- ✅ **Hot Reload**: Changes apply immediately
+- ✅ **Production-Ready**: Same code works with different basePath in production
+
+**Production Difference**:
+
+In production, set `VITE_TRADER_API_BASE_PATH=/api` and deploy without proxy:
+
+```bash
+# Development (uses Vite proxy)
+VITE_TRADER_API_BASE_PATH=
+npm run dev
+
+# Production (direct API calls)
+VITE_TRADER_API_BASE_PATH=/api
+npm run build
+```
+
+See `ENVIRONMENT-CONFIG.md` for complete environment variable documentation.
+
 ## Deployment
 
 ### Development
@@ -2088,7 +2173,7 @@ Services Layer
 | ----------- | ---------------------------------- |
 | Command     | `make -f project.mk dev-fullstack` |
 | Backend     | Uvicorn with auto-reload           |
-| Frontend    | Vite dev server with HMR           |
+| Frontend    | Vite dev server with HMR + Proxy   |
 | WebSocket   | Development endpoint (ws)          |
 | Environment | Local machine                      |
 
