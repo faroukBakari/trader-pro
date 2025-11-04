@@ -28,7 +28,12 @@ OPENAPI_SPECS=$(find "$BACKEND_MODULES_DIR" -type f -path "*/specs_generated/*_o
 
 if [ -z "$OPENAPI_SPECS" ]; then
     echo -e "${RED}❌ No OpenAPI specifications found in: $BACKEND_MODULES_DIR${NC}"
-    echo -e "${YELLOW}💡 Generate them first: cd ../backend && make generate${NC}"
+    echo ""
+    echo -e "${YELLOW}Backend specs must be generated first. Run:${NC}"
+    echo -e "${BLUE}  cd backend && make generate${NC}"
+    echo -e "${BLUE}  # OR from project root:${NC}"
+    echo -e "${BLUE}  make -f project.mk generate${NC}"
+    echo ""
     exit 1
 fi
 

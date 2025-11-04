@@ -35,9 +35,9 @@ help:
 	@echo "  clean-all         Clean all build artifacts (full cleanup)"
 	@echo ""
 	@echo "Code generation targets:"
-	@echo "  generate                  Generate all backend specs and clients (unified)"
-	@echo "  generate-openapi-client   Generate TypeScript REST client (frontend)"
-	@echo "  generate-asyncapi-types   Generate TypeScript WebSocket types (frontend)"
+	@echo "  generate                  Generate backend specs (OpenAPI + AsyncAPI + Python clients)"
+	@echo "  generate-clients          Generate frontend TypeScript clients from backend specs"
+	@echo "                            (requires backend specs - run 'make generate' first)"
 	@echo ""
 	@echo "Other targets:"
 	@echo "  health            Check project health"
@@ -194,13 +194,22 @@ clean-all:
 
 # Code generation targets
 generate:
-	@echo "Generating all backend specs and clients..."
+	@echo "Generating backend specs (OpenAPI + AsyncAPI + Python clients)..."
 	make -C backend generate
 
-generate-openapi-client:
-	@echo "Generating OpenAPI client..."
-	make -C frontend generate-openapi-client
+generate-clients:
+	@echo "Generating frontend TypeScript clients from backend specs..."
+	@echo "Note: Requires backend specs to exist (run 'make generate' first)"
+	make -C frontend client-generate
 
+# Deprecated: Use 'make generate-clients' instead
+generate-openapi-client:
+	@echo "⚠️  Deprecated: Use 'make generate-clients' instead"
+	@echo "Generating OpenAPI client..."
+	make -C frontend client-generate
+
+# Deprecated: Use 'make generate-clients' instead
 generate-asyncapi-types:
+	@echo "⚠️  Deprecated: Use 'make generate-clients' instead"
 	@echo "Generating AsyncAPI types..."
-	make -C frontend generate-asyncapi-types
+	make -C frontend client-generate

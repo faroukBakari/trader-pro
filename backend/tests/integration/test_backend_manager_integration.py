@@ -78,6 +78,28 @@ async def ensure_started(manager: ServerManager) -> None:
         raise RuntimeError("Failed to start backend in ensure_started")
 
 
+async def _wait_for_ports_released(
+    ports: list[int], max_wait: float = 5.0, check_interval: float = 0.1
+) -> bool:
+    """Wait for ports to be released.
+
+    Args:
+        ports: List of ports to check
+        max_wait: Maximum time to wait in seconds
+        check_interval: Time between checks in seconds
+
+    Returns:
+        True if all ports released, False if timeout
+    """
+    start_time = asyncio.get_event_loop().time()
+    while asyncio.get_event_loop().time() - start_time < max_wait:
+        ports_in_use = [port for port in ports if is_port_in_use(port)]
+        if not ports_in_use:
+            return True
+        await asyncio.sleep(check_interval)
+    return False
+
+
 async def _ensure_all_processes_killed(manager: ServerManager) -> None:
     """Ensure all backend processes are killed, including detached daemons.
 
@@ -527,7 +549,8 @@ class TestBackendManagerIntegration:
         Uses isolated manager instance with unique ports.
         """
         # Create unique test config with different ports
-        base_port = 18000 + (os.getpid() % 100) * 10
+        # Use test-specific port range to avoid collisions with other tests
+        base_port = 18100
 
         blocked_config = DeploymentConfig(
             nginx=NginxConfig(
@@ -574,7 +597,8 @@ class TestBackendManagerIntegration:
 
         Uses isolated manager instance with unique ports.
         """
-        base_port = 20000 + (os.getpid() % 100) * 10
+        # Use test-specific port range to avoid collisions with other tests
+        base_port = 20200
 
         config = DeploymentConfig(
             nginx=NginxConfig(
@@ -624,6 +648,9 @@ class TestBackendManagerIntegration:
 
         finally:
             await manager.stop_all(timeout=2.0)
+            # Wait for ports to be fully released before next test
+            all_ports = [port for _, port in config.get_all_ports()]
+            await _wait_for_ports_released(all_ports, max_wait=5.0)
 
     async def test_18_stop_by_pid_files(
         self, session_backend_manager: ServerManager

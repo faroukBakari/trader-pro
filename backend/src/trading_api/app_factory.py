@@ -35,6 +35,12 @@ class ModuleApp:
         self.module = module
         self.api_app, self.ws_app = module.create_app()
 
+    def start(self) -> None:
+        self.module.gen_specs_and_clients(api_app=self.api_app, ws_app=self.ws_app)
+
+        if self.ws_app is not None:
+            self.ws_app.setup(self.api_app)
+
 
 class ModularFastAPI(FastAPI):
     """FastAPI application with integrated WebSocket apps tracking.
@@ -80,7 +86,9 @@ class ModularFastAPI(FastAPI):
         for module_app in self._modules_apps:
             mount_path = f"{self.base_url}/{module_app.module.name}"
             self.mount(mount_path, module_app.api_app)
-            logger.info(f"📦 Mounted module '{module_app.module.name}' at {mount_path}")
+            logger.info(
+                f"📦 Mounted module app '{module_app.module.name}' at {mount_path}"
+            )
 
     @property
     def modules_apps(self) -> list[ModuleApp]:
@@ -103,6 +111,12 @@ class ModularFastAPI(FastAPI):
             for module_app in self._modules_apps
             if module_app.ws_app is not None
         ]
+
+    def start_modules(self) -> None:
+        """Start all module applications (REST + WebSocket)."""
+        for module_app in self._modules_apps:
+            module_app.start()
+            logger.info(f"🚀 Started module '{module_app.module.name}'")
 
     def openapi(self) -> Dict[str, Any]:
         """Generate merged OpenAPI schema including all mounted modules."""
@@ -303,6 +317,8 @@ class AppFactory:
 
             # Validate all routes have response models
             app.validate_response_models()
+
+            app.start_modules()
 
             yield
 

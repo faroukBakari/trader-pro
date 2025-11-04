@@ -154,13 +154,22 @@ install-ci:
 client-generate:
 	@echo "Generating API clients from backend specs..."
 	@echo ""
-	@echo "Step 1/3: Generating backend specs..."
-	@cd ../backend && $(MAKE) generate
-	@echo ""
-	@echo "Step 2/3: Generating TypeScript REST clients..."
+	@# Check if backend specs exist
+	@if ! find ../backend/src/trading_api/modules -type f -path "*/specs_generated/*_openapi.json" 2>/dev/null | grep -q .; then \
+		echo "❌ Backend specs not found!"; \
+		echo ""; \
+		echo "Generate backend specs first:"; \
+		echo "  cd backend && make generate"; \
+		echo ""; \
+		echo "Or from project root:"; \
+		echo "  make -f project.mk generate"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@echo "Step 1/2: Generating TypeScript REST clients..."
 	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-openapi-client.sh'
 	@echo ""
-	@echo "Step 3/3: Generating TypeScript WebSocket types..."
+	@echo "Step 2/2: Generating TypeScript WebSocket types..."
 	@bash -c 'export NVM_DIR="$(NVM_DIR)"; [ -s "$(NVM_SH)" ] && . "$(NVM_SH)"; nvm use 2>/dev/null || true; ./scripts/generate-asyncapi-types.sh'
 	@echo ""
 	@echo "✅ All API clients generated successfully"

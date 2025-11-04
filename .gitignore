@@ -165,7 +165,7 @@ openapi-3.0.json
 .openapi-checksum
 
 # Auto-generated per-module specs
-backend/src/trading_api/modules/*/specs/
+backend/src/trading_api/modules/*/specs_generated/
 
 # Auto-generated Python clients (inter-module HTTP clients)
 backend/src/trading_api/clients/*_client.py

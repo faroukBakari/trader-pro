@@ -282,19 +282,19 @@ jobs:
       working-directory: backend
       run: |
         echo "Verifying per-module specs..."
-        if [ ! -f "src/trading_api/modules/broker/specs/openapi.json" ]; then
+        if [ ! -f "src/trading_api/modules/broker/specs_generated/broker_openapi.json" ]; then
           echo "❌ Broker OpenAPI spec not found"
           exit 1
         fi
-        if [ ! -f "src/trading_api/modules/datafeed/specs/openapi.json" ]; then
+        if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_openapi.json" ]; then
           echo "❌ Datafeed OpenAPI spec not found"
           exit 1
         fi
-        if [ ! -f "src/trading_api/modules/broker/specs/asyncapi.json" ]; then
+        if [ ! -f "src/trading_api/modules/broker/specs_generated/broker_asyncapi.json" ]; then
           echo "❌ Broker AsyncAPI spec not found"
           exit 1
         fi
-        if [ ! -f "src/trading_api/modules/datafeed/specs/asyncapi.json" ]; then
+        if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_asyncapi.json" ]; then
           echo "❌ Datafeed AsyncAPI spec not found"
           exit 1
         fi
@@ -305,7 +305,7 @@ jobs:
       with:
         name: backend-specs
         path: |
-          backend/src/trading_api/modules/*/specs/*.json
+          backend/src/trading_api/modules/*/specs_generated/*.json
         retention-days: 7
 
   # Backend code generation (unified command)

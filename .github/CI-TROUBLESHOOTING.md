@@ -330,20 +330,20 @@ npm run test:unit src/services/__tests__/brokerTerminalService.spec.ts
 # Verify per-module specs are generated
 cd backend
 make generate  # Unified: generates OpenAPI, AsyncAPI, Python clients
-ls -la src/trading_api/modules/*/specs/*.json
+ls -la src/trading_api/modules/*/specs_generated/*.json
 
 # Should see:
-# broker/specs/openapi.json
-# broker/specs/asyncapi.json
-# datafeed/specs/openapi.json
-# datafeed/specs/asyncapi.json
+# broker/specs_generated/broker_openapi.json
+# broker/specs_generated/broker_asyncapi.json
+# datafeed/specs_generated/datafeed_openapi.json
+# datafeed/specs_generated/datafeed_asyncapi.json
 ```
 
 **Debug artifact paths**:
 
 ```yaml
 # In CI, artifacts are uploaded from:
-path: backend/src/trading_api/modules/*/specs/*.json
+path: backend/src/trading_api/modules/*/specs_generated/*.json
 
 # Downloaded to:
 path: backend/src/trading_api/modules/

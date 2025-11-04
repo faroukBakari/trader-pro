@@ -52,7 +52,6 @@ BACKEND_PID=""
 FRONTEND_PID=""
 OPENAPI_WATCHER_PID=""
 ASYNCAPI_WATCHER_PID=""
-WS_WATCHER_PID=""
 SCRIPT_PGID=$$  # Store our process group ID
 
 print_step "🚀 Starting full-stack development environment..."
@@ -139,11 +138,6 @@ cleanup() {
     if [ ! -z "$BACKEND_PID" ]; then
         print_step "Stopping backend server and its children (PID: $BACKEND_PID)..."
         kill_process_tree "$BACKEND_PID" "TERM"
-    fi
-
-    if [ ! -z "$WS_WATCHER_PID" ]; then
-        print_step "Stopping WebSocket router watcher (PID: $WS_WATCHER_PID)..."
-        kill_process_tree "$WS_WATCHER_PID" "TERM"
     fi
 
     if [ ! -z "$OPENAPI_WATCHER_PID" ]; then
@@ -348,7 +342,6 @@ print_step ""
 print_step "👁️  Active Watchers:"
 print_step "   📄 OpenAPI spec → REST client auto-regeneration"
 print_step "   📄 AsyncAPI spec → WebSocket types auto-regeneration"
-print_step "   🔄 WebSocket handlers → Backend router auto-regeneration"
 print_step ""
 print_step "💡 How it works:"
 print_step "   • Uvicorn --reload watches backend Python files"

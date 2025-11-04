@@ -6,10 +6,10 @@ to integrate with the application factory pattern.
 
 import json
 import logging
+import shutil
 from abc import ABC, abstractmethod
-from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, AsyncGenerator
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI
 from fastapi.routing import APIRouter
@@ -112,7 +112,7 @@ def _compare_specs(old_spec: dict[str, Any], new_spec: dict[str, Any]) -> list[s
 
 class Module(ABC):
     """
-    TBD
+    Abstract base class defining the interface for pluggable modules.
     """
 
     def __init__(self) -> None:
@@ -146,7 +146,6 @@ class Module(ABC):
                        - ${output_dir}/client_generated/${module_name}_client.py
                        - ${output_dir}/client_generated/__init__.py
         """
-        import shutil
 
         # Use module_dir if output_dir not provided
         if output_dir is None:
@@ -289,23 +288,6 @@ class Module(ABC):
 
         ws_app: FastWSAdapter | None = None
 
-        @asynccontextmanager
-        async def lifespan(api_app: FastAPI) -> AsyncGenerator[None, None]:
-            nonlocal ws_app
-            """Handle module application startup and shutdown events."""
-
-            # Generate specs and clients using the app being created
-            # This ensures consistent logic and avoids redundant app creation
-            self.gen_specs_and_clients(api_app=api_app, ws_app=ws_app)
-
-            if ws_app is not None:
-                ws_app.setup(api_app)
-
-            yield
-
-            # Shutdown: Cleanup is handled by FastAPIAdapter
-            logger.info(f"🛑 FastAPI <{self.name}> application shutdown complete")
-
         app = FastAPI(
             title=f"{self.name.title()} API",
             description=f"REST API app for {self.name} module",
@@ -314,7 +296,6 @@ class Module(ABC):
             docs_url="/docs",
             redoc_url="/redoc",
             openapi_tags=self.tags,
-            lifespan=lifespan,
         )
         # Register module's API routers with module_path prefix
         # so OpenAPI spec reflects the real accessible routes
@@ -326,8 +307,8 @@ class Module(ABC):
                 title=f"{self.name.title()} WebSockets",
                 description=f"Real-time WebSocket app for {self.name} module",
                 version="1.0.0",
-                asyncapi_url="ws/asyncapi.json",
-                asyncapi_docs_url="ws/asyncapi",
+                asyncapi_url="/ws/asyncapi.json",
+                asyncapi_docs_url="/ws/asyncapi",
                 heartbeat_interval=30.0,
                 max_connection_lifespan=3600.0,
             )
