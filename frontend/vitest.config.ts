@@ -17,7 +17,7 @@ export default mergeConfig(
       ],
       root: fileURLToPath(new URL('./', import.meta.url)),
       env: {
-        TRADER_API_BASE_PATH: 'http://localhost:8000',
+        VITE_TRADER_API_BASE_PATH: 'http://localhost:8000',
       },
     },
   }),
