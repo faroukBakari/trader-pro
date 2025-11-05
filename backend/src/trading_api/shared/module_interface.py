@@ -142,7 +142,6 @@ class Module(ABC):
 
     def _discover_versions(self) -> list[str]:
         """Auto-discover available versions from api/ and ws/ directories."""
-        from pathlib import Path
 
         versions: set[str] = set()
 
@@ -366,7 +365,7 @@ class Module(ABC):
 
         specs_dir = output_dir / "specs_generated"
         clients_dir = output_dir / "client_generated"
-        templates_dir = self.module_dir.parent / "templates"
+        templates_dir = self.module_dir.parent.parent / "shared" / "templates"
 
         # Clean existing files if requested
         if clean_first:
@@ -575,7 +574,7 @@ class ModuleApp:
 
         specs_dir = output_dir / "specs_generated"
         clients_dir = output_dir / "client_generated"
-        templates_dir = self.module.module_dir.parent / "templates"
+        templates_dir = self.module.module_dir.parent.parent / "shared" / "templates"
 
         # Clean existing files if requested
         if clean_first:

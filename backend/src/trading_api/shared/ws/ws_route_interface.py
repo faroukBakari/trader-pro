@@ -35,9 +35,11 @@ def buildTopicParams(obj: Any) -> str:
 
 
 class WsRouteService(ServiceInterface):
-    async def create_topic(self, topic: str, topic_update: Callable) -> None: ...
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+        ...
 
-    def remove_topic(self, topic: str) -> None: ...
+    def remove_topic(self, topic: str) -> None:
+        ...
 
 
 # TODO: add clear subscriptions method to use on FastWSAdapter when client disconnects

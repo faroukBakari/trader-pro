@@ -31,8 +31,9 @@ from trading_api.models.broker import (
     Side,
     SuccessResponse,
 )
-from trading_api.modules.broker.service import BrokerService
 from trading_api.shared.api import APIRouterInterface
+
+from ..service import BrokerService
 
 
 class BrokerApi(APIRouterInterface):
