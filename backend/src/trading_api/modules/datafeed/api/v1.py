@@ -4,7 +4,7 @@ Datafeed API endpoints
 
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import HTTPException, Query
 
 from trading_api.models import (
     DatafeedConfiguration,
@@ -14,14 +14,13 @@ from trading_api.models import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
+from trading_api.modules.datafeed.service import DatafeedService
+from trading_api.shared.api import APIRouterInterface
 
-from .service import DatafeedService
 
-
-class DatafeedApi(APIRouter):
-    def __init__(self, service: DatafeedService, *args: Any, **kwargs: Any) -> None:
+class DatafeedApi(APIRouterInterface):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.service = service
 
         @self.get(
             "/config",
@@ -36,7 +35,7 @@ class DatafeedApi(APIRouter):
             TradingView charting library.
             """
             try:
-                config = service.get_configuration()
+                config = self.service.get_configuration()
                 return config
             except Exception as e:
                 raise HTTPException(
@@ -63,8 +62,9 @@ class DatafeedApi(APIRouter):
             - **symbol_type**: Filter by symbol type (optional)
             - **max_results**: Maximum number of results to return
             """
+
             try:
-                results = service.search_symbols(
+                results = self.service.search_symbols(
                     user_input=user_input,
                     exchange=exchange,
                     symbol_type=symbol_type,
@@ -89,7 +89,7 @@ class DatafeedApi(APIRouter):
             - **symbol**: Symbol name or ticker to resolve
             """
             try:
-                symbol_info = service.resolve_symbol(symbol)
+                symbol_info = self.service.resolve_symbol(symbol)
                 if not symbol_info:
                     raise HTTPException(status_code=404, detail="Symbol not found")
                 return symbol_info
@@ -123,7 +123,7 @@ class DatafeedApi(APIRouter):
             - **count_back**: Number of bars to count back (optional)
             """
             try:
-                bars = service.get_bars(
+                bars = self.service.get_bars(
                     symbol=symbol,
                     resolution=resolution,
                     from_time=from_time,
@@ -149,9 +149,23 @@ class DatafeedApi(APIRouter):
             - **symbols**: Array of symbol names to get quotes for
             """
             try:
-                quotes = service.get_quotes(body.symbols)
+                quotes = self.service.get_quotes(body.symbols)
                 return quotes
             except Exception as e:
                 raise HTTPException(
                     status_code=500, detail=f"Error getting quotes: {str(e)}"
                 )
+
+    @property
+    def service(self) -> DatafeedService:
+        """Get the DatafeedService instance.
+
+        Returns:
+            DatafeedService: The datafeed service
+        """
+        if not isinstance(self._service, DatafeedService):
+            raise ValueError("Service has not been initialized")
+        return self._service
+
+
+__all__ = ["DatafeedApi"]

@@ -41,7 +41,7 @@ The topic builder algorithm is the **critical contract** between backend and fro
 #### Backend (Python)
 
 ```python
-# backend/src/trading_api/ws/router_interface.py
+# backend/src/trading_api/ws/ws_route_interface.py
 
 def buildTopicParams(obj: Any) -> str:
     """

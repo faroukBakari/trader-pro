@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from external_packages.fastws import Client
 from trading_api.models import SubscriptionResponse, SubscriptionUpdate
-from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
+from trading_api.shared.ws.ws_route_interface import WsRouteInterface, WsRouteService
 
 logger = logging.getLogger(__name__)
 

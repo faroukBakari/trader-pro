@@ -60,7 +60,7 @@ src/trading_api/ws/generated/orderwsrouter.py                 36      4    89%  
 src/trading_api/ws/generated/positionwsrouter.py              36      4    89%   29, 43, 74-75
 src/trading_api/ws/generated/quotewsrouter.py                 36     19    47%   29, 37-57, 69-79
 src/trading_api/ws/generic_route.py                           39     28    28%   21-80
-src/trading_api/ws/router_interface.py                        31      4    87%   21, 23, 33, 36
+src/trading_api/ws/ws_route_interface.py                        31      4    87%   21, 23, 33, 36
 ----------------------------------------------------------------------------------------
 TOTAL                                                       1460    384    74%
 Coverage XML written to file coverage.xml

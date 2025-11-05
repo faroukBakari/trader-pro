@@ -1,7 +1,7 @@
 """Shared infrastructure - Module interface, registry, and plugins."""
 
-from .module_interface import Module
+from .module_interface import Module, ModuleApp
 from .module_registry import ModuleRegistry
-from .plugins import FastWSAdapter
+from .ws import FastWSAdapter
 
-__all__ = ["Module", "ModuleRegistry", "FastWSAdapter"]
+__all__ = ["Module", "ModuleApp", "ModuleRegistry", "FastWSAdapter"]

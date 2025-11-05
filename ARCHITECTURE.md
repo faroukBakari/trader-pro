@@ -289,7 +289,7 @@ src/trading_api/
 │   │   ├── health.py        # HealthApi class - Health checks
 │   │   └── versions.py      # VersionApi class - API versioning
 │   ├── ws/                  # Shared WebSocket infrastructure
-│   │   ├── router_interface.py  # WsRouteInterface, WsRouteService Protocol
+│   │   ├── ws_route_interface.py  # WsRouteInterface, WsRouteService Protocol
 │   │   └── generic_route.py     # Generic WsRouter implementation
 │   ├── plugins/
 │   │   └── fastws_adapter.py  # FastWS integration adapter
@@ -645,7 +645,7 @@ The backend implements a **Protocol-based WebSocket service architecture** where
 
 **1. `WsRouteService` (Protocol)**
 
-**Location**: `shared/ws/router_interface.py`
+**Location**: `shared/ws/ws_route_interface.py`
 
 **Protocol Methods**:
 
@@ -1928,7 +1928,7 @@ Services Layer
 
 **⚠️ Topic Builder Compliance**: The topic builder algorithm MUST be **identical** in backend (Python) and frontend (TypeScript). See:
 
-- Backend: `backend/src/trading_api/shared/ws/router_interface.py` - `buildTopicParams()`
+- Backend: `backend/src/trading_api/shared/ws/ws_route_interface.py` - `buildTopicParams()`
 - Frontend: `frontend/src/plugins/wsClientBase.ts` - `buildTopicParams()`
 - Documentation: `docs/WEBSOCKET-CLIENTS.md`
 

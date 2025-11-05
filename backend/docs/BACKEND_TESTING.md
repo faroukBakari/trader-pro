@@ -165,7 +165,7 @@ flowchart TB
 
     Filter -->|Core Always Included| EnabledModules[Get Enabled Modules]
 
-    EnabledModules --> CreateModular[Create ModularFastAPI]
+    EnabledModules --> CreateModular[Create ModularApp]
 
     CreateModular --> InitModules[Initialize Each Module]
 
@@ -197,7 +197,7 @@ flowchart TB
     NextModule -->|Yes| InitModules
     NextModule -->|No| AddMiddleware[Add CORS Middleware]
 
-    AddMiddleware --> MergeSpecs[Merge All Module Specs<br/>into ModularFastAPI]
+    AddMiddleware --> MergeSpecs[Merge All Module Specs<br/>into ModularApp]
     MergeSpecs --> ValidateModels[Validate Response Models<br/>for OpenAPI compliance]
 
     ValidateModels --> Ready([Application Ready<br/>for Requests])
@@ -304,7 +304,7 @@ Tests use fixtures defined in `conftest.py` files:
 
 ```python
 @pytest.fixture(scope="session")
-def apps() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
+def apps() -> tuple[ModularApp, list[FastWSAdapter]]:
     """Full application with all modules enabled (shared across session)."""
     return create_test_app(enabled_modules=None)
 

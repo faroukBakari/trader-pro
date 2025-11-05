@@ -115,7 +115,7 @@ The generator creates:
 # modules/datafeed/ws_generated/barwsrouter.py
 from trading_api.models import BarsSubscriptionRequest, Bar
 from typing import Any
-from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
+from trading_api.shared.ws.ws_route_interface import WsRouteInterface, WsRouteService
 
 class BarWsRouter(WsRouteInterface):
     def __init__(
@@ -495,7 +495,7 @@ poetry run isort src/trading_api/modules/{module}/ws_generated/
 ### Core Documentation
 
 - `backend/docs/MODULAR_BACKEND_ARCHITECTURE.md` - Module system architecture
-- `shared/ws/router_interface.py` - `WsRouteInterface` and `WsRouteService` protocols
+- `shared/ws/ws_route_interface.py` - `WsRouteInterface` and `WsRouteService` protocols
 - `shared/ws/generic_route.py` - Template for generated routers
 - `shared/module_interface.py` - Module Protocol definition
 

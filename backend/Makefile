@@ -453,15 +453,12 @@ dev: clean-generated
 	@echo "Debug server listening on port 5678 (attach debugger to localhost:5678)"
 	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" \
 		--reload \
-		--reload-exclude '*/openapi.json' \
-		--reload-exclude '*/asyncapi.json' \
-		--reload-exclude '*/clients/*' \
-		--reload-exclude '*/ws_generated/*' \
-		--reload-exclude '*/.local/*' \
-		--reload-exclude '*/.pids/*' \
-		--reload-exclude '*/scripts/*' \
-		--reload-exclude '*/__pycache__/*' \
-		--reload-exclude '*.pyc' \
+		--reload-exclude '**/ws_generated/*' \
+		--reload-exclude '**/.local/*' \
+		--reload-exclude '**/.pids/*' \
+		--reload-exclude '**/scripts/*' \
+		--reload-exclude '**/__pycache__/*' \
+		--reload-exclude '**/*.pyc' \
 		--host 0.0.0.0 \
 		--port $(BACKEND_PORT) \
 		--log-level info

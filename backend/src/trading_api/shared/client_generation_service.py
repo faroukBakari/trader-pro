@@ -293,9 +293,7 @@ class ClientGenerationService:
             lstrip_blocks=True,
         )
 
-    def generate_module_client(
-        self, module_name: str, spec_path: Path
-    ) -> tuple[bool, list[str]]:
+    def generate_module_client(self, spec_path: Path) -> tuple[bool, list[str]]:
         """Generate Python HTTP client for a single module.
 
         Args:
@@ -305,6 +303,9 @@ class ClientGenerationService:
         Returns:
             Tuple of (success, missing_routes)
         """
+        module_name_version = spec_path.stem.replace("_openapi", "")
+        module_name = module_name_version.rsplit("_", 1)[0]
+        module_version = module_name_version.rsplit("_", 1)[1]
         try:
             with open(spec_path) as f:
                 spec: dict[str, Any] = json.load(f)
@@ -321,7 +322,7 @@ class ClientGenerationService:
                 models=sorted(models),
             )
 
-            output_file = self.clients_dir / f"{module_name}_client.py"
+            output_file = self.clients_dir / f"{module_name}_{module_version}_client.py"
             output_file.write_text(client_code)
 
             success, missing_routes = self._verify_all_routes_generated(

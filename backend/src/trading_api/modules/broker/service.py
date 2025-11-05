@@ -54,7 +54,7 @@ from trading_api.models.broker import (
     PreOrder,
     Side,
 )
-from trading_api.shared.ws.router_interface import WsRouteService
+from trading_api.shared.ws.ws_route_interface import WsRouteService
 
 logger = logging.getLogger(__name__)
 
@@ -126,14 +126,16 @@ class BrokerService(WsRouteService):
 
     def __init__(
         self,
+        *args: Any,
         execution_delay: float | None = None,
+        **kwargs: Any,
     ) -> None:
         """Initialize broker service.
 
         Args:
             execution_delay: Delay between executions in seconds (default: None)
         """
-        super().__init__()
+        super().__init__(*args, **kwargs)
         self._orders: Dict[str, PlacedOrder] = {}
         self._positions: Dict[str, Position] = {}
         self._executions: List[Execution] = []

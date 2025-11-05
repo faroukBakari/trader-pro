@@ -43,7 +43,7 @@ The Trading API uses **URL-based versioning** in a modular architecture. Each mo
 
 ```python
 base_url = "/api/v1"
-modular_app = ModularFastAPI(modules=enabled_modules, base_url=base_url, ...)
+modular_app = ModularApp(modules=enabled_modules, base_url=base_url, ...)
 ```
 
 2. **Module Mounting**:
@@ -210,11 +210,11 @@ VERSION_CONFIG = {
 **Location**: `backend/src/trading_api/app_factory.py`
 
 ```python
-def create_app(self, api_version: str = "v1", ...) -> ModularFastAPI:
+def create_app(self, api_version: str = "v1", ...) -> ModularApp:
     # Create base URL from version
     base_url = f"/api/{api_version}"
 
-    modular_app = ModularFastAPI(
+    modular_app = ModularApp(
         modules=enabled_modules,
         base_url=base_url,
         ...
