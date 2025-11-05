@@ -144,7 +144,9 @@ class DatafeedService(WsRouteService):
                     SymbolInfo.model_validate(symbol) for symbol in symbols_data
                 ]
             except Exception as e:
-                print(f"Error loading symbols from {self.symbols_file_path}: {e}")
+                print(
+                    f"Warning: Unable to load symbols from {self.symbols_file_path}: {e}"
+                )
                 self._load_default_symbols()
         else:
             self._load_default_symbols()

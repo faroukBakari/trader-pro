@@ -5,12 +5,12 @@ from fastapi import APIRouter
 
 from trading_api.models.health import HealthResponse
 from trading_api.models.versioning import APIMetadata, VersionInfo
-from trading_api.shared.service import Service
+from trading_api.shared.service_interface import ServiceInterface
 
 
 class APIRouterInterface(APIRouter, ABC):
     def __init__(
-        self, *args: Any, service: Service, version: str, **kwargs: Any
+        self, *args: Any, service: ServiceInterface, version: str, **kwargs: Any
     ) -> None:
         super().__init__(*args, **kwargs)
         self._service = service
@@ -64,7 +64,7 @@ class APIRouterInterface(APIRouter, ABC):
         return self._service.module_name
 
     @property
-    def service(self) -> Service:
+    def service(self) -> ServiceInterface:
         """Get the Service instance.
 
         Returns:

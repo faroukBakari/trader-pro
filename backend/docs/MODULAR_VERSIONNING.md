@@ -117,7 +117,7 @@ class Service(ABC):
 ```python
 # shared/api/api_router_interface.py
 class APIRouterInterface(APIRouter, ABC):
-    def __init__(self, service: Service, version: str, **kwargs):
+    def __init__(self, service: ServiceInterface, version: str, **kwargs):
         super().__init__(**kwargs)
         self._service = service
         self._version = version
@@ -136,12 +136,12 @@ class APIRouterInterface(APIRouter, ABC):
             return service.get_current_version_info(version)
 ```
 
-**Service Base Class** (`shared/service.py`):
+**ServiceInterface Base Class** (`shared/service_interface.py`):
 
 Provides the data for health/version endpoints:
 
 ```python
-class Service(ABC):
+class ServiceInterface(ABC):
     def __init__(self, module_dir: Path) -> None:
         # Auto-discovers versions from api/ directory structure
         self._api_metadata = APIMetadata(...)
@@ -342,7 +342,7 @@ print(broker_service.api_metadata.available_versions)
 Customize version metadata by overriding in your service:
 
 ```python
-class BrokerService(Service):
+class BrokerService(ServiceInterface):
     def __init__(self, module_dir: Path) -> None:
         super().__init__(module_dir)
 
@@ -503,13 +503,13 @@ When introducing breaking changes in new version:
 - ✅ Maintain clear documentation of all changes
 - ✅ Support previous version during transition
 - ✅ Use version auto-discovery for clean separation
-- ✅ Leverage Service base class for consistent version metadata
+- ✅ Leverage ServiceInterface base class for consistent version metadata
 
 ---
 
 ## Related Documentation
 
-- **[MODULAR_BACKEND_ARCHITECTURE.md](MODULAR_BACKEND_ARCHITECTURE.md)** - Module system and Service base class
+- **[MODULAR_BACKEND_ARCHITECTURE.md](MODULAR_BACKEND_ARCHITECTURE.md)** - Module system and ServiceInterface base class
 - **[MODULAR_VERSIONNING.md](MODULAR_VERSIONNING.md)** - Auto-discovery and version management
 - **[SPECS_AND_CLIENT_GEN.md](SPECS_AND_CLIENT_GEN.md)** - Client generation
 - **[API-METHODOLOGY.md](../../API-METHODOLOGY.md)** - API design patterns
@@ -543,7 +543,7 @@ backend/src/trading_api/
 │   ├── health.py                  # HealthResponse model
 │   └── versioning.py              # VersionInfo, APIMetadata models
 ├── shared/
-│   ├── service.py                 # Service base class with auto-discovery
+│   ├── service_interface.py       # ServiceInterface base class with auto-discovery
 │   ├── api/
 │   │   └── api_router_interface.py  # APIRouterInterface (auto-exposes /health, /versions, /version)
 │   ├── module_interface.py        # Module protocol and auto-discovery
@@ -552,11 +552,11 @@ backend/src/trading_api/
 └── modules/
     ├── broker/
     │   ├── __init__.py            # BrokerModule
-    │   ├── service.py             # BrokerService(Service)
+    │   ├── service.py             # BrokerService(ServiceInterface)
     │   └── api/v1.py              # Broker API v1 (APIRouterInterface subclass)
     └── datafeed/
         ├── __init__.py            # DatafeedModule
-        ├── service.py             # DatafeedService(Service)
+        ├── service.py             # DatafeedService(ServiceInterface)
         └── api/v1.py              # Datafeed API v1 (APIRouterInterface subclass)
 ```
 
@@ -589,14 +589,14 @@ backend/src/trading_api/
 ### Service Methods
 
 ```python
-# Every module's service inherits these from Service base class:
+# Every module's service inherits these from ServiceInterface base class:
 service.get_health(current_version: str) -> HealthResponse
 service.get_current_version_info(current_version: str) -> VersionInfo
 service.api_metadata -> APIMetadata  # Auto-discovered versions
 service.module_name -> str
 ```
 
-**Note**: These Service methods provide the data for the health/version endpoints that are automatically exposed by `APIRouterInterface` in every module's API router.
+**Note**: These ServiceInterface methods provide the data for the health/version endpoints that are automatically exposed by `APIRouterInterface` in every module's API router.
 
 ---
 
