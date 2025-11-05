@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI
 from external_packages.fastws import Client
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.client_generation_service import ClientGenerationService
-from trading_api.shared.service import Service
+from trading_api.shared.service_interface import ServiceInterface
 from trading_api.shared.ws.fastws_adapter import FastWSAdapter
 from trading_api.shared.ws.ws_route_interface import WsRouterInterface
 
@@ -144,32 +144,28 @@ class Module(ABC):
         """Auto-discover available versions from api/ and ws/ directories."""
         from pathlib import Path
 
-        module_dir = Path(__file__).parent
         versions: set[str] = set()
 
         # Check api/ directory
-        api_dir = module_dir / "api"
-        if api_dir.exists():
+        api_router = self.module_dir / "api"
+        if api_router.exists():
             versions.update(
-                d.name
-                for d in api_dir.iterdir()
-                if d.is_dir() and d.name.startswith("v") and not d.name.startswith("__")
+                d.stem for d in api_router.iterdir() if d.stem.startswith("v")
             )
 
         # Check ws/ directory
-        ws_dir = module_dir / "ws"
+        ws_dir = self.module_dir / "ws"
         if ws_dir.exists():
             ws_versions = {
-                d.name
+                d.stem
                 for d in ws_dir.iterdir()
-                if d.is_dir() and d.name.startswith("v") and not d.name.startswith("__")
+                if d.is_dir() and d.stem.startswith("v")
             }
             # Union: a version is valid if it exists in either api/ or ws/
             versions |= ws_versions
 
         if not versions:
-            # Fallback to v1 if no versions found
-            return ["v1"]
+            raise ValueError(f"No versions found for module {self.name}")
 
         return sorted(versions)  # ["v1", "v2", ...]
 
@@ -185,7 +181,7 @@ class Module(ABC):
             + f".{name}"
         )
 
-    def _import_service(self) -> Service:
+    def _import_service(self) -> ServiceInterface:
         """Import version-agnostic service."""
         try:
             service_module = importlib.import_module(
@@ -196,12 +192,12 @@ class Module(ABC):
                 attr = getattr(service_module, attr_name)
                 if (
                     isinstance(attr, type)
-                    and issubclass(attr, Service)
-                    and attr is not Service
+                    and issubclass(attr, ServiceInterface)
+                    and attr is not ServiceInterface
                     and not attr_name.startswith("_")
                     and attr.__module__ == service_module.__name__
                 ):
-                    service_class: Type[Service] = attr
+                    service_class: Type[ServiceInterface] = attr
                     return service_class(self.module_dir)
 
             raise ValueError(f"No service class found in {self.name}.service module")
@@ -305,7 +301,7 @@ class Module(ABC):
         return self.module_dir.name
 
     @property
-    def service(self) -> Service:
+    def service(self) -> ServiceInterface:
         """Return the service instance for this module.
 
         This should be lazy-loaded on first access.
@@ -370,7 +366,7 @@ class Module(ABC):
 
         specs_dir = output_dir / "specs_generated"
         clients_dir = output_dir / "client_generated"
-        templates_dir = Path(__file__).parent / "templates"
+        templates_dir = self.module_dir.parent / "templates"
 
         # Clean existing files if requested
         if clean_first:
@@ -472,9 +468,7 @@ class Module(ABC):
                                     f"✅ No changes in AsyncAPI spec for '{self.name}'"
                                 )
                     except Exception as e:
-                        logger.warning(
-                            f"⚠️  Could not read existing AsyncAPI spec: {e}"
-                        )
+                        logger.warning(f"⚠️  Could not read existing AsyncAPI spec: {e}")
                 else:
                     logger.info(f"📝 Creating new AsyncAPI spec for '{self.name}'")
 
@@ -581,7 +575,7 @@ class ModuleApp:
 
         specs_dir = output_dir / "specs_generated"
         clients_dir = output_dir / "client_generated"
-        templates_dir = Path(__file__).parent / "templates"
+        templates_dir = self.module.module_dir.parent / "templates"
 
         # Clean existing files if requested
         if clean_first:
@@ -640,7 +634,9 @@ class ModuleApp:
                     if success:
                         # Format generated code
                         if client_gen.format_generated_code(moduleName):
-                            logger.info(f"✅ Generated Python client for '{moduleName}'")
+                            logger.info(
+                                f"✅ Generated Python client for '{moduleName}'"
+                            )
                         else:
                             logger.warning(
                                 f"⚠️  Generated Python client for '{moduleName}' "

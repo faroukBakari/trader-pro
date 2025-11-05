@@ -6,7 +6,7 @@ from trading_api.models.health import HealthResponse
 from trading_api.models.versioning import APIMetadata, VersionInfo
 
 
-class Service(ABC):
+class ServiceInterface(ABC):
     def __init__(self, module_dir: Path) -> None:
         super().__init__()
         self.module_dir = module_dir
@@ -17,14 +17,7 @@ class Service(ABC):
 
         if api_dir.exists() and api_dir.is_dir():
             # Discover version directories (v1, v2, etc.)
-            version_dirs = [
-                d.name
-                for d in api_dir.iterdir()
-                if d.is_dir()
-                and d.name.startswith("v")
-                and d.name[1:].isdigit()
-                and not d.name.startswith("__")
-            ]
+            version_dirs = [d.stem for d in api_dir.iterdir() if d.stem.startswith("v")]
 
             # Sort versions to find latest
             version_dirs.sort(key=lambda v: int(v[1:]))
@@ -36,7 +29,7 @@ class Service(ABC):
                 for version in version_dirs:
                     available_versions[version] = VersionInfo(
                         version=version,
-                        release_date="TBD",  # TODO: Could be read from version file
+                        release_date="TBD",  # TODO: date of the last commit in that version file
                         status="stable" if version == current_version else "stable",
                         breaking_changes=[],
                         deprecation_notice=None,

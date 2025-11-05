@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from external_packages.fastws import FastWS, OperationRouter
 from trading_api.models.common import SubscriptionUpdate
-from trading_api.shared.service import Service
+from trading_api.shared.service_interface import ServiceInterface
 from trading_api.shared.ws.module_router_generator import generate_ws_routers
 
 # Module logger for app_factory
@@ -34,12 +34,10 @@ def buildTopicParams(obj: Any) -> str:
     return json.dumps(sorted_obj, separators=(",", ":"))
 
 
-class WsRouteService(Service):
-    async def create_topic(self, topic: str, topic_update: Callable) -> None:
-        ...
+class WsRouteService(ServiceInterface):
+    async def create_topic(self, topic: str, topic_update: Callable) -> None: ...
 
-    def remove_topic(self, topic: str) -> None:
-        ...
+    def remove_topic(self, topic: str) -> None: ...
 
 
 # TODO: add clear subscriptions method to use on FastWSAdapter when client disconnects
@@ -73,7 +71,7 @@ class WsRouteInterface(OperationRouter):
 
 
 class WsRouterInterface(list[WsRouteInterface]):
-    def __init__(self, *args: Any, service: Service, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, service: ServiceInterface, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._service = service
 

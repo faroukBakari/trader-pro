@@ -1,8 +1,8 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: November 3, 2025  
-**Version**: 4.0.1
+**Last Updated**: November 5, 2025  
+**Version**: 5.1.0
 
 ## Table of Contents
 
@@ -25,30 +25,50 @@ The Trading Pro backend implements a **modular factory-based architecture** that
 
 - **Independent Development**: Modules can be developed, tested, and deployed separately
 - **Selective Deployment**: Deploy only the modules you need
-- **Protocol-Based Design**: All modules implement the same `Module` protocol
+- **ABC-Based Design**: All modules extend the same `Module` abstract base class
 - **Self-Contained Modules**: Each module owns its complete FastAPI app (REST + WebSocket)
 - **Automatic Spec Generation**: OpenAPI and AsyncAPI specs generated per module
-- **Type-Safe Integration**: Protocol-based contracts ensure consistency
+- **Type-Safe Integration**: ABC-based contracts ensure consistency
 
 ### Key Benefits
 
-✅ **Modularity**: Add/remove features without affecting core system  
-✅ **Testability**: Test modules in isolation with dedicated fixtures  
-✅ **Scalability**: Run modules in separate processes for horizontal scaling  
-✅ **Maintainability**: Clear boundaries and ownership per module  
-✅ **Developer Experience**: Work on single module without full system
+- **Modularity**: Add/remove features without affecting core system
+- **Testability**: Test modules in isolation with dedicated fixtures
+- **Scalability**: Run modules in separate processes for horizontal scaling
+- **Maintainability**: Clear boundaries and ownership per module
+- **Developer Experience**: Work on single module without full system
 
 ---
 
 ## Core Design Principles
 
-### 1. Protocol-Based Contracts
+### 1. Abstract Base Class Contracts
 
-Every module implements the `Module` protocol defined in `shared/module_interface.py`:
+Every module extends the `Module` abstract base class defined in `shared/module_interface.py`:
 
 ```python
 class Module(ABC):
-    """Protocol that all modules must implement."""
+    """Abstract base class defining the interface for pluggable modules."""
+
+    def __init__(self, versions: list[str] | None = None):
+        # Auto-discover versions from api/ and ws/ directories
+        if versions is None:
+            versions = self._discover_versions()
+
+        self._versions = versions
+        self._service = self._import_service()
+
+        # Import version-specific routers
+        self._api_routers: dict[str, APIRouterInterface] = {}
+        self._ws_routers: dict[str, WsRouterInterface] = {}
+
+        for version in versions:
+            # Import from api/v1.py (file)
+            self._api_routers[version] = self._import_api_routers_for_version(version)
+            # Import from ws/v1/__init__.py (directory) - optional
+            ws_router = self._import_ws_routers_for_version(version)
+            if ws_router is not None:
+                self._ws_routers[version] = ws_router
 
     @property
     @abstractmethod
@@ -61,49 +81,213 @@ class Module(ABC):
         """Module's directory path"""
 
     @property
-    @abstractmethod
-    def service(self) -> WsRouteService:
-        """Module's business logic service"""
+    def service(self) -> ServiceInterface:
+        """Module's business logic service (extends ServiceInterface base class)"""
 
     @property
-    @abstractmethod
-    def api_routers(self) -> list[APIRouter]:
-        """REST API routers"""
+    def api_routers(self) -> dict[str, APIRouterInterface]:
+        """API routers organized by version (all extend APIRouterInterface)"""
 
     @property
-    @abstractmethod
-    def ws_routers(self) -> list[WsRouteInterface]:
-        """WebSocket routers"""
+    def ws_routers(self) -> dict[str, WsRouterInterface]:
+        """WebSocket routers organized by version (WsRouterInterface is list[WsRouteInterface])"""
 
     @property
     @abstractmethod
     def tags(self) -> list[dict[str, str]]:
         """OpenAPI documentation tags"""
-
-    def create_app(self) -> tuple[FastAPI, FastWSAdapter | None]:
-        """Create module's complete FastAPI application"""
 ```
 
-### 2. Self-Contained Module Apps
+**Key Architecture Patterns**:
 
-Each module creates its **own FastAPI application** with:
+- **ABC Pattern**: Uses Python's `ABC` (Abstract Base Class), not `Protocol`
+- **Versioned Structure**:
+  - API: `api/v1.py` (file)
+  - WebSocket: `ws/v1/` (directory with `__init__.py`)
+- **Auto-discovery**: Versions detected from directory structure
+- **Type Safety**: All API routers extend `APIRouterInterface`
+
+**Design Pattern**:
+
+- Uses **ABC-based design** with Python's `abc.ABC` and `@abstractmethod`
+- Subclasses must implement abstract methods at instantiation time
+
+### 2. APIRouterInterface Auto-Exposing Health and Version Endpoints
+
+All module API routers **inherit from `APIRouterInterface`**, which automatically provides:
+
+- **`/health`** - Health check with module name and version
+- **`/versions`** - All available API versions for the module
+- **`/version`** - Current version information
+
+```python
+# shared/api/api_router_interface.py
+class APIRouterInterface(APIRouter, ABC):
+    def __init__(self, *args: Any, service: ServiceInterface, version: str, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._service = service
+        self._version = version
+
+        @self.get("/health", response_model=HealthResponse)
+        async def healthcheck() -> HealthResponse:
+            return service.get_health(version)
+
+        @self.get("/versions", response_model=APIMetadata)
+        async def get_api_versions() -> APIMetadata:
+            return service.api_metadata
+
+        @self.get("/version", response_model=VersionInfo)
+        async def get_current_version() -> VersionInfo:
+            return service.get_current_version_info(version)
+```
+
+**Example Usage**:
+
+```bash
+# Each module automatically exposes health/version endpoints
+curl http://localhost:8000/api/v1/broker/health
+curl http://localhost:8000/api/v1/broker/versions
+curl http://localhost:8000/api/v1/datafeed/health
+curl http://localhost:8000/api/v2/broker/health  # Different version
+```
+
+**Benefits**:
+
+- No duplication - Every module gets health/version endpoints automatically
+- Consistency - Uniform health check pattern across all modules
+- Version-aware - Each version has its own health endpoint
+- Module-scoped - Health checks specific to each module
+
+### 3. ServiceInterface Base Class with Version Discovery
+
+The `ServiceInterface` base class provides **automatic version discovery** and metadata:
+
+```python
+# shared/service_interface.py
+class ServiceInterface(ABC):
+    def __init__(self, module_dir: Path) -> None:
+        self.module_dir = module_dir
+
+        # Auto-discover versions from api/ directory structure
+        api_dir = self.module_dir / "api"
+        available_versions: dict[str, VersionInfo] = {}
+
+        if api_dir.exists() and api_dir.is_dir():
+            # Discover versions using .stem (supports both v1.py files and v1/ directories)
+            version_dirs = [
+                d.stem
+                for d in api_dir.iterdir()
+                if d.stem.startswith("v")
+            ]
+
+            # Build version metadata
+            for version in version_dirs:
+                available_versions[version] = VersionInfo(
+                    version=version,
+                    release_date="TBD",
+                    status="stable",
+                )
+
+        self._api_metadata = APIMetadata(
+            current_version=version_dirs[-1] if version_dirs else "v1",
+            available_versions=available_versions,
+        )
+```
+
+**Benefits**:
+
+- Auto-discovery from directory structure
+- Convention-based versioning
+- Automatic API metadata generation
+
+### 4. Version Discovery Patterns
+
+The system uses a **mixed approach** for version discovery:
+
+**API Routers** (`api/`):
+
+```
+modules/broker/api/
+└── v1.py              # ✅ File pattern (recommended)
+   OR
+└── v1/                # ✅ Directory pattern (also supported)
+    └── __init__.py
+```
+
+**Note**: API versioning supports **both file and directory patterns equally** via Python's `.stem` property. Use files for simplicity unless you need subdirectories.
+
+**WebSocket Routers** (`ws/`):
+
+```
+modules/broker/ws/
+└── v1/                # ✅ MUST be directory (required for generated routers)
+    ├── __init__.py
+    └── ws_generated/  # Generated routers created here
+```
+
+**Discovery Logic**:
+
+```python
+# In Module._discover_versions() - shared/module_interface.py
+def _discover_versions(self) -> list[str]:
+    """Auto-discover available versions from api/ and ws/ directories."""
+    versions: set[str] = set()
+
+    # Check api/ directory - .stem works for both files and directories
+    # v1.py → .stem = "v1" ✅
+    # v1/  → .stem = "v1" ✅
+    api_dir = module_dir / "api"
+    if api_dir.exists():
+        versions.update(
+            d.stem for d in api_dir.iterdir()
+            if d.stem.startswith("v")
+        )
+
+    # Check ws/ directory - MUST be directories (enforced by d.is_dir())
+    ws_dir = module_dir / "ws"
+    if ws_dir.exists():
+        ws_versions = {
+            d.stem for d in ws_dir.iterdir()
+            if d.is_dir() and d.stem.startswith("v")  # ← Directory required
+        }
+        versions |= ws_versions
+
+    if not versions:
+        raise ValueError(f"No versions found for module {self.name}")
+
+    return sorted(versions)
+```
+
+### 5. Self-Contained Module Apps
+
+Each module creates its **own FastAPI application** via `ModuleApp` wrapper:
 
 - **REST endpoints** via `APIRouter` instances
 - **WebSocket endpoint** (`/ws`) via `FastWSAdapter`
-- **Lifespan management** for spec generation and cleanup
 - **Independent documentation** (OpenAPI/AsyncAPI)
 
-The factory **mounts** module apps rather than collecting routers:
+The factory **mounts** module apps:
 
 ```python
-# Module creates complete app
-app, ws_app = module.create_app()
+# ModuleApp creates complete apps per version
+for version, api_router in module.api_routers.items():
+    api_app = FastAPI(...)
+    api_app.include_router(api_router)
+
+    # WebSocket setup if available
+    if module.ws_routers:
+        ws_app = FastWSAdapter(...)
+        # Note: ws_routers is dict[str, WsRouterInterface]
+        # WsRouterInterface is actually list[WsRouteInterface]
+        for version, ws_routers in module.ws_routers.items():
+            for ws_router in ws_routers:
+                ws_app.include_router(ws_router)
 
 # Factory mounts it
-main_app.mount(f"/api/v1/{module.name}", app)
+main_app.mount(f"/api/{version}/{module.name}", api_app)
 ```
 
-### 3. Auto-Discovery and Registration
+### 6. Auto-Discovery and Registration
 
 The `ModuleRegistry` automatically discovers modules:
 
@@ -111,8 +295,7 @@ The `ModuleRegistry` automatically discovers modules:
 # Convention: modules/<module_name>/__init__.py exports <ModuleName>Module
 modules/
 ├── broker/__init__.py      → exports BrokerModule
-├── datafeed/__init__.py    → exports DatafeedModule
-└── core/__init__.py        → exports CoreModule
+└── datafeed/__init__.py    → exports DatafeedModule
 
 # Registry auto-discovers and validates
 registry.auto_discover(modules_dir)
@@ -124,7 +307,91 @@ registry.auto_discover(modules_dir)
 - Class naming: `{ModuleName}Module` (e.g., `BrokerModule`)
 - No duplicate module names
 
-### 4. Lazy Loading
+### 7. Module Loading Enforcement
+
+The module system **validates** that all routers follow the required patterns during import:
+
+**API Router Enforcement**:
+
+```python
+# In Module._import_api_routers_for_version()
+def _import_api_routers_for_version(self, version: str) -> APIRouterInterface:
+    """Import API routers for a specific version."""
+    api_module = importlib.import_module(f"...api.{version}")
+
+    # Scan module for APIRouterInterface subclass
+    for attr_name in dir(api_module):
+        if attr_name.startswith("_"):
+            continue
+        attr = getattr(api_module, attr_name)
+        if (
+            isinstance(attr, type)
+            and issubclass(attr, APIRouterInterface)  # ← VALIDATION
+            and attr is not APIRouterInterface
+        ):
+            return attr(service=self._service, version=version, prefix="", tags=[self.name])
+
+    # Fail if no valid router found
+    raise ValueError(f"No APIRouterInterface class found in api.{version}")
+```
+
+**What This Enforces**:
+
+- ✅ API routers **must** inherit from `APIRouterInterface`
+- ✅ Automatically gets `/health`, `/versions`, `/version` endpoints
+- ✅ Module name used for tags
+- ✅ Prefix always empty (mounting adds the prefix)
+- ❌ Modules without `APIRouterInterface` inheritance fail to load
+
+**WebSocket Router Enforcement**:
+
+```python
+# In Module._import_ws_routers_for_version()
+def _import_ws_routers_for_version(self, version: str) -> WsRouterInterface | None:
+    """Import WebSocket routers for a specific version."""
+    try:
+        ws_module = importlib.import_module(f"...ws.{version}")
+
+        # Scan for WsRouterInterface subclass
+        for attr_name in dir(ws_module):
+            if attr_name.startswith("_"):
+                continue
+            attr = getattr(ws_module, attr_name)
+            if (
+                isinstance(attr, type)
+                and issubclass(attr, WsRouterInterface)  # ← VALIDATION
+                and attr is not WsRouterInterface
+            ):
+                return attr(service=self._service)
+
+        return None  # WebSocket is optional
+    except ImportError:
+        return None  # WebSocket support not required
+```
+
+**What This Enforces**:
+
+- ✅ WS routers **should** inherit from `WsRouterInterface` if present
+- ✅ WebSocket support is **optional** (returns None if not found)
+- ✅ Version **must** be a directory (enforced in `_discover_versions()`)
+- ✅ Multiple routers per version supported (list-based pattern)
+
+**Error Examples**:
+
+```python
+# Missing APIRouterInterface inheritance
+# api/v1.py
+class BrokerApi(APIRouter):  # ❌ Wrong! Must inherit APIRouterInterface
+    pass
+
+# Result: ValueError: No APIRouterInterface class found in api.v1
+
+# No versions found
+# Empty api/ and ws/ directories
+# Result: ValueError: No versions found for module broker
+```
+
+### 8. Lazy Loading
 
 Modules are **lazy-loaded** only when needed:
 
@@ -150,10 +417,10 @@ Benefits:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     ModularApp                          │
+│                     ModularApp                              │
 │  (Main Application - Coordinator)                           │
 │                                                             │
-│  • Mounts module apps at /api/v1/{module}                  │
+│  • Mounts module apps at /api/{version}/{module}           │
 │  • Merges OpenAPI specs                                     │
 │  • Merges AsyncAPI specs                                    │
 │  • Tracks WebSocket apps                                    │
@@ -163,11 +430,17 @@ Benefits:
         │                   │                   │
         ▼                   ▼                   ▼
 ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│ Core Module  │    │ Broker Module│    │Datafeed Module│
+│ Broker Module│    │Datafeed Module│    │ Other Modules│
 │              │    │              │    │              │
 │ FastAPI App  │    │ FastAPI App  │    │ FastAPI App  │
-│ + WS (none)  │    │ + WS App     │    │ + WS App     │
+│ + WS App     │    │ + WS App     │    │ + WS App     │
 └──────────────┘    └──────────────┘    └──────────────┘
+
+  Each module provides:
+  • Health endpoints via APIRouterInterface
+  • Version endpoints via APIRouterInterface
+  • Business logic via Service base class
+  • Auto-discovered versions from directory structure
 ```
 
 ### Directory Structure
@@ -178,49 +451,64 @@ backend/src/trading_api/
 ├── main.py                     # Entry point (creates app via factory)
 │
 ├── shared/                     # Shared infrastructure (always loaded)
-│   ├── module_interface.py    # Module Protocol definition
+│   ├── module_interface.py    # Module ABC definition
 │   ├── module_registry.py     # Module discovery and registration
+│   ├── service.py             # Base Service class (health, versions)
 │   ├── client_generation_service.py  # Python client generation
 │   ├── api/                   # Shared API utilities
+│   │   └── api_router_interface.py  # APIRouterInterface (auto health/version)
 │   ├── plugins/               # FastWS adapter and plugins
 │   ├── ws/                    # WebSocket framework
+│   │   ├── fastws_adapter.py  # FastWSAdapter integration
+│   │   └── ws_route_interface.py  # WsRouterInterface (list[WsRouteInterface])
 │   └── templates/             # Code generation templates
 │
 ├── modules/                   # Feature modules (pluggable)
-│   ├── core/                  # Core module (always enabled)
-│   │   ├── __init__.py       # CoreModule class
-│   │   ├── service.py        # CoreService (health, versions)
-│   │   ├── api.py            # CoreApi (REST endpoints)
-│   │   ├── specs_generated/  # OpenAPI specs
-│   │   ├── client_generated/ # Python HTTP client
-│   │   └── tests/            # Module tests
-│   │
 │   ├── broker/               # Broker module (optional)
 │   │   ├── __init__.py       # BrokerModule class
-│   │   ├── service.py        # BrokerService
-│   │   ├── api.py            # BrokerApi
-│   │   ├── ws.py             # WebSocket routers definition
-│   │   ├── ws_generated/     # Auto-generated WS routers
+│   │   ├── service.py        # BrokerService (extends ServiceInterface)
+│   │   ├── api/              # Versioned API routers
+│   │   │   └── v1.py         # ✅ v1 API router (file pattern - recommended)
+│   │   ├── ws/               # Versioned WebSocket routers
+│   │   │   └── v1/           # ✅ v1 WS router (directory pattern - required)
+│   │   │       └── __init__.py  # BrokerWsRouters class
 │   │   ├── specs_generated/  # OpenAPI + AsyncAPI specs
 │   │   ├── client_generated/ # Python HTTP client
 │   │   └── tests/            # Module tests
 │   │
 │   └── datafeed/             # Datafeed module (optional)
 │       ├── __init__.py       # DatafeedModule class
-│       ├── service.py        # DatafeedService
-│       ├── api.py            # DatafeedApi
-│       ├── ws.py             # WebSocket routers definition
-│       ├── ws_generated/     # Auto-generated WS routers
+│       ├── service.py        # DatafeedService (extends ServiceInterface)
+│       ├── api/              # Versioned API routers
+│       │   └── v1.py         # ✅ v1 API router file (extends APIRouterInterface)
+│       ├── ws/               # Versioned WebSocket routers
+│       │   └── v1/           # ✅ v1 WS router directory
+│       │       └── __init__.py  # DatafeedWsRouters class
 │       ├── specs_generated/  # OpenAPI + AsyncAPI specs
 │       ├── client_generated/ # Python HTTP client
 │       └── tests/            # Module tests
 │
 └── models/                   # Shared Pydantic models (topic-based)
     ├── bars.py               # Bar/candle data models
-    ├── broker.py             # Order, position, execution models
+    ├── broker/               # Broker-specific models
+    │   ├── account.py        # Account models
+    │   ├── orders.py         # Order models
+    │   └── positions.py      # Position models
     ├── common.py             # Common types (TimeFrame, etc.)
-    └── datafeed.py           # Symbol, quote models
+    ├── datafeed.py           # Symbol, quote models
+    ├── health.py             # Health check models
+    └── versioning.py         # Version info models
 ```
+
+**Key Structure Points**:
+
+- **`api/v1.py`**: Version-specific API router as **file** (or `v1/__init__.py` - both supported)
+- **`ws/v1/`**: Version-specific WebSocket router as **directory** (required for generated routers)
+- **Flexible API versioning**: API supports both file and directory patterns via `.stem`
+- **Required WS directories**: WebSocket versions must be directories
+- **No core module**: Health/version functionality provided by `shared/service_interface.py` and `shared/api/api_router_interface.py`
+- **APIRouterInterface**: All API routers inherit from this, automatically getting health/version endpoints
+- **WsRouterInterface**: Is `list[WsRouteInterface]`, allowing multiple WS routers per version
 
 ---
 
@@ -233,8 +521,8 @@ backend/src/trading_api/
 2. Registration → registry.register(ModuleClass, "module_name")
 3. Filtering    → registry.set_enabled_modules(["broker", "datafeed"])
 4. Loading      → registry.get_enabled_modules()  # Lazy instantiation
-5. App Creation → module.create_app()  # Returns (FastAPI, FastWSAdapter | None)
-6. Mounting     → main_app.mount(f"/api/v1/{module.name}", module_app)
+5. App Wrapping → ModuleApp(module)  # Creates FastAPI apps per version
+6. Mounting     → main_app.mount(f"/api/{version}/{module.name}", api_app)
 ```
 
 ### Module Implementation Example
@@ -242,47 +530,14 @@ backend/src/trading_api/
 ```python
 # modules/broker/__init__.py
 from pathlib import Path
-from fastapi.routing import APIRouter
 from trading_api.shared import Module
-from trading_api.shared.ws.ws_route_interface import WsRouteInterface
-
-from .api import BrokerApi
-from .service import BrokerService
-from .ws import BrokerWsRouters
-
 
 class BrokerModule(Module):
     """Broker module - Trading operations."""
 
-    def __init__(self) -> None:
-        super().__init__()
-        self._service = BrokerService()
-        # ⚠️ CRITICAL: prefix="" is REQUIRED (routes at root level)
-        # Factory will mount entire app at /api/v1/broker
-        self._api_routers = [
-            BrokerApi(service=self.service, prefix="", tags=[self.name])
-        ]
-        self._ws_routers = BrokerWsRouters(broker_service=self.service)
-
-    @property
-    def name(self) -> str:
-        return "broker"
-
     @property
     def module_dir(self) -> Path:
         return Path(__file__).parent
-
-    @property
-    def service(self) -> BrokerService:
-        return self._service
-
-    @property
-    def api_routers(self) -> list[APIRouter]:
-        return self._api_routers
-
-    @property
-    def ws_routers(self) -> list[WsRouteInterface]:
-        return self._ws_routers
 
     @property
     def tags(self) -> list[dict[str, str]]:
@@ -292,26 +547,82 @@ class BrokerModule(Module):
                 "description": "Broker operations (orders, positions, executions)",
             }
         ]
+
+# modules/broker/service.py
+from trading_api.shared.service_interface import ServiceInterface
+
+class BrokerService(ServiceInterface):
+    """Broker business logic."""
+
+    def __init__(self, module_dir: Path):
+        super().__init__(module_dir)
+
+# modules/broker/api/v1.py (FILE, not directory)
+from trading_api.shared.api import APIRouterInterface
+from trading_api.models.broker.orders import Order, OrderResponse
+
+class BrokerApi(APIRouterInterface):
+    """Broker API v1.
+
+    Automatically provides: /health, /versions, /version
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        @self.post("/orders", response_model=OrderResponse)
+        async def create_order(order: Order) -> OrderResponse:
+            return await self.service.create_order(order)
+
+# modules/broker/ws/v1/__init__.py (DIRECTORY with __init__.py)
+from trading_api.shared.ws import WsRouterInterface
+
+class BrokerWsRouters(WsRouterInterface):
+    """Broker WebSocket v1 routers."""
+
+    def __init__(self, service: WsRouteService):
+        self.generate_routers(__file__)
+
+        from .ws_generated import OrderWsRouter, PositionWsRouter
+
+        order_router = OrderWsRouter(route="orders", service=service)
+        position_router = PositionWsRouter(route="positions", service=service)
+
+        super().__init__([order_router, position_router], service=service)
 ```
+
+**URL Results After Mounting**:
+
+| Module Route (defined) | Mount Point (factory) | Final URL                    |
+| ---------------------- | --------------------- | ---------------------------- |
+| `/health`              | `/api/v1/broker`      | `/api/v1/broker/health`      |
+| `/versions`            | `/api/v1/broker`      | `/api/v1/broker/versions`    |
+| `/orders`              | `/api/v1/broker`      | `/api/v1/broker/orders`      |
+| `/orders/{id}`         | `/api/v1/broker`      | `/api/v1/broker/orders/{id}` |
+
+**Pattern**:
+
+- Module API router: `prefix=""` (routes at root level)
+- Extends `APIRouterInterface` (gets automatic health/version endpoints)
+- Factory mounts at: `/api/{version}/{module.name}`
+- Service extends `Service` base class (gets version metadata)
+- Result: Clean, consistent URLs with automatic health/version support
 
 ### URL Structure
 
-Modules create **root-level routes** that get mounted with module prefix:
+| Module   | Version | Mount Point        | Module Route | Final URL                         |
+| -------- | ------- | ------------------ | ------------ | --------------------------------- |
+| Broker   | v1      | `/api/v1/broker`   | `/health`    | `/api/v1/broker/health` (auto)    |
+| Broker   | v1      | `/api/v1/broker`   | `/versions`  | `/api/v1/broker/versions` (auto)  |
+| Broker   | v1      | `/api/v1/broker`   | `/version`   | `/api/v1/broker/version` (auto)   |
+| Broker   | v1      | `/api/v1/broker`   | `/orders`    | `/api/v1/broker/orders`           |
+| Broker   | v1      | `/api/v1/broker`   | `/ws`        | `/api/v1/broker/ws` (WebSocket)   |
+| Broker   | v2      | `/api/v2/broker`   | `/health`    | `/api/v2/broker/health` (auto)    |
+| Datafeed | v1      | `/api/v1/datafeed` | `/health`    | `/api/v1/datafeed/health` (auto)  |
+| Datafeed | v1      | `/api/v1/datafeed` | `/config`    | `/api/v1/datafeed/config`         |
+| Datafeed | v1      | `/api/v1/datafeed` | `/ws`        | `/api/v1/datafeed/ws` (WebSocket) |
 
-| Module   | Mount Point        | Module Route | Final URL                         |
-| -------- | ------------------ | ------------ | --------------------------------- |
-| Core     | `/api/v1/core`     | `/health`    | `/api/v1/core/health`             |
-| Core     | `/api/v1/core`     | `/versions`  | `/api/v1/core/versions`           |
-| Broker   | `/api/v1/broker`   | `/orders`    | `/api/v1/broker/orders`           |
-| Broker   | `/api/v1/broker`   | `/ws`        | `/api/v1/broker/ws` (WebSocket)   |
-| Datafeed | `/api/v1/datafeed` | `/config`    | `/api/v1/datafeed/config`         |
-| Datafeed | `/api/v1/datafeed` | `/ws`        | `/api/v1/datafeed/ws` (WebSocket) |
-
-**Key Pattern**:
-
-- Module defines: `prefix=""` in routers
-- Factory mounts: `app.mount("/api/v1/{module.name}", module_app)`
-- Result: Clean, consistent URLs
+Routes marked "(auto)" are automatically provided by `APIRouterInterface` inheritance.
 
 ---
 
@@ -322,32 +633,24 @@ Modules create **root-level routes** that get mounted with module prefix:
 The `ModularApp` class extends FastAPI with module management:
 
 ```python
-class ModuleApp:
-    """Wrapper for module's FastAPI and WebSocket apps."""
-    def __init__(self, module: Module):
-        self.module = module
-        self.api_app, self.ws_app = module.create_app()
-
 class ModularApp(FastAPI):
     """FastAPI with integrated module and WebSocket tracking."""
 
     def __init__(self, modules: list[Module], base_url: str, **kwargs):
         self.base_url = base_url
-        # Create ModuleApp wrappers (not just modules)
         self._modules_apps = [ModuleApp(module) for module in modules]
 
-        # Create FastAPI with merged OpenAPI tags
         super().__init__(
             openapi_url=f"{base_url}/openapi.json",
             docs_url=f"{base_url}/docs",
-            openapi_tags=[...],  # Merged from all modules
+            openapi_tags=[...],
             **kwargs
         )
 
-        # Mount each module's app
         for module_app in self._modules_apps:
-            mount_path = f"{self.base_url}/{module_app.module.name}"
-            self.mount(mount_path, module_app.api_app)
+            for api_app in module_app.api_versions:
+                mount_path = f"{self.base_url}/{api_app.version}/{module_app.module.name}"
+                self.mount(mount_path, api_app)
 
     def openapi(self) -> dict[str, Any]:
         """Generate merged OpenAPI schema from all modules."""
@@ -358,9 +661,50 @@ class ModularApp(FastAPI):
         # Merges channels, components from all module WebSocket apps
 
     @property
-    def ws_apps(self) -> list[FastWSAdapter]:
-        """Get all WebSocket apps from modules."""
-        return [m.ws_app for m in self._modules_apps if m.ws_app]
+    def modules_apps(self) -> list[ModuleApp]:
+        """Get all module app wrappers."""
+        return self._modules_apps
+```
+
+### ModuleApp Wrapper
+
+```python
+class ModuleApp:
+    """Wraps a module and creates versioned FastAPI/WebSocket apps."""
+
+    def __init__(self, module: Module):
+        self.module = module
+        self.versions: dict[str, tuple[FastAPI, FastWSAdapter | None]] = {}
+
+        for version, api_router in module.api_routers.items():
+            api_app = FastAPI(
+                title=f"{module.name.title()} API",
+                version=version,
+                openapi_tags=module.tags,
+            )
+            api_app.include_router(api_router)
+
+            ws_app: FastWSAdapter | None = None
+            if module.ws_routers:
+                ws_app = FastWSAdapter(...)
+
+                for version, ws_routers in module.ws_routers.items():
+                    for ws_router in ws_routers:
+                        ws_app.include_router(ws_router)
+
+                @api_app.websocket("/ws")
+                async def websocket_endpoint(client):
+                    await ws_app.serve(client)
+
+            self.versions[version] = (api_app, ws_app)
+
+    @property
+    def api_versions(self) -> list[FastAPI]:
+        return [v[0] for v in self.versions.values()]
+
+    @property
+    def ws_versions(self) -> list[FastWSAdapter]:
+        return [v[1] for v in self.versions.values() if v[1] is not None]
 ```
 
 ### Factory Pattern
@@ -373,34 +717,16 @@ class AppFactory:
         self,
         enabled_module_names: list[str] | None = None
     ) -> ModularApp:
-        """Create app with selective module loading.
-
-        Args:
-            enabled_module_names: Modules to enable (None = all).
-                                 Core is always enabled.
-
-        Returns:
-            ModularApp instance with mounted modules
-        """
-        # 1. Clear and auto-discover modules
+        """Create app with selective module loading."""
         self.registry.clear()
         self.registry.auto_discover(self.modules_dir)
-
-        # 2. Ensure core is always enabled
-        if enabled_module_names is not None:
-            if "core" not in enabled_module_names:
-                enabled_module_names.append("core")
-
-        # 3. Set enabled modules
         self.registry.set_enabled_modules(enabled_module_names)
 
-        # 4. Get enabled module instances (lazy-loaded)
         enabled_modules = self.registry.get_enabled_modules()
 
-        # 5. Create ModularApp
         app = ModularApp(
             modules=enabled_modules,
-            base_url="/api/v1",
+            base_url="/api",
             title="Trading API",
             version="1.0.0",
         )
@@ -411,17 +737,11 @@ class AppFactory:
 ### Usage Examples
 
 ```python
-# Create factory
 factory = AppFactory()
 
-# Load all modules (default)
-app = factory.create_app()
-
-# Load specific modules (core always included)
-app = factory.create_app(enabled_module_names=["datafeed"])
-
-# Load only core
-app = factory.create_app(enabled_module_names=[])
+app = factory.create_app()  # Load all modules
+app = factory.create_app(enabled_module_names=["broker", "datafeed"])  # Specific modules
+app = factory.create_app(enabled_module_names=["broker"])  # Single module
 ```
 
 ---
@@ -434,18 +754,19 @@ Each module follows this structure:
 
 ```
 modules/{module_name}/
-├── __init__.py              # {ModuleName}Module class (implements Protocol)
-├── service.py               # Business logic (implements WsRouteService if WS)
-├── api.py                   # REST API endpoints (extends APIRouter)
-├── ws.py                    # WebSocket router definitions (TypeAlias)
-├── ws_generated/            # Auto-generated concrete WS router classes
-│   ├── {operation}_router.py
-│   └── ...
+├── __init__.py              # {ModuleName}Module class (extends Module ABC)
+├── service.py               # Business logic (extends ServiceInterface base class)
+├── api/                     # Versioned REST API routers
+│   └── v1.py                # ✅ v1 API router (file pattern - recommended for API)
+├── ws/                      # Versioned WebSocket routers (optional)
+│   └── v1/                  # ✅ v1 WS router (directory pattern - required for WS)
+│       ├── __init__.py      # Exports WsRouterInterface subclass
+│       └── ws_generated/    # Generated routers
 ├── specs_generated/         # Generated API specifications
-│   ├── {module}_openapi.json
-│   └── {module}_asyncapi.json
+│   ├── {module}_v1_openapi.json
+│   └── {module}_v1_asyncapi.json
 ├── client_generated/        # Generated Python HTTP client
-│   ├── {module}_client.py
+│   ├── {module}_v1_client.py
 │   └── __init__.py
 └── tests/                   # Module-specific tests
     ├── test_api.py
@@ -453,58 +774,59 @@ modules/{module_name}/
     └── test_ws.py
 ```
 
-#### Core Module (Always Enabled)
+**Key Structure Points**:
 
-The `core` module is special - it's **always enabled** and provides essential system endpoints:
+- **`api/v1.py`**: API router as **file** (recommended, though directories also work via `.stem`)
+- **`ws/v1/`**: WebSocket router as **directory** with `__init__.py` (required for generated routers)
+- **Versioning patterns**: API flexible (file or directory), WS strict (directory only)
+- **APIRouterInterface**: All API routers extend this for automatic health/version endpoints
+- **ServiceInterface**: All services extend this base class for version metadata and health checks
+- **WsRouterInterface**: List-based pattern (`extends list[WsRouteInterface]`) supporting multiple WS routers per version
+
+**Understanding WsRouterInterface**:
+
+`WsRouterInterface` extends `list[WsRouteInterface]`, which means:
 
 ```python
-# modules/core/__init__.py
-class CoreModule(Module):
-    """Core module - Essential system endpoints.
+# Each version maps to a WsRouterInterface, which IS a list
+ws_routers: dict[str, WsRouterInterface] = {
+    "v1": WsRouterInterface([router1, router2, router3], service=service)
+}
 
-    Always enabled, provides:
-    - Health checks (/health)
-    - API versioning (/versions)
-    - System information
-    """
+# You can iterate directly over it
+for ws_router in module.ws_routers["v1"]:  # WsRouterInterface is a list!
+    ws_app.include_router(ws_router)
 
-    def __init__(self) -> None:
-        super().__init__()
-        # Core module has NO WebSocket routers
-        self._ws_routers = []
+# Actual usage in broker module
+class BrokerWsRouters(WsRouterInterface):  # Inherits from list!
+    def __init__(self, service: WsRouteService):
+        order_router = OrderWsRouter(route="orders", service=service)
+        position_router = PositionWsRouter(route="positions", service=service)
 
-    @property
-    def name(self) -> str:
-        return "core"
+        # Pass list to parent constructor
+        super().__init__([order_router, position_router], service=service)
 ```
 
-**Key Differences from Feature Modules**:
-
-- No WebSocket support (REST only)
-- Always included in enabled modules
-- Provides infrastructure endpoints
-- No business logic service
-
-**Core Module Endpoints**:
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/v1/core/health` | GET | Health check status |
-| `/api/v1/core/versions` | GET | API version information |
+This design allows each module version to have **multiple WebSocket routers** (orders, positions, executions, etc.) that are managed as a cohesive unit.
 
 ### Module Creation Checklist
 
 When creating a new module:
 
 - [ ] Create `modules/{module_name}/` directory
-- [ ] Implement `{ModuleName}Module` class with `Module` protocol
-- [ ] Create `service.py` with business logic
-- [ ] Create `api.py` with `APIRouter` subclass (REST endpoints)
-  - [ ] **CRITICAL**: Use `prefix=""` in router initialization (not `prefix="/{module}"`)
-  - [ ] Factory handles mounting at `/api/v1/{module}` automatically
-- [ ] (Optional) Create `ws.py` with WebSocket router TypeAliases
-- [ ] (Optional) WebSocket routers auto-generate on `make dev`
+- [ ] Implement `{ModuleName}Module` class extending `Module` ABC
+- [ ] Create `service.py` extending `ServiceInterface` base class
+- [ ] Create `api/v1.py` **file** extending `APIRouterInterface` with `prefix=""`
+- [ ] (Optional) Create `ws/v1/` **directory** with `__init__.py` extending `WsRouterInterface`
 - [ ] Add module tests in `tests/` directory
-- [ ] Verify with `make test-module-{module_name}`
+- [ ] Verify module with `make test-module-{module_name}`
+
+**Required Base Classes**:
+
+- **Module** → Extend `trading_api.shared.module_interface.Module` (ABC)
+- **ServiceInterface** → Extend `trading_api.shared.service_interface.ServiceInterface` (ABC)
+- **API Router** → Extend `trading_api.shared.api.api_router_interface.APIRouterInterface`
+- **WebSocket Router** → Extend `trading_api.shared.ws.ws_route_interface.WsRouterInterface` (list-based)
 
 ---
 
@@ -512,30 +834,26 @@ When creating a new module:
 
 ### Module-Scoped WebSocket Apps
 
-Each module with real-time features creates its **own FastWSAdapter**:
+Each module with real-time features creates its **own FastWSAdapter** via `ModuleApp`:
 
 ```python
-# In module.create_app()
-if self.ws_routers:
-    # Create module-specific WebSocket app
+# In ModuleApp.__init__()
+if module.ws_routers:
     ws_app = FastWSAdapter(
-        title=f"{self.name.title()} WebSockets",
-        description=f"Real-time WebSocket app for {self.name} module",
-        version="1.0.0",
-        asyncapi_url="ws/asyncapi.json",
+        title=f"{module.name.title()} WebSockets",
+        description=f"Real-time WebSocket app for {module.name} module",
+        version=version,
+        asyncapi_url="/ws/asyncapi.json",
         heartbeat_interval=30.0,
         max_connection_lifespan=3600.0,
     )
 
-    # Register module's WebSocket routers
-    for ws_router in self.ws_routers:
-        ws_app.include_router(ws_router)
+    for version, ws_routers in module.ws_routers.items():
+        for ws_router in ws_routers:
+            ws_app.include_router(ws_router)
 
-    # Register WebSocket endpoint in module's FastAPI app
     @app.websocket("/ws")
-    async def websocket_endpoint(
-        client: Annotated[Client, Depends(ws_app.manage)],
-    ) -> None:
+    async def websocket_endpoint(client):
         await ws_app.serve(client)
 ```
 
@@ -546,37 +864,49 @@ if self.ws_routers:
 | Broker   | `/api/v1/broker/ws`   | `/api/v1/broker/ws/asyncapi`   |
 | Datafeed | `/api/v1/datafeed/ws` | `/api/v1/datafeed/ws/asyncapi` |
 
-### WsRouteService Protocol
+### WsRouterInterface and WsRouteService
 
-Services implement the `WsRouteService` protocol for topic lifecycle:
+**WsRouterInterface** is `list[WsRouteInterface]`:
 
 ```python
-class WsRouteService(Protocol):
-    """Protocol for services that support WebSocket topic subscriptions."""
+# shared/ws/ws_route_interface.py
+class WsRouterInterface(list[WsRouteInterface]):
+    """Collection of WebSocket routers for a module version."""
 
-    async def create_topic(self, topic: str) -> None:
+    def __init__(self, *args, service: ServiceInterface, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._service = service
+
+    def generate_routers(self, ws_file: str) -> None:
+        """Generate WebSocket routers from type aliases."""
+```
+
+**WsRouteService Protocol** for topic lifecycle:
+
+```python
+class WsRouteService(ServiceInterface):
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
         """Start generating data for topic (first subscriber)."""
 
-    async def remove_topic(self, topic: str) -> None:
+    def remove_topic(self, topic: str) -> None:
         """Stop generating data for topic (last unsubscribe)."""
 ```
 
 **Reference Counting Pattern**:
 
 ```python
-# In WebSocket router
 topic_trackers: dict[str, int] = {}
 
 async def subscribe(topic: str):
     if topic not in topic_trackers:
         topic_trackers[topic] = 0
-        await service.create_topic(topic)  # First subscriber
+        await service.create_topic(topic)
     topic_trackers[topic] += 1
 
 async def unsubscribe(topic: str):
     topic_trackers[topic] -= 1
     if topic_trackers[topic] == 0:
-        await service.remove_topic(topic)  # Last unsubscribe
+        service.remove_topic(topic)
         del topic_trackers[topic]
 ```
 
@@ -586,67 +916,50 @@ async def unsubscribe(topic: str):
 
 ### Per-Module Spec Generation
 
-Each module generates its **own specifications**:
+Each module generates its own specifications:
 
 ```python
-# In module.create_app() lifespan
-async def lifespan(api_app: FastAPI):
-    # Generate module's specs
-    module.gen_specs_and_clients(
-        api_app=api_app,
-        ws_app=ws_app
-    )
-
-    if ws_app:
-        ws_app.setup(api_app)
-
-    yield
+module_app.gen_specs_and_clients(clean_first=False)
 ```
 
-**Output Structure**:
+**Output**:
 
 ```
 modules/{module}/
 ├── specs_generated/
-│   ├── {module}_openapi.json    # Module's REST API spec
-│   └── {module}_asyncapi.json   # Module's WebSocket spec
+│   ├── {module}_v1_openapi.json    # Module's v1 REST API spec
+│   └── {module}_v1_asyncapi.json   # Module's v1 WebSocket spec
 └── client_generated/
-    └── {module}_client.py        # Generated Python client
+    └── {module}_v1_client.py       # Generated Python client
 ```
 
 ### Merged Specifications
 
-The main app **merges** all module specs:
+The main app merges all module specs:
 
 ```python
-# OpenAPI merge
-main_app.openapi()  # Merges all module OpenAPI specs
-# → /api/v1/openapi.json
-
-# AsyncAPI merge
-main_app.asyncapi()  # Merges all module AsyncAPI specs
-# → /api/v1/ws/asyncapi.json (if WebSocket endpoint exists)
+main_app.openapi()  # → /api/openapi.json
+main_app.asyncapi()  # → /api/ws/asyncapi.json
 ```
 
 ### WebSocket Router Generation
 
-WebSocket routers are **auto-generated** from TypeAlias definitions:
+WebSocket routers are defined in versioned directories:
 
 ```python
-# modules/broker/ws.py
-BarsSubscribeRouter: TypeAlias = GenericWsRoute[
-    BarsSubscribeRequest,    # TRequest
-    BarsSubscribeResponse,   # TResponse
-    BarData,                 # TData (streaming)
-]
+class BrokerWsRouters(WsRouterInterface):
+    """Broker WebSocket v1 routers."""
 
-# Auto-generates: modules/broker/ws_generated/bars_subscribe_router.py
-class BarsSubscribeRouter(WsRouteInterface):
-    # Concrete implementation with proper types
-    ...
+    def __init__(self, service: WsRouteService):
+        self.generate_routers(__file__)
+
+        from .ws_generated import OrderWsRouter, PositionWsRouter
+
+        order_router = OrderWsRouter(route="orders", service=service)
+        position_router = PositionWsRouter(route="positions", service=service)
+
+        super().__init__([order_router, position_router], service=service)
 ```
-
-**Generation**: Automatic on app startup (`make dev`)
 
 ---
 
@@ -665,36 +978,33 @@ ENABLED_MODULES=broker,datafeed make dev
 
 ### 2. Multi-Process Mode (Production)
 
-Run modules in **separate processes** with nginx routing:
+Run modules in separate processes with nginx routing:
 
 ```bash
-# Start multi-process backend
 make backend-manager-start  # Uses dev-config.yaml
+```
 
-# Configuration: backend/dev-config.yaml
+**Configuration** (`backend/dev-config.yaml`):
+
+```yaml
 servers:
-  - module: core
-    host: 127.0.0.1
-    port: 8001
   - module: broker
     host: 127.0.0.1
-    port: 8002
+    port: 8001
   - module: datafeed
     host: 127.0.0.1
-    port: 8003
+    port: 8002
 
 nginx:
   listen_port: 8000
-  routing_strategy: "path"  # Routes by /api/v1/{module}/*
+  routing_strategy: "path"
 ```
 
 **Architecture**:
 
 ```
-Client Request → Nginx (8000) → Route by path → Module Process
-                                 /api/v1/core/*      → Core (8001)
-                                 /api/v1/broker/*    → Broker (8002)
-                                 /api/v1/datafeed/*  → Datafeed (8003)
+Client → Nginx (8000) → /api/v1/broker/*    → Broker (8001)
+                      → /api/v1/datafeed/*  → Datafeed (8002)
 ```
 
 **Commands**:
@@ -711,13 +1021,11 @@ make logs-tail               # View unified logs
 Deploy individual modules:
 
 ```python
-# Start only broker module
 from trading_api.app_factory import AppFactory
 
 factory = AppFactory()
 app = factory.create_app(enabled_module_names=["broker"])
 
-# Run with uvicorn
 uvicorn.run(app, host="0.0.0.0", port=8002)
 ```
 
@@ -727,23 +1035,18 @@ uvicorn.run(app, host="0.0.0.0", port=8002)
 
 ### Module Isolation
 
-Each module has **independent test fixtures**:
+Each module has independent test fixtures:
 
 ```python
-# modules/broker/tests/conftest.py
-import pytest
-from trading_api.app_factory import AppFactory
-
 @pytest.fixture
 def broker_app():
-    """Broker module app only (core automatically included)."""
+    """Broker module app only."""
     factory = AppFactory()
     return factory.create_app(enabled_module_names=["broker"])
 
 @pytest.fixture
 def broker_client(broker_app):
     """Test client for broker module."""
-    from fastapi.testclient import TestClient
     return TestClient(broker_app)
 ```
 
@@ -753,7 +1056,6 @@ def broker_client(broker_app):
 # Module-specific tests
 make test-module-broker      # Broker module only
 make test-module-datafeed    # Datafeed module only
-make test-module-core        # Core module only
 
 # Boundary tests
 make test-boundaries         # Import validation
@@ -786,11 +1088,73 @@ modules/broker/tests/
 
 ---
 
+## Quick Reference
+
+### Terminology Consistency Table
+
+Use these exact names when working with the modular architecture:
+
+| Concept            | Correct Class Name   | File Location                        | Import Path                                                                  |
+| ------------------ | -------------------- | ------------------------------------ | ---------------------------------------------------------------------------- |
+| Service base class | `ServiceInterface`   | `shared/service_interface.py`        | `from trading_api.shared.service_interface import ServiceInterface`          |
+| API router base    | `APIRouterInterface` | `shared/api/api_router_interface.py` | `from trading_api.shared.api.api_router_interface import APIRouterInterface` |
+| WS router base     | `WsRouterInterface`  | `shared/ws/ws_route_interface.py`    | `from trading_api.shared.ws.ws_route_interface import WsRouterInterface`     |
+| Module base class  | `Module`             | `shared/module_interface.py`         | `from trading_api.shared.module_interface import Module`                     |
+| WS route service   | `WsRouteService`     | `shared/ws/ws_route_interface.py`    | `from trading_api.shared.ws.ws_route_interface import WsRouteService`        |
+
+### Version Pattern Reference
+
+| Component         | Pattern                | Example                                  | Notes                               |
+| ----------------- | ---------------------- | ---------------------------------------- | ----------------------------------- |
+| API Router        | File or Directory      | `api/v1.py` or `api/v1/__init__.py`      | Both supported via `.stem` property |
+| WebSocket Router  | Directory only         | `ws/v1/__init__.py`                      | Required for generated routers      |
+| Version Discovery | Auto-detected          | Scans `api/` and `ws/` dirs              | Uses `d.stem.startswith("v")`       |
+| Enforcement       | Import-time validation | Module loading fails if wrong base class | See section 7                       |
+
+### Module Structure Quick Copy
+
+```python
+# modules/mymodule/__init__.py
+from pathlib import Path
+from trading_api.shared.module_interface import Module
+
+class MymoduleModule(Module):
+    @property
+    def module_dir(self) -> Path:
+        return Path(__file__).parent
+
+    @property
+    def tags(self) -> list[dict[str, str]]:
+        return [{"name": "mymodule", "description": "My module description"}]
+
+# modules/mymodule/service.py
+from pathlib import Path
+from trading_api.shared.service_interface import ServiceInterface
+
+class MymoduleService(ServiceInterface):
+    def __init__(self, module_dir: Path) -> None:
+        super().__init__(module_dir)
+        # Add custom service logic here
+
+# modules/mymodule/api/v1.py
+from trading_api.shared.api.api_router_interface import APIRouterInterface
+
+class MymoduleApi(APIRouterInterface):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)  # Auto-registers /health, /versions, /version
+
+        @self.get("/example")
+        async def example_endpoint():
+            return {"message": "Hello from mymodule"}
+```
+
+---
+
 ## Related Documentation
 
 - **[ARCHITECTURE.md](../../ARCHITECTURE.md)** - Overall system architecture
 - **[backend/README.md](../README.md)** - Backend setup and reference
-- **[VERSIONING.md](./VERSIONING.md)** - API versioning strategy
+- **[MODULAR_VERSIONNING.md](./MODULAR_VERSIONNING.md)** - API versioning strategy
 - **[BACKEND_WEBSOCKETS.md](./BACKEND_WEBSOCKETS.md)** - WebSocket implementation guide
 - **[SPECS_AND_CLIENT_GEN.md](./SPECS_AND_CLIENT_GEN.md)** - Spec and client generation
 - **[WS_ROUTERS_GEN.md](./WS_ROUTERS_GEN.md)** - WebSocket router generation
@@ -802,14 +1166,23 @@ modules/broker/tests/
 
 The modular backend architecture provides:
 
-✅ **Protocol-Based Design** - All modules implement `Module` protocol  
-✅ **Self-Contained Apps** - Each module owns complete FastAPI app  
-✅ **Auto-Discovery** - Modules registered automatically via convention  
-✅ **Lazy Loading** - Resources initialized only when needed  
-✅ **Independent Testing** - Test modules in complete isolation  
-✅ **Selective Deployment** - Run only the modules you need  
-✅ **Horizontal Scaling** - Multi-process deployment with nginx  
-✅ **Automatic Specs** - OpenAPI/AsyncAPI per module + merged  
-✅ **Type Safety** - Protocol enforcement at compile time
+- **ABC-Based Design** - All modules extend `Module` abstract base class
+- **Self-Contained Apps** - Each module owns complete FastAPI app per version
+- **Auto-Discovery** - Modules registered automatically via convention
+- **Lazy Loading** - Resources initialized only when needed
+- **Independent Testing** - Test modules in complete isolation
+- **Selective Deployment** - Run only needed modules
+- **Horizontal Scaling** - Multi-process deployment with nginx
+- **Automatic Specs** - OpenAPI/AsyncAPI per module + merged
+- **Type Safety** - ABC enforcement at instantiation time
 
-**Key Insight**: Modules are **not just code organization** - they are **independently deployable applications** that compose into a cohesive system.
+**Architectural Patterns**:
+
+- **Flexible API Versioning**: API routers support both file (`api/v1.py`) and directory (`api/v1/`) patterns via `.stem`
+- **Strict WS Versioning**: WebSocket routers require directories (`ws/v1/`) for generated routers
+- **ABC Pattern**: Uses Python's `abc.ABC`, not `typing.Protocol`
+- **List-Based WS**: `WsRouterInterface` extends `list[WsRouteInterface]` for multiple routers per version
+- **Auto Health/Version**: All modules get health/version endpoints via `APIRouterInterface` inheritance
+- **Enforcement**: Module loading validates base class inheritance at import time
+
+Modules are **independently deployable versioned applications** that compose into a cohesive system.

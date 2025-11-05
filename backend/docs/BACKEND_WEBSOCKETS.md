@@ -1,7 +1,7 @@
 # Backend WebSockets - FastWS Integration Guide
 
 **Version**: 1.0.0  
-**Date**: November 2, 2025  
+**Last Updated**: November 5, 2025  
 **Status**: ✅ Production Ready
 
 ---
@@ -26,7 +26,8 @@ Module-Scoped WebSocket Pattern
 ├─ Each module creates its own FastWSAdapter
 ├─ Module registers WebSocket endpoint at /ws
 ├─ Auto-generates AsyncAPI specs per module
-└─ Main app merges all AsyncAPI specs
+├─ Main app merges all AsyncAPI specs
+└─ Health/version endpoints via APIRouterInterface (per module)
 ```
 
 ---
@@ -94,18 +95,24 @@ if self.ws_routers:
         await ws_app.serve(client)
 ```
 
-**Result**: Each module has its own WebSocket endpoint at `/api/v1/{module}/ws`
+**Result**: Each module has its own WebSocket endpoint at `/api/v{N}/{module}/ws`
 
 | Module   | WebSocket URL         | AsyncAPI Docs                  |
 | -------- | --------------------- | ------------------------------ |
 | Broker   | `/api/v1/broker/ws`   | `/api/v1/broker/ws/asyncapi`   |
 | Datafeed | `/api/v1/datafeed/ws` | `/api/v1/datafeed/ws/asyncapi` |
 
-### 3. WebSocket Router Interface
+**Note**: Health and version endpoints (`/health`, `/versions`, `/version`) are automatically provided by `APIRouterInterface` for each module at `/api/v{N}/{module}/health` etc.
+
+### 3. WebSocket Router Interfaces
 
 **Location**: `shared/ws/ws_route_interface.py`
 
-All WebSocket routers implement `WsRouteInterface`:
+Two complementary interfaces for WebSocket routing:
+
+#### WsRouteInterface (Single Topic Router)
+
+All individual WebSocket routers implement `WsRouteInterface`:
 
 ```python
 class WsRouteInterface(OperationRouter):
@@ -125,14 +132,35 @@ class WsRouteInterface(OperationRouter):
 - **Topic Builder**: Generates consistent topic names from subscription params
 - **Route Namespace**: Each router has a unique route prefix (e.g., `orders.`, `positions.`)
 
+#### WsRouterInterface (Router Container)
+
+Module-level container that holds multiple `WsRouteInterface` instances:
+
+```python
+class WsRouterInterface(list[WsRouteInterface]):
+    def __init__(self, *args: Any, service: ServiceInterface, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._service = service
+
+    def generate_routers(self, ws_file: str) -> None:
+        """Generate WebSocket routers from TypeAlias declarations"""
+        ...
+```
+
+**Key Features**:
+
+- **Router Collection**: Holds all WebSocket routers for a module
+- **Auto-generation**: Provides `generate_routers(__file__)` method
+- **Service Integration**: Maintains reference to module service
+
 ### 4. Service Protocol
 
 **Location**: `shared/ws/ws_route_interface.py`
 
-Services implementing WebSocket features must implement `WsRouteService`:
+Services with WebSocket features must implement the `WsRouteService` protocol, which extends `ServiceInterface` and adds WebSocket-specific methods:
 
 ```python
-class WsRouteService(Protocol):
+class WsRouteService(ServiceInterface):
     async def create_topic(self, topic: str, topic_update: Callable) -> None:
         """Start generating data for topic (first subscriber)"""
         ...
@@ -144,6 +172,8 @@ class WsRouteService(Protocol):
 
 **Reference Counting Pattern**: Routers track subscribers per topic and call service methods on first subscribe / last unsubscribe.
 
+**Note**: In practice, your module's service (e.g., `BrokerService`) inherits from `ServiceInterface` and implements the `WsRouteService` protocol methods.
+
 ---
 
 ## Creating a WebSocket-Ready Module
@@ -151,7 +181,7 @@ class WsRouteService(Protocol):
 ### Checklist
 
 - [ ] Service implements `WsRouteService` protocol
-- [ ] Create `ws.py` with TypeAlias declarations
+- [ ] Create `ws/v{N}/__init__.py` with TypeAlias declarations
 - [ ] Module exposes `ws_routers` property
 - [ ] Define subscription request and data models
 
@@ -178,44 +208,54 @@ class Bar(BaseModel):
 
 ### Step 2: Declare Router TypeAlias
 
-**Location**: `modules/{module}/ws.py`
+**Location**: `modules/{module}/ws/v{N}/__init__.py`
 
 ```python
+from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 from trading_api.shared.ws.generic_route import WsRouter
-from trading_api.shared.ws.module_router_generator import generate_module_routers
+from trading_api.shared.ws.ws_route_interface import WsRouterInterface, WsRouteService
 
 if TYPE_CHECKING:
     # TypeAlias for code generation (compile-time only)
     BarWsRouter: TypeAlias = WsRouter[BarSubscriptionRequest, Bar]
 
-class DatafeedWsRouters(list[WsRouteInterface]):
-    def __init__(self, datafeed_service: WsRouteService):
+class DatafeedWsRouters(WsRouterInterface):
+    def __init__(self, service: WsRouteService):
         # Auto-generate concrete router classes
-        module_name = os.path.basename(os.path.dirname(__file__))
-        generate_module_routers(module_name)
+        module_name = Path(__file__).parent.parent.parent.name
+
+        # Generate routers from TypeAlias declarations
+        self.generate_routers(__file__)
 
         # Import generated routers (runtime)
         if not TYPE_CHECKING:
             from .ws_generated import BarWsRouter
 
         # Instantiate with service
-        bar_router = BarWsRouter(route="bars", service=datafeed_service)
-        super().__init__([bar_router])
+        bar_router = BarWsRouter(route="bars", tags=[module_name], service=service)
+
+        # Initialize list with router instances
+        super().__init__([bar_router], service=service)
 ```
 
 **Pattern**: `TypeAlias = WsRouter[SubscriptionRequestType, DataType]`
 
-**Generation**: Happens automatically during router factory instantiation, creating:
+**Generation**: Happens automatically via `self.generate_routers(__file__)`, creating:
 
-- `ws_generated/barwsrouter.py` - Concrete router class
-- `ws_generated/__init__.py` - Exports all routers
+- `ws/v{N}/ws_generated/barwsrouter.py` - Concrete router class
+- `ws/v{N}/ws_generated/__init__.py` - Exports all routers
 
-### Step 3: Implement Service Protocol
+**Architecture Note**:
+
+- `WsRouteInterface` - Single router for one topic (extends OperationRouter)
+- `WsRouterInterface` - Container for multiple routers (extends list[WsRouteInterface])
+
+### Step 3: Implement WsRouteService Protocol Methods
 
 **Location**: `modules/{module}/service.py`
 
-The service is where **business logic integration** happens. It must implement `WsRouteService` protocol and handle:
+The service is where **business logic integration** happens. It must inherit from `ServiceInterface` and implement the `WsRouteService` protocol methods:
 
 - **Topic parsing** - Extract subscription parameters from topic string
 - **Model validation** - Verify subscription requests using Pydantic models
@@ -225,16 +265,19 @@ The service is where **business logic integration** happens. It must implement `
 ```python
 import asyncio
 import json
+from pathlib import Path
 from typing import Callable
-from trading_api.shared.ws.ws_route_interface import WsRouteService
 
-class DatafeedService(WsRouteService):
-    """Service implementing WsRouteService protocol for WebSocket support"""
+from trading_api.shared.service_interface import ServiceInterface
 
-    def __init__(self):
+class DatafeedService(ServiceInterface):
+    """Service extending ServiceInterface for WebSocket support"""
+
+    def __init__(self, module_dir: Path):
+        super().__init__(module_dir)
         self._topic_generators: dict[str, asyncio.Task] = {}
 
-    # !! IMORTANT SECTION !!
+    # !! IMPORTANT SECTION !!
     # MAIN BUSINESS SETUP METHOD
     async def create_topic(self, topic: str, topic_update: Callable) -> None:
         """Start streaming data for topic (first subscriber)
@@ -316,26 +359,27 @@ class DatafeedService(WsRouteService):
 
 ```python
 class DatafeedModule(Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self._service = DatafeedService()
-        self._api_routers = [
-            DatafeedApi(service=self.service, prefix="", tags=[self.name])
-        ]
-        # WebSocket routers (auto-generates during instantiation)
-        self._ws_routers = DatafeedWsRouters(datafeed_service=self.service)
+    def __init__(self, versions: list[str] | None = None) -> None:
+        # Module base class handles version discovery, service import,
+        # and API/WS router imports for each version
+        super().__init__(versions=versions)
 
     @property
-    def ws_routers(self) -> list[WsRouteInterface]:
-        return self._ws_routers
+    def module_dir(self) -> Path:
+        return Path(__file__).parent
+
+    @property
+    def tags(self) -> list[dict[str, str]]:
+        return [{"name": self.name, "description": "Datafeed operations"}]
 ```
 
 **That's it!** The module now has WebSocket support:
 
-- ✅ WebSocket endpoint at `/api/v1/datafeed/ws`
+- ✅ WebSocket endpoint at `/api/v1/datafeed/ws` (and all enabled versions)
 - ✅ AsyncAPI spec at `/api/v1/datafeed/ws/asyncapi`
-- ✅ Auto-generated routers in `ws_generated/`
+- ✅ Auto-generated routers in `ws/v{N}/ws_generated/`
 - ✅ Automatic broadcasting to subscribed clients
+- ✅ Health/version endpoints via APIRouterInterface at `/api/v1/datafeed/health`, `/api/v1/datafeed/versions`, `/api/v1/datafeed/version`
 
 ---
 
@@ -347,24 +391,24 @@ class DatafeedModule(Module):
 
 **Automatic generation from TypeAlias declarations**:
 
-1. **Declaration**: Define `TypeAlias = WsRouter[Request, Data]` in `ws.py` (inside `TYPE_CHECKING` block)
-2. **Generation**: `generate_module_routers(module_name)` called during router factory instantiation
-3. **Parsing**: Regex extracts TypeAlias declarations from `ws.py`
+1. **Declaration**: Define `TypeAlias = WsRouter[Request, Data]` in `ws/v{N}/__init__.py` (inside `TYPE_CHECKING` block)
+2. **Generation**: `self.generate_routers(__file__)` called during WsRouters class instantiation
+3. **Parsing**: Regex extracts TypeAlias declarations from the file
 4. **Template**: Loads `generic_route.py` template
 5. **Substitution**: Replaces `_TRequest` with `Request`, `_TData` with `Data`
 6. **Quality Checks**: Runs Black, Ruff, Flake8, Mypy, Isort (7-step pipeline)
-7. **Output**: Creates concrete class in `ws_generated/`
+7. **Output**: Creates concrete class in `ws/v{N}/ws_generated/`
 
 ### Generated Router Structure
 
-**Input** (`ws.py`):
+**Input** (`ws/v{N}/__init__.py`):
 
 ```python
 if TYPE_CHECKING:
     OrderWsRouter: TypeAlias = WsRouter[OrderSubscriptionRequest, PlacedOrder]
 ```
 
-**Output** (`ws_generated/orderwsrouter.py`):
+**Output** (`ws/v{N}/ws_generated/orderwsrouter.py`):
 
 ```python
 class OrderWsRouter(WsRouteInterface):
@@ -688,42 +732,54 @@ logger.info(f"Broadcast tasks: {len(ws_app._broadcast_tasks)}")
 
 ### Module WebSocket Checklist
 
-- [ ] Service implements `WsRouteService` protocol
-- [ ] Created `ws.py` with TypeAlias declarations
+- [ ] Service inherits from `ServiceInterface` and implements `WsRouteService` protocol methods (`create_topic`, `remove_topic`)
+- [ ] Created `ws/v{N}/__init__.py` with TypeAlias declarations
 - [ ] TypeAlias inside `if TYPE_CHECKING:` block
-- [ ] Router factory calls `generate_module_routers(module_name)`
-- [ ] Module exposes `ws_routers` property
-- [ ] Defined subscription request and data models
+- [ ] Router container class extends `WsRouterInterface` and calls `self.generate_routers(__file__)`
+- [ ] Module class extends `Module` base class (which auto-imports ws_routers)
+- [ ] API router extends `APIRouterInterface` in `api/v{N}.py` (provides health/version endpoints)
+- [ ] Defined subscription request and data models in `models/`
 
 ### File Structure
 
 ```
 modules/{module}/
-├── __init__.py              # Module class with ws_routers property
-├── service.py               # Implements WsRouteService protocol
-├── ws.py                    # TypeAlias declarations + router factory
-├── ws_generated/            # Auto-generated (created at init)
-│   ├── __init__.py
-│   └── {route}wsrouter.py
+├── __init__.py              # Module class extending Module base
+├── service.py               # Inherits from ServiceInterface, implements WsRouteService protocol
+├── api/
+│   └── v{N}.py             # API router extending APIRouterInterface
+├── ws/
+│   └── v{N}/
+│       ├── __init__.py     # TypeAlias declarations + router factory
+│       └── ws_generated/   # Auto-generated (created at init)
+│           ├── __init__.py
+│           └── {route}wsrouter.py
 └── specs_generated/
-    └── {module}_asyncapi.json
+    ├── {module}_v{N}_openapi.json
+    └── {module}_v{N}_asyncapi.json
 ```
 
 ### Key Classes
 
 ```python
+# Module base classes
+Module                    # shared/module_interface.py
+ServiceInterface          # shared/service_interface.py
+APIRouterInterface        # shared/api/api_router_interface.py
+
 # FastWS integration
-FastWSAdapter              # shared/plugins/fastws_adapter.py
-WsRouteInterface          # shared/ws/ws_route_interface.py
-WsRouteService            # shared/ws/ws_route_interface.py
+FastWSAdapter             # shared/ws/fastws_adapter.py
+WsRouteInterface          # shared/ws/ws_route_interface.py (single router)
+WsRouterInterface         # shared/ws/ws_route_interface.py (router container)
+WsRouteService            # shared/ws/ws_route_interface.py (service protocol)
 
 # Generation
-generate_module_routers   # shared/ws/module_router_generator.py
+generate_ws_routers       # shared/ws/module_router_generator.py
 WsRouter[Request, Data]   # shared/ws/generic_route.py (template)
 ```
 
 ---
 
-**Last Updated**: November 2, 2025  
+**Last Updated**: November 5, 2025  
 **Maintainer**: Backend Team  
 **Status**: ✅ Production-ready

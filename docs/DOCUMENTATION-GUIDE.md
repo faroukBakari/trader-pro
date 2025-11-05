@@ -44,7 +44,6 @@ Complete index of all project documentation with descriptions and reading paths.
 | **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules     |
 | **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation        |
 | **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide                  |
-| **backend/docs/VERSIONING.md**                   | Global API versioning strategy and implementation  |
 | **backend/docs/BACKEND_TESTING.md**              | Backend testing strategy and overhead optimization |
 
 > **Note**: backend/docs/outdated/ contains historical documentation from previous refactors. These files are kept for reference only and should NOT be used for current implementation guidance.
@@ -202,7 +201,6 @@ Complete index of all project documentation with descriptions and reading paths.
 ### API Versioning
 
 - **backend/docs/MODULAR_VERSIONNING.md** - ⭐ **Module-level versioning (start here for independent module versions)**
-- **backend/docs/VERSIONING.md** - Global API versioning strategy (complementary)
 - **API-METHODOLOGY.md** - TDD methodology for API implementation
 
 ### WebSocket & Real-Time
@@ -257,7 +255,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### Total Documentation Files
 
-- **User-Maintained**: ~42 actively maintained documentation files
+- **User-Maintained**: ~41 actively maintained documentation files
 - **Auto-Generated**: 40+ API model documentation files
 - **Third-Party**: 3 external package documentation files
 - **Outdated/Historical**: 13 files in backend/docs/outdated/ (reference only)

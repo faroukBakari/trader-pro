@@ -1,7 +1,7 @@
 # WebSocket Router Generation Guide
 
-**Version**: 1.0.0  
-**Date**: November 2, 2025  
+**Version**: 1.1.0  
+**Date**: November 5, 2025  
 **Status**: ✅ Current Implementation Reference
 
 ---
@@ -41,16 +41,20 @@ WebSocket routers in this codebase are **automatically generated** from TypeAlia
 
 ```
 modules/{module}/
-├── ws.py                    # TypeAlias declarations + WsRouters class
-├── ws_generated/            # Auto-generated (created at module init)
-│   ├── __init__.py          # Exports all routers
-│   ├── barwsrouter.py       # Generated router classes
-│   └── quotewsrouter.py
-└── service.py               # Implements WsRouteService protocol
+├── ws/
+│   ├── __init__.py          # Module-level WebSocket exports
+│   └── v1/
+│       ├── __init__.py      # TypeAlias declarations + WsRouters class
+│       └── ws_generated/    # Auto-generated (created at module init)
+│           ├── __init__.py  # Exports all routers
+│           ├── barwsrouter.py       # Generated router classes
+│           └── quotewsrouter.py
+└── service.py               # Inherits from ServiceInterface, implements WsRouteService methods
 ```
 
-**Generator Location**: `shared/ws/module_router_generator.py`  
-**Template**: `shared/ws/generic_route.py`
+**Generator Function**: `generate_ws_routers()` in `shared/ws/module_router_generator.py`  
+**Template**: `shared/ws/generic_route.py`  
+**Router Interface**: `WsRouterInterface` in `shared/ws/ws_route_interface.py`
 
 ---
 
@@ -58,17 +62,17 @@ modules/{module}/
 
 ### Step 1: Developer Writes TypeAlias
 
-In your module's `ws.py` file:
+In your module's versioned WebSocket file (e.g., `ws/v1/__init__.py`):
 
 ```python
-# modules/datafeed/ws.py
+# modules/datafeed/ws/v1/__init__.py
 from typing import TYPE_CHECKING, TypeAlias
 from trading_api.shared.ws.generic_route import WsRouter
 
 if TYPE_CHECKING:
     # TypeAlias for code generation
     BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
-    QuoteWsRouter: TypeAlias = WsRouter[QuoteSubscriptionRequest, Quote]
+    QuoteWsRouter: TypeAlias = WsRouter[QuoteDataSubscriptionRequest, QuoteData]
 ```
 
 **Key Pattern**:
@@ -82,37 +86,34 @@ if TYPE_CHECKING:
 When your `WsRouters` class is instantiated:
 
 ```python
-class DatafeedWsRouters(list[WsRouteInterface]):
-    def __init__(self, datafeed_service: WsRouteService):
-        # 1. Detect module name automatically
-        module_name = os.path.basename(os.path.dirname(__file__))
+class DatafeedWsRouters(WsRouterInterface):
+    def __init__(self, service: WsRouteService):
+        # 1. Detect module name automatically (for logging/tags)
+        module_name = Path(__file__).parent.parent.parent.name
 
         # 2. Generate routers (creates ws_generated/ directory)
-        try:
-            generated = generate_module_routers(module_name)
-            if generated:
-                logger.info(f"Generated WS routers for module '{module_name}'")
-        except RuntimeError as e:
-            logger.error(f"WebSocket router generation failed for module '{module_name}'!")
-            raise
+        #    Uses __file__ to determine module/version automatically
+        self.generate_routers(__file__)
 
-        # 3. Import generated routers
+        # 3. Import generated routers (after generation!)
         if not TYPE_CHECKING:
             from .ws_generated import BarWsRouter, QuoteWsRouter
 
         # 4. Instantiate and register
-        bar_router = BarWsRouter(route="bars", service=datafeed_service)
-        super().__init__([bar_router, ...])
+        bar_router = BarWsRouter(route="bars", tags=[module_name], service=service)
+        quote_router = QuoteWsRouter(route="quotes", tags=[module_name], service=service)
+
+        super().__init__([bar_router, quote_router], service=service)
 ```
 
-**Critical**: Generation happens BEFORE the import statement, ensuring files exist when needed.
+**Critical**: `self.generate_routers(__file__)` is called BEFORE the import statement, ensuring files exist when needed. The method automatically detects the module name and version from the file path.
 
 ### Step 3: Generated Output
 
 The generator creates:
 
 ```python
-# modules/datafeed/ws_generated/barwsrouter.py
+# modules/datafeed/ws/v1/ws_generated/barwsrouter.py
 from trading_api.models import BarsSubscriptionRequest, Bar
 from typing import Any
 from trading_api.shared.ws.ws_route_interface import WsRouteInterface, WsRouteService
@@ -139,9 +140,10 @@ When creating a new module with WebSocket support:
 
 ### ✅ Required Files
 
-- [ ] `modules/{module}/ws.py` - Contains TypeAlias declarations
-- [ ] `modules/{module}/service.py` - Implements `WsRouteService` protocol
-- [ ] Service has `broadcast()` method for push notifications
+- [ ] `modules/{module}/ws/v{N}/__init__.py` - Contains TypeAlias declarations and WsRouters class
+- [ ] `modules/{module}/ws/__init__.py` - Module-level WebSocket exports
+- [ ] `modules/{module}/service.py` - Inherits from `ServiceInterface`, implements `WsRouteService` methods
+- [ ] Service has `create_topic()` and `remove_topic()` methods for subscription management
 
 ### ✅ TypeAlias Declaration Format
 
@@ -166,39 +168,46 @@ if TYPE_CHECKING:
 ### ✅ WsRouters Class Pattern
 
 ```python
-from trading_api.shared.ws.module_router_generator import generate_module_routers
+from pathlib import Path
+from trading_api.shared.ws.ws_route_interface import WsRouterInterface, WsRouteService
 
-class ModuleWsRouters(list[WsRouteInterface]):
-    def __init__(self, module_service: WsRouteService):
-        # 1. Generate routers
-        module_name = os.path.basename(os.path.dirname(__file__))
-        generated = generate_module_routers(module_name)
+class ModuleWsRouters(WsRouterInterface):
+    def __init__(self, service: WsRouteService):
+        # 1. Detect module name (for logging/tags)
+        module_name = Path(__file__).parent.parent.parent.name
 
-        # 2. Import (after generation!)
+        # 2. Generate routers using self.generate_routers()
+        self.generate_routers(__file__)
+
+        # 3. Import (after generation!)
         if not TYPE_CHECKING:
             from .ws_generated import RouterName
 
-        # 3. Instantiate
-        router = RouterName(route="endpoint", service=module_service)
-        super().__init__([router])
+        # 4. Instantiate
+        router = RouterName(route="endpoint", tags=[module_name], service=service)
+
+        # 5. Call parent with list of routers and service
+        super().__init__([router], service=service)
 ```
 
-### ✅ Service Protocol Compliance
+### ✅ Service Interface Compliance
 
-Your service MUST implement:
+Your service MUST inherit from `ServiceInterface` and implement the `WsRouteService` methods:
 
 ```python
-class WsRouteService(Protocol):
-    """Service protocol for WebSocket routers."""
+class WsRouteService(ServiceInterface):
+    """Service interface for WebSocket routers."""
 
-    async def broadcast(
-        self,
-        message: Any,
-        route: str | None = None,
-    ) -> None:
-        """Broadcast message to subscribed clients."""
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+        """Create a subscription topic with update callback."""
+        ...
+
+    def remove_topic(self, topic: str) -> None:
+        """Remove a subscription topic."""
         ...
 ```
+
+**Note**: `WsRouteService` is an abstract base class that extends `ServiceInterface` and defines WebSocket-specific methods. Your service inherits from `ServiceInterface` and implements these methods (the pattern is ABC inheritance, not Protocol implementation).
 
 ---
 
@@ -211,7 +220,7 @@ if TYPE_CHECKING:
     OrderWsRouter: TypeAlias = WsRouter[OrderSubscriptionRequest, PlacedOrder]
 ```
 
-**Generated File**: `orderwsrouter.py`  
+**Generated File**: `ws/v1/ws_generated/orderwsrouter.py`  
 **Generated Class**: `OrderWsRouter`
 
 ### Pattern 2: Multi-line for Readability
@@ -224,7 +233,7 @@ if TYPE_CHECKING:
     ]
 ```
 
-**Generated File**: `brokerconnectionwsrouter.py`  
+**Generated File**: `ws/v1/ws_generated/brokerconnectionwsrouter.py`  
 **Generated Class**: `BrokerConnectionWsRouter`
 
 ### Pattern 3: Multiple Routers in One Module
@@ -253,7 +262,7 @@ All routers generated in the same `ws_generated/` directory.
 **Symptom**:
 
 ```python
-ModuleNotFoundError: No module named 'trading_api.modules.datafeed.ws_generated'
+ModuleNotFoundError: No module named 'trading_api.modules.datafeed.ws.v1.ws_generated'
 ```
 
 **Cause**: Generation failed or wasn't triggered before import
@@ -261,19 +270,19 @@ ModuleNotFoundError: No module named 'trading_api.modules.datafeed.ws_generated'
 **Solutions**:
 
 1. Check TypeAlias declarations are inside `if TYPE_CHECKING:` block
-2. Verify `generate_module_routers()` is called BEFORE the import
+2. Verify `self.generate_routers(__file__)` is called BEFORE the import
 3. Check logs for generation errors
-4. Ensure `ws.py` exists in the module directory
+4. Ensure `ws/v{N}/__init__.py` exists in the module directory
 
 **Debug**:
 
 ```bash
 # Check if ws_generated exists
-ls -la backend/src/trading_api/modules/datafeed/ws_generated/
+ls -la backend/src/trading_api/modules/datafeed/ws/v1/ws_generated/
 
-# Manually trigger generation
+# Manually trigger generation (using __file__ path pattern)
 cd backend
-poetry run python -c "from trading_api.shared.ws.module_router_generator import generate_module_routers; generate_module_routers('datafeed', silent=False)"
+poetry run python -c "from trading_api.shared.ws.module_router_generator import generate_ws_routers; generate_ws_routers('modules/datafeed/ws/v1/__init__.py', silent=False)"
 ```
 
 ### Issue 2: AttributeError on Router Class
@@ -294,7 +303,7 @@ AttributeError: module 'trading_api.modules.datafeed.ws_generated' has no attrib
 
 1. Verify TypeAlias name matches import: `BarWsRouter: TypeAlias = ...`
 2. Clear Python cache: `find . -name "__pycache__" -type d -exec rm -rf {} +`
-3. Re-run generation: `make generate modules=datafeed`
+3. Delete ws_generated directory and restart the app to trigger regeneration
 
 ### Issue 3: Generation Fails with RuntimeError
 
@@ -317,13 +326,13 @@ RuntimeError: Black formatting failed for module 'datafeed'!
 ```bash
 # Run generation with verbose output
 poetry run python -c "
-from trading_api.shared.ws.module_router_generator import generate_module_routers
-generate_module_routers('datafeed', silent=False, skip_quality_checks=True)
+from trading_api.shared.ws.module_router_generator import generate_ws_routers
+generate_ws_routers('modules/datafeed/ws/v1/__init__.py', silent=False, skip_quality_checks=True)
 "
 
 # Then manually check generated files
-poetry run black src/trading_api/modules/datafeed/ws_generated/
-poetry run mypy src/trading_api/modules/datafeed/ws_generated/
+poetry run black src/trading_api/modules/datafeed/ws/v1/ws_generated/
+poetry run mypy src/trading_api/modules/datafeed/ws/v1/ws_generated/
 ```
 
 ### Issue 4: Service Protocol Violations
@@ -331,23 +340,28 @@ poetry run mypy src/trading_api/modules/datafeed/ws_generated/
 **Symptom**:
 
 ```python
-TypeError: Can't instantiate abstract class with abstract methods broadcast
+TypeError: Can't instantiate abstract class with abstract methods create_topic, remove_topic
 ```
 
-**Cause**: Service doesn't implement `WsRouteService` protocol
+**Cause**: Service doesn't implement `WsRouteService` methods
 
-**Solution**: Implement the required `broadcast()` method:
+**Solution**: Inherit from `ServiceInterface` and implement the required `WsRouteService` methods:
 
 ```python
-class DatafeedService:
-    async def broadcast(
-        self,
-        message: Any,
-        route: str | None = None,
-    ) -> None:
-        """Broadcast message to WebSocket clients."""
-        if self._ws_adapter:
-            await self._ws_adapter.broadcast(message, route=route)
+from trading_api.shared.service_interface import ServiceInterface
+
+class DatafeedService(ServiceInterface):
+    """Service inheriting from ServiceInterface with WsRouteService methods"""
+
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+        """Create a subscription topic with update callback."""
+        # Implementation for creating/managing topic subscriptions
+        ...
+
+    def remove_topic(self, topic: str) -> None:
+        """Remove a subscription topic."""
+        # Implementation for cleaning up topic subscriptions
+        ...
 ```
 
 ### Issue 5: Stale Generated Files
@@ -358,9 +372,9 @@ class DatafeedService:
 
 **Solutions**:
 
-1. Delete `ws_generated/` directory: `rm -rf modules/{module}/ws_generated/`
+1. Delete `ws_generated/` directory: `rm -rf modules/{module}/ws/v{N}/ws_generated/`
 2. Clear Python cache: `find . -name "__pycache__" -type d -exec rm -rf {} +`
-3. Re-run generation: Module initialization will regenerate
+3. Re-run generation: Module initialization will regenerate automatically
 
 **Prevention**: Generator automatically cleans old files on regeneration.
 
@@ -373,17 +387,18 @@ class DatafeedService:
 ```
 Module Initialization
 ├─ 1. DatafeedWsRouters.__init__() called
-│  ├─ 2. Detect module name from __file__
-│  ├─ 3. Call generate_module_routers('datafeed')
-│  │  ├─ 4. Check if ws.py exists
-│  │  ├─ 5. Parse TypeAlias declarations (regex)
-│  │  ├─ 6. Load template (generic_route.py)
-│  │  ├─ 7. Generate concrete classes
-│  │  ├─ 8. Generate __init__.py
-│  │  ├─ 9. Run quality checks (Black, Ruff, Mypy, etc.)
-│  │  └─ 10. Verify imports work
-│  └─ 11. Import from ws_generated
-└─ 12. Instantiate routers with service
+│  ├─ 2. Detect module name from Path(__file__).parent.parent.parent.name
+│  ├─ 3. Call self.generate_routers(__file__)
+│  │  ├─ 4. Extract module/version from __file__ path pattern
+│  │  ├─ 5. Check if ws/v{N}/__init__.py exists
+│  │  ├─ 6. Parse TypeAlias declarations (regex)
+│  │  ├─ 7. Load template (generic_route.py)
+│  │  ├─ 8. Generate concrete classes
+│  │  ├─ 9. Generate __init__.py
+│  │  ├─ 10. Run quality checks (Black, Ruff, Mypy, etc.)
+│  │  └─ 11. Verify imports work
+│  └─ 12. Import from .ws_generated
+└─ 13. Instantiate routers with service and tags
 ```
 
 ### Manual Generation (Optional)
@@ -391,15 +406,18 @@ Module Initialization
 For debugging or pre-generation:
 
 ```bash
-# Generate for specific module
+# Generate for specific module version
 cd backend
 poetry run python -c "
-from trading_api.shared.ws.module_router_generator import generate_module_routers
-generate_module_routers('datafeed', silent=False)
+from trading_api.shared.ws.module_router_generator import generate_ws_routers
+generate_ws_routers('modules/datafeed/ws/v1/__init__.py', silent=False)
 "
 
-# Or use Makefile (deprecated, but still works)
-make generate modules=datafeed
+# For different versions
+poetry run python -c "
+from trading_api.shared.ws.module_router_generator import generate_ws_routers
+generate_ws_routers('modules/broker/ws/v1/__init__.py', silent=False)
+"
 ```
 
 ### Generator Implementation Details
@@ -408,30 +426,37 @@ make generate modules=datafeed
 
 **Key Functions**:
 
-1. `parse_router_specs_from_file()`: Regex-based TypeAlias extraction
+1. `generate_ws_routers()`: Main entry point
+
+   - Extracts module name and version from ws_file path
+   - Expected pattern: `modules/{module}/ws/{version}/__init__.py`
+   - Orchestrates the full generation pipeline
+   - Returns `True` if routers generated, `False` if no routers found
+
+2. `parse_router_specs_from_file()`: Regex-based TypeAlias extraction
 
    - Pattern: `(\w+): TypeAlias = WsRouter\[(\w+), (\w+)\]`
    - Supports multi-line declarations
    - Returns `RouterSpec` named tuples
 
-2. `generate_router_code()`: Template substitution
+3. `generate_router_code()`: Template substitution
 
    - Replaces `_TRequest` with actual request type
    - Replaces `_TData` with actual data type
    - Removes generic type parameters
    - Adds model imports
 
-3. `generate_init_file()`: Creates `__init__.py`
+4. `generate_init_file()`: Creates `__init__.py`
 
    - Imports all generated routers
    - Exports via `__all__`
 
-4. `run_quality_checks_for_module()`: 7-step validation
+5. `run_quality_checks_for_module()`: 7-step validation
 
    - Black → Ruff format → Ruff fix → Flake8 → Ruff check → Mypy → Isort
 
-5. `verify_router_imports()`: Lightweight verification
-   - Checks routers can be imported
+6. `verify_router_imports()`: Lightweight verification
+   - Checks routers can be imported from versioned package
    - Does NOT instantiate (avoids circular deps)
 
 ---
@@ -443,43 +468,43 @@ Generated code passes through 7 quality checks:
 ### 1. Black - Code Formatting
 
 ```bash
-poetry run black src/trading_api/modules/{module}/ws_generated/
+poetry run black src/trading_api/modules/{module}/ws/v{N}/ws_generated/
 ```
 
 ### 2. Ruff Format - Additional Formatting
 
 ```bash
-poetry run ruff format src/trading_api/modules/{module}/ws_generated/
+poetry run ruff format src/trading_api/modules/{module}/ws/v{N}/ws_generated/
 ```
 
 ### 3. Ruff Auto-fix - Linting with Fixes
 
 ```bash
-poetry run ruff check src/trading_api/modules/{module}/ws_generated/ --fix
+poetry run ruff check src/trading_api/modules/{module}/ws/v{N}/ws_generated/ --fix
 ```
 
 ### 4. Flake8 - Style Guide Enforcement
 
 ```bash
-poetry run flake8 src/trading_api/modules/{module}/ws_generated/
+poetry run flake8 src/trading_api/modules/{module}/ws/v{N}/ws_generated/
 ```
 
 ### 5. Ruff Check - Linting Validation
 
 ```bash
-poetry run ruff check src/trading_api/modules/{module}/ws_generated/
+poetry run ruff check src/trading_api/modules/{module}/ws/v{N}/ws_generated/
 ```
 
 ### 6. Mypy - Type Checking
 
 ```bash
-poetry run mypy src/trading_api/modules/{module}/ws_generated/
+poetry run mypy src/trading_api/modules/{module}/ws/v{N}/ws_generated/
 ```
 
 ### 7. Isort - Import Sorting
 
 ```bash
-poetry run isort src/trading_api/modules/{module}/ws_generated/
+poetry run isort src/trading_api/modules/{module}/ws/v{N}/ws_generated/
 ```
 
 **All checks must pass** for generation to succeed. If any check fails, the generator:
@@ -495,16 +520,16 @@ poetry run isort src/trading_api/modules/{module}/ws_generated/
 ### Core Documentation
 
 - `backend/docs/MODULAR_BACKEND_ARCHITECTURE.md` - Module system architecture
-- `shared/ws/ws_route_interface.py` - `WsRouteInterface` and `WsRouteService` protocols
+- `shared/ws/ws_route_interface.py` - `WsRouteInterface` and `WsRouteService` interfaces
 - `shared/ws/generic_route.py` - Template for generated routers
-- `shared/module_interface.py` - Module Protocol definition
+- `shared/module_interface.py` - Module abstract base class definition
 
 ### Implementation Examples
 
-- `modules/datafeed/ws.py` - Datafeed WebSocket routers (2 routers)
-- `modules/broker/ws.py` - Broker WebSocket routers (5 routers)
-- `modules/datafeed/service.py` - Service implementing WsRouteService
-- `modules/broker/service.py` - Service implementing WsRouteService
+- `modules/datafeed/ws/v1/__init__.py` - Datafeed WebSocket routers (2 routers)
+- `modules/broker/ws/v1/__init__.py` - Broker WebSocket routers (5 routers)
+- `modules/datafeed/service.py` - Service inheriting from ServiceInterface with WsRouteService methods
+- `modules/broker/service.py` - Service inheriting from ServiceInterface with WsRouteService methods
 
 ### Historical Context
 
@@ -524,7 +549,7 @@ poetry run isort src/trading_api/modules/{module}/ws_generated/
 
 ### Creating a New WebSocket Router
 
-1. **Add TypeAlias in `ws.py`**:
+1. **Add TypeAlias in `ws/v{N}/__init__.py`**:
 
    ```python
    if TYPE_CHECKING:
@@ -539,44 +564,59 @@ poetry run isort src/trading_api/modules/{module}/ws_generated/
    class MyData(BaseModel): ...
    ```
 
-3. **Import in WsRouters class**:
+3. **Call generation in WsRouters class**:
+
+   ```python
+   class ModuleWsRouters(WsRouterInterface):
+       def __init__(self, service: WsRouteService):
+           self.generate_routers(__file__)  # Generate first!
+   ```
+
+4. **Import generated router**:
 
    ```python
    if not TYPE_CHECKING:
        from .ws_generated import MyRouter
    ```
 
-4. **Instantiate**:
+5. **Instantiate with tags**:
 
    ```python
-   router = MyRouter(route="my-route", service=service)
+   module_name = Path(__file__).parent.parent.parent.name
+   router = MyRouter(route="my-route", tags=[module_name], service=service)
    ```
 
-5. **Test**: Module initialization will auto-generate
+6. **Pass to parent**:
+
+   ```python
+   super().__init__([router], service=service)
+   ```
+
+7. **Test**: Module initialization will auto-generate on startup
 
 ### Troubleshooting Commands
 
 ```bash
 # Check if ws_generated exists
-ls -la src/trading_api/modules/{module}/ws_generated/
+ls -la src/trading_api/modules/{module}/ws/v{N}/ws_generated/
 
 # Manual generation (debug)
-poetry run python -c "from trading_api.shared.ws.module_router_generator import generate_module_routers; generate_module_routers('{module}', silent=False)"
+poetry run python -c "from trading_api.shared.ws.module_router_generator import generate_ws_routers; generate_ws_routers('modules/{module}/ws/v{N}/__init__.py', silent=False)"
 
 # Clear all caches
 find . -name "__pycache__" -type d -exec rm -rf {} +
 find . -name "ws_generated" -type d -exec rm -rf {} +
 
-# Verify service protocol
+# Verify service implements required methods
 poetry run mypy modules/{module}/service.py
 
 # Check generated code quality
-poetry run black modules/{module}/ws_generated/
-poetry run mypy modules/{module}/ws_generated/
+poetry run black modules/{module}/ws/v{N}/ws_generated/
+poetry run mypy modules/{module}/ws/v{N}/ws_generated/
 ```
 
 ---
 
-**Last Updated**: November 2, 2025  
+**Last Updated**: November 5, 2025  
 **Maintainer**: Backend Team  
 **Status**: ✅ Production-ready, actively used
