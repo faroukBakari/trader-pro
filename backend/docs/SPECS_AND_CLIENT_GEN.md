@@ -95,14 +95,14 @@ async def lifespan(api_app: FastAPI):
 
 ### Level 2: App-Level Merged Specs
 
-The `ModularFastAPI` class merges all module specs on-demand.
+The `ModularApp` class merges all module specs on-demand.
 
 **Trigger**: Access to `/api/v1/openapi.json` or `/api/v1/ws/asyncapi.json`  
-**Location**: `ModularFastAPI.openapi()` and `ModularFastAPI.asyncapi()` in `app_factory.py`  
+**Location**: `ModularApp.openapi()` and `ModularApp.asyncapi()` in `app_factory.py`  
 **Output**: Cached merged specifications
 
 ```python
-class ModularFastAPI(FastAPI):
+class ModularApp(FastAPI):
     def openapi(self) -> dict[str, Any]:
         """Merge OpenAPI specs from all modules."""
         # Merges paths with mount path prefix
@@ -1064,7 +1064,7 @@ finally:
 from pathlib import Path
 from fastapi.routing import APIRouter
 from trading_api.shared import Module
-from trading_api.shared.ws.router_interface import WsRouteInterface
+from trading_api.shared.ws.ws_route_interface import WsRouteInterface
 
 from .api import {Module}Api
 from .service import {Module}Service
@@ -1487,8 +1487,8 @@ Module.gen_specs_and_clients()  # Generate specs and client
 Module.create_app()             # Create FastAPI app with lifespan
 
 # App Factory
-ModularFastAPI.openapi()        # Merged OpenAPI spec
-ModularFastAPI.asyncapi()       # Merged AsyncAPI spec
+ModularApp.openapi()        # Merged OpenAPI spec
+ModularApp.asyncapi()       # Merged AsyncAPI spec
 
 # Client Generation
 ClientGenerationService.generate_module_client()

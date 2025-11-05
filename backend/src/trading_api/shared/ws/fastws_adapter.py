@@ -9,7 +9,7 @@ from typing import Any, Callable
 from fastapi import FastAPI
 
 from external_packages.fastws import FastWS, Message, OperationRouter
-from trading_api.shared.ws.router_interface import WsRouteInterface
+from trading_api.shared.ws.ws_route_interface import WsRouteInterface
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,10 @@ class FastWSAdapter(FastWS):
     ) -> None:
         super().include_router(router, prefix=prefix)
 
-        # Only set up broadcasting for WsRouteInterface instances
         if not isinstance(router, WsRouteInterface):
+            logger.warning(
+                f"Router {router} is not a WsRouteInterface, skipping broadcasting setup"
+            )
             return
 
         async def broadcast_router_messages() -> None:

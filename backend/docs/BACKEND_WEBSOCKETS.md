@@ -103,7 +103,7 @@ if self.ws_routers:
 
 ### 3. WebSocket Router Interface
 
-**Location**: `shared/ws/router_interface.py`
+**Location**: `shared/ws/ws_route_interface.py`
 
 All WebSocket routers implement `WsRouteInterface`:
 
@@ -127,7 +127,7 @@ class WsRouteInterface(OperationRouter):
 
 ### 4. Service Protocol
 
-**Location**: `shared/ws/router_interface.py`
+**Location**: `shared/ws/ws_route_interface.py`
 
 Services implementing WebSocket features must implement `WsRouteService`:
 
@@ -226,7 +226,7 @@ The service is where **business logic integration** happens. It must implement `
 import asyncio
 import json
 from typing import Callable
-from trading_api.shared.ws.router_interface import WsRouteService
+from trading_api.shared.ws.ws_route_interface import WsRouteService
 
 class DatafeedService(WsRouteService):
     """Service implementing WsRouteService protocol for WebSocket support"""
@@ -478,7 +478,7 @@ Client Unsubscribe Request
 **Main app merges all module AsyncAPI specs**:
 
 **Endpoint**: `/api/v1/ws/asyncapi.json`  
-**Implementation**: `ModularFastAPI.asyncapi()` in `app_factory.py`
+**Implementation**: `ModularApp.asyncapi()` in `app_factory.py`
 
 **Merge Strategy**:
 
@@ -714,8 +714,8 @@ modules/{module}/
 ```python
 # FastWS integration
 FastWSAdapter              # shared/plugins/fastws_adapter.py
-WsRouteInterface          # shared/ws/router_interface.py
-WsRouteService            # shared/ws/router_interface.py
+WsRouteInterface          # shared/ws/ws_route_interface.py
+WsRouteService            # shared/ws/ws_route_interface.py
 
 # Generation
 generate_module_routers   # shared/ws/module_router_generator.py

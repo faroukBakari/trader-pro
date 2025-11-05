@@ -12,8 +12,7 @@ from typing import Generator
 
 import pytest
 
-from trading_api.app_factory import AppFactory, ModularFastAPI
-from trading_api.shared import FastWSAdapter
+from trading_api.app_factory import AppFactory, ModularApp
 
 
 @pytest.fixture(scope="session")
@@ -26,7 +25,7 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 
 def create_test_app(
     enabled_modules: list[str] | None = None,
-) -> tuple[ModularFastAPI, list[FastWSAdapter]]:
+) -> ModularApp:
     """Create a test application with specified modules.
 
     Args:
@@ -34,7 +33,7 @@ def create_test_app(
                         If None, all modules are enabled.
 
     Returns:
-        tuple: (ModularFastAPI application, list of FastWSAdapter applications)
+        tuple: (ModularApp application, list of FastWSAdapter applications)
 
     Example:
         # Test with all modules
@@ -47,11 +46,10 @@ def create_test_app(
         api_app, ws_apps = create_test_app(enabled_modules=[])
     """
     factory = AppFactory()
-    modular_app = factory.create_app(enabled_module_names=enabled_modules)
-    return modular_app, modular_app.ws_apps
+    return factory.create_app(enabled_module_names=enabled_modules)
 
 
 @pytest.fixture(scope="session")
-def apps() -> tuple[ModularFastAPI, list[FastWSAdapter]]:
+def apps() -> ModularApp:
     """Full application (API + WS) with all modules enabled (shared across session)."""
-    return create_test_app(enabled_modules=None)
+    return create_test_app()

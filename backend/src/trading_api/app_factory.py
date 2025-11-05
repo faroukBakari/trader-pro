@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
-from trading_api.shared import FastWSAdapter, Module, ModuleRegistry
+from trading_api.shared import Module, ModuleApp, ModuleRegistry
 
 # Configure logging for the application
 logging.basicConfig(
@@ -30,38 +30,11 @@ logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class ModuleApp:
-    def __init__(self, module: Module):
-        self.module = module
-        self.api_app, self.ws_app = module.create_app()
-
-    def start(self) -> None:
-        self.module.gen_specs_and_clients(api_app=self.api_app, ws_app=self.ws_app)
-
-        if self.ws_app is not None:
-            self.ws_app.setup(self.api_app)
-
-
-class ModularFastAPI(FastAPI):
-    """FastAPI application with integrated WebSocket apps tracking.
-
-    Extends FastAPI to provide centralized management of WebSocket applications
-    alongside the REST API. This class maintains a list of FastWSAdapter instances
-    and provides convenient access to both REST and WebSocket functionality.
-
-    Example:
-        >>> app = ModularApp(title="Trading API")
-        >>> # Access WebSocket apps
-        >>> for ws_app in app.ws_apps:
-        >>>     ws_app.setup(app)
-        >>> # Use like regular FastAPI
-        >>> @app.get("/health")
-        >>> async def health():
-        >>>     return {"status": "ok"}
-    """
+class ModularApp(FastAPI):
+    """FastAPI application with integrated WebSocket apps tracking"""
 
     def __init__(self, modules: list[Module], base_url: str, *args: Any, **kwargs: Any):
-        """Initialize ModularFastAPI with empty WebSocket apps list.
+        """Initialize ModularApp with empty WebSocket apps list.
 
         Args:
             *args: Positional arguments passed to FastAPI
@@ -77,18 +50,22 @@ class ModularFastAPI(FastAPI):
             redoc_url=f"{base_url}/redoc",
             openapi_tags=[
                 tag
-                for module in self.modules_apps
-                if module.api_app.openapi_tags
-                for tag in module.api_app.openapi_tags
+                for app in self.modules_apps
+                for version in app.api_versions
+                if version.openapi_tags
+                for tag in version.openapi_tags
             ],
             **kwargs,
         )
         for module_app in self._modules_apps:
-            mount_path = f"{self.base_url}/{module_app.module.name}"
-            self.mount(mount_path, module_app.api_app)
-            logger.info(
-                f"📦 Mounted module app '{module_app.module.name}' at {mount_path}"
-            )
+            for api_app in module_app.api_versions:
+                mount_path = (
+                    f"{self.base_url}/{api_app.version}/{module_app.module.name}"
+                )
+                self.mount(mount_path, api_app)
+                logger.info(
+                    f"📦 Mounted module app '{module_app.module.name}-{api_app.version}' at {mount_path}"
+                )
 
     @property
     def modules_apps(self) -> list[ModuleApp]:
@@ -99,24 +76,28 @@ class ModularFastAPI(FastAPI):
         """
         return self._modules_apps
 
-    @property
-    def ws_apps(self) -> list[FastWSAdapter]:
-        """Get list of WebSocket applications from all modules.
+    def gen_module_specs_and_clients(
+        self,
+        clean_first: bool = False,
+        output_dir: Path | None = None,
+    ) -> None:
+        """Generate OpenAPI and AsyncAPI specs and clients for all modules.
 
-        Returns:
-            list[FastWSAdapter]: List of WebSocket apps
+        Args:
+            clean_first: If True, cleans existing specs/clients before generation
         """
-        return [
-            module_app.ws_app
-            for module_app in self._modules_apps
-            if module_app.ws_app is not None
-        ]
+        for module_app in self._modules_apps:
+            module_app.gen_specs_and_clients(
+                clean_first=clean_first, output_dir=output_dir
+            )
 
-    def start_modules(self) -> None:
-        """Start all module applications (REST + WebSocket)."""
+    def start(self) -> None:
+        """Start the FastAPI application (placeholder for actual server start)."""
+        logger.info("🚀 Starting ModularApp...")
         for module_app in self._modules_apps:
             module_app.start()
-            logger.info(f"🚀 Started module '{module_app.module.name}'")
+            logger.info(f"🔹 Module started: {module_app.module.name}")
+        logger.info("✅ ModularApp started.")
 
     def openapi(self) -> Dict[str, Any]:
         """Generate merged OpenAPI schema including all mounted modules."""
@@ -129,23 +110,26 @@ class ModularFastAPI(FastAPI):
 
         # Merge each mounted module's schema
         for module_app in self._modules_apps:
-            mount_path = f"{self.base_url}/{module_app.module.name}"
-            module_schema = module_app.api_app.openapi()
+            for api_app in module_app.api_versions:
+                mount_path = (
+                    f"{self.base_url}/{api_app.version}/{module_app.module.name}"
+                )
+                version_schema = api_app.openapi()
 
-            # Merge paths with mount path prefix
-            for path, path_item in module_schema.get("paths", {}).items():
-                full_path = f"{mount_path}{path}"
-                openapi_schema["paths"][full_path] = path_item
+                # Merge paths with mount path prefix
+                for path, path_item in version_schema.get("paths", {}).items():
+                    full_path = f"{mount_path}{path}"
+                    openapi_schema["paths"][full_path] = path_item
 
-            # Merge components (schemas, security schemes, etc.)
-            module_components = module_schema.get("components", {})
-            if module_components:
-                if "components" not in openapi_schema:
-                    openapi_schema["components"] = {}
-                for comp_type, comp_data in module_components.items():
-                    if comp_type not in openapi_schema["components"]:
-                        openapi_schema["components"][comp_type] = {}
-                    openapi_schema["components"][comp_type].update(comp_data)
+                # Merge components (schemas, security schemes, etc.)
+                module_components = version_schema.get("components", {})
+                if module_components:
+                    if "components" not in openapi_schema:
+                        openapi_schema["components"] = {}
+                    for comp_type, comp_data in module_components.items():
+                        if comp_type not in openapi_schema["components"]:
+                            openapi_schema["components"][comp_type] = {}
+                        openapi_schema["components"][comp_type].update(comp_data)
 
         self.openapi_schema = openapi_schema
         return openapi_schema
@@ -160,7 +144,7 @@ class ModularFastAPI(FastAPI):
             Dict[str, Any]: Merged AsyncAPI specification with all module channels
 
         Example:
-            >>> app = ModularFastAPI(...)
+            >>> app = ModularApp(...)
             >>> asyncapi_spec = app.asyncapi()
             >>> # Contains channels like:
             >>> # "/api/v1/datafeed/ws" - for datafeed WebSocket operations
@@ -187,35 +171,44 @@ class ModularFastAPI(FastAPI):
 
         # Merge each module's AsyncAPI spec
         for module_app in self._modules_apps:
-            ws_app = module_app.ws_app
-            if ws_app is None:
-                continue
+            for ws_app in module_app.ws_versions:
+                # Get module's AsyncAPI spec
+                module_spec = ws_app.asyncapi()
 
-            # Get module's AsyncAPI spec
-            module_spec = ws_app.asyncapi()
-
-            # The module's WebSocket endpoint
-            ws_endpoint = f"{self.base_url}/{module_app.module.name}/ws"
-
-            # Merge channels with corrected endpoint paths
-            for channel_path, channel_spec in module_spec.get("channels", {}).items():
-                # Replace generic "/" with actual endpoint path
-                actual_channel = (
-                    ws_endpoint if channel_path == "/" else ws_endpoint + channel_path
+                # The module's WebSocket endpoint
+                ws_endpoint = (
+                    f"{self.base_url}/{ws_app.version}/{module_app.module.name}/ws"
                 )
-                merged_spec["channels"][actual_channel] = channel_spec
 
-            # Merge component schemas (avoiding duplicates)
-            module_schemas = module_spec.get("components", {}).get("schemas", {})
-            for schema_name, schema_def in module_schemas.items():
-                if schema_name not in merged_spec["components"]["schemas"]:
-                    merged_spec["components"]["schemas"][schema_name] = schema_def
+                # Merge channels with corrected endpoint paths
+                for channel_path, channel_spec in dict(
+                    module_spec.get("channels", {})
+                ).items():
+                    # Replace generic "/" with actual endpoint path
+                    actual_channel = (
+                        ws_endpoint
+                        if channel_path == "/"
+                        else ws_endpoint + channel_path
+                    )
+                    merged_spec["channels"][actual_channel] = channel_spec
 
-            # Merge component messages (avoiding duplicates)
-            module_messages = module_spec.get("components", {}).get("messages", {})
-            for message_name, message_def in module_messages.items():
-                if message_name not in merged_spec["components"]["messages"]:
-                    merged_spec["components"]["messages"][message_name] = message_def
+                # Merge component schemas (avoiding duplicates)
+                module_schemas = dict(module_spec.get("components", {})).get(
+                    "schemas", {}
+                )
+                for schema_name, schema_def in module_schemas.items():
+                    if schema_name not in merged_spec["components"]["schemas"]:
+                        merged_spec["components"]["schemas"][schema_name] = schema_def
+
+                # Merge component messages (avoiding duplicates)
+                module_messages = dict(module_spec.get("components", {})).get(
+                    "messages", {}
+                )
+                for message_name, message_def in module_messages.items():
+                    if message_name not in merged_spec["components"]["messages"]:
+                        merged_spec["components"]["messages"][
+                            message_name
+                        ] = message_def
 
         self.asyncapi_schema = merged_spec
         return merged_spec
@@ -249,7 +242,7 @@ class ModularFastAPI(FastAPI):
 
 
 class AppFactory:
-    """Factory for creating ModularFastAPI applications with dynamic module loading."""
+    """Factory for creating ModularApp applications with dynamic module loading."""
 
     def __init__(self, modules_dir: Path | None = None):
         """Initialize factory with fresh registry.
@@ -258,67 +251,39 @@ class AppFactory:
             modules_dir: Path to modules directory.
                         Defaults to trading_api/modules/
         """
-        self.registry = ModuleRegistry()
-        self.modules_dir = modules_dir or Path(__file__).parent / "modules"
+        self.registry = ModuleRegistry(modules_dir or Path(__file__).parent / "modules")
 
     def create_app(
         self,
         enabled_module_names: list[str] | None = None,
-    ) -> ModularFastAPI:
-        """Create and configure ModularApp (FastAPI + WebSocket apps).
-
-        The core module is always enabled and loaded first, regardless of the
-        enabled_module_names parameter. This ensures health checks and versioning
-        are always available.
-
-        Args:
-            enabled_module_names: List of module names to enable. If None, all
-                registered modules are enabled. Core is always enabled automatically.
-                Use this to selectively load feature modules.
-
-        Returns:
-            tuple[ModularApp, list[FastWSAdapter]]: ModularApp instance (with ws_apps
-                tracked internally) and list of module WS apps for backward compatibility
-
-        Example:
-            >>> factory = AppFactory()
-            >>> # Load all modules (core + all feature modules)
-            >>> app, ws_apps = factory.create_app()
-            >>> # Access WebSocket apps via ModularApp
-            >>> assert app.ws_apps == ws_apps
-            >>> # Load core + datafeed only
-            >>> app, ws_apps = factory.create_app(["datafeed"])
-            >>> # Load only core module
-            >>> app, ws_apps = factory.create_app([])
-        """
+    ) -> ModularApp:
+        """Create a ModularApp with specified enabled modules."""
         # Clear registry to allow fresh registration (important for tests)
         self.registry.clear()
 
         # Auto-discover and register all available modules
-        self.registry.auto_discover(self.modules_dir)
-
-        # Core module is ALWAYS enabled - ensure it's in the enabled list
-        if enabled_module_names is not None and "core" not in enabled_module_names:
-            enabled_module_names.append("core")
+        self.registry.auto_discover()
 
         # Set which modules should be enabled (core will be included)
         self.registry.set_enabled_modules(enabled_module_names)
 
         # Create base URL
-        base_url = "/api/v1"
+        base_url = "/api"
 
         # Compute OpenAPI tags dynamically from enabled modules (including core)
 
         enabled_modules = self.registry.get_enabled_modules()
 
         @asynccontextmanager
-        async def lifespan(app: ModularFastAPI) -> AsyncGenerator[None, None]:
+        async def lifespan(app: ModularApp) -> AsyncGenerator[None, None]:
             """Handle application startup and shutdown events."""
 
             # Validate all routes have response models
             app.validate_response_models()
 
-            app.start_modules()
+            app.gen_module_specs_and_clients()
+
+            app.start()
 
             yield
 
@@ -326,7 +291,7 @@ class AppFactory:
             print("🛑 FastAPI application shutdown complete")
 
         # Create ModularApp (FastAPI + WebSocket tracking)
-        modular_app = ModularFastAPI(
+        modular_app = ModularApp(
             modules=enabled_modules,
             base_url=base_url,
             title="Trading API",

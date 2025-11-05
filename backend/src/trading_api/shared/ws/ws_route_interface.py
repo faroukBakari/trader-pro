@@ -1,11 +1,17 @@
 import asyncio
 import json
-from typing import Any, Callable, Protocol
+import logging
+from typing import Any, Callable
 
 from pydantic import BaseModel
 
 from external_packages.fastws import FastWS, OperationRouter
 from trading_api.models.common import SubscriptionUpdate
+from trading_api.shared.service import Service
+from trading_api.shared.ws.module_router_generator import generate_ws_routers
+
+# Module logger for app_factory
+logger = logging.getLogger(__name__)
 
 
 def buildTopicParams(obj: Any) -> str:
@@ -28,7 +34,7 @@ def buildTopicParams(obj: Any) -> str:
     return json.dumps(sorted_obj, separators=(",", ":"))
 
 
-class WsRouteService(Protocol):
+class WsRouteService(Service):
     async def create_topic(self, topic: str, topic_update: Callable) -> None:
         ...
 
@@ -64,3 +70,44 @@ class WsRouteInterface(OperationRouter):
             ],
             "note": "WebSocket endpoints use AsyncAPI spec, not OpenAPI/Swagger",
         }
+
+
+class WsRouterInterface(list[WsRouteInterface]):
+    def __init__(self, *args: Any, service: Service, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._service = service
+
+    def generate_routers(self, ws_file: str) -> None:
+        """Generate WebSocket routers from the ws file path.
+
+        Args:
+            ws_file: Path to the WebSocket router definition file
+                     (typically __file__ from the calling module)
+                     Expected pattern: modules/{module_name}/ws/{version}/__init__.py
+
+        Raises:
+            RuntimeError: If router generation fails
+            ValueError: If ws_file path doesn't match expected pattern
+        """
+        try:
+            generated = generate_ws_routers(ws_file)
+            if generated:
+                # Extract module info for logging (best effort)
+                from pathlib import Path
+
+                ws_path = Path(ws_file)
+                parts = ws_path.parts
+                try:
+                    modules_idx = parts.index("modules")
+                    module_name = parts[modules_idx + 1]
+                    version = parts[modules_idx + 3]
+                    logger.info(
+                        f"Generated WS routers for module '{module_name}' version '{version}'"
+                    )
+                except (ValueError, IndexError):
+                    logger.info(f"Generated WS routers from {ws_file}")
+        except RuntimeError as e:
+            # Fail loudly with context
+            logger.error(f"WebSocket router generation failed for '{ws_file}'!")
+            logger.error(str(e))
+            raise

@@ -150,7 +150,7 @@ Benefits:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     ModularFastAPI                          │
+│                     ModularApp                          │
 │  (Main Application - Coordinator)                           │
 │                                                             │
 │  • Mounts module apps at /api/v1/{module}                  │
@@ -174,7 +174,7 @@ Benefits:
 
 ```
 backend/src/trading_api/
-├── app_factory.py              # Application factory and ModularFastAPI
+├── app_factory.py              # Application factory and ModularApp
 ├── main.py                     # Entry point (creates app via factory)
 │
 ├── shared/                     # Shared infrastructure (always loaded)
@@ -244,7 +244,7 @@ backend/src/trading_api/
 from pathlib import Path
 from fastapi.routing import APIRouter
 from trading_api.shared import Module
-from trading_api.shared.ws.router_interface import WsRouteInterface
+from trading_api.shared.ws.ws_route_interface import WsRouteInterface
 
 from .api import BrokerApi
 from .service import BrokerService
@@ -317,9 +317,9 @@ Modules create **root-level routes** that get mounted with module prefix:
 
 ## Application Factory
 
-### ModularFastAPI Class
+### ModularApp Class
 
-The `ModularFastAPI` class extends FastAPI with module management:
+The `ModularApp` class extends FastAPI with module management:
 
 ```python
 class ModuleApp:
@@ -328,7 +328,7 @@ class ModuleApp:
         self.module = module
         self.api_app, self.ws_app = module.create_app()
 
-class ModularFastAPI(FastAPI):
+class ModularApp(FastAPI):
     """FastAPI with integrated module and WebSocket tracking."""
 
     def __init__(self, modules: list[Module], base_url: str, **kwargs):
@@ -367,12 +367,12 @@ class ModularFastAPI(FastAPI):
 
 ```python
 class AppFactory:
-    """Factory for creating ModularFastAPI applications."""
+    """Factory for creating ModularApp applications."""
 
     def create_app(
         self,
         enabled_module_names: list[str] | None = None
-    ) -> ModularFastAPI:
+    ) -> ModularApp:
         """Create app with selective module loading.
 
         Args:
@@ -380,7 +380,7 @@ class AppFactory:
                                  Core is always enabled.
 
         Returns:
-            ModularFastAPI instance with mounted modules
+            ModularApp instance with mounted modules
         """
         # 1. Clear and auto-discover modules
         self.registry.clear()
@@ -397,8 +397,8 @@ class AppFactory:
         # 4. Get enabled module instances (lazy-loaded)
         enabled_modules = self.registry.get_enabled_modules()
 
-        # 5. Create ModularFastAPI
-        app = ModularFastAPI(
+        # 5. Create ModularApp
+        app = ModularApp(
             modules=enabled_modules,
             base_url="/api/v1",
             title="Trading API",

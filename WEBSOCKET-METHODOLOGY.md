@@ -98,7 +98,7 @@ Use the router factory pattern with TYPE_CHECKING:
 # backend/src/trading_api/modules/datafeed/ws.py
 from typing import TYPE_CHECKING, TypeAlias
 from trading_api.models.market import Bar, BarsSubscriptionRequest
-from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
+from trading_api.shared.ws.ws_route_interface import WsRouteInterface, WsRouteService
 from trading_api.shared.ws.generic_route import WsRouter
 
 if TYPE_CHECKING:
@@ -146,7 +146,7 @@ This triggers automatic router generation when each module's router factory is i
 # backend/src/trading_api/modules/datafeed/__init__.py
 from typing import List
 from fastapi import APIRouter
-from trading_api.shared.ws.router_interface import WsRouteInterface
+from trading_api.shared.ws.ws_route_interface import WsRouteInterface
 from .service import DatafeedService
 from .api import DatafeedApi
 from .ws import DatafeedWsRouters
@@ -440,7 +440,7 @@ The `WsRouter` passes a `topic_update` callback to your service's `create_topic(
 
 **Location**: `backend/src/trading_api/modules/{module}/service.py`
 
-**Note**: Service implements `WsRouteService` Protocol from `shared.ws.router_interface`.
+**Note**: Service implements `WsRouteService` Protocol from `shared.ws.ws_route_interface`.
 
 **Example (DatafeedService)**:
 
@@ -450,7 +450,7 @@ import asyncio
 import json
 from typing import Callable
 from trading_api.models.market import Bar, BarsSubscriptionRequest
-from trading_api.shared.ws.router_interface import WsRouteService
+from trading_api.shared.ws.ws_route_interface import WsRouteService
 
 class DatafeedService(WsRouteService):
     """Datafeed service implementing WsRouteService Protocol"""

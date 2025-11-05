@@ -11,7 +11,7 @@ This module provides REST API endpoints for broker operations:
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import HTTPException, Query
 
 from trading_api.models.broker import (
     AccountMetainfo,
@@ -31,14 +31,13 @@ from trading_api.models.broker import (
     Side,
     SuccessResponse,
 )
+from trading_api.modules.broker.service import BrokerService
+from trading_api.shared.api import APIRouterInterface
 
-from .service import BrokerService
 
-
-class BrokerApi(APIRouter):
-    def __init__(self, service: BrokerService, *args: Any, **kwargs: Any) -> None:
+class BrokerApi(APIRouterInterface):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.service = service
 
         @self.post(
             "/debug/reset",
@@ -363,3 +362,14 @@ class BrokerApi(APIRouter):
                 LeveragePreviewResult: Preview messages (infos, warnings, errors)
             """
             return await self.service.preview_leverage(params)
+
+    @property
+    def service(self) -> BrokerService:
+        """Get the DatafeedService instance.
+
+        Returns:
+            DatafeedService: The datafeed service
+        """
+        if not isinstance(self._service, BrokerService):
+            raise ValueError("Service has not been initialized")
+        return self._service

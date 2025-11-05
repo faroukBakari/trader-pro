@@ -266,16 +266,6 @@ class ServerManager:
         """
         env = os.environ.copy()
 
-        # CRITICAL: Ensure core module is always included
-        # Core provides health checks and version endpoints required by nginx.
-        # This is correct architecture - every server process must host core
-        # for nginx health monitoring to work properly.
-        # AppFactory also auto-includes core, but we set it explicitly here.
-        if modules and "core" not in modules:
-            modules = ["core"] + modules
-        elif not modules:
-            modules = ["core"]
-
         env["ENABLED_MODULES"] = ",".join(modules)
 
         # Create log file path and uvicorn logging config

@@ -20,8 +20,12 @@ class TestModuleRegistryValidation:
 
     @pytest.fixture
     def registry(self) -> ModuleRegistry:
-        """Create a fresh registry for each test."""
-        return ModuleRegistry()
+        from pathlib import Path
+
+        # Use actual modules directory
+        backend_dir = Path(__file__).parent.parent
+        modules_dir = backend_dir / "src" / "trading_api" / "modules"
+        return ModuleRegistry(modules_dir=modules_dir)
 
     def test_validate_module_names_accepts_valid_hyphenated_names(
         self, registry: ModuleRegistry
@@ -107,7 +111,12 @@ class TestModuleRegistryExistingFunctionality:
     @pytest.fixture
     def registry(self) -> Generator[ModuleRegistry, None, None]:
         """Create a fresh registry for each test."""
-        reg = ModuleRegistry()
+        from pathlib import Path
+
+        # Use actual modules directory
+        backend_dir = Path(__file__).parent.parent
+        modules_dir = backend_dir / "src" / "trading_api" / "modules"
+        reg = ModuleRegistry(modules_dir=modules_dir)
         yield reg
         reg.clear()
 
@@ -160,14 +169,8 @@ class TestModuleRegistryExistingFunctionality:
 
     def test_auto_discover_with_real_modules(self, registry: ModuleRegistry):
         """Verify auto_discover works with real modules (broker, datafeed)."""
-        from pathlib import Path
-
-        # Use actual modules directory
-        backend_dir = Path(__file__).parent.parent
-        modules_dir = backend_dir / "src" / "trading_api" / "modules"
-
         # Should succeed (existing modules have valid names)
-        registry.auto_discover(modules_dir)
+        registry.auto_discover()
 
         # Verify known modules were registered
         assert "broker" in registry._module_classes

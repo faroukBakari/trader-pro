@@ -131,18 +131,6 @@ class DeploymentConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_core_server_has_no_modules(self) -> "DeploymentConfig":
-        """Validate core server has empty modules list."""
-        if "core" in self.servers:
-            core_modules = self.servers["core"].modules
-            if core_modules:
-                raise ValueError(
-                    f"Core server must have no modules, found: {core_modules}"
-                )
-
-        return self
-
-    @model_validator(mode="after")
     def validate_websocket_routes(self) -> "DeploymentConfig":
         """Validate all websocket routes reference existing servers."""
         for route, server_name in self.websocket_routes.items():

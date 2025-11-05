@@ -25,11 +25,12 @@ class ModuleRegistry:
         _enabled_modules: Set of module names to enable (None = all enabled)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, modules_dir: Path) -> None:
         """Initialize an empty module registry."""
         self._module_classes: Dict[str, type[Module]] = {}
         self._instances: Dict[str, Module] = {}
         self._enabled_modules: set[str] | None = None
+        self._modules_dir = modules_dir
 
     def register(self, module_class: type[Module], module_name: str) -> None:
         """Register a module class with the registry.
@@ -47,7 +48,7 @@ class ModuleRegistry:
         self._module_classes[module_name] = module_class
         logger.info(f"Registered module class: {module_name}")
 
-    def auto_discover(self, modules_dir: Path) -> None:
+    def auto_discover(self) -> None:
         """Auto-discover and register modules from directory.
 
         Convention: modules/<module_name>/__init__.py exports <ModuleName>Module.
@@ -62,7 +63,7 @@ class ModuleRegistry:
         discovered_modules = {}
 
         # Step 1: Discover all modules
-        for module_path in modules_dir.iterdir():
+        for module_path in self._modules_dir.iterdir():
             # Skip non-directories and private/internal modules
             if not module_path.is_dir() or module_path.name.startswith("_"):
                 continue
@@ -90,8 +91,8 @@ class ModuleRegistry:
 
         # Step 3: Register validated modules
         for module_name, module_class in discovered_modules.items():
-            self.register(module_class, module_name)
             logger.info(f"Auto-discovered module: {module_name}")
+            self.register(module_class, module_name)
 
     def _get_instance(self, module_name: str) -> Module:
         """Get or create module instance (lazy loading).

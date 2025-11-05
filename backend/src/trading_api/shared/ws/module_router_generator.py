@@ -237,6 +237,7 @@ def run_quality_checks_for_module(
 
 def verify_router_imports(
     module_name: str,
+    version: str,
     router_class_name: str,
 ) -> tuple[bool, str]:
     """Verify a generated router can be imported (lightweight check).
@@ -250,18 +251,19 @@ def verify_router_imports(
 
     Args:
         module_name: Name of the module (e.g., 'datafeed', 'broker')
+        version: Version of the module (e.g., 'v1', 'v2')
         router_class_name: Name of the router class (e.g., 'BarWsRouter')
 
     Returns:
         Tuple of (success: bool, message: str)
 
     Example:
-        >>> success, msg = verify_router_imports("datafeed", "BarWsRouter")
+        >>> success, msg = verify_router_imports("datafeed", "v1", "BarWsRouter")
         >>> print(success, msg)  # True, "✓ BarWsRouter imports successfully"
     """
     try:
-        # Dynamically import module's generated package
-        module_path = f"trading_api.modules.{module_name}.ws_generated"
+        # Dynamically import module's version-specific generated package
+        module_path = f"trading_api.modules.{module_name}.ws.{version}.ws_generated"
         generated_module = __import__(module_path, fromlist=[router_class_name])
 
         # Verify router class exists
@@ -281,63 +283,96 @@ def verify_router_imports(
         return False, f"Verification failed: {e}"
 
 
-def generate_module_routers(
-    module_name: str,
+def generate_ws_routers(
+    ws_file: str,
     *,
     silent: bool = False,
     skip_quality_checks: bool = False,
 ) -> bool:
     """
-    Generate WebSocket routers for a specific module.
+    Generate WebSocket routers for a specific module version.
 
     Detection:
-    1. Check if modules/<module_name>/ws.py exists
-    2. If not found, return False (no generation needed)
-    3. If found, parse TypeAlias declarations and generate
+    1. Extract module name and version from ws_file path
+    2. Expected path: modules/{module_name}/ws/{version}/__init__.py
+    3. Parse TypeAlias declarations and generate routers
 
     Generation:
-    1. Parse router specs from ws.py
+    1. Parse router specs from ws file
     2. Load template from shared/ws/generic_route.py
     3. Generate concrete router classes
     4. Generate __init__.py with exports
     5. Optionally run quality checks
 
     Args:
-        module_name: Name of the module (e.g., 'datafeed', 'broker')
-        silent: If True, suppress output except errors (default: True)
+        ws_file: Path to the WebSocket router file
+                 (e.g., "modules/broker/ws/v1/__init__.py")
+        silent: If True, suppress output except errors (default: False)
         skip_quality_checks: If True, skip formatters/linters for faster iteration
             (default: False)
 
     Returns:
-        bool: True if routers were generated, False if no ws.py found
+        bool: True if routers were generated, False if no ws file found
 
     Raises:
         RuntimeError: If generation or quality checks fail
+        ValueError: If ws_file path doesn't match expected pattern
 
     Example:
-        >>> # Generate routers for datafeed module
-        >>> generate_module_routers("datafeed")
+        >>> # Generate routers for broker v1
+        >>> generate_ws_routers("modules/broker/ws/v1/__init__.py")
         True
-        >>> # Module without ws.py
-        >>> generate_module_routers("auth")
-        False
+        >>> # Generate routers for datafeed v2
+        >>> generate_ws_routers("modules/datafeed/ws/v2/__init__.py")
+        True
         >>> # Development mode (skip quality checks for speed)
-        >>> generate_module_routers("datafeed", silent=False, skip_quality_checks=True)
+        >>> generate_ws_routers(
+        ...     "modules/broker/ws/v1/__init__.py",
+        ...     silent=False,
+        ...     skip_quality_checks=True
+        ... )
         True
     """
-    # Detect module ws.py file
-    base_dir = Path(__file__).parent.parent.parent.parent.parent  # backend/
-    module_ws_file = base_dir / f"src/trading_api/modules/{module_name}/ws.py"
+    # Get backend base directory (from this file's location)
+    # This file is at: backend/src/trading_api/shared/ws/module_router_generator.py
+    # So we go up 5 levels to reach backend/
+    base_dir = Path(__file__).parent.parent.parent.parent.parent
 
-    if not module_ws_file.exists():
+    # Convert ws_file to Path and resolve to absolute path
+    ws_path = Path(ws_file)
+    if not ws_path.is_absolute():
+        # If relative, assume it's relative to backend/src/trading_api/
+        ws_path = base_dir / "src" / "trading_api" / ws_file
+
+    # Extract module name and version from path
+    # Expected: .../modules/{module_name}/ws/{version}/__init__.py
+    parts = ws_path.parts
+    try:
+        modules_idx = parts.index("modules")
+        module_name = parts[modules_idx + 1]
+        # Check if there's a ws directory
+        if parts[modules_idx + 2] != "ws":
+            raise ValueError(
+                f"Expected 'ws' directory in path, got: {parts[modules_idx + 2]}"
+            )
+        version = parts[modules_idx + 3]
+    except (ValueError, IndexError) as e:
+        raise ValueError(
+            f"Invalid ws_file path: {ws_file}. "
+            f"Expected pattern: modules/{{module_name}}/ws/{{version}}/__init__.py"
+        ) from e
+
+    router_path = ws_path
+
+    if not router_path.exists():
         return False  # No ws.py, no generation needed
 
     # Parse router specs
     try:
-        router_specs = parse_router_specs_from_file(module_ws_file, module_name)
+        router_specs = parse_router_specs_from_file(router_path, module_name)
     except Exception as e:
         raise RuntimeError(
-            f"Failed to parse ws.py for module '{module_name}': {e}"
+            f"Failed to parse ws file for module '{module_name}' version '{version}': {e}"
         ) from e
 
     if not router_specs:
@@ -347,17 +382,18 @@ def generate_module_routers(
     template_path = base_dir / "src/trading_api/shared/ws/generic_route.py"
     template = template_path.read_text()
 
-    # Output directory
-    output_dir = base_dir / f"src/trading_api/modules/{module_name}/ws_generated"
+    # Output directory - place in same directory level as ws router file
+    # e.g., modules/broker/ws/v1/ws_generated/
+    output_dir = router_path.parent / "ws_generated"
 
     # Completely remove and recreate to ensure clean state
     # This removes all generated files, __pycache__, and any leftover artifacts
     if output_dir.exists():
         shutil.rmtree(output_dir, ignore_errors=True)
 
-    # Ensure parent module's __pycache__ is also cleared to avoid import issues
-    module_dir = base_dir / f"src/trading_api/modules/{module_name}"
-    pycache_dir = module_dir / "__pycache__"
+    # Ensure parent ws version directory's __pycache__ is also cleared to avoid import issues
+    ws_version_dir = router_path.parent
+    pycache_dir = ws_version_dir / "__pycache__"
     if pycache_dir.exists():
         # Remove any cached imports of ws_generated
         for cache_file in pycache_dir.glob("*ws_generated*"):
@@ -367,7 +403,7 @@ def generate_module_routers(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if not silent:
-        print(f"📁 Generating routers for module '{module_name}'")
+        print(f"📁 Generating routers for module '{module_name}' version '{version}'")
 
     # Generate each router
     for spec in router_specs:
@@ -400,6 +436,7 @@ def generate_module_routers(
     for spec in router_specs:
         success, message = verify_router_imports(
             module_name=module_name,
+            version=version,
             router_class_name=spec.class_name,
         )
         if not success:
@@ -407,12 +444,12 @@ def generate_module_routers(
             shutil.rmtree(output_dir)
             raise RuntimeError(
                 f"Router import verification failed for '{spec.class_name}' "
-                f"in module '{module_name}': {message}"
+                f"in module '{module_name}' version '{version}': {message}"
             )
         if not silent:
             print(f"    {message}")
 
     if not silent:
-        logger.info(f"✓ Generated WS routers for '{module_name}'")
+        logger.info(f"✓ Generated WS routers for '{module_name}' version '{version}'")
 
     return True

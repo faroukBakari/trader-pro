@@ -67,7 +67,7 @@ from .market import (
 )
 
 # Import versioning models
-from .versioning import VERSION_CONFIG, APIMetadata, APIVersion, VersionInfo
+from .versioning import APIMetadata, VersionInfo
 
 __all__ = [
     # Common utilities
@@ -123,7 +123,5 @@ __all__ = [
     "HealthResponse",
     # Versioning models
     "APIMetadata",
-    "APIVersion",
-    "VERSION_CONFIG",
     "VersionInfo",
 ]

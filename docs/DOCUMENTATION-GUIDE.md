@@ -39,11 +39,12 @@ Complete index of all project documentation with descriptions and reading paths.
 | File                                             | Purpose                                            |
 | ------------------------------------------------ | -------------------------------------------------- |
 | **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture and module system     |
+| **backend/docs/MODULAR_VERSIONNING.md**          | Module-level API versioning strategy               |
 | **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx        |
 | **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules     |
 | **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation        |
 | **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide                  |
-| **backend/docs/VERSIONING.md**                   | API versioning strategy and implementation         |
+| **backend/docs/VERSIONING.md**                   | Global API versioning strategy and implementation  |
 | **backend/docs/BACKEND_TESTING.md**              | Backend testing strategy and overhead optimization |
 
 > **Note**: backend/docs/outdated/ contains historical documentation from previous refactors. These files are kept for reference only and should NOT be used for current implementation guidance.
@@ -133,14 +134,15 @@ Complete index of all project documentation with descriptions and reading paths.
 ### Backend Developers
 
 1. **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** - Modular architecture and module system
-2. **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process deployment with nginx
-3. **backend/docs/BACKEND_WEBSOCKETS.md** - FastWS integration and creating WebSocket modules
-4. **backend/docs/SPECS_AND_CLIENT_GEN.md** - Spec and client generation flow
-5. **API-METHODOLOGY.md** - TDD implementation workflow
-6. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
-7. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
-8. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
-9. **docs/TESTING.md** - General testing strategies
+2. **backend/docs/MODULAR_VERSIONNING.md** - Module-level API versioning strategy
+3. **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process deployment with nginx
+4. **backend/docs/BACKEND_WEBSOCKETS.md** - FastWS integration and creating WebSocket modules
+5. **backend/docs/SPECS_AND_CLIENT_GEN.md** - Spec and client generation flow
+6. **API-METHODOLOGY.md** - TDD implementation workflow
+7. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
+8. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
+9. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
+10. **docs/TESTING.md** - General testing strategies
 
 ### Frontend Developers
 
@@ -196,6 +198,12 @@ Complete index of all project documentation with descriptions and reading paths.
 - **docs/CLIENT-GENERATION.md** - Client auto-generation overview
 - **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation guide
 - **frontend/src/clients/trader-client-generated/README.md** - Generated client usage
+
+### API Versioning
+
+- **backend/docs/MODULAR_VERSIONNING.md** - ⭐ **Module-level versioning (start here for independent module versions)**
+- **backend/docs/VERSIONING.md** - Global API versioning strategy (complementary)
+- **API-METHODOLOGY.md** - TDD methodology for API implementation
 
 ### WebSocket & Real-Time
 

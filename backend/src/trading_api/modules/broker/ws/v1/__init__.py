@@ -10,7 +10,7 @@ Provides real-time push notifications for:
 """
 
 import logging
-import os
+from pathlib import Path
 from typing import TYPE_CHECKING, TypeAlias
 
 from trading_api.models.broker import (
@@ -26,8 +26,7 @@ from trading_api.models.broker import (
     PositionSubscriptionRequest,
 )
 from trading_api.shared.ws.generic_route import WsRouter
-from trading_api.shared.ws.module_router_generator import generate_module_routers
-from trading_api.shared.ws.router_interface import WsRouteInterface, WsRouteService
+from trading_api.shared.ws.ws_route_interface import WsRouterInterface, WsRouteService
 
 # Type aliases for code generation
 if TYPE_CHECKING:
@@ -43,21 +42,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class BrokerWsRouters(list[WsRouteInterface]):
-    def __init__(self, broker_service: WsRouteService):
+class BrokerWsRouters(WsRouterInterface):
+    def __init__(self, service: WsRouteService):
         # Generate WebSocket routers for module
-        module_name = os.path.basename(os.path.dirname(__file__))
-        try:
-            generated = generate_module_routers(module_name)
-            if generated:
-                logger.info(f"Generated WS routers for module '{module_name}'")
-        except RuntimeError as e:
-            # Fail loudly with module context
-            logger.error(
-                f"WebSocket router generation failed for module '{module_name}'!"
-            )
-            logger.error(str(e))
-            raise
+        module_name = Path(__file__).parent.parent.parent.name
+
+        self.generate_routers(__file__)
         if not TYPE_CHECKING:
             from .ws_generated import (
                 BrokerConnectionWsRouter,
@@ -69,19 +59,19 @@ class BrokerWsRouters(list[WsRouteInterface]):
 
         # Instantiate routers
         order_router = OrderWsRouter(
-            route="orders", tags=[module_name], service=broker_service
+            route="orders", tags=[module_name], service=service
         )
         position_router = PositionWsRouter(
-            route="positions", tags=[module_name], service=broker_service
+            route="positions", tags=[module_name], service=service
         )
         execution_router = ExecutionWsRouter(
-            route="executions", tags=[module_name], service=broker_service
+            route="executions", tags=[module_name], service=service
         )
         equity_router = EquityWsRouter(
-            route="equity", tags=[module_name], service=broker_service
+            route="equity", tags=[module_name], service=service
         )
         broker_connection_router = BrokerConnectionWsRouter(
-            route="broker-connection", tags=[module_name], service=broker_service
+            route="broker-connection", tags=[module_name], service=service
         )
         super().__init__(
             [
@@ -90,5 +80,6 @@ class BrokerWsRouters(list[WsRouteInterface]):
                 execution_router,
                 equity_router,
                 broker_connection_router,
-            ]
+            ],
+            service=service,
         )
