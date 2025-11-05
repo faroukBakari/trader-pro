@@ -1,7 +1,7 @@
 """Shared test fixtures for all test suites.
 
 This module provides a generic test app factory and the apps fixture for shared tests.
-Other common fixtures (app, ws_app, client, async_client) are defined in the root
+Other common fixtures (app, ws_apps, ws_app, client, async_client) are defined in the root
 trading_api/conftest.py and are available to all tests via pytest discovery.
 
 Each test suite can create an app with only the modules it needs for isolation.
@@ -33,17 +33,17 @@ def create_test_app(
                         If None, all modules are enabled.
 
     Returns:
-        tuple: (ModularApp application, list of FastWSAdapter applications)
+        ModularApp: Modular application (extends FastAPI)
 
     Example:
         # Test with all modules
-        api_app, ws_apps = create_test_app()
+        app = create_test_app()
 
         # Test with only broker module
-        api_app, ws_apps = create_test_app(enabled_modules=["broker"])
+        app = create_test_app(enabled_modules=["broker"])
 
         # Test with only shared infrastructure (no modules)
-        api_app, ws_apps = create_test_app(enabled_modules=[])
+        app = create_test_app(enabled_modules=[])
     """
     factory = AppFactory()
     return factory.create_app(enabled_module_names=enabled_modules)
@@ -51,5 +51,5 @@ def create_test_app(
 
 @pytest.fixture(scope="session")
 def apps() -> ModularApp:
-    """Full application (API + WS) with all modules enabled (shared across session)."""
+    """Full application with all modules enabled (shared across session)."""
     return create_test_app()

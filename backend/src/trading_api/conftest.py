@@ -16,20 +16,33 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
+from trading_api.app_factory import ModularApp
 from trading_api.shared import FastWSAdapter
 
 
 @pytest.fixture(scope="session")
-def app(apps: tuple[FastAPI, list[FastWSAdapter]]) -> FastAPI:
-    """FastAPI application instance (shared across session)."""
-    api_app, _ = apps
-    return api_app
+def app(apps: ModularApp) -> FastAPI:
+    """FastAPI application instance (shared across session).
+
+    ModularApp extends FastAPI, so we can use it directly.
+    """
+    return apps  # ModularApp IS a FastAPI
 
 
 @pytest.fixture(scope="session")
-def ws_app(apps: tuple[FastAPI, list[FastWSAdapter]]) -> FastWSAdapter | None:
-    """FastWSAdapter application instance (shared across session)."""
-    _, ws_apps = apps
+def ws_apps(apps: ModularApp) -> list[FastWSAdapter]:
+    """FastWSAdapter application instances (shared across session).
+
+    Extracts WebSocket apps from all modules.
+    """
+    return [
+        ws_app for module_app in apps.modules_apps for ws_app in module_app.ws_versions
+    ]
+
+
+@pytest.fixture(scope="session")
+def ws_app(ws_apps: list[FastWSAdapter]) -> FastWSAdapter | None:
+    """First FastWSAdapter application instance (shared across session)."""
     return ws_apps[0] if ws_apps else None
 
 

@@ -32,59 +32,39 @@ if str(backend_scripts_dir) not in sys.path:
 
 
 @pytest.fixture(scope="session")
-def datafeed_only_app() -> tuple[ModularApp, list[FastWSAdapter]]:
+def datafeed_only_app() -> ModularApp:
     """Session-scoped datafeed-only app for isolation tests."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    modular_app = factory.create_app(enabled_module_names=["datafeed"])
-    return modular_app, [
-        module_app.ws_app
-        for module_app in modular_app.modules_apps
-        if module_app.ws_app
-    ]
+    return factory.create_app(enabled_module_names=["datafeed"])
 
 
 @pytest.fixture(scope="session")
-def broker_only_app() -> tuple[ModularApp, list[FastWSAdapter]]:
+def broker_only_app() -> ModularApp:
     """Session-scoped broker-only app for isolation tests."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    modular_app = factory.create_app(enabled_module_names=["broker"])
-    return modular_app, [
-        module_app.ws_app
-        for module_app in modular_app.modules_apps
-        if module_app.ws_app
-    ]
+    return factory.create_app(enabled_module_names=["broker"])
 
 
 @pytest.fixture(scope="session")
-def all_modules_app() -> tuple[ModularApp, list[FastWSAdapter]]:
+def all_modules_app() -> ModularApp:
     """Session-scoped app with all modules for isolation tests."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    modular_app = factory.create_app(enabled_module_names=None)
-    return modular_app, [
-        module_app.ws_app
-        for module_app in modular_app.modules_apps
-        if module_app.ws_app
-    ]
+    return factory.create_app(enabled_module_names=None)
 
 
 @pytest.fixture(scope="session")
-def no_modules_app() -> tuple[ModularApp, list[FastWSAdapter]]:
+def no_modules_app() -> ModularApp:
     """Session-scoped app with no modules (shared infrastructure only)."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    modular_app = factory.create_app(enabled_module_names=[])
-    return modular_app, [
-        module_app.ws_app
-        for module_app in modular_app.modules_apps
-        if module_app.ws_app
-    ]
+    return factory.create_app(enabled_module_names=[])
 
 
 # ============================================================================
@@ -133,30 +113,34 @@ def wait_for_service_sync(base_url: str, max_attempts: int = 30) -> bool:
 
 
 @pytest.fixture(scope="module")
-def apps() -> tuple[ModularApp, list[FastWSAdapter]]:
+def apps() -> ModularApp:
     """Full application with all modules enabled (shared per test module)."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    modular_app = factory.create_app(enabled_module_names=None)  # None = all modules
-    return modular_app, [
-        module_app.ws_app
-        for module_app in modular_app.modules_apps
-        if module_app.ws_app
+    return factory.create_app(enabled_module_names=None)  # None = all modules
+
+
+@pytest.fixture(scope="module")
+def app(apps: ModularApp) -> ModularApp:
+    """ModularApp application instance (shared per test module).
+
+    ModularApp extends FastAPI, so we can use it directly.
+    """
+    return apps  # ModularApp IS a FastAPI
+
+
+@pytest.fixture(scope="module")
+def ws_apps(apps: ModularApp) -> list[FastWSAdapter]:
+    """FastWSAdapter application instances (shared per test module)."""
+    return [
+        ws_app for module_app in apps.modules_apps for ws_app in module_app.ws_versions
     ]
 
 
 @pytest.fixture(scope="module")
-def app(apps: tuple[ModularApp, list[FastWSAdapter]]) -> ModularApp:
-    """ModularApp application instance (shared per test module)."""
-    api_app, _ = apps
-    return api_app
-
-
-@pytest.fixture(scope="module")
-def ws_app(apps: tuple[ModularApp, list[FastWSAdapter]]) -> FastWSAdapter | None:
-    """FastWSAdapter application instance (shared per test module)."""
-    _, ws_apps = apps
+def ws_app(ws_apps: list[FastWSAdapter]) -> FastWSAdapter | None:
+    """First FastWSAdapter application instance (shared per test module)."""
     return ws_apps[0] if ws_apps else None
 
 

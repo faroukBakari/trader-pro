@@ -30,12 +30,12 @@ async def test_all_modules_loaded(async_client: AsyncClient) -> None:
     broker_executions = await async_client.get("/api/v1/broker/executions/AAPL")
     assert broker_executions.status_code == 200
 
-    # Test shared endpoints
-    health = await async_client.get("/api/v1/core/health")
-    assert health.status_code == 200
+    # Test module-specific health endpoints (no core module)
+    broker_health = await async_client.get("/api/v1/broker/health")
+    assert broker_health.status_code == 200
 
-    versions = await async_client.get("/api/v1/core/versions")
-    assert versions.status_code == 200
+    datafeed_health = await async_client.get("/api/v1/datafeed/health")
+    assert datafeed_health.status_code == 200
 
 
 @pytest.mark.integration
@@ -110,9 +110,11 @@ async def test_spec_generation_completeness(app: FastAPI) -> None:
     assert "/api/v1/broker/positions" in paths
     assert "/api/v1/broker/executions/{symbol}" in paths
 
-    # Verify shared endpoints present
-    assert "/api/v1/core/health" in paths
-    assert "/api/v1/core/versions" in paths
+    # Verify module-specific health/versions endpoints present (no core module)
+    assert "/api/v1/broker/health" in paths
+    assert "/api/v1/broker/versions" in paths
+    assert "/api/v1/datafeed/health" in paths
+    assert "/api/v1/datafeed/versions" in paths
 
 
 @pytest.mark.integration
@@ -120,37 +122,49 @@ async def test_spec_generation_completeness(app: FastAPI) -> None:
 async def test_health_endpoint_includes_all_modules(
     async_client: AsyncClient,
 ) -> None:
-    """Verify health endpoint reports status for all modules."""
-    response = await async_client.get("/api/v1/core/health")
-    assert response.status_code == 200
-    health_data = response.json()
+    """Verify health endpoints work for all modules."""
+    # Check broker health
+    broker_response = await async_client.get("/api/v1/broker/health")
+    assert broker_response.status_code == 200
+    broker_health = broker_response.json()
+    assert "status" in broker_health
+    assert broker_health["status"] == "ok"
 
-    # Should have status and timestamp
-    assert "status" in health_data
-    assert health_data["status"] == "ok"
-    assert "timestamp" in health_data
+    # Check datafeed health
+    datafeed_response = await async_client.get("/api/v1/datafeed/health")
+    assert datafeed_response.status_code == 200
+    datafeed_health = datafeed_response.json()
+    assert "status" in datafeed_health
+    assert datafeed_health["status"] == "ok"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_versions_endpoint(async_client: AsyncClient) -> None:
-    """Verify versions endpoint returns API version info."""
-    response = await async_client.get("/api/v1/core/versions")
-    assert response.status_code == 200
-    versions_data = response.json()
+    """Verify versions endpoints return API version info for each module."""
+    # Check broker versions
+    broker_response = await async_client.get("/api/v1/broker/versions")
+    assert broker_response.status_code == 200
+    broker_versions = broker_response.json()
+    assert "current_version" in broker_versions
+    assert broker_versions["current_version"] == "v1"
+    assert "available_versions" in broker_versions
 
-    # Should have version information
-    assert "current_version" in versions_data
-    assert versions_data["current_version"] == "v1"
-    assert "available_versions" in versions_data
+    # Check datafeed versions
+    datafeed_response = await async_client.get("/api/v1/datafeed/versions")
+    assert datafeed_response.status_code == 200
+    datafeed_versions = datafeed_response.json()
+    assert "current_version" in datafeed_versions
+    assert datafeed_versions["current_version"] == "v1"
+    assert "available_versions" in datafeed_versions
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_cors_headers_present(async_client: AsyncClient) -> None:
     """Verify CORS headers are properly configured."""
-    # Make a simple request and check for CORS headers
-    response = await async_client.get("/api/v1/core/health")
+    # Make a simple request and check for CORS headers (use broker health)
+    response = await async_client.get("/api/v1/broker/health")
     assert response.status_code == 200
 
     # Note: In tests, CORS headers may not be present as middleware
@@ -219,6 +233,6 @@ async def test_multi_module_workflow_end_to_end(async_client: AsyncClient) -> No
     assert executions[0]["symbol"] == "AAPL"
 
     # 8. Check health status
-    health_response = await async_client.get("/api/v1/core/health")
+    health_response = await async_client.get("/api/v1/broker/health")
     assert health_response.status_code == 200
     assert health_response.json()["status"] == "ok"

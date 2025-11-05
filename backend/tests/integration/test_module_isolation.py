@@ -12,8 +12,8 @@ from trading_api.app_factory import AppFactory
 @pytest.mark.integration
 def test_datafeed_only_isolation(datafeed_only_app) -> None:
     """Verify datafeed-only app doesn't load broker."""
-    api_app, _ = datafeed_only_app
-    openapi_spec = api_app.openapi()
+    # datafeed_only_app is now a ModularApp (which IS a FastAPI)
+    openapi_spec = datafeed_only_app.openapi()
     paths = openapi_spec.get("paths", {})
 
     # Datafeed endpoints should exist
@@ -23,16 +23,15 @@ def test_datafeed_only_isolation(datafeed_only_app) -> None:
     # Broker endpoints should NOT exist
     assert not any("/broker/" in path for path in paths)
 
-    # Shared endpoints should still exist
-    assert "/api/v1/core/health" in paths
-    assert "/api/v1/core/versions" in paths
+    # Module-specific health endpoints should exist
+    assert "/api/v1/datafeed/health" in paths
 
 
 @pytest.mark.integration
 def test_broker_only_isolation(broker_only_app) -> None:
     """Verify broker-only app doesn't load datafeed."""
-    api_app, _ = broker_only_app
-    openapi_spec = api_app.openapi()
+    # broker_only_app is now a ModularApp (which IS a FastAPI)
+    openapi_spec = broker_only_app.openapi()
     paths = openapi_spec.get("paths", {})
 
     # Broker endpoints should exist
@@ -44,9 +43,8 @@ def test_broker_only_isolation(broker_only_app) -> None:
     # Datafeed endpoints should NOT exist
     assert not any("/datafeed/" in path for path in paths)
 
-    # Shared endpoints should still exist
-    assert "/api/v1/core/health" in paths
-    assert "/api/v1/core/versions" in paths
+    # Module-specific health endpoints should exist
+    assert "/api/v1/broker/health" in paths
 
 
 @pytest.mark.integration
@@ -57,34 +55,33 @@ def test_module_registry_state(all_modules_app, datafeed_only_app) -> None:
     modules are reflected in the app's routes.
     """
     # Check all_modules_app has both broker and datafeed routes
-    all_api_app, _ = all_modules_app
-    all_paths = all_api_app.openapi().get("paths", {})
+    all_paths = all_modules_app.openapi().get("paths", {})
     assert any("/broker/" in p for p in all_paths)
     assert any("/datafeed/" in p for p in all_paths)
 
     # Check datafeed_only_app has only datafeed routes
-    datafeed_api_app, _ = datafeed_only_app
-    datafeed_paths = datafeed_api_app.openapi().get("paths", {})
+    datafeed_paths = datafeed_only_app.openapi().get("paths", {})
     assert any("/datafeed/" in p for p in datafeed_paths)
     assert not any("/broker/" in p for p in datafeed_paths)
 
-    # Verify module discovery by creating a factory and checking its registry
+    # Verify module discovery by creating an app which triggers discovery
     factory = AppFactory()
-    factory.registry.auto_discover(factory.modules_dir)
-    all_modules = factory.registry.get_all_modules()
-    assert len(all_modules) >= 3  # Should have core + broker + datafeed at minimum
+    test_app = factory.create_app()  # This triggers auto-discovery
+    # Get enabled modules from the created app
+    assert len(test_app.modules_apps) >= 2  # Should have broker + datafeed at minimum
 
 
 @pytest.mark.integration
 def test_shared_infrastructure_always_loaded(no_modules_app) -> None:
     """Verify shared infrastructure is always available regardless of modules."""
-    api_app, _ = no_modules_app
-    openapi_spec = api_app.openapi()
+    # no_modules_app is now a ModularApp (which IS a FastAPI)
+    openapi_spec = no_modules_app.openapi()
     paths = openapi_spec.get("paths", {})
 
-    # Shared endpoints should always exist
-    assert "/api/v1/core/health" in paths
-    assert "/api/v1/core/versions" in paths
+    # With no modules enabled, no health endpoints should exist
+    # (health endpoints are module-specific via APIRouterInterface)
+    # OpenAPI spec should still be valid
+    assert isinstance(paths, dict)
 
     # No module endpoints should exist
     assert not any("/broker/" in path for path in paths)
@@ -97,15 +94,12 @@ def test_module_service_independence(broker_only_app, datafeed_only_app) -> None
 
     This validates that different app fixtures have independent FastAPI apps.
     """
-    broker_api_app, _ = broker_only_app
-    datafeed_api_app, _ = datafeed_only_app
-
     # The two apps should be different instances
-    assert broker_api_app is not datafeed_api_app
+    assert broker_only_app is not datafeed_only_app
 
     # Each should have their own routes
-    broker_paths = set(broker_api_app.openapi().get("paths", {}).keys())
-    datafeed_paths = set(datafeed_api_app.openapi().get("paths", {}).keys())
+    broker_paths = set(broker_only_app.openapi().get("paths", {}).keys())
+    datafeed_paths = set(datafeed_only_app.openapi().get("paths", {}).keys())
 
     # Broker should have broker-specific paths
     assert any("/broker/" in p for p in broker_paths)
@@ -117,8 +111,8 @@ def test_module_service_independence(broker_only_app, datafeed_only_app) -> None
 @pytest.mark.integration
 def test_module_prefix_consistency(all_modules_app) -> None:
     """Verify module API prefixes match module names."""
-    api_app, _ = all_modules_app
-    openapi_spec = api_app.openapi()
+    # all_modules_app is now a ModularApp (which IS a FastAPI)
+    openapi_spec = all_modules_app.openapi()
     paths = openapi_spec.get("paths", {})
 
     # Datafeed module: prefix should be /datafeed
@@ -133,8 +127,12 @@ def test_module_prefix_consistency(all_modules_app) -> None:
 @pytest.mark.integration
 def test_websocket_routers_module_specific(datafeed_only_app, broker_only_app) -> None:
     """Verify WebSocket routers are only loaded with their modules."""
-    # Create datafeed-only app
-    _, ws_apps_datafeed = datafeed_only_app
+    # datafeed_only_app is now a ModularApp - extract WS apps
+    ws_apps_datafeed = [
+        ws_app
+        for module_app in datafeed_only_app.modules_apps
+        for ws_app in module_app.ws_versions
+    ]
     assert len(ws_apps_datafeed) == 1, "Should have one WebSocket app for datafeed"
     datafeed_routes = [route.operation for route in ws_apps_datafeed[0].router.routes]
 
@@ -149,8 +147,12 @@ def test_websocket_routers_module_specific(datafeed_only_app, broker_only_app) -
     assert not any("positions" in route for route in datafeed_routes)
     assert not any("executions" in route for route in datafeed_routes)
 
-    # Create broker-only app
-    _, ws_apps_broker = broker_only_app
+    # broker_only_app is now a ModularApp - extract WS apps
+    ws_apps_broker = [
+        ws_app
+        for module_app in broker_only_app.modules_apps
+        for ws_app in module_app.ws_versions
+    ]
     assert len(ws_apps_broker) == 1, "Should have one WebSocket app for broker"
     broker_routes = [route.operation for route in ws_apps_broker[0].router.routes]
 
@@ -167,17 +169,12 @@ def test_websocket_routers_module_specific(datafeed_only_app, broker_only_app) -
 @pytest.mark.integration
 def test_module_disabled_not_instantiated(datafeed_only_app, broker_only_app) -> None:
     """Verify disabled modules don't load their routes in the app."""
-    datafeed_api_app, _ = datafeed_only_app
-    broker_api_app, _ = broker_only_app
-
     # Datafeed app should NOT have broker routes
-    datafeed_paths = datafeed_api_app.openapi().get("paths", {})
+    datafeed_paths = datafeed_only_app.openapi().get("paths", {})
     assert not any("/broker/" in p for p in datafeed_paths)
     assert any("/datafeed/" in p for p in datafeed_paths)
 
     # Broker app should NOT have datafeed routes
-    broker_paths = broker_api_app.openapi().get("paths", {})
-    assert not any("/datafeed/" in p for p in broker_paths)
-    assert any("/broker/" in p for p in broker_paths)
+    broker_paths = broker_only_app.openapi().get("paths", {})
     assert not any("/datafeed/" in p for p in broker_paths)
     assert any("/broker/" in p for p in broker_paths)

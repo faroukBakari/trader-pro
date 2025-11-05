@@ -352,7 +352,10 @@ class ClientGenerationService:
             exports = []
 
             for client_file in client_files:
-                module_name = client_file.stem.replace("_client", "")
+                # File name is like "broker_v1_client.py"
+                # Extract module name without version: "broker"
+                stem_without_client = client_file.stem.replace("_client", "")
+                module_name = stem_without_client.rsplit("_", 1)[0]  # Remove version
                 class_name = f"{module_name.capitalize()}Client"
                 imports.append(f"from .{client_file.stem} import {class_name}")
                 exports.append(f'    "{class_name}",')

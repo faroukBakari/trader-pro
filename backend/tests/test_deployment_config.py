@@ -210,18 +210,6 @@ class TestDeploymentConfig:
                 },
             )
 
-    def test_core_server_must_have_no_modules(self) -> None:
-        """Test core server validation (must have empty modules)."""
-        with pytest.raises(
-            ValueError, match="Core server must have no modules, found: \\['broker'\\]"
-        ):
-            DeploymentConfig(
-                nginx=NginxConfig(port=8000),
-                servers={
-                    "core": ServerConfig(port=8003, modules=["broker"]),
-                },
-            )
-
     def test_websocket_route_unknown_server(self) -> None:
         """Test WebSocket route validation (unknown server)."""
         with pytest.raises(

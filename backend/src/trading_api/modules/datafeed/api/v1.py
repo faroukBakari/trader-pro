@@ -14,8 +14,9 @@ from trading_api.models import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.modules.datafeed.service import DatafeedService
 from trading_api.shared.api import APIRouterInterface
+
+from ..service import DatafeedService
 
 
 class DatafeedApi(APIRouterInterface):
