@@ -456,3 +456,10 @@ class DatafeedService(WsRouteService):
             volume=(last_bar.volume or 0)
             + int(random.random() * 10000),  # Add some volume
         )
+
+    def __del__(self) -> None:
+        """Cleanup generator tasks on instance deletion"""
+        for task in self._topic_generators.values():
+            if not task.done():
+                task.cancel()
+                logger.info(f"Cancelled broadcasting task: {task.get_name()}")

@@ -9,8 +9,7 @@ Fixtures defined here are automatically available to all test files
 in trading_api and its subdirectories.
 """
 
-import asyncio
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator
 
 import pytest
 from fastapi import FastAPI
@@ -21,29 +20,10 @@ from trading_api.app_factory import AppFactory, ModularApp
 from trading_api.shared import FastWSAdapter
 
 # ============================================================================
-# Event Loop Override for Session-Scoped Async Fixtures
-# ============================================================================
-
-
-@pytest.fixture(scope="session")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """Create event loop for session-scoped async fixtures.
-
-    Required for pytest-asyncio 0.21.x with session-scoped async fixtures.
-    Without this, you'll get: "ScopeMismatch: You tried to access the
-    function scoped fixture event_loop with a session scoped request object"
-
-    Also prevents: "RuntimeWarning: coroutine 'async_finalizer' was never awaited"
-    during test teardown.
-    """
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.new_event_loop()
-    yield loop
-
-
-# ============================================================================
 # Application Fixtures (Session-Scoped for Performance)
 # ============================================================================
+# Note: event_loop fixture is inherited from tests/conftest.py
+# to avoid overlapping session-scoped event loops
 
 
 @pytest.fixture(scope="session")
@@ -84,9 +64,13 @@ def ws_app(ws_apps: list[FastWSAdapter]) -> FastWSAdapter | None:
 
 
 @pytest.fixture
-def client(app: FastAPI) -> TestClient:
-    """Sync test client for WebSocket tests."""
-    return TestClient(app)
+def client(app: FastAPI):
+    """Sync test client for WebSocket tests.
+
+    Uses context manager to ensure proper cleanup of TestClient's internal event loop.
+    """
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture
