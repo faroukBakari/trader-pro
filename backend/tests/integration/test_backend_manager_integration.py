@@ -59,7 +59,8 @@ async def ensure_started(manager: ServerManager) -> None:
         all_healthy = True
         for server_name in manager.config.servers.keys():
             instances = status["servers"].get(server_name, [])
-            if not instances or not all(inst["healthy"] for inst in instances):
+            # Updated to use new status format with overall_healthy
+            if not instances or not all(inst["overall_healthy"] for inst in instances):
                 all_healthy = False
                 break
 
@@ -176,7 +177,7 @@ def session_test_config() -> DeploymentConfig:
             "broker": ServerConfig(
                 port=base_port + 1,
                 instances=1,
-                modules=["core", "broker"],
+                modules=["broker"],
                 reload=False,
             ),
             "datafeed": ServerConfig(
@@ -271,25 +272,29 @@ class TestBackendManagerIntegration:
         """Test that health checks pass for all servers after startup."""
         await ensure_started(session_backend_manager)
 
-        # Check nginx health
+        # Check nginx health through broker module
         nginx_port = session_backend_manager.config.nginx.port
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/core/health", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/health", timeout=5.0
             )
             assert response.status_code == 200
 
-        # Check individual server health
-        for (
-            server_name,
-            server_config,
-        ) in session_backend_manager.config.servers.items():
-            port = server_config.port
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"http://127.0.0.1:{port}/api/v1/core/health", timeout=5.0
-                )
-                assert response.status_code == 200
+        # Check individual server health using their respective modules
+        async with httpx.AsyncClient() as client:
+            # Broker server
+            broker_port = session_backend_manager.config.servers["broker"].port
+            response = await client.get(
+                f"http://127.0.0.1:{broker_port}/api/v1/broker/health", timeout=5.0
+            )
+            assert response.status_code == 200
+
+            # Datafeed server
+            datafeed_port = session_backend_manager.config.servers["datafeed"].port
+            response = await client.get(
+                f"http://127.0.0.1:{datafeed_port}/api/v1/datafeed/health", timeout=5.0
+            )
+            assert response.status_code == 200
 
     async def test_03_processes_are_alive(
         self, session_backend_manager: ServerManager
@@ -297,11 +302,11 @@ class TestBackendManagerIntegration:
         """Test that all backend processes remain alive."""
         await ensure_started(session_backend_manager)
 
-        # Verify nginx is running
+        # Verify nginx is running using broker health endpoint
         nginx_port = session_backend_manager.config.nginx.port
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/core/health", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/health", timeout=5.0
             )
             assert response.status_code == 200
 
@@ -390,27 +395,27 @@ class TestBackendManagerIntegration:
             )
             assert response.status_code == 200
 
-    async def test_08_core_routes_through_nginx(
+    async def test_08_broker_health_endpoint_format(
         self, session_backend_manager: ServerManager
     ) -> None:
-        """Test that core routes are accessible through nginx."""
+        """Test broker health endpoint returns correct format."""
         await ensure_started(session_backend_manager)
 
         nginx_port = session_backend_manager.config.nginx.port
 
         async with httpx.AsyncClient() as client:
-            # Health endpoint
+            # Health endpoint through nginx
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/core/health", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/health", timeout=5.0
             )
             assert response.status_code == 200
             data = response.json()
-            assert "status" in data
-            assert data["status"] == "ok"
+            assert "module_name" in data
+            assert data["module_name"] == "broker"
 
             # Versions endpoint
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/core/versions", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/versions", timeout=5.0
             )
             assert response.status_code == 200
 
@@ -425,7 +430,7 @@ class TestBackendManagerIntegration:
         async with httpx.AsyncClient() as client:
             # Direct broker health check
             response = await client.get(
-                f"http://127.0.0.1:{broker_port}/api/v1/core/health", timeout=5.0
+                f"http://127.0.0.1:{broker_port}/api/v1/broker/health", timeout=5.0
             )
             assert response.status_code == 200
 
@@ -446,7 +451,7 @@ class TestBackendManagerIntegration:
         async with httpx.AsyncClient() as client:
             # Direct datafeed health check
             response = await client.get(
-                f"http://127.0.0.1:{datafeed_port}/api/v1/core/health", timeout=5.0
+                f"http://127.0.0.1:{datafeed_port}/api/v1/datafeed/health", timeout=5.0
             )
             assert response.status_code == 200
 
@@ -560,7 +565,7 @@ class TestBackendManagerIntegration:
                 "broker": ServerConfig(
                     port=base_port + 1,
                     instances=1,
-                    modules=["core", "broker"],
+                    modules=["broker"],
                     reload=False,
                 ),
             },
@@ -608,7 +613,7 @@ class TestBackendManagerIntegration:
                 "broker": ServerConfig(
                     port=base_port + 1,
                     instances=3,  # 3 instances
-                    modules=["core", "broker"],
+                    modules=["broker"],
                     reload=False,
                 ),
             },
@@ -642,7 +647,7 @@ class TestBackendManagerIntegration:
                 port = base_port + 1 + i
                 async with httpx.AsyncClient() as client:
                     response = await client.get(
-                        f"http://127.0.0.1:{port}/api/v1/core/health", timeout=5.0
+                        f"http://127.0.0.1:{port}/api/v1/broker/health", timeout=5.0
                     )
                     assert response.status_code == 200
 

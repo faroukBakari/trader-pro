@@ -100,38 +100,53 @@ def check_all_ports(config: DeploymentConfig) -> tuple[bool, list[tuple[str, int
 
 
 async def wait_for_health(
-    base_url: str, max_attempts: int = 30, delay: float = 0.5
+    base_url: str, modules: list[str], max_attempts: int = 30, delay: float = 0.5
 ) -> bool:
-    """Wait for a service to become healthy.
+    """Wait for all modules on a service to become healthy.
 
     Args:
         base_url: Base URL of the service
+        modules: List of module names to check
         max_attempts: Maximum number of connection attempts
         delay: Delay between attempts in seconds
 
     Returns:
-        True if service is healthy, False otherwise
+        True if all modules are healthy, False otherwise
     """
     async with httpx.AsyncClient() as client:
         for attempt in range(max_attempts):
-            try:
-                response = await client.get(
-                    f"{base_url}/api/v1/core/health", timeout=2.0
+            all_healthy = True
+
+            for module in modules:
+                try:
+                    response = await client.get(
+                        f"{base_url}/api/v1/{module}/health", timeout=2.0
+                    )
+                    if response.status_code != 200:
+                        all_healthy = False
+                        break
+                except (
+                    httpx.ConnectError,
+                    httpx.RemoteProtocolError,
+                    httpx.TimeoutException,
+                ):
+                    all_healthy = False
+                    break
+                except Exception as e:
+                    logger.warning(
+                        f"Unexpected error checking health for {module} at {base_url}: {e}"
+                    )
+                    all_healthy = False
+                    break
+
+            if all_healthy:
+                logger.info(
+                    f"All modules at {base_url} are healthy: {', '.join(modules)}"
                 )
-                if response.status_code == 200:
-                    logger.info(f"Service at {base_url} is healthy")
-                    return True
-            except (
-                httpx.ConnectError,
-                httpx.RemoteProtocolError,
-                httpx.TimeoutException,
-            ):
-                if attempt < max_attempts - 1:
-                    await asyncio.sleep(delay)
-            except Exception as e:
-                logger.warning(f"Unexpected error checking health at {base_url}: {e}")
-                if attempt < max_attempts - 1:
-                    await asyncio.sleep(delay)
+                return True
+
+            if attempt < max_attempts - 1:
+                await asyncio.sleep(delay)
 
     logger.error(
         f"Service at {base_url} failed to become healthy after {max_attempts} attempts"
@@ -467,15 +482,68 @@ class ServerManager:
             # Give kernel more time to release ports after kills
             await asyncio.sleep(0.3)
 
-    async def _check_health(self, port: int) -> bool:
+    async def _check_module_health(
+        self, port: int, modules: list[str]
+    ) -> dict[str, Any]:
+        """Check health of all modules on a server instance.
+
+        Args:
+            port: Server port
+            modules: List of module names to check
+
+        Returns:
+            Dictionary with module health details:
+            {
+                "overall_healthy": bool,
+                "modules": {
+                    "module_name": {
+                        "healthy": bool,
+                        "url": str,
+                        "api_version": str,
+                        "response_time_ms": float,
+                        "error": str  # Only if unhealthy
+                    }
+                }
+            }
+        """
+        base_url = f"http://127.0.0.1:{port}"
+        module_health: dict[str, Any] = {}
+        all_healthy = True
+
         async with httpx.AsyncClient() as client:
-            try:
-                response = await client.get(
-                    f"http://127.0.0.1:{port}/api/v1/core/health", timeout=2.0
-                )
-                return response.status_code == 200
-            except Exception:
-                return False
+            for module_name in modules:
+                health_url = f"{base_url}/api/v1/{module_name}/health"
+
+                try:
+                    start_time = time.time()
+                    response = await client.get(health_url, timeout=2.0)
+                    response_time = (time.time() - start_time) * 1000
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        module_health[module_name] = {
+                            "healthy": True,
+                            "url": health_url,
+                            "api_version": data.get("api_version", "unknown"),
+                            "response_time_ms": round(response_time, 2),
+                        }
+                    else:
+                        module_health[module_name] = {
+                            "healthy": False,
+                            "url": health_url,
+                            "status_code": response.status_code,
+                        }
+                        all_healthy = False
+
+                except Exception as e:
+                    module_health[module_name] = {
+                        "healthy": False,
+                        "url": health_url,
+                        "error": str(e),
+                    }
+                    all_healthy = False
+
+        return {"overall_healthy": all_healthy, "modules": module_health}
 
     async def _wait_for_ports_release(
         self, max_wait: float = 2.0, max_retries: int = 3
@@ -634,7 +702,7 @@ class ServerManager:
                 instance_name = f"{server_name}-{instance_idx}"
                 base_url = f"http://127.0.0.1:{port}"
 
-                healthy = await wait_for_health(base_url)
+                healthy = await wait_for_health(base_url, modules=server_config.modules)
                 if not healthy:
                     logger.error(f"{instance_name} failed to become healthy")
                     all_healthy = False
@@ -654,8 +722,13 @@ class ServerManager:
             return False
 
         # Wait for nginx to become healthy
+        # Check nginx by probing first available module through it
         nginx_url = f"http://127.0.0.1:{self.config.nginx.port}"
-        nginx_healthy = await wait_for_health(nginx_url)
+        # Get first server's modules for nginx health check
+        first_server_modules = next(iter(self.config.servers.values())).modules
+        nginx_healthy = await wait_for_health(
+            nginx_url, modules=first_server_modules[:1]
+        )  # Check just first module
 
         if not nginx_healthy:
             logger.error("Nginx failed to become healthy - shutting down")
@@ -708,11 +781,18 @@ class ServerManager:
                 nginx_pid = int(self.nginx_pid_file.read_text().strip())
                 if self._is_process_running(nginx_pid):
                     nginx_port = self.config.nginx.port
+                    # Check nginx health by probing through it to first server's first module
+                    first_server_modules = next(
+                        iter(self.config.servers.values())
+                    ).modules
+                    nginx_health = await self._check_module_health(
+                        nginx_port, first_server_modules[:1]
+                    )
                     status["nginx"] = {
                         "running": True,
                         "pid": nginx_pid,
                         "port": nginx_port,
-                        "healthy": await self._check_health(nginx_port),
+                        "healthy": nginx_health["overall_healthy"],
                     }
                     status["running"] = True
             except (ValueError, OSError):
@@ -727,19 +807,27 @@ class ServerManager:
                 instance_name = f"{server_name}-{instance_idx}"
                 pid = self._read_pid_file(instance_name)
 
-                instance_info = {
+                instance_info: dict[str, Any] = {
                     "name": instance_name,
                     "port": port,
-                    "modules": server_config.modules,
+                    "configured_modules": server_config.modules,
                     "running": False,
                     "pid": None,
-                    "healthy": False,
+                    "overall_healthy": False,
+                    "module_health": {},
                 }
 
                 if pid and self._is_process_running(pid):
                     instance_info["running"] = True
                     instance_info["pid"] = pid
-                    instance_info["healthy"] = await self._check_health(port)
+
+                    # Check health of all modules
+                    health_result = await self._check_module_health(
+                        port, server_config.modules
+                    )
+                    instance_info["overall_healthy"] = health_result["overall_healthy"]
+                    instance_info["module_health"] = health_result["modules"]
+
                     status["running"] = True
 
                 server_instances.append(instance_info)
@@ -1170,12 +1258,33 @@ async def cmd_status(args: argparse.Namespace) -> int:
                     f"  {instance_name}: http://127.0.0.1:{instance_info['port']}"
                 )
                 logger.info(f"    PID: {instance_info['pid']}")
-                logger.info(
-                    f"    Status: {'✅ Healthy' if instance_info['healthy'] else '❌ Unhealthy'}"
+
+                # Overall health status
+                overall_status = (
+                    "✅ Healthy" if instance_info["overall_healthy"] else "❌ Unhealthy"
                 )
-                modules = instance_info.get("modules", [])
-                modules_str = ", ".join(modules) if modules else "core only"
-                logger.info(f"    Modules: {modules_str}")
+                logger.info(f"    Overall: {overall_status}")
+
+                # Module-level health details
+                logger.info("    Modules:")
+                for module_name, module_health in instance_info[
+                    "module_health"
+                ].items():
+                    if module_health["healthy"]:
+                        version = module_health.get("api_version", "unknown")
+                        response_time = module_health.get("response_time_ms", 0)
+                        logger.info(
+                            f"      - {module_name}: ✅ Healthy (v{version}, {response_time}ms)"
+                        )
+                    else:
+                        error_msg = module_health.get("error", "")
+                        status_code = module_health.get("status_code", "")
+                        detail = (
+                            f"error: {error_msg}"
+                            if error_msg
+                            else f"status: {status_code}"
+                        )
+                        logger.info(f"      - {module_name}: ❌ Unhealthy ({detail})")
             else:
                 logger.info(f"  {instance_name}: NOT RUNNING")
 

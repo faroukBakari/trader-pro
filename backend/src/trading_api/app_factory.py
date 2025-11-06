@@ -322,8 +322,6 @@ class AppFactory:
                 "version": "1.0.0",
                 "current_api_version": "v1",
                 "documentation": f"{base_url}/docs",
-                "health": f"{base_url}/core/health",
-                "versions": f"{base_url}/core/versions",
             }
 
         return modular_app
