@@ -110,10 +110,3 @@ class FastWSAdapter(FastWS):
             self._broadcast_tasks.append(task)
 
         self._pending_routers.clear()
-
-    def __del__(self) -> None:
-        """Cleanup broadcasting tasks on instance deletion"""
-        for task in self._broadcast_tasks:
-            if not task.done():
-                task.cancel()
-                logger.info(f"Cancelled broadcasting task: {task.get_name()}")

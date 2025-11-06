@@ -333,11 +333,6 @@ class DatafeedService(ServiceInterface):
         if task:
             task.cancel()
 
-    def __del__(self) -> None:
-        """Cleanup all streaming tasks on service deletion"""
-        for task in self._topic_generators.values():
-            if not task.done():
-                task.cancel()
 ```
 
 **Critical Implementation Details**:
