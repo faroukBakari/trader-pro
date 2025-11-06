@@ -29,25 +29,6 @@ if str(backend_scripts_dir) not in sys.path:
 
 
 # ============================================================================
-# Event Loop Override for Session-Scoped Async Fixtures
-# ============================================================================
-
-
-@pytest.fixture(scope="session")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """Create event loop for session-scoped async fixtures.
-
-    Required for pytest-asyncio 0.21.x with session-scoped async fixtures.
-    Without this, you'll get: "ScopeMismatch: You tried to access the
-    function scoped fixture event_loop with a session scoped request object"
-    """
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.new_event_loop()
-    yield loop
-    loop.close()
-
-
-# ============================================================================
 # Module Isolation Fixtures (Session-Scoped for Performance)
 # ============================================================================
 
@@ -170,9 +151,13 @@ def ws_app(ws_apps: list[FastWSAdapter]) -> FastWSAdapter | None:
 
 
 @pytest.fixture
-def client(app: ModularApp) -> TestClient:
-    """Sync test client for WebSocket tests."""
-    return TestClient(app)
+def client(app: ModularApp):
+    """Sync test client for WebSocket tests.
+
+    Uses context manager to ensure proper cleanup of TestClient's internal event loop.
+    """
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture
