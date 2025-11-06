@@ -13,7 +13,7 @@ export default mergeConfig(
         'e2e/**',
         'public/charting_library/**',
         'public/datafeeds/**',
-        'src/clients/*-generated/**',
+        'src/clients_generated/**',
       ],
       root: fileURLToPath(new URL('./', import.meta.url)),
       env: {

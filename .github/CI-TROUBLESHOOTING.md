@@ -183,7 +183,7 @@ curl -f http://localhost:8000/api/v1/version
 - **Backend Broadcasting**: Verify backend implements broadcasting in `broker_service.py`
 - **Connection Check**: Ensure WebSocket endpoint is accessible (`ws://localhost:8000/api/v1/ws`)
 - **Subscription Confirmation**: Check backend sends `.subscribe.response` messages
-- **Type Generation**: Verify AsyncAPI types generated correctly in `frontend/src/clients/ws-types-generated/`
+- **Type Generation**: Verify AsyncAPI types generated correctly in `frontend/src/clients_generated/ws-types-generated/`
 - **Topic Compliance**: Ensure topic builders match in backend and frontend
 
 **Debug WebSocket tests**:
@@ -423,7 +423,7 @@ make type-check
 
 ```yaml
 # CI checks for these directories
-if [ ! -d "src/clients/trader-client-broker" ]; then
+if [ ! -d "src/clients_generated/trader-client-broker" ]; then
 echo "❌ Broker client generation failed"
 exit 1
 fi

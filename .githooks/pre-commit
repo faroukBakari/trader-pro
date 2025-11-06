@@ -139,7 +139,7 @@ if [[ -n "$backend_files" ]]; then
     
     # Regenerate frontend TypeScript clients from updated backend specs
     log_info "Regenerating frontend TypeScript clients from updated backend specs..."
-    if ! run_check "Frontend client generation" "make client-generate" "$repo_root/frontend"; then
+    if ! run_check "Frontend client generation" "make generate" "$repo_root/frontend"; then
         log_error "Frontend client generation failed (backend specs may be invalid)"
         exit 1
     fi
@@ -179,7 +179,7 @@ if [[ -n "$frontend_files" ]]; then
     
     # Generate/update frontend clients from backend specs
     log_info "Generating frontend TypeScript clients from backend specs..."
-    if ! run_check "Frontend client generation" "make client-generate" "$repo_root/frontend"; then
+    if ! run_check "Frontend client generation" "make generate" "$repo_root/frontend"; then
         log_error "Frontend client generation failed"
         exit 1
     fi

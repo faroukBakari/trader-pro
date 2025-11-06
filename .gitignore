@@ -172,8 +172,7 @@ backend/src/trading_api/clients/*_client.py
 backend/src/trading_api/clients/__init__.py
 
 # Auto-generated frontend clients
-frontend/src/clients/trader-client-*/
-frontend/src/clients/ws-types-*/
+frontend/src/clients_generated/
 
 # Auto-generated WebSocket clients
 *generated/

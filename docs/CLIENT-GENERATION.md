@@ -25,7 +25,7 @@ Frontend Build → Export Backend Specs → Generate Clients → Build/Dev
 
 ```
 ┌─────────────────────────────────────────┐
-│ Frontend: make client-generate          │
+│ Frontend: make generate                 │
 └────────────────┬────────────────────────┘
                  │
                  ▼
@@ -125,7 +125,7 @@ make generate-openapi-client
 ### Generated Files
 
 ```
-frontend/src/clients/trader-client-generated/
+frontend/src/clients_generated/trader-client-generated/
 ├── api/           # API client classes
 ├── models/        # TypeScript types
 ├── configuration.ts
@@ -159,7 +159,7 @@ make generate-asyncapi-types
 ### Generated Files
 
 ```
-frontend/src/clients/
+frontend/src/clients_generated/
 └── ws-types-generated/     # TypeScript interfaces
     └── index.ts            # Bar, BarsSubscriptionRequest, etc.
 ```
@@ -486,7 +486,7 @@ make export-openapi-offline
 
 ```bash
 # Clean and regenerate
-rm -rf frontend/src/clients/*-generated
+rm -rf frontend/src/clients_generated/*
 make generate-openapi-client
 make generate-asyncapi-types
 ```

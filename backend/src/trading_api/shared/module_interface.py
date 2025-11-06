@@ -467,7 +467,9 @@ class Module(ABC):
                                     f"✅ No changes in AsyncAPI spec for '{self.name}'"
                                 )
                     except Exception as e:
-                        logger.warning(f"⚠️  Could not read existing AsyncAPI spec: {e}")
+                        logger.warning(
+                            f"⚠️  Could not read existing AsyncAPI spec: {e}"
+                        )
                 else:
                     logger.info(f"📝 Creating new AsyncAPI spec for '{self.name}'")
 
@@ -633,9 +635,7 @@ class ModuleApp:
                     if success:
                         # Format generated code
                         if client_gen.format_generated_code(moduleName):
-                            logger.info(
-                                f"✅ Generated Python client for '{moduleName}'"
-                            )
+                            logger.info(f"✅ Generated Python client for '{moduleName}'")
                         else:
                             logger.warning(
                                 f"⚠️  Generated Python client for '{moduleName}' "

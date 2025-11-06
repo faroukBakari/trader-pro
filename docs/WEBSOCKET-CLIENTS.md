@@ -181,7 +181,7 @@ Base Layer (WebSocketBase - Singleton connection management)
 ### Generation Process
 
 ```bash
-# Runs automatically via make client-generate
+# Runs automatically via make generate
 node scripts/generate-ws-types.mjs      # → ws-types-generated/
 ```
 
@@ -757,7 +757,7 @@ WebSocketClientBase.DEBUG = true;
 curl http://localhost:8000/api/v1/ws/asyncapi.json
 
 # Regenerate clients
-cd frontend && make client-generate
+cd frontend && make generate
 ```
 
 ## Performance

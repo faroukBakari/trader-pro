@@ -244,7 +244,7 @@ cd backend && make dev
 cd frontend && make generate-asyncapi-types
 ```
 
-**Output**: Types in `frontend/src/clients/ws-types-generated/`
+**Output**: Types in `frontend/src/clients_generated/ws-types-generated/`
 
 - `BarsSubscriptionRequest`
 - `Bar_backend` (suffixed to avoid conflicts)

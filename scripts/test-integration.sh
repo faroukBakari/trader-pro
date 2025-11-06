@@ -146,7 +146,7 @@ echo -e "${BLUE}Step 4: Client Generation from Live API${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 echo "🔧 Generating REST API client from live API..."
-if make client-generate > /dev/null 2>&1; then
+if make generate > /dev/null 2>&1; then
     echo -e "${GREEN}✅ REST API client generation successful${NC}"
 else
     echo -e "${RED}❌ REST API client generation failed${NC}"
@@ -257,7 +257,7 @@ echo "🧹 Cleaning generated clients..."
 rm -rf src/clients/trader-client-generated src/clients/ws-generated src/clients/ws-types-generated
 
 echo "🎭 Generating REST API client without backend..."
-if make client-generate > /dev/null 2>&1; then
+if make generate > /dev/null 2>&1; then
     echo -e "${GREEN}✅ REST API mock fallback generation successful${NC}"
 else
     echo -e "${RED}❌ REST API mock fallback generation failed${NC}"

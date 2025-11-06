@@ -81,7 +81,7 @@ make generate-openapi-client
 make generate-asyncapi-types
 
 # Or use Makefile
-make client-generate
+make generate
 ```
 
 **Documentation**:
@@ -101,8 +101,8 @@ make client-generate
 
 The following directories are auto-generated (gitignored):
 
-- `src/clients/trader-client-generated/` - REST API client
-- `src/clients/ws-types-generated/` - WebSocket type definitions
+- `src/clients_generated/trader-client-generated/` - REST API client
+- `src/clients_generated/ws-types-generated/` - WebSocket type definitions
 
 ### Environment Configuration
 
@@ -206,7 +206,7 @@ await client.subscribe({ symbol: 'AAPL', resolution: '1' }, (bar: Bar) =>
 - **WebSocket Adapter**: `src/plugins/wsAdapter.ts` - High-level WebSocket clients wrapper
 - **Data Mappers**: `src/plugins/mappers.ts` - Type-safe data transformations between backend/frontend types
   - **⚠️ STRICT NAMING**: All type imports must follow `<TYPE>_Api_Backend`, `<TYPE>_Ws_Backend`, and `<TYPE>` pattern
-- **Generated Types**: `src/clients/ws-types-generated/index.ts` - Auto-generated type definitions (from AsyncAPI)
+- **Generated Types**: `src/clients_generated/ws-types-generated/index.ts` - Auto-generated type definitions (from AsyncAPI)
 - **Integration**: `src/services/datafeedService.ts` - TradingView integration example
 - **Type Generator**: `scripts/generate-ws-types.mjs` - AsyncAPI → TypeScript types
 

@@ -49,9 +49,8 @@ is_process_running() {
 
 # Global variables for process IDs
 BACKEND_PID=""
+WATCHER_PID=""
 FRONTEND_PID=""
-OPENAPI_WATCHER_PID=""
-ASYNCAPI_WATCHER_PID=""
 SCRIPT_PGID=$$  # Store our process group ID
 
 print_step "🚀 Starting full-stack development environment..."
@@ -129,254 +128,216 @@ print_success "Ports $BACKEND_PORT and $FRONTEND_PORT are available"
 cleanup() {
     print_step "🛑 Shutting down full-stack development environment..."
 
-    # First, kill tracked PIDs and their descendants using SIGTERM
+    # Step 1: Kill tracked processes with SIGTERM (graceful)
+    # Order: Frontend → Watcher → Backend (dependency order)
+
     if [ ! -z "$FRONTEND_PID" ]; then
-        print_step "Stopping frontend server and its children (PID: $FRONTEND_PID)..."
+        print_step "Stopping frontend server (PID: $FRONTEND_PID)..."
         kill_process_tree "$FRONTEND_PID" "TERM"
     fi
 
+    if [ ! -z "$WATCHER_PID" ]; then
+        print_step "Stopping spec watcher (PID: $WATCHER_PID)..."
+        kill_process_tree "$WATCHER_PID" "TERM"
+    fi
+
     if [ ! -z "$BACKEND_PID" ]; then
-        print_step "Stopping backend server and its children (PID: $BACKEND_PID)..."
+        print_step "Stopping backend server (PID: $BACKEND_PID)..."
         kill_process_tree "$BACKEND_PID" "TERM"
     fi
 
-    if [ ! -z "$OPENAPI_WATCHER_PID" ]; then
-        print_step "Stopping OpenAPI watcher (PID: $OPENAPI_WATCHER_PID)..."
-        kill_process_tree "$OPENAPI_WATCHER_PID" "TERM"
-    fi
-
-    if [ ! -z "$ASYNCAPI_WATCHER_PID" ]; then
-        print_step "Stopping AsyncAPI watcher (PID: $ASYNCAPI_WATCHER_PID)..."
-        kill_process_tree "$ASYNCAPI_WATCHER_PID" "TERM"
-    fi
-
-    # Wait for graceful shutdown
+    # Step 2: Wait for graceful shutdown
     sleep 2
 
-    # Now kill any remaining processes in our process group (including orphaned/daemon processes)
-    print_step "Cleaning up any remaining processes in process group..."
+    # Step 3: Kill remaining process group members
+    print_step "Cleaning up any remaining processes..."
     local remaining_pids=$(get_process_group_pids)
     
     if [ ! -z "$remaining_pids" ]; then
-        print_step "Found remaining processes, sending SIGTERM..."
         for pid in $remaining_pids; do
-            if is_process_running "$pid"; then
-                kill -TERM "$pid" 2>/dev/null || true
-            fi
+            kill -TERM $pid 2>/dev/null || true
         done
-        
-        sleep 2
-        
-        # Force kill any stubborn processes
-        remaining_pids=$(get_process_group_pids)
-        if [ ! -z "$remaining_pids" ]; then
-            print_step "Force killing stubborn processes..."
-            for pid in $remaining_pids; do
-                if is_process_running "$pid"; then
-                    kill -KILL "$pid" 2>/dev/null || true
-                fi
-            done
-        fi
+    fi
+
+    # Step 4: Force kill stubborn processes
+    sleep 2
+    remaining_pids=$(get_process_group_pids)
+    if [ ! -z "$remaining_pids" ]; then
+        for pid in $remaining_pids; do
+            kill -KILL $pid 2>/dev/null || true
+        done
     fi
 
     print_success "All processes stopped. Environment cleaned up."
-    exit 0
 }
 
 # Set up trap to cleanup on exit
 trap cleanup EXIT INT TERM
 
-# Step 1: Clean up and generate everything before starting servers
+# Step 1: Clean up before starting servers
 print_step "1. Preparing environment..."
 print_step "   🧹 Cleaning generated files..."
-rm -f backend/openapi.json backend/asyncapi.json
-rm -rf frontend/src/clients/*
-rm -rf frontend/dist frontend/node_modules/.vite
-
-print_step "   🔧 Generating all specs and clients..."
-if make -f project.mk generate >/dev/null 2>&1; then
-    print_success "   All specs and clients generated"
-else
-    print_error "   Spec and client generation failed!"
-    exit 1
-fi
+make -C backend clean-generated
+make -C frontend clean-generated
+print_success "   Environment cleaned"
 
 # Step 2: Start backend server in background
 print_step "2. Starting backend server..."
-make -f project.mk dev-backend &
+make -C backend dev &
 BACKEND_PID=$!
 print_step "   Backend started with PID: $BACKEND_PID"
 
 # Step 3: Wait for backend to be ready
-print_step "3. Waiting for backend to be ready..."
-timeout=60
-while [ $timeout -gt 0 ]; do
-    if curl -f http://localhost:$BACKEND_PORT/api/v1/core/health >/dev/null 2>&1; then
-        print_success "Backend is ready and responding"
-        break
-    fi
-    sleep 1
-    timeout=$((timeout - 1))
-done
+print_step "3. Waiting for backend to initialize and generate specs..."
+print_step "   (Backend will auto-generate openapi.json and asyncapi.json on startup)"
+sleep 5  # Give backend time to start and generate specs
 
-if [ $timeout -eq 0 ]; then
-    print_error "Backend failed to start within 60 seconds"
-    exit 1
-fi
+# Step 4: Start unified spec watcher
+print_step "4. Starting unified spec watcher..."
 
-# Step 4: Generate frontend clients
-print_step "4. Generating frontend clients..."
-if make -f project.mk generate-openapi-client >/dev/null 2>&1 && make -f project.mk generate-asyncapi-types >/dev/null 2>&1; then
-    print_success "Frontend clients generated successfully"
-else
-    print_error "Client generation failed"
-    exit 1
-fi
+# Unified spec watcher function
+watch_specs() {
+    # Per-module spec watching
+    # Backend generates specs per module in: backend/src/trading_api/modules/{module}/specs_generated/
+    # Pattern: {module}_openapi.json and {module}_asyncapi.json
+    
+    BACKEND_MODULES_DIR="backend/src/trading_api/modules"
+    
+    # Initialize baseline checksums for all module specs
+    declare -A OPENAPI_CHECKSUMS
+    declare -A ASYNCAPI_CHECKSUMS
+    
+    # Initial scan of all module specs
+    for spec_file in "$BACKEND_MODULES_DIR"/*/specs_generated/*_openapi.json; do
+        if [ -f "$spec_file" ]; then
+            OPENAPI_CHECKSUMS["$spec_file"]=$(md5sum "$spec_file" 2>/dev/null | cut -d' ' -f1)
+        fi
+    done
+    
+    for spec_file in "$BACKEND_MODULES_DIR"/*/specs_generated/*_asyncapi.json; do
+        if [ -f "$spec_file" ]; then
+            ASYNCAPI_CHECKSUMS["$spec_file"]=$(md5sum "$spec_file" 2>/dev/null | cut -d' ' -f1)
+        fi
+    done
 
-# Step 5: Start spec file watchers
-print_step "5. Setting up spec file watchers..."
-
-# Define the spec file paths
-OPENAPI_FILE="backend/openapi.json"
-ASYNCAPI_FILE="backend/asyncapi.json"
-
-if [ -f "$OPENAPI_FILE" ]; then
-    OPENAPI_INITIAL_MTIME=$(stat -c %Y "$OPENAPI_FILE" 2>/dev/null || echo "0")
-    OPENAPI_LAST_CONTENT=$(cat "$OPENAPI_FILE" 2>/dev/null || echo "")
-else
-    OPENAPI_INITIAL_MTIME="0"
-    OPENAPI_LAST_CONTENT=""
-fi
-
-if [ -f "$ASYNCAPI_FILE" ]; then
-    ASYNCAPI_INITIAL_MTIME=$(stat -c %Y "$ASYNCAPI_FILE" 2>/dev/null || echo "0")
-    ASYNCAPI_LAST_CONTENT=$(cat "$ASYNCAPI_FILE" 2>/dev/null || echo "")
-else
-    ASYNCAPI_INITIAL_MTIME="0"
-    ASYNCAPI_LAST_CONTENT=""
-fi
-
-# Start OpenAPI file watcher in background
-{
-    print_step "Starting OpenAPI file watcher..."
-    LAST_MTIME="$OPENAPI_INITIAL_MTIME"
-
+    # Watch loop (1 second interval)
     while true; do
-        sleep 1  # Check every 2 seconds
+        sleep 1
+        
+        SPECS_CHANGED=false
 
-        if [ -f "$OPENAPI_FILE" ]; then
-            CURRENT_MTIME=$(stat -c %Y "$OPENAPI_FILE" 2>/dev/null || echo "0")
-
-            # Only check content if modification time changed
-            if [ "$CURRENT_MTIME" != "$LAST_MTIME" ] && [ "$CURRENT_MTIME" != "0" ]; then
-                CURRENT_CONTENT=$(cat "$OPENAPI_FILE" 2>/dev/null || echo "")
+        # Check all OpenAPI specs for changes
+        for spec_file in "$BACKEND_MODULES_DIR"/*/specs_generated/*_openapi.json; do
+            if [ -f "$spec_file" ]; then
+                CURRENT_CHECKSUM=$(md5sum "$spec_file" 2>/dev/null | cut -d' ' -f1)
+                LAST_CHECKSUM="${OPENAPI_CHECKSUMS[$spec_file]:-}"
                 
-                # Compare actual content, not just timestamps
-                if [ "$CURRENT_CONTENT" != "$OPENAPI_LAST_CONTENT" ]; then
-                    print_warning "OpenAPI file changed! Regenerating REST client..."
-                    if SKIP_SPEC_GENERATION=true make -f project.mk generate-openapi-client >/dev/null 2>&1; then
-                        print_success "Frontend REST client regenerated successfully"
-                    else
-                        print_error "Failed to regenerate REST client"
-                    fi
-                    
-                    # Update both timestamp and content
-                    LAST_MTIME="$CURRENT_MTIME"
-                    OPENAPI_LAST_CONTENT="$CURRENT_CONTENT"
-                else
-                    # Content unchanged, just update timestamp to avoid repeated checks
-                    LAST_MTIME="$CURRENT_MTIME"
+                if [ "$CURRENT_CHECKSUM" != "$LAST_CHECKSUM" ]; then
+                    MODULE_NAME=$(basename "$spec_file" "_openapi.json")
+                    print_warning "OpenAPI spec changed for module: $MODULE_NAME"
+                    OPENAPI_CHECKSUMS["$spec_file"]="$CURRENT_CHECKSUM"
+                    SPECS_CHANGED=true
                 fi
+            fi
+        done
+        
+        # Check for new OpenAPI specs
+        for spec_file in "$BACKEND_MODULES_DIR"/*/specs_generated/*_openapi.json; do
+            if [ -f "$spec_file" ] && [ -z "${OPENAPI_CHECKSUMS[$spec_file]:-}" ]; then
+                MODULE_NAME=$(basename "$spec_file" "_openapi.json")
+                print_warning "New OpenAPI spec detected for module: $MODULE_NAME"
+                OPENAPI_CHECKSUMS["$spec_file"]=$(md5sum "$spec_file" 2>/dev/null | cut -d' ' -f1)
+                SPECS_CHANGED=true
+            fi
+        done
+
+        # Check all AsyncAPI specs for changes
+        for spec_file in "$BACKEND_MODULES_DIR"/*/specs_generated/*_asyncapi.json; do
+            if [ -f "$spec_file" ]; then
+                CURRENT_CHECKSUM=$(md5sum "$spec_file" 2>/dev/null | cut -d' ' -f1)
+                LAST_CHECKSUM="${ASYNCAPI_CHECKSUMS[$spec_file]:-}"
+                
+                if [ "$CURRENT_CHECKSUM" != "$LAST_CHECKSUM" ]; then
+                    MODULE_NAME=$(basename "$spec_file" "_asyncapi.json")
+                    print_warning "AsyncAPI spec changed for module: $MODULE_NAME"
+                    ASYNCAPI_CHECKSUMS["$spec_file"]="$CURRENT_CHECKSUM"
+                    SPECS_CHANGED=true
+                fi
+            fi
+        done
+        
+        # Check for new AsyncAPI specs
+        for spec_file in "$BACKEND_MODULES_DIR"/*/specs_generated/*_asyncapi.json; do
+            if [ -f "$spec_file" ] && [ -z "${ASYNCAPI_CHECKSUMS[$spec_file]:-}" ]; then
+                MODULE_NAME=$(basename "$spec_file" "_asyncapi.json")
+                print_warning "New AsyncAPI spec detected for module: $MODULE_NAME"
+                ASYNCAPI_CHECKSUMS["$spec_file"]=$(md5sum "$spec_file" 2>/dev/null | cut -d' ' -f1)
+                SPECS_CHANGED=true
+            fi
+        done
+
+        # If any specs changed, regenerate frontend clients
+        if [ "$SPECS_CHANGED" = true ]; then
+            print_warning "Regenerating frontend clients from per-module specs..."
+            if make -C frontend generate >/dev/null 2>&1; then
+                print_success "Frontend clients regenerated successfully"
+            else
+                print_error "Failed to regenerate frontend clients"
             fi
         fi
     done
-} &
-OPENAPI_WATCHER_PID=$!
+}
 
-# Start AsyncAPI file watcher in background
-{
-    print_step "Starting AsyncAPI file watcher..."
-    LAST_MTIME="$ASYNCAPI_INITIAL_MTIME"
+# Start unified watcher in background
+watch_specs &
+WATCHER_PID=$!
+print_step "   Spec watcher started with PID: $WATCHER_PID"
 
-    while true; do
-        sleep 1  # Check every 2 seconds
-
-        if [ -f "$ASYNCAPI_FILE" ]; then
-            CURRENT_MTIME=$(stat -c %Y "$ASYNCAPI_FILE" 2>/dev/null || echo "0")
-
-            # Only check content if modification time changed
-            if [ "$CURRENT_MTIME" != "$LAST_MTIME" ] && [ "$CURRENT_MTIME" != "0" ]; then
-                CURRENT_CONTENT=$(cat "$ASYNCAPI_FILE" 2>/dev/null || echo "")
-                
-                # Compare actual content, not just timestamps
-                if [ "$CURRENT_CONTENT" != "$ASYNCAPI_LAST_CONTENT" ]; then
-                    print_warning "AsyncAPI file changed! Regenerating WebSocket types..."
-                    if make -f project.mk generate-asyncapi-types >/dev/null 2>&1; then
-                        print_success "Frontend WebSocket types regenerated successfully"
-                    else
-                        print_error "Failed to regenerate WebSocket types"
-                    fi
-                    
-                    # Update both timestamp and content
-                    LAST_MTIME="$CURRENT_MTIME"
-                    ASYNCAPI_LAST_CONTENT="$CURRENT_CONTENT"
-                else
-                    # Content unchanged, just update timestamp to avoid repeated checks
-                    LAST_MTIME="$CURRENT_MTIME"
-                fi
-            fi
-        fi
-    done
-} &
-ASYNCAPI_WATCHER_PID=$!
-
-# Step 6: Start WebSocket router watcher
-print_step "6. Starting WebSocket router watcher..."
-(cd backend && ./scripts/watch-ws-routers.sh) &
-WS_WATCHER_PID=$!
-
-print_step "7. Starting frontend development server..."
+print_step "5. Starting frontend development server..."
 print_step "🌐 Frontend will be available at: $FRONTEND_URL"
 print_step "🔧 Backend API is running at: $VITE_API_URL"
 print_step ""
-print_step "👁️  Active Watchers:"
-print_step "   📄 OpenAPI spec → REST client auto-regeneration"
-print_step "   📄 AsyncAPI spec → WebSocket types auto-regeneration"
+print_step "👁️  Watch Mode Active:"
+print_step "   🔄 Backend: Uvicorn --reload (auto-restart on Python file changes)"
+print_step "   🔄 Frontend: Vite HMR (hot module replacement)"
+print_step "   📄 Spec watcher → Auto-regenerates REST client & WebSocket types"
 print_step ""
-print_step "💡 How it works:"
-print_step "   • Uvicorn --reload watches backend Python files"
-print_step "   • On code change → Uvicorn restarts → Specs regenerate"
-print_step "   • Spec file watchers detect changes → Regenerate frontend clients"
+print_step "💡 Change Flow:"
+print_step "   Backend .py change → Uvicorn restart → Specs regenerate → Frontend clients update"
+print_step "   Frontend .ts/.vue change → Vite HMR → Browser auto-refresh"
 print_step ""
 print_warning "Press Ctrl+C to stop all servers and watchers"
 print_step ""
 
 # Start frontend in background and capture PID
-make -f project.mk dev-frontend &
+make -C frontend dev &
 FRONTEND_PID=$!
 
 print_step "Frontend started with PID: $FRONTEND_PID"
 
-# Wait for backend or frontend to exit (or be interrupted)
-# This keeps the script running until one of the main servers exits
+# Monitor all three processes
 print_step ""
-print_step "🎯 All services running. Monitoring backend and frontend..."
+print_step "🎯 All services running. Monitoring processes..."
 print_step ""
 
-# Monitor both backend and frontend processes
 while true; do
     # Check if backend is still running
-    if [ ! -z "$BACKEND_PID" ] && ! is_process_running "$BACKEND_PID"; then
+    if ! is_process_running "$BACKEND_PID"; then
         print_error "Backend process exited unexpectedly!"
         exit 1
     fi
     
+    # Check if spec watcher is still running
+    if ! is_process_running "$WATCHER_PID"; then
+        print_error "Spec watcher exited unexpectedly!"
+        exit 1
+    fi
+    
     # Check if frontend is still running  
-    if [ ! -z "$FRONTEND_PID" ] && ! is_process_running "$FRONTEND_PID"; then
+    if ! is_process_running "$FRONTEND_PID"; then
         print_error "Frontend process exited unexpectedly!"
         exit 1
     fi
     
-    # Sleep before next check
     sleep 1
 done

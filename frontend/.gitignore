@@ -29,17 +29,10 @@ coverage
 *.sw?
 
 # Generated API client
-src/clients/trader-client-generated/
-# Generated per-module API clients
-src/clients/trader-client-*/
+src/clients_generated/trader-client-*/
 
 # Generated WebSocket types
-src/clients/ws-types-generated/
-# Generated per-module WebSocket types
-src/clients/ws-types-*/
-
-# Generated WebSocket client
-src/clients/ws-generated/
+src/clients_generated/ws-types-*/
 
 # OpenAPI/AsyncAPI generation artifacts
 openapi.json
