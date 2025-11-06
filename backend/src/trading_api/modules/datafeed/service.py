@@ -28,13 +28,15 @@ logger = logging.getLogger(__name__)
 class DatafeedService(WsRouteService):
     """Service for handling datafeed operations"""
 
-    def __init__(self, symbols_file_path: Optional[str] = None):
+    def __init__(self, module_dir: Path, symbols_file_path: Optional[str] = None):
         """Initialize the datafeed service
 
         Args:
+            module_dir: Path to the module directory
             symbols_file_path: Path to symbols JSON file. If None, uses
                 default embedded symbols.
         """
+        super().__init__(module_dir)
         self.configuration = DatafeedConfiguration()
         self.symbols_file_path = symbols_file_path
         self._symbols: List[SymbolInfo] = []
@@ -460,6 +462,5 @@ class DatafeedService(WsRouteService):
         for task in self._topic_generators.values():
             try:
                 task.cancel()
-                logger.info(f"Cancelled generator task: {task.get_name()}")
-            except Exception as e:
-                logger.error(f"Error cancelling generator task: {e}")
+            finally:
+                pass
