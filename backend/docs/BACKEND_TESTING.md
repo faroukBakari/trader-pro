@@ -623,6 +623,53 @@ def client(app: FastAPI) -> TestClient:
     return TestClient(app)
 ```
 
+### Event Loop Fixture for Session-Scoped Async Tests
+
+**CRITICAL**: When using session-scoped async fixtures (like `apps`, `app`, `ws_apps`), you **MUST** define a session-scoped `event_loop` fixture to prevent event loop teardown issues.
+
+```python
+import asyncio
+from collections.abc import Generator
+
+import pytest
+
+
+@pytest.fixture(scope="session")
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Create event loop for session-scoped async fixtures.
+
+    Required for pytest-asyncio 0.21.x with session-scoped async fixtures.
+    Without this, you'll get:
+    - "ScopeMismatch: You tried to access the function scoped fixture
+       event_loop with a session scoped request object"
+    - "RuntimeWarning: coroutine 'async_finalizer' was never awaited"
+       during test teardown
+    """
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
+    yield loop
+```
+
+**Where to define this:**
+
+- ✅ `backend/src/trading_api/conftest.py` - For module tests
+- ✅ `backend/tests/integration/conftest.py` - For integration tests
+- ✅ Any conftest.py with session-scoped async fixtures
+
+**Why this is needed:**
+
+- pytest-asyncio creates a **function-scoped** event loop by default
+- Session-scoped async fixtures need a **session-scoped** event loop
+- Without this, async cleanup (like closing async generators) fails
+- Prevents CI failures with "Event loop is closed" errors
+
+**Symptoms of missing event_loop fixture:**
+
+- Tests pass locally but fail in CI
+- RuntimeWarning about unawaited coroutines
+- "Event loop is closed" errors during teardown
+- DeprecationWarning about unclosed event loops
+
 ### Session-Based Testing Pattern
 
 Integration tests use session-scoped fixtures to minimize overhead:

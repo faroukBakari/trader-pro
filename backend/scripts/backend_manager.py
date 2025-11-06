@@ -1032,17 +1032,28 @@ def generate_nginx_config(
     backend_dir = Path(__file__).parent.parent
     local_dir = backend_dir / ".local"
     log_dir = local_dir / "logs"
+    temp_dir = local_dir / "temp"
     access_log = log_dir / "nginx-access.log"
     error_log = log_dir / "nginx-error.log"
+
+    # Nginx temp directories (for buffering)
+    # Only include paths for modules that are compiled in
+    client_body_temp = temp_dir / "client_body_temp"
+    proxy_temp = temp_dir / "proxy_temp"
 
     # PID file path (use custom or default)
     if pid_file is None:
         pid_file = local_dir / "nginx.pid"
 
+    # Ensure temp directory exists
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
     # Convert all paths to absolute paths (nginx needs absolute paths)
     pid_file = pid_file.resolve()
     access_log = access_log.resolve()
     error_log = error_log.resolve()
+    client_body_temp = client_body_temp.resolve()
+    proxy_temp = proxy_temp.resolve()
 
     # Generate complete configuration
     nginx_config = f"""# Auto-generated nginx configuration for multi-process backend
@@ -1057,6 +1068,10 @@ events {{
 }}
 
 http {{
+    # Temporary directories for buffering (absolute paths in .local/)
+    client_body_temp_path {client_body_temp};
+    proxy_temp_path {proxy_temp};
+
     # Upstream server definitions
 {upstreams}
 

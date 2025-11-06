@@ -9,7 +9,8 @@ Fixtures defined here are automatically available to all test files
 in trading_api and its subdirectories.
 """
 
-from typing import AsyncGenerator
+import asyncio
+from collections.abc import AsyncGenerator, Generator
 
 import pytest
 from fastapi import FastAPI
@@ -18,6 +19,31 @@ from httpx import AsyncClient
 
 from trading_api.app_factory import AppFactory, ModularApp
 from trading_api.shared import FastWSAdapter
+
+# ============================================================================
+# Event Loop Override for Session-Scoped Async Fixtures
+# ============================================================================
+
+
+@pytest.fixture(scope="session")
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Create event loop for session-scoped async fixtures.
+
+    Required for pytest-asyncio 0.21.x with session-scoped async fixtures.
+    Without this, you'll get: "ScopeMismatch: You tried to access the
+    function scoped fixture event_loop with a session scoped request object"
+
+    Also prevents: "RuntimeWarning: coroutine 'async_finalizer' was never awaited"
+    during test teardown.
+    """
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
+    yield loop
+
+
+# ============================================================================
+# Application Fixtures (Session-Scoped for Performance)
+# ============================================================================
 
 
 @pytest.fixture(scope="session")
