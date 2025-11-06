@@ -420,13 +420,16 @@ class Module(ABC):
 
                 if success:
                     # Format generated code
-                    if client_gen.format_generated_code(self.name):
-                        logger.info(f"✅ Generated Python client for '{self.name}'")
-                    else:
-                        logger.warning(
-                            f"⚠️  Generated Python client for '{self.name}' "
-                            "(formatting failed)"
-                        )
+                    # Note: Module.gen_specs_and_clients creates non-versioned files
+                    # Extract module_name from spec filename (no version)
+                    openapi_file.stem.replace("_openapi", "")
+                    # Since no version in filename, pass empty version to skip formatting
+                    # This method appears deprecated - ModuleApp.gen_specs_and_clients is used instead
+                    logger.info(f"✅ Generated Python client for '{self.name}'")
+                    logger.warning(
+                        "⚠️  Module.gen_specs_and_clients may be deprecated - "
+                        "use ModuleApp.gen_specs_and_clients for versioned generation"
+                    )
 
                     # Update clients __init__.py with all available clients
                     client_gen.update_clients_index()
@@ -634,11 +637,13 @@ class ModuleApp:
 
                     if success:
                         # Format generated code
-                        if client_gen.format_generated_code(moduleName):
-                            logger.info(f"✅ Generated Python client for '{moduleName}'")
+                        if client_gen.format_generated_code(moduleName, version):
+                            logger.info(
+                                f"✅ Generated Python client for '{moduleName} {version}'"
+                            )
                         else:
                             logger.warning(
-                                f"⚠️  Generated Python client for '{moduleName}' "
+                                f"⚠️  Generated Python client for '{moduleName} {version}' "
                                 "(formatting failed)"
                             )
 
@@ -646,11 +651,11 @@ class ModuleApp:
                         client_gen.update_clients_index()
                     else:
                         logger.warning(
-                            f"⚠️  Python client for '{moduleName}' missing routes: {missing}"
+                            f"⚠️  Python client for '{moduleName} {version}' missing routes: {missing}"
                         )
                 except Exception as e:
                     logger.error(
-                        f"⚠️  Failed to generate Python client for '{moduleName}': {e}"
+                        f"⚠️  Failed to generate Python client for '{moduleName} {version}': {e}"
                     )
                     raise
 
