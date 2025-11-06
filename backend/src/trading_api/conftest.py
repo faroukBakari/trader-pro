@@ -16,8 +16,19 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
-from trading_api.app_factory import ModularApp
+from trading_api.app_factory import AppFactory, ModularApp
 from trading_api.shared import FastWSAdapter
+
+
+@pytest.fixture(scope="session")
+def apps() -> ModularApp:
+    """Full application with all modules enabled (shared across session).
+
+    This fixture is the source for all other app-related fixtures.
+    It creates a ModularApp with all discovered modules enabled.
+    """
+    factory = AppFactory()
+    return factory.create_app()
 
 
 @pytest.fixture(scope="session")

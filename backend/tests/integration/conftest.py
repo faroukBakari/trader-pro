@@ -5,11 +5,12 @@ Provides session-scoped multi-process service fixtures for client testing.
 Provides session-scoped module isolation fixtures for fast test execution.
 """
 
+import asyncio
 import multiprocessing
 import os
 import sys
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
 import httpx
@@ -25,6 +26,26 @@ from trading_api.shared import FastWSAdapter
 backend_scripts_dir = Path(__file__).parent.parent.parent / "scripts"
 if str(backend_scripts_dir) not in sys.path:
     sys.path.insert(0, str(backend_scripts_dir))
+
+
+# ============================================================================
+# Event Loop Override for Session-Scoped Async Fixtures
+# ============================================================================
+
+
+@pytest.fixture(scope="session")
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Create event loop for session-scoped async fixtures.
+
+    Required for pytest-asyncio 0.21.x with session-scoped async fixtures.
+    Without this, you'll get: "ScopeMismatch: You tried to access the
+    function scoped fixture event_loop with a session scoped request object"
+    """
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
+    yield loop
+    loop.close()
+
 
 # ============================================================================
 # Module Isolation Fixtures (Session-Scoped for Performance)

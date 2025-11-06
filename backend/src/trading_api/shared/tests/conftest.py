@@ -17,8 +17,15 @@ from trading_api.app_factory import AppFactory, ModularApp
 
 @pytest.fixture(scope="session")
 def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """Create an event loop for the entire test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
+    """Create event loop for session-scoped fixtures.
+
+    Required for pytest-asyncio 0.21.x when using session-scoped fixtures
+    that are dependencies of async fixtures. Without this override, pytest-asyncio
+    uses a function-scoped event loop by default, which causes teardown issues
+    with async generators that depend on session-scoped fixtures.
+    """
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
     yield loop
     loop.close()
 

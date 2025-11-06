@@ -41,6 +41,12 @@ help:
 	@echo "  type-check        Run backend linting with type checking (black, isort, flake8, mypy, pyright)"
 	@echo "  format            Format backend code"
 	@echo ""
+	@echo "Cleanup targets:"
+	@echo "  clean             Remove build artifacts and generated files"
+	@echo "  clean-cache       Remove Python caches (__pycache__, .pytest_cache, etc.)"
+	@echo "  clean-coverage    Remove coverage files (.coverage, coverage.xml, htmlcov/)"
+	@echo "  clean-generated   Remove all generated files (*_generated*)"
+	@echo ""
 	@echo "Development targets:"
 	@echo "  dev               Start backend development server with debugpy"
 	@echo "  dev-ci            Start backend server for CI (background)"
@@ -410,7 +416,12 @@ test: test-boundaries test-modules test-integration
 # Coverage targets
 test-cov: test-boundaries
 	@echo "Running all tests with coverage..."
-	poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
+	@poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
+	@echo ""
+	@echo "Cleaning up coverage artifacts..."
+	@rm -f .coverage.* 2>/dev/null || true
+	@echo "✓ Removed intermediate .coverage.* files"
+	@echo "✅ Coverage report generated: coverage.xml"
 
 # Linting and formatting
 lint:
@@ -540,7 +551,18 @@ clean:
 	@rm -rf dist/ build/ *.egg-info
 	@echo "Removing generated files..."
 	@$(MAKE) clean-generated
+	@echo "Removing coverage files..."
+	@$(MAKE) clean-coverage
 	@echo "✅ Clean complete"
+
+# Clean coverage files
+clean-coverage:
+	@echo "Cleaning coverage files..."
+	@rm -f .coverage .coverage.* coverage.xml
+	@rm -rf htmlcov/
+	@echo "✓ Removed .coverage files"
+	@echo "✓ Removed coverage.xml"
+	@echo "✓ Removed htmlcov directory"
 
 # Clean all Python caches
 clean-cache:
