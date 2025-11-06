@@ -79,28 +79,6 @@ async def ensure_started(manager: ServerManager) -> None:
         raise RuntimeError("Failed to start backend in ensure_started")
 
 
-async def _wait_for_ports_released(
-    ports: list[int], max_wait: float = 5.0, check_interval: float = 0.1
-) -> bool:
-    """Wait for ports to be released.
-
-    Args:
-        ports: List of ports to check
-        max_wait: Maximum time to wait in seconds
-        check_interval: Time between checks in seconds
-
-    Returns:
-        True if all ports released, False if timeout
-    """
-    start_time = asyncio.get_event_loop().time()
-    while asyncio.get_event_loop().time() - start_time < max_wait:
-        ports_in_use = [port for port in ports if is_port_in_use(port)]
-        if not ports_in_use:
-            return True
-        await asyncio.sleep(check_interval)
-    return False
-
-
 async def _ensure_all_processes_killed(manager: ServerManager) -> None:
     """Ensure all backend processes are killed, including detached daemons.
 
