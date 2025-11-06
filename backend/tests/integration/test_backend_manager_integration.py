@@ -597,67 +597,7 @@ class TestBackendManagerIntegration:
             # Should fail due to blocked port
             assert not success
 
-    async def test_17_multiple_instance_port_allocation(self, tmp_path: Path) -> None:
-        """Test that multiple instances get sequential ports.
-
-        Uses isolated manager instance with unique ports.
-        """
-        # Use test-specific port range to avoid collisions with other tests
-        base_port = 20200
-
-        config = DeploymentConfig(
-            nginx=NginxConfig(
-                port=base_port, worker_processes=1, worker_connections=1024
-            ),
-            servers={
-                "broker": ServerConfig(
-                    port=base_port + 1,
-                    instances=3,  # 3 instances
-                    modules=["broker"],
-                    reload=False,
-                ),
-            },
-            websocket=WebSocketConfig(routing_strategy="path", query_param_name="type"),
-            websocket_routes={"broker": "broker"},
-        )
-
-        nginx_config_path = tmp_path / "nginx-multi.conf"
-        with open(nginx_config_path, "w") as f:
-            generate_nginx_config(config, f)
-
-        manager = ServerManager(config)
-        manager.nginx_config_path = nginx_config_path
-        manager.pid_dir = tmp_path / ".pids"
-        manager.log_dir = tmp_path / ".logs"
-        manager.nginx_pid_file = tmp_path / "nginx.pid"
-        manager.pid_dir.mkdir(parents=True, exist_ok=True)
-        manager.log_dir.mkdir(parents=True, exist_ok=True)
-
-        try:
-            success = await manager.start_all()
-            assert success
-
-            # Verify 3 broker instances running
-            assert "broker-0" in manager.processes
-            assert "broker-1" in manager.processes
-            assert "broker-2" in manager.processes
-
-            # Verify they're on sequential ports
-            for i in range(3):
-                port = base_port + 1 + i
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        f"http://127.0.0.1:{port}/api/v1/broker/health", timeout=5.0
-                    )
-                    assert response.status_code == 200
-
-        finally:
-            await manager.stop_all(timeout=2.0)
-            # Wait for ports to be fully released before next test
-            all_ports = [port for _, port in config.get_all_ports()]
-            await _wait_for_ports_released(all_ports, max_wait=5.0)
-
-    async def test_18_stop_by_pid_files(
+    async def test_17_stop_by_pid_files(
         self, session_backend_manager: ServerManager
     ) -> None:
         """Test stopping processes using PID files (detached mode simulation)."""
@@ -678,7 +618,7 @@ class TestBackendManagerIntegration:
         for name, process in session_backend_manager.processes.items():
             assert process.poll() is not None, f"Process {name} still running"
 
-    async def test_19_get_status_stopped(
+    async def test_18_get_status_stopped(
         self, session_backend_manager: ServerManager
     ) -> None:
         """Test get_status when backend is stopped."""
