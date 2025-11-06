@@ -175,7 +175,7 @@ class ServerManager:
         self.log_dir = self.local_dir / "logs"
 
         self.nginx_config_path = self.local_dir / "nginx.conf"
-        self.nginx_pid_file = self.local_dir / "nginx.pid"
+        self.nginx_pid_file = (self.local_dir / "nginx.pid").resolve()
         self.unified_log_path = self.log_dir / "backend-unified.log"
 
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
@@ -1038,6 +1038,11 @@ def generate_nginx_config(
     # PID file path (use custom or default)
     if pid_file is None:
         pid_file = local_dir / "nginx.pid"
+
+    # Convert all paths to absolute paths (nginx needs absolute paths)
+    pid_file = pid_file.resolve()
+    access_log = access_log.resolve()
+    error_log = error_log.resolve()
 
     # Generate complete configuration
     nginx_config = f"""# Auto-generated nginx configuration for multi-process backend

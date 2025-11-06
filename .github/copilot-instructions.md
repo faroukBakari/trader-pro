@@ -43,12 +43,20 @@ You must follow the TDD & Feature Workflow for all tasks. After proposing a plan
     * **ALWAYS read `docs/DOCUMENTATION-GUIDE.md` FIRST.** This is your complete index.
     * Identify and read ALL relevant documentation.
     * explore related source code as needed.
+    * check existing test coverage related to the task.
     * consult external resources and use MCP tools where applicable.
+    * playwright mcp server could be very helpful for frontend checks.
+    * run exploratory / root-cause-analysis commands in the terminal if needed. this could includes :
+        - make/node/poetry commands
+        - development env tests and checks,
+        - test suites
+        - linters
+        - etc.
     * Summarize the relevant documentation to confirm your understanding of patterns and architecture. 
     * Repeat until you fully understand the task context.
 
 * **Step 1: Propose Plan**  
-    * Draft a clear action plan with a TODO checklist.  
+    * Draft a clear action plan with a TODO checklist. TODO must include test coverage check and TDD steps.
     * ⚠️⚠️!!CRITICAL!! !!IMPORTANT!!⚠️⚠️ ===> **STOP and yield to the user for feedback. You MUST request approval before proceeding.**
 
 ### Phase 2: Implementation

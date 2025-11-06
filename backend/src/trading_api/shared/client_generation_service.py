@@ -385,16 +385,17 @@ __all__ = [
         except Exception as e:
             logger.error(f"Failed to update clients __init__.py: {e}")
 
-    def format_generated_code(self, module_name: str) -> bool:
+    def format_generated_code(self, module_name: str, version: str) -> bool:
         """Format generated client code using autoflake, black, and isort.
 
         Args:
             module_name: Name of the module whose client should be formatted
+            version: Version of the module (e.g., 'v1', 'v2')
 
         Returns:
             True if formatting succeeded, False otherwise
         """
-        client_file = self.clients_dir / f"{module_name}_client.py"
+        client_file = self.clients_dir / f"{module_name}_{version}_client.py"
         if not client_file.exists():
             return False
 
@@ -429,7 +430,7 @@ __all__ = [
             return True
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to format client for '{module_name}': {e}")
+            logger.error(f"Failed to format client for '{module_name} {version}': {e}")
             return False
         except FileNotFoundError:
             logger.warning(
