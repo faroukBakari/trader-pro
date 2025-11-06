@@ -23,13 +23,13 @@ describe('ApiService', () => {
       expect(healthResponse).toHaveProperty('status')
       expect(healthResponse).toHaveProperty('timestamp')
       expect(healthResponse).toHaveProperty('api_version')
-      expect(healthResponse).toHaveProperty('version_info')
+      expect(healthResponse).toHaveProperty('module_name')
 
       // Validate required fields
       expect(typeof healthResponse.status).toBe('string')
       expect(typeof healthResponse.timestamp).toBe('string')
       expect(typeof healthResponse.api_version).toBe('string')
-      expect(typeof healthResponse.version_info).toBe('object')
+      expect(typeof healthResponse.module_name).toBe('string')
 
       // Validate timestamp format (ISO string)
       expect(new Date(healthResponse.timestamp).toISOString()).toBe(healthResponse.timestamp)
@@ -83,7 +83,7 @@ describe('ApiService', () => {
 
       // Validate types
       expect(typeof versionsResponse.current_version).toBe('string')
-      expect(Array.isArray(versionsResponse.available_versions)).toBe(true)
+      expect(typeof versionsResponse.available_versions).toBe('object')
       expect(typeof versionsResponse.documentation_url).toBe('string')
       expect(typeof versionsResponse.support_contact).toBe('string')
     })
@@ -91,9 +91,10 @@ describe('ApiService', () => {
     it('should return valid version information structure', async () => {
       const versionsResponse = await apiService.getAPIVersions()
 
-      expect(versionsResponse.available_versions.length).toBeGreaterThan(0)
+      const versionKeys = Object.keys(versionsResponse.available_versions)
+      expect(versionKeys.length).toBeGreaterThan(0)
 
-      versionsResponse.available_versions.forEach((version) => {
+      Object.values(versionsResponse.available_versions).forEach((version) => {
         expect(version).toHaveProperty('version')
         expect(version).toHaveProperty('release_date')
         expect(version).toHaveProperty('status')
@@ -118,7 +119,7 @@ describe('ApiService', () => {
     it('should include current version in available versions', async () => {
       const versionsResponse = await apiService.getAPIVersions()
 
-      const currentVersionExists = versionsResponse.available_versions.some(
+      const currentVersionExists = Object.values(versionsResponse.available_versions).some(
         (version) => version.version === versionsResponse.current_version,
       )
 
@@ -275,7 +276,7 @@ describe('ApiService', () => {
         status: expect.any(String),
         timestamp: expect.any(String),
         api_version: expect.any(String),
-        version_info: expect.any(Object),
+        module_name: expect.any(String),
       })
 
       // Optional field
@@ -290,13 +291,13 @@ describe('ApiService', () => {
       // Required fields according to APIMetadata interface
       expect(versions).toMatchObject({
         current_version: expect.any(String),
-        available_versions: expect.any(Array),
+        available_versions: expect.any(Object),
         documentation_url: expect.any(String),
         support_contact: expect.any(String),
       })
 
       // Validate VersionInfo structure for each version
-      versions.available_versions.forEach((version) => {
+      Object.values(versions.available_versions).forEach((version) => {
         expect(version).toMatchObject({
           version: expect.any(String),
           release_date: expect.any(String),
