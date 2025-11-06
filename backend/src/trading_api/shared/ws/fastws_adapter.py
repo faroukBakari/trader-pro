@@ -117,4 +117,3 @@ class FastWSAdapter(FastWS):
             if not task.done():
                 task.cancel()
                 logger.info(f"Cancelled broadcasting task: {task.get_name()}")
-                logger.info(f"Cancelled broadcasting task: {task.get_name()}")

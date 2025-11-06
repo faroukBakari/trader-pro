@@ -39,13 +39,14 @@ You must follow the TDD & Feature Workflow for all tasks. After proposing a plan
 ### Phase 1: Analysis & Planning
 
 * **Step 0: Exploration & investigation (See Above)**
-**BEFORE starting ANY task** (feature, refactor, bug fix, or troubleshooting), you MUST explore documentation.
+    **BEFORE starting ANY task** (feature, refactor, bug fix, or troubleshooting), you MUST explore documentation.
     * **ALWAYS read `docs/DOCUMENTATION-GUIDE.md` FIRST.** This is your complete index.
     * Identify and read ALL relevant documentation.
     * explore related source code as needed.
     * check existing test coverage related to the task.
     * consult external resources and use MCP tools where applicable.
     * playwright mcp server could be very helpful for frontend checks.
+    * ⚠️⚠️!!CRITICAL!! !!IMPORTANT!!⚠️⚠️ : in case of BUG or ISSUE, you MUST reproduce it first as part of your investigation. yield to the user for futher instructions if unable to reproduce.
     * run exploratory / root-cause-analysis commands in the terminal if needed. this could includes :
         - make/node/poetry commands
         - development env tests and checks,
@@ -57,12 +58,12 @@ You must follow the TDD & Feature Workflow for all tasks. After proposing a plan
 
 * **Step 1: Propose Plan**  
     * Draft a clear action plan with a TODO checklist. TODO must include test coverage check and TDD steps.
-    * ⚠️⚠️!!CRITICAL!! !!IMPORTANT!!⚠️⚠️ ===> **STOP and yield to the user for feedback. You MUST request approval before proceeding.**
+    * ⚠️⚠️!!CRITICAL!! !!IMPORTANT!!⚠️⚠️ : **STOP and yield to the user for feedback. You MUST request approval before proceeding.**
 
 ### Phase 2: Implementation
 
 * **Step 1: TDD Implementation Cycle** *(Applies to BugFixes/Features/Refactors — NOT DevOps)*  
-    * ❌ **STOP**: ⚠️⚠️!!CRITICAL!! !!IMPORTANT!!⚠️⚠️ ===> **DO NOT begin implementation until test coverage is verified.**  
+    * ❌ **STOP**: ⚠️⚠️!!CRITICAL!! !!IMPORTANT!!⚠️⚠️ : **DO NOT begin implementation until test coverage is verified.**  
     * ✅ **Verify Red:**  
         * Confirm existing test coverage or write failing test(s).  
         * For application bugs: use unit/integration tests in `tests/`  
@@ -74,7 +75,7 @@ You must follow the TDD & Feature Workflow for all tasks. After proposing a plan
     * ✅ Refactor if necessary
 
 * **Step 3: Final Validation (MANDATORY)**
-    * ⚠️⚠️!!CRITICAL!! !!IMPORTANT!!⚠️⚠️ ===> **Before finishing, you ⚠️MUST⚠️ run the full validation suite to confirm correctness and prevent regressions.**  
+    * ⚠️⚠️!!CRITICAL!! !!IMPORTANT!!⚠️⚠️ : **Before finishing, you ⚠️MUST⚠️ run the full validation suite to confirm correctness and prevent regressions.**  
     * Run all relevant validation commands:  
         * `make format`  
         * `make lint` (or `make -f project.mk lint-all`)  

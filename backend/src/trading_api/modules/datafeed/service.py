@@ -460,7 +460,6 @@ class DatafeedService(WsRouteService):
     def __del__(self) -> None:
         """Cleanup generator tasks on instance deletion"""
         for task in self._topic_generators.values():
-            try:
+            if not task.done():
                 task.cancel()
-            finally:
-                pass
+                logger.info(f"Cancelled broadcasting task: {task.get_name()}")
