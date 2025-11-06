@@ -38,15 +38,10 @@ class ApiFallback implements ApiInterface {
       status: 200,
       data: {
         status: 'ok',
-        message: 'Trading API down',
+        message: 'Trading API is running (mock)',
         timestamp: new Date().toISOString(),
-        api_version: 'v0',
-        version_info: {
-          version: 'v0',
-          release_date: new Date().toISOString().split('T')[0],
-          status: 'none',
-          deprecation_notice: null,
-        },
+        module_name: 'mock',
+        api_version: 'v1',
       },
     }
   }
@@ -62,25 +57,17 @@ class ApiFallback implements ApiInterface {
     return {
       status: 200,
       data: {
-        current_version: 'v0',
-        available_versions: [
-          {
-            version: 'v0',
+        current_version: 'v1',
+        available_versions: {
+          'v1': {
+            version: 'v1',
             release_date: '2024-01-01',
-            status: 'none',
+            status: 'stable',
             breaking_changes: [],
             deprecation_notice: null,
             sunset_date: null,
           },
-          {
-            version: 'v1',
-            release_date: 'none',
-            status: 'next',
-            breaking_changes: ['none'],
-            deprecation_notice: null,
-            sunset_date: null,
-          },
-        ],
+        },
         documentation_url: '/',
         support_contact: 'none',
       },

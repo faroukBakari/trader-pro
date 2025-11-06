@@ -27,6 +27,9 @@ def main() -> None:
     module_path = f"trading_api.modules.{module_name}"
 
     try:
+        # Import ModuleApp wrapper
+        from trading_api.shared.module_interface import ModuleApp
+
         # Import and instantiate module
         module_pkg = __import__(module_path, fromlist=[module_class_name])
         module_class = getattr(module_pkg, module_class_name)
@@ -35,25 +38,17 @@ def main() -> None:
         # When module_class() is called, the module's __init__ creates WsRouters,
         # which triggers generate_module_routers() to generate concrete router classes
         # from TypeAlias declarations in the module's ws.py file.
-        # This ensures WS routers exist before create_app() is called.
         module = module_class()
 
-        # Create apps (WS routers already generated at this point)
-        api_app, ws_app = module.create_app()
-
-        # Build kwargs
-        kwargs = {
-            "api_app": api_app,
-            "ws_app": ws_app,
-            "clean_first": False,
-        }
-
-        if output_dir:
-            kwargs["output_dir"] = output_dir
-            print(f"📁 Using custom output directory: {output_dir}")
+        # Create apps using ModuleApp wrapper
+        module_app = ModuleApp(module)
 
         # Generate specs and clients
-        module.gen_specs_and_clients(**kwargs)
+        if output_dir:
+            print(f"📁 Using custom output directory: {output_dir}")
+            module_app.gen_specs_and_clients(clean_first=False, output_dir=output_dir)
+        else:
+            module_app.gen_specs_and_clients(clean_first=False)
 
         print(f"✅ Successfully generated for {module_name}")
 

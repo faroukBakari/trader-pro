@@ -29,6 +29,7 @@ Complete index of all project documentation with descriptions and reading paths.
 | **docs/WEBSOCKET-CLIENTS.md**   | WebSocket implementation overview               |
 | **docs/DEVELOPMENT.md**         | Development workflows and setup                 |
 | **docs/TESTING.md**             | Testing strategy and best practices             |
+| **docs/FULLSTACK-DEV-MODE.md**  | Full-stack dev mode with auto-regeneration      |
 
 ---
 
@@ -88,7 +89,7 @@ Complete index of all project documentation with descriptions and reading paths.
 | **frontend/src/services/README.md**           | Services layer overview            |
 | **frontend/src/services/**tests**/README.md** | Testing guide for services         |
 
-### frontend/src/clients/trader-client-generated/
+### frontend/src/clients_generated/trader-client-generated/
 
 - **README.md** - Generated client usage guide
 - **docs/** - 40+ auto-generated API model documentation files
@@ -127,8 +128,9 @@ Complete index of all project documentation with descriptions and reading paths.
 1. **README.md** - Understand the project
 2. **docs/DEVELOPMENT.md** - Get development environment set up
 3. **WORKSPACE-SETUP.md** - Configure VS Code workspace
-4. **ARCHITECTURE.md** - Learn the system architecture
-5. **MAKEFILE-GUIDE.md** - Familiarize with build commands
+4. **docs/FULLSTACK-DEV-MODE.md** - Learn the dev workflow and watch mode
+5. **ARCHITECTURE.md** - Learn the system architecture
+6. **MAKEFILE-GUIDE.md** - Familiarize with build commands
 
 ### Backend Developers
 
@@ -164,11 +166,12 @@ Complete index of all project documentation with descriptions and reading paths.
 ### Full-Stack Developers
 
 1. **ARCHITECTURE.md** - Overall system design
-2. **API-METHODOLOGY.md** - Backend service implementation
-3. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
-4. **docs/CLIENT-GENERATION.md** - Client generation workflow
-5. **docs/WEBSOCKET-CLIENTS.md** - Real-time communication
-6. **docs/DEVELOPMENT.md** - Full-stack workflows
+2. **docs/FULLSTACK-DEV-MODE.md** - Development mode and watch system
+3. **API-METHODOLOGY.md** - Backend service implementation
+4. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
+5. **docs/CLIENT-GENERATION.md** - Client generation workflow
+6. **docs/WEBSOCKET-CLIENTS.md** - Real-time communication
+7. **docs/DEVELOPMENT.md** - Full-stack workflows
 
 ---
 
@@ -190,13 +193,14 @@ Complete index of all project documentation with descriptions and reading paths.
 - **ENVIRONMENT-CONFIG.md** - Environment variables
 - **HOOKS-SETUP.md** - Git hooks
 - **docs/DEVELOPMENT.md** - Development setup
+- **docs/FULLSTACK-DEV-MODE.md** - Full-stack dev mode and watch system
 
 ### API & Client Generation
 
 - **backend/docs/SPECS_AND_CLIENT_GEN.md** - ⭐ **Complete generation guide (OpenAPI/AsyncAPI/Python clients)**
 - **docs/CLIENT-GENERATION.md** - Client auto-generation overview
 - **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation guide
-- **frontend/src/clients/trader-client-generated/README.md** - Generated client usage
+- **frontend/src/clients_generated/trader-client-generated/README.md** - Generated client usage
 
 ### API Versioning
 
@@ -230,6 +234,7 @@ Complete index of all project documentation with descriptions and reading paths.
 ### Build & DevOps
 
 - **MAKEFILE-GUIDE.md** - Makefile commands
+- **docs/FULLSTACK-DEV-MODE.md** - Development mode orchestration
 - **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process backend management
 - **.github/CI-TROUBLESHOOTING.md** - CI/CD issues
 
@@ -246,7 +251,7 @@ Complete index of all project documentation with descriptions and reading paths.
 ### Categories Summary
 
 - **Root Documentation**: 10 essential project-wide guides
-- **docs/ Folder**: 7 core cross-cutting documentation files
+- **docs/ Folder**: 8 core cross-cutting documentation files
 - **Backend Documentation**: 7 current backend guides + 1 third-party doc
 - **Frontend Documentation**: 15 frontend-specific guides + 2 third-party docs
 - **Auto-Generated Docs**: 40+ API model references
@@ -255,7 +260,7 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ### Total Documentation Files
 
-- **User-Maintained**: ~41 actively maintained documentation files
+- **User-Maintained**: ~42 actively maintained documentation files
 - **Auto-Generated**: 40+ API model documentation files
 - **Third-Party**: 3 external package documentation files
 - **Outdated/Historical**: 13 files in backend/docs/outdated/ (reference only)
@@ -270,5 +275,5 @@ Complete index of all project documentation with descriptions and reading paths.
 
 ---
 
-**Last Updated**: November 3, 2025
+**Last Updated**: November 6, 2025
 **Maintained by**: Development Team

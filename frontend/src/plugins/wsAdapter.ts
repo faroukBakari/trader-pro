@@ -15,7 +15,7 @@ import {
   type BarsSubscriptionRequest as BarsSubscriptionRequest_Ws_Backend,
   type QuoteData as QuoteData_Ws_Backend,
   type QuoteDataSubscriptionRequest as QuoteDataSubscriptionRequest_Ws_Backend,
-} from '../clients/ws-types-datafeed/index.js';
+} from '../clients_generated/ws-types-datafeed_v1/index.js';
 
 // Broker module types
 import {
@@ -29,7 +29,7 @@ import {
   type PlacedOrder as PlacedOrder_Ws_Backend,
   type Position as Position_Ws_Backend,
   type PositionSubscriptionRequest as PositionSubscriptionRequest_Ws_Backend,
-} from '../clients/ws-types-broker/index.js';
+} from '../clients_generated/ws-types-broker_v1/index.js';
 
 import {
   mapBrokerConnectionStatus,
@@ -71,16 +71,15 @@ export class WsAdapter implements WsAdapterType {
   equity: WebSocketInterface<EquitySubscriptionRequest, EquityData>
   brokerConnection: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
 
+  // frontend dev have to set the resired version /{version}/{module}/ws
   constructor() {
-    // TODO: make ws urls auto configurable
-    const datafeedWsUrl = '/api/v1/datafeed/ws'
+    const datafeedWsUrl = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + '/v1/datafeed/ws'
     this.bars = new WebSocketClient<BarsSubscriptionRequest, Bar_Ws_Backend, Bar>(datafeedWsUrl, 'bars', data => data)
     this.quotes = new WebSocketClient<QuoteDataSubscriptionRequest, QuoteData_Ws_Backend, QuoteData>(
       datafeedWsUrl, 'quotes', mapQuoteData
     )
 
-    // Broker clients - connect to /api/v1/broker/ws
-    const brokerWsUrl = '/api/v1/broker/ws'
+    const brokerWsUrl = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + '/v1/broker/ws'
     this.orders = new WebSocketClient<OrderSubscriptionRequest, PlacedOrder_Ws_Backend, PlacedOrder>(
       brokerWsUrl, 'orders', mapOrder
     )

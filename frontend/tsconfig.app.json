@@ -23,7 +23,7 @@
     "emitDecoratorMetadata": true,
     "paths": {
       "@/*": ["./src/*"],
-      "@clients/*": ["./src/clients/*"],
+      "@clients/*": ["./src/clients_generated/*"],
       "@public/*": ["./public/*"],
       "@debug/*": ["./debug_data/*"]
     }

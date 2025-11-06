@@ -24,8 +24,8 @@ The frontend has two categories of excluded files:
 
 ### Generated Code (Auto-Generated from Backend Specs)
 
-- `src/clients/trader-client-generated/` - OpenAPI-generated REST API client
-- `src/clients/ws-types-generated/` - AsyncAPI-generated WebSocket types
+- `src/clients_generated/trader-client-generated/` - OpenAPI-generated REST API client
+- `src/clients_generated/ws-types-generated/` - AsyncAPI-generated WebSocket types
 - `src/clients/ws-generated/` - WebSocket client scaffolding (if applicable)
 
 ## Configuration Files Updated
@@ -52,10 +52,10 @@ frontend/public/advanced_charting_library/
 
 ```ignore
 # Generated API client
-src/clients/trader-client-generated/
+src/clients_generated/trader-client-generated/
 
 # Generated WebSocket types
-src/clients/ws-types-generated/
+src/clients_generated/ws-types-generated/
 
 # Generated WebSocket client
 src/clients/ws-generated/
@@ -98,7 +98,7 @@ globalIgnores([
 
 ```ignore
 # Generated files
-src/clients/trader-client-generated/
+src/clients_generated/trader-client-generated/
 
 # External libraries and dependencies
 public/
@@ -213,7 +213,7 @@ npm run generate:openapi-client
 ```
 
 **Source**: `backend/openapi.json` (exported from FastAPI)  
-**Output**: `src/clients/trader-client-generated/`  
+**Output**: `src/clients_generated/trader-client-generated/`  
 **Tool**: `@openapitools/openapi-generator-cli`
 
 ### AsyncAPI WebSocket Types Generation
@@ -226,7 +226,7 @@ npm run generate:asyncapi-types
 ```
 
 **Source**: `backend/asyncapi.json` (exported from backend WebSocket routes)  
-**Output**: `src/clients/ws-types-generated/`  
+**Output**: `src/clients_generated/ws-types-generated/`  
 **Tool**: Custom script `scripts/generate-ws-types.mjs`
 
 ### Regeneration Triggers
@@ -284,7 +284,7 @@ If you add new code generation (e.g., GraphQL, gRPC):
 
 - [ ] **Update `.prettierignore`** to include:
   ```ignore
-  src/clients/ws-types-generated/
+  src/clients_generated/ws-types-generated/
   src/clients/ws-generated/
   ```
   Or use wildcard pattern:

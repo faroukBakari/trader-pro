@@ -9,15 +9,11 @@
 import {
   BrokerApi,
   Configuration as BrokerConfiguration
-} from '@clients/trader-client-broker';
-import {
-  CoreApi,
-  Configuration as CoreConfiguration
-} from '@clients/trader-client-core';
+} from '@clients/trader-client-broker_v1';
 import {
   DatafeedApi,
   Configuration as DatafeedConfiguration
-} from '@clients/trader-client-datafeed';
+} from '@clients/trader-client-datafeed_v1';
 
 import type {
   AccountMetainfo,
@@ -45,12 +41,16 @@ import {
   mapPreOrder,
   mapQuoteData,
 } from './mappers';
+
+// Import backend types for health and versioning
+
+// Frontend interface types (can differ from backend)
 export interface HealthResponse {
   status: string
   message?: string
   timestamp: string
+  module_name: string
   api_version: string
-  version_info: object
 }
 
 export interface VersionInfo {
@@ -64,7 +64,7 @@ export interface VersionInfo {
 
 export interface APIMetadata {
   current_version: string
-  available_versions: VersionInfo[]
+  available_versions: { [key: string]: VersionInfo }
   documentation_url: string
   support_contact: string
 }
@@ -154,40 +154,49 @@ function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
 
 export class ApiAdapter {
   private brokerApi: BrokerApi
-  private coreApi: CoreApi
   private datafeedApi: DatafeedApi
   private brokerConfig: BrokerConfiguration
-  private coreConfig: CoreConfiguration
   private datafeedConfig: DatafeedConfiguration
 
   constructor() {
-    const basePath = import.meta.env.VITE_TRADER_API_BASE_PATH || ''
+
+    const ApiV1BasePath = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + "/v1"
 
     // Initialize per-module configurations
     // In multi-process mode, these could point to different services:
     // broker: http://broker-service:8001
     // datafeed: http://datafeed-service:8002
-    this.brokerConfig = new BrokerConfiguration({ basePath })
-    this.coreConfig = new CoreConfiguration({ basePath })
-    this.datafeedConfig = new DatafeedConfiguration({ basePath })
+    this.brokerConfig = new BrokerConfiguration({ basePath: ApiV1BasePath + '/broker' })
+    this.datafeedConfig = new DatafeedConfiguration({ basePath: ApiV1BasePath + '/datafeed' })
 
     // Initialize per-module API clients
     this.brokerApi = new BrokerApi(this.brokerConfig)
-    this.coreApi = new CoreApi(this.coreConfig)
     this.datafeedApi = new DatafeedApi(this.datafeedConfig)
   }
 
   @ApiErrorHandler('/health')
   async getHealthStatus(): ApiPromise<HealthResponse> {
-    // Health check from core module
-    const response = await this.coreApi.getHealthStatus()
-    return response
+    // Health check from broker module (per-module health via APIRouterInterface)
+    const response = await this.brokerApi.getHealthStatus()
+    // Map backend HealthResponse to frontend HealthResponse
+    return {
+      status: response.status,
+      data: {
+        status: response.data.status,
+        timestamp: response.data.timestamp,
+        module_name: response.data.module_name,
+        api_version: response.data.api_version,
+        message: response.data.message,
+      }
+    }
   }
 
   @ApiErrorHandler('/versions')
   async getAPIVersions(): ApiPromise<APIMetadata> {
-    // Version info from core module
-    return await this.coreApi.getAPIVersions()
+    // Version info from broker module (per-module versioning via APIRouterInterface)
+    const response = await this.brokerApi.getAPIVersions()
+    // Backend returns { [key: string]: VersionInfo }, frontend expects same
+    return response
   }
 
   @ApiErrorHandler('/config')

@@ -198,7 +198,7 @@ await client2.dispose()
 
 ### 1. Base Client (`wsClientBase.ts`)
 
-**Location**: `frontend/src/clients/ws-generated/wsClientBase.ts`
+**Location**: `frontend/src/clients_generated/ws-generated/wsClientBase.ts`
 
 #### Key Classes & Interfaces
 
@@ -259,7 +259,7 @@ class WebSocketClientBase {
 
 ### 2. Example Implementation (`barsClient.ts`)
 
-**Location**: `frontend/src/clients/ws-generated/barsClient.ts`
+**Location**: `frontend/src/clients_generated/ws-generated/barsClient.ts`
 
 #### `IBarDataSource` Interface
 
@@ -1391,7 +1391,7 @@ With this singleton base in place, you can now:
 ## 📚 Files
 
 ```
-frontend/src/clients/ws-generated/
+frontend/src/clients_generated/ws-generated/
 ├── wsClientBase.ts          ⭐ Generic WebSocket singleton base
 └── barsClient.ts           ⭐ Bars-specific implementation
 ```

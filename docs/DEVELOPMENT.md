@@ -198,14 +198,14 @@ See `docs/CLIENT-GENERATION.md` for details.
 
 1. **Backend**: Add route in `src/trading_api/api/`
 2. **Backend**: Run `make test` to verify
-3. **Frontend**: Run `make client-generate` to update client
+3. **Frontend**: Run `make generate` to update client
 4. **Frontend**: Use new endpoint in services
 
 ### Add New WebSocket Channel
 
 1. **Backend**: Add router in `src/trading_api/ws/`
 2. **Backend**: Update AsyncAPI spec
-3. **Frontend**: Run `make client-generate`
+3. **Frontend**: Run `make generate`
 4. **Frontend**: New client factory auto-available
 
 ### Debug Issues
@@ -325,7 +325,7 @@ npm install
 cd backend && make export-openapi-offline
 
 # Regenerate clients
-cd frontend && make client-generate
+cd frontend && make generate
 ```
 
 ## Performance Tips

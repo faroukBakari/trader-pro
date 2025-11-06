@@ -131,10 +131,10 @@ FastWS App + AsyncAPI Decorator → Export Script → asyncapi.json
 
 **Generation Targets**:
 
-| Command                        | Input Spec            | Output Location                               | Artifacts Generated                              |
-| ------------------------------ | --------------------- | --------------------------------------------- | ------------------------------------------------ |
-| `make generate-openapi-client` | backend/openapi.json  | frontend/src/clients/trader-client-generated/ | TypeScript interfaces, API client classes        |
-| `make generate-asyncapi-types` | backend/asyncapi.json | frontend/src/clients/ws-types-generated/      | WebSocket message types, subscription interfaces |
+| Command                        | Input Spec            | Output Location                                         | Artifacts Generated                              |
+| ------------------------------ | --------------------- | ------------------------------------------------------- | ------------------------------------------------ |
+| `make generate-openapi-client` | backend/openapi.json  | frontend/src/clients_generated/trader-client-generated/ | TypeScript interfaces, API client classes        |
+| `make generate-asyncapi-types` | backend/asyncapi.json | frontend/src/clients_generated/ws-types-generated/      | WebSocket message types, subscription interfaces |
 
 **Process Flow**:
 
@@ -1229,7 +1229,7 @@ scripts/
 │                 │  • Custom AsyncAPI type extractor           │
 └────────┬────────┘                                             │
          │                                                       │
-         │ Generate: frontend/src/clients/                      │
+         │ Generate: frontend/src/clients_generated/            │
          │   ├─ trader-client-generated/                        │
          │   │  ├─ apis/                                        │
          │   │  ├─ models/                                      │
@@ -1320,7 +1320,7 @@ Key Features:
 │                   GENERATED TYPESCRIPT TYPES                            │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  // frontend/src/clients/trader-client-generated/models/                │
+│  // frontend/src/clients_generated/trader-client-generated/models/                │
 │  export interface PreOrder {                                            │
 │    symbol: string                                                       │
 │    type: "market" | "limit" | "stop"                                    │
@@ -1329,7 +1329,7 @@ Key Features:
 │    limitPrice?: number | null                                           │
 │  }                                                                      │
 │                                                                         │
-│  // frontend/src/clients/ws-types-generated/index.ts                    │
+│  // frontend/src/clients_generated/ws-types-generated/index.ts                    │
 │  export interface PlacedOrder {                                         │
 │    id: string                                                           │
 │    symbol: string                                                       │

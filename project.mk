@@ -7,7 +7,7 @@ FRONTEND_PORT ?= 5173
 # Module discovery
 BACKEND_MODULES = $(shell find backend/src/trading_api/modules -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -v __pycache__ || echo "")
 
-.PHONY: help install install-hooks dev-backend dev-frontend dev-fullstack kill-dev test-all test-backend-modules test-smoke lint-all format-all build-all clean-all test-integration generate generate-openapi-client generate-asyncapi-types
+.PHONY: help install install-hooks dev-backend dev-frontend dev-fullstack kill-dev test-all test-smoke lint-all format-all build-all clean-all test-integration generate backend-generate frontend-generate generate-openapi-client generate-asyncapi-types health
 
 # Default target
 help:
@@ -16,12 +16,11 @@ help:
 	@echo "  install-hooks     Install Git hooks for pre-commit checks only"
 	@echo "  dev-backend       Start backend development server"
 	@echo "  dev-frontend      Start frontend development server"
-	@echo "  dev-fullstack     Start backend, generate client, then start frontend"
+	@echo "  dev-fullstack     Start backend, then start frontend"
 	@echo "  kill-dev          Stop all running development servers (frontend then backend)"
 	@echo ""
 	@echo "Testing targets:"
 	@echo "  test-all              Run all tests (backend + frontend)"
-	@echo "  test-backend-modules  Run all backend module tests"
 	@echo "  test-smoke            Run smoke tests with Playwright"
 	@echo "  test-integration      Run full integration test suite"
 	@echo ""
@@ -31,16 +30,18 @@ help:
 	@echo "  build-all         Build all projects"
 	@echo ""
 	@echo "Cleanup targets:"
-	@echo "  clean-generated   Clean only generated files (quick cleanup)"
 	@echo "  clean-all         Clean all build artifacts (full cleanup)"
 	@echo ""
 	@echo "Code generation targets:"
-	@echo "  generate                  Generate backend specs (OpenAPI + AsyncAPI + Python clients)"
-	@echo "  generate-clients          Generate frontend TypeScript clients from backend specs"
-	@echo "                            (requires backend specs - run 'make generate' first)"
+	@echo "  generate                  Generate all (backend specs + frontend clients)"
+	@echo "  backend-generate          Generate backend specs (OpenAPI + AsyncAPI + Python clients)"
+	@echo "  frontend-generate         Generate frontend TypeScript clients from backend specs"
+	@echo "                            (requires backend specs - run 'backend-generate' first)"
+	@echo "  generate-openapi-client   Generate frontend OpenAPI REST client (called by watcher)"
+	@echo "  generate-asyncapi-types   Generate frontend AsyncAPI WebSocket types (called by watcher)"
 	@echo ""
-	@echo "Other targets:"
-	@echo "  health            Check project health"
+	@echo "Health targets:"
+	@echo "  health                    Check project health (backend + frontend)"
 	@echo ""
 	@echo "Backend-specific targets:"
 	@echo "  make -C backend help"
@@ -84,12 +85,12 @@ install:
 # Development servers
 dev-backend:
 	@echo "Starting backend development server..."
-	@echo "🧹 Cleaning backend generated files..."
-	rm -f backend/openapi.json backend/asyncapi.json
+	make -C backend clean-generated
 	make -C backend dev
 
 dev-frontend:
 	@echo "Starting frontend development server..."
+	make -C frontend clean-generated
 	make -C frontend dev
 
 # Full-stack development
@@ -111,12 +112,7 @@ kill-dev:
 	@echo ""
 	@echo "✅ All development servers stopped"
 
-# Testing
-test-backend-modules:
-	@echo "Running backend module tests..."
-	cd backend && $(MAKE) test-modules
-
-test-all: test-backend-modules
+test-all:
 	@echo "Running all tests..."
 	@echo ""
 	@echo "[1/2] Backend tests"
@@ -194,22 +190,53 @@ clean-all:
 
 # Code generation targets
 generate:
+	@echo "Generating all (backend specs + frontend clients)..."
+	@echo ""
+	@echo "[1/2] Generating backend specs..."
+	@echo "=========================================="
+	@$(MAKE) backend-generate
+	@echo ""
+	@echo "[2/2] Generating frontend clients..."
+	@echo "=========================================="
+	@$(MAKE) frontend-generate
+	@echo ""
+	@echo "✅ All code generation complete!"
+
+backend-generate:
 	@echo "Generating backend specs (OpenAPI + AsyncAPI + Python clients)..."
 	make -C backend generate
 
-generate-clients:
+frontend-generate:
 	@echo "Generating frontend TypeScript clients from backend specs..."
-	@echo "Note: Requires backend specs to exist (run 'make generate' first)"
-	make -C frontend client-generate
+	@echo "Note: Requires backend specs to exist (run 'backend-generate' first)"
+	make -C frontend generate
 
-# Deprecated: Use 'make generate-clients' instead
 generate-openapi-client:
-	@echo "⚠️  Deprecated: Use 'make generate-clients' instead"
-	@echo "Generating OpenAPI client..."
-	make -C frontend client-generate
+	@echo "Generating frontend OpenAPI REST client from backend specs..."
+	make -C frontend generate
 
-# Deprecated: Use 'make generate-clients' instead
 generate-asyncapi-types:
-	@echo "⚠️  Deprecated: Use 'make generate-clients' instead"
-	@echo "Generating AsyncAPI types..."
-	make -C frontend client-generate
+	@echo "Generating frontend AsyncAPI WebSocket types from backend specs..."
+	make -C frontend generate
+
+# Health check
+health:
+	@echo "Checking project health..."
+	@echo ""
+	@echo "[1/2] Checking backend health..."
+	@echo "=========================================="
+	@if make -C backend health-ci 2>/dev/null; then \
+		echo "✅ Backend is healthy"; \
+	else \
+		echo "⚠️  Backend health check not available (server may not be running)"; \
+	fi
+	@echo ""
+	@echo "[2/2] Checking frontend health..."
+	@echo "=========================================="
+	@if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then \
+		echo "✅ Frontend server is running on port 5173"; \
+	else \
+		echo "⚠️  Frontend server is not running"; \
+	fi
+	@echo ""
+	@echo "💡 Tip: Start servers with 'make dev-fullstack'"

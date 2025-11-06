@@ -58,7 +58,7 @@ define ensure-node-version
 	$(1)'
 endef
 
-.PHONY: help ensure-node install install-ci lint type-check test build dev clean client-generate generate-openapi-client generate-asyncapi-types
+.PHONY: help ensure-node install install-ci lint type-check test build dev clean clean-generated generate client-generate generate-openapi-client generate-asyncapi-types
 
 # Default target
 help:
@@ -68,7 +68,7 @@ help:
 	@echo "  install-ci          Install frontend dependencies for CI"
 	@echo ""
 	@echo "Client generation (unified):"
-	@echo "  client-generate     Generate all API clients (REST + WebSocket)"
+	@echo "  generate            Generate all API clients (REST + WebSocket)"
 	@echo ""
 	@echo "Code quality targets:"
 	@echo "  lint                Run frontend linting and formatting checks"
@@ -78,6 +78,7 @@ help:
 	@echo "  build               Build frontend for production"
 	@echo "  dev                 Start frontend development server"
 	@echo "  clean               Clean build artifacts"
+	@echo "  clean-generated     Clean all *_generated* files and directories"
 
 # Ensure Node.js 22.20+ is available
 ensure-node:
@@ -151,7 +152,7 @@ install-ci:
 	@npm ci
 
 # Client generation (unified)
-client-generate:
+generate:
 	@echo "Generating API clients from backend specs..."
 	@echo ""
 	@# Check if backend specs exist
@@ -174,34 +175,33 @@ client-generate:
 	@echo ""
 	@echo "✅ All API clients generated successfully"
 
-# Keep old targets as aliases for backward compatibility
-generate-openapi-client: client-generate
-	@echo "✓ OpenAPI client generation complete (via client-generate)"
+generate-openapi-client: generate
+	@echo "✓ OpenAPI client generation complete (via generate)"
 
-generate-asyncapi-types: client-generate
-	@echo "✓ AsyncAPI types generation complete (via client-generate)"
+generate-asyncapi-types: generate
+	@echo "✓ AsyncAPI types generation complete (via generate)"
 
 # Linting and formatting
 lint:
 	@echo "Running frontend linting and formatting checks..."
-	@$(MAKE) client-generate
+	@$(MAKE) generate
 	$(call ensure-node-version,npm run lint)
 
 # Type checking
 type-check:
 	@echo "Running TypeScript type checking..."
-	@$(MAKE) client-generate
+	@$(MAKE) generate
 	$(call ensure-node-version,npm run type-check)
 
 # Testing
 test:
 	@echo "Running frontend tests..."
-	@$(MAKE) client-generate
+	@$(MAKE) generate
 	$(call ensure-node-version,npm run test:run)
 
 test-backend:
 	@echo "Running frontend tests with backend API (not mock)..."
-	@$(MAKE) client-generate
+	@$(MAKE) generate
 	$(call ensure-node-version,VITE_USE_MOCK_BROKER=false npm run test:run)
 
 # Build
@@ -249,5 +249,26 @@ kill-dev:
 # Cleanup
 clean:
 	@echo "Cleaning frontend build artifacts..."
-	rm -rf dist/ node_modules/.vite src/clients/*
+	rm -rf dist/ node_modules/.vite src/clients_generated/*
 	@echo "Frontend clean complete."
+
+# Clean all generated files using *_generated* pattern
+clean-generated:
+	@echo "🧹 Cleaning all generated files..."
+	@echo ""
+	@echo "Searching for *_generated* files and directories..."
+	@find . -name "*_generated*" -type f -o -name "*_generated*" -type d | while read item; do \
+		if [ -f "$$item" ]; then \
+			echo "  ✓ Removing file: $$item"; \
+			rm -f "$$item"; \
+		elif [ -d "$$item" ]; then \
+			echo "  ✓ Removing directory: $$item"; \
+			rm -rf "$$item"; \
+		fi; \
+	done
+	@echo ""
+	@echo "✅ All generated files removed!"
+	@echo ""
+	@echo "💡 Tip: Regenerate files with:"
+	@echo "   make generate                  # All API clients (REST + WebSocket)"
+	@echo "   make -f ../Makefile generate   # From project root (backend + frontend)"

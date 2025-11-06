@@ -48,7 +48,7 @@ FAILED_MODULES=()
 while IFS= read -r SPEC_PATH; do
     # Extract module name from filename: {module}_asyncapi.json (UPDATED)
     MODULE_NAME=$(basename "$SPEC_PATH" "_asyncapi.json")
-    OUTPUT_DIR="./src/clients/ws-types-${MODULE_NAME}"
+    OUTPUT_DIR="./src/clients_generated/ws-types-${MODULE_NAME}"
     
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}📦 Processing module: ${MODULE_NAME}${NC}"
@@ -96,7 +96,7 @@ fi
 
 echo ""
 echo -e "${GREEN}🎉 Success! Generated all WebSocket types from per-module AsyncAPI specifications${NC}"
-echo -e "${GREEN}📁 Output: ./src/clients/ws-types-*/${NC}"
+echo -e "${GREEN}📁 Output: ./src/clients_generated/ws-types-*/${NC}"
 echo -e "${GREEN}   - Import: import { Bar, SubscriptionRequest } from '@/clients/ws-types-{module}'${NC}"
 echo ""
 exit 0

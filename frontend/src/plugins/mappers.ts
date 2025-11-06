@@ -34,10 +34,10 @@
 // Per-module API Backend types (OpenAPI)
 import type {
   PreOrder as PreOrder_Api_Backend
-} from '@clients/trader-client-broker';
+} from '@clients/trader-client-broker_v1';
 import type {
   QuoteData as QuoteData_Api_Backend
-} from '@clients/trader-client-datafeed';
+} from '@clients/trader-client-datafeed_v1';
 
 // Per-module WebSocket Backend types (AsyncAPI)
 import type {
@@ -46,10 +46,10 @@ import type {
   Execution as Execution_Ws_Backend,
   PlacedOrder as PlacedOrder_Ws_Backend,
   Position as Position_Ws_Backend
-} from '@clients/ws-types-broker';
+} from '@clients/ws-types-broker_v1';
 import type {
   QuoteData as QuoteData_Ws_Backend
-} from '@clients/ws-types-datafeed';
+} from '@clients/ws-types-datafeed_v1';
 
 // Frontend types (TradingView)
 import type {

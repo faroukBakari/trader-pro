@@ -221,7 +221,7 @@ export class WsAdapter {
 **Tasks**:
 
 1. Run type generator: `cd frontend && make generate-asyncapi-types`
-2. Verify generated types in `frontend/src/clients/ws-types-generated/`
+2. Verify generated types in `frontend/src/clients_generated/ws-types-generated/`
    - `OrderSubscriptionRequest`
    - `Order_backend`
    - `PositionSubscriptionRequest`

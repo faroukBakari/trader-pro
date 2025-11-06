@@ -487,8 +487,18 @@ kill-dev:
 # CI development server (background)
 dev-ci:
 	@echo "Starting backend server for CI..."
-	poetry run uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --host 0.0.0.0 --port $(BACKEND_PORT) &
-	sleep 10
+	@poetry run uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --host 0.0.0.0 --port $(BACKEND_PORT) > /dev/null 2>&1 & \
+	echo "Waiting for backend to initialize..."; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		sleep 1; \
+		if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
+			echo "Backend is listening on port $(BACKEND_PORT)"; \
+			break; \
+		fi; \
+	done; \
+	sleep 2; \
+	echo "Running health checks..."; \
+	$(MAKE) health-ci
 
 # Build
 build:
@@ -497,9 +507,31 @@ build:
 
 # CI health check
 health-ci:
-	@echo "Testing API endpoints for CI..."
-	curl -f http://localhost:$(BACKEND_PORT)/api/v1/core/health || exit 1
-	curl -f http://localhost:$(BACKEND_PORT)/api/v1/core/version || exit 1
+	@echo "🔍 Auto-discovering modules for health checks..."
+	@MODULES=$$(find $(MODULES_DIR) -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -v __pycache__ || echo ""); \
+	if [ -z "$$MODULES" ]; then \
+		echo "❌ No modules found in $(MODULES_DIR)"; \
+		exit 1; \
+	fi; \
+	echo "Found modules: $$MODULES"; \
+	echo ""; \
+	FAILED=0; \
+	for module in $$MODULES; do \
+		echo "Checking $$module module..."; \
+		if curl -f -s http://localhost:$(BACKEND_PORT)/api/v1/$$module/health > /dev/null 2>&1; then \
+			echo "  ✅ $$module is healthy"; \
+		else \
+			echo "  ❌ $$module health check failed"; \
+			FAILED=1; \
+		fi; \
+	done; \
+	echo ""; \
+	if [ $$FAILED -eq 0 ]; then \
+		echo "✅ All module health checks passed"; \
+	else \
+		echo "❌ Some module health checks failed"; \
+		exit 1; \
+	fi
 
 # Cleanup
 clean:

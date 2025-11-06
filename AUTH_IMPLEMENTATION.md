@@ -267,7 +267,7 @@ wsApp = FastWSAdapter(auth_handler=ws_auth_handler, auto_ws_accept=False)
 **Auto-Generated Types** (from OpenAPI spec):
 
 ```typescript
-// Generated in: frontend/src/clients/trader-client-generated/models/
+// Generated in: frontend/src/clients_generated/trader-client-generated/models/
 export interface MockLoginRequest {
   email?: string; // Defaults to "test@example.com"
 }
@@ -476,7 +476,7 @@ Frontend client generation creates TypeScript interfaces and API classes:
 
 ```bash
 # Frontend generates client (make generate-openapi-client)
-frontend/src/clients/trader-client-generated/
+frontend/src/clients_generated/trader-client-generated/
   ├── models/
   │   ├── MockLoginRequest.ts
   │   ├── LoginResponse.ts

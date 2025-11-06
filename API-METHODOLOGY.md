@@ -457,7 +457,7 @@ cd frontend
 make generate-openapi-client
 
 # Generated client structure:
-# - frontend/src/clients/trader-client-generated/
+# - frontend/src/clients_generated/trader-client-generated/
 # - API methods matching backend operation_id values
 # - Type definitions matching backend Pydantic models
 ```

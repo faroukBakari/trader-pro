@@ -50,7 +50,7 @@ FAILED_MODULES=()
 while IFS= read -r SPEC_PATH; do
     # Extract module name from filename: {module}_openapi.json (UPDATED)
     MODULE_NAME=$(basename "$SPEC_PATH" "_openapi.json")
-    OUTPUT_DIR="./src/clients/trader-client-${MODULE_NAME}"
+    OUTPUT_DIR="./src/clients_generated/trader-client-${MODULE_NAME}"
     
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}📦 Processing module: ${MODULE_NAME}${NC}"
@@ -153,7 +153,7 @@ fi
 
 echo ""
 echo -e "${GREEN}🎉 Success! Generated all REST clients from per-module OpenAPI specifications${NC}"
-echo -e "${GREEN}📁 Output: ./src/clients/trader-client-*/${NC}"
+echo -e "${GREEN}📁 Output: ./src/clients_generated/trader-client-*/${NC}"
 if [ -n "$BASE_PATH" ]; then
     echo -e "${GREEN}   - Using basePath: $BASE_PATH${NC}"
 fi
