@@ -238,10 +238,6 @@ jobs:
         name: backend-specs-${{ github.sha }}
         path: backend/src/trading_api/modules/
 
-    - name: Run integration tests
-      working-directory: backend
-      run: make test-integration
-
     - name: Run all tests with coverage (final report)
       working-directory: backend
       run: make test-cov
