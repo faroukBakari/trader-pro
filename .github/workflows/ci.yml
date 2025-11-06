@@ -52,7 +52,7 @@ jobs:
       run: make generate
 
     - name: Upload backend specs
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
         path: |
@@ -61,7 +61,7 @@ jobs:
 
     - name: Upload backend venv
       if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: backend-venv-${{ github.sha }}
         path: backend/.venv
@@ -108,7 +108,7 @@ jobs:
         fail-on-cache-miss: false
 
     - name: Download backend specs
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
         path: backend/src/trading_api/modules/
@@ -149,7 +149,7 @@ jobs:
         fail-on-cache-miss: false
 
     - name: Download backend specs
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
         path: backend/src/trading_api/modules/
@@ -192,7 +192,7 @@ jobs:
         fail-on-cache-miss: false
 
     - name: Download backend specs
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
         path: backend/src/trading_api/modules/
@@ -233,7 +233,7 @@ jobs:
         fail-on-cache-miss: false
 
     - name: Download backend specs
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
         path: backend/src/trading_api/modules/
@@ -266,7 +266,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Download backend specs
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
         path: backend/src/trading_api/modules/
@@ -325,7 +325,7 @@ jobs:
         fail-on-cache-miss: false
 
     - name: Download backend specs
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
         path: backend/src/trading_api/modules/
@@ -353,7 +353,7 @@ jobs:
         echo "✅ All Python HTTP clients generated successfully"
 
     - name: Upload Python clients as artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: backend-python-clients-${{ github.sha }}
         path: |
@@ -379,7 +379,7 @@ jobs:
         cache-dependency-path: frontend/package-lock.json
 
     - name: Download backend specs
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
         path: backend/src/trading_api/modules/
@@ -477,7 +477,7 @@ jobs:
         fail-on-cache-miss: false
 
     - name: Download backend specs
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
         path: backend/src/trading_api/modules/
