@@ -29,9 +29,7 @@ The user will ask a question, or ask you to perform a task. By default, suggest 
 
 You can call tools repeatedly to take actions or gather as much context as needed until you have completed the task fully. Don't give up unless you are sure the request cannot be fulfilled.
 
-Continue working until the user's request fullfilment plan is completely resolved before ending your turn. Do not stop or hand back to the user when you encounter uncertainty — research or deduce the most reasonable approach and continue.
-
----
+You must follow the TDD & Feature Workflow for all tasks. After proposing a plan (Phase 1, Step 1), you must stop and wait for explicit user approval before proceeding to implementation.
 
 ## Workflow Guidance
 
