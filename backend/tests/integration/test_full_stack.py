@@ -3,10 +3,61 @@
 Tests that verify all modules work correctly together.
 """
 
+import time
+from typing import Any, Dict
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
+from starlette.websockets import WebSocketDisconnect
+
+
+def receive_message_by_type(
+    websocket: Any, expected_type: str, timeout: float = 5.0
+) -> Dict[str, Any]:
+    """Receive WebSocket messages until we get one with the expected type.
+
+    This helper function handles the race condition where background tasks
+    (e.g., bars.update) might send messages while we're waiting for a
+    specific response (e.g., quotes.subscribe.response).
+
+    Args:
+        websocket: The WebSocket connection
+        expected_type: The message type we're looking for
+        timeout: Maximum time to wait in seconds
+
+    Returns:
+        The first message matching the expected type
+
+    Raises:
+        AssertionError: If timeout is reached or websocket disconnects
+    """
+    start_time = time.time()
+    messages_received = []
+
+    while time.time() - start_time < timeout:
+        try:
+            message = websocket.receive_json()
+            messages_received.append(message.get("type", "unknown"))
+
+            if message.get("type") == expected_type:
+                return message
+        except WebSocketDisconnect:
+            raise AssertionError(
+                f"WebSocket disconnected while waiting for '{expected_type}'. "
+                f"Received messages: {messages_received}"
+            )
+        except Exception as e:
+            raise AssertionError(
+                f"Error receiving message: {e}. "
+                f"Expected '{expected_type}', received: {messages_received}"
+            )
+
+    raise AssertionError(
+        f"Timeout waiting for message type '{expected_type}'. "
+        f"Received {len(messages_received)} messages: {messages_received}"
+    )
 
 
 @pytest.mark.integration
@@ -50,7 +101,7 @@ def test_websocket_all_channels(client: TestClient) -> None:
                 "payload": {"symbol": "AAPL", "resolution": "1"},
             }
         )
-        response = websocket.receive_json()
+        response = receive_message_by_type(websocket, "bars.subscribe.response")
         assert response["type"] == "bars.subscribe.response"
         assert response["payload"]["status"] == "ok"
 
@@ -61,7 +112,7 @@ def test_websocket_all_channels(client: TestClient) -> None:
                 "payload": {"symbols": ["AAPL"], "fast_symbols": []},
             }
         )
-        response = websocket.receive_json()
+        response = receive_message_by_type(websocket, "quotes.subscribe.response")
         assert response["type"] == "quotes.subscribe.response"
         assert response["payload"]["status"] == "ok"
 
@@ -71,7 +122,7 @@ def test_websocket_all_channels(client: TestClient) -> None:
         websocket.send_json(
             {"type": "orders.subscribe", "payload": {"accountId": "test"}}
         )
-        response = websocket.receive_json()
+        response = receive_message_by_type(websocket, "orders.subscribe.response")
         assert response["type"] == "orders.subscribe.response"
         assert response["payload"]["status"] == "ok"
 
@@ -79,7 +130,7 @@ def test_websocket_all_channels(client: TestClient) -> None:
         websocket.send_json(
             {"type": "positions.subscribe", "payload": {"accountId": "test"}}
         )
-        response = websocket.receive_json()
+        response = receive_message_by_type(websocket, "positions.subscribe.response")
         assert response["type"] == "positions.subscribe.response"
         assert response["payload"]["status"] == "ok"
 
@@ -87,7 +138,7 @@ def test_websocket_all_channels(client: TestClient) -> None:
         websocket.send_json(
             {"type": "executions.subscribe", "payload": {"accountId": "test"}}
         )
-        response = websocket.receive_json()
+        response = receive_message_by_type(websocket, "executions.subscribe.response")
         assert response["type"] == "executions.subscribe.response"
         assert response["payload"]["status"] == "ok"
 

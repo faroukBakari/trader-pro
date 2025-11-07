@@ -5,12 +5,11 @@ Provides session-scoped multi-process service fixtures for client testing.
 Provides session-scoped module isolation fixtures for fast test execution.
 """
 
-import asyncio
 import multiprocessing
 import os
 import sys
 import time
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import httpx
