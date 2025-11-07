@@ -507,7 +507,8 @@ dev-ci:
 			break; \
 		fi; \
 	done; \
-	sleep 2; \
+	echo "Waiting for backend startup sequence (codegen + reload cycles)..."; \
+	sleep 8; \
 	echo "Running health checks..."; \
 	$(MAKE) health-ci
 
@@ -529,10 +530,21 @@ health-ci:
 	FAILED=0; \
 	for module in $$MODULES; do \
 		echo "Checking $$module module..."; \
-		if curl -f -s http://localhost:$(BACKEND_PORT)/api/v1/$$module/health > /dev/null 2>&1; then \
-			echo "  ✅ $$module is healthy"; \
-		else \
-			echo "  ❌ $$module health check failed"; \
+		SUCCESS=0; \
+		for attempt in 1 2 3 4 5; do \
+			if curl -f -s http://localhost:$(BACKEND_PORT)/api/v1/$$module/health > /dev/null 2>&1; then \
+				echo "  ✅ $$module is healthy (attempt $$attempt)"; \
+				SUCCESS=1; \
+				break; \
+			else \
+				if [ $$attempt -lt 5 ]; then \
+					echo "  ⏳ $$module not ready yet (attempt $$attempt/5), retrying in 2s..."; \
+					sleep 2; \
+				fi; \
+			fi; \
+		done; \
+		if [ $$SUCCESS -eq 0 ]; then \
+			echo "  ❌ $$module health check failed after 5 attempts"; \
 			FAILED=1; \
 		fi; \
 	done; \
