@@ -332,11 +332,11 @@ cd backend
 make generate  # Unified: generates OpenAPI, AsyncAPI, Python clients
 ls -la src/trading_api/modules/*/specs_generated/*.json
 
-# Should see:
-# broker/specs_generated/broker_openapi.json
-# broker/specs_generated/broker_asyncapi.json
-# datafeed/specs_generated/datafeed_openapi.json
-# datafeed/specs_generated/datafeed_asyncapi.json
+# Should see (with versioned names):
+# broker/specs_generated/broker_v1_openapi.json
+# broker/specs_generated/broker_v1_asyncapi.json
+# datafeed/specs_generated/datafeed_v1_openapi.json
+# datafeed/specs_generated/datafeed_v1_asyncapi.json
 ```
 
 **Debug artifact paths**:
@@ -348,6 +348,10 @@ path: backend/src/trading_api/modules/*/specs_generated/*.json
 # Downloaded to:
 path: backend/src/trading_api/modules/
 # This recreates the directory structure
+
+# Generated clients are located at:
+# src/clients_generated/trader-client-{module}_v{version}/
+# src/clients_generated/ws-types-{module}_v{version}/
 ```
 
 ### 14. Python Client Generation Failures (Phase 4)
@@ -408,12 +412,12 @@ make generate-openapi-client
 make generate-asyncapi-types
 
 # Verify clients exist
-ls -la src/clients/
+ls -la src/clients_generated/
 # Should see:
-# trader-client-broker/
-# trader-client-datafeed/
-# ws-types-broker/
-# ws-types-datafeed/
+# trader-client-broker_v1/
+# trader-client-datafeed_v1/
+# ws-types-broker_v1/
+# ws-types-datafeed_v1/
 
 # Run type checks
 make type-check
@@ -422,8 +426,8 @@ make type-check
 **Debug CI verification**:
 
 ```yaml
-# CI checks for these directories
-if [ ! -d "src/clients_generated/trader-client-broker" ]; then
+# CI checks for these directories (with versioned names)
+if [ ! -d "src/clients_generated/trader-client-broker_v1" ]; then
 echo "❌ Broker client generation failed"
 exit 1
 fi

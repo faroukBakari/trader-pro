@@ -107,56 +107,9 @@ jobs:
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
         fail-on-cache-miss: false
 
-    - name: Download backend specs
-      uses: actions/download-artifact@v4
-      with:
-        name: backend-specs-${{ github.sha }}
-        path: backend/src/trading_api/modules/
-
     - name: Run import boundary tests
       working-directory: backend
       run: make test-boundaries
-
-  # Backend shared infrastructure tests (runs once)
-  backend-shared:
-    runs-on: ubuntu-latest
-    needs: [backend-setup]
-    if: success()
-    strategy:
-      matrix:
-        python-version: ["3.11"]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: latest
-        virtualenvs-create: true
-        virtualenvs-in-project: true
-
-    - name: Restore cached venv
-      uses: actions/cache@v3
-      with:
-        path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
-        fail-on-cache-miss: false
-
-    - name: Download backend specs
-      uses: actions/download-artifact@v4
-      with:
-        name: backend-specs-${{ github.sha }}
-        path: backend/src/trading_api/modules/
-
-    - name: Run shared infrastructure tests
-      working-directory: backend
-      run: echo "Shared tests now part of core module tests"
 
   # Backend module tests (runs in parallel per module)
   backend-modules:
@@ -191,12 +144,6 @@ jobs:
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
         fail-on-cache-miss: false
 
-    - name: Download backend specs
-      uses: actions/download-artifact@v4
-      with:
-        name: backend-specs-${{ github.sha }}
-        path: backend/src/trading_api/modules/
-
     - name: Run ${{ matrix.module }} module tests
       working-directory: backend
       run: make test-module-${{ matrix.module }}
@@ -204,7 +151,7 @@ jobs:
   # Backend integration tests (runs once, requires all modules)
   backend-integration:
     runs-on: ubuntu-latest
-    needs: [backend-boundaries, backend-shared, backend-modules]
+    needs: [backend-boundaries, backend-modules]
     if: success()
     strategy:
       matrix:
@@ -231,12 +178,6 @@ jobs:
         path: backend/.venv
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
         fail-on-cache-miss: false
-
-    - name: Download backend specs
-      uses: actions/download-artifact@v4
-      with:
-        name: backend-specs-${{ github.sha }}
-        path: backend/src/trading_api/modules/
 
     - name: Run all tests with coverage (final report)
       working-directory: backend
@@ -249,42 +190,16 @@ jobs:
     #     flags: backend
     #     name: codecov-backend
 
-  # Backend generate and export specs (run make generate then verify)
+  # Backend generate and export specs (reuse artifacts from backend-setup)
   backend-generate-and-export:
     runs-on: ubuntu-latest
     needs: [backend-integration]
     if: success()
-    strategy:
-      matrix:
-        python-version: ["3.11"]
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: latest
-        virtualenvs-create: true
-        virtualenvs-in-project: true
-
-    - name: Restore cached venv
-      uses: actions/cache@v3
-      with:
-        path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
-        fail-on-cache-miss: false
-
-    - name: Generate all specs and clients
-      working-directory: backend
-      run: make generate
-
-    - name: Download backend specs artifact
+    - name: Download backend specs from backend-setup
       uses: actions/download-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
@@ -293,114 +208,47 @@ jobs:
     - name: Verify all module specs exist
       working-directory: backend
       run: |
-        echo "🔍 Verifying per-module specs (generated in backend-setup)..."
+        echo "🔍 Verifying per-module specs (reused from backend-setup)..."
         FAILED=0
         
-        # Check broker specs
-        if [ ! -f "src/trading_api/modules/broker/specs_generated/broker_openapi.json" ]; then
-          echo "❌ Broker OpenAPI spec not found"
+        # Check broker specs (versioned)
+        if [ ! -f "src/trading_api/modules/broker/specs_generated/broker_v1_openapi.json" ]; then
+          echo "❌ Broker v1 OpenAPI spec not found"
           FAILED=1
         else
-          echo "✅ Broker OpenAPI spec found"
+          echo "✅ Broker v1 OpenAPI spec found"
         fi
         
-        if [ ! -f "src/trading_api/modules/broker/specs_generated/broker_asyncapi.json" ]; then
-          echo "❌ Broker AsyncAPI spec not found"
+        if [ ! -f "src/trading_api/modules/broker/specs_generated/broker_v1_asyncapi.json" ]; then
+          echo "❌ Broker v1 AsyncAPI spec not found"
           FAILED=1
         else
-          echo "✅ Broker AsyncAPI spec found"
+          echo "✅ Broker v1 AsyncAPI spec found"
         fi
         
-        # Check datafeed specs
-        if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_openapi.json" ]; then
-          echo "❌ Datafeed OpenAPI spec not found"
+        # Check datafeed specs (versioned)
+        if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_v1_openapi.json" ]; then
+          echo "❌ Datafeed v1 OpenAPI spec not found"
           FAILED=1
         else
-          echo "✅ Datafeed OpenAPI spec found"
+          echo "✅ Datafeed v1 OpenAPI spec found"
         fi
         
-        if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_asyncapi.json" ]; then
-          echo "❌ Datafeed AsyncAPI spec not found"
+        if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_v1_asyncapi.json" ]; then
+          echo "❌ Datafeed v1 AsyncAPI spec not found"
           FAILED=1
         else
-          echo "✅ Datafeed AsyncAPI spec found"
+          echo "✅ Datafeed v1 AsyncAPI spec found"
         fi
         
         if [ $FAILED -eq 1 ]; then
           echo ""
-          echo "❌ Some specs are missing. Backend-setup job may have failed to generate them."
+          echo "❌ Some specs are missing. Artifact download may have failed."
           exit 1
         fi
         
         echo ""
         echo "✅ All per-module specs verified successfully"
-
-  # Backend code generation (unified command)
-  backend-generate:
-    runs-on: ubuntu-latest
-    needs: [backend-generate-and-export]
-    if: success()
-    strategy:
-      matrix:
-        python-version: ["3.11"]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: latest
-        virtualenvs-create: true
-        virtualenvs-in-project: true
-
-    - name: Restore cached venv
-      uses: actions/cache@v3
-      with:
-        path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
-        fail-on-cache-miss: false
-
-    - name: Download backend specs
-      uses: actions/download-artifact@v4
-      with:
-        name: backend-specs-${{ github.sha }}
-        path: backend/src/trading_api/modules/
-
-    - name: Generate all specs and clients (unified)
-      working-directory: backend
-      run: make generate
-
-    - name: Verify Python clients generated
-      working-directory: backend
-      run: |
-        echo "Verifying Python HTTP clients..."
-        if [ ! -f "src/trading_api/clients/broker_client.py" ]; then
-          echo "❌ Broker client not found"
-          exit 1
-        fi
-        if [ ! -f "src/trading_api/clients/datafeed_client.py" ]; then
-          echo "❌ Datafeed client not found"
-          exit 1
-        fi
-        if [ ! -f "src/trading_api/clients/__init__.py" ]; then
-          echo "❌ Clients __init__.py not found"
-          exit 1
-        fi
-        echo "✅ All Python HTTP clients generated successfully"
-
-    - name: Upload Python clients as artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: backend-python-clients-${{ github.sha }}
-        path: |
-          backend/src/trading_api/clients/
-        retention-days: 1
 
   frontend:
     runs-on: ubuntu-latest
@@ -439,20 +287,20 @@ jobs:
     - name: Verify per-module client generation
       working-directory: frontend
       run: |
-        if [ ! -d "src/clients/trader-client-broker" ]; then
-          echo "❌ Broker client generation failed - no trader-client-broker directory"
+        if [ ! -d "src/clients_generated/trader-client-broker_v1" ]; then
+          echo "❌ Broker client generation failed - no trader-client-broker_v1 directory"
           exit 1
         fi
-        if [ ! -d "src/clients/trader-client-datafeed" ]; then
-          echo "❌ Datafeed client generation failed - no trader-client-datafeed directory"
+        if [ ! -d "src/clients_generated/trader-client-datafeed_v1" ]; then
+          echo "❌ Datafeed client generation failed - no trader-client-datafeed_v1 directory"
           exit 1
         fi
-        if [ ! -d "src/clients/ws-types-broker" ]; then
-          echo "❌ Broker WebSocket types generation failed - no ws-types-broker directory"
+        if [ ! -d "src/clients_generated/ws-types-broker_v1" ]; then
+          echo "❌ Broker WebSocket types generation failed - no ws-types-broker_v1 directory"
           exit 1
         fi
-        if [ ! -d "src/clients/ws-types-datafeed" ]; then
-          echo "❌ Datafeed WebSocket types generation failed - no ws-types-datafeed directory"
+        if [ ! -d "src/clients_generated/ws-types-datafeed_v1" ]; then
+          echo "❌ Datafeed WebSocket types generation failed - no ws-types-datafeed_v1 directory"
           exit 1
         fi
         echo "✅ Per-module REST clients and WebSocket types generated successfully"
@@ -487,22 +335,19 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     needs: [backend-integration, frontend]
-    if: success() && (github.event_name == 'push' || github.event_name == 'pull_request')
+    if: success()
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+        node-version: ["22"]
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
-        python-version: "3.11"
-
-    - name: Set up Node.js 22
-      uses: actions/setup-node@v4
-      with:
-        node-version: "22"
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
+        python-version: ${{ matrix.python-version }}
 
     - name: Install Poetry
       uses: snok/install-poetry@v1
@@ -515,45 +360,19 @@ jobs:
       uses: actions/cache@v3
       with:
         path: backend/.venv
-        key: venv-${{ runner.os }}-3.11-${{ hashFiles('backend/poetry.lock') }}-v2
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
         fail-on-cache-miss: false
 
-    - name: Download backend specs
-      uses: actions/download-artifact@v4
+    - name: Set up Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
       with:
-        name: backend-specs-${{ github.sha }}
-        path: backend/src/trading_api/modules/
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
 
     - name: Install frontend dependencies
       working-directory: frontend
-      run: make install-ci
-
-    - name: Generate per-module frontend clients (offline from specs)
-      working-directory: frontend
-      run: |
-        make generate-openapi-client
-        make generate-asyncapi-types
-
-    - name: Verify per-module client generation
-      working-directory: frontend
-      run: |
-        if [ ! -d "src/clients/trader-client-broker" ]; then
-          echo "❌ Broker client generation failed - no trader-client-broker directory"
-          exit 1
-        fi
-        if [ ! -d "src/clients/trader-client-datafeed" ]; then
-          echo "❌ Datafeed client generation failed - no trader-client-datafeed directory"
-          exit 1
-        fi
-        if [ ! -d "src/clients/ws-types-broker" ]; then
-          echo "❌ Broker WebSocket types generation failed - no ws-types-broker directory"
-          exit 1
-        fi
-        if [ ! -d "src/clients/ws-types-datafeed" ]; then
-          echo "❌ Datafeed WebSocket types generation failed - no ws-types-datafeed directory"
-          exit 1
-        fi
-        echo "✅ Per-module REST clients and WebSocket types generated successfully"
+      run: npm ci
 
     - name: Start backend server
       working-directory: backend
@@ -567,6 +386,11 @@ jobs:
 
     - name: Build frontend against live API
       working-directory: frontend
-      run: make build
+      run: npm run build
       env:
         VITE_API_URL: http://localhost:8000
+
+    - name: Cleanup backend processes
+      if: always()
+      working-directory: backend
+      run: make kill-dev || true
