@@ -9,7 +9,7 @@ Fixtures defined here are automatically available to all test files
 in trading_api and its subdirectories.
 """
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 
 import pytest
 from fastapi import FastAPI
@@ -64,7 +64,7 @@ def ws_app(ws_apps: list[FastWSAdapter]) -> FastWSAdapter | None:
 
 
 @pytest.fixture
-def client(app: FastAPI):
+def client(app: FastAPI) -> Generator[TestClient, None]:
     """Sync test client for WebSocket tests.
 
     Uses context manager to ensure proper cleanup of TestClient's internal event loop.

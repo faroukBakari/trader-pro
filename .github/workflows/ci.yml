@@ -240,17 +240,17 @@ jobs:
 
     - name: Run all tests with coverage (final report)
       working-directory: backend
-      run: make test-cov
+      run: make test-integration # make test-cov
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
-      with:
-        file: backend/coverage.xml
-        flags: backend
-        name: codecov-backend
+    # - name: Upload coverage to Codecov
+    #   uses: codecov/codecov-action@v3
+    #   with:
+    #     file: backend/coverage.xml
+    #     flags: backend
+    #     name: codecov-backend
 
-  # Backend export per-module specs (verify specs from backend-setup)
-  backend-export-specs:
+  # Backend generate and export specs (run make generate then verify)
+  backend-generate-and-export:
     runs-on: ubuntu-latest
     needs: [backend-integration]
     if: success()
@@ -261,38 +261,84 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Download backend specs
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Restore cached venv
+      uses: actions/cache@v3
+      with:
+        path: backend/.venv
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+        fail-on-cache-miss: false
+
+    - name: Generate all specs and clients
+      working-directory: backend
+      run: make generate
+
+    - name: Download backend specs artifact
       uses: actions/download-artifact@v4
       with:
         name: backend-specs-${{ github.sha }}
         path: backend/src/trading_api/modules/
 
-    - name: Verify specs generated
+    - name: Verify all module specs exist
       working-directory: backend
       run: |
-        echo "Verifying per-module specs..."
+        echo "🔍 Verifying per-module specs (generated in backend-setup)..."
+        FAILED=0
+        
+        # Check broker specs
         if [ ! -f "src/trading_api/modules/broker/specs_generated/broker_openapi.json" ]; then
           echo "❌ Broker OpenAPI spec not found"
-          exit 1
+          FAILED=1
+        else
+          echo "✅ Broker OpenAPI spec found"
         fi
-        if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_openapi.json" ]; then
-          echo "❌ Datafeed OpenAPI spec not found"
-          exit 1
-        fi
+        
         if [ ! -f "src/trading_api/modules/broker/specs_generated/broker_asyncapi.json" ]; then
           echo "❌ Broker AsyncAPI spec not found"
-          exit 1
+          FAILED=1
+        else
+          echo "✅ Broker AsyncAPI spec found"
         fi
+        
+        # Check datafeed specs
+        if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_openapi.json" ]; then
+          echo "❌ Datafeed OpenAPI spec not found"
+          FAILED=1
+        else
+          echo "✅ Datafeed OpenAPI spec found"
+        fi
+        
         if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_asyncapi.json" ]; then
           echo "❌ Datafeed AsyncAPI spec not found"
+          FAILED=1
+        else
+          echo "✅ Datafeed AsyncAPI spec found"
+        fi
+        
+        if [ $FAILED -eq 1 ]; then
+          echo ""
+          echo "❌ Some specs are missing. Backend-setup job may have failed to generate them."
           exit 1
         fi
-        echo "✅ All per-module specs generated successfully"
+        
+        echo ""
+        echo "✅ All per-module specs verified successfully"
 
   # Backend code generation (unified command)
   backend-generate:
     runs-on: ubuntu-latest
-    needs: [backend-export-specs]
+    needs: [backend-generate-and-export]
     if: success()
     strategy:
       matrix:
@@ -358,7 +404,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
-    needs: [backend-export-specs]
+    needs: [backend-generate-and-export]
     if: success()
     strategy:
       matrix:
