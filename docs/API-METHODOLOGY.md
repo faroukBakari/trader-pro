@@ -472,11 +472,12 @@ make generate-openapi-client
 
 1. **API Versioning Constraint**:
 
-   - Use module-specific API classes (e.g., `BrokerApi`, `DatafeedApi`, `CoreApi`) from generated clients
+   - Use per-module-version API classes from generated clients (e.g., `BrokerApi` from `trader-client-broker_v1`)
    - **DO NOT** import individual API methods directly
-   - Each module generates its own API class matching the module name
-   - Example: `trader-client-broker` → `BrokerApi`, `trader-client-datafeed` → `DatafeedApi`
-   - Supports modular architecture and per-module versioning
+   - Each module+version generates its own client package: `trader-client-{module}_v{version}`
+   - Example: `trader-client-broker_v1` → `BrokerApi`, `trader-client-datafeed_v1` → `DatafeedApi`
+   - Configuration classes are version-specific: `Configuration as BrokerConfigurationV1`
+   - Supports modular architecture with independent per-module versioning
 
 2. **Type Casting Safety Constraint**:
    - **Rule**: Unsafe casting (`as unknown as`) **ONLY** for literal/alias/enum fields
@@ -535,26 +536,27 @@ const response = await this.rawApi.createResource(
 
 ```typescript
 /**
- * API Adapter (Per-Module Architecture)
+ * API Adapter (Per-Module-Version Architecture)
  *
  * Wraps generated OpenAPI clients for type conversion and clean interface.
  * Rule: Never import backend models outside this file.
- * Constraint: Use module-specific API classes (BrokerApi, DatafeedApi, etc.) for all calls.
+ * Constraint: Use per-module-version API classes (BrokerApi from v1, DatafeedApi from v1, etc.) for all calls.
  * Type Casting: Only cast enums/literals, never entire objects.
+ * Versioning: Each module can have independent versions (broker v1, datafeed v1, etc.)
  */
 
 import type {
   ResourceRequest as ResourceRequest_Backend,
   AnotherType as AnotherType_Backend,
-} from "@clients/trader-client-broker";
+} from "@clients/trader-client-broker_v1";
 import {
-  Configuration as BrokerConfiguration,
-  BrokerApi
-} from "@clients/trader-client-broker/";
+  BrokerApi,
+  Configuration as BrokerConfigurationV1
+} from "@clients/trader-client-broker_v1";
 import {
-  Configuration as DatafeedConfiguration,
-  DatafeedApi
-} from "@clients/trader-client-datafeed/";
+  DatafeedApi,
+  Configuration as DatafeedConfigurationV1
+} from "@clients/trader-client-datafeed_v1";
 import type {
   FrontendResourceRequest,
   FrontendResourceResponse,
@@ -585,20 +587,24 @@ export type ApiPromise<T> = Promise<ApiResponse<T>>;
 import { mapQuoteData, mapPreOrder } from '@/plugins/mappers';
 
 export class ApiAdapter {
-  // Per-module API clients
+  // Per-module-version API clients
   private brokerApi: BrokerApi;
   private datafeedApi: DatafeedApi;
-  private brokerConfig: BrokerConfiguration;
-  private datafeedConfig: DatafeedConfiguration;
+  private brokerConfig: BrokerConfigurationV1;
+  private datafeedConfig: DatafeedConfigurationV1;
 
   constructor() {
-    const basePath = import.meta.env.TRADER_API_BASE_PATH || '';
+    // Construct base path with version suffix
+    const ApiV1BasePath = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + "/v1";
 
-    // Initialize per-module configurations
-    this.brokerConfig = new BrokerConfiguration({ basePath });
-    this.datafeedConfig = new DatafeedConfiguration({ basePath });
+    // Initialize per-module-version configurations with module-specific paths
+    // Base path format: {base}/v{version}/{module}
+    // Example: http://localhost:8000/v1/broker, http://localhost:8000/v1/datafeed
+    // In multi-process mode, nginx routes these to different backend servers
+    this.brokerConfig = new BrokerConfigurationV1({ basePath: ApiV1BasePath + '/broker' });
+    this.datafeedConfig = new DatafeedConfigurationV1({ basePath: ApiV1BasePath + '/datafeed' });
 
-    // Initialize per-module API clients
+    // Initialize per-module-version API clients
     this.brokerApi = new BrokerApi(this.brokerConfig);
     this.datafeedApi = new DatafeedApi(this.datafeedConfig);
   }
