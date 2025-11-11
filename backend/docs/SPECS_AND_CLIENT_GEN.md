@@ -1,7 +1,7 @@
 # Specs and Client Generation Guide
 
 **Version**: 1.0.0  
-**Date**: November 2, 2025  
+**Date**: November 11, 2025  
 **Status**: ✅ Current Reference
 
 ---
@@ -58,22 +58,17 @@ This unified command handles:
 
 ### Level 1: Module-Scoped Generation
 
-Each module independently generates specs during startup via `Module.create_app()` lifespan.
+Each module's specs are generated via the `ModuleApp` wrapper class, which creates versioned FastAPI and FastWSAdapter instances.
 
-**Trigger**: Module startup (automatic)  
-**Location**: `Module.gen_specs_and_clients()` in `shared/module_interface.py`  
+**Trigger**: Manual generation via `make generate` (primary method)  
+**Location**: `ModuleApp.gen_specs_and_clients()` in `shared/module_interface.py`  
 **Output**: Module's `specs_generated/` and `client_generated/` directories
 
 ```python
-# In Module.create_app() lifespan
-async def lifespan(api_app: FastAPI):
-    # Generate this module's specs and clients
-    self.gen_specs_and_clients(api_app=api_app, ws_app=ws_app)
-
-    if ws_app:
-        ws_app.setup(api_app)
-
-    yield
+# In scripts/module_codegen.py (called by make generate)
+module = BrokerModule()            # Module instantiation
+module_app = ModuleApp(module)     # Create versioned apps
+module_app.gen_specs_and_clients() # Generate specs and clients
 ```
 
 **Process**:
@@ -132,41 +127,44 @@ class ModularApp(FastAPI):
 
 ## Generation Flow
 
-### Startup Flow (Automatic)
+### Manual Generation Flow (Primary Method)
 
 ```
-Module Initialization
-├─ 1. Module.__init__() called
-│  └─ WsRouters instantiation triggers WebSocket router generation (if ws.py exists)
+make generate modules=broker
+├─ 1. Makefile invokes: poetry run python scripts/module_codegen.py broker
 │
-├─ 2. Module.create_app() called
-│  ├─ Creates FastAPI app with lifespan handler
-│  ├─ Includes REST routers
-│  └─ Creates FastWSAdapter and includes WS routers (if ws_routers exist)
+├─ 2. Module Instantiation
+│  ├─ Import BrokerModule class
+│  ├─ module = BrokerModule()
+│  │  ├─ Module.__init__() creates service
+│  │  ├─ Imports API routers from api/v1.py
+│  │  └─ Imports WS routers from ws/v1/__init__.py
+│  │     └─ ⚡ WS router generation happens during import
+│  │        ├─ WsRouters.__init__() calls generate_routers(__file__)
+│  │        └─ Generates concrete classes in ws_generated/
 │
-├─ 3. Lifespan startup event
-│  └─ Module.gen_specs_and_clients(api_app, ws_app)
-│     ├─ 4. Generate OpenAPI spec
-│     │  ├─ Extract spec: api_app.openapi()
-│     │  ├─ Compare with existing: _compare_specs()
-│     │  ├─ Write if changed: {module}_openapi.json
-│     │  └─ Log differences
-│     │
-│     ├─ 5. Generate Python Client
-│     │  ├─ ClientGenerationService.generate_module_client()
-│     │  ├─ Extract operations from OpenAPI spec
-│     │  ├─ Collect model imports
-│     │  ├─ Render Jinja2 template
-│     │  ├─ Format code: autoflake → black → isort
-│     │  └─ Update clients index
-│     │
-│     └─ 6. Generate AsyncAPI spec (if ws_app exists)
-│        ├─ Extract spec: ws_app.asyncapi()
-│        ├─ Compare with existing: _compare_specs()
-│        ├─ Write if changed: {module}_asyncapi.json
-│        └─ Log differences
+├─ 3. App Creation
+│  ├─ module_app = ModuleApp(module)
+│  ├─ For each version (v1, v2, ...):
+│  │  ├─ Create FastAPI app
+│  │  ├─ Include API routers
+│  │  ├─ Create FastWSAdapter (if WS routers exist)
+│  │  └─ Include WS routers
 │
-└─ 7. Module app mounted at /api/v1/{module}
+└─ 4. Spec and Client Generation
+   └─ module_app.gen_specs_and_clients()
+      ├─ For each version:
+      │  ├─ Extract OpenAPI spec from FastAPI app
+      │  ├─ Compare with existing spec
+      │  ├─ Write if changed: {module}_v{N}_openapi.json
+      │  ├─ Generate Python client from spec
+      │  ├─ Format: autoflake → black → isort
+      │  └─ If WS app exists:
+      │     ├─ Extract AsyncAPI spec
+      │     ├─ Compare with existing spec
+      │     └─ Write if changed: {module}_v{N}_asyncapi.json
+      │
+      └─ Update global client index
 ```
 
 ### Manual Generation - `make generate`

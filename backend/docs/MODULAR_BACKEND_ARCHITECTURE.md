@@ -1,12 +1,13 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: November 5, 2025  
+**Last Updated**: November 11, 2025  
 **Version**: 5.1.0
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Quick Start for Module Development](#quick-start-for-module-development)
 - [Core Design Principles](#core-design-principles)
 - [Architecture Components](#architecture-components)
 - [Module System](#module-system)
@@ -37,6 +38,92 @@ The Trading Pro backend implements a **modular factory-based architecture** that
 - **Scalability**: Run modules in separate processes for horizontal scaling
 - **Maintainability**: Clear boundaries and ownership per module
 - **Developer Experience**: Work on single module without full system
+
+---
+
+## Quick Start for Module Development
+
+### Creating a New Module
+
+Follow these steps to add a new feature module to the system:
+
+**1. Create module directory structure**:
+
+```bash
+backend/src/trading_api/modules/my_module/
+├── __init__.py           # MyModuleModule(Module) class
+├── service.py            # MyModuleService(ServiceInterface) class
+├── api/
+│   └── v1.py            # MyModuleApi(APIRouterInterface) class
+├── ws/
+│   └── v1/
+│       └── __init__.py  # WS routers (optional)
+└── tests/
+    └── test_my_module.py
+```
+
+**2. Implement the Module ABC**:
+
+```python
+# modules/my_module/__init__.py
+from pathlib import Path
+from trading_api.shared import Module
+
+class MyModuleModule(Module):
+    @property
+    def name(self) -> str:
+        return "my_module"
+
+    @property
+    def module_dir(self) -> Path:
+        return Path(__file__).parent
+
+    @property
+    def tags(self) -> list[dict[str, str]]:
+        return [{"name": "My Module", "description": "My module operations"}]
+```
+
+**3. Implement the Service** (extends `ServiceInterface`):
+
+```python
+# modules/my_module/service.py
+from trading_api.shared import ServiceInterface
+
+class MyModuleService(ServiceInterface):
+    def __init__(self, module_dir: Path):
+        super().__init__(module_dir)
+        # Your service logic here
+```
+
+**4. Implement the API Router** (extends `APIRouterInterface`):
+
+```python
+# modules/my_module/api/v1.py
+from trading_api.shared.api import APIRouterInterface
+
+class MyModuleApi(APIRouterInterface):
+    def __init__(self, service: MyModuleService, version: str = "v1"):
+        super().__init__(service=service, version=version, prefix="", tags=["My Module"])
+
+        @self.get("/data")
+        async def get_data():
+            return {"message": "Hello from my module"}
+```
+
+**5. Auto-Discovery**: The module is automatically discovered by the registry. No manual registration needed!
+
+**6. Test in isolation**:
+
+```bash
+# Start only your new module
+ENABLED_MODULES=my_module make dev
+
+# Access your endpoint
+curl http://localhost:8000/api/v1/my_module/data
+curl http://localhost:8000/api/v1/my_module/health
+```
+
+See sections below for complete implementation patterns and advanced features.
 
 ---
 
@@ -1028,6 +1115,119 @@ app = factory.create_app(enabled_module_names=["broker"])
 
 uvicorn.run(app, host="0.0.0.0", port=8002)
 ```
+
+### 4. Multi-Process Deployment with Backend Manager (Production)
+
+For production workloads, the **Backend Manager** orchestrates multiple module processes with an nginx gateway for load balancing and routing.
+
+**Configuration**: `backend/dev-config.yaml`
+
+```yaml
+# API base URL prefix
+api_base_url: "/api/v1"
+
+# Nginx gateway configuration
+nginx:
+  port: 8000 # Single public-facing port
+  worker_processes: 1 # 'auto' or specific number
+  worker_connections: 1024
+
+# Backend server instances
+servers:
+  # Broker operations server
+  broker:
+    port: 8001
+    instances: 1
+    modules:
+      - broker
+    reload: true
+
+  # Market data server
+  datafeed:
+    port: 8002
+    instances: 1
+    modules:
+      - datafeed
+    reload: true
+
+# WebSocket routing strategy
+websocket:
+  routing_strategy: "path" # "query_param" or "path"
+  query_param_name: "type" # Used when routing_strategy is "query_param"
+
+# Module to server mapping for WebSocket routing
+websocket_routes:
+  broker: broker # /api/v1/broker/ws → broker server
+  datafeed: datafeed # /api/v1/datafeed/ws → datafeed server
+```
+
+**Commands**:
+
+```bash
+# Start all configured servers + nginx
+make backend-dev-multi
+
+# Check status of all processes
+make backend-status
+
+# View logs
+make backend-logs          # All server logs
+make backend-logs-nginx    # Nginx logs only
+
+# Stop all processes
+make backend-stop
+
+# Restart all processes
+make backend-restart
+```
+
+**Architecture**:
+
+```
+Client Requests
+    ↓
+nginx Gateway (port 8000)
+    ├─→ /api/v1/broker/*   → Broker Process (port 8001)
+    ├─→ /api/v1/datafeed/* → Datafeed Process (port 8002)
+    └─→ WebSocket routing based on path or query param
+```
+
+**WebSocket Routing Strategies**:
+
+1. **Path-Based** (default): `ws://host/api/v1/broker/ws`
+
+   - Nginx routes based on URL path prefix
+   - Matches frontend URL structure
+   - Simpler configuration
+
+2. **Query-Param**: `ws://host/api/v1/ws?type=orders`
+   - Nginx inspects query parameter
+   - Single WebSocket endpoint
+   - More flexible for complex routing
+
+**Benefits**:
+
+- **Process Isolation**: Module crashes don't affect other modules
+- **Independent Scaling**: Run multiple instances of heavy modules
+- **Resource Management**: Apply CPU/memory limits per process
+- **Zero-Downtime Deploys**: Rolling restarts per module
+- **Automatic Nginx Config**: Backend Manager generates nginx.conf from dev-config.yaml
+- **PID Tracking**: Graceful process management and cleanup
+
+**Generated Nginx Configuration**: The Backend Manager automatically generates `nginx-dev.conf` with:
+
+- Upstream server definitions for each module
+- Location-based routing for REST endpoints
+- WebSocket upgrade headers and routing
+- Proper proxy headers for backend communication
+
+See [BACKEND_MANAGER_GUIDE.md](BACKEND_MANAGER_GUIDE.md) for complete deployment guide including:
+
+- Detailed configuration file reference
+- Process management commands
+- Nginx routing strategies
+- Production deployment patterns
+- Troubleshooting guide
 
 ---
 

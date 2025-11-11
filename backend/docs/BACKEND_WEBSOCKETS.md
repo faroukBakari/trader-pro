@@ -1,7 +1,7 @@
 # Backend WebSockets - FastWS Integration Guide
 
 **Version**: 1.0.0  
-**Last Updated**: November 5, 2025  
+**Last Updated**: November 11, 2025  
 **Status**: ✅ Production Ready
 
 ---
@@ -172,7 +172,7 @@ class WsRouteService(ServiceInterface):
 
 **Reference Counting Pattern**: Routers track subscribers per topic and call service methods on first subscribe / last unsubscribe.
 
-**Note**: In practice, your module's service (e.g., `BrokerService`) inherits from `ServiceInterface` and implements the `WsRouteService` protocol methods.
+**Note**: In practice, your module's service (e.g., `BrokerService`) inherits from `WsRouteService` (which extends `ServiceInterface` with WebSocket-specific methods).
 
 ---
 
@@ -255,7 +255,7 @@ class DatafeedWsRouters(WsRouterInterface):
 
 **Location**: `modules/{module}/service.py`
 
-The service is where **business logic integration** happens. It must inherit from `ServiceInterface` and implement the `WsRouteService` protocol methods:
+The service is where **business logic integration** happens. It must inherit from `WsRouteService` (which extends `ServiceInterface` with WebSocket-specific methods):
 
 - **Topic parsing** - Extract subscription parameters from topic string
 - **Model validation** - Verify subscription requests using Pydantic models
@@ -727,7 +727,7 @@ logger.info(f"Broadcast tasks: {len(ws_app._broadcast_tasks)}")
 
 ### Module WebSocket Checklist
 
-- [ ] Service inherits from `ServiceInterface` and implements `WsRouteService` protocol methods (`create_topic`, `remove_topic`)
+- [ ] Service inherits from `WsRouteService` (which extends `ServiceInterface` with methods: `create_topic`, `remove_topic`)
 - [ ] Created `ws/v{N}/__init__.py` with TypeAlias declarations
 - [ ] TypeAlias inside `if TYPE_CHECKING:` block
 - [ ] Router container class extends `WsRouterInterface` and calls `self.generate_routers(__file__)`
@@ -740,7 +740,7 @@ logger.info(f"Broadcast tasks: {len(ws_app._broadcast_tasks)}")
 ```
 modules/{module}/
 ├── __init__.py              # Module class extending Module base
-├── service.py               # Inherits from ServiceInterface, implements WsRouteService protocol
+├── service.py               # Inherits from WsRouteService (which extends ServiceInterface)
 ├── api/
 │   └── v{N}.py             # API router extending APIRouterInterface
 ├── ws/

@@ -1,7 +1,7 @@
 # WebSocket Router Generation Guide
 
 **Version**: 1.1.0  
-**Date**: November 5, 2025  
+**Date**: November 11, 2025  
 **Status**: ✅ Current Implementation Reference
 
 ---
@@ -142,7 +142,7 @@ When creating a new module with WebSocket support:
 
 - [ ] `modules/{module}/ws/v{N}/__init__.py` - Contains TypeAlias declarations and WsRouters class
 - [ ] `modules/{module}/ws/__init__.py` - Module-level WebSocket exports
-- [ ] `modules/{module}/service.py` - Inherits from `ServiceInterface`, implements `WsRouteService` methods
+- [ ] `modules/{module}/service.py` - Inherits from `WsRouteService` (which extends `ServiceInterface`)
 - [ ] Service has `create_topic()` and `remove_topic()` methods for subscription management
 
 ### ✅ TypeAlias Declaration Format
@@ -192,7 +192,7 @@ class ModuleWsRouters(WsRouterInterface):
 
 ### ✅ Service Interface Compliance
 
-Your service MUST inherit from `ServiceInterface` and implement the `WsRouteService` methods:
+Your service MUST inherit from `WsRouteService` (which extends `ServiceInterface` with WebSocket-specific methods):
 
 ```python
 class WsRouteService(ServiceInterface):

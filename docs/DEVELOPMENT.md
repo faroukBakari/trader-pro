@@ -59,12 +59,30 @@ make -f project.mk dev-fullstack
 
 For working on backend or frontend separately:
 
+**Backend Development**:
+
 ```bash
 cd backend
 make install  # One-time setup (checks Python, Poetry, installs deps, prompts for nginx)
-make dev      # Start server
+make dev      # Start server with all modules (default)
 make test     # Run tests
 ```
+
+**Module-Specific Backend Development**:
+
+```bash
+# Start only specific modules
+ENABLED_MODULES=broker make dev
+ENABLED_MODULES=datafeed make dev
+ENABLED_MODULES=broker,datafeed make dev
+
+# Multi-process mode (production-like with nginx)
+make backend-dev-multi
+make backend-status  # Check process status
+make backend-stop    # Stop all processes
+```
+
+See [backend/docs/BACKEND_MANAGER_GUIDE.md](../backend/docs/BACKEND_MANAGER_GUIDE.md) for multi-process deployment details.
 
 ### Frontend-Only Development
 

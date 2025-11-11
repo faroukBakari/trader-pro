@@ -1,7 +1,7 @@
 # Trading Pro - Architecture Documentation
 
 **Version**: 4.0.0 (Modular Architecture)
-**Last Updated**: October 30, 2025
+**Last Updated**: November 11, 2025
 **Status**: ✅ Production Ready
 
 ## Overview
@@ -150,7 +150,48 @@ AsyncAPI Spec → Custom Type Extractor → TypeScript Interfaces
 - Optional fields mapped to TypeScript optional properties
 - Discriminated unions for polymorphic types
 
-### 3. Backend WebSocket Router Generation
+### 3. Module-Level Spec Generation
+
+**New in Modular Architecture**: Each module generates its own OpenAPI/AsyncAPI specifications in addition to the global specs.
+
+**Process**:
+
+```
+Module.gen_module_specs_and_clients()
+    ├─→ Generate module OpenAPI spec
+    │   └─→ modules/{module_name}/specs_generated/openapi.json
+    ├─→ Generate module AsyncAPI spec (if WebSocket routes exist)
+    │   └─→ modules/{module_name}/specs_generated/asyncapi.json
+    └─→ Generate Python client for module
+        └─→ modules/{module_name}/specs_generated/client_generated.py
+```
+
+**Module Specs vs Global Specs**:
+
+| Type             | Location                                        | Purpose                      | Scope               |
+| ---------------- | ----------------------------------------------- | ---------------------------- | ------------------- |
+| **Module Specs** | `modules/{name}/specs_generated/`               | Module-specific API contract | Single module only  |
+| **Global Specs** | `backend/openapi.json`, `backend/asyncapi.json` | Complete system API          | All enabled modules |
+
+**Key Features**:
+
+- **Module Isolation**: Each module's spec can be versioned and deployed independently
+- **Automatic Aggregation**: Global specs combine all enabled modules
+- **Python Client Generation**: Each module generates its own Python client for inter-module communication
+- **Automatic Regeneration**:
+  - Backend restart triggers module spec regeneration
+  - Frontend client regeneration triggered by global spec file changes
+  - Watch system in `dev-fullstack` mode handles automatic updates
+
+**When Module Specs Are Generated**:
+
+1. **On module initialization** (first import)
+2. **On backend restart** (development mode)
+3. **Manually**: `make generate` (backend root)
+
+See [backend/docs/SPECS_AND_CLIENT_GEN.md](../backend/docs/SPECS_AND_CLIENT_GEN.md) for complete generation guide.
+
+### 4. Backend WebSocket Router Generation
 
 **Command**: Auto-generated at module initialization (no manual command needed)
 
@@ -338,6 +379,139 @@ shared/tests/
 └── test_api_versioning.py  # Versioning API tests
 ```
 
+### Backend Manager (Multi-Process Orchestration)
+
+**Component**: `backend/scripts/backend_manager.py` (1,571 lines)
+
+**Purpose**: Orchestrates multi-process backend deployment with nginx gateway and comprehensive process lifecycle management.
+
+#### Key Features
+
+**1. Configuration-Driven Deployment**
+
+- Reads `dev-config.yaml` for server definitions
+- Generates nginx configuration automatically
+- Validates module assignments and port allocation
+- Supports flexible WebSocket routing strategies
+
+**2. Process Management**
+
+- Tracks PIDs for all servers and nginx in `.local/*.pid` files
+- Graceful startup/shutdown sequences
+- Crash detection and status monitoring
+- Automatic cleanup on failures
+
+**3. Nginx Integration**
+
+- Auto-generates `nginx-dev.conf` from configuration
+- Manages nginx lifecycle (install, start, stop, reload)
+- Configures REST API routing by URL path prefix
+- Handles WebSocket upgrade headers and routing
+- Supports both path-based and query-param routing
+
+**4. Logging & Monitoring**
+
+- Per-server log files in `.local/logs/{server}.log`
+- Nginx access and error logs
+- Unified log tailing with `make backend-logs`
+- Process status inspection with `make backend-status`
+
+#### Commands (via Makefile)
+
+```bash
+# Development Workflow
+make backend-dev-multi    # Start all processes + nginx
+make backend-stop         # Stop all processes gracefully
+make backend-restart      # Restart all processes
+make backend-status       # Show process status (running/stopped)
+
+# Log Management
+make backend-logs         # Tail all server logs
+make backend-logs-nginx   # Tail nginx logs only
+
+# Configuration Management
+make backend-gen-nginx    # Regenerate nginx.conf from dev-config.yaml
+```
+
+#### Architecture Components
+
+```
+Backend Manager (backend_manager.py)
+    ├─→ Configuration Parser (dev-config.yaml)
+    │   ├─ Server definitions (modules, ports, instances)
+    │   ├─ Nginx gateway config (port, workers)
+    │   └─ WebSocket routing strategy
+    │
+    ├─→ Nginx Config Generator
+    │   ├─ Upstream server blocks
+    │   ├─ Location-based REST routing
+    │   ├─ WebSocket upgrade configuration
+    │   └─ Proxy headers and timeouts
+    │
+    ├─→ Process Manager
+    │   ├─ PID file tracking (.local/*.pid)
+    │   ├─ Uvicorn server spawning
+    │   ├─ Nginx process control
+    │   └─ Graceful shutdown handling
+    │
+    └─→ Monitoring & Logging
+        ├─ Server log files (.local/logs/)
+        ├─ Nginx log files (.local/logs/nginx-*.log)
+        ├─ Process status checks
+        └─ Health check integration
+```
+
+#### File Structure
+
+```
+backend/
+├── dev-config.yaml           # User-editable deployment configuration
+├── nginx-dev.conf            # Auto-generated nginx config (DO NOT EDIT)
+├── scripts/
+│   ├── backend_manager.py    # Main orchestration script
+│   └── install_nginx.py      # Nginx installation helper
+└── .local/                   # Runtime files (git-ignored)
+    ├── *.pid                 # Process ID tracking
+    ├── logs/                 # Log files
+    │   ├── broker.log
+    │   ├── datafeed.log
+    │   ├── nginx-access.log
+    │   └── nginx-error.log
+    └── temp/                 # Nginx temporary directories
+```
+
+#### Integration with Module System
+
+The Backend Manager seamlessly integrates with the modular architecture:
+
+- **Module-to-Server Mapping**: Assigns modules to specific server processes
+- **Selective Loading**: Each server only loads its assigned modules via `ENABLED_MODULES`
+- **Dynamic Routing**: Nginx routes requests based on module name in URL
+- **Independent Scaling**: Modules can run multiple instances on different ports
+
+**Example**: Running broker and datafeed on separate servers:
+
+```yaml
+# dev-config.yaml
+servers:
+  broker:
+    port: 8001
+    modules: [broker]
+  datafeed:
+    port: 8002
+    modules: [datafeed]
+```
+
+Result: Broker module isolated in process on port 8001, datafeed on 8002, nginx gateway on 8000.
+
+See [backend/docs/BACKEND_MANAGER_GUIDE.md](../backend/docs/BACKEND_MANAGER_GUIDE.md) for complete reference including:
+
+- Detailed configuration file schema
+- Advanced deployment patterns
+- Production deployment guide
+- Troubleshooting common issues
+- Performance tuning recommendations
+
 ### Modular Backend Architecture
 
 **Architectural Pattern**: The backend follows a **modular factory-based architecture** enabling independent development, testing, and deployment of feature modules.
@@ -454,6 +628,95 @@ ENABLED_MODULES=broker uvicorn trading_api.main:app
 # Start with all modules (default)
 uvicorn trading_api.main:app
 ```
+
+#### Multi-Process Deployment with Nginx Gateway
+
+**Overview**: Production deployments run modules in separate processes coordinated by an nginx reverse proxy gateway. This enables process isolation, independent scaling, and zero-downtime deployments.
+
+**Architecture**:
+
+```
+Client Requests
+    ↓
+nginx Gateway (port 8000)
+    ├─→ /api/v1/broker/*   → Broker Process (port 8001)
+    ├─→ /api/v1/datafeed/* → Datafeed Process (port 8002)
+    └─→ WebSocket routing based on path or query param
+```
+
+**Configuration** (`backend/dev-config.yaml`):
+
+```yaml
+# API base URL prefix
+api_base_url: "/api/v1"
+
+# Nginx gateway configuration
+nginx:
+  port: 8000 # Single public-facing port
+  worker_processes: 1 # 'auto' or specific number
+  worker_connections: 1024
+
+# Backend server instances
+servers:
+  broker:
+    port: 8001
+    instances: 1
+    modules: [broker]
+    reload: true
+
+  datafeed:
+    port: 8002
+    instances: 1
+    modules: [datafeed]
+    reload: true
+
+# WebSocket routing strategy
+websocket:
+  routing_strategy: "path" # "query_param" or "path"
+  query_param_name: "type"
+
+# Module-to-server mapping for WebSocket routing
+websocket_routes:
+  broker: broker # /api/v1/broker/ws → broker server
+  datafeed: datafeed # /api/v1/datafeed/ws → datafeed server
+```
+
+**Deployment Commands**:
+
+```bash
+# Start orchestrated multi-process backend
+make backend-dev-multi
+
+# Managed by backend_manager.py (1,571 lines):
+# - Generates nginx.conf from dev-config.yaml
+# - Starts module processes with PID tracking
+# - Configures nginx routing (REST + WebSocket)
+# - Handles graceful shutdown
+```
+
+**WebSocket Routing Strategies**:
+
+1. **Path-Based** (default): `ws://host/api/v1/broker/ws`
+
+   - Nginx routes based on URL path prefix
+   - Matches frontend URL structure
+   - Simpler configuration
+
+2. **Query-Param**: `ws://host/api/v1/ws?type=orders`
+   - Nginx inspects query parameter
+   - Single WebSocket endpoint
+   - More flexible for complex routing
+
+**Benefits**:
+
+- ✅ **Process Isolation**: Module crashes don't affect others
+- ✅ **Horizontal Scaling**: Run multiple instances per module
+- ✅ **Resource Management**: CPU/memory limits per process
+- ✅ **Zero-Downtime Deploys**: Rolling restarts per module
+- ✅ **Auto-Generated Config**: nginx.conf generated from YAML
+- ✅ **PID Tracking**: Graceful process lifecycle management
+
+See [backend/docs/BACKEND_MANAGER_GUIDE.md](../backend/docs/BACKEND_MANAGER_GUIDE.md) for complete deployment guide.
 
 **Benefits**:
 

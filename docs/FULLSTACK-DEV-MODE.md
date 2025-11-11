@@ -1,10 +1,12 @@
 # Full-Stack Development Mode
 
-**Last Updated:** November 6, 2025
+**Last Updated:** November 11, 2025
 
 ## Overview
 
 The full-stack development mode (`make dev-fullstack`) provides an integrated development environment with automatic code generation, hot-reloading, and synchronized backend-frontend updates.
+
+**Note**: This mode runs the backend in **single-process mode** with all modules in one Uvicorn process for simplicity and faster iteration. For production-like multi-process deployment with nginx gateway, see [backend/docs/BACKEND_MANAGER_GUIDE.md](../backend/docs/BACKEND_MANAGER_GUIDE.md).
 
 ## Quick Start
 

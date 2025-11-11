@@ -2,6 +2,73 @@
 
 Complete index of all project documentation with descriptions and reading paths.
 
+---
+
+### Structure & Organization
+
+The documentation follows a strict hierarchical structure:
+
+```
+trader-pro/
+├── README.md              # Project overview
+├── docs/                  # Cross-cutting concerns
+│   ├── ARCHITECTURE.md
+│   │   ├── tmp/           # Store for temporary documents
+│   │   |   ├── workings.md
+│   │   │   └── ...
+│   └── ...
+│
+├── backend/
+│   ├── README.md          # Backend overview
+│   ├── docs/              # Backend-specific architecture
+│   │   ├── ARCHITECTURE.md
+│   │   ├── tmp/           # Store for temporary documents
+│   │   |   ├── workings.md
+│   │   │   └── ...
+│   │   └── ...
+│
+└── frontend/
+    ├── README.md          # Frontend overview
+    ├── docs/              # Frontend-specific architecture
+    │   ├── ARCHITECTURE.md
+│   │   ├── tmp/           # Store for temporary documents
+│   │   |   ├── workings.md
+│   │   │   └── ...
+    │   └── ...
+```
+
+**Organization Decision Rules:**
+
+| Scope        | Path                                   | Description                               | Examples                                     |
+| :----------- | :------------------------------------- | :---------------------------------------- | :------------------------------------------- |
+| **Root**     | `README.md`, `docs/`                   | Project-wide, cross-cutting concerns      | `docs/TESTING.md`, `docs/WORKSPACE-SETUP.md` |
+| **Backend**  | `backend/README.md`, `backend/docs/`   | Backend-specific architecture & patterns  | `backend/docs/BACKEND_WEBSOCKETS.md`         |
+| **Frontend** | `frontend/README.md`, `frontend/docs/` | Frontend-specific architecture & patterns | `frontend/docs/WEBSOCKET-CLIENT-PATTERN.md`  |
+| **Module**   | `.../src/module/README.md`             | Specific implementation details           | `backend/src/trading_api/auth/README.md`     |
+
+### Update Strategy: Specific-to-Global
+
+When updating documentation for large-scale changes, follow this three-phase approach:
+
+**Phase 1: Module & Implementation Docs (The "Specific")**
+
+- Document new implementation details, function signatures, module responsibilities
+- Target: `README.md` files inside specific modules or components
+
+**Phase 2: Sub-System & Architecture Docs (The "Summary")**
+
+- Summarize Phase 1 changes and show impact on sub-system architecture
+- Target: Top-level `README.md` and `docs/` for affected area (e.g., `backend/docs/ARCHITECTURE.md`)
+- Update architectural diagrams, API contracts, high-level explanations
+
+**Phase 3: Root & Project-Wide Docs (The "Global")**
+
+- Update project-wide documentation for cross-cutting system changes
+- Target: Root `README.md` and root `docs/` (e.g., `docs/ARCHITECTURE.md`, `docs/DOCUMENTATION-GUIDE.md`)
+- Update main project overview, high-level architecture, cross-cutting guides
+
+---
+
 ## 🎯 Root Level Documentation (Project-Wide)
 
 | File                         | Purpose                                                    |
@@ -272,8 +339,15 @@ Complete index of all project documentation with descriptions and reading paths.
 - Obsolete/historical docs have been removed
 - Focus on essential, actionable information
 - Regular reviews ensure accuracy and relevance
+- **Note:** Files in `**/tmp/` directories are excluded from documentation updates (temporary/scratch files)
+
+### Link Format
+
+- All internal documentation references use **relative links**
+- All file paths and cross-references are validated
+- Links are verified during documentation updates
 
 ---
 
-**Last Updated**: November 6, 2025
+**Last Updated**: November 11, 2025
 **Maintained by**: Development Team

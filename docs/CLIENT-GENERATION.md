@@ -1,5 +1,6 @@
 # API Client Generation
 
+**Last Updated**: November 11, 2025  
 **Status**: ✅ Implemented | **Mode**: Offline Generation
 
 ## Overview
@@ -112,15 +113,28 @@ The validation catches common issues:
 
 ### REST API Client
 
-### Generation Command
+### Generation Command (Unified - Recommended)
 
 ```bash
-# From project root
-make generate-openapi-client
+# Generate all clients (REST + WebSocket) - RECOMMENDED
+make generate
 
-# Or from frontend directory
-make generate-openapi-client
+# This runs both:
+# 1. OpenAPI client generation (REST API)
+# 2. AsyncAPI types generation (WebSocket)
 ```
+
+#### Individual Commands (Still Available)
+
+For specific needs or backward compatibility, you can use these commands, but they internally call `make generate`:
+
+```bash
+# These are aliases to the unified command
+make generate-openapi-client  # Generates via 'make generate'
+make generate-asyncapi-types  # Generates via 'make generate'
+```
+
+**Note**: The unified `make generate` is the recommended approach for most workflows. Individual commands exist for backward compatibility and CI flexibility.
 
 ### Generated Files
 
@@ -146,13 +160,13 @@ const health = await healthApi.getHealth();
 
 ### Generation Command
 
-WebSocket types are automatically generated from AsyncAPI specification:
+WebSocket types are generated alongside REST clients via the unified command:
 
 ```bash
-# From project root
-make generate-asyncapi-types
+# Unified generation (REST + WebSocket) - RECOMMENDED
+make generate
 
-# Or from frontend directory
+# Or use the specific alias (also calls 'make generate')
 make generate-asyncapi-types
 ```
 
