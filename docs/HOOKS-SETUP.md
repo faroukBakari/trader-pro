@@ -1,18 +1,17 @@
 # Git Hooks Setup
 
+**Last Updated:** November 11, 2025
+
 ## Quick Start
 
 ```bash
 # Option 1: Install all (recommended for new setup)
-make -f project.mk install
+make install
 
 # Option 2: Install hooks only
-make -f project.mk install-hooks
+make install-hooks
 
-# Option 3: From frontend directory
-npm run install:hooks
-
-# Option 4: Manual
+# Option 3: Manual
 git config core.hooksPath .githooks
 chmod +x .githooks/*
 ```
@@ -97,6 +96,6 @@ make lint && make format && make test
 ## For New Team Members
 
 1. Clone repo
-2. Run `make -f project.mk install`
+2. Run `make install`
 3. Start coding - hooks run automatically!
 ```

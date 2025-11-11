@@ -1,5 +1,7 @@
 # Environment Variables Configuration
 
+**Last Updated:** November 11, 2025
+
 Environment variables for configuring ports, URLs, and settings across development, testing, and production.
 
 ## Environment Variables
@@ -36,7 +38,7 @@ Environment variables for configuring ports, URLs, and settings across developme
 
 ## Configuration Files
 
-### `.env` (Git-tracked defaults)
+### `.env.example` (Git-tracked template)
 
 ```bash
 # Ports
@@ -46,18 +48,18 @@ FRONTEND_PORT=5173
 # URLs
 VITE_API_URL=http://localhost:8000
 FRONTEND_URL=http://localhost:5173
-
-# Environment
-NODE_ENV=development
 ```
 
 ### `.env.local` (Local overrides, not tracked)
 
-Copy `.env.example` to `.env.local` for custom configurations:
+Create `.env.local` for custom configurations:
 
 ```bash
 cp .env.example .env.local
+# Edit .env.local with your custom settings
 ```
+
+**Note:** The project does not use a `.env` file by default. Use system environment variables or `.env.local` for customization.
 
 ## Client Generation
 
@@ -85,7 +87,7 @@ export FRONTEND_PORT=3001
 export VITE_API_URL=http://localhost:9000
 export FRONTEND_URL=http://localhost:3001
 
-make -f project.mk dev-fullstack
+make dev-fullstack
 ```
 
 ### Production Configuration
@@ -128,8 +130,8 @@ cd frontend && npm test
 
 ## Best Practices
 
-1. **Development**: Use `.env` defaults
-2. **Local Customization**: Use `.env.local` (not tracked)
+1. **Development**: Use `.env.example` as template
+2. **Local Customization**: Create `.env.local` (not tracked)
 3. **Production**: Set via deployment platform env vars
 4. **CI/CD**: Set in GitHub Actions secrets/variables
 5. **Testing**: Override as needed in test scripts
@@ -137,5 +139,5 @@ cd frontend && npm test
 ## Environment Variable Precedence
 
 1. System environment variables (highest)
-2. `.env.local` (local overrides)
-3. `.env` (committed defaults, lowest)
+2. `.env.local` (local overrides, if exists)
+3. `.env.example` (template defaults, lowest)

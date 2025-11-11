@@ -94,7 +94,6 @@ make generate
 ### Frontend-Specific Docs
 
 - **WebSocket Pattern**: See `WEBSOCKET-CLIENT-PATTERN.md`
-- **WebSocket Quick Ref**: See `WEBSOCKET-QUICK-REFERENCE.md`
 - **Plugin Usage**: See `src/plugins/ws-plugin-usage.md`
 
 ### Generated Files
@@ -185,7 +184,6 @@ The frontend includes real-time WebSocket clients for streaming market data.
 
 - **WebSocket Clients**: See `../docs/WEBSOCKET-CLIENTS.md` for overview
 - **WebSocket Pattern**: See `WEBSOCKET-CLIENT-PATTERN.md` for implementation details
-- **Quick Reference**: See `WEBSOCKET-QUICK-REFERENCE.md` for daily usage
 - **Plugin Usage**: See `src/plugins/ws-plugin-usage.md` for integration patterns
 
 ### Basic Usage

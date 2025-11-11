@@ -1,5 +1,7 @@
 # Development Guide
 
+**Last Updated**: November 11, 2025
+
 ## Quick Start
 
 ### Prerequisites
@@ -191,21 +193,22 @@ Clients are automatically generated during `make dev-fullstack`:
 
 1. Backend starts and generates specs on startup
 2. Script waits for backend to be ready
-3. Runs `make generate-openapi-client` (REST API client)
-4. Runs `make generate-asyncapi-types` (WebSocket types)
-5. File watchers monitor specs for changes
+3. Runs unified `make generate` (generates both REST and WebSocket clients)
+4. File watchers monitor specs for changes
 
 ### Manual Generation
 
 ```bash
-# From project root
-make -f project.mk generate-openapi-client
-make -f project.mk generate-asyncapi-types
+# Unified command (recommended) - generates both REST and WebSocket clients
+make -f project.mk generate
 
 # Or from frontend directory
 cd frontend
-make generate-openapi-client
-make generate-asyncapi-types
+make generate
+
+# Individual commands (for specific needs)
+make -f project.mk generate-openapi-client  # REST API client only
+make -f project.mk generate-asyncapi-types  # WebSocket types only
 ```
 
 See `docs/CLIENT-GENERATION.md` for details.
