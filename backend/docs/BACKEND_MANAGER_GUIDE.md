@@ -29,23 +29,22 @@ The Backend Manager (`scripts/backend_manager.py`) orchestrates multi-process ba
 Client
   ↓
 Nginx Gateway (port 8000)
-  ├─> /api/v1/core/*     → broker_backend (8001)
   ├─> /api/v1/broker/*   → broker_backend (8001)
   └─> /api/v1/datafeed/* → datafeed_backend (8002)
 
 Broker Server (8001)
-  ├─ Modules: core + broker
-  └─ Health: /api/v1/core/health
+  ├─ Modules: broker
+  └─ Health: /api/v1/broker/health
 
 Datafeed Server (8002)
-  ├─ Modules: core + datafeed
-  └─ Health: /api/v1/core/health
+  ├─ Modules: datafeed
+  └─ Health: /api/v1/datafeed/health
 ```
 
 **Key Concepts**:
 
 - **Module-based routing**: Each module has dedicated REST and WebSocket endpoints
-- **Core module**: Auto-included in all servers (provides health checks, version info, docs)
+- **Health endpoints**: Each module automatically provides `/health` and `/version` endpoints via `APIRouterInterface` inheritance
 - **Load balancing**: Multiple instances per server supported
 - **Detached mode**: Processes run in background, start command returns immediately
 
@@ -71,7 +70,6 @@ servers:
     port: 8001
     instances: 1
     modules:
-      - core # Auto-included, explicit for clarity
       - broker
     reload: true # Enable uvicorn auto-reload
 
@@ -79,7 +77,6 @@ servers:
     port: 8002
     instances: 1
     modules:
-      - core
       - datafeed
     reload: true
 
@@ -331,11 +328,6 @@ Nginx config is **auto-generated** from `dev-config.yaml`:
 **REST API** (module prefix matching):
 
 ```nginx
-# Core module
-location /api/v1/core/ {
-    proxy_pass http://broker_backend;
-}
-
 # Broker module
 location /api/v1/broker/ {
     proxy_pass http://broker_backend;
@@ -436,11 +428,11 @@ rm -rf backend/.local/pids/*
 
 ```bash
 # Check individual server health
-curl http://localhost:8001/api/v1/core/health
-curl http://localhost:8002/api/v1/core/health
+curl http://localhost:8001/api/v1/broker/health
+curl http://localhost:8002/api/v1/datafeed/health
 
-# Check nginx health
-curl http://localhost:8000/api/v1/core/health
+# Check nginx health (via any module)
+curl http://localhost:8000/api/v1/broker/health
 
 # Review server logs
 make logs-tail
@@ -669,7 +661,7 @@ async def wait_for_health(base_url: str) -> bool:
 
 ### Configuration
 
-1. **Keep core module explicit** in `dev-config.yaml` for clarity
+1. **List only actual modules** in `dev-config.yaml` (e.g., `broker`, `datafeed`)
 2. **Use path-based WebSocket routing** for frontend compatibility
 3. **Set reload: true** for development, `reload: false` for production
 4. **Start ports at 8001+** to avoid common conflicts
@@ -691,6 +683,6 @@ async def wait_for_health(base_url: str) -> bool:
 
 ---
 
-**Last Updated**: November 3, 2025
+**Last Updated**: November 11, 2025
 **Version**: 1.0.0
 **Status**: ✅ Current Reference

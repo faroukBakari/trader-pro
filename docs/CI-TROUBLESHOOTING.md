@@ -1,5 +1,7 @@
 # CI/CD Troubleshooting Guide
 
+**Last Updated:** November 11, 2025
+
 ## Common Issues and Solutions
 
 ### 1. Poetry not finding pyproject.toml

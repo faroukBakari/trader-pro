@@ -2,6 +2,8 @@
 
 Consistent Makefile-based build system across all components.
 
+**Last Updated:** November 11, 2025
+
 ## Philosophy
 
 - **Consistency**: CI uses same `make` commands as local development
@@ -19,30 +21,30 @@ project.mk              # Project-wide orchestration
 
 ## Project Commands
 
-**Location**: `project.mk` at repository root
+**Location**: `project.mk` at repository root (use `make` command)
 
 ```bash
-make -f project.mk help              # View all targets
+make help              # View all targets
 
 # Setup
-make -f project.mk setup             # Full setup (hooks + deps)
-make -f project.mk install-all       # Install all dependencies
+make install           # Full setup (hooks + deps)
 
 # Development
-make -f project.mk dev-fullstack     # Start full stack (recommended)
-make -f project.mk dev-backend       # Backend only
-make -f project.mk dev-frontend      # Frontend only
-make -f project.mk kill-dev          # Kill all dev servers (frontend + backend)
+make dev-fullstack     # Start full stack (recommended)
+make dev-backend       # Backend only
+make dev-frontend      # Frontend only
+make kill-dev          # Kill all dev servers (frontend + backend)
 
 # Code Generation
-make -f project.mk generate-openapi-client    # REST client (frontend)
-make -f project.mk generate-asyncapi-types    # WS types (frontend)
+make generate          # Generate all (backend specs + frontend clients)
+make backend-generate  # Backend specs only (OpenAPI + AsyncAPI + Python clients)
+make frontend-generate # Frontend clients only (TypeScript from backend specs)
 
 # Quality
-make -f project.mk test-all          # Run all tests
-make -f project.mk lint-all          # Run all linters
-make -f project.mk format-all        # Format all code
-make -f project.mk build-all         # Build everything
+make test-all          # Run all tests
+make lint-all          # Run all linters
+make format-all        # Format all code
+make build-all         # Build everything
 ```
 
 ## Backend Commands
@@ -72,9 +74,9 @@ make clean             # Clean artifacts
 make clean-cache       # Clean all Python caches
 make clean-generated   # Clean all generated files (WS routers, specs, Python clients)
 
-# Code Generation (NEW - Unified approach)
+# Code Generation (Unified)
 make list-modules             # List all discovered modules
-make generate                 # Generate specs & clients for all modules
+make generate                 # Generate all: OpenAPI + AsyncAPI specs + Python clients
 make generate modules=broker  # Generate for specific module(s)
 make generate output_dir=/tmp/custom  # Use custom output directory
 make generate modules=broker output_dir=/tmp/custom  # Combine options
@@ -83,8 +85,6 @@ make generate modules=broker output_dir=/tmp/custom  # Combine options
 #   - AsyncAPI specs (WebSocket API documentation)
 #   - Python HTTP clients (for inter-module communication)
 # Note: WebSocket routers auto-generate at module init (no manual step needed)
-
-
 
 # Multi-Process Backend (Development)
 make backend-manager-start          # Start multi-process backend with nginx
@@ -104,9 +104,9 @@ make logs-clean                     # Clean all backend log files
 ```bash
 cd backend
 
-# Unified Code Generation (Recommended)
+# Unified Code Generation
 make list-modules             # List all discovered modules
-make generate                 # Generate all: OpenAPI specs, AsyncAPI specs, Python clients
+make generate                 # Generate all: OpenAPI + AsyncAPI specs + Python clients
 make generate modules=broker  # Generate for specific module
 make generate modules=broker,datafeed  # Generate for multiple modules
 make generate output_dir=/tmp/custom   # Use custom output directory
@@ -116,9 +116,7 @@ make generate modules=broker output_dir=/custom/path  # Combine options
 # - OpenAPI specs: REST API documentation (specs_generated/*.json)
 # - AsyncAPI specs: WebSocket API documentation (specs_generated/*.json)
 # - Python HTTP clients: Type-safe inter-module communication (client_generated/*.py)
-# - WebSocket routers: Auto-generated at module init (ws_generated/*.py)
-
-
+# Note: WebSocket routers auto-generate at module init (ws_generated/*.py)
 
 # Import Boundary Validation
 make test-boundaries          # Verify module import boundaries
@@ -168,9 +166,9 @@ make build             # Production build
 make preview           # Preview production build
 make clean             # Clean artifacts
 
-# API Clients
-make generate-openapi-client    # Generate REST client
-make generate-asyncapi-types    # Generate WS types
+# API Clients (Unified)
+make generate    # Generate all API clients (REST + WebSocket)
+# Note: Individual commands (generate-openapi-client, generate-asyncapi-types) are aliases to 'generate'
 ```
 
 ## CI-Specific Targets
@@ -191,20 +189,20 @@ make install-ci        # Uses npm ci
 ### Initial Setup
 
 ```bash
-make -f project.mk setup  # Installs hooks + all dependencies
+make install  # Installs hooks + all dependencies
 ```
 
 ### Daily Development
 
 ```bash
-make -f project.mk dev-fullstack  # One command, full stack
+make dev-fullstack  # One command, full stack
 ```
 
 ### Stopping Development Servers
 
 ```bash
 # Kill all dev servers (useful for port conflicts or stuck processes)
-make -f project.mk kill-dev      # Kill both frontend and backend
+make kill-dev                    # Kill both frontend and backend
 
 # Kill individual servers
 make -C backend kill-dev         # Kill backend only (port 8000)
@@ -221,21 +219,22 @@ make -C frontend kill-dev        # Kill frontend only (port 5173)
 ### Before Commit
 
 ```bash
-make -f project.mk lint-all format-all test-all
+make lint-all format-all test-all
 ```
 
 ### CI Pipeline
 
 ```bash
-make -f project.mk install-all
-make -f project.mk lint-all
-make -f project.mk test-all
-make -f project.mk build-all
+make install
+make lint-all
+make test-all
+make build-all
 ```
 
 ## Tips
 
 - Use `make help` in any directory to see available targets
-- Add `-f project.mk` when running from root
+- Project root commands work with just `make` (no `-f` flag needed)
+- Component-specific commands: `make -C backend <target>` or `make -C frontend <target>`
 - Most targets check dependencies (Python, Node, Poetry, etc.)
 - CI targets are non-interactive and fail fast
