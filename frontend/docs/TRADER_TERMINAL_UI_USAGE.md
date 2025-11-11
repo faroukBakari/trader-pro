@@ -1,3 +1,13 @@
+# TradingView Trading Terminal - UI Usage Guide
+
+**Version**: 1.0.0  
+**Last Updated**: November 11, 2025  
+**Purpose**: Tutorial on using TradingView's trading features with Playwright MCP for testing
+
+---
+
+## Overview
+
 Here is a detailed tutorial on how to use TradingView's trading features, from placing orders to managing your account.
 
 ### **Part 1: Understanding Your "Account Manager" (The Trading Panel)**

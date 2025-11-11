@@ -1,7 +1,7 @@
 # Broker Terminal Service - Implementation Documentation
 
 **Version**: 2.0.0  
-**Last Updated**: October 21, 2025  
+**Last Updated**: November 11, 2025  
 **Status**: ✅ Full Implementation - Backend Integration Complete
 
 ## Table of Contents
@@ -1667,7 +1667,7 @@ currentAccount(): AccountId {
 
 - `frontend/src/services/brokerTerminalService.ts` (lines 630, 878)
 - `frontend/src/plugins/wsAdapter.ts` (WebSocket subscription handlers)
-- `backend/src/trading_api/ws/broker.py` (WebSocket message routing)
+- `backend/src/trading_api/modules/broker/service.py` (BrokerService WebSocket implementation)
 
 **Priority**: High - Blocks Account Manager functionality
 
@@ -1696,22 +1696,22 @@ currentAccount(): AccountId {
 
 ### Project Documentation
 
-- **Architecture Overview**: `/ARCHITECTURE.md`
-- **TradingView Types Guide**: `/frontend/TRADINGVIEW-TYPES.md`
-- **Frontend README**: `/frontend/README.md`
-- **Development Guide**: `/docs/DEVELOPMENT.md`
+- **Architecture Overview**: `../../ARCHITECTURE.md`
+- **TradingView Types Guide**: `./TRADINGVIEW-TYPES.md`
+- **Frontend README**: `../README.md`
+- **Development Guide**: `../../docs/DEVELOPMENT.md`
 
 ### Source Files
 
-- **Service Implementation**: `/frontend/src/services/brokerTerminalService.ts`
-- **Chart Container**: `/frontend/src/components/TraderChartContainer.vue`
-- **Datafeed Service**: `/frontend/src/services/datafeedService.ts`
+- **Service Implementation**: `../src/services/brokerTerminalService.ts`
+- **Chart Container**: `../src/components/TraderChartContainer.vue`
+- **Datafeed Service**: `../src/services/datafeedService.ts`
 
 ---
 
 **Maintained by**: Development Team
 **Review Schedule**: Updated as features are implemented
-**Last Review**: October 18, 2025
+**Last Review**: November 11, 2025
 
 ```
 

@@ -1,5 +1,7 @@
 # API Services
 
+**Last Updated**: November 11, 2025
+
 This directory contains the API service layer for the frontend application.
 
 ## Structure
@@ -661,6 +663,6 @@ describe('mapQuoteData', () => {
 
 - [TradingView Datafeed API](https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi)
 - [TradingView Tutorials](https://www.tradingview.com/charting-library-docs/latest/tutorials/)
-- [WebSocket Client Pattern](../WEBSOCKET-CLIENT-PATTERN.md)
-- [WebSocket Client Base](../WEBSOCKET-CLIENT-BASE.md)
+- [WebSocket Client Pattern](../../docs/WEBSOCKET-CLIENT-PATTERN.md)
+- [WebSocket Client Base](../../docs/WEBSOCKET-CLIENT-BASE.md)
 - [Client Generation Guide](../../../docs/CLIENT-GENERATION.md)

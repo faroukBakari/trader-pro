@@ -1,7 +1,7 @@
 # IBrokerConnectionAdapterHost - Trading Host API Reference
 
 **Version**: 1.0.0  
-**Last Updated**: October 21, 2025  
+**Last Updated**: November 11, 2025  
 **Type**: Interface (provided by TradingView)  
 **Location**: `frontend/public/trading_terminal/charting_library.d.ts`
 
@@ -1653,9 +1653,9 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
 ### Local Files
 
-- **Type Definitions**: `/frontend/public/trading_terminal/charting_library.d.ts`
-- **Broker Service**: `/frontend/src/services/brokerTerminalService.ts`
-- **Broker Documentation**: `/frontend/src/services/BROKER-TERMINAL-SERVICE.md`
+- **Type Definitions**: `../public/trading_terminal/charting_library.d.ts`
+- **Broker Service**: `../src/services/brokerTerminalService.ts`
+- **Broker Documentation**: `./BROKER-TERMINAL-SERVICE.md`
 
 ### Related Interfaces
 
@@ -1668,5 +1668,5 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 ---
 
 **Version**: 1.0.0  
-**Last Updated**: October 21, 2025  
+**Last Updated**: November 11, 2025  
 **Maintained by**: Development Team
