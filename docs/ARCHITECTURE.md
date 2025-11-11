@@ -74,6 +74,41 @@ This enables:
 - Backend development without frontend
 - Graceful degradation in production
 
+### 6. Multi-Module Monitoring (Independent Module Health)
+
+The system provides **per-module health monitoring** for independent service observability:
+
+```
+Backend Modules (broker, datafeed) → Health/Versions Endpoints → ApiAdapter Registry → Per-Module UI Cards
+```
+
+**Key Design Decisions:**
+
+- **No Overall Health**: System health = independent module health (no aggregation)
+- **Static Discovery**: Module list hardcoded in `ApiAdapter` (no runtime discovery)
+- **AsyncAPI Detection**: WebSocket support detected via `WsAdapter.getModules()`
+- **Error Isolation**: Individual module failures don't block other modules
+- **Response Time Tracking**: Per-module performance metrics
+
+**UI Architecture:**
+
+```
+ApiStatus.vue (Grid Layout)
+    ↓ queries
+ApiService.getAllModulesHealth() → Map<string, ModuleHealth>
+    ↓ delegates to
+ApiAdapter.getModuleHealth(name) → Parallel queries per module
+    ↓ routes to
+Module-specific API clients (broker, datafeed)
+```
+
+**Benefits:**
+
+- ✅ Individual module failures visible
+- ✅ Partial system degradation supported
+- ✅ Per-module documentation links (OpenAPI/AsyncAPI)
+- ✅ Independent module versioning displayed
+
 ---
 
 ## Technology Stack

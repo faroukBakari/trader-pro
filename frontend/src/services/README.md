@@ -143,6 +143,64 @@ const health: HealthResponse = await apiService.getHealth()
 const versions: APIMetadata = await apiService.getVersions()
 ```
 
+### Multi-Module API Architecture
+
+The API service supports querying health and version information for individual modules or all modules in parallel.
+
+**Available Methods:**
+
+```typescript
+// Per-module queries
+await apiService.getModuleHealth('broker') // Get health for specific module
+await apiService.getModuleVersions('datafeed') // Get versions for specific module
+
+// Multi-module queries (parallel execution)
+const health: Map<string, ModuleHealth> = await apiService.getAllModulesHealth()
+const versions: Map<string, ModuleVersions> = await apiService.getAllModulesVersions()
+```
+
+**Type Definitions:**
+
+```typescript
+interface ModuleHealth {
+  moduleName: string
+  health: HealthResponse | null
+  loading: boolean
+  error: string | null
+  responseTime?: number
+}
+
+interface ModuleVersions {
+  moduleName: string
+  versions: APIMetadata | null
+  loading: boolean
+  error: string | null
+}
+```
+
+**Benefits:**
+
+- ✅ **Parallel Execution**: All modules queried simultaneously
+- ✅ **Error Isolation**: Individual module failures don't break entire query
+- ✅ **Response Time Tracking**: Per-module performance metrics
+- ✅ **Backward Compatible**: Old methods still work (deprecated)
+
+**Module Registry:**
+
+The service exposes the static module registry via:
+
+```typescript
+import { ApiService } from '@/services/apiService'
+
+const modules = ApiService.getIntegratedModules()
+// Returns: ModuleInfo[] with name, displayName, docsUrl, hasWebSocket
+```
+
+**Deprecated Methods:**
+
+- `getHealthStatus()` - Use `getModuleHealth('broker')` instead
+- `getAPIVersions()` - Use `getModuleVersions('broker')` instead
+
 ### Smart Client Generation
 
 The API client is **automatically generated** when you run the development server (via make dev-fullstack):

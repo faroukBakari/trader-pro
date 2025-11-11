@@ -1,12 +1,12 @@
 ---
 agent: "Plan"
-name: "tdd-plan"
-description: "Generate a step-by-step TDD action plan for implementing a feature."
+name: "tdd-plan-v3"
+description: "Generate a step-by-step TDD action plan, nominating subagents for execution."
 ---
 
 ## TDD Feature Planner
 
-Generate a detailed, actionable TDD implementation plan.
+Generate a detailed, actionable TDD implementation plan designed for a follow-up "Executor" agent.
 
 ## Inputs
 
@@ -29,10 +29,12 @@ Generate a detailed, actionable TDD implementation plan.
 
 Adapt the chosen methodology to this specific feature.
 
-**Guiding Principle**: Deconstruct the feature into a logical sequence. For APIs, this is typically **outside-in**: 1. API route/spec, 2. Controller/Handler, 3. Service logic, 4. Data model/adapter. For other types, start with the most critical test.
+**Guiding Principle**: Deconstruct the feature into a logical sequence. For APIs, this is typically **outside-in**: 1. API route/spec, 2. Controller/Handler, 3. Service logic, 4. Data model/adapter.
+For each task in the sequence, identify the most appropriate **subagent** to perform the action (e.g., `@workspace` for search/read, `@codeWriter` for implementation, `@tester` for verification).
 
 For each phase:
 
+* **Agent** - The specific subagent best suited for the task.
 * **File paths** - Exact locations following project patterns.
 * **Actions** - Specific, executable tasks (e.g., "Add `placeOrder()` to `BrokerApiAdapter`").
 * **Verification** - Command to run (e.g., `make test`, `npm run type-check`).
@@ -45,6 +47,8 @@ Mark TDD phases clearly:
 
 ### Step 3: Output Format
 
+Generate the plan using the format below. This format is critical for the "Executor" agent.
+
 ````markdown
 ### Plan for [Feature Name]
 
@@ -54,9 +58,12 @@ Mark TDD phases clearly:
 
 #### Phase 1: [Phase Name]
 
--   `[ ]` (`path/to/file.py`): Specific action
--   `[ ]` (`path/to/file.ts`): Specific action
--   **Verify**: `make test` → Expected: ✅ pass / 🔴 fail
+-   [ ] **Agent**: `[@workspace]`
+    * **Action**: (`path/to/file.py`): Specific action (e.g., "Add new test case...")
+    * **Verify**: `make test` → Expected: 🔴 fail
+-   [ ] **Agent**: `[@codeWriter]`
+    * **Action**: (`path/to/file.py`): Specific action (e.g., "Add minimal implementation...")
+    * **Verify**: `make test` → Expected: ✅ pass
 
 #### Phase 2: [Phase Name]
 
@@ -64,6 +71,9 @@ Mark TDD phases clearly:
 
 #### Validation
 
--   `[ ]` All tests pass: `make test`
--   `[ ]` Type checks pass: `npm run type-check`
--   `[ ]` Smoke tests pass: `make smoke-test`
+-   [ ] **Agent**: `[@tester]`
+    * **Action**: Run all tests
+    * **Verify**: `make test` → Expected: ✅ pass
+-   [ ] **Agent**: `[@tester]`
+    * **Action**: Run type checks
+    * **Verify**: `npm run type-check` → Expected: ✅ pass

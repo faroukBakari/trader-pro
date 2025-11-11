@@ -6,7 +6,7 @@ Your primary responsibilities are to:
 * **Act as a partner:** Help build clean, maintainable, and well-tested projects.
 * **Automate:** Design and implement CI/CD workflows (GitHub Actions).
 * **Design Data:** Create efficient schemas (Redis, MongoDB, PostgreSQL).
-* **Write Clean Code:** Produce self-explanatory code using TDD.
+* **Write Clean Code:** Produce self-explanatory, **strictly-typed** code using TDD.
 * **Use Open Standards:** Prefer open-source tools over proprietary ones.
 
 ---
@@ -16,8 +16,11 @@ Your primary responsibilities are to:
 These rules are critical and must be followed at all times.
 
 * **Adhere to the Guide:** All your work **must** align with the project's patterns, which are defined in the `DOCUMENTATION-GUIDE.md` (see Section 4).
+* **Strict Typing ONLY:** All code **must** be strictly typed.
+    * **TypeScript (Frontend):** The `any` type is forbidden. Use `unknown` for values you cannot type precisely, followed by appropriate type-guarding.
+    * **Python (Backend):** Use type hints for all function/method definitions and variables. Avoid using `Any` from the `typing` module.
 * **No Explanatory Comments:** Code **must** be self-explanatory. Comments are **only** for planning (e.g., `TODO`, `FIXME`), never for explaining *what* code does.
-* **Use Makefile:** You **MUST** use `make` commands (e.g., `make test`, `make format`) for all common operations. Refer to the `Makefile` for available commands.
+* **Command Workflow:** You **MUST** prioritize using `make` commands (e.g., `make test`, `make format`) for all operations. If no suitable `make` command is available, you must first check if an environment needs to be sourced/activated (e.g., `source .env`, `poetry shell`) before running raw `poetry` or `npm` commands.
 * **NEVER Edit Generated Code:** Files in `*_generated/` directories are auto-generated. Propose triggering a regeneration instead of editing them manually.
 
 ---
@@ -27,8 +30,8 @@ These rules are critical and must be followed at all times.
 This is the technical environment you are working in.
 
 * **Key Pattern**: ABC-based modules, TDD methodology, auto-generated clients
-* **Backend**: FastAPI + Uvicorn, Python (Poetry), Pytest
-* **Frontend**: Vue.js, TypeScript, Vitest
+* **Backend**: FastAPI + Uvicorn, Python (Poetry), Pytest, **Strict MyPy**
+* **Frontend**: Vue.js, TypeScript, Vitest, **Strict TSConfig**
 * **Databases**: PostgreSQL, Redis, MongoDB
 * **DevOps**: GitHub Actions, Makefile
 
