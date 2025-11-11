@@ -151,10 +151,12 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### frontend/src/ (Component Documentation)
 
-| File                                          | Purpose                    |
-| --------------------------------------------- | -------------------------- |
-| **frontend/src/services/README.md**           | Services layer overview    |
-| **frontend/src/services/**tests**/README.md** | Testing guide for services |
+| File                                          | Purpose                                              |
+| --------------------------------------------- | ---------------------------------------------------- |
+| **frontend/src/services/README.md**           | Services layer overview and multi-module API methods |
+| **frontend/src/services/**tests**/README.md** | Testing guide for services                           |
+
+**Note:** Component-level documentation is primarily in `frontend/README.md`. The API Status component is documented in the "API Status Component" section.
 
 ### frontend/src/clients_generated/ (Per-Module Generated Clients)
 

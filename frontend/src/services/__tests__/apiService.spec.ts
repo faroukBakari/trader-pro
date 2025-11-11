@@ -306,4 +306,372 @@ describe('ApiService', () => {
       })
     })
   })
+
+  // NEW: Multi-module method tests
+  describe('getModuleHealth', () => {
+    it('should return health status for broker module', async () => {
+      const healthResponse = await apiService.getModuleHealth('broker')
+
+      expect(healthResponse).toBeDefined()
+      expect(healthResponse).toHaveProperty('status')
+      expect(healthResponse).toHaveProperty('timestamp')
+      expect(healthResponse).toHaveProperty('api_version')
+      expect(healthResponse.module_name).toBe('broker')
+    })
+
+    it('should return health status for datafeed module', async () => {
+      const healthResponse = await apiService.getModuleHealth('datafeed')
+
+      expect(healthResponse).toBeDefined()
+      expect(healthResponse).toHaveProperty('status')
+      expect(healthResponse).toHaveProperty('timestamp')
+      expect(healthResponse).toHaveProperty('api_version')
+      expect(healthResponse.module_name).toBe('datafeed')
+    })
+
+    it('should return different timestamps for each call', async () => {
+      const first = await apiService.getModuleHealth('broker')
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      const second = await apiService.getModuleHealth('broker')
+
+      expect(first.timestamp).not.toBe(second.timestamp)
+    })
+
+    it('should handle concurrent requests for different modules', async () => {
+      const [brokerHealth, datafeedHealth] = await Promise.all([
+        apiService.getModuleHealth('broker'),
+        apiService.getModuleHealth('datafeed'),
+      ])
+
+      expect(brokerHealth.module_name).toBe('broker')
+      expect(datafeedHealth.module_name).toBe('datafeed')
+    })
+
+    it('should validate health response structure', async () => {
+      const health = await apiService.getModuleHealth('broker')
+
+      expect(health).toMatchObject({
+        status: expect.any(String),
+        timestamp: expect.any(String),
+        api_version: expect.any(String),
+        module_name: expect.any(String),
+      })
+
+      // Validate timestamp is ISO format
+      expect(new Date(health.timestamp).toISOString()).toBe(health.timestamp)
+    })
+  })
+
+  describe('getModuleVersions', () => {
+    it('should return versions for broker module', async () => {
+      const versionsResponse = await apiService.getModuleVersions('broker')
+
+      expect(versionsResponse).toBeDefined()
+      expect(versionsResponse).toHaveProperty('current_version')
+      expect(versionsResponse).toHaveProperty('available_versions')
+      expect(versionsResponse.documentation_url).toContain('broker')
+    })
+
+    it('should return versions for datafeed module', async () => {
+      const versionsResponse = await apiService.getModuleVersions('datafeed')
+
+      expect(versionsResponse).toBeDefined()
+      expect(versionsResponse).toHaveProperty('current_version')
+      expect(versionsResponse).toHaveProperty('available_versions')
+      expect(versionsResponse.documentation_url).toContain('datafeed')
+    })
+
+    it('should return valid version structure for each module', async () => {
+      const brokerVersions = await apiService.getModuleVersions('broker')
+
+      Object.values(brokerVersions.available_versions).forEach((version) => {
+        expect(version).toHaveProperty('version')
+        expect(version).toHaveProperty('release_date')
+        expect(version).toHaveProperty('status')
+        expect(typeof version.version).toBe('string')
+      })
+    })
+
+    it('should handle concurrent version requests', async () => {
+      const [brokerVersions, datafeedVersions] = await Promise.all([
+        apiService.getModuleVersions('broker'),
+        apiService.getModuleVersions('datafeed'),
+      ])
+
+      expect(brokerVersions.documentation_url).toContain('broker')
+      expect(datafeedVersions.documentation_url).toContain('datafeed')
+    })
+
+    it('should include current version in available versions', async () => {
+      const versions = await apiService.getModuleVersions('broker')
+
+      const currentVersionExists = Object.values(versions.available_versions).some(
+        (version) => version.version === versions.current_version,
+      )
+
+      expect(currentVersionExists).toBe(true)
+    })
+  })
+
+  describe('getAllModulesHealth', () => {
+    it('should return health for all modules', async () => {
+      const allHealth = await apiService.getAllModulesHealth()
+
+      expect(allHealth).toBeInstanceOf(Map)
+      expect(allHealth.size).toBeGreaterThanOrEqual(2)
+      expect(allHealth.has('broker')).toBe(true)
+      expect(allHealth.has('datafeed')).toBe(true)
+    })
+
+    it('should return ModuleHealth objects for each module', async () => {
+      const allHealth = await apiService.getAllModulesHealth()
+
+      allHealth.forEach((moduleHealth, moduleName) => {
+        expect(moduleHealth).toHaveProperty('moduleName')
+        expect(moduleHealth).toHaveProperty('health')
+        expect(moduleHealth).toHaveProperty('loading')
+        expect(moduleHealth).toHaveProperty('error')
+        expect(moduleHealth).toHaveProperty('responseTime')
+
+        expect(moduleHealth.moduleName).toBe(moduleName)
+        expect(moduleHealth.loading).toBe(false)
+        expect(typeof moduleHealth.responseTime).toBe('number')
+      })
+    })
+
+    it('should include health data when module is healthy', async () => {
+      const allHealth = await apiService.getAllModulesHealth()
+      const brokerHealth = allHealth.get('broker')
+
+      expect(brokerHealth).toBeDefined()
+      expect(brokerHealth!.health).not.toBeNull()
+      expect(brokerHealth!.health).toHaveProperty('status')
+      expect(brokerHealth!.health).toHaveProperty('timestamp')
+      expect(brokerHealth!.error).toBeNull()
+    })
+
+    it('should track response times for each module', async () => {
+      const allHealth = await apiService.getAllModulesHealth()
+
+      allHealth.forEach((moduleHealth) => {
+        expect(moduleHealth.responseTime).toBeGreaterThan(0)
+        expect(moduleHealth.responseTime).toBeLessThan(5000)
+      })
+    })
+
+    it('should handle concurrent getAllModulesHealth calls', async () => {
+      const [first, second] = await Promise.all([
+        apiService.getAllModulesHealth(),
+        apiService.getAllModulesHealth(),
+      ])
+
+      expect(first.size).toBe(second.size)
+      expect(first.has('broker')).toBe(true)
+      expect(second.has('broker')).toBe(true)
+    })
+
+    it('should return consistent module names across calls', async () => {
+      const first = await apiService.getAllModulesHealth()
+      const second = await apiService.getAllModulesHealth()
+
+      const firstModules = Array.from(first.keys()).sort()
+      const secondModules = Array.from(second.keys()).sort()
+
+      expect(firstModules).toEqual(secondModules)
+    })
+
+    it('should not set loading flag in completed response', async () => {
+      const allHealth = await apiService.getAllModulesHealth()
+
+      allHealth.forEach((moduleHealth) => {
+        expect(moduleHealth.loading).toBe(false)
+      })
+    })
+
+    it('should validate ModuleHealth structure', async () => {
+      const allHealth = await apiService.getAllModulesHealth()
+      const brokerHealth = allHealth.get('broker')
+
+      expect(brokerHealth).toMatchObject({
+        moduleName: 'broker',
+        health: expect.any(Object),
+        loading: false,
+        error: null,
+        responseTime: expect.any(Number),
+      })
+    })
+  })
+
+  describe('getAllModulesVersions', () => {
+    it('should return versions for all modules', async () => {
+      const allVersions = await apiService.getAllModulesVersions()
+
+      expect(allVersions).toBeInstanceOf(Map)
+      expect(allVersions.size).toBeGreaterThanOrEqual(2)
+      expect(allVersions.has('broker')).toBe(true)
+      expect(allVersions.has('datafeed')).toBe(true)
+    })
+
+    it('should return ModuleVersions objects for each module', async () => {
+      const allVersions = await apiService.getAllModulesVersions()
+
+      allVersions.forEach((moduleVersions, moduleName) => {
+        expect(moduleVersions).toHaveProperty('moduleName')
+        expect(moduleVersions).toHaveProperty('versions')
+        expect(moduleVersions).toHaveProperty('loading')
+        expect(moduleVersions).toHaveProperty('error')
+
+        expect(moduleVersions.moduleName).toBe(moduleName)
+        expect(moduleVersions.loading).toBe(false)
+      })
+    })
+
+    it('should include versions data when module is accessible', async () => {
+      const allVersions = await apiService.getAllModulesVersions()
+      const brokerVersions = allVersions.get('broker')
+
+      expect(brokerVersions).toBeDefined()
+      expect(brokerVersions!.versions).not.toBeNull()
+      expect(brokerVersions!.versions).toHaveProperty('current_version')
+      expect(brokerVersions!.versions).toHaveProperty('available_versions')
+      expect(brokerVersions!.error).toBeNull()
+    })
+
+    it('should validate versions structure for each module', async () => {
+      const allVersions = await apiService.getAllModulesVersions()
+
+      allVersions.forEach((moduleVersions) => {
+        if (moduleVersions.versions) {
+          expect(moduleVersions.versions).toHaveProperty('current_version')
+          expect(moduleVersions.versions).toHaveProperty('available_versions')
+          expect(typeof moduleVersions.versions.current_version).toBe('string')
+          expect(typeof moduleVersions.versions.available_versions).toBe('object')
+        }
+      })
+    })
+
+    it('should handle concurrent getAllModulesVersions calls', async () => {
+      const [first, second] = await Promise.all([
+        apiService.getAllModulesVersions(),
+        apiService.getAllModulesVersions(),
+      ])
+
+      expect(first.size).toBe(second.size)
+      expect(first.has('broker')).toBe(true)
+      expect(second.has('broker')).toBe(true)
+    })
+
+    it('should return consistent module names across calls', async () => {
+      const first = await apiService.getAllModulesVersions()
+      const second = await apiService.getAllModulesVersions()
+
+      const firstModules = Array.from(first.keys()).sort()
+      const secondModules = Array.from(second.keys()).sort()
+
+      expect(firstModules).toEqual(secondModules)
+    })
+
+    it('should not set loading flag in completed response', async () => {
+      const allVersions = await apiService.getAllModulesVersions()
+
+      allVersions.forEach((moduleVersions) => {
+        expect(moduleVersions.loading).toBe(false)
+      })
+    })
+
+    it('should validate ModuleVersions structure', async () => {
+      const allVersions = await apiService.getAllModulesVersions()
+      const brokerVersions = allVersions.get('broker')
+
+      expect(brokerVersions).toMatchObject({
+        moduleName: 'broker',
+        versions: expect.any(Object),
+        loading: false,
+        error: null,
+      })
+    })
+  })
+
+  describe('Multi-module Integration', () => {
+    it('should cross-validate health and versions for same module', async () => {
+      const health = await apiService.getModuleHealth('broker')
+      const versions = await apiService.getModuleVersions('broker')
+
+      expect(health.api_version).toBe(versions.current_version)
+    })
+
+    it('should work with parallel per-module and all-modules calls', async () => {
+      const [brokerHealth, allHealth] = await Promise.all([
+        apiService.getModuleHealth('broker'),
+        apiService.getAllModulesHealth(),
+      ])
+
+      const brokerFromAll = allHealth.get('broker')
+      expect(brokerFromAll).toBeDefined()
+      expect(brokerFromAll!.health).not.toBeNull()
+      expect(brokerHealth.module_name).toBe(brokerFromAll!.moduleName)
+    })
+
+    it('should handle rapid mixed calls gracefully', async () => {
+      const promises = [
+        apiService.getModuleHealth('broker'),
+        apiService.getAllModulesHealth(),
+        apiService.getModuleVersions('datafeed'),
+        apiService.getAllModulesVersions(),
+        apiService.getModuleHealth('datafeed'),
+        apiService.getModuleVersions('broker'),
+      ]
+
+      const results = await Promise.all(promises)
+
+      expect(results).toHaveLength(6)
+      expect(results[0]).toHaveProperty('status') // broker health
+      expect(results[1]).toBeInstanceOf(Map) // all health
+      expect(results[2]).toHaveProperty('current_version') // datafeed versions
+      expect(results[3]).toBeInstanceOf(Map) // all versions
+      expect(results[4]).toHaveProperty('status') // datafeed health
+      expect(results[5]).toHaveProperty('current_version') // broker versions
+    })
+
+    it('should maintain consistency between per-module and all-modules calls', async () => {
+      const [brokerHealth, allHealth] = await Promise.all([
+        apiService.getModuleHealth('broker'),
+        apiService.getAllModulesHealth(),
+      ])
+
+      const brokerFromAll = allHealth.get('broker')!
+      expect(brokerHealth.module_name).toBe(brokerFromAll.moduleName)
+      expect(brokerHealth.status).toBe(brokerFromAll.health!.status)
+    })
+  })
+
+  describe('Backward Compatibility', () => {
+    it('should ensure getHealthStatus delegates to broker module', async () => {
+      const oldHealth = await apiService.getHealthStatus()
+      const brokerHealth = await apiService.getModuleHealth('broker')
+
+      expect(oldHealth.api_version).toBe(brokerHealth.api_version)
+      expect(oldHealth.status).toBe(brokerHealth.status)
+    })
+
+    it('should ensure getAPIVersions delegates to broker module', async () => {
+      const oldVersions = await apiService.getAPIVersions()
+      const brokerVersions = await apiService.getModuleVersions('broker')
+
+      expect(oldVersions.current_version).toBe(brokerVersions.current_version)
+      expect(oldVersions.documentation_url).toBe(brokerVersions.documentation_url)
+    })
+
+    it('should work with mixed old and new API calls', async () => {
+      const [oldHealth, newHealth, oldVersions, newVersions] = await Promise.all([
+        apiService.getHealthStatus(),
+        apiService.getModuleHealth('broker'),
+        apiService.getAPIVersions(),
+        apiService.getModuleVersions('broker'),
+      ])
+
+      expect(oldHealth.api_version).toBe(newHealth.api_version)
+      expect(oldVersions.current_version).toBe(newVersions.current_version)
+    })
+  })
 })

@@ -123,6 +123,60 @@ VITE_API_BASE_URL=http://localhost:8000
 - **About** (`/about`) - Information about the application
 - **API Status** (`/api-status`) - Real-time monitoring of backend API status
 
+### API Status Component
+
+The API Status component displays health and version information for all integrated backend modules in a responsive grid layout.
+
+#### Features
+
+- **Per-Module Monitoring**: Displays health status for each module independently (broker, datafeed, etc.)
+- **Response Time Tracking**: Shows response time for each module's health check
+- **Documentation Links**: Direct links to OpenAPI docs for each module
+- **AsyncAPI Support**: Automatically detects and shows AsyncAPI spec links for modules with WebSocket support
+- **Error Visibility**: Displays error states for individual module failures (partial failure support)
+- **Mock Support**: Works with fallback client when backend is unavailable
+- **Client Type Indicator**: Shows whether using real backend or mock data
+
+#### Architecture
+
+The component uses a modular multi-module architecture:
+
+- **`ApiAdapter.getIntegratedModules()`** - Provides module registry with metadata (name, docs URL, WebSocket support)
+- **`WsAdapter.getModules()`** - Detects which modules have WebSocket/AsyncAPI support
+- **`ApiService.getAllModulesHealth()`** - Parallel health checks for all modules with error handling
+- **`ApiService.getAllModulesVersions()`** - Retrieves version information for all modules
+
+**For detailed API method documentation**, see [Services README](src/services/README.md#multi-module-api-architecture).
+
+**Type System:**
+
+```typescript
+interface ModuleHealth {
+  moduleName: string
+  health: HealthResponse | null
+  loading: boolean
+  error: string | null
+  responseTime?: number
+}
+
+interface ModuleVersions {
+  moduleName: string
+  versions: APIMetadata | null
+  loading: boolean
+  error: string | null
+}
+```
+
+#### Adding New Modules
+
+When integrating a new backend module into the API Status display:
+
+1. **Add to ApiAdapter registry** - Update `ApiAdapter.getIntegratedModules()` array with new module metadata
+2. **Add routing** - Add switch case in `ApiAdapter.getModuleHealth()` and `getModuleVersions()` for the new module
+3. **WebSocket support** (optional) - If module has WebSocket endpoints, update `WsAdapter.getModules()` to include it
+
+The API Status component will automatically detect and display the new module without requiring component-level changes.
+
 ## Development Workflow
 
 1. Start the FastAPI backend server:

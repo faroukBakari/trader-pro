@@ -1,277 +1,294 @@
 <template>
   <div class="api-status">
-    <h3>API Status</h3>
+    <header>
+      <h2>API Status</h2>
+      <span
+        >Client: <strong>{{ clientType }}</strong></span
+      >
+    </header>
 
-    <!-- Client Type Indicator -->
-    <div class="client-type-indicator">
-      <div v-if="clientType === 'server'" class="client-type server">
-        🌐 Connected to Live Server
-      </div>
-      <div v-else-if="clientType === 'mock'" class="client-type mock">🎭 Using Mock Client</div>
-      <div v-else class="client-type unknown">⏳ Checking Connection...</div>
+    <p v-if="initialLoading" class="loading">Loading API status...</p>
+
+    <div v-else class="modules-grid">
+      <article v-for="module in moduleInfos" :key="module.name" class="module-card">
+        <h3>{{ module.displayName }}</h3>
+
+        <dl>
+          <div class="row">
+            <dt>Health:</dt>
+            <dd :class="['status', getHealthClass(module.name)]">
+              {{ getHealthStatus(module.name) }}
+            </dd>
+          </div>
+
+          <div v-if="getHealthError(module.name)" class="error">
+            {{ getHealthError(module.name) }}
+          </div>
+
+          <template v-else-if="getHealth(module.name)">
+            <div class="row">
+              <dt>Version:</dt>
+              <dd>{{ getHealth(module.name)?.api_version || 'N/A' }}</dd>
+            </div>
+            <div class="row">
+              <dt>Response Time:</dt>
+              <dd>{{ getResponseTime(module.name) }}</dd>
+            </div>
+            <div class="row">
+              <dt>Current Version:</dt>
+              <dd>{{ getCurrentVersion(module.name) }}</dd>
+            </div>
+          </template>
+
+          <div v-else-if="getVersionsError(module.name)" class="error">
+            {{ getVersionsError(module.name) }}
+          </div>
+        </dl>
+
+        <nav>
+          <a :href="module.docsUrl" target="_blank">📚 OpenAPI Docs</a>
+          <a
+            v-if="module.hasWebSocket"
+            :href="`/api/v1/${module.name}/ws/asyncapi`"
+            target="_blank"
+          >
+            📡 AsyncAPI Spec
+          </a>
+        </nav>
+      </article>
     </div>
 
-    <div class="status-grid">
-      <div class="status-item">
-        <h4>Health Check</h4>
-        <div v-if="healthLoading" class="loading">Loading...</div>
-        <div v-else-if="healthError" class="error">Error: {{ healthError }}</div>
-        <div v-else-if="healthData" class="success">
-          <p>Status: {{ healthData.status }}</p>
-          <p>Version: {{ healthData.api_version }}</p>
-          <p>Timestamp: {{ new Date(healthData.timestamp).toLocaleString() }}</p>
-        </div>
-      </div>
-
-      <div class="status-item">
-        <h4>API Versions</h4>
-        <div v-if="versionsLoading" class="loading">Loading...</div>
-        <div v-else-if="versionsError" class="error">Error: {{ versionsError }}</div>
-        <div v-else-if="versionsData" class="success">
-          <div class="card-content">
-            <p>Current: {{ versionsData.current_version }}</p>
-            <ul>
-              <li v-for="version in versionsData.available_versions" :key="version.version">
-                {{ version.version }} - {{ version.status }}
-                <span v-if="version.deprecation_notice" class="deprecated">(deprecated)</span>
-                <span v-if="version.sunset_date" class="sunset"
-                  >sunset: {{ new Date(version.sunset_date).toLocaleDateString() }}</span
-                >
-              </li>
-            </ul>
-          </div>
-          <p class="docs-link">
-            <a :href="versionsData.documentation_url" target="_blank" rel="noopener"
-              >📚 REST API Documentation</a
-            >
-          </p>
-        </div>
-      </div>
-
-      <div class="status-item">
-        <h4>WebSocket API</h4>
-        <div class="success">
-          <div class="card-content">
-            <p>Protocol: AsyncAPI 2.4.0</p>
-            <p>Endpoint: /api/v1/ws</p>
-          </div>
-          <p class="docs-link">
-            <a :href="websocketDocsUrl" target="_blank" rel="noopener"
-              >📡 WebSocket Documentation</a
-            >
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <button @click="refreshData" :disabled="healthLoading || versionsLoading">Refresh</button>
+    <button @click="refreshAll" :disabled="refreshing">
+      {{ refreshing ? 'Refreshing...' : 'Refresh All' }}
+    </button>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ApiService, type HealthResponse, type APIMetadata } from '@/services/apiService'
+import { ApiService } from '@/services/apiService'
+import type { ModuleHealth, ModuleVersions } from '@/types/apiStatus'
 
-// Health check state
-const healthData = ref<HealthResponse | null>(null)
-const healthLoading = ref(false)
-const healthError = ref<string | null>(null)
-
-// Versions state
-const versionsData = ref<APIMetadata | null>(null)
-const versionsLoading = ref(false)
-const versionsError = ref<string | null>(null)
 const apiService = new ApiService()
 
-// Client type state
+// Static module configuration (never changes)
+const moduleInfos = ApiService.getIntegratedModules()
+
+// Reactive state for module data
+const modulesHealth = ref<Map<string, ModuleHealth>>(new Map())
+const modulesVersions = ref<Map<string, ModuleVersions>>(new Map())
+const initialLoading = ref(true)
+const refreshing = ref(false)
 const clientType = ref<'server' | 'mock' | 'unknown'>('unknown')
 
-// WebSocket docs URL
-const websocketDocsUrl = ref(`/api/v1/ws/asyncapi`)
+// Getter functions for reactive access
+const getHealth = (moduleName: string) => modulesHealth.value.get(moduleName)?.health ?? null
 
-const fetchHealth = async () => {
-  healthLoading.value = true
-  healthError.value = null
+const getHealthError = (moduleName: string) => modulesHealth.value.get(moduleName)?.error ?? null
+
+const getHealthStatus = (moduleName: string): string => {
+  const error = getHealthError(moduleName)
+  if (error) return 'Error'
+  return getHealth(moduleName)?.status || 'Unknown'
+}
+
+const getHealthClass = (moduleName: string): string => {
+  if (getHealthError(moduleName)) return 'status-error'
+  if (getHealth(moduleName)?.status === 'ok') return 'status-ok'
+  return 'status-unknown'
+}
+
+const getResponseTime = (moduleName: string): string => {
+  const time = modulesHealth.value.get(moduleName)?.responseTime
+  return time !== undefined ? `${time}ms` : 'N/A'
+}
+
+const getVersionsError = (moduleName: string) =>
+  modulesVersions.value.get(moduleName)?.error ?? null
+
+const getCurrentVersion = (moduleName: string): string => {
+  return modulesVersions.value.get(moduleName)?.versions?.current_version || 'N/A'
+}
+
+// Fetch all data
+const fetchData = async () => {
   try {
-    healthData.value = await apiService.getHealthStatus()
-    // Update client type after successful call
+    const [health, versions] = await Promise.all([
+      apiService.getAllModulesHealth(),
+      apiService.getAllModulesVersions(),
+    ])
+
+    modulesHealth.value = health
+    modulesVersions.value = versions
     clientType.value = apiService.getClientType()
   } catch (error) {
-    healthError.value = error instanceof Error ? error.message : 'Unknown error'
-  } finally {
-    healthLoading.value = false
+    console.error('Failed to fetch API status:', error)
   }
 }
 
-const fetchVersions = async () => {
-  versionsLoading.value = true
-  versionsError.value = null
+const refreshAll = async () => {
+  refreshing.value = true
   try {
-    versionsData.value = await apiService.getAPIVersions()
-    // Update client type after successful call
-    clientType.value = apiService.getClientType()
-  } catch (error) {
-    versionsError.value = error instanceof Error ? error.message : 'Unknown error'
+    await fetchData()
   } finally {
-    versionsLoading.value = false
+    refreshing.value = false
   }
 }
 
-const refreshData = async () => {
-  await Promise.all([fetchHealth(), fetchVersions()])
-}
-
-onMounted(() => {
-  refreshData()
+onMounted(async () => {
+  await fetchData()
+  initialLoading.value = false
 })
 </script>
 
 <style scoped>
 .api-status {
+  padding: 20px;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 10px;
 }
 
-.client-type-indicator {
-  margin-bottom: 10px;
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
 }
 
-.client-type {
-  display: inline-block;
-  padding: 8px 16px;
-  border-radius: 20px;
-  font-weight: 500;
+header span {
   font-size: 14px;
-}
-
-.client-type.server {
-  background: #e8f5e8;
-  color: #2e7d32;
-  border: 1px solid #c8e6c9;
-}
-
-.client-type.mock {
-  background: #fff3e0;
-  color: #f57c00;
-  border: 1px solid #ffcc02;
-}
-
-.client-type.unknown {
-  background: #f5f5f5;
   color: #666;
-  border: 1px solid #ddd;
-}
-
-.status-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin: 10px 0;
-}
-
-.status-item {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 10px;
-  background: #f9f9f9;
-  display: flex;
-  flex-direction: column;
-}
-
-.status-item h4 {
-  margin-top: 0;
-  color: #333;
-}
-
-.status-item .success {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-
-.card-content {
-  flex: 1;
 }
 
 .loading {
+  text-align: center;
+  padding: 40px;
   color: #666;
-  font-style: italic;
+}
+
+.modules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 400px));
+  gap: 20px;
+  margin-bottom: 20px;
+  justify-content: center;
+}
+
+.module-card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 20px;
+  background: #fff;
+}
+
+.module-card h3 {
+  margin: 0 0 20px 0;
+  font-size: 20px;
+  color: #333;
+  border-bottom: 2px solid #007bff;
+  padding-bottom: 8px;
+}
+
+dl {
+  font-size: 14px;
+  background: #f8f9fa;
+  padding: 4px;
+  border-radius: 4px;
+  margin: 0 0 10px 0;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+dt {
+  font-weight: 600;
+  color: #666;
+}
+
+dd {
+  margin: 0;
+  color: #333;
+  font-weight: 500;
+}
+
+.status {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.status-ok {
+  background: #d4edda;
+  color: #155724;
+}
+
+.status-error {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.status-unknown {
+  background: #fff3cd;
+  color: #856404;
 }
 
 .error {
-  color: #d32f2f;
-  font-weight: bold;
+  padding: 8px 12px;
+  background: #f8d7da;
+  border-left: 3px solid #dc3545;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #721c24;
+  margin-top: 8px;
 }
 
-.success {
-  color: #2e7d32;
-}
-
-.success p {
-  margin: 5px 0;
-}
-
-.success ul {
-  margin: 10px 0;
-  padding-left: 20px;
-}
-
-.deprecated {
-  color: #f57c00;
-  font-size: 0.8em;
-}
-
-.sunset {
-  color: #d32f2f;
-  font-size: 0.8em;
-  margin-left: 8px;
-}
-
-.docs-link {
-  margin-top: 10px;
+nav {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
   padding-top: 10px;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid #eee;
 }
 
-.docs-link a {
-  color: #42b883;
+nav a {
+  padding: 6px 12px;
+  background: #007bff;
+  color: white;
   text-decoration: none;
+  border-radius: 4px;
+  font-size: 13px;
+  transition: background 0.2s;
 }
 
-.docs-link a:hover {
-  text-decoration: underline;
+nav a:hover {
+  background: #0056b3;
 }
 
 button {
-  background: #42b883;
+  display: block;
+  margin: 0 auto;
+  padding: 10px 24px;
+  font-size: 16px;
+  background: #28a745;
   color: white;
   border: none;
-  padding: 10px 20px;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 16px;
+  transition: background 0.2s;
 }
 
 button:hover:not(:disabled) {
-  background: #369870;
+  background: #218838;
 }
 
 button:disabled {
-  background: #ccc;
+  background: #6c757d;
   cursor: not-allowed;
-}
-
-@media (max-width: 1024px) {
-  .status-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (min-width: 1025px) and (max-width: 1400px) {
-  .api-status {
-    max-width: 100%;
-    padding: 20px 40px;
-  }
 }
 </style>

@@ -96,6 +96,16 @@ export class WsAdapter implements WsAdapterType {
       brokerWsUrl, 'broker-connection', mapBrokerConnectionStatus
     )
   }
+
+  /**
+   * Get list of modules with WebSocket support.
+   * Static method - hardcoded list based on which modules have WebSocket endpoints wired.
+   *
+   * @returns Array of module names that have WebSocket endpoints
+   */
+  static getModules(): string[] {
+    return ['broker', 'datafeed']
+  }
 }
 
 export interface wsMocker {
@@ -126,5 +136,15 @@ export class WsFallback implements Partial<WsAdapterType> {
     if (wsMocker.executionsMocker) this.executions = new WebSocketFallback<ExecutionSubscriptionRequest, Execution>(wsMocker.executionsMocker.bind(wsMocker))
     if (wsMocker.equityMocker) this.equity = new WebSocketFallback<EquitySubscriptionRequest, EquityData>(wsMocker.equityMocker.bind(wsMocker))
     if (wsMocker.brokerConnectionMocker) this.brokerConnection = new WebSocketFallback<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>(wsMocker.brokerConnectionMocker.bind(wsMocker))
+  }
+
+  /**
+   * Get list of modules with WebSocket support.
+   * Static method - hardcoded list based on which modules have WebSocket endpoints wired.
+   *
+   * @returns Array of module names that have WebSocket endpoints
+   */
+  static getModules(): string[] {
+    return ['broker', 'datafeed']
   }
 }
