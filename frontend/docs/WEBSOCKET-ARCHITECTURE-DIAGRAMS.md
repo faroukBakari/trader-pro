@@ -1,746 +1,677 @@
-# WebSocket Client Architecture Diagrams
+# WebSocket Architecture Diagrams
 
-**Date**: October 13, 2025
-**Version**: 1.0.0
+**Date**: November 11, 2025  
+**Version**: 2.0.0  
+**Status**: ✅ Production Ready
 
 ## Overview
 
-This document provides visual diagrams to help understand the WebSocket client architecture, data flow, and patterns used in the Trading Pro frontend.
+Visual reference for the WebSocket architecture in Trading Pro frontend, showing the WsAdapter facade pattern, modular backend integration, and centralized subscription management.
 
 ---
 
-## 1. Component Architecture
+## 1. Complete System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          Application Layer                              │
-│                                                                         │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐    │
-│  │ DatafeedService  │  │  OrderService    │  │ AccountService   │    │
-│  │                  │  │                  │  │                  │    │
-│  │ - subscribeBars  │  │ - placeOrder     │  │ - getBalance     │    │
-│  │ - unsubscribeBars│  │ - cancelOrder    │  │ - watchAccount   │    │
-│  │ - getBars (HTTP) │  │ - watchOrders    │  │                  │    │
-│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘    │
-│           │                     │                      │               │
-│           │ Uses interface      │                      │               │
-└───────────┼─────────────────────┼──────────────────────┼───────────────┘
-            │                     │                      │
-            │                     │                      │
-┌───────────▼─────────────────────▼──────────────────────▼───────────────┐
-│                          Client Layer                                   │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │  BarsWebSocketInterface                                         │  │
-│  │  = WebSocketInterface<BarsSubscriptionRequest, Bar>             │  │
-│  └─────────────────────────────────────────────────────────────────┘  │
-│                            │                                            │
-│                            │ Created by                                 │
-│                            ▼                                            │
-│  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │  BarsWebSocketClientFactory()                                   │  │
-│  │  └─> new WebSocketClientBase<Request, Data>('bars')            │  │
-│  └─────────────────────────────────────────────────────────────────┘  │
-│                                                                         │
-│  Similar patterns for:                                                  │
-│  - QuotesWebSocketClientFactory() → 'quotes'                           │
-│  - TradesWebSocketClientFactory() → 'trades'                           │
-│  - OrdersWebSocketClientFactory() → 'orders'                           │
-│                                                                         │
-└───────────────────────────────┬─────────────────────────────────────────┘
-                                │
-                                │ Uses/Composes
-                                │
-┌───────────────────────────────▼─────────────────────────────────────────┐
-│                          Base Layer                                     │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │ WebSocketClientBase<TParams, TData>                             │  │
-│  │                                                                  │  │
-│  │ Static (Shared):                                                 │  │
-│  │  - instances: Map<url, instance>  (Singleton registry)          │  │
-│  │  - ws: WebSocket | null           (Shared connection)           │  │
-│  │                                                                  │  │
-│  │ Instance (Per URL):                                              │  │
-│  │  - subscriptions: Map<id, state>  (Active subscriptions)        │  │
-│  │  - pendingRequests: Map<id, ...>  (Awaiting responses)          │  │
-│  │  - referenceCount: number         (Usage tracking)              │  │
-│  │  - topicType: string              (e.g., 'bars', 'quotes')      │  │
-│  │                                                                  │  │
-│  │ Methods:                                                         │  │
-│  │  - subscribe()      (Send request, wait confirmation)           │  │
-│  │  - unsubscribe()    (Send request, cleanup)                     │  │
-│  │  - sendRequest()    (Send + await response)                     │  │
-│  │  - handleMessage()  (Route incoming messages)                   │  │
-│  │  - connect()        (Establish WebSocket)                       │  │
-│  │  - disconnect()     (Close WebSocket)                           │  │
-│  └─────────────────────────────────────────────────────────────────┘  │
-│                                                                         │
-└───────────────────────────────┬─────────────────────────────────────────┘
-                                │
-                                │ Uses
-                                │
-┌───────────────────────────────▼─────────────────────────────────────────┐
-│                       Native Browser API                                │
-│                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │ WebSocket (Browser Native)                                      │  │
-│  │                                                                  │  │
-│  │  - send()                                                        │  │
-│  │  - close()                                                       │  │
-│  │  - onopen                                                        │  │
-│  │  - onmessage                                                     │  │
-│  │  - onerror                                                       │  │
-│  │  - onclose                                                       │  │
-│  └─────────────────────────────────────────────────────────────────┘  │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 2. Singleton Pattern Visualization
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                   WebSocket Singleton Management                        │
-└─────────────────────────────────────────────────────────────────────────┘
-
-State: Empty
-┌──────────────────────────────────────┐
-│ WebSocketClientBase.instances = {}   │
-└──────────────────────────────────────┘
-
-
-Event: BarsWebSocketClientFactory() called (URL: ws://server)
-┌──────────────────────────────────────────────────────────────┐
-│ WebSocketClientBase.instances = {                            │
-│   'ws://server': {                                           │
-│     referenceCount: 1,                                       │
-│     ws: WebSocket(OPEN),                                     │
-│     subscriptions: {},                                       │
-│     topicType: 'bars'                                        │
-│   }                                                          │
-│ }                                                            │
-└──────────────────────────────────────────────────────────────┘
-                      │
-                      │ Returns client instance #1
-                      ▼
-                ┌──────────────┐
-                │ Client 1     │
-                │ (bars)       │
-                └──────────────┘
-
-
-Event: QuotesWebSocketClientFactory() called (URL: ws://server)
-┌──────────────────────────────────────────────────────────────┐
-│ WebSocketClientBase.instances = {                            │
-│   'ws://server': {                                           │
-│     referenceCount: 2,  ◄─── Incremented!                   │
-│     ws: WebSocket(OPEN), ◄─── Same connection reused!       │
-│     subscriptions: {},                                       │
-│     topicType: 'bars,quotes' ◄─── Multiple types supported  │
-│   }                                                          │
-│ }                                                            │
-└──────────────────────────────────────────────────────────────┘
-                      │
-                      │ Returns same instance
-                      ▼
-        ┌──────────────┐    ┌──────────────┐
-        │ Client 1     │    │ Client 2     │
-        │ (bars)       │    │ (quotes)     │
-        └──────────────┘    └──────────────┘
-              │                    │
-              └──────────┬─────────┘
-                         │
-                  Both share same
-                  WebSocket connection!
-
-
-Event: Client 1 calls dispose()
-┌──────────────────────────────────────────────────────────────┐
-│ WebSocketClientBase.instances = {                            │
-│   'ws://server': {                                           │
-│     referenceCount: 1,  ◄─── Decremented!                   │
-│     ws: WebSocket(OPEN), ◄─── Still open (Client 2 active)  │
-│     subscriptions: {},                                       │
-│     topicType: 'quotes'                                      │
-│   }                                                          │
-│ }                                                            │
-└──────────────────────────────────────────────────────────────┘
-                      │
-                      │ Connection remains alive
-                      ▼
-                ┌──────────────┐
-                │ Client 2     │
-                │ (quotes)     │
-                └──────────────┘
-
-
-Event: Client 2 calls dispose()
-┌──────────────────────────────────────────────────────────────┐
-│ WebSocketClientBase.instances = {}  ◄─── Cleaned up!        │
-│                                                              │
-│ WebSocket connection closed and removed                      │
-└──────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 3. Subscription Flow Sequence
-
-```
-┌──────────┐    ┌──────────────┐    ┌──────────────┐      ┌────────┐
-│ Service  │    │ BarsWSClient │    │ WSClientBase │      │ Server │
-└────┬─────┘    └──────┬───────┘    └──────┬───────┘      └───┬────┘
-     │                 │                   │                  │
-     │ subscribeToBars('AAPL', '1', cb)    │                  │
-     ├────────────────>│                   │                  │
-     │                 │                   │                  │
-     │                 │ subscribe(        │                  │
-     │                 │   'bars.subscribe',                  │
-     │                 │   { symbol: 'AAPL', resolution: '1' },
-     │                 │   'bars:AAPL:1',  │                  │
-     │                 │   'bars.update',  │                  │
-     │                 │   callback        │                  │
-     │                 │ )                 │                  │
-     │                 ├──────────────────>│                  │
-     │                 │                   │                  │
-     │                 │                   │ 1. Create subscription state
-     │                 │                   │    (id, topic, callback, unconfirmed)
-     │                 │                   │                  │
-     │                 │                   │ 2. sendRequest() │
-     │                 │                   ├─────────────────>│
-     │                 │                   │ { type: 'bars.subscribe',
-     │                 │                   │   payload: { symbol: 'AAPL', resolution: '1' } }
-     │                 │                   │                  │
-     │                 │                   │                  │ Process request
-     │                 │                   │                  │ Subscribe to topic
-     │                 │                   │                  │
-     │                 │                   │ 3. Response      │
-     │                 │                   │<─────────────────┤
-     │                 │                   │ { type: 'bars.subscribe.response',
-     │                 │                   │   payload: { status: 'ok', topic: 'bars:AAPL:1' } }
-     │                 │                   │                  │
-     │                 │                   │ 4. Verify:       │
-     │                 │                   │    - topic matches
-     │                 │                   │    - status == 'ok'
-     │                 │                   │                  │
-     │                 │                   │ 5. Mark subscription confirmed
-     │                 │                   │                  │
-     │                 │ subscriptionId    │                  │
-     │                 │<──────────────────┤                  │
-     │                 │                   │                  │
-     │ subscriptionId  │                   │                  │
-     │<────────────────┤                   │                  │
-     │                 │                   │                  │
-     │ Store subId     │                   │                  │
-     │                 │                   │                  │
-     │                 │                   │                  │
-     │                 │                   │ 6. Bar Update    │
-     │                 │                   │<─────────────────┤
-     │                 │                   │ { type: 'bars.update',
-     │                 │                   │   payload: { time: ..., open: ..., ... } }
-     │                 │                   │                  │
-     │                 │                   │ 7. Route to confirmed
-     │                 │                   │    subscriptions with
-     │                 │                   │    updateType == 'bars.update'
-     │                 │                   │                  │
-     │                 │ callback(bar)     │                  │
-     │                 │<──────────────────┤                  │
-     │                 │                   │                  │
-     │ onTick(bar)     │                   │                  │
-     │<────────────────┤                   │                  │
-     │                 │                   │                  │
-     │ Forward to      │                   │                  │
-     │ TradingView     │                   │                  │
-     │                 │                   │                  │
-```
-
----
-
-## 4. Topic-Based Routing
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                   Topic-Based Message Routing                           │
-└─────────────────────────────────────────────────────────────────────────┘
-
-Server broadcasts:
-  { type: 'bars.update', payload: { time: ..., open: ... } }
-                    │
-                    ▼
-          WSClientBase.handleMessage()
-                    │
-                    │ Check: Is this an update message?
-                    │ (type.endsWith('.update'))
-                    │
-                    ▼ YES
-          routeUpdateMessage('bars.update', payload)
-                    │
-                    ▼
-     Loop through all subscriptions:
-
-     ┌─────────────────────────────────────────────────────┐
-     │ Subscription 1:                                     │
-     │   id: 'sub_123'                                     │
-     │   topic: 'bars:AAPL:1'                              │
-     │   updateType: 'bars.update'  ◄─── MATCH!           │
-     │   confirmed: true            ◄─── CONFIRMED!       │
-     │   callback: (bar) => { ... }                        │
-     │                                                     │
-     │ Action: Call callback(payload) ✅                   │
-     └─────────────────────────────────────────────────────┘
-
-     ┌─────────────────────────────────────────────────────┐
-     │ Subscription 2:                                     │
-     │   id: 'sub_456'                                     │
-     │   topic: 'bars:GOOGL:5'                             │
-     │   updateType: 'bars.update'  ◄─── MATCH!           │
-     │   confirmed: true            ◄─── CONFIRMED!       │
-     │   callback: (bar) => { ... }                        │
-     │                                                     │
-     │ Action: Call callback(payload) ✅                   │
-     └─────────────────────────────────────────────────────┘
-
-     ┌─────────────────────────────────────────────────────┐
-     │ Subscription 3:                                     │
-     │   id: 'sub_789'                                     │
-     │   topic: 'quotes:TSLA'                              │
-     │   updateType: 'quotes.update' ◄─── NO MATCH!       │
-     │   confirmed: true                                   │
-     │   callback: (quote) => { ... }                      │
-     │                                                     │
-     │ Action: Skip ⏭️                                     │
-     └─────────────────────────────────────────────────────┘
-
-     ┌─────────────────────────────────────────────────────┐
-     │ Subscription 4:                                     │
-     │   id: 'sub_101'                                     │
-     │   topic: 'bars:MSFT:D'                              │
-     │   updateType: 'bars.update'  ◄─── MATCH!           │
-     │   confirmed: false           ◄─── NOT CONFIRMED!   │
-     │   callback: (bar) => { ... }                        │
-     │                                                     │
-     │ Action: Skip (waiting for confirmation) ⏭️          │
-     └─────────────────────────────────────────────────────┘
-```
-
----
-
-## 5. Connection State Machine
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                   WebSocket Connection States                           │
-└─────────────────────────────────────────────────────────────────────────┘
-
-                        [INITIAL STATE]
-                              │
-                              │ getInstance(config)
-                              ▼
-                        [CONNECTING]
-                              │
-                              │ Attempt 1: delay 0ms
-                              ▼
-                        ┌─────────┐
-                        │ ws.open │
-                        └────┬────┘
-                             │
-                ┌────────────┴────────────┐
-                │                         │
-            SUCCESS                    FAILURE
-                │                         │
-                ▼                         ▼
-          [CONNECTED] ◄────────────  [RETRY DELAY]
-                │                         │
-                │                         │ Exponential backoff
-                │                         │ (1s, 2s, 4s, 8s...)
-                │                         │
-                │                         ▼
-                │                    [CONNECTING]
-                │                         │
-                │                         │ Max attempts reached?
-                │                         │
-                │                         ├──YES──> [FAILED]
-                │                         │
-                │                         └──NO───> (retry)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Application Layer                                  │
+│  (Vue Components, TradingView Integration)                                  │
+└────────────────────────────────┬────────────────────────────────────────────┘
+                                 │
+                                 │ Uses services
+                                 │
+┌────────────────────────────────▼────────────────────────────────────────────┐
+│                          Service Layer                                      │
+│  ┌─────────────────────┐  ┌─────────────────────────────────────────────┐  │
+│  │ DatafeedService     │  │ BrokerTerminalService                       │  │
+│  │                     │  │                                             │  │
+│  │ - subscribeBars()   │  │ - subscribeOrders()                         │  │
+│  │ - subscribeQuotes() │  │ - subscribePositions()                      │  │
+│  │ - unsubscribeBars() │  │ - subscribeExecutions()                     │  │
+│  └──────────┬──────────┘  └──────────┬──────────────────────────────────┘  │
+└─────────────┼────────────────────────┼─────────────────────────────────────┘
+              │                        │
+              │ Uses wsAdapter         │
+              │                        │
+┌─────────────▼────────────────────────▼─────────────────────────────────────┐
+│                          Adapter Layer (Facade)                             │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │ WsAdapter implements WsAdapterType                                    │ │
+│  │ ┌───────────────────────┐  ┌───────────────────────────────────────┐ │ │
+│  │ │ Datafeed Clients      │  │ Broker Clients                        │ │ │
+│  │ │ ─────────────────────  │  │ ──────────────────────────────────────│ │ │
+│  │ │ bars: WsClient        │  │ orders: WsClient                      │ │ │
+│  │ │ quotes: WsClient      │  │ positions: WsClient                   │ │ │
+│  │ │                       │  │ executions: WsClient                  │ │ │
+│  │ │                       │  │ equity: WsClient                      │ │ │
+│  │ │                       │  │ brokerConnection: WsClient            │ │ │
+│  │ └───────┬───────────────┘  └───────┬───────────────────────────────┘ │ │
+│  └──────────┼──────────────────────────┼─────────────────────────────────┘ │
+└─────────────┼──────────────────────────┼─────────────────────────────────┘
+              │                          │
+              │ All clients use          │
+              │                          │
+┌─────────────▼──────────────────────────▼─────────────────────────────────────┐
+│                          Client Layer                                        │
+│  ┌────────────────────────────────────────────────────────────────────────┐ │
+│  │ WebSocketClient<TParams, TBackendData, TData>                          │ │
+│  │                                                                         │ │
+│  │ - ws: WebSocketBase (singleton reference)                              │ │
+│  │ - wsRoute: string (e.g., 'bars', 'orders')                             │ │
+│  │ - dataMapper: (TBackendData) => TData                                  │ │
+│  │ - listeners: Map<listenerId, Set<topic>>                               │ │
+│  │                                                                         │ │
+│  │ Methods:                                                                │ │
+│  │ - subscribe(listenerId, params, callback): Promise<topic>              │ │
+│  │ - unsubscribe(listenerId, topic?): Promise<void>                       │ │
+│  └────────────────────────────────┬───────────────────────────────────────┘ │
+└───────────────────────────────────┼───────────────────────────────────────┘
+                                    │
+                                    │ Uses singleton + mapper
+                                    │
+┌───────────────────────────────────▼─────────────────────────────────────────┐
+│                          Base + Mapper Layers                               │
+│  ┌───────────────────────────┐  ┌───────────────────────────────────────┐  │
+│  │ WebSocketBase (Singleton) │  │ Mappers (mappers.ts)                  │  │
+│  │ ───────────────────────── │  │ ──────────────────────────────────────│  │
+│  │ Per URL singleton         │  │ mapQuoteData(backend) → frontend      │  │
+│  │                           │  │ mapOrder(backend) → frontend          │  │
+│  │ - getInstance(url)        │  │ mapPosition(backend) → frontend       │  │
+│  │ - subscriptions: Map      │  │ mapExecution(backend) → frontend      │  │
+│  │ - pendingRequests: Map    │  │ mapEquityData(backend) → frontend     │  │
+│  │ - ws: WebSocket           │  │ mapBrokerConnectionStatus(...)        │  │
+│  │                           │  │                                       │  │
+│  │ - subscribe(...)          │  │ Type isolation:                       │  │
+│  │ - unsubscribe(...)        │  │ Backend types ONLY in mappers.ts      │  │
+│  │ - sendRequest(...)        │  │ Services NEVER import backend types   │  │
+│  │ - handleMessage(...)      │  │                                       │  │
+│  │ - resubscribeAll()        │  │                                       │  │
+│  └───────────┬───────────────┘  └───────────────────────────────────────┘  │
+└───────────────┼─────────────────────────────────────────────────────────────┘
                 │
-                │ WebSocket.onclose or onerror
-                ▼
-          [DISCONNECTED]
+                │ Uses native API
                 │
-                │ config.reconnect == true?
-                │
-                ├──YES──> [RECONNECTING]
-                │              │
-                │              │ 1. Clear pending requests
-                │              │ 2. Attempt reconnection
-                │              │ 3. Resubscribe all confirmed
-                │              │
-                │              ▼
-                │         [CONNECTING] (loop back)
-                │
-                └──NO───> [TERMINATED]
+┌───────────────▼─────────────────────────────────────────────────────────────┐
+│                          Native Browser API                                 │
+│  ┌───────────────────────────────────────────────────────────────────────┐ │
+│  │ WebSocket (Browser Native)                                            │ │
+│  │ - send(message)                                                        │ │
+│  │ - close()                                                              │ │
+│  │ - onopen, onmessage, onerror, onclose                                 │ │
+│  └───────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 6. Message Type Flow
+## 2. Modular Backend Integration
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    Message Types and Handling                           │
-└─────────────────────────────────────────────────────────────────────────┘
+Frontend WsAdapter                 Backend Modules
+──────────────────────             ───────────────
 
-Incoming Message from Server
-       │
-       ▼
-  Parse JSON → { type: string, payload: any }
-       │
-       ▼
-  Check message type
-       │
-       ├─────────────────────────────────────────────┐
-       │                                             │
-       │ Type ends with '.response'?                 │
-       │                                             │
-  ┌────▼────┐                                  ┌─────▼─────┐
-  │   YES   │                                  │    NO     │
-  └────┬────┘                                  └─────┬─────┘
-       │                                             │
-       │ Look up in pendingRequests                  │ Type ends with '.update'?
-       │ using requestId                             │
-       ▼                                        ┌────▼────┐
-  ┌──────────────────────┐                     │   YES   │
-  │ Found?               │                     └────┬────┘
-  └──┬────────────────┬──┘                          │
-     │ YES            │ NO                           │ Route to subscriptions
-     │                │                              ▼
-     ▼                ▼                    ┌───────────────────┐
-  Resolve         Log 'No                 │ Loop through all  │
-  promise         matching                │ subscriptions     │
-  with payload    request'                └────────┬──────────┘
-                                                   │
-                                                   │ Filter by:
-                                                   │ - confirmed == true
-                                                   │ - updateType matches
-                                                   │
-                                                   ▼
-                                          ┌─────────────────────┐
-                                          │ Call each callback  │
-                                          │ callback(payload)   │
-                                          └─────────────────────┘
-
-
-Message Type Examples:
-
-┌────────────────────────────────────────────────────────────────┐
-│ REQUEST (Client → Server)                                      │
-│  type: 'bars.subscribe'                                        │
-│  payload: { symbol: 'AAPL', resolution: '1' }                  │
-└────────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌────────────────────────────────────────────────────────────────┐
-│ RESPONSE (Server → Client)                                     │
-│  type: 'bars.subscribe.response'  ◄─── Matches pattern         │
-│  payload: { status: 'ok', topic: 'bars:AAPL:1' }              │
-└────────────────────────────────────────────────────────────────┘
-
-┌────────────────────────────────────────────────────────────────┐
-│ UPDATE (Server → Client, broadcast)                            │
-│  type: 'bars.update'  ◄─── Ends with '.update'                 │
-│  payload: { time: ..., open: ..., high: ..., ... }            │
-└────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 7. Error Handling Flow
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        Error Handling                                   │
-└─────────────────────────────────────────────────────────────────────────┘
-
-Subscription Request
-       │
-       ▼
-  Send subscribe message
-       │
-       ├──────────────────────────────────────┐
-       │                                      │
-  Wait for response                      Timeout (5s)
-       │                                      │
-       ▼                                      ▼
-  Response received                    ┌──────────────┐
-       │                               │ Reject with  │
-       │                               │ timeout error│
-       ▼                               └──────────────┘
-  Check status field                          │
-       │                                      │
-       ├────────────────────┐                 │
-       │                    │                 │
-  status == 'ok'       status == 'error'      │
-       │                    │                 │
-       ▼                    ▼                 │
-  Check topic          ┌──────────────┐      │
-       │               │ Reject with  │      │
-       │               │ server error │      │
-       ▼               └──────────────┘      │
-  topic matches?              │              │
-       │                      │              │
-  ┌────┴────┐                 │              │
-  │ YES     │ NO              │              │
-  ▼         ▼                 │              │
-SUCCESS  ┌──────────────┐    │              │
-  │      │ Reject with  │    │              │
-  │      │ topic error  │    │              │
-  │      └──────────────┘    │              │
-  │            │              │              │
-  │            └──────────────┴──────────────┘
-  │                          │
-  │                          ▼
-  │                    [CATCH BLOCK]
-  │                          │
-  │                          ▼
-  │                    Log error
-  │                    Notify service
-  │                    (optional: retry)
-  │
-  ▼
-Mark subscription
-as confirmed
+┌─────────────────────┐
+│ WsAdapter           │
+│                     │
+│ Datafeed Clients    │  ─────────────────────────┐
+│ ─────────────────── │                           │
+│ • bars              │  ──┐                      │
+│ • quotes            │    │                      │
+└─────────────────────┘    │  WebSocketBase       │
+                           │  singleton for:      │
+                           │  /v1/datafeed/ws     │
+                           └──────────────────────┼──────────┐
+                                                  │          │
+                                                  ▼          │
+                           ┌──────────────────────────────┐  │
+                           │ Backend: datafeed module     │  │
+                           │ /v1/datafeed/ws              │  │
+                           │                              │  │
+                           │ Routers:                     │  │
+                           │ • bars.subscribe             │  │
+                           │ • bars.unsubscribe           │  │
+                           │ • bars.update (pub-sub)      │  │
+                           │ • quotes.subscribe           │  │
+                           │ • quotes.unsubscribe         │  │
+                           │ • quotes.update (pub-sub)    │  │
+                           └──────────────────────────────┘  │
+                                                              │
+┌─────────────────────┐                                      │
+│ WsAdapter           │                                      │
+│                     │                                      │
+│ Broker Clients      │  ─────────────────────────┐         │
+│ ─────────────────── │                           │         │
+│ • orders            │  ──┐                      │         │
+│ • positions         │    │                      │         │
+│ • executions        │    │  WebSocketBase       │         │
+│ • equity            │    │  singleton for:      │         │
+│ • brokerConnection  │    │  /v1/broker/ws       │         │
+└─────────────────────┘    └──────────────────────┼─────────┼─────┐
+                                                  │         │     │
+                                                  ▼         │     │
+                           ┌──────────────────────────────┐  │     │
+                           │ Backend: broker module       │  │     │
+                           │ /v1/broker/ws                │  │     │
+                           │                              │  │     │
+                           │ Routers:                     │  │     │
+                           │ • orders.subscribe           │  │     │
+                           │ • orders.update (pub-sub)    │  │     │
+                           │ • positions.subscribe        │  │     │
+                           │ • positions.update           │  │     │
+                           │ • executions.subscribe       │  │     │
+                           │ • executions.update          │  │     │
+                           │ • equity.subscribe           │  │     │
+                           │ • equity.update              │  │     │
+                           │ • broker-connection.subscribe│  │     │
+                           │ • broker-connection.update   │  │     │
+                           └──────────────────────────────┘  │     │
+                                                              │     │
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓     │
+┃ Result: 2 WebSocket Connections Total                     ┃     │
+┃ - One per backend module                                  ┃     │
+┃ - Efficient resource usage                                ┃     │
+┃ - Module independence (deploy separately)                 ┃     │
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛     │
+       │                                                            │
+       └────────────────────────────────────────────────────────────┘
+                       Both connections active simultaneously
 ```
 
 ---
 
-## 8. Reconnection Strategy
+## 3. Singleton Pattern per URL
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     Reconnection Flow                                   │
-└─────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│                   WebSocketBase Singleton Management                      │
+└───────────────────────────────────────────────────────────────────────────┘
 
-Connection Lost (WebSocket.onclose)
-       │
-       ▼
-  config.reconnect == true?
-       │
-  ┌────┴────┐
-  │   NO    │ YES
-  ▼         ▼
-[DONE]   [RECONNECTING]
-              │
-              ▼
-    Clear pending requests
-    (reject all with error)
-              │
-              ▼
-    Attempt reconnection
-    with exponential backoff
-              │
-         ┌────┴────┐
-         │ SUCCESS │ FAILURE (max retries)
-         ▼         ▼
-   [CONNECTED]  [FAILED]
-         │          │
-         ▼          └──> Notify service
-    Resubscribe         (connection lost)
-    all confirmed
-    subscriptions
-         │
-         ▼
-    For each subscription:
-      1. Send subscribe request
-      2. Wait for confirmation
-      3. Mark as confirmed
-         │
-         ▼
-    [FULLY RESTORED]
-         │
-         └──> Resume normal operation
-
-Exponential Backoff:
-  Attempt 1: 0ms
-  Attempt 2: 1000ms
-  Attempt 3: 2000ms
-  Attempt 4: 4000ms
-  Attempt 5: 8000ms
-  (Max attempts: 5)
-```
-
----
-
-## 9. Factory Pattern Usage
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     Factory Pattern                                     │
-└─────────────────────────────────────────────────────────────────────────┘
-
-Application Code:
-┌────────────────────────────────────────────────────────┐
-│ import { BarsWebSocketClientFactory }                 │
-│                                                        │
-│ const client = BarsWebSocketClientFactory()           │
-└────────────────────────┬───────────────────────────────┘
-                         │
-                         │ Calls factory
-                         ▼
-Factory Implementation:
-┌────────────────────────────────────────────────────────┐
-│ export function BarsWebSocketClientFactory() {        │
-│   return new WebSocketClientBase<                     │
-│     BarsSubscriptionRequest,                          │
-│     Bar                                               │
-│   >('bars')                                           │
-│ }                                                      │
-└────────────────────────┬───────────────────────────────┘
-                         │
-                         │ Creates instance
-                         ▼
-Base Class Constructor:
-┌────────────────────────────────────────────────────────┐
-│ constructor(topicType: string) {                       │
-│   this.topicType = topicType  // 'bars'              │
-│   // Initialize subscriptions, etc.                   │
-│ }                                                      │
-└────────────────────────┬───────────────────────────────┘
-                         │
-                         │ Returns
-                         ▼
-┌────────────────────────────────────────────────────────┐
-│ Type: BarsWebSocketInterface                           │
-│ = WebSocketInterface<BarsSubscriptionRequest, Bar>    │
-│                                                        │
-│ Methods:                                               │
-│  - subscribe(params, callback): Promise<string>       │
-│  - unsubscribe(id): Promise<void>                     │
-└────────────────────────────────────────────────────────┘
+Initial State:
+┌───────────────────────────────────────┐
+│ WebSocketBase.instances = Map()       │
+│ (empty)                               │
+└───────────────────────────────────────┘
 
 
-Type Safety Guarantee:
-┌────────────────────────────────────────────────────────┐
-│ const client = BarsWebSocketClientFactory()           │
-│                                                        │
-│ // ✅ TypeScript knows:                               │
-│ // - params must be BarsSubscriptionRequest          │
-│ // - callback receives Bar                           │
-│                                                        │
-│ await client.subscribe(                               │
-│   { symbol: 'AAPL', resolution: '1' }, // Typed!     │
-│   (bar: Bar) => {                      // Typed!     │
-│     console.log(bar.open)              // Typed!     │
-│   }                                                   │
-│ )                                                     │
-└────────────────────────────────────────────────────────┘
-```
-
----
-
-## 10. Integration with DatafeedService
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│              DatafeedService Integration                                │
-└─────────────────────────────────────────────────────────────────────────┘
-
+Step 1: WsAdapter creates bars client (URL: /v1/datafeed/ws)
 ┌──────────────────────────────────────────────────────────────────────┐
-│ TradingView Chart Library                                           │
-│                                                                      │
-│  subscribeBars(symbolInfo, resolution, onTick, listenerGuid)        │
-└────────────────────────────┬─────────────────────────────────────────┘
-                             │
-                             │ Calls
-                             ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│ DatafeedService (Adapter)                                           │
-│                                                                      │
-│  subscribeBars(symbolInfo, resolution, onTick, listenerGuid) {      │
-│    if (!this.wsClient) return                                       │
-│                                                                      │
-│    this.wsClient.subscribe(                                         │
-│      { symbol: symbolInfo.name, resolution },                       │
-│      (bar) => {                                                     │
-│        onTick(bar)  // Forward to TradingView                       │
-│      }                                                              │
-│    ).then(wsSubscriptionId => {                                     │
-│      this.subscriptions.set(listenerGuid, { wsSubscriptionId })    │
-│    })                                                               │
-│  }                                                                  │
-└────────────────────────────┬─────────────────────────────────────────┘
-                             │
-                             │ Uses
-                             ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│ BarsWebSocketClient                                                  │
-│                                                                      │
-│  subscribe(params, callback) {                                      │
-│    return this.instance.subscribe(                                  │
-│      'bars.subscribe',                                              │
-│      params,                                                        │
-│      topic,                                                         │
-│      'bars.update',                                                 │
-│      callback                                                       │
-│    )                                                                │
-│  }                                                                  │
-└────────────────────────────┬─────────────────────────────────────────┘
-                             │
-                             │ Delegates to
-                             ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│ WebSocketClientBase                                                  │
-│                                                                      │
-│  async subscribe(...) {                                             │
-│    // 1. Send subscribe request                                     │
-│    // 2. Wait for confirmation                                      │
-│    // 3. Register callback                                          │
-│    // 4. Return subscription ID                                     │
-│  }                                                                  │
-└────────────────────────────┬─────────────────────────────────────────┘
-                             │
-                             │ Communicates with
-                             ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│ Backend (FastWS)                                                     │
-│                                                                      │
-│  @router.send("subscribe")                                          │
-│  async def send_subscribe(...):                                     │
-│    client.subscribe(topic)                                          │
-│    return SubscriptionResponse(status='ok', topic=...)              │
-│                                                                      │
-│  @router.recv("update")                                             │
-│  async def update(...):                                             │
-│    # Broadcast to all subscribed clients                            │
+│ WebSocketBase.instances = Map {                                      │
+│   '/v1/datafeed/ws' => WebSocketBase {                               │
+│     wsUrl: '/v1/datafeed/ws',                                        │
+│     ws: WebSocket(CONNECTING...),                                    │
+│     subscriptions: Map(),                                            │
+│     pendingRequests: Map(),                                          │
+│     reconnectAttempts: 0                                             │
+│   }                                                                  │
+│ }                                                                    │
 └──────────────────────────────────────────────────────────────────────┘
+         │
+         │ Returns reference to singleton
+         ▼
+┌──────────────────┐
+│ bars client      │ ──> uses WebSocketBase('/v1/datafeed/ws')
+└──────────────────┘
 
 
-Data Flow:
-1. TradingView requests subscription
-2. DatafeedService forwards to WebSocket client
-3. WebSocket client sends subscribe message to server
-4. Server confirms subscription
-5. WebSocket client registers callback
-6. Server broadcasts bar updates
-7. WebSocket client routes update to callback
-8. DatafeedService forwards bar to TradingView
-9. TradingView updates chart
+Step 2: WsAdapter creates quotes client (URL: /v1/datafeed/ws)
+┌──────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase.instances = Map {                                      │
+│   '/v1/datafeed/ws' => WebSocketBase {  ◄── SAME INSTANCE REUSED!   │
+│     wsUrl: '/v1/datafeed/ws',                                        │
+│     ws: WebSocket(OPEN),                                             │
+│     subscriptions: Map(),                                            │
+│     pendingRequests: Map(),                                          │
+│     reconnectAttempts: 0                                             │
+│   }                                                                  │
+│ }                                                                    │
+└──────────────────────────────────────────────────────────────────────┘
+         │
+         │ Returns reference to SAME singleton
+         ▼
+┌──────────────────┐    ┌──────────────────┐
+│ bars client      │    │ quotes client    │
+└──────────────────┘    └──────────────────┘
+         │                       │
+         └───────────┬───────────┘
+                     │ Both use SAME WebSocket connection
+                     ▼
+          WebSocketBase('/v1/datafeed/ws')
+
+
+Step 3: WsAdapter creates orders client (URL: /v1/broker/ws)
+┌──────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase.instances = Map {                                      │
+│   '/v1/datafeed/ws' => WebSocketBase { ... },                        │
+│   '/v1/broker/ws' => WebSocketBase {      ◄── NEW INSTANCE!         │
+│     wsUrl: '/v1/broker/ws',                                          │
+│     ws: WebSocket(CONNECTING...),                                    │
+│     subscriptions: Map(),                                            │
+│     pendingRequests: Map(),                                          │
+│     reconnectAttempts: 0                                             │
+│   }                                                                  │
+│ }                                                                    │
+└──────────────────────────────────────────────────────────────────────┘
+         │
+         │ Returns reference to new singleton
+         ▼
+┌──────────────────┐
+│ orders client    │ ──> uses WebSocketBase('/v1/broker/ws')
+└──────────────────┘
+
+
+Final State: 2 Singleton Instances
+┌──────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase.instances = Map {                                      │
+│   '/v1/datafeed/ws' => WebSocketBase { ... },   ◄── Shared by 2     │
+│   '/v1/broker/ws' => WebSocketBase { ... }      ◄── Shared by 5     │
+│ }                                                                    │
+└──────────────────────────────────────────────────────────────────────┘
+         │                              │
+         │                              │
+         ▼                              ▼
+   ┌──────────┐                  ┌──────────┐
+   │ Datafeed │                  │ Broker   │
+   │ Clients  │                  │ Clients  │
+   ├──────────┤                  ├──────────┤
+   │ • bars   │                  │ • orders │
+   │ • quotes │                  │ • posits │
+   └──────────┘                  │ • execs  │
+                                 │ • equity │
+                                 │ • broker │
+                                 │   conn   │
+                                 └──────────┘
 ```
 
 ---
 
-**End of Diagrams**
+## 4. Subscription Lifecycle
 
-These diagrams illustrate the key architectural patterns, data flows, and component interactions in the WebSocket client implementation. For more details, refer to:
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          Subscribe Flow                                   │
+└───────────────────────────────────────────────────────────────────────────┘
 
-- [`WEBSOCKET-CLIENT-PATTERN.md`](./WEBSOCKET-CLIENT-PATTERN.md) - Comprehensive pattern documentation
-- [`../docs/WEBSOCKET-CLIENTS.md`](../docs/WEBSOCKET-CLIENTS.md) - WebSocket clients overview
-- [`WEBSOCKET-CLIENT-BASE.md`](./WEBSOCKET-CLIENT-BASE.md) - Base client deep dive
+Service Call:
+┌────────────────────────────────────────────────────────────────────┐
+│ datafeedService.subscribeBars('listener-1', 'AAPL', '1', callback) │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ wsAdapter.bars.subscribe('listener-1', {symbol:'AAPL',res:'1'}, cb)│
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketClient.subscribe()                                        │
+│ 1. Build topic: "bars:AAPL:1"                                      │
+│ 2. Track listener in local map                                     │
+│ 3. Wrap callback with mapper                                       │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase.subscribe()                                          │
+│ ┌────────────────────────────────────────────────────────────────┐ │
+│ │ Check if subscription exists?                                  │ │
+│ │ ┌───────────┐         ┌──────────────────┐                    │ │
+│ │ │ Yes:      │         │ No:              │                    │ │
+│ │ │ Add       │         │ Create new       │                    │ │
+│ │ │ listener  │         │ subscription     │                    │ │
+│ │ │ to        │         │ state            │                    │ │
+│ │ │ existing  │         └──────┬───────────┘                    │ │
+│ │ │ (ref      │                │                                │ │
+│ │ │ counting) │                ▼                                │ │
+│ │ └───────────┘         Send subscribe request to server        │ │
+│ │      │                       │                                │ │
+│ │      │                       ▼                                │ │
+│ │      │                Wait for confirmation (5s timeout)      │ │
+│ │      │                       │                                │ │
+│ │      │              ┌────────▼────────┐                       │ │
+│ │      │              │ Success?        │                       │ │
+│ │      │         Yes ─┤                 ├─ No                   │ │
+│ │      │              │                 │                       │ │
+│ │      ▼              ▼                 ▼                       │ │
+│ │   Mark subscription            Delete subscription            │ │
+│ │   as confirmed                 Throw error                    │ │
+│ └────────────────────────────────────────────────────────────────┘ │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ Result: Subscription active, listener registered                   │
+│ - Server knows about subscription                                  │
+│ - Base client tracks state                                         │
+│ - Future updates routed to listener                                │
+└────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-**Version**: 1.0.0
-**Date**: October 13, 2025
-**Status**: ✅ Complete
+## 5. Message Routing
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          Message Flow                                     │
+└───────────────────────────────────────────────────────────────────────────┘
+
+Backend sends update:
+┌────────────────────────────────────────────────────────────────────┐
+│ {                                                                  │
+│   "type": "bars.update",                                           │
+│   "topic": "bars:AAPL:1",                                          │
+│   "data": { time: 1234567890, open: 150.0, ... }                  │
+│ }                                                                  │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             │ WebSocket.onmessage
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase.handleMessage()                                      │
+│ ┌────────────────────────────────────────────────────────────────┐ │
+│ │ Parse message                                                  │ │
+│ │                                                                │ │
+│ │ Is response to request? (has request_id)                      │ │
+│ │ ┌─────────┐              ┌───────────┐                        │ │
+│ │ │ Yes:    │              │ No:       │                        │ │
+│ │ │ Resolve │              │ Is update?│                        │ │
+│ │ │ pending │              │ (*.update)│                        │ │
+│ │ │ request │              └────┬──────┘                        │ │
+│ │ └─────────┘                   │                               │ │
+│ │                               ▼                               │ │
+│ │                        Find subscription by topic             │ │
+│ │                               │                               │ │
+│ │                        ┌──────▼──────┐                        │ │
+│ │                        │ Confirmed?  │                        │ │
+│ │                        │             │                        │ │
+│ │                   Yes ─┤             ├─ No (ignore)           │ │
+│ │                        └──────┬──────┘                        │ │
+│ │                               ▼                               │ │
+│ │                   Broadcast to all listeners                  │ │
+│ │                   for this topic                              │ │
+│ │                               │                               │ │
+│ │                    ┌──────────┴──────────┐                   │ │
+│ │                    ▼                      ▼                   │ │
+│ │              listener1(data)        listener2(data)           │ │
+│ │              (with error isolation)                           │ │
+│ └────────────────────────────────────────────────────────────────┘ │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketClient receives update (backend type)                     │
+│ - Applies mapper: mapBar(backendData) → frontendData              │
+│ - Calls service callback with frontend types                       │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ Service callback executes (frontend types only)                    │
+│ datafeedService: onRealtimeCallback(bar)                           │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 6. Reference Counting (Subscription Cleanup)
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          Unsubscribe Flow                                 │
+└───────────────────────────────────────────────────────────────────────────┘
+
+Initial State: 2 listeners for "bars:AAPL:1"
+┌────────────────────────────────────────────────────────────────────┐
+│ subscriptions.get("bars:AAPL:1") = {                               │
+│   topic: "bars:AAPL:1",                                            │
+│   confirmed: true,                                                 │
+│   listeners: Map {                                                 │
+│     'listener-1' => callback1,                                     │
+│     'listener-2' => callback2                                      │
+│   }                                                                │
+│ }                                                                  │
+└────────────────────────────────────────────────────────────────────┘
+
+
+Event: listener-1 unsubscribes
+┌────────────────────────────────────────────────────────────────────┐
+│ wsAdapter.bars.unsubscribe('listener-1')                           │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase.unsubscribe('listener-1', 'bars:AAPL:1')            │
+│ ┌────────────────────────────────────────────────────────────────┐ │
+│ │ Remove listener-1 from subscription.listeners                  │ │
+│ │                                                                │ │
+│ │ listeners.size > 0?                                            │ │
+│ │ ┌─────────┐              ┌───────────┐                        │ │
+│ │ │ Yes:    │              │ No:       │                        │ │
+│ │ │ Keep    │              │ Send      │                        │ │
+│ │ │ sub     │              │ unsub to  │                        │ │
+│ │ │ active  │              │ server +  │                        │ │
+│ │ │         │              │ delete    │                        │ │
+│ │ │ (other  │              │ sub       │                        │ │
+│ │ │ listener│              │           │                        │ │
+│ │ │ still   │              │           │                        │ │
+│ │ │ using)  │              │           │                        │ │
+│ │ └─────────┘              └───────────┘                        │ │
+│ └────────────────────────────────────────────────────────────────┘ │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+Updated State: 1 listener remains
+┌────────────────────────────────────────────────────────────────────┐
+│ subscriptions.get("bars:AAPL:1") = {                               │
+│   topic: "bars:AAPL:1",                                            │
+│   confirmed: true,                                                 │
+│   listeners: Map {                                                 │
+│     'listener-2' => callback2  ◄── Only listener-2 remains        │
+│   }                                                                │
+│ }                                                                  │
+└────────────────────────────────────────────────────────────────────┘
+
+
+Event: listener-2 unsubscribes (last listener!)
+┌────────────────────────────────────────────────────────────────────┐
+│ wsAdapter.bars.unsubscribe('listener-2')                           │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase.unsubscribe('listener-2', 'bars:AAPL:1')            │
+│ ┌────────────────────────────────────────────────────────────────┐ │
+│ │ Remove listener-2 from subscription.listeners                  │ │
+│ │                                                                │ │
+│ │ listeners.size = 0  ◄── LAST LISTENER GONE!                   │ │
+│ │                                                                │ │
+│ │ Actions:                                                       │ │
+│ │ 1. Send bars.unsubscribe to server                            │ │
+│ │ 2. Delete subscription from Map                               │ │
+│ └────────────────────────────────────────────────────────────────┘ │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+Final State: Subscription removed
+┌────────────────────────────────────────────────────────────────────┐
+│ subscriptions.has("bars:AAPL:1") = false  ◄── Cleaned up!         │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 7. Reconnection with Resubscription
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          Reconnection Flow                                │
+└───────────────────────────────────────────────────────────────────────────┘
+
+Active State: 3 active subscriptions
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase('/v1/datafeed/ws') {                                 │
+│   ws: WebSocket(OPEN),                                             │
+│   subscriptions: Map {                                             │
+│     'bars:AAPL:1' => { confirmed: true, listeners: [...] },        │
+│     'bars:TSLA:5' => { confirmed: true, listeners: [...] },        │
+│     'quotes:AAPL' => { confirmed: true, listeners: [...] }         │
+│   }                                                                │
+│ }                                                                  │
+└────────────────────────────────────────────────────────────────────┘
+                     │
+                     │ Network issue / Server restart
+                     ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocket.onclose triggered                                        │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase.handleClose()                                        │
+│ - isReconnecting = true                                            │
+│ - reconnectAttempts++                                              │
+│ - Schedule reconnect with exponential backoff                      │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             │ Wait (1s, 2s, 4s, 8s, or 16s)
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase.connect()                                            │
+│ - Create new WebSocket                                             │
+│ - Wait for open                                                    │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocket.onopen triggered                                         │
+│ - reconnectAttempts = 0                                            │
+│ - isReconnecting = false                                           │
+│ - Call resubscribeAll()                                            │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase.resubscribeAll()                                     │
+│ ┌────────────────────────────────────────────────────────────────┐ │
+│ │ For each subscription in Map:                                  │ │
+│ │                                                                │ │
+│ │   1. Mark as unconfirmed                                       │ │
+│ │   2. Send subscribe request to server                          │ │
+│ │   3. Wait for confirmation                                     │ │
+│ │   4. Mark as confirmed (or log error)                          │ │
+│ │                                                                │ │
+│ │ Results:                                                       │ │
+│ │   ✅ bars:AAPL:1 resubscribed                                  │ │
+│ │   ✅ bars:TSLA:5 resubscribed                                  │ │
+│ │   ✅ quotes:AAPL resubscribed                                  │ │
+│ └────────────────────────────────────────────────────────────────┘ │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             ▼
+Reconnected State: All subscriptions restored
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase('/v1/datafeed/ws') {                                 │
+│   ws: WebSocket(OPEN),  ◄── New connection                         │
+│   subscriptions: Map {  ◄── Same subscriptions preserved           │
+│     'bars:AAPL:1' => { confirmed: true, listeners: [...] },        │
+│     'bars:TSLA:5' => { confirmed: true, listeners: [...] },        │
+│     'quotes:AAPL' => { confirmed: true, listeners: [...] }         │
+│   }                                                                │
+│ }                                                                  │
+│                                                                    │
+│ Services unaware of reconnection! ✅                               │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 8. Type Transformation Flow
+
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│                          Type Flow (Backend → Frontend)                   │
+└───────────────────────────────────────────────────────────────────────────┘
+
+Backend sends (WebSocket):
+┌────────────────────────────────────────────────────────────────────┐
+│ {                                                                  │
+│   "type": "quotes.update",                                         │
+│   "topic": "quotes:AAPL",                                          │
+│   "data": {                                                        │
+│     "s": "ok",                                                     │
+│     "n": "AAPL",                                                   │
+│     "v": {                                                         │
+│       "lp": 150.0,      // last_price (backend naming)            │
+│       "bid": 149.9,                                                │
+│       "ask": 150.1,                                                │
+│       // ... backend field names                                  │
+│     }                                                              │
+│   }                                                                │
+│ }                                                                  │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             │ Type: QuoteData_Ws_Backend (generated from AsyncAPI)
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ WebSocketBase routes to WebSocketClient callback                   │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             │ Apply mapper
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ mapQuoteData(backendData: QuoteData_Ws_Backend): QuoteData         │
+│ ┌────────────────────────────────────────────────────────────────┐ │
+│ │ if (backendData.s === 'error') {                               │ │
+│ │   return { s: 'error', n: backendData.n, v: backendData.v }    │ │
+│ │ }                                                              │ │
+│ │                                                                │ │
+│ │ return {                                                       │ │
+│ │   s: 'ok',                                                     │ │
+│ │   n: backendData.n,                                            │ │
+│ │   v: { ...backendData.v } // Copy all fields                  │ │
+│ │ }                                                              │ │
+│ └────────────────────────────────────────────────────────────────┘ │
+└────────────┬───────────────────────────────────────────────────────┘
+             │
+             │ Type: QuoteData (TradingView frontend type)
+             ▼
+┌────────────────────────────────────────────────────────────────────┐
+│ Service callback receives frontend type                            │
+│ datafeedService.subscribeQuotes(..., (quote: QuoteData) => {       │
+│   // quote is frontend type - no backend types leaked!            │
+│   console.log(quote.v.lp)  // TypeScript autocomplete works       │
+│ })                                                                 │
+└────────────────────────────────────────────────────────────────────┘
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Key Pattern: Backend types isolated to mappers.ts ONLY          ┃
+┃ - Services: import frontend types (TradingView)                 ┃
+┃ - Mappers: import backend types (_Ws_Backend suffix)            ┃
+┃ - Clients: generic with mapper function, no backend imports     ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+```
+
+---
+
+## Conclusion
+
+This architecture provides:
+
+- ✅ **Efficiency** - 2 WebSocket connections for all features
+- ✅ **Type Safety** - Backend types isolated to mappers
+- ✅ **Simplicity** - Services just call subscribe/unsubscribe
+- ✅ **Resilience** - Automatic reconnection with resubscription
+- ✅ **Modularity** - Backend modules can deploy independently
+- ✅ **Scalability** - Reference counting prevents resource leaks
+
+### Related Documentation
+
+- [WEBSOCKET-CLIENT-PATTERN.md](./WEBSOCKET-CLIENT-PATTERN.md) - Implementation patterns and usage guide
+- [WEBSOCKET-CLIENT-BASE.md](./WEBSOCKET-CLIENT-BASE.md) - WebSocketBase detailed reference
+
+---
+
+**Version**: 2.0.0  
+**Date**: November 11, 2025  
+**Status**: ✅ Production Ready  
+**Maintainers**: Development Team

@@ -1,3 +1,8 @@
+---
+agent: "Plan"
+name: "doc-assessment"
+description: "Conduct a comprehensive assessment of project documentation for accuracy and update it to reflect the current codebase."
+---
 # 📊 Documentation Assessment & Update Request
 
 You are a technical documentation specialist. I need you to conduct a comprehensive accuracy assessment of all project documentation and update it to reflect the current codebase.

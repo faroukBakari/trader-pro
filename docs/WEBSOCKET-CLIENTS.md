@@ -453,24 +453,6 @@ class DatafeedService {
 }
 ```
 
-## Plugin-Based Loading
-
-### WebSocket Client Plugin
-
-```typescript
-import { WebSocketClientPlugin } from "@/plugins/wsClientPlugin";
-
-// Automatic client loading with fallback
-const wsPlugin = new WebSocketClientPlugin();
-const client = await wsPlugin.getClientWithFallback(FallbackClient);
-```
-
-**Features:**
-
-- Graceful fallback when backend unavailable
-- Singleton management
-- Type-safe client access
-
 ## Message Protocol
 
 ### Subscribe Operation
@@ -620,19 +602,19 @@ export class WebSocketFallback<TParams, TData>
 
 ### 1. Singleton Pattern
 
-One WebSocket connection per URL, automatically managed.
+One WebSocket connection per URL, automatically managed via `WebSocketBase.getInstance()`.
 
-### 2. Factory Pattern
+### 2. Facade Pattern
 
-Simple API for client creation: `BarsWebSocketClientFactory()`
+Simple API via `WsAdapter` for all WebSocket clients.
 
 ### 3. Observer Pattern
 
 Multiple callbacks per topic with type-safe notifications.
 
-### 4. Repository Pattern
+### 4. Strategy Pattern (Mappers)
 
-Abstract interface for different data sources (live/fallback).
+Type-safe data transformations via mapper functions.
 
 ## Adding New Channels
 
@@ -669,9 +651,12 @@ export class WsAdapter implements WsAdapterType {
   trades: WebSocketInterface<TradesSubscriptionRequest, Trade>; // NEW
 
   constructor() {
-    this.bars = new WebSocketClient("bars", (data) => data);
-    this.quotes = new WebSocketClient("quotes", mapQuoteData);
-    this.trades = new WebSocketClient("trades", mapTrade); // NEW
+    const datafeedWsUrl =
+      (import.meta.env.VITE_TRADER_API_BASE_PATH || "") + "/v1/datafeed/ws";
+
+    this.bars = new WebSocketClient(datafeedWsUrl, "bars", (data) => data);
+    this.quotes = new WebSocketClient(datafeedWsUrl, "quotes", mapQuoteData);
+    this.trades = new WebSocketClient(datafeedWsUrl, "trades", mapTrade); // NEW
   }
 }
 
@@ -688,14 +673,27 @@ const trade = await wsAdapter.trades.subscribe(
 ### Unit Tests (With Mocks)
 
 ```typescript
+import { WsFallback } from "@/plugins/wsAdapter";
+
 describe("WebSocket Client", () => {
   it("subscribes to bar updates", async () => {
-    const client = new WebSocketClientBase<BarsSubscriptionRequest, Bar>(
-      "bars"
-    );
+    const mockAdapter = new WsFallback({
+      barsMocker: () => ({
+        time: 123,
+        open: 150,
+        high: 151,
+        low: 149,
+        close: 150.5,
+        volume: 1000,
+      }),
+    });
     const callback = vi.fn();
 
-    await client.subscribe({ symbol: "AAPL", resolution: "1" }, callback);
+    await mockAdapter.bars?.subscribe(
+      "test-listener",
+      { symbol: "AAPL", resolution: "1" },
+      callback
+    );
 
     // Trigger mock update
     expect(callback).toHaveBeenCalledWith(
@@ -710,19 +708,24 @@ describe("WebSocket Client", () => {
 ### Integration Tests (With Live Server)
 
 ```typescript
+import { WsAdapter } from "@/plugins/wsAdapter";
+
 describe("WebSocket Integration", () => {
   let backend: BackendServer;
+  let adapter: WsAdapter;
 
   beforeAll(async () => {
     backend = await startBackend();
+    adapter = new WsAdapter();
   });
 
   it("receives real-time bar updates", async () => {
-    const client = BarsWebSocketClientFactory();
     const bars: Bar[] = [];
 
-    await client.subscribe({ symbol: "AAPL", resolution: "1" }, (bar) =>
-      bars.push(bar)
+    await adapter.bars.subscribe(
+      "test-listener",
+      { symbol: "AAPL", resolution: "1" },
+      (bar) => bars.push(bar)
     );
 
     await waitFor(() => expect(bars.length).toBeGreaterThan(0));
@@ -735,28 +738,32 @@ describe("WebSocket Integration", () => {
 ### Connection Issues
 
 ```typescript
-// Check connection status
-if (client.isConnected()) {
-  console.log("Connected");
-} else {
-  console.log("Disconnected - will auto-reconnect");
-}
+import { WsAdapter } from "@/plugins/wsAdapter";
+
+const adapter = new WsAdapter();
+
+// WebSocketBase manages connection automatically
+// Check if subscriptions are confirmed
+console.log("Active subscriptions:", adapter.bars["ws"].getSubscriptionCount());
 ```
 
 ### Debug Logging
 
+Enable debug logging in browser console to see WebSocket events:
+
 ```typescript
-// Enable debug mode in base client
-WebSocketClientBase.DEBUG = true;
+// WebSocketBase logs connection events automatically
+// Look for: [WebSocketBase] Connected to ws://...
 ```
 
 ### Subscription Not Working
 
 ```bash
 # Verify backend WebSocket endpoint
-curl http://localhost:8000/api/v1/ws/asyncapi.json
+curl http://localhost:8000/v1/datafeed/asyncapi.json
+curl http://localhost:8000/v1/broker/asyncapi.json
 
-# Regenerate clients
+# Regenerate types
 cd frontend && make generate
 ```
 
@@ -788,9 +795,9 @@ cd frontend && make generate
 
 ## Related Documentation
 
-- **Backend Router Generation**: See `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` ⚠️ **CRITICAL for new WebSocket features**
+- **Backend Router Generation**: See `backend/docs/WS_ROUTERS_GEN.md` ⚠️ **CRITICAL for new WebSocket features**
 - **Client Generation**: See `docs/CLIENT-GENERATION.md`
-- **WebSocket Client Pattern**: See `frontend/WEBSOCKET-CLIENT-PATTERN.md`
-- **WebSocket Client Base**: See `frontend/WEBSOCKET-CLIENT-BASE.md`
+- **WebSocket Client Pattern**: See `frontend/docs/WEBSOCKET-CLIENT-PATTERN.md` (v2.0.0)
+- **WebSocket Client Base**: See `frontend/docs/WEBSOCKET-CLIENT-BASE.md` (v2.0.0)
+- **WebSocket Architecture Diagrams**: See `frontend/docs/WEBSOCKET-ARCHITECTURE-DIAGRAMS.md` (v2.0.0)
 - **Service Layer**: See `frontend/src/services/README.md`
-- **Plugin Usage**: See `frontend/src/plugins/WS-PLUGIN-USAGE.md`
