@@ -1,7 +1,7 @@
 # Frontend Generated Code and External Library Exclusions
 
-**Version**: 1.1.0  
-**Last Updated**: October 25, 2025  
+**Version**: 1.2.0  
+**Last Updated**: November 11, 2025  
 **Status**: ✅ Current
 
 This document outlines all the configurations that exclude frontend generated code and external libraries from linting, testing, and other development checks.
@@ -24,9 +24,14 @@ The frontend has two categories of excluded files:
 
 ### Generated Code (Auto-Generated from Backend Specs)
 
-- `src/clients_generated/trader-client-generated/` - OpenAPI-generated REST API client
-- `src/clients_generated/ws-types-generated/` - AsyncAPI-generated WebSocket types
-- `src/clients/ws-generated/` - WebSocket client scaffolding (if applicable)
+**Per-Module Generated Clients** (Modular Architecture):
+
+- `src/clients_generated/trader-client-broker_v1/` - OpenAPI-generated REST API client for broker module
+- `src/clients_generated/trader-client-datafeed_v1/` - OpenAPI-generated REST API client for datafeed module
+- `src/clients_generated/ws-types-broker_v1/` - AsyncAPI-generated WebSocket types for broker module
+- `src/clients_generated/ws-types-datafeed_v1/` - AsyncAPI-generated WebSocket types for datafeed module
+
+**Pattern**: `src/clients_generated/{trader-client|ws-types}-{module}_v{version}/`
 
 ## Configuration Files Updated
 
@@ -51,14 +56,11 @@ frontend/public/advanced_charting_library/
 **Exclusions**:
 
 ```ignore
-# Generated API client
-src/clients_generated/trader-client-generated/
+# Generated API clients (per-module pattern)
+src/clients_generated/trader-client-*/
 
-# Generated WebSocket types
-src/clients_generated/ws-types-generated/
-
-# Generated WebSocket client
-src/clients/ws-generated/
+# Generated WebSocket types (per-module pattern)
+src/clients_generated/ws-types-*/
 
 # OpenAPI/AsyncAPI generation artifacts
 openapi.json
@@ -67,7 +69,7 @@ openapi-3.0.json
 openapitools.json
 ```
 
-**Status**: ✅ All generated code directories excluded
+**Status**: ✅ All generated code directories excluded with wildcard patterns
 
 ### 3. ESLint Configuration (`frontend/eslint.config.ts`)
 
@@ -82,11 +84,11 @@ globalIgnores([
   '**/coverage/**',
   '**/public/**', // 👈 Covers all external libraries
   '**/node_modules/**',
-  'src/clients/*-generated/**', // 👈 Covers trader-client-generated, ws-types-generated, ws-generated
+  'src/clients_generated/**', // 👈 Covers all generated clients (trader-client-*, ws-types-*)
 ])
 ```
 
-**Pattern Used**: Wildcard `*-generated/**` covers all generated client directories
+**Pattern Used**: Single wildcard `src/clients_generated/**` covers all module-specific generated directories
 
 **Status**: ✅ Current - covers all generated code
 
@@ -97,14 +99,15 @@ globalIgnores([
 **Current Exclusions**:
 
 ```ignore
-# Generated files
-src/clients_generated/trader-client-generated/
+# Generated files (per-module pattern)
+src/clients_generated/trader-client-*/
+src/clients_generated/ws-types-*/
 
 # External libraries and dependencies
 public/
 ```
 
-**Status**: ⚠️ Missing `ws-types-generated/` and `ws-generated/` - **NEEDS UPDATE**
+**Status**: ✅ Up-to-date - covers all generated directories with wildcard patterns
 
 ### 5. TypeScript Configuration (`frontend/tsconfig.app.json`)
 
@@ -133,13 +136,13 @@ public/
 test: {
   exclude: [
     ...configDefaults.exclude,
-    'public/**',                   // External libraries
-    'src/clients/*-generated/**',  // 👈 All generated clients
+    'public/**',                      // External libraries
+    'src/clients_generated/**',       // 👈 All generated clients
   ],
 }
 ```
 
-**Status**: ✅ Current - covers all generated code with wildcard
+**Status**: ✅ Current - covers all generated code with single wildcard
 
 ### 7. Git Hooks (`.githooks/shared-lib.sh`)
 
@@ -177,7 +180,7 @@ frontend/public/
 ### Checks Excluded From:
 
 - ✅ ESLint linting
-- ⚠️ Prettier formatting (missing ws-types-generated in .prettierignore)
+- ✅ Prettier formatting
 - ✅ TypeScript type checking (external libraries only)
 - ✅ Vitest testing
 - ✅ Git pre-commit hooks
@@ -206,28 +209,28 @@ frontend/public/
 ### OpenAPI REST Client Generation
 
 ```bash
-# Generate trader-client-generated/
+# Generate per-module REST clients
 cd frontend && make generate-openapi-client
 # or
 npm run generate:openapi-client
 ```
 
-**Source**: `backend/openapi.json` (exported from FastAPI)  
-**Output**: `src/clients_generated/trader-client-generated/`  
+**Source**: Backend module OpenAPI specs (`backend/modules/{module}/openapi.json`)  
+**Output**: `src/clients_generated/trader-client-{module}_v{version}/`  
 **Tool**: `@openapitools/openapi-generator-cli`
 
 ### AsyncAPI WebSocket Types Generation
 
 ```bash
-# Generate ws-types-generated/
+# Generate per-module WebSocket types
 cd frontend && make generate-asyncapi-types
 # or
 npm run generate:asyncapi-types
 ```
 
-**Source**: `backend/asyncapi.json` (exported from backend WebSocket routes)  
-**Output**: `src/clients_generated/ws-types-generated/`  
-**Tool**: Custom script `scripts/generate-ws-types.mjs`
+**Source**: Backend module AsyncAPI specs (`backend/modules/{module}/asyncapi.json`)  
+**Output**: `src/clients_generated/ws-types-{module}_v{version}/`  
+**Tool**: Custom script `scripts/generate-asyncapi-types.sh`
 
 ### Regeneration Triggers
 
@@ -255,42 +258,45 @@ cd frontend && make type-check
 cd frontend && make test
 
 # Check Git status (generated files should not appear)
-git status  # Should not show src/clients/*-generated/
+git status  # Should not show src/clients_generated/
 ```
 
 ## Adding New Generated Code Directories
 
-If you add new code generation (e.g., GraphQL, gRPC):
+If you add new code generation for additional modules (e.g., new trading module):
 
-1. Add to `frontend/.gitignore` with exact path
-2. Update `.prettierignore` with exact path
-3. Verify ESLint wildcard `src/clients/*-generated/**` still covers it
-4. Verify Vitest wildcard `src/clients/*-generated/**` still covers it
-5. Update this documentation with:
-   - Directory name and purpose
+1. Generated clients will automatically follow the pattern: `src/clients_generated/{type}-{module}_v{version}/`
+2. Existing wildcard patterns in `.gitignore`, ESLint, and Vitest will cover them automatically
+3. Verify `.prettierignore` includes the wildcard patterns
+4. Update this documentation with:
+   - New module name
    - Generation command
-   - Source specification
-   - Tool/script used
+   - Source specification location
 
 ## Recommended Naming Convention
 
-**Generated Code**: Use `-generated` suffix (e.g., `graphql-client-generated/`)
+**Generated Code**: Use pattern `{type}-{module}_v{version}` where:
 
-**Rationale**: Matches existing wildcard patterns in ESLint and Vitest configs, reducing configuration changes.
+- `type`: `trader-client` (REST) or `ws-types` (WebSocket)
+- `module`: Backend module name (e.g., `broker`, `datafeed`)
+- `version`: API version (e.g., `v1`, `v2`)
+
+**Examples**:
+
+- `trader-client-broker_v1/`
+- `ws-types-datafeed_v1/`
+
+**Rationale**: Matches modular backend architecture and wildcard patterns in configuration files.
 
 ## Action Items
 
-### High Priority
+**All action items completed** ✅
 
-- [ ] **Update `.prettierignore`** to include:
-  ```ignore
-  src/clients_generated/ws-types-generated/
-  src/clients/ws-generated/
-  ```
-  Or use wildcard pattern:
-  ```ignore
-  src/clients/*-generated/
-  ```
+Previous issues have been resolved:
+
+- ✅ `.prettierignore` uses wildcard patterns for all generated code
+- ✅ All configuration files properly exclude generated directories
+- ✅ Documentation updated to reflect modular architecture
 
 ### Optional Improvements
 
@@ -300,21 +306,23 @@ If you add new code generation (e.g., GraphQL, gRPC):
 
 ## Notes
 
-- **Wildcard Patterns**: ESLint and Vitest use `*-generated/**` for future-proofing
+- **Wildcard Patterns**: All configs use `src/clients_generated/**` for future-proofing
+- **Modular Architecture**: Generated clients are organized per backend module
 - **Type Safety**: Generated clients are type-safe and can be imported normally
-- **No Manual Edits**: Never manually edit files in `-generated/` directories
+- **No Manual Edits**: Never manually edit files in `clients_generated/` directories
 - **Regeneration**: Always re-run generation scripts after backend spec changes
 - **Version Control**: Generated code is `.gitignore`d to reduce repository size
 
 ## Related Documentation
 
-- **Client Generation**: `/docs/CLIENT-GENERATION.md`
-- **WebSocket Clients**: `/docs/WEBSOCKET-CLIENTS.md`
-- **Frontend README**: `/frontend/README.md`
-- **Makefile Guide**: `/MAKEFILE-GUIDE.md`
+- **Client Generation**: `../../docs/CLIENT-GENERATION.md`
+- **WebSocket Clients**: `../../docs/WEBSOCKET-CLIENTS.md`
+- **Frontend README**: `../README.md`
+- **Makefile Guide**: `../../docs/MAKEFILE-GUIDE.md`
+- **Modular Backend**: `../../backend/docs/MODULAR_BACKEND_ARCHITECTURE.md`
 
 ---
 
 **Maintained by**: Development Team  
 **Review Schedule**: Update when new generated code directories are added  
-**Last Review**: October 25, 2025
+**Last Review**: November 11, 2025

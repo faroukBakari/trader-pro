@@ -13,27 +13,27 @@ trader-pro/
 ├── README.md              # Project overview
 ├── docs/                  # Cross-cutting concerns
 │   ├── ARCHITECTURE.md
-│   │   ├── tmp/           # Store for temporary documents
-│   │   |   ├── workings.md
-│   │   │   └── ...
+│   ├── tmp/               # Store for temporary documents
+│   │   ├── workings.md
+│   │   └── ...
 │   └── ...
 │
 ├── backend/
 │   ├── README.md          # Backend overview
 │   ├── docs/              # Backend-specific architecture
-│   │   ├── ARCHITECTURE.md
+│   │   ├── BACKEND_MANAGER_GUIDE.md
 │   │   ├── tmp/           # Store for temporary documents
-│   │   |   ├── workings.md
+│   │   │   ├── workings.md
 │   │   │   └── ...
 │   │   └── ...
 │
 └── frontend/
     ├── README.md          # Frontend overview
     ├── docs/              # Frontend-specific architecture
-    │   ├── ARCHITECTURE.md
-│   │   ├── tmp/           # Store for temporary documents
-│   │   |   ├── workings.md
-│   │   │   └── ...
+    │   ├── WEBSOCKET-CLIENT-PATTERN.md
+    │   ├── tmp/           # Store for temporary documents
+    │   │   ├── workings.md
+    │   │   └── ...
     │   └── ...
 ```
 
@@ -97,6 +97,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 | **docs/DEVELOPMENT.md**         | Development workflows and setup                 |
 | **docs/TESTING.md**             | Testing strategy and best practices             |
 | **docs/FULLSTACK-DEV-MODE.md**  | Full-stack dev mode with auto-regeneration      |
+| **docs/CI-TROUBLESHOOTING.md**  | CI/CD troubleshooting guide                     |
 
 ---
 
@@ -114,7 +115,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 | **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide                  |
 | **backend/docs/BACKEND_TESTING.md**              | Backend testing strategy and overhead optimization |
 
-> **Note**: backend/docs/outdated/ contains historical documentation from previous refactors. These files are kept for reference only and should NOT be used for current implementation guidance.
+> **Note**: Historical documentation from previous refactors has been cleaned up. All current backend documentation listed above is accurate and actively maintained.
 
 ### backend/external_packages/ (Third-Party Documentation)
 
@@ -140,26 +141,30 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### frontend/ (WebSocket Documentation - Read in Order)
 
-| File                                            | Purpose                                        |
-| ----------------------------------------------- | ---------------------------------------------- |
-| **frontend/WEBSOCKET-CLIENT-PATTERN.md**        | ⭐ Start here - WebSocket client pattern guide |
-| **frontend/WEBSOCKET-CLIENT-BASE.md**           | Deep dive - Base client implementation details |
-| **frontend/WEBSOCKET-ARCHITECTURE-DIAGRAMS.md** | Visual reference - Architecture diagrams       |
+| File                                            | Purpose                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------- |
+| **frontend/WEBSOCKET-CLIENT-PATTERN.md**        | ⚠️ WebSocket client pattern guide (needs accuracy update)     |
+| **frontend/WEBSOCKET-CLIENT-BASE.md**           | ⚠️ Base client implementation details (needs accuracy update) |
+| **frontend/WEBSOCKET-ARCHITECTURE-DIAGRAMS.md** | ⚠️ Architecture diagrams (needs accuracy update)              |
 
-> **Note**: These docs form a cohesive guide. Start with PATTERN, reference BASE for implementation details, and use DIAGRAMS for visual understanding.
+> **Note**: These three documents require comprehensive rewrites to match current implementation. Per documentation assessment (Nov 2025), they contain outdated API examples and architecture patterns. Use with caution until rewrite is complete. For current implementation, refer to actual source code in `frontend/src/plugins/`.
 
 ### frontend/src/ (Component Documentation)
 
-| File                                          | Purpose                            |
-| --------------------------------------------- | ---------------------------------- |
-| **frontend/src/plugins/WS-PLUGIN-USAGE.md**   | WebSocket plugin integration guide |
-| **frontend/src/services/README.md**           | Services layer overview            |
-| **frontend/src/services/**tests**/README.md** | Testing guide for services         |
+| File                                          | Purpose                                                                             |
+| --------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **frontend/src/plugins/WS-PLUGIN-USAGE.md**   | ⚠️ OUTDATED - Scheduled for removal/rewrite (describes non-existent plugin pattern) |
+| **frontend/src/services/README.md**           | Services layer overview                                                             |
+| **frontend/src/services/**tests**/README.md** | Testing guide for services                                                          |
 
-### frontend/src/clients_generated/trader-client-generated/
+> **Note**: WS-PLUGIN-USAGE.md describes a plugin architecture that was never implemented. Current implementation uses `WsAdapter` pattern. This file is flagged for removal or complete rewrite.
 
-- **README.md** - Generated client usage guide
-- **docs/** - 40+ auto-generated API model documentation files
+### frontend/src/clients_generated/ (Per-Module Generated Clients)
+
+- **trader-client-{module}\_v{version}/** - REST API clients (one per module)
+  - **README.md** - Generated client usage guide
+  - **docs/** - Auto-generated API model documentation files
+- **ws-types-{module}\_v{version}/** - WebSocket type definitions (one per module)
 
 ### frontend/public/ (Third-Party Documentation)
 
@@ -175,7 +180,6 @@ When updating documentation for large-scale changes, follow this three-phase app
 | File                                | Purpose                                            |
 | ----------------------------------- | -------------------------------------------------- |
 | **.github/copilot-instructions.md** | GitHub Copilot coding guidelines and project rules |
-| **.github/CI-TROUBLESHOOTING.md**   | CI/CD troubleshooting guide                        |
 | **.githooks/README.md**             | Git hooks implementation details                   |
 
 ---
@@ -227,7 +231,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 2. **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process backend deployment
 3. **HOOKS-SETUP.md** - Git hooks setup
 4. **ENVIRONMENT-CONFIG.md** - Environment configuration
-5. **.github/CI-TROUBLESHOOTING.md** - CI/CD troubleshooting
+5. **docs/CI-TROUBLESHOOTING.md** - CI/CD troubleshooting
 6. **docs/TESTING.md** - Testing infrastructure
 
 ### Full-Stack Developers
@@ -267,7 +271,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 - **backend/docs/SPECS_AND_CLIENT_GEN.md** - ⭐ **Complete generation guide (OpenAPI/AsyncAPI/Python clients)**
 - **docs/CLIENT-GENERATION.md** - Client auto-generation overview
 - **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation guide
-- **frontend/src/clients_generated/trader-client-generated/README.md** - Generated client usage
+- **frontend/src/clients_generated/** - Per-module generated clients (REST + WebSocket types)
 
 ### API Versioning
 
@@ -303,7 +307,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 - **MAKEFILE-GUIDE.md** - Makefile commands
 - **docs/FULLSTACK-DEV-MODE.md** - Development mode orchestration
 - **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process backend management
-- **.github/CI-TROUBLESHOOTING.md** - CI/CD issues
+- **docs/CI-TROUBLESHOOTING.md** - CI/CD issues
 
 ### Code Quality
 
@@ -318,19 +322,21 @@ When updating documentation for large-scale changes, follow this three-phase app
 ### Categories Summary
 
 - **Root Documentation**: 10 essential project-wide guides
-- **docs/ Folder**: 8 core cross-cutting documentation files
+- **docs/ Folder**: 9 core cross-cutting documentation files
 - **Backend Documentation**: 7 current backend guides + 1 third-party doc
-- **Frontend Documentation**: 15 frontend-specific guides + 2 third-party docs
-- **Auto-Generated Docs**: 40+ API model references
-- **DevOps & Git**: 3 setup and operations guides
+- **Frontend Documentation**: 15 frontend-specific guides + 2 third-party docs (⚠️ 4 flagged for update/rewrite)
+- **Auto-Generated Docs**: Per-module generated clients and type definitions
+- **DevOps & Git**: 2 setup and operations guides
 - **Testing**: 3 testing guides
 
 ### Total Documentation Files
 
 - **User-Maintained**: ~42 actively maintained documentation files
-- **Auto-Generated**: 40+ API model documentation files
+  - ⚠️ **Quality Note**: 4 files flagged for update/rewrite (Nov 2025 assessment)
+  - 1 outdated file scheduled for removal (WS-PLUGIN-USAGE.md)
+  - 3 frontend WebSocket docs need accuracy improvements
+- **Auto-Generated**: Per-module client documentation (regenerated on API changes)
 - **Third-Party**: 3 external package documentation files
-- **Outdated/Historical**: 13 files in backend/docs/outdated/ (reference only)
 
 ### Maintenance
 
@@ -340,6 +346,14 @@ When updating documentation for large-scale changes, follow this three-phase app
 - Focus on essential, actionable information
 - Regular reviews ensure accuracy and relevance
 - **Note:** Files in `**/tmp/` directories are excluded from documentation updates (temporary/scratch files)
+
+**Recent Assessment** (November 2025):
+
+- 36 documents assessed for accuracy
+- 24 documents updated, 12 verified as accurate
+- Overall accuracy: 90% (A- grade)
+- 4 documents flagged for future rewrite/removal
+- See `docs/tmp/documentation-assessment-report.md` for details
 
 ### Link Format
 

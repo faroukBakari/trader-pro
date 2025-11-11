@@ -1,17 +1,32 @@
 # TradingView Charting Library TypeScript Types
 
+**Version**: 1.0.0  
+**Last Updated**: November 11, 2025  
+**Purpose**: Guide to TradingView TypeScript type definitions and usage patterns
+
+---
+
 ## Overview
 
-The TradingView Charting Library integration uses comprehensive TypeScript type definitions located in `/frontend/src/types/tradingview.ts`. These types ensure type safety and provide excellent IDE intellisense when working with the charting library.
+The TradingView Charting Library integration uses comprehensive TypeScript type definitions from the official TradingView library files located in `frontend/public/trading_terminal/`. These types ensure type safety and provide excellent IDE intellisense when working with the charting library.
 
 ## Project Structure
 
 ```
-frontend/src/
-├── types/
-│   └── tradingview.ts          # All TradingView type definitions (exported)
-└── components/
-    └── TraderChartContainer.vue # Chart component (imports types)
+frontend/
+├── public/trading_terminal/
+│   ├── charting_library.d.ts    # Main type definitions
+│   └── broker-api.d.ts          # Broker API types
+└── src/
+    ├── components/
+    │   └── TraderChartContainer.vue # Chart component (imports types)
+    ├── services/
+    │   ├── brokerTerminalService.ts # Broker implementation
+    │   └── datafeedService.ts       # Datafeed implementation
+    └── plugins/
+        ├── apiAdapter.ts            # API adapter
+        ├── wsAdapter.ts             # WebSocket adapter
+        └── mappers.ts               # Type mappers
 ```
 
 ## Usage
@@ -19,14 +34,26 @@ frontend/src/
 Import the types you need in your components:
 
 ```typescript
+// For datafeed and chart types
 import type {
   Bar,
   IDatafeedChartApi,
   LibrarySymbolInfo,
   ResolutionString,
-  TradingViewWidget,
-  // ... other types as needed
-} from '@/types/tradingview'
+  TradingTerminalWidgetOptions,
+} from '@public/trading_terminal/charting_library'
+
+// For broker types
+import type {
+  IBrokerConnectionAdapterHost,
+  IBrokerWithoutRealtime,
+  Order,
+  Position,
+  Execution,
+} from '@public/trading_terminal'
+
+// For enums and constants
+import { OrderStatus, OrderType, Side, ConnectionStatus } from '@public/trading_terminal'
 ```
 
 ## Type Definitions
