@@ -1,1404 +1,785 @@
-# Generic WebSocket Client Base - Centralized Subscription Management
+# WebSocket Base Client - Implementation Reference
 
-**Date**: October 15, 2025  
-**Status**: ✅ Complete and Production-Ready  
-**Latest Update**: Centralized subscription state management
+**Date**: November 11, 2025  
+**Status**: ✅ Production Ready  
+**Version**: 2.0.0
 
-## 🎯 Overview
+## 📋 Table of Contents
 
-Implemented a **singleton WebSocket client base class** with **centralized subscription management**:
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+3. [Core Classes](#core-classes)
+4. [Subscription Lifecycle](#subscription-lifecycle)
+5. [Connection Management](#connection-management)
+6. [Message Routing](#message-routing)
+7. [Error Handling](#error-handling)
+8. [Advanced Features](#advanced-features)
 
-- ✅ **Singleton pattern** - One WebSocket connection per URL shared across all instances
-- ✅ **Automatic connection** - Connects on creation with retry logic
-- ✅ **Server-confirmed subscriptions** - Waits for confirmation before registering listeners
-- ✅ **Centralized subscription state** - Single source of truth in base client ⭐ **NEW**
-- ✅ **Simplified service layer** - No duplicate subscription tracking needed ⭐ **NEW**
-- ✅ **Topic-based message filtering** - Each listener receives only relevant data
-- ✅ **Automatic reconnection** - Exponential backoff with resubscription
-- ✅ **Proper cleanup** - Reference counting with automatic disposal
-- ✅ **Type-safe operations** - Full TypeScript generics support
+---
 
-## 🌟 Recent Improvement: Centralized State Management
+## Overview
 
-### The Problem (Before)
+This document provides a detailed technical reference for the `WebSocketBase` singleton class, which powers all real-time WebSocket communication in the Trading Pro frontend.
 
-Services duplicated subscription state, leading to potential sync issues:
+### Key Features
+
+- ✅ **Singleton Pattern** - One WebSocket connection per backend module URL
+- ✅ **Centralized Subscription Management** - Single source of truth for all subscriptions
+- ✅ **Server-Confirmed Subscriptions** - Waits for server acknowledgment
+- ✅ **Automatic Reconnection** - Exponential backoff with full resubscription
+- ✅ **Reference Counting** - Auto-cleanup when last listener disconnects
+- ✅ **Topic-Based Routing** - Filters messages to relevant subscribers
+- ✅ **Type-Safe Messages** - Full TypeScript support
+- ✅ **Request-Response Pattern** - Async/await API for subscriptions
+- ✅ **Message Deduplication** - Prevents duplicate messages
+
+### Design Philosophy
+
+**Services Never Track State** ⭐
+
+The fundamental design principle is that services (like `DatafeedService` or `BrokerTerminalService`) **never** track subscription state. All subscription management happens centrally in `WebSocketBase`.
 
 ```typescript
-// ❌ OLD: Duplicate state tracking
+// ✅ Good - Service just passes through
 class DatafeedService {
-  private subscriptions = new Map<string, {...}>()  // Service tracks state
-
-  subscribeBars(listenerGuid, symbol, callback) {
-    // Track subscription in service
-    this.subscriptions.set(listenerGuid, { symbol, callback })
-
-    // AND track in base client
-    wsClient.subscribe(listenerGuid, params, callback)
-
-    // Problem: Two sources of truth!
+  subscribeBars(listenerId, params, callback) {
+    // No subscription Map needed!
+    return this.wsAdapter.bars.subscribe(listenerId, params, callback)
   }
 }
 
-class WebSocketClientBase {
-  protected subscriptions = new Map<string, SubscriptionState>()  // Client also tracks
-}
-```
-
-### The Solution (Now)
-
-**Single source of truth** - Base client manages all subscription state:
-
-```typescript
-// ✅ NEW: Centralized subscription management
+// ❌ Bad - Don't duplicate state
 class DatafeedService {
-  // No subscription Map needed!
+  private subscriptions = new Map() // NO! Base client handles this
+}
+```
 
-  subscribeBars(listenerGuid, symbol, callback) {
-    // Just pass through - base client handles everything
-    return wsClient.subscribe(listenerGuid, { symbol }, callback)
+---
+
+## Architecture
+
+### Class Hierarchy
+
+```
+┌────────────────────────────────────────────────┐
+│         WebSocketBase (Singleton)              │
+│  - One instance per WebSocket URL             │
+│  - Connection lifecycle management            │
+│  - Centralized subscription state              │
+│  - Message routing to subscribers              │
+└────────────────┬───────────────────────────────┘
+                 │
+                 │ Used by (extends/uses)
+                 │
+┌────────────────▼───────────────────────────────┐
+│  WebSocketClient<TParams, TBackendData, TData>│
+│  - Generic client with mapper                  │
+│  - Topic building from params                  │
+│  - Type-safe data transformations              │
+│  - Listener tracking per subscription          │
+└────────────────┬───────────────────────────────┘
+                 │
+                 │ Used by
+                 │
+┌────────────────▼───────────────────────────────┐
+│         WsAdapter (Facade)                     │
+│  - bars, quotes, orders, positions, etc.       │
+│  - Type-safe access to all WebSocket clients   │
+└────────────────────────────────────────────────┘
+```
+
+### Singleton Pattern per URL
+
+```
+Frontend Components:
+┌─────────────────────┐  ┌─────────────────────┐
+│  DatafeedService    │  │  BrokerService      │
+└──────────┬──────────┘  └──────────┬──────────┘
+           │                         │
+           │ Uses adapter            │
+           │                         │
+┌──────────▼─────────────────────────▼──────────┐
+│            WsAdapter (Facade)                 │
+│  ┌────────────┐    ┌─────────────────────┐   │
+│  │bars,quotes │    │orders,positions,etc.│   │
+│  └─────┬──────┘    └──────┬──────────────┘   │
+└────────┼───────────────────┼──────────────────┘
+         │                   │
+         │ WebSocketClient   │ WebSocketClient
+         │ instances         │ instances
+         │                   │
+┌────────▼───────┐  ┌────────▼───────────┐
+│ WebSocketBase  │  │ WebSocketBase      │
+│ (singleton)    │  │ (singleton)        │
+│ /v1/datafeed/ws│  │ /v1/broker/ws      │
+└────────┬───────┘  └────────┬───────────┘
+         │                   │
+         │ Native WebSocket  │ Native WebSocket
+         │                   │
+┌────────▼───────────────────▼───────────┐
+│         Backend Modules                │
+│  datafeed module     broker module     │
+└────────────────────────────────────────┘
+```
+
+**Key Point**: Even though there are 7 `WebSocketClient` instances (bars, quotes, orders, etc.), there are only **2 actual WebSocket connections** - one per backend module URL.
+
+---
+
+## Core Classes
+
+### WebSocketBase
+
+**File**: `frontend/src/plugins/wsClientBase.ts`
+
+The singleton WebSocket connection manager.
+
+#### Class Definition
+
+```typescript
+export class WebSocketBase {
+  // Singleton management
+  private static instances = new Map<string, WebSocketBase>()
+
+  // Connection state
+  protected ws: WebSocket | null = null
+  protected wsUrl: string
+  protected isReconnecting: boolean = false
+  protected reconnectAttempts: number = 0
+  protected maxReconnectAttempts: number = 5
+  protected reconnectDelay: number = 1000
+
+  // Subscription state (centralized!)
+  protected subscriptions = new Map<string, SubscriptionState>()
+
+  // Message handling
+  protected pendingRequests = new Map<string, PendingRequest>()
+  protected requestIdCounter: number = 0
+
+  // Singleton accessor
+  static getInstance(wsUrl: string): WebSocketBase {
+    if (!WebSocketBase.instances.has(wsUrl)) {
+      WebSocketBase.instances.set(wsUrl, new WebSocketBase(wsUrl))
+    }
+    return WebSocketBase.instances.get(wsUrl)!
   }
 
-  unsubscribeBars(listenerGuid) {
-    // Base client handles cleanup
-    return wsClient.unsubscribe(listenerGuid)
+  // Private constructor
+  private constructor(wsUrl: string) {
+    this.wsUrl = wsUrl
+    this.connect()
+  }
+}
+```
+
+#### Key Interfaces
+
+**`SubscriptionState`** - Tracks subscription metadata
+
+```typescript
+export interface SubscriptionState {
+  topic: string // e.g., "bars:AAPL:1"
+  subscriptionType: string // e.g., "bars.subscribe"
+  subscriptionParams: object // Original params
+  confirmed: boolean // Server confirmed?
+  listeners: Map<string, (data: object) => void> // All callbacks
+}
+```
+
+**`PendingRequest`** - Tracks request-response pairs
+
+```typescript
+interface PendingRequest {
+  resolve: (response: object) => void
+  reject: (error: Error) => void
+  timeout: ReturnType<typeof setTimeout>
+  expectedType?: string
+}
+```
+
+---
+
+## Subscription Lifecycle
+
+### 1. Subscribe Flow
+
+```typescript
+// Service calls
+await adapter.bars.subscribe(listenerId, params, callback)
+  ↓
+// WebSocketClient builds topic and calls
+await ws.subscribe(topic, subscribeType, params, listenerId, callback)
+  ↓
+// WebSocketBase handles subscription
+```
+
+**Detailed Steps**:
+
+```typescript
+async subscribe(
+  topic: string,
+  subscriptionType: string,
+  subscriptionParams: object,
+  listenerId: string,
+  onUpdate: (data: object) => void
+): Promise<SubscriptionState> {
+  // Step 1: Check if subscription exists
+  let subscription = this.subscriptions.get(topic)
+
+  if (subscription) {
+    // Reuse existing subscription - just add listener
+    subscription.listeners.set(listenerId, onUpdate)
+    return subscription
+  }
+
+  // Step 2: Create new subscription (unconfirmed)
+  subscription = {
+    topic,
+    subscriptionParams,
+    subscriptionType,
+    confirmed: false,
+    listeners: new Map([[listenerId, onUpdate]])
+  }
+  this.subscriptions.set(topic, subscription)
+
+  // Step 3: Send subscribe request to server
+  try {
+    const response = await this.sendRequestWithTimeout(
+      subscriptionType,
+      subscriptionParams,
+      5000 // 5 second timeout
+    )
+
+    // Step 4: Verify server response
+    if (response.status === 'ok') {
+      subscription.confirmed = true
+    } else {
+      throw new Error(`Subscription failed: ${response.message}`)
+    }
+
+    return subscription
+  } catch (error) {
+    // Cleanup on failure
+    this.subscriptions.delete(topic)
+    throw error
+  }
+}
+```
+
+**Key Features**:
+
+- ✅ Reuses existing subscriptions (reference counting)
+- ✅ Waits for server confirmation
+- ✅ Cleans up on failure
+- ✅ Returns subscription state to client
+
+### 2. Message Routing
+
+```typescript
+protected handleMessage(event: MessageEvent): void {
+  const message: WebSocketMessage = JSON.parse(event.data)
+
+  // Route 1: Response to pending request (subscribe, unsubscribe)
+  if (message.request_id !== undefined) {
+    const pending = this.pendingRequests.get(message.request_id)
+    if (pending) {
+      clearTimeout(pending.timeout)
+      this.pendingRequests.delete(message.request_id)
+
+      if (message.status === 'error') {
+        pending.reject(new Error(message.message || 'Request failed'))
+      } else {
+        pending.resolve(message)
+      }
+      return
+    }
+  }
+
+  // Route 2: Data update (bars.update, orders.update, etc.)
+  if (message.type && message.type.endsWith('.update')) {
+    const topic = message.topic
+    if (!topic) return
+
+    const subscription = this.subscriptions.get(topic)
+    if (subscription && subscription.confirmed) {
+      // Broadcast to all listeners for this topic
+      for (const [listenerId, callback] of subscription.listeners) {
+        try {
+          callback(message.data)
+        } catch (error) {
+          console.error(`[WebSocketBase] Listener ${listenerId} error:`, error)
+        }
+      }
+    }
+  }
+}
+```
+
+**Key Features**:
+
+- ✅ Handles both request-response and pub-sub patterns
+- ✅ Only routes to confirmed subscriptions
+- ✅ Broadcasts to all listeners for a topic
+- ✅ Error isolation per listener
+
+### 3. Unsubscribe Flow
+
+```typescript
+async unsubscribe(listenerId: string, topic?: string): Promise<void> {
+  if (!topic) {
+    // Unsubscribe from all topics for this listener
+    for (const [currentTopic, subscription] of this.subscriptions) {
+      if (subscription.listeners.has(listenerId)) {
+        await this.unsubscribeFromTopic(listenerId, currentTopic)
+      }
+    }
+    return
+  }
+
+  await this.unsubscribeFromTopic(listenerId, topic)
+}
+
+private async unsubscribeFromTopic(listenerId: string, topic: string): Promise<void> {
+  const subscription = this.subscriptions.get(topic)
+  if (!subscription) return
+
+  // Remove listener
+  subscription.listeners.delete(listenerId)
+
+  // If no more listeners, unsubscribe from server
+  if (subscription.listeners.size === 0) {
+    try {
+      await this.sendRequestWithTimeout(
+        subscription.subscriptionType.replace('.subscribe', '.unsubscribe'),
+        subscription.subscriptionParams,
+        5000
+      )
+    } finally {
+      this.subscriptions.delete(topic)
+    }
+  }
+}
+```
+
+**Key Features**:
+
+- ✅ Reference counting (only unsubscribes when last listener gone)
+- ✅ Supports unsubscribing from specific topic or all topics
+- ✅ Automatic cleanup
+- ✅ Handles server communication
+
+---
+
+## Connection Management
+
+### Initial Connection
+
+```typescript
+protected connect(): void {
+  if (this.ws?.readyState === WebSocket.OPEN) return
+
+  try {
+    this.ws = new WebSocket(this.wsUrl)
+
+    this.ws.onopen = () => {
+      console.log(`[WebSocketBase] Connected to ${this.wsUrl}`)
+      this.reconnectAttempts = 0
+      this.isReconnecting = false
+    }
+
+    this.ws.onmessage = (event) => this.handleMessage(event)
+    this.ws.onerror = (error) => this.handleError(error)
+    this.ws.onclose = (event) => this.handleClose(event)
+  } catch (error) {
+    console.error('[WebSocketBase] Connection error:', error)
+    this.scheduleReconnect()
+  }
+}
+```
+
+### Automatic Reconnection
+
+```typescript
+protected handleClose(event: CloseEvent): void {
+  console.log(`[WebSocketBase] Connection closed: ${event.code} ${event.reason}`)
+
+  if (!this.isReconnecting && this.reconnectAttempts < this.maxReconnectAttempts) {
+    this.scheduleReconnect()
   }
 }
 
-class WebSocketClientBase {
-  protected subscriptions = new Map<string, SubscriptionState>() // Single source
+protected scheduleReconnect(): void {
+  if (this.isReconnecting) return
+
+  this.isReconnecting = true
+  this.reconnectAttempts++
+
+  // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+  const delay = Math.min(
+    this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+    16000
+  )
+
+  console.log(`[WebSocketBase] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`)
+
+  setTimeout(() => {
+    this.connect()
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.resubscribeAll()
+    }
+  }, delay)
 }
 ```
 
-### Benefits
-
-1. **No Duplicate State** ✅
-   - Service layer simplified - no subscription Maps
-   - Impossible for state to desync
-   - Less memory usage
-
-2. **Simpler Service Code** ✅
-   - Services just call subscribe/unsubscribe
-   - No subscription lifecycle management
-   - No cleanup logic needed
-
-3. **Automatic Reconnection** ✅
-   - Base client has all subscription state
-   - Can resubscribe all on reconnect automatically
-   - Services don't need to track for reconnection
-
-4. **Better Type Safety** ✅
-   - Subscription state typed in one place
-   - No duplicate type definitions
-
-5. **Easier Testing** ✅
-   - Mock the base client interface only
-   - No need to mock service subscription management
-
-## 🔑 Key Design Decisions
-
-### 1. Singleton Pattern ⭐
-
-**Why?** Prevent multiple WebSocket connections to the same server.
+### Resubscription on Reconnect
 
 ```typescript
-// Multiple clients share the same underlying WebSocket connection
-const client1 = await BarsWebSocketClient.create({ url: 'ws://localhost:8000/api/v1/ws' })
-const client2 = await BarsWebSocketClient.create({ url: 'ws://localhost:8000/api/v1/ws' })
+protected async resubscribeAll(): Promise<void> {
+  console.log(`[WebSocketBase] Resubscribing to ${this.subscriptions.size} topics`)
 
-// Both use the SAME WebSocket connection
-// Reference count: 2
-```
+  for (const [topic, subscription] of this.subscriptions) {
+    try {
+      const response = await this.sendRequestWithTimeout(
+        subscription.subscriptionType,
+        subscription.subscriptionParams,
+        5000
+      )
 
-**Benefits**:
-
-- **Resource efficient**: One connection handles all subscriptions
-- **Reduced overhead**: No duplicate handshakes or heartbeats
-- **Centralized state**: All subscriptions managed in one place
-- **Automatic cleanup**: Connection closes when last client disposes
-
-### 2. Automatic Connection with Retries ⭐
-
-**Why?** No need for manual connection management.
-
-```typescript
-// Old way (manual):
-const client = new BarsWebSocketClient(config)
-await client.connect() // Manual connection
-const subId = await client.subscribeToBars(...)
-
-// New way (automatic):
-const client = await BarsWebSocketClient.create(config) // Auto-connects!
-const subId = await client.subscribeToBars(...) // Just subscribe
-```
-
-**Retry Logic**:
-
-```
-Attempt 1: Wait 0ms
-Attempt 2: Wait 1000ms
-Attempt 3: Wait 2000ms
-Attempt 4: Wait 4000ms
-Attempt 5: Wait 8000ms (max attempts)
-```
-
-**Benefits**:
-
-- **Zero boilerplate**: Connection happens automatically
-- **Fault tolerant**: Handles temporary network issues
-- **Fast fail**: Clear error after max retries
-- **Developer friendly**: Less code to write
-
-### 3. Private connect/disconnect Methods
-
-**Why?** Prevent misuse and ensure proper lifecycle management.
-
-```typescript
-// These are now PRIVATE and handled internally:
-// - connect()       -> Called automatically in create()
-// - disconnect()    -> Called automatically in dispose()
-
-// Public API is simple:
-const client = await BarsWebSocketClient.create(config) // Auto-connects
-await client.subscribeToBars(...)
-await client.dispose() // Auto-disconnects when ref count = 0
-```
-
-**Benefits**:
-
-- **Foolproof API**: Can't accidentally disconnect while subscriptions are active
-- **Reference counting**: Connection stays alive as long as needed
-- **Clean lifecycle**: Creation = connection, disposal = disconnection
-
-### 4. Reference Counting
-
-**How it works**:
-
-```typescript
-// Client 1 created -> refCount = 1, connect WebSocket
-const client1 = await BarsWebSocketClient.create(config)
-
-// Client 2 created (same URL) -> refCount = 2, reuse WebSocket
-const client2 = await BarsWebSocketClient.create(config)
-
-// Client 1 disposed -> refCount = 1, WebSocket stays open
-await client1.dispose()
-
-// Client 2 disposed -> refCount = 0, WebSocket closes
-await client2.dispose()
-```
-
-**Benefits**:
-
-- **Safe disposal**: Only closes when no one is using it
-- **Memory efficient**: Automatic cleanup when done
-- **Predictable**: Clear ownership semantics
-
-## 📦 What Was Created
-
-### 1. Base Client (`wsClientBase.ts`)
-
-**Location**: `frontend/src/clients_generated/ws-generated/wsClientBase.ts`
-
-#### Key Classes & Interfaces
-
-**`WebSocketMessage<T>`** - Message envelope interface
-
-```typescript
-interface WebSocketMessage<T = unknown> {
-  type: string // e.g., 'bars.subscribe', 'bars.update'
-  payload?: T // Optional payload
+      if (response.status === 'ok') {
+        subscription.confirmed = true
+      } else {
+        console.error(`[WebSocketBase] Resubscription failed for ${topic}`)
+        subscription.confirmed = false
+      }
+    } catch (error) {
+      console.error(`[WebSocketBase] Resubscription error for ${topic}:`, error)
+      subscription.confirmed = false
+    }
+  }
 }
 ```
 
-**`WebSocketClientConfig`** - Configuration interface
+**Key Features**:
+
+- ✅ Exponential backoff (1s → 2s → 4s → 8s → 16s max)
+- ✅ Automatic resubscription after reconnect
+- ✅ Preserves all subscription state
+- ✅ Max 5 reconnect attempts
+- ✅ Services don't need to handle reconnection
+
+---
+
+## Message Routing
+
+### Request-Response Pattern
+
+Used for subscribe/unsubscribe operations:
 
 ```typescript
-interface WebSocketClientConfig {
-  url: string
-  reconnect?: boolean // default: true
-  maxReconnectAttempts?: number // default: 5
-  reconnectDelay?: number // default: 1000ms
-  debug?: boolean // default: false
+protected async sendRequestWithTimeout<T = object>(
+  type: string,
+  payload: object,
+  timeoutMs: number = 5000
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const requestId = `${++this.requestIdCounter}`
+
+    // Create pending request
+    const timeout = setTimeout(() => {
+      this.pendingRequests.delete(requestId)
+      reject(new Error(`Request timeout after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    this.pendingRequests.set(requestId, { resolve, reject, timeout })
+
+    // Send request
+    const message = {
+      type,
+      payload,
+      request_id: requestId
+    }
+    this.ws?.send(JSON.stringify(message))
+  })
 }
 ```
 
-**`WebSocketClientBase`** - Generic base class
+### Publish-Subscribe Pattern
+
+Used for data updates:
 
 ```typescript
-class WebSocketClientBase {
-  // Protected methods for derived classes
-  protected async subscribe<TPayload, TData>(
-    subscribeType: string,
-    subscribePayload: TPayload,
-    expectedTopic: string,
-    updateType: string,
-    callback: (data: TData) => void,
-  ): Promise<string>
+// Server sends:
+{
+  "type": "bars.update",
+  "topic": "bars:AAPL:1",
+  "data": { time: 123456, open: 150, ... }
+}
 
-  protected async unsubscribe<TPayload>(
-    subscriptionId: string,
-    unsubscribeType: string,
-    unsubscribePayload: TPayload,
-  ): Promise<void>
-
-  protected async sendRequest<TResponse>(
-    type: string,
-    payload: unknown,
-    timeout?: number,
-  ): Promise<TResponse>
-
-  // Public methods
-  async connect(): Promise<void>
-  async disconnect(): Promise<void>
-  isConnected(): boolean
-  getSubscriptionCount(): number
-  getConfirmedSubscriptionCount(): number
+// WebSocketBase routes to all listeners:
+const subscription = this.subscriptions.get("bars:AAPL:1")
+for (const callback of subscription.listeners.values()) {
+  callback(data) // Each listener gets the update
 }
 ```
 
-### 2. Example Implementation (`barsClient.ts`)
+---
 
-**Location**: `frontend/src/clients_generated/ws-generated/barsClient.ts`
+## Error Handling
 
-#### `IBarDataSource` Interface
+### Connection Errors
 
 ```typescript
-interface IBarDataSource {
-  subscribeToBars(symbol: string, resolution: string, onTick: (bar: Bar) => void): Promise<string>
-
-  unsubscribe(listenerGuid: string): Promise<void>
-  isConnected(): boolean
-  connect(): Promise<void>
-  disconnect(): Promise<void>
+protected handleError(error: Event): void {
+  console.error('[WebSocketBase] WebSocket error:', error)
+  // Will trigger onclose → scheduleReconnect
 }
 ```
 
-#### `BarsWebSocketClient` Class
+### Subscription Errors
 
 ```typescript
-class BarsWebSocketClient extends WebSocketClientBase implements IBarDataSource {
-  async subscribeToBars(symbol, resolution, onTick): Promise<string>
-  async unsubscribe(listenerGuid): Promise<void>
+async subscribe(...): Promise<SubscriptionState> {
+  try {
+    const response = await this.sendRequestWithTimeout(...)
+    if (response.status !== 'ok') {
+      throw new Error(`Subscription failed: ${response.message}`)
+    }
+  } catch (error) {
+    // Cleanup failed subscription
+    this.subscriptions.delete(topic)
+    throw error // Propagate to caller
+  }
 }
 ```
 
-## 🔑 Key Features
-
-### 1. Server-Confirmed Subscriptions ⭐
-
-The client **waits for server confirmation** before registering listeners:
+### Listener Errors
 
 ```typescript
-// 1. Send subscription request
-const response = await this.sendRequest<SubscriptionResponse>(
-  'bars.subscribe',
-  { symbol, resolution },
-  5000, // 5 second timeout
-)
-
-// 2. Verify topic matches
-if (response.topic !== expectedTopic) {
-  throw new Error('Topic mismatch')
-}
-
-// 3. Verify status is 'ok'
-if (response.status !== 'ok') {
-  throw new Error('Subscription failed')
-}
-
-// 4. Mark subscription as confirmed
-subscription.confirmed = true
-
-// 5. Now listener is registered and will receive updates
-```
-
-**Benefits**:
-
-- No race conditions
-- Guaranteed server acknowledgment
-- Proper error handling
-- Clean subscription state
-
-### 2. Topic-Based Filtering
-
-Each subscription is associated with a topic:
-
-```typescript
-// Topic format: bars:SYMBOL:RESOLUTION
-const topic = `bars:AAPL:1`
-
-// Only confirmed subscriptions with matching updateType receive messages
-if (subscription.confirmed && subscription.updateType === type) {
-  subscription.callback(payload)
+// Errors in one listener don't affect others
+for (const [listenerId, callback] of subscription.listeners) {
+  try {
+    callback(message.data)
+  } catch (error) {
+    console.error(`[WebSocketBase] Listener ${listenerId} error:`, error)
+    // Continue to next listener
+  }
 }
 ```
 
-**Benefits**:
+---
 
-- Multiple subscriptions can coexist
-- Each listener only receives relevant data
-- Follows backend topic structure
+## Advanced Features
 
-### 3. Automatic Reconnection
+### 1. Topic Building
 
-Implements exponential backoff strategy:
+Topics are built from subscription parameters to ensure uniqueness:
 
 ```typescript
-// Attempt 1: Wait 1000ms
-// Attempt 2: Wait 2000ms
-// Attempt 3: Wait 4000ms
-// Attempt 4: Wait 8000ms
-// Attempt 5: Wait 16000ms (max attempts reached)
+// In WebSocketClient
+const topic = `${this.wsRoute}:${buildTopicParams(subscriptionParams)}`
 
-const delay = this.config.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
-```
-
-**On reconnection**:
-
-- Automatically resubscribes to all confirmed subscriptions
-- Uses stored subscription parameters
-- Waits for server confirmation again
-
-### 4. Type Safety
-
-Full TypeScript support with generics:
-
-```typescript
-// Subscribe is fully typed
-await this.subscribe<BarsSubscriptionRequest, Bar>(
-  'bars.subscribe', // type: string
-  payload, // type: BarsSubscriptionRequest
-  topic, // type: string
-  'bars.update', // type: string
-  onTick, // type: (bar: Bar) => void
-)
-
-// Callback receives properly typed data
-onTick: (bar: Bar) => {
-  console.log(bar.open, bar.close) // Full autocomplete!
+// Example buildTopicParams:
+function buildTopicParams(params: object): string {
+  // bars: { symbol: "AAPL", resolution: "1" } → "AAPL:1"
+  // orders: { account_id: "123" } → "123"
+  return Object.values(params).join(':')
 }
 ```
 
-### 5. Debug Logging
-
-Enable debug mode to see all WebSocket activity:
+### 2. Connection State Inspection
 
 ```typescript
-const client = new BarsWebSocketClient({
-  url: 'ws://localhost:8000/api/v1/ws',
-  debug: true, // Enable debug logging
+export class WebSocketBase {
+  isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  getSubscriptionCount(): number {
+    return this.subscriptions.size
+  }
+
+  getConfirmedSubscriptionCount(): number {
+    return Array.from(this.subscriptions.values()).filter((sub) => sub.confirmed).length
+  }
+}
+```
+
+### 3. Multiple Listeners per Topic
+
+```typescript
+// Listener 1
+await adapter.bars.subscribe('listener-1', { symbol: 'AAPL', resolution: '1' }, callback1)
+
+// Listener 2 (same params → same topic)
+await adapter.bars.subscribe('listener-2', { symbol: 'AAPL', resolution: '1' }, callback2)
+
+// Result: ONE subscription to server, TWO listeners
+// Both get updates when server sends bars.update
+```
+
+### 4. Graceful Cleanup
+
+```typescript
+// When last listener unsubscribes:
+await adapter.bars.unsubscribe('listener-2')
+// subscription.listeners.size = 1, keep subscription
+
+await adapter.bars.unsubscribe('listener-1')
+// subscription.listeners.size = 0, unsubscribe from server
+```
+
+---
+
+## Usage Patterns
+
+### Pattern 1: Service Integration
+
+```typescript
+export class DatafeedService {
+  private wsAdapter: WsAdapterType
+
+  constructor() {
+    this.wsAdapter = new WsAdapter()
+  }
+
+  subscribeBars(
+    listenerGuid: string,
+    symbol: string,
+    resolution: string,
+    callback: (bar: Bar) => void,
+  ): void {
+    // Just pass through - base client handles everything!
+    this.wsAdapter.bars.subscribe(listenerGuid, { symbol, resolution }, callback)
+  }
+
+  unsubscribeBars(listenerGuid: string): void {
+    this.wsAdapter.bars.unsubscribe(listenerGuid)
+  }
+}
+```
+
+### Pattern 2: Vue Component Usage
+
+```typescript
+<script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
+import { WsAdapter } from '@/plugins/wsAdapter'
+
+const adapter = new WsAdapter()
+const listenerId = 'my-component'
+
+onMounted(() => {
+  adapter.bars.subscribe(
+    listenerId,
+    { symbol: 'AAPL', resolution: '1' },
+    (bar) => {
+      console.log('Bar update:', bar)
+    }
+  )
 })
 
-// Console output:
-// [WebSocketClient] Connecting to ws://localhost:8000/api/v1/ws
-// [WebSocketClient] Connected
-// [WebSocketClient] Sent: bars.subscribe { symbol: 'AAPL', resolution: '1' }
-// [WebSocketClient] Received: bars.subscribe.response { status: 'ok', topic: 'bars:AAPL:1' }
-// [WebSocketClient] Subscription confirmed: bars:AAPL:1
-// [WebSocketClient] Received: bars.update { time: 1697..., open: 150, ... }
-```
-
-## 📖 Usage Examples
-
-### Basic Usage
-
-```typescript
-import { BarsWebSocketClientFactory } from '@/clients/ws-generated/client'
-import type { Bar } from '@/clients/ws-types-generated'
-
-// Get client instance (singleton)
-const client = BarsWebSocketClientFactory()
-
-// Subscribe with your own ID (e.g., from TradingView's listenerGuid)
-const subscriptionId = 'my-unique-id'
-await client.subscribe(
-  subscriptionId, // Your ID
-  { symbol: 'AAPL', resolution: '1' }, // Params
-  (bar: Bar) => {
-    // Callback
-    console.log('New bar received:', bar)
-    console.log(`  Time: ${new Date(bar.time)}`)
-    console.log(`  OHLC: ${bar.open}, ${bar.high}, ${bar.low}, ${bar.close}`)
-    console.log(`  Volume: ${bar.volume}`)
-  },
-)
-
-// Unsubscribe using the same ID
-await client.unsubscribe(subscriptionId)
-
-// ✅ No need to track subscription state in your service!
-// ✅ Base client manages everything internally
-```
-
-### Multiple Subscriptions (Single Client)
-
-```typescript
-const client = await BarsWebSocketClient.create({
-  url: 'ws://localhost:8000/api/v1/ws',
+onUnmounted(() => {
+  adapter.bars.unsubscribe(listenerId)
 })
-
-// All subscriptions share the same WebSocket connection
-const subscriptions = await Promise.all([
-  client.subscribeToBars('AAPL', '1', (bar) => console.log('AAPL 1min:', bar)),
-  client.subscribeToBars('GOOGL', '5', (bar) => console.log('GOOGL 5min:', bar)),
-  client.subscribeToBars('MSFT', 'D', (bar) => console.log('MSFT Daily:', bar)),
-])
-
-// Unsubscribe from all
-for (const id of subscriptions) {
-  await client.unsubscribe(id)
-}
-
-await client.dispose()
+</script>
 ```
 
-### Multiple Clients (Singleton Shared Connection)
-
-```typescript
-// Create multiple clients - they share the SAME WebSocket connection
-const client1 = await BarsWebSocketClient.create({
-  url: 'ws://localhost:8000/api/v1/ws',
-})
-
-const client2 = await BarsWebSocketClient.create({
-  url: 'ws://localhost:8000/api/v1/ws', // Same URL = same connection
-})
-
-// Both clients use the same underlying WebSocket
-await client1.subscribeToBars('AAPL', '1', (bar) => console.log('Client1:', bar))
-await client2.subscribeToBars('GOOGL', '5', (bar) => console.log('Client2:', bar))
-
-// Disposing client1 doesn't close the WebSocket (client2 still using it)
-await client1.dispose() // refCount: 2 -> 1
-
-// Disposing client2 closes the WebSocket (refCount: 1 -> 0)
-await client2.dispose() // Connection closed!
-```
-
-### Error Handling
+### Pattern 3: Error Handling
 
 ```typescript
 try {
-  const client = await BarsWebSocketClient.create({
-    url: 'ws://localhost:8000/api/v1/ws',
-    maxReconnectAttempts: 3,
-  })
-
-  const id = await client.subscribeToBars('AAPL', '1', (bar) => {
-    console.log(bar)
-  })
+  await adapter.orders.subscribe('order-listener', { account_id: '123' }, (order) =>
+    console.log(order),
+  )
 } catch (error) {
-  if (error.message.includes('Failed to connect after')) {
-    console.error('Could not establish connection:', error)
-  } else if (error.message.includes('timeout')) {
+  if (error.message.includes('timeout')) {
     console.error('Server did not respond in time')
-  } else if (error.message.includes('Topic mismatch')) {
-    console.error('Server returned unexpected topic')
+  } else if (error.message.includes('Subscription failed')) {
+    console.error('Server rejected subscription')
   } else {
     console.error('Unknown error:', error)
   }
 }
 ```
 
-### With DatafeedService
+---
+
+## Testing Considerations
+
+### Unit Testing
 
 ```typescript
-import { BarsWebSocketClientFactory } from '@/clients/ws-generated/client'
-import type { BarsWebSocketInterface } from '@/clients/ws-generated/client'
-
-class DatafeedService implements IBasicDataFeed {
-  private wsClient: BarsWebSocketInterface
-
-  constructor() {
-    // Get singleton client instance
-    this.wsClient = BarsWebSocketClientFactory()
-  }
-
-  async subscribeBars(
-    symbolInfo: LibrarySymbolInfo,
-    resolution: string,
-    onTick: SubscribeBarsCallback,
-    listenerGuid: string,
-  ): void {
-    // ✅ No subscription tracking needed - just pass through!
-    await this.wsClient.subscribe(
-      listenerGuid, // TradingView's unique ID
-      { symbol: symbolInfo.name, resolution },
-      (bar) => onTick(bar), // Forward to TradingView
-    )
-  }
-
-  async unsubscribeBars(listenerGuid: string): void {
-    // ✅ Base client handles cleanup internally
-    await this.wsClient.unsubscribe(listenerGuid)
-  }
-
-  // ✅ No cleanup() method needed - no state to manage!
-}
-```
-
-**Key Differences from Old Implementation**:
-
-- ❌ **Removed**: `private subscriptions = new Map()`
-- ❌ **Removed**: `activeSubscriptions.set()` / `activeSubscriptions.delete()`
-- ❌ **Removed**: `cleanup()` method to iterate and clean subscriptions
-- ✅ **Added**: Direct pass-through to base client
-- ✅ **Simpler**: Service has no subscription state management
-
-## 🏗️ Architecture Benefits
-
-### 1. Separation of Concerns
-
-- **`WebSocketClientBase`**: Handles WebSocket protocol, reconnection, message routing
-- **`BarsWebSocketClient`**: Handles bars-specific logic and topic building
-- **`DatafeedService`**: Handles TradingView integration
-
-### 2. Extensibility
-
-Easy to create new clients for different data types:
-
-```typescript
-// Create quotes client
-class QuotesWebSocketClient extends WebSocketClientBase {
-  async subscribeToQuotes(symbol: string, callback: (quote: Quote) => void) {
-    return this.subscribe(
-      'quotes.subscribe',
-      { symbol },
-      `quotes:${symbol}`,
-      'quotes.update',
-      callback,
-    )
-  }
-}
-
-// Create trades client
-class TradesWebSocketClient extends WebSocketClientBase {
-  async subscribeToTrades(symbol: string, callback: (trade: Trade) => void) {
-    return this.subscribe(
-      'trades.subscribe',
-      { symbol },
-      `trades:${symbol}`,
-      'trades.update',
-      callback,
-    )
-  }
-}
-```
-
-### 3. Testability
-
-Easy to mock for testing:
-
-```typescript
-class MockBarsClient implements IBarDataSource {
-  async subscribeToBars(symbol, resolution, onTick) {
-    // Generate mock bars
-    setInterval(() => {
-      onTick(generateMockBar())
-    }, 1000)
-    return 'mock-sub-id'
-  }
-
-  async unsubscribe(id) {
-    // Clean up mock subscription
-  }
-
-  isConnected() {
-    return true
-  }
-  async connect() {}
-  async disconnect() {}
-}
-```
-
-## 🔍 How It Works
-
-### Subscription Flow
-
-```
-1. Client                    2. WebSocket Base         3. Server
-   |                            |                        |
-   | subscribeToBars()          |                        |
-   |--------------------------->|                        |
-   |                            | subscribe()            |
-   |                            | sendRequest()          |
-   |                            |----------------------->|
-   |                            |                        |
-   |                            |   { type: 'bars.subscribe.response',
-   |                            |     payload: { status: 'ok', topic: 'bars:AAPL:1' } }
-   |                            |<-----------------------|
-   |                            |                        |
-   |                            | ✅ Verify topic        |
-   |                            | ✅ Verify status       |
-   |                            | ✅ Mark confirmed      |
-   |                            |                        |
-   | subscription ID            |                        |
-   |<---------------------------|                        |
-   |                            |                        |
-   |                            |                        |
-   |                            |   { type: 'bars.update',
-   |                            |     payload: { time: ..., open: ..., ... } }
-   |                            |<-----------------------|
-   |                            |                        |
-   |                            | Route to callback      |
-   |  onTick(bar)               |                        |
-   |<---------------------------|                        |
-```
-
-### Message Routing
-
-```typescript
-handleMessage(event) {
-  const { type, payload } = JSON.parse(event.data)
-
-  // 1. Check if response to pending request
-  if (this.pendingRequests.has(type)) {
-    this.pendingRequests.get(type).resolve(payload)
-    return
-  }
-
-  // 2. Check if update message
-  if (type.endsWith('.update')) {
-    // Route to confirmed subscriptions with matching updateType
-    for (const sub of this.subscriptions.values()) {
-      if (sub.confirmed && sub.updateType === type) {
-        sub.callback(payload)
-      }
-    }
-    return
-  }
-
-  // 3. Unhandled message
-  this.log('Unhandled message type:', type)
-}
-```
-
-## 📊 Code Statistics
-
-- **Base Client**: ~550 lines (generic, reusable, singleton)
-- **Bars Client**: ~130 lines (specific implementation)
-- **Total**: ~680 lines
-- **TypeScript Errors**: 0
-- **Dependencies**: 0 (uses native WebSocket)
-- **Bundle Impact**: ~22KB (minified)
-
-## ✅ Verification
-
-```bash
-# Compile check
-cd frontend
-npx tsc --noEmit src/clients/ws-generated/wsClientBase.ts
-npx tsc --noEmit src/clients/ws-generated/barsClient.ts
-
-# Both compile successfully ✅
-```
-
-## 🎯 API Summary
-
-### BarsWebSocketClient
-
-```typescript
-class BarsWebSocketClient implements IBarDataSource {
-  // Factory method (use this instead of constructor)
-  static async create(config: WebSocketClientConfig): Promise<BarsWebSocketClient>
-
-  // Subscribe to bars
-  async subscribeToBars(
-    symbol: string,
-    resolution: string,
-    onTick: (bar: Bar) => void,
-  ): Promise<string>
-
-  // Unsubscribe
-  async unsubscribe(listenerGuid: string): Promise<void>
-
-  // Check connection status
-  isConnected(): boolean
-
-  // Cleanup (decrements ref count, closes if 0)
-  async dispose(): Promise<void>
-}
-```
-
-### WebSocketClientBase (Singleton)
-
-```typescript
-class WebSocketClientBase {
-  // Get/create singleton instance (auto-connects)
-  static async getInstance(config: WebSocketClientConfig): Promise<WebSocketClientBase>
-
-  // Subscribe with server confirmation
-  async subscribe<TPayload, TData>(
-    subscribeType: string,
-    subscribePayload: TPayload,
-    expectedTopic: string,
-    updateType: string,
-    callback: (data: TData) => void,
-  ): Promise<string>
-
-  // Unsubscribe
-  async unsubscribe<TPayload>(
-    subscriptionId: string,
-    unsubscribeType: string,
-    unsubscribePayload: TPayload,
-  ): Promise<void>
-
-  // Send request and wait for response
-  async sendRequest<TResponse>(type: string, payload: unknown, timeout?: number): Promise<TResponse>
-
-  // Check connection
-  isConnected(): boolean
-
-  // Release reference (auto-disconnects when refCount = 0)
-  async releaseInstance(): Promise<void>
-
-  // Get metrics
-  getSubscriptions(): ReadonlyMap<string, SubscriptionState>
-  getSubscriptionCount(): number
-  getConfirmedSubscriptionCount(): number
-}
-```
-
-## 🚀 Migration Guide
-
-### From Old API
-
-```typescript
-// OLD WAY ❌
-const client = new BarsWebSocketClient(config)
-await client.connect()
-const subId = await client.subscribeToBars(...)
-await client.disconnect()
-
-// NEW WAY ✅
-const client = await BarsWebSocketClient.create(config) // Auto-connects!
-const subId = await client.subscribeToBars(...)
-await client.dispose() // Auto-disconnects when safe
-```
-
-### Key Changes
-
-1. **Constructor is now private** - Use `BarsWebSocketClient.create()` instead
-2. **No manual connect** - Connection happens automatically in `create()`
-3. **No manual disconnect** - Use `dispose()` instead (ref-counted)
-4. **create() is async** - Returns Promise, handles connection retries
-5. **dispose() is mandatory** - Cleanup to release resources properly
-
-## 🎯 Next Steps
-
-With this singleton base in place, you can now:
-
-1. ✅ **Use in DatafeedService** - Replace mock with real WebSocket client
-2. ✅ **Create additional clients** - Quotes, trades, orders (same pattern)
-3. ✅ **Add comprehensive tests** - Unit and integration tests
-4. ✅ **Deploy to production** - Ready for production use
-
-## 🏦 Broker WebSocket Clients
-
-The project includes **5 broker-specific WebSocket clients** integrated into `BrokerTerminalService` for real-time trading updates:
-
-### Architecture Overview
-
-```typescript
-// WsAdapter - Real WebSocket clients for production
-class WsAdapter implements WsAdapterType {
-  orders: WebSocketInterface<OrderSubscriptionRequest, PlacedOrder>
-  positions: WebSocketInterface<PositionSubscriptionRequest, Position>
-  executions: WebSocketInterface<ExecutionSubscriptionRequest, Execution>
-  equity: WebSocketInterface<EquitySubscriptionRequest, EquityData>
-  brokerConnection: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
-}
-
-// WsFallback - Mock clients for testing
-class WsFallback implements Partial<WsAdapterType> {
-  // Optional mock implementations (polling-based)
-}
-```
-
-### Account-Based Topics
-
-Broker WebSocket subscriptions use **account-specific topics** for multi-account support:
-
-**Topic Pattern**: `{channel}:{accountId}`
-
-**Examples**:
-
-```typescript
-// Orders for specific account
-Topic: "orders:ACCOUNT-abc123def456"
-Message: { type: 'orders.update', payload: { id: 'ORDER-1', status: 'Filled', ... } }
-
-// Positions for specific account
-Topic: "positions:ACCOUNT-abc123def456"
-Message: { type: 'positions.update', payload: { id: 'POS-1', qty: 100, ... } }
-
-// Executions for specific account
-Topic: "executions:ACCOUNT-abc123def456"
-Message: { type: 'executions.update', payload: { symbol: 'AAPL', qty: 100, ... } }
-
-// Equity for specific account
-Topic: "equity:ACCOUNT-abc123def456"
-Message: { type: 'equity.update', payload: { balance: 100000, equity: 105000, ... } }
-
-// Broker connection status for specific account
-Topic: "broker-connection:ACCOUNT-abc123def456"
-Message: { type: 'broker-connection.update', payload: { status: 1, message: 'Connected', ... } }
-```
-
-**Why Account-Based Topics?**
-
-- **Multi-Account Support**: Different users/accounts receive only their data
-- **Security**: Account ID acts as authorization filter
-- **Scalability**: Backend can route messages efficiently
-- **Isolation**: Account A's orders don't interfere with Account B's
-
-### 1. Orders WebSocket Client
-
-**Purpose**: Real-time order status updates (Working, Filled, Canceled, Rejected)
-
-**Usage in BrokerTerminalService**:
-
-```typescript
-// Subscribe to order updates
-this._getWsAdapter().orders?.subscribe(
-  'broker-orders', // Listener ID
-  { accountId: this.listenerId }, // Account-specific subscription
-  (order: Order) => {
-    // Callback receives Order type
-    this._hostAdapter.orderUpdate(order)
-
-    // Show notification on fill
-    if (order.status === OrderStatus.Filled) {
-      this._hostAdapter.showNotification(
-        'Order Filled',
-        `${order.symbol} ${order.side === 1 ? 'Buy' : 'Sell'} ${order.qty} @ ${order.avgPrice ?? 'market'}`,
-        NotificationType.Success,
-      )
-    }
-  },
-)
-```
-
-**Backend Message Example**:
-
-```json
-{
-  "type": "orders.update",
-  "payload": {
-    "id": "ORDER-12345",
-    "symbol": "AAPL",
-    "status": 6,
-    "side": 1,
-    "qty": 100,
-    "avgPrice": 150.25,
-    "filledQty": 100,
-    "updateTime": 1697897540000
-  }
-}
-```
-
-**Type Mapping**: `PlacedOrder_Ws_Backend` → `Order` (TradingView type)
-
-### 2. Positions WebSocket Client
-
-**Purpose**: Real-time position updates (new, quantity changes, closures)
-
-**Usage in BrokerTerminalService**:
-
-```typescript
-// Subscribe to position updates
-this._getWsAdapter().positions?.subscribe(
-  'broker-positions', // Listener ID
-  { accountId: this.listenerId }, // Account-specific
-  (position: Position) => {
-    // Callback receives Position type
-    this._hostAdapter.positionUpdate(position)
-  },
-)
-```
-
-**Backend Message Example**:
-
-```json
-{
-  "type": "positions.update",
-  "payload": {
-    "id": "AAPL-POS",
-    "symbol": "AAPL",
-    "side": 1,
-    "qty": 200,
-    "avgPrice": 149.8
-  }
-}
-```
-
-**Type Mapping**: `Position_Ws_Backend` → `Position` (TradingView type)
-
-### 3. Executions WebSocket Client
-
-**Purpose**: Real-time trade confirmations
-
-**Usage in BrokerTerminalService**:
-
-```typescript
-// Subscribe to execution updates
-this._getWsAdapter().executions?.subscribe(
-  'broker-executions', // Listener ID
-  { accountId: this.listenerId }, // Account-specific
-  (execution: Execution) => {
-    // Callback receives Execution type
-    this._hostAdapter.executionUpdate(execution)
-  },
-)
-```
-
-**Backend Message Example**:
-
-```json
-{
-  "type": "executions.update",
-  "payload": {
-    "symbol": "AAPL",
-    "price": 150.25,
-    "qty": 100,
-    "side": 1,
-    "time": 1697897540000
-  }
-}
-```
-
-**Type Mapping**: `Execution_Ws_Backend` → `Execution` (TradingView type)
-
-### 4. Equity WebSocket Client
-
-**Purpose**: Real-time account balance, equity, and P&L updates
-
-**Usage in BrokerTerminalService**:
-
-```typescript
-// Subscribe to equity updates
-this._getWsAdapter().equity?.subscribe(
-  'broker-equity', // Listener ID
-  { accountId: this.listenerId }, // Account-specific
-  (data: EquityData) => {
-    // Callback receives EquityData type
-    this._hostAdapter.equityUpdate(data.equity)
-
-    // Update reactive balance/equity values
-    if (data.balance !== undefined && data.balance !== null) {
-      this.balance.setValue(data.balance)
-    }
-    if (data.equity !== undefined && data.equity !== null) {
-      this.equity.setValue(data.equity)
-    }
-  },
-)
-```
-
-**Backend Message Example**:
-
-```json
-{
-  "type": "equity.update",
-  "payload": {
-    "balance": 100000.0,
-    "equity": 105250.5,
-    "unrealizedPL": 5250.5,
-    "realizedPL": 0.0
-  }
-}
-```
-
-**Type**: `EquityData` (shared between backend and frontend)
-
-**Reactive Values**: Balance and equity are `IWatchedValue<number>` for automatic UI updates
-
-### 5. Broker Connection Status Client
-
-**Purpose**: Real-time broker connection health monitoring
-
-**Usage in BrokerTerminalService**:
-
-```typescript
-// Subscribe to connection status updates
-this._getWsAdapter().brokerConnectionStatus?.subscribe(
-  'broker-connection-status', // Listener ID
-  { accountId: this.listenerId }, // Account-specific
-  (status: BrokerConnectionStatus) => {
-    // Callback receives BrokerConnectionStatus type
-    this._hostAdapter.showNotification(
-      'Broker Status',
-      status.message || 'Connection status changed',
-      status.status === ConnectionStatus.Connected
-        ? NotificationType.Success
-        : NotificationType.Error,
-    )
-  },
-)
-```
-
-**Backend Message Example**:
-
-```json
-{
-  "type": "broker-connection.update",
-  "payload": {
-    "status": 1,
-    "message": "Connected to broker",
-    "timestamp": 1697897540000
-  }
-}
-```
-
-**Type**: `BrokerConnectionStatus` (shared between backend and frontend)
-
-**Connection Status Enum**:
-
-```typescript
-enum ConnectionStatus {
-  Connected = 1,
-  Connecting = 2,
-  Disconnected = 3,
-  Error = 4,
-}
-```
-
-### Integration with BrokerTerminalService
-
-**Smart Client Selection** (`_getWsAdapter()` pattern):
-
-```typescript
-class BrokerTerminalService {
-  private readonly _wsAdapter: WsAdapter
-  private readonly _wsFallback?: Partial<WsAdapterType>
-
-  constructor(
-    host: IBrokerConnectionAdapterHost,
-    quotesProvider: IDatafeedQuotesApi,
-    brokerMock?: BrokerMock,
-  ) {
-    this._wsAdapter = new WsAdapter() // Real WebSocket clients
-
-    if (brokerMock) {
-      this._wsFallback = new WsFallback({
-        ordersMocker: () => brokerMock.getOrderUpdates()[0],
-        positionsMocker: () => brokerMock.getPositionUpdates()[0],
-        executionsMocker: () => brokerMock.getExecutionUpdates()[0],
-        equityMocker: () => brokerMock.getEquityUpdates()[0],
-        brokerConnectionMocker: () => brokerMock.getConnectionStatusUpdates()[0],
-      })
-    }
-
-    this.setupWebSocketHandlers() // Subscribe to all 5 broker channels
-  }
-
-  private _getWsAdapter(): WsAdapterType | Partial<WsAdapterType> {
-    return this._wsFallback ?? this._wsAdapter // Fallback if mock, else real
-  }
-}
-```
-
-**Subscription Lifecycle**:
-
-1. **Service Construction**: Creates WsAdapter and optional WsFallback
-2. **setupWebSocketHandlers()**: Subscribes to all 5 broker channels
-3. **Runtime**: Receives updates via callbacks
-4. **TradingView Integration**: Forwards updates to `IBrokerConnectionAdapterHost`
-5. **UI Updates**: TradingView panels update automatically
-
-### Type Mappers
-
-All broker WebSocket messages use **type mappers** to convert backend types to TradingView types:
-
-**Location**: `frontend/src/plugins/mappers.ts`
-
-**Naming Convention**:
-
-- Backend types: `<TYPE>_Ws_Backend` (e.g., `PlacedOrder_Ws_Backend`)
-- Frontend types: `<TYPE>` (e.g., `Order`, `Position`)
-
-**Example Mapper**:
-
-```typescript
-import type { Order } from '@public/trading_terminal'
-import type { PlacedOrder as PlacedOrder_Ws_Backend } from '@clients/ws-types-generated'
-
-export function mapOrder(backendOrder: PlacedOrder_Ws_Backend): Order {
-  return {
-    id: backendOrder.id,
-    symbol: backendOrder.symbol,
-    type: backendOrder.type as OrderType, // Enum casting
-    side: backendOrder.side as Side, // Enum casting
-    qty: backendOrder.qty,
-    status: backendOrder.status as OrderStatus, // Enum casting
-    limitPrice: backendOrder.limitPrice,
-    stopPrice: backendOrder.stopPrice,
-    avgPrice: backendOrder.avgPrice,
-    filledQty: backendOrder.filledQty,
-    updateTime: backendOrder.updateTime,
-  }
-}
-```
-
-**Why Mappers?**
-
-- **Type Safety**: Ensures backend enums match TradingView enums
-- **Flexibility**: Can transform field names or structures
-- **Validation**: Can add runtime checks if needed
-- **Separation**: Backend and frontend types can evolve independently
-
-### Mock vs Real Behavior
-
-#### WsFallback (Mock Mode)
-
-**Polling Simulation**:
-
-```typescript
-// Checks BrokerMock state every 100ms
-class WebSocketFallback<TRequest, TData> {
-  subscribe(listenerId: string, params: TRequest, callback: (data: TData) => void): void {
-    const interval = setInterval(() => {
-      const newData = this.mocker() // Get updates from BrokerMock
-      if (newData) {
-        callback(newData) // Emit update
-      }
-    }, 100) // Poll every 100ms
-
-    this.intervals.set(listenerId, interval)
-  }
-}
-```
-
-**BrokerMock Update Queues**:
-
-```typescript
-class BrokerMock {
-  protected orderUpdates: Order[] = []
-  protected positionUpdates: Position[] = []
-  protected executionUpdates: Execution[] = []
-  protected equityUpdates: EquityData[] = []
-  protected connectionStatusUpdates: BrokerConnectionStatus[] = []
-
-  getOrderUpdates(): Order[] {
-    return this.orderUpdates.splice(0) // Return and clear
-  }
-
-  // Similar for other update types...
-}
-```
-
-**Testing Pattern**:
-
-```typescript
-// Create BrokerMock instance
-const brokerMock = new BrokerMock()
-
-// Use fallback clients
-const broker = new BrokerTerminalService(host, datafeed, brokerMock)
-
-// Trigger mock update
-brokerMock.orderUpdates.push({ id: 'ORDER-1', status: OrderStatus.Filled, ... })
-
-// Wait for polling cycle
-await new Promise(resolve => setTimeout(resolve, 150))  // > 100ms
-
-// Verify callback was called
-expect(mockHost.orderUpdate).toHaveBeenCalledWith(expect.objectContaining({ id: 'ORDER-1' }))
-```
-
-#### WsAdapter (Real Mode)
-
-**WebSocket Connection**:
-
-```typescript
-class WebSocketClient<TRequest, TBackendData, TFrontendData> {
-  constructor(
-    private channel: string,
-    private mapper: (data: TBackendData) => TFrontendData,
-  ) {
-    // Connect to backend WebSocket
-    this.wsClient = new WebSocketClientBase({
-      url: import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000/ws',
-    })
-  }
-
-  subscribe(listenerId: string, params: TRequest, callback: (data: TFrontendData) => void): void {
-    // Send server-confirmed subscription
-    this.wsClient.subscribe<TRequest, TBackendData>(
-      `${this.channel}.subscribe`,
-      params,
-      `${this.channel}:${params.accountId}`, // Account-based topic
-      `${this.channel}.update`,
-      (backendData) => {
-        const frontendData = this.mapper(backendData) // Convert types
-        callback(frontendData)
-      },
-    )
-  }
-}
-```
-
-**Real Backend Flow**:
-
-```
-1. Frontend sends: { type: 'orders.subscribe', payload: { accountId: 'ACCOUNT-abc123' } }
-   ↓
-2. Backend validates account and confirms: { type: 'orders.subscribe.response', payload: { status: 'ok', topic: 'orders:ACCOUNT-abc123' } }
-   ↓
-3. Backend broadcasts order updates: { type: 'orders.update', payload: { id: 'ORDER-1', status: 6, ... } }
-   ↓
-4. Frontend mapper converts: PlacedOrder_Ws_Backend → Order
-   ↓
-5. Callback receives typed Order and forwards to TradingView
-```
-
-### Testing Broker WebSocket Integration
-
-**Unit Tests with WsFallback**:
-
-```typescript
-import { BrokerMock } from '@/services/brokerTerminalService'
-
-describe('BrokerTerminalService WebSocket Integration', () => {
-  let broker: BrokerTerminalService
-  let brokerMock: BrokerMock
-  let mockHost: IBrokerConnectionAdapterHost
-
-  beforeEach(() => {
-    brokerMock = new BrokerMock()
-    mockHost = createMockHost()
-    broker = new BrokerTerminalService(mockHost, mockDatafeed, brokerMock)
+import { WebSocketBase } from '@/plugins/wsClientBase'
+
+describe('WebSocketBase', () => {
+  it('should maintain singleton per URL', () => {
+    const ws1 = WebSocketBase.getInstance('ws://localhost/v1/datafeed/ws')
+    const ws2 = WebSocketBase.getInstance('ws://localhost/v1/datafeed/ws')
+    expect(ws1).toBe(ws2) // Same instance
   })
 
-  it('should receive order updates via WebSocket', async () => {
-    // Trigger mock update
-    brokerMock.orderUpdates.push({
-      id: 'ORDER-1',
-      symbol: 'AAPL',
-      status: OrderStatus.Filled,
-      side: Side.Buy,
-      qty: 100,
-      avgPrice: 150.0,
-      updateTime: Date.now(),
-    })
+  it('should handle multiple listeners', async () => {
+    const ws = WebSocketBase.getInstance('ws://localhost/v1/datafeed/ws')
+    const updates1: object[] = []
+    const updates2: object[] = []
 
-    // Wait for polling cycle
-    await new Promise((resolve) => setTimeout(resolve, 150))
-
-    // Verify TradingView received update
-    expect(mockHost.orderUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'ORDER-1', status: OrderStatus.Filled }),
+    await ws.subscribe('topic1', 'bars.subscribe', { symbol: 'AAPL' }, 'listener1', (data) =>
+      updates1.push(data),
     )
-  })
+    await ws.subscribe('topic1', 'bars.subscribe', { symbol: 'AAPL' }, 'listener2', (data) =>
+      updates2.push(data),
+    )
 
-  it('should receive position updates via WebSocket', async () => {
-    brokerMock.positionUpdates.push({
-      id: 'POS-1',
-      symbol: 'AAPL',
-      qty: 100,
-      side: Side.Buy,
-      avgPrice: 150.0,
+    // Simulate message
+    ws['handleMessage']({
+      data: JSON.stringify({ type: 'bars.update', topic: 'topic1', data: { price: 150 } }),
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 150))
-
-    expect(mockHost.positionUpdate).toHaveBeenCalled()
-  })
-
-  it('should receive equity updates via WebSocket', async () => {
-    brokerMock.equityUpdates.push({
-      balance: 100000,
-      equity: 105000,
-      unrealizedPL: 5000,
-      realizedPL: 0,
-    })
-
-    await new Promise((resolve) => setTimeout(resolve, 150))
-
-    expect(mockHost.equityUpdate).toHaveBeenCalledWith(105000)
+    expect(updates1.length).toBe(1)
+    expect(updates2.length).toBe(1)
   })
 })
 ```
 
-**Integration Tests with Real Backend**:
-
-```bash
-# Start backend with WebSocket broadcasting
-make -f project.mk dev-backend
-
-# Run frontend with real WsAdapter
-make -f project.mk dev-frontend
-
-# Frontend connects to ws://localhost:8000/ws
-# Backend sends real-time updates
-# TradingView UI updates automatically
-```
-
-### Current Status & Known Limitations
-
-**✅ Frontend Implementation Complete (Phase 4)**:
-
-- All 5 broker WebSocket clients implemented
-- Smart client selection with `_getWsAdapter()`
-- Type-safe mappers for all broker types
-- Account-based topic subscriptions
-- Mock fallback for testing (WsFallback + BrokerMock)
-- Integration with TradingView broker adapter host
-
-**⏳ Backend Implementation Pending (Phase 5)**:
-
-- WebSocket broadcasting logic not yet implemented
-- Server-confirmed subscriptions protocol defined
-- AsyncAPI spec complete
-- Tests in TDD Red Phase (expected failures until backend ready)
-
-**Workaround for Development**:
+### Integration Testing
 
 ```typescript
-// Use BrokerMock for development until Phase 5 completes
-const brokerMock = new BrokerMock()
-const broker = new BrokerTerminalService(host, datafeed, brokerMock)
+describe('WebSocket Integration', () => {
+  it('should connect and subscribe', async () => {
+    const adapter = new WsAdapter()
+    const bars: Bar[] = []
 
-// All WebSocket updates work via polling simulation
-```
+    await adapter.bars.subscribe('test', { symbol: 'AAPL', resolution: '1' }, (bar) => {
+      bars.push(bar)
+    })
 
-**Next Steps (Phase 5)**:
-
-1. Implement backend WebSocket broadcasting
-2. Add order placement → execution → position flow
-3. Add equity calculation and updates
-4. Test with real backend WebSocket server
-5. Move tests from Red → Green phase
-
-### Related Documentation
-
-- **WebSocket Integration**: `frontend/BROKER-TERMINAL-SERVICE.md#websocket-integration`
-- **Backend Methodology**: `WEBSOCKET-METHODOLOGY.md`
-- **Type Mappers**: `frontend/src/plugins/mappers.ts`
-- **WsAdapter Implementation**: `frontend/src/plugins/wsAdapter.ts`
-- **WebSocket Client Base**: `frontend/src/plugins/wsClientBase.ts`
-
-## 🎯 Next Steps
-
-With this singleton base in place, you can now:
-
-1. ✅ **Use in DatafeedService** - Replace mock with real WebSocket client
-2. ✅ **Create additional clients** - Quotes, trades, orders (same pattern)
-3. ✅ **Add comprehensive tests** - Unit and integration tests
-4. ✅ **Deploy to production** - Ready for production use
-
-## 📚 Files
-
-```
-frontend/src/clients_generated/ws-generated/
-├── wsClientBase.ts          ⭐ Generic WebSocket singleton base
-└── barsClient.ts           ⭐ Bars-specific implementation
+    // Wait for updates
+    await new Promise((resolve) => setTimeout(resolve, 5000))
+    expect(bars.length).toBeGreaterThan(0)
+  })
+})
 ```
 
 ---
 
-**Implementation Date**: October 12, 2025
-**Status**: ✅ Complete and Ready for Production
-**Pattern**: Singleton with Auto-Connection and Reference Counting
-**Next**: Integrate with DatafeedService
+## Conclusion
+
+The `WebSocketBase` singleton provides a robust, centralized foundation for WebSocket communication in Trading Pro. Key takeaways:
+
+1. **Single Source of Truth** - All subscription state lives in base client
+2. **Services Stay Simple** - No duplicate tracking, just pass-through calls
+3. **Automatic Everything** - Connection, reconnection, resubscription all handled
+4. **Type-Safe** - Full TypeScript support throughout
+5. **Efficient** - One connection per module, reference counting
+
+### Related Documentation
+
+- [WEBSOCKET-CLIENT-PATTERN.md](./WEBSOCKET-CLIENT-PATTERN.md) - High-level pattern overview
+- [WEBSOCKET-ARCHITECTURE-DIAGRAMS.md](./WEBSOCKET-ARCHITECTURE-DIAGRAMS.md) - Visual architecture reference
+
+---
+
+**Version**: 2.0.0  
+**Date**: November 11, 2025  
+**Status**: ✅ Production Ready  
+**Maintainers**: Development Team
