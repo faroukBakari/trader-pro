@@ -5,14 +5,14 @@
 // only simple enum/string/number conversions are done here.
 // the best approach is to implement mappers that insure type safety, at runtime (but can be time consuming)
 
-// Per-module API clients (microservice-ready architecture)
+// Per-module-version API clients (versionned-microservice-ready architecture)
 import {
   BrokerApi,
-  Configuration as BrokerConfiguration
+  Configuration as BrokerConfigurationV1
 } from '@clients/trader-client-broker_v1';
 import {
   DatafeedApi,
-  Configuration as DatafeedConfiguration
+  Configuration as DatafeedConfigurationV1
 } from '@clients/trader-client-datafeed_v1';
 
 import type {
@@ -155,8 +155,8 @@ function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
 export class ApiAdapter {
   private brokerApi: BrokerApi
   private datafeedApi: DatafeedApi
-  private brokerConfig: BrokerConfiguration
-  private datafeedConfig: DatafeedConfiguration
+  private brokerConfig: BrokerConfigurationV1
+  private datafeedConfig: DatafeedConfigurationV1
 
   constructor() {
 
@@ -166,8 +166,9 @@ export class ApiAdapter {
     // In multi-process mode, these could point to different services:
     // broker: http://broker-service:8001
     // datafeed: http://datafeed-service:8002
-    this.brokerConfig = new BrokerConfiguration({ basePath: ApiV1BasePath + '/broker' })
-    this.datafeedConfig = new DatafeedConfiguration({ basePath: ApiV1BasePath + '/datafeed' })
+    this.brokerConfig = new BrokerConfigurationV1
+      ({ basePath: ApiV1BasePath + '/broker' })
+    this.datafeedConfig = new DatafeedConfigurationV1({ basePath: ApiV1BasePath + '/datafeed' })
 
     // Initialize per-module API clients
     this.brokerApi = new BrokerApi(this.brokerConfig)
