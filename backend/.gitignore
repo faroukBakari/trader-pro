@@ -24,3 +24,4 @@ proxy_temp/
 fastcgi_temp/
 uwsgi_temp/
 scgi_temp/
+**/archive/

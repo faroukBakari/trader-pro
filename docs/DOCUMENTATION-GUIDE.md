@@ -129,25 +129,35 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### frontend/ (Frontend Root)
 
-| File                                         | Purpose                                                          |
-| -------------------------------------------- | ---------------------------------------------------------------- |
-| **frontend/README.md**                       | Frontend overview, setup, and structure                          |
-| **frontend/BROKER-TERMINAL-SERVICE.md**      | Broker terminal service implementation (TradingView integration) |
-| **frontend/BROKER-WEBSOCKET-INTEGRATION.md** | Broker WebSocket integration implementation details              |
-| **frontend/IBROKERCONNECTIONADAPTERHOST.md** | TradingView Trading Host API reference (comprehensive)           |
-| **frontend/TRADER_TERMINAL_UI_USAGE.md**     | TradingView Trading Terminal UI usage with Playwright MCP        |
-| **frontend/TRADINGVIEW-TYPES.md**            | TradingView TypeScript type definitions guide                    |
-| **frontend/FRONTEND-EXCLUSIONS.md**          | Public folder exclusions (linting, testing, etc.)                |
+| File                                | Purpose                                     |
+| ----------------------------------- | ------------------------------------------- |
+| **frontend/README.md**              | Frontend overview, setup, and structure     |
+| **frontend/FRONTEND-EXCLUSIONS.md** | Public folder exclusions (linting, testing) |
 
-### frontend/docs/ (WebSocket Documentation - Read in Order)
+### frontend/docs/ (Frontend-Specific Documentation)
 
-| File                                                 | Purpose                                        |
-| ---------------------------------------------------- | ---------------------------------------------- |
-| **frontend/docs/WEBSOCKET-CLIENT-PATTERN.md**        | ✅ WebSocket client pattern guide (v2.0.0)     |
-| **frontend/docs/WEBSOCKET-CLIENT-BASE.md**           | ✅ Base client implementation details (v2.0.0) |
-| **frontend/docs/WEBSOCKET-ARCHITECTURE-DIAGRAMS.md** | ✅ Architecture diagrams (v2.0.0)              |
+| File                                        | Purpose                                           |
+| ------------------------------------------- | ------------------------------------------------- |
+| **frontend/docs/WEBSOCKET-ARCHITECTURE.md** | ✅ Complete WebSocket architecture guide (v2.0.0) |
+| **frontend/docs/BROKER-INTEGRATION.md**     | ✅ Complete broker integration guide (v2.0.0)     |
+| **frontend/docs/FRONTEND-EXCLUSIONS.md**    | Public folder exclusions (linting, testing, etc.) |
 
-> **Note**: These documents were comprehensively rewritten on November 11, 2025 to accurately reflect the current WsAdapter facade + WebSocketBase singleton + mappers architecture. All outdated API examples have been removed and replaced with production patterns.
+> **Note**: These documents were comprehensively updated on November 12, 2025 during documentation refactoring:
+>
+> - **WEBSOCKET-ARCHITECTURE.md** - Consolidated from 3 separate files (WEBSOCKET-CLIENT-PATTERN.md, WEBSOCKET-CLIENT-BASE.md, WEBSOCKET-ARCHITECTURE-DIAGRAMS.md)
+> - **BROKER-INTEGRATION.md** - Merged from 2 separate files (BROKER-TERMINAL-SERVICE.md, BROKER-WEBSOCKET-INTEGRATION.md)
+> - All old files archived to `frontend/docs/archive/`
+
+### frontend/docs/tradingview/ (TradingView Integration)
+
+| File                                                       | Purpose                                                |
+| ---------------------------------------------------------- | ------------------------------------------------------ |
+| **frontend/docs/tradingview/README.md**                    | TradingView documentation index                        |
+| **frontend/docs/tradingview/BROKER-CONNECTION-ADAPTER.md** | TradingView Trading Host API reference (comprehensive) |
+| **frontend/docs/tradingview/UI-USAGE-GUIDE.md**            | TradingView Trading Terminal UI usage with Playwright  |
+| **frontend/docs/tradingview/TYPE-DEFINITIONS.md**          | TradingView TypeScript type definitions guide          |
+
+> **Note**: TradingView-specific documentation was reorganized into dedicated subdirectory on November 12, 2025 for better organization.
 
 ### frontend/src/ (Component Documentation)
 
@@ -219,9 +229,9 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 1. **frontend/README.md** - Frontend overview
 2. **docs/CLIENT-GENERATION.md** - Working with auto-generated clients
-3. **frontend/WEBSOCKET-CLIENT-PATTERN.md** - WebSocket client patterns (start here)
-4. **frontend/BROKER-TERMINAL-SERVICE.md** - TradingView broker integration
-5. **frontend/IBROKERCONNECTIONADAPTERHOST.md** - TradingView Trading Host API
+3. **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket architecture patterns (start here)
+4. **frontend/docs/BROKER-INTEGRATION.md** - TradingView broker integration
+5. **frontend/docs/tradingview/BROKER-CONNECTION-ADAPTER.md** - TradingView Trading Host API
 6. **docs/TESTING.md** - Testing strategies
 
 ### DevOps Engineers
@@ -255,7 +265,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 - **docs/BROKER-ARCHITECTURE.md** - Broker service execution simulator architecture
 - **AUTH_IMPLEMENTATION.md** - Authentication system design and planning
 - **API-METHODOLOGY.md** - TDD methodology
-- **frontend/WEBSOCKET-ARCHITECTURE-DIAGRAMS.md** - WebSocket diagrams
+- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket architecture diagrams
 
 ### Setup & Configuration
 
@@ -282,7 +292,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 - **backend/docs/BACKEND_WEBSOCKETS.md** - ⭐ **FastWS integration guide (start here for WebSocket modules)**
 - **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation details
 - **docs/WEBSOCKET-CLIENTS.md** - WebSocket overview
-- **frontend/WEBSOCKET-CLIENT-PATTERN.md** - Frontend patterns
+- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - Frontend WebSocket architecture patterns
 
 ### Testing
 
@@ -293,11 +303,10 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### TradingView Integration
 
-- **frontend/BROKER-TERMINAL-SERVICE.md** - Broker terminal service implementation
-- **frontend/IBROKERCONNECTIONADAPTERHOST.md** - Trading Host API reference
-- **frontend/BROKER-WEBSOCKET-INTEGRATION.md** - WebSocket integration details
-- **frontend/TRADER_TERMINAL_UI_USAGE.md** - UI testing with Playwright
-- **frontend/TRADINGVIEW-TYPES.md** - TradingView types
+- **frontend/docs/BROKER-INTEGRATION.md** - Complete broker integration implementation guide
+- **frontend/docs/tradingview/BROKER-CONNECTION-ADAPTER.md** - Trading Host API reference
+- **frontend/docs/tradingview/UI-USAGE-GUIDE.md** - UI testing with Playwright
+- **frontend/docs/tradingview/TYPE-DEFINITIONS.md** - TradingView types
 - **frontend/public/datafeeds/README.md** - Datafeeds library documentation
 - **frontend/public/datafeeds/udf/README.md** - UDF documentation
 
@@ -323,17 +332,17 @@ When updating documentation for large-scale changes, follow this three-phase app
 - **Root Documentation**: 10 essential project-wide guides
 - **docs/ Folder**: 9 core cross-cutting documentation files
 - **Backend Documentation**: 7 current backend guides + 1 third-party doc
-- **Frontend Documentation**: 15 frontend-specific guides + 2 third-party docs (⚠️ 4 flagged for update/rewrite)
+- **Frontend Documentation**: 10 frontend-specific guides + 2 third-party docs
 - **Auto-Generated Docs**: Per-module generated clients and type definitions
 - **DevOps & Git**: 2 setup and operations guides
 - **Testing**: 3 testing guides
 
 ### Total Documentation Files
 
-- **User-Maintained**: ~42 actively maintained documentation files
-  - ⚠️ **Quality Note**: 4 files flagged for update/rewrite (Nov 2025 assessment)
-  - 1 outdated file scheduled for removal (WS-PLUGIN-USAGE.md)
-  - 3 frontend WebSocket docs need accuracy improvements
+- **User-Maintained**: ~36 actively maintained documentation files
+  - Files consolidated: 5 → 2 (Nov 12, 2025 documentation refactoring)
+  - Files archived: 5 old files preserved in `frontend/docs/archive/`
+  - New organization: TradingView docs in dedicated `frontend/docs/tradingview/` subdirectory
 - **Auto-Generated**: Per-module client documentation (regenerated on API changes)
 - **Third-Party**: 3 external package documentation files
 
@@ -341,20 +350,23 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 - All user-maintained documentation is actively kept up-to-date
 - Auto-generated docs are regenerated on API changes
-- Obsolete/historical docs have been removed
+- Obsolete/historical docs have been archived
 - Focus on essential, actionable information
 - Regular reviews ensure accuracy and relevance
 - **Note:** Files in `**/tmp/` directories are excluded from documentation updates (temporary/scratch files)
 
-**Deferred Work Completed** (November 11, 2025):
+**Documentation Refactoring** (November 12, 2025):
 
-- **4 Frontend WebSocket Docs Rewritten**: All flagged documents updated to v2.0.0
-  - `WEBSOCKET-CLIENT-PATTERN.md` - Comprehensive rewrite with current WsAdapter facade pattern
-  - `WEBSOCKET-CLIENT-BASE.md` - Updated with WebSocketBase singleton implementation details
-  - `WEBSOCKET-ARCHITECTURE-DIAGRAMS.md` - Regenerated all diagrams for current architecture
-  - `WS-PLUGIN-USAGE.md` - Removed (described non-existent plugin pattern)
-- **Accuracy Improvement**: Frontend WebSocket docs now 100% accurate (A+ grade)
-- **Result**: Overall documentation accuracy increased from 95% to ~98%
+- **WebSocket Documentation Consolidation**: 3 files → 1 comprehensive guide
+  - Created `frontend/docs/WEBSOCKET-ARCHITECTURE.md` (consolidated from WEBSOCKET-CLIENT-PATTERN, WEBSOCKET-CLIENT-BASE, WEBSOCKET-ARCHITECTURE-DIAGRAMS)
+  - Old files archived to `frontend/docs/archive/`
+- **Broker Integration Consolidation**: 2 files → 1 comprehensive guide
+  - Created `frontend/docs/BROKER-INTEGRATION.md` (merged BROKER-TERMINAL-SERVICE + BROKER-WEBSOCKET-INTEGRATION)
+  - Old files archived to `frontend/docs/archive/`
+- **TradingView Organization**: Created `frontend/docs/tradingview/` subdirectory
+  - Moved 3 TradingView-specific files to dedicated directory
+  - Added `tradingview/README.md` index
+- **Result**: Better organization, reduced duplication, improved discoverability
 
 **Recent Assessment** (November 11, 2025):
 
@@ -380,5 +392,5 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ---
 
-**Last Updated**: November 11, 2025
+**Last Updated**: November 12, 2025
 **Maintained by**: Development Team
