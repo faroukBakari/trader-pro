@@ -617,7 +617,7 @@ clean-generated:
 	@echo "   make generate                  # All specs, clients, and routers"
 	@echo "   make generate modules=broker   # Specific module only"
 
-# Multi-process backend management (using backend-manager)
+# Multi-process backend (using backend-manager)
 backend-manager-start:
 	@echo "Checking nginx installation..."
 	@if [ -f ".local/bin/nginx" ]; then \
@@ -703,4 +703,34 @@ logs-clean:
 		echo "✅ All log files cleaned (truncated)"; \
 	else \
 		echo "✅ No log directory found (nothing to clean)"; \
+	fi
+
+# JWT Key Pair Management
+SECRETS_DIR := .local/secrets
+PRIVATE_KEY := $(SECRETS_DIR)/jwt_private.pem
+PUBLIC_KEY := $(SECRETS_DIR)/jwt_public.pem
+
+.PHONY: check-generate-keypair
+check-generate-keypair: ## Check and generate JWT key pair if missing
+	@echo "🔐 Checking JWT key pair..."
+	@if [ -f "$(PRIVATE_KEY)" ] && [ -f "$(PUBLIC_KEY)" ]; then \
+		echo "✓ JWT key pair already exists"; \
+		echo "  Private key: $(PRIVATE_KEY)"; \
+		echo "  Public key: $(PUBLIC_KEY)"; \
+	else \
+		echo "⚠️  JWT key pair not found. Generating..."; \
+		mkdir -p $(SECRETS_DIR); \
+		openssl genrsa -out $(PRIVATE_KEY) 4096 2>/dev/null; \
+		openssl rsa -in $(PRIVATE_KEY) -pubout -out $(PUBLIC_KEY) 2>/dev/null; \
+		chmod 600 $(PRIVATE_KEY); \
+		chmod 644 $(PUBLIC_KEY); \
+		echo "✓ JWT key pair generated successfully"; \
+		echo "  Private key: $(PRIVATE_KEY) (permissions: 600)"; \
+		echo "  Public key: $(PUBLIC_KEY) (permissions: 644)"; \
+		echo ""; \
+		echo "📝 Add to .env.local:"; \
+		echo "  JWT_ALGORITHM=RS256"; \
+		echo "  JWT_PRIVATE_KEY_PATH=backend/.local/secrets/jwt_private.pem"; \
+		echo "  JWT_PUBLIC_KEY_PATH=backend/.local/secrets/jwt_public.pem"; \
+		echo "  ACCESS_TOKEN_EXPIRE_MINUTES=5"; \
 	fi

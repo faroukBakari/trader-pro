@@ -14,6 +14,7 @@ We have defined and validated this plan that I need you to follow.
     * This progress section must list every main step and sub-step from the plan as a markdown checkbox (e.g., `[ ] Step 1: ...`).
 
 3.  **Assess and Resume:**
+    * Before starting any work, carefully read through the entire plan.
     * Analyze the current state of the project files to determine if any steps are already completed.
     * Update the checkboxes in the plan file to reflect this initial assessment (checking off any completed steps).
     * Begin your work from the **first uncompleted step**.
