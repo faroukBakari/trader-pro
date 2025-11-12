@@ -41,3 +41,4 @@ openapi-3.0.json
 openapitools.json
 
 *.tsbuildinfo
+**/archive/

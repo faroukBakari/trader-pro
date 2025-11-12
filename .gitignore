@@ -204,3 +204,4 @@ ehthumbs.db
 Thumbs.db
 .playwright-mcp*
 tmp/
+**/archive/
