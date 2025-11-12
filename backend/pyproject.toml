@@ -14,7 +14,7 @@ include = ["trading_api/py.typed", "external_packages/py.typed", "external_packa
 
 [tool.poetry.dependencies]
 python = "^3.11"
-fastapi = "^0.104.1"
+fastapi = "^0.115.0"
 uvicorn = {extras = ["standard"], version = "^0.24.0"}
 pyyaml = "^6.0.1"
 google-auth = "^2.43.0"
