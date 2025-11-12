@@ -1,0 +1,45 @@
+# Multi-Process Backend Development Configuration
+
+# API base URL prefix for all modules
+api_base_url: "/api/v1"
+
+# Nginx gateway configuration
+nginx:
+  port: 8000  # Single public-facing port
+  worker_processes: 1  # 'auto' or specific number
+  worker_connections: 1024
+
+# Backend server instances
+servers:
+  # Broker operations server
+  broker:
+    port: 8001
+    instances: 1
+    modules:
+      - broker
+    reload: true
+
+  # Market data server
+  datafeed:
+    port: 8002
+    instances: 1
+    modules:
+      - datafeed
+    reload: true
+
+# WebSocket routing strategy
+websocket:
+  # Query parameter-based routing: ws://host/api/v1/ws?type=orders
+  # Path-based routing: ws://host/api/v1/broker/ws (matches frontend URLs)
+  routing_strategy: "path"  # "query_param" or "path"
+  query_param_name: "type"  # Used when routing_strategy is "query_param"
+
+# Module to server mapping for WebSocket routing
+# Maps WebSocket module paths to server names (for path-based routing)
+# TODO: web socket routes should be detected/explored automatically from module asyncapi specs
+websocket_routes:
+  # Broker module - all routes go to /api/v1/broker/ws
+  broker: broker
+
+  # Datafeed module - all routes go to /api/v1/datafeed/ws
+  datafeed: datafeed

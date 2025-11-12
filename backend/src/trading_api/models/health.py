@@ -7,5 +7,5 @@ class HealthResponse(BaseModel):
     status: str
     message: str = "Service is healthy"
     timestamp: str
+    module_name: str
     api_version: str
-    version_info: dict

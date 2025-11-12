@@ -3,16 +3,12 @@
 Provides REST API and WebSocket streaming for market data.
 """
 
-from typing import Any
+from pathlib import Path
 
-from fastapi.routing import APIRouter
-
-from .api import DatafeedApi
-from .service import DatafeedService
-from .ws import DatafeedWsRouters
+from trading_api.shared import Module
 
 
-class DatafeedModule:
+class DatafeedModule(Module):
     """Datafeed module implementation.
 
     Implements the Module Protocol for pluggable datafeed functionality.
@@ -23,70 +19,28 @@ class DatafeedModule:
         _enabled: Whether this module is enabled for loading
     """
 
-    def __init__(self) -> None:
-        """Initialize the datafeed module with lazy service loading."""
-        self._service: DatafeedService | None = None
-        self._enabled: bool = True
+    @property
+    def module_dir(self) -> Path:
+        """Return the directory path for this module.
+
+        Returns:
+            Path: Module directory path
+        """
+        return Path(__file__).parent
 
     @property
-    def name(self) -> str:
-        """Return the unique name identifier for this module.
+    def tags(self) -> list[dict[str, str]]:
+        """Get OpenAPI tags for datafeed module.
 
         Returns:
-            str: "datafeed"
+            list[dict[str, str]]: OpenAPI tags describing datafeed operations
         """
-        return "datafeed"
-
-    @property
-    def enabled(self) -> bool:
-        """Check if this module is enabled for loading.
-
-        Returns:
-            bool: True if module should be loaded, False otherwise
-        """
-        return self._enabled
-
-    @property
-    def service(self) -> DatafeedService:
-        """Get or create the datafeed service instance.
-
-        Lazy loads the service on first access for resource efficiency.
-
-        Returns:
-            DatafeedService: The datafeed service instance
-        """
-        if self._service is None:
-            self._service = DatafeedService()
-        return self._service
-
-    def get_api_routers(self) -> list[APIRouter]:
-        """Get all FastAPI routers for datafeed REST API endpoints.
-
-        Returns:
-            list[APIRouter]: List containing the DatafeedApi router
-        """
-        # Prefix MUST match module name for consistency
         return [
-            DatafeedApi(service=self.service, prefix=f"/{self.name}", tags=[self.name])
+            {
+                "name": "datafeed",
+                "description": "Market data and symbols operations",
+            }
         ]
-
-    def get_ws_routers(self) -> list[Any]:
-        """Get all WebSocket routers for datafeed real-time endpoints.
-
-        Returns:
-            list[Any]: List of WebSocket router instances for bars and quotes
-        """
-        return DatafeedWsRouters(datafeed_service=self.service)
-
-    def configure_app(self, api_app: Any, ws_app: Any) -> None:
-        """Optional hook for custom application configuration.
-
-        Currently no custom configuration needed for datafeed module.
-
-        Args:
-            api_app: FastAPI application instance
-            ws_app: FastWSAdapter WebSocket application instance
-        """
 
 
 __all__ = ["DatafeedModule"]

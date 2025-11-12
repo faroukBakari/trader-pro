@@ -3,10 +3,61 @@
 Tests that verify all modules work correctly together.
 """
 
+import time
+from typing import Any, Dict
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
+from starlette.websockets import WebSocketDisconnect
+
+
+def receive_message_by_type(
+    websocket: Any, expected_type: str, timeout: float = 5.0
+) -> Dict[str, Any]:
+    """Receive WebSocket messages until we get one with the expected type.
+
+    This helper function handles the race condition where background tasks
+    (e.g., bars.update) might send messages while we're waiting for a
+    specific response (e.g., quotes.subscribe.response).
+
+    Args:
+        websocket: The WebSocket connection
+        expected_type: The message type we're looking for
+        timeout: Maximum time to wait in seconds
+
+    Returns:
+        The first message matching the expected type
+
+    Raises:
+        AssertionError: If timeout is reached or websocket disconnects
+    """
+    start_time = time.time()
+    messages_received = []
+
+    while time.time() - start_time < timeout:
+        try:
+            message = websocket.receive_json()
+            messages_received.append(message.get("type", "unknown"))
+
+            if message.get("type") == expected_type:
+                return message
+        except WebSocketDisconnect:
+            raise AssertionError(
+                f"WebSocket disconnected while waiting for '{expected_type}'. "
+                f"Received messages: {messages_received}"
+            )
+        except Exception as e:
+            raise AssertionError(
+                f"Error receiving message: {e}. "
+                f"Expected '{expected_type}', received: {messages_received}"
+            )
+
+    raise AssertionError(
+        f"Timeout waiting for message type '{expected_type}'. "
+        f"Received {len(messages_received)} messages: {messages_received}"
+    )
 
 
 @pytest.mark.integration
@@ -30,18 +81,19 @@ async def test_all_modules_loaded(async_client: AsyncClient) -> None:
     broker_executions = await async_client.get("/api/v1/broker/executions/AAPL")
     assert broker_executions.status_code == 200
 
-    # Test shared endpoints
-    health = await async_client.get("/api/v1/health")
-    assert health.status_code == 200
+    # Test module-specific health endpoints (no core module)
+    broker_health = await async_client.get("/api/v1/broker/health")
+    assert broker_health.status_code == 200
 
-    versions = await async_client.get("/api/v1/versions")
-    assert versions.status_code == 200
+    datafeed_health = await async_client.get("/api/v1/datafeed/health")
+    assert datafeed_health.status_code == 200
 
 
 @pytest.mark.integration
 def test_websocket_all_channels(client: TestClient) -> None:
     """Verify all WebSocket channels available with all modules."""
-    with client.websocket_connect("/api/v1/ws") as websocket:
+    # Test datafeed WebSocket channels
+    with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
         # Test datafeed channels - bars
         websocket.send_json(
             {
@@ -49,7 +101,7 @@ def test_websocket_all_channels(client: TestClient) -> None:
                 "payload": {"symbol": "AAPL", "resolution": "1"},
             }
         )
-        response = websocket.receive_json()
+        response = receive_message_by_type(websocket, "bars.subscribe.response")
         assert response["type"] == "bars.subscribe.response"
         assert response["payload"]["status"] == "ok"
 
@@ -60,15 +112,17 @@ def test_websocket_all_channels(client: TestClient) -> None:
                 "payload": {"symbols": ["AAPL"], "fast_symbols": []},
             }
         )
-        response = websocket.receive_json()
+        response = receive_message_by_type(websocket, "quotes.subscribe.response")
         assert response["type"] == "quotes.subscribe.response"
         assert response["payload"]["status"] == "ok"
 
+    # Test broker WebSocket channels
+    with client.websocket_connect("/api/v1/broker/ws") as websocket:
         # Test broker channels - orders
         websocket.send_json(
             {"type": "orders.subscribe", "payload": {"accountId": "test"}}
         )
-        response = websocket.receive_json()
+        response = receive_message_by_type(websocket, "orders.subscribe.response")
         assert response["type"] == "orders.subscribe.response"
         assert response["payload"]["status"] == "ok"
 
@@ -76,7 +130,7 @@ def test_websocket_all_channels(client: TestClient) -> None:
         websocket.send_json(
             {"type": "positions.subscribe", "payload": {"accountId": "test"}}
         )
-        response = websocket.receive_json()
+        response = receive_message_by_type(websocket, "positions.subscribe.response")
         assert response["type"] == "positions.subscribe.response"
         assert response["payload"]["status"] == "ok"
 
@@ -84,7 +138,7 @@ def test_websocket_all_channels(client: TestClient) -> None:
         websocket.send_json(
             {"type": "executions.subscribe", "payload": {"accountId": "test"}}
         )
-        response = websocket.receive_json()
+        response = receive_message_by_type(websocket, "executions.subscribe.response")
         assert response["type"] == "executions.subscribe.response"
         assert response["payload"]["status"] == "ok"
 
@@ -107,9 +161,11 @@ async def test_spec_generation_completeness(app: FastAPI) -> None:
     assert "/api/v1/broker/positions" in paths
     assert "/api/v1/broker/executions/{symbol}" in paths
 
-    # Verify shared endpoints present
-    assert "/api/v1/health" in paths
-    assert "/api/v1/versions" in paths
+    # Verify module-specific health/versions endpoints present (no core module)
+    assert "/api/v1/broker/health" in paths
+    assert "/api/v1/broker/versions" in paths
+    assert "/api/v1/datafeed/health" in paths
+    assert "/api/v1/datafeed/versions" in paths
 
 
 @pytest.mark.integration
@@ -117,37 +173,49 @@ async def test_spec_generation_completeness(app: FastAPI) -> None:
 async def test_health_endpoint_includes_all_modules(
     async_client: AsyncClient,
 ) -> None:
-    """Verify health endpoint reports status for all modules."""
-    response = await async_client.get("/api/v1/health")
-    assert response.status_code == 200
-    health_data = response.json()
+    """Verify health endpoints work for all modules."""
+    # Check broker health
+    broker_response = await async_client.get("/api/v1/broker/health")
+    assert broker_response.status_code == 200
+    broker_health = broker_response.json()
+    assert "status" in broker_health
+    assert broker_health["status"] == "ok"
 
-    # Should have status and timestamp
-    assert "status" in health_data
-    assert health_data["status"] == "ok"
-    assert "timestamp" in health_data
+    # Check datafeed health
+    datafeed_response = await async_client.get("/api/v1/datafeed/health")
+    assert datafeed_response.status_code == 200
+    datafeed_health = datafeed_response.json()
+    assert "status" in datafeed_health
+    assert datafeed_health["status"] == "ok"
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_versions_endpoint(async_client: AsyncClient) -> None:
-    """Verify versions endpoint returns API version info."""
-    response = await async_client.get("/api/v1/versions")
-    assert response.status_code == 200
-    versions_data = response.json()
+    """Verify versions endpoints return API version info for each module."""
+    # Check broker versions
+    broker_response = await async_client.get("/api/v1/broker/versions")
+    assert broker_response.status_code == 200
+    broker_versions = broker_response.json()
+    assert "current_version" in broker_versions
+    assert broker_versions["current_version"] == "v1"
+    assert "available_versions" in broker_versions
 
-    # Should have version information
-    assert "current_version" in versions_data
-    assert versions_data["current_version"] == "v1"
-    assert "available_versions" in versions_data
+    # Check datafeed versions
+    datafeed_response = await async_client.get("/api/v1/datafeed/versions")
+    assert datafeed_response.status_code == 200
+    datafeed_versions = datafeed_response.json()
+    assert "current_version" in datafeed_versions
+    assert datafeed_versions["current_version"] == "v1"
+    assert "available_versions" in datafeed_versions
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_cors_headers_present(async_client: AsyncClient) -> None:
     """Verify CORS headers are properly configured."""
-    # Make a simple request and check for CORS headers
-    response = await async_client.get("/api/v1/health")
+    # Make a simple request and check for CORS headers (use broker health)
+    response = await async_client.get("/api/v1/broker/health")
     assert response.status_code == 200
 
     # Note: In tests, CORS headers may not be present as middleware
@@ -216,6 +284,6 @@ async def test_multi_module_workflow_end_to_end(async_client: AsyncClient) -> No
     assert executions[0]["symbol"] == "AAPL"
 
     # 8. Check health status
-    health_response = await async_client.get("/api/v1/health")
+    health_response = await async_client.get("/api/v1/broker/health")
     assert health_response.status_code == 200
     assert health_response.json()["status"] == "ok"

@@ -30,6 +30,7 @@ import logging
 import random
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from trading_api.models.broker import (
@@ -54,7 +55,7 @@ from trading_api.models.broker import (
     PreOrder,
     Side,
 )
-from trading_api.shared.ws.router_interface import WsRouteService
+from trading_api.shared.ws.ws_route_interface import WsRouteService
 
 logger = logging.getLogger(__name__)
 
@@ -126,14 +127,16 @@ class BrokerService(WsRouteService):
 
     def __init__(
         self,
+        module_dir: Path,
         execution_delay: float | None = None,
     ) -> None:
         """Initialize broker service.
 
         Args:
+            module_dir: Path to the module directory
             execution_delay: Delay between executions in seconds (default: None)
         """
-        super().__init__()
+        super().__init__(module_dir)
         self._orders: Dict[str, PlacedOrder] = {}
         self._positions: Dict[str, Position] = {}
         self._executions: List[Execution] = []

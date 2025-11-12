@@ -1,6 +1,7 @@
 # Services Testing Guide
 
-**Last Updated**: October 25, 2025  
+**Version**: 2.0.1  
+**Last Updated**: November 11, 2025  
 **Status**: ✅ Current - Includes WebSocket Integration Tests
 
 ## Overview
@@ -87,37 +88,38 @@ Tests for real-time order updates via WebSocket:
 
 \`\`\`typescript
 describe('BrokerTerminalService - Order WebSocket Integration', () => {
-  let broker: BrokerTerminalService
-  let mockHost: IBrokerConnectionAdapterHost
-  const orderUpdates: Order[] = []
+let broker: BrokerTerminalService
+let mockHost: IBrokerConnectionAdapterHost
+const orderUpdates: Order[] = []
 
-  beforeEach(() => {
-    mockHost = {
-      orderUpdate: vi.fn((order) => orderUpdates.push(order)),
-      positionUpdate: vi.fn(),
-      executionUpdate: vi.fn(),
-      equityUpdate: vi.fn(),
-      connectionStatusUpdate: vi.fn(),
-      showNotification: vi.fn(),
-      factory: {
-        createWatchedValue: vi.fn((val) => ({ 
-          setValue: vi.fn(), 
-          value: () => val 
-        })),
-      },
-    } as any
+beforeEach(() => {
+mockHost = {
+orderUpdate: vi.fn((order) => orderUpdates.push(order)),
+positionUpdate: vi.fn(),
+executionUpdate: vi.fn(),
+equityUpdate: vi.fn(),
+connectionStatusUpdate: vi.fn(),
+showNotification: vi.fn(),
+factory: {
+createWatchedValue: vi.fn((val) => ({
+setValue: vi.fn(),
+value: () => val
+})),
+},
+} as any
 
     broker = new BrokerTerminalService(mockHost, mockQuotesProvider)
-  })
 
-  it('should receive order update after placing order', async () => {
-    // Place order via REST
-    await broker.placeOrder({
-      symbol: 'AAPL',
-      type: OrderType.Market,
-      side: Side.Buy,
-      qty: 100
-    })
+})
+
+it('should receive order update after placing order', async () => {
+// Place order via REST
+await broker.placeOrder({
+symbol: 'AAPL',
+type: OrderType.Market,
+side: Side.Buy,
+qty: 100
+})
 
     // Wait for WebSocket update
     await new Promise(resolve => setTimeout(resolve, 2000))
@@ -126,7 +128,8 @@ describe('BrokerTerminalService - Order WebSocket Integration', () => {
     expect(orderUpdates.length).toBe(1)
     expect(orderUpdates[0].symbol).toBe('AAPL')
     expect(orderUpdates[0].status).toBe(OrderStatus.Working)
-  })
+
+})
 })
 \`\`\`
 
@@ -136,23 +139,23 @@ Tests for real-time position updates:
 
 \`\`\`typescript
 it('should receive position update after order fill', async () => {
-  const positionUpdates: Position[] = []
-  mockHost.positionUpdate = vi.fn((pos) => positionUpdates.push(pos))
+const positionUpdates: Position[] = []
+mockHost.positionUpdate = vi.fn((pos) => positionUpdates.push(pos))
 
-  // Place and wait for fill
-  await broker.placeOrder({
-    symbol: 'AAPL',
-    type: OrderType.Market,
-    side: Side.Buy,
-    qty: 100
-  })
+// Place and wait for fill
+await broker.placeOrder({
+symbol: 'AAPL',
+type: OrderType.Market,
+side: Side.Buy,
+qty: 100
+})
 
-  await new Promise(resolve => setTimeout(resolve, 3000))
+await new Promise(resolve => setTimeout(resolve, 3000))
 
-  // Verify position created
-  expect(positionUpdates.length).toBeGreaterThan(0)
-  expect(positionUpdates[0].symbol).toBe('AAPL')
-  expect(positionUpdates[0].qty).toBe(100)
+// Verify position created
+expect(positionUpdates.length).toBeGreaterThan(0)
+expect(positionUpdates[0].symbol).toBe('AAPL')
+expect(positionUpdates[0].qty).toBe(100)
 })
 \`\`\`
 
@@ -162,22 +165,22 @@ Tests for trade execution updates:
 
 \`\`\`typescript
 it('should receive execution update when order fills', async () => {
-  const executions: Execution[] = []
-  mockHost.executionUpdate = vi.fn((exec) => executions.push(exec))
+const executions: Execution[] = []
+mockHost.executionUpdate = vi.fn((exec) => executions.push(exec))
 
-  await broker.placeOrder({
-    symbol: 'AAPL',
-    type: OrderType.Market,
-    side: Side.Buy,
-    qty: 100
-  })
+await broker.placeOrder({
+symbol: 'AAPL',
+type: OrderType.Market,
+side: Side.Buy,
+qty: 100
+})
 
-  await new Promise(resolve => setTimeout(resolve, 3000))
+await new Promise(resolve => setTimeout(resolve, 3000))
 
-  expect(executions.length).toBe(1)
-  expect(executions[0].symbol).toBe('AAPL')
-  expect(executions[0].qty).toBe(100)
-  expect(executions[0].side).toBe(Side.Buy)
+expect(executions.length).toBe(1)
+expect(executions[0].symbol).toBe('AAPL')
+expect(executions[0].qty).toBe(100)
+expect(executions[0].side).toBe(Side.Buy)
 })
 \`\`\`
 
@@ -187,16 +190,16 @@ Tests for real-time equity updates:
 
 \`\`\`typescript
 it('should receive equity updates', async () => {
-  const equityUpdates: number[] = []
-  mockHost.equityUpdate = vi.fn((equity) => equityUpdates.push(equity))
+const equityUpdates: number[] = []
+mockHost.equityUpdate = vi.fn((equity) => equityUpdates.push(equity))
 
-  // Subscribe to equity updates
-  broker.subscribeEquity()
+// Subscribe to equity updates
+broker.subscribeEquity()
 
-  await new Promise(resolve => setTimeout(resolve, 2000))
+await new Promise(resolve => setTimeout(resolve, 2000))
 
-  expect(equityUpdates.length).toBeGreaterThan(0)
-  expect(typeof equityUpdates[0]).toBe('number')
+expect(equityUpdates.length).toBeGreaterThan(0)
+expect(typeof equityUpdates[0]).toBe('number')
 })
 \`\`\`
 
@@ -206,15 +209,15 @@ Tests for broker connection status updates:
 
 \`\`\`typescript
 it('should handle connection status updates', async () => {
-  const statusUpdates: ConnectionStatus[] = []
-  mockHost.connectionStatusUpdate = vi.fn((status) => statusUpdates.push(status))
+const statusUpdates: ConnectionStatus[] = []
+mockHost.connectionStatusUpdate = vi.fn((status) => statusUpdates.push(status))
 
-  // Simulate connection change
-  // (Backend broadcasts connection status via WebSocket)
+// Simulate connection change
+// (Backend broadcasts connection status via WebSocket)
 
-  await new Promise(resolve => setTimeout(resolve, 1000))
+await new Promise(resolve => setTimeout(resolve, 1000))
 
-  expect(statusUpdates.length).toBeGreaterThan(0)
+expect(statusUpdates.length).toBeGreaterThan(0)
 })
 \`\`\`
 
@@ -226,29 +229,29 @@ Always mock the Trading Host interface with \`vi.fn()\`:
 
 \`\`\`typescript
 const mockHost: IBrokerConnectionAdapterHost = {
-  orderUpdate: vi.fn((order: Order) => {
-    // Store for assertions
-    receivedOrders.push(order)
-  }),
-  positionUpdate: vi.fn((position: Position) => {
-    receivedPositions.push(position)
-  }),
-  executionUpdate: vi.fn((execution: Execution) => {
-    receivedExecutions.push(execution)
-  }),
-  equityUpdate: vi.fn((equity: number) => {
-    receivedEquityValues.push(equity)
-  }),
-  connectionStatusUpdate: vi.fn((status: ConnectionStatus) => {
-    currentStatus = status
-  }),
-  showNotification: vi.fn(),
-  factory: {
-    createWatchedValue: vi.fn((val) => ({
-      setValue: vi.fn(),
-      value: () => val,
-    })),
-  },
+orderUpdate: vi.fn((order: Order) => {
+// Store for assertions
+receivedOrders.push(order)
+}),
+positionUpdate: vi.fn((position: Position) => {
+receivedPositions.push(position)
+}),
+executionUpdate: vi.fn((execution: Execution) => {
+receivedExecutions.push(execution)
+}),
+equityUpdate: vi.fn((equity: number) => {
+receivedEquityValues.push(equity)
+}),
+connectionStatusUpdate: vi.fn((status: ConnectionStatus) => {
+currentStatus = status
+}),
+showNotification: vi.fn(),
+factory: {
+createWatchedValue: vi.fn((val) => ({
+setValue: vi.fn(),
+value: () => val,
+})),
+},
 } as any
 \`\`\`
 
@@ -265,10 +268,10 @@ await new Promise(resolve => setTimeout(resolve, 2000))
 
 // Or use retry logic
 async function waitForUpdate(check: () => boolean, timeout = 5000) {
-  const start = Date.now()
-  while (!check() && Date.now() - start < timeout) {
-    await new Promise(resolve => setTimeout(resolve, 100))
-  }
+const start = Date.now()
+while (!check() && Date.now() - start < timeout) {
+await new Promise(resolve => setTimeout(resolve, 100))
+}
 }
 
 await waitForUpdate(() => orderUpdates.length > 0)
@@ -280,27 +283,29 @@ Test both mock and real WebSocket clients:
 
 \`\`\`typescript
 describe('WebSocket Client Selection', () => {
-  it('should use mock WebSocket when brokerMock provided', () => {
-    const broker = new BrokerTerminalService(
-      mockHost, 
-      mockQuotesProvider,
-      true // mock = true
-    )
-    
+it('should use mock WebSocket when brokerMock provided', () => {
+const broker = new BrokerTerminalService(
+mockHost,
+mockQuotesProvider,
+true // mock = true
+)
+
     // Verify uses WsFallback
     // Internal implementation check
-  })
 
-  it('should use real WebSocket when brokerMock absent', () => {
-    const broker = new BrokerTerminalService(
-      mockHost,
-      mockQuotesProvider,
-      false // mock = false
-    )
-    
+})
+
+it('should use real WebSocket when brokerMock absent', () => {
+const broker = new BrokerTerminalService(
+mockHost,
+mockQuotesProvider,
+false // mock = false
+)
+
     // Verify uses WsAdapter
     // Internal implementation check
-  })
+
+})
 })
 \`\`\`
 
@@ -315,6 +320,7 @@ These tests are **expected to fail** until Phase 5 (Backend Broadcasting) is imp
 3. ⏳ **Phase 6 Pending**: Full stack validation and refactoring
 
 **When tests will pass**: After backend implements broadcasting logic in:
+
 - \`backend/src/trading_api/core/broker_service.py\`
 - Backend broadcasts order/position/execution/equity updates via WebSocket
 
@@ -325,24 +331,31 @@ These tests are **expected to fail** until Phase 5 (Backend Broadcasting) is imp
 ### Run All Tests
 
 \`\`\`bash
+
 # Run all service tests
-npm run test:unit src/services/__tests__/
+
+npm run test:unit src/services/**tests**/
 
 # Run all tests
+
 npm run test:unit
 \`\`\`
 
 ### Run Specific Test Suites
 
 \`\`\`bash
+
 # ApiService tests only
-npm run test:unit src/services/__tests__/apiService.spec.ts
+
+npm run test:unit src/services/**tests**/apiService.spec.ts
 
 # Broker WebSocket integration tests (currently skipped)
-npm run test:unit src/services/__tests__/brokerTerminalService.spec.ts
+
+npm run test:unit src/services/**tests**/brokerTerminalService.spec.ts
 
 # Datafeed service tests
-npm run test:unit src/services/__tests__/datafeedService.spec.ts
+
+npm run test:unit src/services/**tests**/datafeedService.spec.ts
 \`\`\`
 
 ### Run with Coverage
@@ -356,12 +369,14 @@ npm run test:unit -- --coverage
 ## Test Results
 
 ### ApiService Tests
+
 - ✅ All 28 tests passing
 - ✅ No mocking dependencies
 - ✅ Realistic test scenarios using fallback mechanism
 - ✅ Fast execution (under 3 seconds for full suite)
 
 ### WebSocket Integration Tests
+
 - ⏭️ 10 tests currently skipped (Phase 5 pending)
 - 🔴 Expected to fail until backend broadcasting implemented
 - ✅ Test infrastructure ready
@@ -396,14 +411,14 @@ npm run test:unit -- --coverage
 
 ## References
 
-- **WebSocket Integration**: See \`frontend/src/services/BROKER-WEBSOCKET-INTEGRATION.md\`
-- **Trading Host API**: See \`frontend/src/services/IBROKERCONNECTIONADAPTERHOST.md\`
-- **Broker Service**: See \`frontend/BROKER-TERMINAL-SERVICE.md\`
-- **WebSocket Clients**: See \`docs/WEBSOCKET-CLIENTS.md\`
-- **Testing Strategy**: See \`docs/TESTING.md\`
+- **WebSocket Integration**: See `../../../docs/BROKER-WEBSOCKET-INTEGRATION.md`
+- **Trading Host API**: See `../../../docs/IBROKERCONNECTIONADAPTERHOST.md`
+- **Broker Service**: See `../../../docs/BROKER-TERMINAL-SERVICE.md`
+- **WebSocket Clients**: See `../../../../docs/WEBSOCKET-CLIENTS.md`
+- **Testing Strategy**: See `../../../../docs/TESTING.md`
 
 ---
 
-**Version**: 2.0.0  
-**Last Updated**: October 25, 2025  
+**Version**: 2.0.1  
+**Last Updated**: November 11, 2025  
 **Maintained by**: Frontend Team

@@ -8,15 +8,30 @@ A modern full-stack trading platform with FastAPI backend and Vue.js frontend. F
 ## 🏗️ Project Structure
 
 ```
-├── backend/          # FastAPI application
-│   ├── src/         # Source code
-│   ├── tests/       # Test files
+trader-pro/
+├── backend/              # Modular FastAPI backend
+│   ├── src/
+│   │   └── trading_api/
+│   │       ├── modules/          # Pluggable feature modules
+│   │       │   ├── broker/       # Trading operations module
+│   │       │   └── datafeed/     # Market data module
+│   │       ├── shared/           # Module interface, registry, core infrastructure
+│   │       │   ├── module_interface.py  # Module ABC
+│   │       │   ├── module_registry.py   # Module management
+│   │       │   └── api/          # Shared API routers (health, versioning)
+│   │       ├── models/           # Centralized Pydantic models
+│   │       └── app_factory.py    # Application factory for dynamic composition
+│   ├── scripts/
+│   │   └── backend_manager.py    # Multi-process orchestration
+│   ├── dev-config.yaml           # Deployment configuration
+│   ├── tests/                    # Integration tests
 │   └── pyproject.toml
-├── frontend/        # Vue.js application
-│   ├── src/         # Source code
+├── frontend/             # Vue.js application
+│   ├── src/             # Source code
 │   └── package.json
-├── .githooks/       # Git hooks for code quality
-└── .github/         # CI/CD workflows
+├── docs/                # Project-wide documentation
+├── .githooks/           # Git hooks for code quality
+└── .github/             # CI/CD workflows
 ```
 
 ## 🚀 Quick Start
@@ -55,7 +70,7 @@ code trader-pro.code-workspace
 - ✅ No `import.meta` errors
 - ✅ Better IntelliSense and debugging
 
-See [WORKSPACE-SETUP.md](./WORKSPACE-SETUP.md) for details.
+See [WORKSPACE-SETUP.md](./docs/WORKSPACE-SETUP.md) for details.
 
 ### Development
 
@@ -71,7 +86,19 @@ make -f project.mk dev-frontend
 - Frontend: http://localhost:${FRONTEND_PORT:-5173}
 - API Docs: http://localhost:${BACKEND_PORT:-8000}/docs
 
-See [ENVIRONMENT-CONFIG.md](./ENVIRONMENT-CONFIG.md) for environment variable configuration.
+See [ENVIRONMENT-CONFIG.md](./docs/ENVIRONMENT-CONFIG.md) for environment variable configuration.
+
+**Module-Specific Development** (Backend):
+
+```bash
+# Start only specific modules
+ENABLED_MODULES=broker make -f project.mk dev-backend
+
+# Multi-process mode (production-like)
+make -C backend backend-dev-multi
+```
+
+See [docs/FULLSTACK-DEV-MODE.md](docs/FULLSTACK-DEV-MODE.md) for watch system and [backend/docs/BACKEND_MANAGER_GUIDE.md](backend/docs/BACKEND_MANAGER_GUIDE.md) for multi-process deployment.
 
 ## 🔧 Development
 
@@ -116,7 +143,7 @@ make -f project.mk lint-all
 make -f project.mk format-all
 
 # Backend only
-make -C backend lint-check
+make -C backend type-check
 make -C backend format
 ```
 
@@ -124,7 +151,7 @@ make -C backend format
 
 ### Core Documentation
 
-- **[Architecture](ARCHITECTURE.md)** - System architecture and design
+- **[Architecture](docs/ARCHITECTURE.md)** - System architecture and design
 - **[Development Guide](docs/DEVELOPMENT.md)** - Development workflows and setup
 - **[Testing Strategy](docs/TESTING.md)** - Testing approach and best practices
 - **[Client Generation](docs/CLIENT-GENERATION.md)** - API client auto-generation
@@ -165,6 +192,7 @@ The project uses GitHub Actions for continuous integration:
 ### Backend
 
 - **Framework**: FastAPI 0.104+ (REST) + FastWS 0.1.7 (WebSocket)
+- **Architecture**: Modular factory-based with ABC protocol (pluggable modules, selective deployment)
 - **Runtime**: Python 3.11+ with Uvicorn ASGI server
 - **Dependencies**: Poetry for package management
 - **Testing**: pytest + pytest-asyncio + httpx TestClient
@@ -185,7 +213,7 @@ The project uses GitHub Actions for continuous integration:
 - **Git Hooks**: Automated code quality and testing
 - **Workspace**: VS Code multi-root workspace support
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for complete technical details.
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for complete technical details.
 
 ## 🤝 Contributing
 

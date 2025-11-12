@@ -13,6 +13,7 @@ dist
 dist-ssr
 coverage
 *.local
+*/tmp
 
 /cypress/videos/
 /cypress/screenshots/
@@ -28,13 +29,10 @@ coverage
 *.sw?
 
 # Generated API client
-src/clients/trader-client-generated/
+src/clients_generated/trader-client-*/
 
 # Generated WebSocket types
-src/clients/ws-types-generated/
-
-# Generated WebSocket client
-src/clients/ws-generated/
+src/clients_generated/ws-types-*/
 
 # OpenAPI/AsyncAPI generation artifacts
 openapi.json
@@ -43,3 +41,4 @@ openapi-3.0.json
 openapitools.json
 
 *.tsbuildinfo
+**/archive/

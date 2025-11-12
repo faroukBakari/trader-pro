@@ -1,10 +1,9 @@
-"""Shared API routers - Always loaded.
+"""Shared API module.
 
-This module contains API routers that are always available regardless of
-module configuration (health checks, versioning, etc.).
+Note: HealthApi and VersionApi have been moved to the core module.
+They are no longer part of the shared infrastructure.
 """
 
-from .health import HealthApi
-from .versions import VersionApi
+from .api_router_interface import APIRouterInterface
 
-__all__ = ["HealthApi", "VersionApi"]
+__all__: list[str] = ["APIRouterInterface"]

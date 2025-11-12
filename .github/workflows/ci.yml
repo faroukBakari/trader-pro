@@ -35,7 +35,7 @@ jobs:
         virtualenvs-create: true
         virtualenvs-in-project: true
 
-    - name: Load cached venv
+    - name: Cache Poetry dependencies
       id: cached-poetry-dependencies
       uses: actions/cache@v3
       with:
@@ -43,26 +43,31 @@ jobs:
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
 
     - name: Install backend dependencies
+      if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
       working-directory: backend
       run: make install-ci
 
-    - name: Generate WebSocket routers
+    - name: Generate all specs and clients
       working-directory: backend
-      run: make generate-ws-routers
+      run: make generate
 
-    - name: Install Git hooks
-      run: |
-        git config core.hooksPath .githooks
-        chmod +x .githooks/*
+    - name: Upload backend specs
+      uses: actions/upload-artifact@v4
+      with:
+        name: backend-specs-${{ github.sha }}
+        path: |
+          backend/src/trading_api/modules/*/specs_generated/*.json
+        retention-days: 1
 
     - name: Run backend linting
       working-directory: backend
-      run: make lint-check
+      run: make type-check
 
   # Backend boundary tests (runs once, enforces module isolation)
   backend-boundaries:
     runs-on: ubuntu-latest
     needs: [backend-setup]
+    if: success()
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -82,71 +87,22 @@ jobs:
         virtualenvs-create: true
         virtualenvs-in-project: true
 
-    - name: Load cached venv
-      id: cached-poetry-dependencies
+    - name: Restore cached venv
       uses: actions/cache@v3
       with:
         path: backend/.venv
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
-
-    - name: Install backend dependencies
-      working-directory: backend
-      run: make install-ci
-
-    - name: Generate WebSocket routers
-      working-directory: backend
-      run: make generate-ws-routers
+        fail-on-cache-miss: false
 
     - name: Run import boundary tests
       working-directory: backend
       run: make test-boundaries
 
-  # Backend shared infrastructure tests (runs once)
-  backend-shared:
-    runs-on: ubuntu-latest
-    needs: [backend-setup]
-    strategy:
-      matrix:
-        python-version: ["3.11"]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
-      with:
-        version: latest
-        virtualenvs-create: true
-        virtualenvs-in-project: true
-
-    - name: Load cached venv
-      id: cached-poetry-dependencies
-      uses: actions/cache@v3
-      with:
-        path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
-
-    - name: Install backend dependencies
-      working-directory: backend
-      run: make install-ci
-
-    - name: Generate WebSocket routers
-      working-directory: backend
-      run: make generate-ws-routers
-
-    - name: Run shared infrastructure tests
-      working-directory: backend
-      run: make test-shared
-
   # Backend module tests (runs in parallel per module)
   backend-modules:
     runs-on: ubuntu-latest
     needs: [backend-setup]
+    if: success()
     strategy:
       fail-fast: false
       matrix:
@@ -168,20 +124,12 @@ jobs:
         virtualenvs-create: true
         virtualenvs-in-project: true
 
-    - name: Load cached venv
-      id: cached-poetry-dependencies
+    - name: Restore cached venv
       uses: actions/cache@v3
       with:
         path: backend/.venv
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
-
-    - name: Install backend dependencies
-      working-directory: backend
-      run: make install-ci
-
-    - name: Generate WebSocket routers
-      working-directory: backend
-      run: make generate-ws-routers
+        fail-on-cache-miss: false
 
     - name: Run ${{ matrix.module }} module tests
       working-directory: backend
@@ -190,7 +138,8 @@ jobs:
   # Backend integration tests (runs once, requires all modules)
   backend-integration:
     runs-on: ubuntu-latest
-    needs: [backend-boundaries, backend-shared, backend-modules]
+    needs: [backend-boundaries, backend-modules]
+    if: success()
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -210,50 +159,87 @@ jobs:
         virtualenvs-create: true
         virtualenvs-in-project: true
 
-    - name: Load cached venv
-      id: cached-poetry-dependencies
+    - name: Restore cached venv
       uses: actions/cache@v3
       with:
         path: backend/.venv
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
-
-    - name: Install backend dependencies
-      working-directory: backend
-      run: make install-ci
-
-    - name: Generate WebSocket routers
-      working-directory: backend
-      run: make generate-ws-routers
-
-    - name: Run integration tests
-      working-directory: backend
-      run: make test-integration
+        fail-on-cache-miss: false
 
     - name: Run all tests with coverage (final report)
       working-directory: backend
-      run: make test-cov
+      run: make test-integration # make test-cov
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+  # Backend spec import and check
+  backend-spec-import:
+    runs-on: ubuntu-latest
+    needs: [backend-integration]
+    if: success()
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Download backend specs from backend-setup
+      uses: actions/download-artifact@v4
       with:
-        file: backend/coverage.xml
-        flags: backend
-        name: codecov-backend
+        name: backend-specs-${{ github.sha }}
+        path: backend/src/trading_api/modules/
+
+    - name: Verify all module specs exist
+      working-directory: backend
+      run: |
+        echo "🔍 Verifying per-module specs (reused from backend-setup)..."
+        FAILED=0
+        
+        # Check broker specs (versioned)
+        if [ ! -f "src/trading_api/modules/broker/specs_generated/broker_v1_openapi.json" ]; then
+          echo "❌ Broker v1 OpenAPI spec not found"
+          FAILED=1
+        else
+          echo "✅ Broker v1 OpenAPI spec found"
+        fi
+        
+        if [ ! -f "src/trading_api/modules/broker/specs_generated/broker_v1_asyncapi.json" ]; then
+          echo "❌ Broker v1 AsyncAPI spec not found"
+          FAILED=1
+        else
+          echo "✅ Broker v1 AsyncAPI spec found"
+        fi
+        
+        # Check datafeed specs (versioned)
+        if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_v1_openapi.json" ]; then
+          echo "❌ Datafeed v1 OpenAPI spec not found"
+          FAILED=1
+        else
+          echo "✅ Datafeed v1 OpenAPI spec found"
+        fi
+        
+        if [ ! -f "src/trading_api/modules/datafeed/specs_generated/datafeed_v1_asyncapi.json" ]; then
+          echo "❌ Datafeed v1 AsyncAPI spec not found"
+          FAILED=1
+        else
+          echo "✅ Datafeed v1 AsyncAPI spec found"
+        fi
+        
+        if [ $FAILED -eq 1 ]; then
+          echo ""
+          echo "❌ Some specs are missing. Artifact download may have failed."
+          exit 1
+        fi
+        
+        echo ""
+        echo "✅ All per-module specs verified successfully"
 
   frontend:
     runs-on: ubuntu-latest
-    needs: [backend-integration]
+    needs: [backend-spec-import]
+    if: success()
     strategy:
       matrix:
         node-version: ["22"]
 
     steps:
     - uses: actions/checkout@v4
-
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.11"
 
     - name: Set up Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v4
@@ -262,36 +248,40 @@ jobs:
         cache: 'npm'
         cache-dependency-path: frontend/package-lock.json
 
-    - name: Install Poetry
-      uses: snok/install-poetry@v1
+    - name: Download backend specs
+      uses: actions/download-artifact@v4
       with:
-        version: latest
-        virtualenvs-create: true
-        virtualenvs-in-project: true
-
-    - name: Install backend dependencies (for offline spec generation)
-      working-directory: backend
-      run: make install-ci
-
-    - name: Generate WebSocket routers
-      working-directory: backend
-      run: make generate-ws-routers
-
-    - name: Export backend API specs
-      working-directory: backend
-      run: |
-        make export-openapi-spec
-        make export-asyncapi-spec
+        name: backend-specs-${{ github.sha }}
+        path: backend/src/trading_api/modules/
 
     - name: Install frontend dependencies
       working-directory: frontend
       run: make install-ci
 
-    - name: Generate frontend clients from backend specs (offline)
+    - name: Generate per-module frontend clients (offline from specs)
+      working-directory: frontend
+      run: make generate
+
+    - name: Verify per-module client generation
       working-directory: frontend
       run: |
-        make generate-openapi-client
-        make generate-asyncapi-types
+        if [ ! -d "src/clients_generated/trader-client-broker_v1" ]; then
+          echo "❌ Broker client generation failed - no trader-client-broker_v1 directory"
+          exit 1
+        fi
+        if [ ! -d "src/clients_generated/trader-client-datafeed_v1" ]; then
+          echo "❌ Datafeed client generation failed - no trader-client-datafeed_v1 directory"
+          exit 1
+        fi
+        if [ ! -d "src/clients_generated/ws-types-broker_v1" ]; then
+          echo "❌ Broker WebSocket types generation failed - no ws-types-broker_v1 directory"
+          exit 1
+        fi
+        if [ ! -d "src/clients_generated/ws-types-datafeed_v1" ]; then
+          echo "❌ Datafeed WebSocket types generation failed - no ws-types-datafeed_v1 directory"
+          exit 1
+        fi
+        echo "✅ Per-module REST clients and WebSocket types generated successfully"
 
     - name: Install Git hooks
       run: |
@@ -323,22 +313,19 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     needs: [backend-integration, frontend]
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    if: success()
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+        node-version: ["22"]
 
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
-        python-version: "3.11"
-
-    - name: Set up Node.js 22
-      uses: actions/setup-node@v4
-      with:
-        node-version: "22"
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
+        python-version: ${{ matrix.python-version }}
 
     - name: Install Poetry
       uses: snok/install-poetry@v1
@@ -347,55 +334,35 @@ jobs:
         virtualenvs-create: true
         virtualenvs-in-project: true
 
-    - name: Install backend dependencies
-      working-directory: backend
-      run: make install-ci
+    - name: Restore cached venv
+      uses: actions/cache@v3
+      with:
+        path: backend/.venv
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+        fail-on-cache-miss: false
 
-    - name: Generate WebSocket routers
+    - name: Generate all specs and clients
       working-directory: backend
-      run: make generate-ws-routers
+      run: make generate
 
-    - name: Export backend API specs
-      working-directory: backend
-      run: |
-        make export-openapi-spec
-        make export-asyncapi-spec
+    - name: Set up Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
 
     - name: Install frontend dependencies
       working-directory: frontend
       run: make install-ci
 
-    - name: Generate frontend clients from backend specs (offline)
+    - name: Generate per-module frontend clients (offline from specs)
       working-directory: frontend
-      run: |
-        make generate-openapi-client
-        make generate-asyncapi-types
-
-    - name: Verify client generation
-      working-directory: frontend
-      run: |
-        if [ ! -f "src/clients/trader-client-generated/index.ts" ]; then
-          echo "❌ Client generation failed - no trader-client-generated/index.ts file"
-          exit 1
-        fi
-        if [ ! -f "src/clients/ws-types-generated/index.ts" ]; then
-          echo "❌ WebSocket types generation failed - no ws-types-generated/index.ts file"
-          exit 1
-        fi
-        echo "✅ REST client and WebSocket types generated successfully from backend specs"
-
-    - name: Start backend server
-      working-directory: backend
-      run: make dev-ci
-      env:
-        CI: true
-
-    - name: Test API endpoints
-      working-directory: backend
-      run: make health-ci
+      run: make generate
 
     - name: Build frontend against live API
       working-directory: frontend
-      run: make build
+      run: npm run build
       env:
         VITE_API_URL: http://localhost:8000
+

@@ -83,7 +83,7 @@ else
 fi
 
 echo "🔍 Running backend linting..."
-if make lint-check > /dev/null 2>&1; then
+if make type-check > /dev/null 2>&1; then
     echo -e "${GREEN}✅ Backend linting passed${NC}"
 else
     echo -e "${RED}❌ Backend linting failed${NC}"
@@ -101,7 +101,7 @@ SERVER_STARTED=true
 
 echo "⏳ Waiting for server to be ready..."
 for i in {1..20}; do
-    if curl -sf http://localhost:$BACKEND_PORT/api/v1/health > /dev/null 2>&1; then
+    if curl -sf http://localhost:$BACKEND_PORT/api/v1/core/health > /dev/null 2>&1; then
         echo -e "${GREEN}✅ Backend server is ready${NC}"
         break
     fi
@@ -113,9 +113,9 @@ for i in {1..20}; do
 done
 
 echo "🩺 Testing API endpoints..."
-if curl -sf http://localhost:$BACKEND_PORT/api/v1/health > /dev/null 2>&1 && \
-    curl -sf http://localhost:$BACKEND_PORT/api/v1/version > /dev/null 2>&1 && \
-    curl -sf http://localhost:$BACKEND_PORT/api/v1/versions > /dev/null 2>&1; then
+if curl -sf http://localhost:$BACKEND_PORT/api/v1/core/health > /dev/null 2>&1 && \
+    curl -sf http://localhost:$BACKEND_PORT/api/v1/core/version > /dev/null 2>&1 && \
+    curl -sf http://localhost:$BACKEND_PORT/api/v1/core/versions > /dev/null 2>&1; then
     echo -e "${GREEN}✅ All API endpoints responding${NC}"
 else
     echo -e "${RED}❌ Some API endpoints failed${NC}"
@@ -146,7 +146,7 @@ echo -e "${BLUE}Step 4: Client Generation from Live API${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 echo "🔧 Generating REST API client from live API..."
-if make client-generate > /dev/null 2>&1; then
+if make generate > /dev/null 2>&1; then
     echo -e "${GREEN}✅ REST API client generation successful${NC}"
 else
     echo -e "${RED}❌ REST API client generation failed${NC}"
@@ -257,7 +257,7 @@ echo "🧹 Cleaning generated clients..."
 rm -rf src/clients/trader-client-generated src/clients/ws-generated src/clients/ws-types-generated
 
 echo "🎭 Generating REST API client without backend..."
-if make client-generate > /dev/null 2>&1; then
+if make generate > /dev/null 2>&1; then
     echo -e "${GREEN}✅ REST API mock fallback generation successful${NC}"
 else
     echo -e "${RED}❌ REST API mock fallback generation failed${NC}"

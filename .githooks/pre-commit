@@ -22,13 +22,35 @@ fi
 STASH_NAME="pre-commit-$(date +%s)"
 STASHED=0
 
-log_info "Stashing unstaged changes..."
-if git diff --quiet; then
-    log_info "No unstaged changes to stash"
+log_info "Checking working directory state..."
+
+# Check for untracked files in source directories
+untracked_in_src=$(git ls-files --others --exclude-standard -- \
+    'backend/src/**/*.py' \
+    'frontend/src/**/*.ts' \
+    'frontend/src/**/*.vue' \
+    'frontend/src/**/*.js' 2>/dev/null || true)
+
+if [[ -n "$untracked_in_src" ]]; then
+    untracked_count=$(echo "$untracked_in_src" | wc -l)
+    log_warning "⚠️  Found $untracked_count untracked source file(s):"
+    echo "$untracked_in_src" | head -5
+    if [[ $untracked_count -gt 5 ]]; then
+        echo "   ... and $((untracked_count - 5)) more"
+    fi
+    log_warning "These files will be stashed during checks but are NOT being committed"
+    log_warning "Consider: 'git add <file>' to include OR add to .gitignore"
+    echo ""
+fi
+
+# Stash unstaged and untracked changes
+log_info "Stashing unstaged and untracked changes..."
+if git diff --quiet && [[ -z "$untracked_in_src" ]]; then
+    log_info "No unstaged or untracked changes to stash"
 else
     git stash push -k -u -m "$STASH_NAME" >/dev/null 2>&1 || true
     STASHED=1
-    log_success "Unstaged changes stashed"
+    log_success "Unstaged and untracked changes stashed (will be restored after checks)"
 fi
 
 # Setup trap to ALWAYS restore stashed changes
@@ -85,8 +107,20 @@ if [[ -n "$backend_files" ]]; then
         exit 1
     fi
 
+    # Re-stage ALL backend Python files that were modified by formatting
+    # (make format runs on all files in src/ and tests/, not just staged ones)
+    log_info "Re-staging backend files to include formatting changes..."
+    cd "$repo_root"
+    # Add all modified tracked Python files in backend
+    git add -u backend/src/ backend/tests/ 2>/dev/null || true
+    # Also add any new Python files that might have been created
+    git add backend/src/ backend/tests/ 2>/dev/null || true
+    log_success "Backend files re-staged with formatting changes"
+
+    cd "$repo_root/backend"
+
     # Lint backend code (flake8 + mypy)
-    if ! run_check "Backend linting" "make lint-check" "$repo_root/backend"; then
+    if ! run_check "Backend linting" "make type-check" "$repo_root/backend"; then
         exit 1
     fi
 
@@ -97,19 +131,25 @@ if [[ -n "$backend_files" ]]; then
         fi
     fi
 
-    # Validate API specifications (always run to catch schema issues)
-    if ! run_check "OpenAPI spec validation" "make export-openapi-spec" "$repo_root/backend"; then
-        log_error "OpenAPI spec export/validation failed"
-        log_error "This usually means there are issues with your API models or routes"
+    # Generate backend specs (OpenAPI/AsyncAPI) and validate Python clients
+    if ! run_check "Backend specs & Python clients generation" "make generate" "$repo_root/backend"; then
+        log_error "Backend spec generation and/or Python client validation failed"
         exit 1
     fi
-
-    if ! run_check "AsyncAPI spec validation" "make export-asyncapi-spec" "$repo_root/backend"; then
-        log_error "AsyncAPI spec export/validation failed"
-        log_error "This usually means there are issues with your WebSocket models"
-        log_error "Check for optional parameters in subscription request models"
+    
+    # Regenerate frontend TypeScript clients from updated backend specs
+    log_info "Regenerating frontend TypeScript clients from updated backend specs..."
+    if ! run_check "Frontend client generation" "make generate" "$repo_root/frontend"; then
+        log_error "Frontend client generation failed (backend specs may be invalid)"
         exit 1
     fi
+    
+    # Re-stage generated frontend clients
+    log_info "Re-staging generated frontend TypeScript clients..."
+    cd "$repo_root"
+    git add -u frontend/src/clients/ 2>/dev/null || true
+    git add frontend/src/clients/ 2>/dev/null || true
+    log_success "Frontend clients re-staged"
 fi
 
 # Frontend TypeScript/Vue checks
@@ -130,11 +170,37 @@ if [[ -n "$frontend_files" ]]; then
         npm install
     fi
 
-    # Linting (includes client generation)
+    # Ensure backend specs exist before running frontend checks
+    if ! find "$repo_root/backend/src/trading_api/modules" -type f -path "*/specs_generated/*_openapi.json" 2>/dev/null | grep -q .; then
+        log_error "Backend specs not found! Frontend code requires backend specs."
+        log_info "Generate backend specs first: cd backend && make generate"
+        exit 1
+    fi
+    
+    # Generate/update frontend clients from backend specs
+    log_info "Generating frontend TypeScript clients from backend specs..."
+    if ! run_check "Frontend client generation" "make generate" "$repo_root/frontend"; then
+        log_error "Frontend client generation failed"
+        exit 1
+    fi
+    
+    # Linting (auto-fix)
     if ! run_check "Frontend linting" "make lint" "$repo_root/frontend"; then
         log_warning "Run 'cd frontend && make lint' to fix linting issues"
         exit 1
     fi
+
+    # Re-stage ALL frontend files that were modified by linting/formatting
+    # (make lint runs on all files in src/, not just staged ones)
+    log_info "Re-staging frontend files to include linting/formatting changes..."
+    cd "$repo_root"
+    # Add all modified tracked TypeScript/Vue/JS files in frontend
+    git add -u frontend/src/ 2>/dev/null || true
+    # Also add any new files that might have been created
+    git add frontend/src/ 2>/dev/null || true
+    log_success "Frontend files re-staged with linting/formatting changes"
+
+    cd "$repo_root/frontend"
 
     # TypeScript type checking (includes client generation)
     if ! run_check "TypeScript type checking" "make type-check" "$repo_root/frontend"; then

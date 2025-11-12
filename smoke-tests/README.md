@@ -1,5 +1,8 @@
 # Smoke Tests
 
+**Version**: 1.0.0  
+**Last Updated**: November 11, 2025
+
 This directory contains Playwright smoke tests for the Trader Pro application.
 
 ## Purpose

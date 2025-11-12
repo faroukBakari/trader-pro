@@ -7,9 +7,18 @@ import type {
   Position,
   QuoteData,
 } from '@public/trading_terminal/charting_library';
+
+// Per-module WebSocket types (microservice-ready architecture)
+// Datafeed module types
 import {
   type Bar as Bar_Ws_Backend,
   type BarsSubscriptionRequest as BarsSubscriptionRequest_Ws_Backend,
+  type QuoteData as QuoteData_Ws_Backend,
+  type QuoteDataSubscriptionRequest as QuoteDataSubscriptionRequest_Ws_Backend,
+} from '../clients_generated/ws-types-datafeed_v1/index.js';
+
+// Broker module types
+import {
   type BrokerConnectionStatus as BrokerConnectionStatus_Ws_Backend,
   type BrokerConnectionSubscriptionRequest as BrokerConnectionSubscriptionRequest_Ws_Backend,
   type EquityData as EquityData_Ws_Backend,
@@ -20,9 +29,8 @@ import {
   type PlacedOrder as PlacedOrder_Ws_Backend,
   type Position as Position_Ws_Backend,
   type PositionSubscriptionRequest as PositionSubscriptionRequest_Ws_Backend,
-  type QuoteData as QuoteData_Ws_Backend,
-  type QuoteDataSubscriptionRequest as QuoteDataSubscriptionRequest_Ws_Backend,
-} from '../clients/ws-types-generated/index.js';
+} from '../clients_generated/ws-types-broker_v1/index.js';
+
 import {
   mapBrokerConnectionStatus,
   mapEquityData,
@@ -63,29 +71,40 @@ export class WsAdapter implements WsAdapterType {
   equity: WebSocketInterface<EquitySubscriptionRequest, EquityData>
   brokerConnection: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
 
+  // frontend dev have to set the resired version /{version}/{module}/ws
   constructor() {
-    // Datafeed clients
-    this.bars = new WebSocketClient<BarsSubscriptionRequest, Bar_Ws_Backend, Bar>('bars', data => data)
+    const datafeedWsUrl = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + '/v1/datafeed/ws'
+    this.bars = new WebSocketClient<BarsSubscriptionRequest, Bar_Ws_Backend, Bar>(datafeedWsUrl, 'bars', data => data)
     this.quotes = new WebSocketClient<QuoteDataSubscriptionRequest, QuoteData_Ws_Backend, QuoteData>(
-      'quotes', mapQuoteData
+      datafeedWsUrl, 'quotes', mapQuoteData
     )
 
-    // Broker clients
+    const brokerWsUrl = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + '/v1/broker/ws'
     this.orders = new WebSocketClient<OrderSubscriptionRequest, PlacedOrder_Ws_Backend, PlacedOrder>(
-      'orders', mapOrder
+      brokerWsUrl, 'orders', mapOrder
     )
     this.positions = new WebSocketClient<PositionSubscriptionRequest, Position_Ws_Backend, Position>(
-      'positions', mapPosition
+      brokerWsUrl, 'positions', mapPosition
     )
     this.executions = new WebSocketClient<ExecutionSubscriptionRequest, Execution_Ws_Backend, Execution>(
-      'executions', mapExecution
+      brokerWsUrl, 'executions', mapExecution
     )
     this.equity = new WebSocketClient<EquitySubscriptionRequest, EquityData_Ws_Backend, EquityData>(
-      'equity', mapEquityData
+      brokerWsUrl, 'equity', mapEquityData
     )
     this.brokerConnection = new WebSocketClient<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus_Ws_Backend, BrokerConnectionStatus>(
-      'broker-connection', mapBrokerConnectionStatus
+      brokerWsUrl, 'broker-connection', mapBrokerConnectionStatus
     )
+  }
+
+  /**
+   * Get list of modules with WebSocket support.
+   * Static method - hardcoded list based on which modules have WebSocket endpoints wired.
+   *
+   * @returns Array of module names that have WebSocket endpoints
+   */
+  static getModules(): string[] {
+    return ['broker', 'datafeed']
   }
 }
 
@@ -117,5 +136,15 @@ export class WsFallback implements Partial<WsAdapterType> {
     if (wsMocker.executionsMocker) this.executions = new WebSocketFallback<ExecutionSubscriptionRequest, Execution>(wsMocker.executionsMocker.bind(wsMocker))
     if (wsMocker.equityMocker) this.equity = new WebSocketFallback<EquitySubscriptionRequest, EquityData>(wsMocker.equityMocker.bind(wsMocker))
     if (wsMocker.brokerConnectionMocker) this.brokerConnection = new WebSocketFallback<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>(wsMocker.brokerConnectionMocker.bind(wsMocker))
+  }
+
+  /**
+   * Get list of modules with WebSocket support.
+   * Static method - hardcoded list based on which modules have WebSocket endpoints wired.
+   *
+   * @returns Array of module names that have WebSocket endpoints
+   */
+  static getModules(): string[] {
+    return ['broker', 'datafeed']
   }
 }
