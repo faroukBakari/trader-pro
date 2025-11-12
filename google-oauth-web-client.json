@@ -1,0 +1,12 @@
+{
+  "web": {
+    "client_id": "1002931823122-q0jtvvnc649mbr3pihsh7rebhbdgemt2.apps.googleusercontent.com",
+    "project_id": "trader-pro-478018",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_secret": "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",
+    "redirect_uris": ["http://localhost:5173"],
+    "javascript_origins": ["http://localhost:5173"]
+  }
+}

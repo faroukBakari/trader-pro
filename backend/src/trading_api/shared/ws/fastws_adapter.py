@@ -14,6 +14,8 @@ from trading_api.shared.ws.ws_route_interface import WsRouteInterface
 logger = logging.getLogger(__name__)
 
 
+# TODO: need optimizations for idle states with no subscriptions / no clients
+# TODO: need optimizations to handle load and optimize tasks when many clients are connected
 class FastWSAdapter(FastWS):
     """
     Self-contained WebSocket adapter with embedded endpoint
