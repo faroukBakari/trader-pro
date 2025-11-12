@@ -161,7 +161,7 @@ jobs:
     steps:
       - run: make install-ci
       - run: make test
-      - run: make lint-check
+      - run: make type-check
 
   frontend:
     runs-on: ubuntu-latest
@@ -289,12 +289,18 @@ def test_bars_subscription():
 ### Frontend WebSocket Tests
 
 ```typescript
+import { WsAdapter } from "@/plugins/wsAdapter";
+
 describe("WebSocket Client", () => {
   it("subscribes to bar updates", async () => {
-    const client = BarsWebSocketClientFactory();
+    const adapter = new WsAdapter();
     const callback = vi.fn();
 
-    await client.subscribe({ symbol: "AAPL", resolution: "1" }, callback);
+    await adapter.bars.subscribe(
+      "test-listener",
+      { symbol: "AAPL", resolution: "1" },
+      callback
+    );
 
     expect(callback).toHaveBeenCalled();
   });

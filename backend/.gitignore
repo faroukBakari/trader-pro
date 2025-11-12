@@ -11,3 +11,17 @@ asyncapi.json
 .ruff_cache
 coverage.xml
 .openapi-checksum
+.local/
+nginx.pid
+nginx-dev.conf
+.pids/
+**/tmp
+
+# Nginx temp directories (should now be in .local/temp/)
+# but keep these as fallback in case nginx creates them
+client_body_temp/
+proxy_temp/
+fastcgi_temp/
+uwsgi_temp/
+scgi_temp/
+**/archive/

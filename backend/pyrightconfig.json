@@ -1,5 +1,5 @@
 {
-  "include": ["src"],
+  "include": ["src", "scripts"],
   "exclude": [
     "**/node_modules",
     "**/__pycache__",
@@ -9,8 +9,13 @@
   ],
   "pythonVersion": "3.11",
   "pythonPlatform": "Linux",
-  "typeCheckingMode": "basic",
-  "reportMissingImports": true,
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "error",
   "reportMissingTypeStubs": false,
-  "extraPaths": [".", "src", "external_packages"]
+  "reportAttributeAccessIssue": "error",
+  "reportUnknownMemberType": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownArgumentType": "none",
+  "extraPaths": [".", "src", "scripts", "external_packages"]
 }

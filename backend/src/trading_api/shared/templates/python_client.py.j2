@@ -1,0 +1,207 @@
+"""
+{{ class_name }} - HTTP client for {{ module_name }} module.
+
+Auto-generated from OpenAPI specification.
+DO NOT EDIT MANUALLY - Auto-generate using openapi specs at module level.
+"""
+
+from typing import Any
+
+import httpx
+
+{% if models %}
+from trading_api.models import (
+{% for model in models %}
+    {{ model }},
+{% endfor %}
+)
+{% endif %}
+
+
+class {{ class_name }}:
+    """
+    HTTP client for {{ module_name }} module operations.
+    
+    Used for inter-module communication when running as separate processes.
+    All models are imported from trading_api.models to maintain consistency.
+    
+    Example:
+        >>> client = {{ class_name }}(base_url="http://{{ module_name }}-service:8000")
+        >>> result = await client.some_operation()
+    """
+    
+    def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
+        """
+        Initialize the client.
+        
+        Args:
+            base_url: Base URL of the {{ module_name }} service
+            timeout: Request timeout in seconds
+        """
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self._client: httpx.AsyncClient | None = None
+    
+    async def __aenter__(self) -> "{{ class_name }}":
+        """Async context manager entry."""
+        self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+        return self
+    
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Async context manager exit."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+    
+    def _get_client(self) -> httpx.AsyncClient:
+        """Get or create HTTP client."""
+        if self._client is None:
+            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+        return self._client
+    
+    async def close(self) -> None:
+        """Close the HTTP client."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+
+{% for operation in operations %}
+    async def {{ operation.operation_id }}(
+        self,
+{% if operation.request_body and operation.request_body.type != 'expanded' %}
+        body: {{ operation.request_body.type }},
+{% endif %}
+{% for param in operation.parameters %}
+        {{ param.name }}: {{ param.type }}{% if not param.required %} | None = None{% endif %},
+{% endfor %}
+    ) -> {{ operation.response_type }}:
+        """
+        {{ operation.description | replace('\n', '\n        ') }}
+        
+        Args:
+{% if operation.request_body and operation.request_body.type != 'expanded' %}
+            body: Request body
+{% endif %}
+{% for param in operation.parameters %}
+            {{ param.name }}: {{ param.description or param.name }}
+{% endfor %}
+        
+        Returns:
+            {{ operation.response_type }}
+        """
+        client = self._get_client()
+        
+        # Build URL
+        url = "{{ operation.path }}"
+{% if operation.parameters | selectattr('in', 'equalto', 'path') | list %}
+        
+        # Replace path parameters
+{% for param in operation.parameters %}
+{% if param.in == 'path' %}
+        url = url.replace("{{ '{' + param.name + '}' }}", str({{ param.name }}))
+{% endif %}
+{% endfor %}
+{% endif %}
+        
+{% if operation.parameters | selectattr('in', 'equalto', 'query') | list %}
+        # Build query parameters
+        params: dict[str, Any] = {}
+{% for param in operation.parameters %}
+{% if param.in == 'query' %}
+{% if param.required %}
+{% if param.is_enum %}
+        params["{{ param.name }}"] = {{ param.name }}.value
+{% else %}
+        params["{{ param.name }}"] = {{ param.name }}
+{% endif %}
+{% else %}
+        if {{ param.name }} is not None:
+{% if param.is_enum %}
+            params["{{ param.name }}"] = {{ param.name }}.value
+{% else %}
+            params["{{ param.name }}"] = {{ param.name }}
+{% endif %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% else %}
+        params = None
+{% endif %}
+{% if operation.request_body and operation.request_body.type == 'expanded' %}
+        
+        # Build request body from parameters
+        body_dict: dict[str, Any] = {}
+{% for field_name in operation.request_body.fields %}
+{% set param = operation.parameters | selectattr('name', 'equalto', field_name) | first %}
+{% if param.required %}
+        body_dict["{{ field_name }}"] = {{ field_name }}.model_dump() if hasattr({{ field_name }}, 'model_dump') else {{ field_name }}
+{% else %}
+        if {{ field_name }} is not None:
+            body_dict["{{ field_name }}"] = {{ field_name }}.model_dump() if hasattr({{ field_name }}, 'model_dump') else {{ field_name }}
+{% endif %}
+{% endfor %}
+{% endif %}
+        
+        # Make request
+{% if operation.method == 'GET' %}
+        response = await client.get(url, params=params)
+{% elif operation.method == 'POST' %}
+        response = await client.post(
+            url,
+{% if operation.request_body %}
+{% if operation.request_body.type == 'expanded' %}
+            json=body_dict,
+{% else %}
+            json=body.model_dump() if hasattr(body, 'model_dump') else body,
+{% endif %}
+{% endif %}
+            params=params,
+        )
+{% elif operation.method == 'PUT' %}
+        response = await client.put(
+            url,
+{% if operation.request_body %}
+{% if operation.request_body.type == 'expanded' %}
+            json=body_dict,
+{% else %}
+            json=body.model_dump() if hasattr(body, 'model_dump') else body,
+{% endif %}
+{% endif %}
+            params=params,
+        )
+{% elif operation.method == 'DELETE' %}
+        response = await client.delete(url, params=params)
+{% elif operation.method == 'PATCH' %}
+        response = await client.patch(
+            url,
+{% if operation.request_body %}
+{% if operation.request_body.type == 'expanded' %}
+            json=body_dict,
+{% else %}
+            json=body.model_dump() if hasattr(body, 'model_dump') else body,
+{% endif %}
+{% endif %}
+            params=params,
+        )
+{% endif %}
+        
+        response.raise_for_status()
+        
+        # Parse response
+{% if operation.response_type.startswith('list[') %}
+        data = response.json()
+        model_type = {{ operation.response_type.replace('list[', '').replace(']', '') }}
+        return [model_type(**item) if hasattr(model_type, 'model_validate') else item for item in data]
+{% elif operation.response_type in ['str', 'int', 'float', 'bool'] %}
+        return response.json()  # type: ignore[no-any-return]
+{% elif operation.response_type == 'Any' %}
+        return response.json()  # type: ignore[no-any-return]
+{% elif operation.response_type == 'dict[str, Any]' %}
+        result: dict[str, Any] = response.json()
+        return result
+{% else %}
+        data = response.json()
+        return {{ operation.response_type }}(**data) if isinstance(data, dict) else data
+{% endif %}
+
+{% endfor %}

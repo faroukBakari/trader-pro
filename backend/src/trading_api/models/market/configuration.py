@@ -43,17 +43,6 @@ class DatafeedConfiguration(BaseModel):
     )
 
 
-class DatafeedHealthResponse(BaseModel):
-    """Datafeed health check response model"""
-
-    status: str = Field(..., description="Health status")
-    message: str = Field(..., description="Health message")
-    symbols_loaded: int = Field(..., description="Number of symbols loaded")
-    bars_count: int = Field(..., description="Number of sample bars generated")
-    timestamp: str = Field(..., description="Timestamp of health check")
-
-
 __all__ = [
     "DatafeedConfiguration",
-    "DatafeedHealthResponse",
 ]

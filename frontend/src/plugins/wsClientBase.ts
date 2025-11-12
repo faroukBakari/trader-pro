@@ -51,12 +51,12 @@ function buildTopicParams(obj: unknown): string {
 }
 
 export class WebSocketBase {
-  private readonly config = {
-    reconnect: true,
-    maxReconnectAttempts: 5,
-    reconnectDelay: 1000,
-    debug: false,
-    wsUrl: '/api/v1/ws', // TODO: make configurable
+  private readonly config: {
+    reconnect: boolean
+    maxReconnectAttempts: number
+    reconnectDelay: number
+    debug: boolean
+    wsUrl: string
   }
   protected logger: Console
   protected ws: WebSocket | null = null
@@ -72,17 +72,24 @@ export class WebSocketBase {
   protected subscriptions = new Map<string, SubscriptionState>()
 
   // dont defaut to identity dataMapper to detect types missmatch (data => data as unknown as TData)
-  private static instance: WebSocketBase | null = null
+  private static instances = new Map<string, WebSocketBase>()
 
-  private constructor() {
+  private constructor(wsUrl: string) {
+    this.config = {
+      reconnect: true,
+      maxReconnectAttempts: 5,
+      reconnectDelay: 1000,
+      debug: false,
+      wsUrl,
+    }
     this.logger = this.config.debug ? console : { log: () => { }, error: () => { } } as Console
   }
 
-  static getInstance(): WebSocketBase {
-    if (!WebSocketBase.instance) {
-      WebSocketBase.instance = new WebSocketBase()
+  static getInstance(wsUrl: string): WebSocketBase {
+    if (!WebSocketBase.instances.has(wsUrl)) {
+      WebSocketBase.instances.set(wsUrl, new WebSocketBase(wsUrl))
     }
-    return WebSocketBase.instance
+    return WebSocketBase.instances.get(wsUrl)!
   }
 
   private async __socketConnect(): Promise<void> {
@@ -361,10 +368,10 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
   private dataMapper: ((data: TBackendData) => TData)
 
   // dont defaut to identity dataMapper to detect types missmatch (data => data as unknown as TData)
-  constructor(wsRoute: string, dataMapper: ((data: TBackendData) => TData)) {
+  constructor(wsUrl: string, wsRoute: string, dataMapper: ((data: TBackendData) => TData)) {
     this.wsRoute = wsRoute
     this.dataMapper = dataMapper
-    this.ws = WebSocketBase.getInstance()
+    this.ws = WebSocketBase.getInstance(wsUrl)
     this.listeners = new Map<string, Set<string>>()
   }
 
@@ -382,7 +389,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     }
 
 
-    await WebSocketBase.getInstance().subscribe(
+    await this.ws.subscribe(
       topic,
       this.wsRoute + '.subscribe',
       subscriptionParams,
@@ -400,7 +407,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
       return
     }
     this.listeners.delete(listenerId)
-    await WebSocketBase.getInstance().unsubscribe(listenerId, topic)
+    await this.ws.unsubscribe(listenerId, topic)
 
   }
 }

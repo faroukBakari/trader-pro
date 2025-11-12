@@ -6,7 +6,6 @@
 
 - `backend/src/trading_api/core/broker_service.py`
 - `backend/src/trading_api/models/broker/`
-- `backend/docs/WEBSOCKETS.md`
 
 ---
 
@@ -717,7 +716,6 @@ class BrokerService:
 ## Related Documentation
 
 - **[WEBSOCKET-METHODOLOGY.md](../WEBSOCKET-METHODOLOGY.md)** - TDD workflow for WebSocket features
-- **[backend/docs/WEBSOCKETS.md](../backend/docs/WEBSOCKETS.md)** - WebSocket API patterns and subscription models
 - **[API-METHODOLOGY.md](../API-METHODOLOGY.md)** - TDD workflow for REST API features
 - **[ARCHITECTURE.md](../ARCHITECTURE.md)** - Overall system architecture
 

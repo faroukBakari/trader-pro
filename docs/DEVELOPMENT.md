@@ -1,5 +1,7 @@
 # Development Guide
 
+**Last Updated**: November 11, 2025
+
 ## Quick Start
 
 ### Prerequisites
@@ -59,12 +61,30 @@ make -f project.mk dev-fullstack
 
 For working on backend or frontend separately:
 
+**Backend Development**:
+
 ```bash
 cd backend
-make install  # One-time setup
-make dev      # Start server
+make install  # One-time setup (checks Python, Poetry, installs deps, prompts for nginx)
+make dev      # Start server with all modules (default)
 make test     # Run tests
 ```
+
+**Module-Specific Backend Development**:
+
+```bash
+# Start only specific modules
+ENABLED_MODULES=broker make dev
+ENABLED_MODULES=datafeed make dev
+ENABLED_MODULES=broker,datafeed make dev
+
+# Multi-process mode (production-like with nginx)
+make backend-dev-multi
+make backend-status  # Check process status
+make backend-stop    # Stop all processes
+```
+
+See [backend/docs/BACKEND_MANAGER_GUIDE.md](../backend/docs/BACKEND_MANAGER_GUIDE.md) for multi-process deployment details.
 
 ### Frontend-Only Development
 
@@ -113,7 +133,7 @@ cd backend && make test-cov
 make -f project.mk lint-all
 
 # Backend only
-cd backend && make lint-check
+cd backend && make type-check
 
 # Frontend only
 cd frontend && make lint
@@ -173,21 +193,22 @@ Clients are automatically generated during `make dev-fullstack`:
 
 1. Backend starts and generates specs on startup
 2. Script waits for backend to be ready
-3. Runs `make generate-openapi-client` (REST API client)
-4. Runs `make generate-asyncapi-types` (WebSocket types)
-5. File watchers monitor specs for changes
+3. Runs unified `make generate` (generates both REST and WebSocket clients)
+4. File watchers monitor specs for changes
 
 ### Manual Generation
 
 ```bash
-# From project root
-make -f project.mk generate-openapi-client
-make -f project.mk generate-asyncapi-types
+# Unified command (recommended) - generates both REST and WebSocket clients
+make -f project.mk generate
 
 # Or from frontend directory
 cd frontend
-make generate-openapi-client
-make generate-asyncapi-types
+make generate
+
+# Individual commands (for specific needs)
+make -f project.mk generate-openapi-client  # REST API client only
+make -f project.mk generate-asyncapi-types  # WebSocket types only
 ```
 
 See `docs/CLIENT-GENERATION.md` for details.
@@ -198,14 +219,14 @@ See `docs/CLIENT-GENERATION.md` for details.
 
 1. **Backend**: Add route in `src/trading_api/api/`
 2. **Backend**: Run `make test` to verify
-3. **Frontend**: Run `make client-generate` to update client
+3. **Frontend**: Run `make generate` to update client
 4. **Frontend**: Use new endpoint in services
 
 ### Add New WebSocket Channel
 
 1. **Backend**: Add router in `src/trading_api/ws/`
 2. **Backend**: Update AsyncAPI spec
-3. **Frontend**: Run `make client-generate`
+3. **Frontend**: Run `make generate`
 4. **Frontend**: New client factory auto-available
 
 ### Debug Issues
@@ -291,7 +312,7 @@ make -f project.mk dev-fullstack
 
 ```bash
 cd backend
-make ensure-python  # Offers to install Python 3.11+ via pyenv
+make install  # Checks Python 3.11+, offers pyenv install if needed
 ```
 
 ### Node.js Version Issues
@@ -325,14 +346,13 @@ npm install
 cd backend && make export-openapi-offline
 
 # Regenerate clients
-cd frontend && make client-generate
+cd frontend && make generate
 ```
 
 ## Performance Tips
 
 ### Backend
 
-- Use `make dev-no-debug` to skip debugpy overhead
 - Enable `--reload` for auto-restart on changes
 - Use `make test` frequently for fast feedback
 

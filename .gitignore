@@ -164,6 +164,16 @@ openapi.json
 openapi-3.0.json
 .openapi-checksum
 
+# Auto-generated per-module specs
+backend/src/trading_api/modules/*/specs_generated/
+
+# Auto-generated Python clients (inter-module HTTP clients)
+backend/src/trading_api/clients/*_client.py
+backend/src/trading_api/clients/__init__.py
+
+# Auto-generated frontend clients
+frontend/src/clients_generated/
+
 # Auto-generated WebSocket clients
 *generated/
 
@@ -192,4 +202,6 @@ build/
 .Trashes
 ehthumbs.db
 Thumbs.db
-.playwright-mcp
+.playwright-mcp*
+tmp/
+**/archive/

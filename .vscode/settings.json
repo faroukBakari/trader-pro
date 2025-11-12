@@ -16,9 +16,4 @@
     },
     "python.analysis.autoImportCompletions": true,
     "isort.args": ["--profile", "black"],
-    "autoflake.args": [
-        "--remove-all-unused-imports",
-        "--remove-unused-variables",
-        "--ignore-init-module-imports"
-    ]
 }

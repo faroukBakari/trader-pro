@@ -16,160 +16,104 @@ else
 endif
 comma := ,
 
-.PHONY: help ensure-python ensure-python-ci ensure-poetry install install-ci test test-boundaries test-shared test-modules test-cov test-cov-modules test-integration test-integration-verbose lint lint-check lint-response-models format build clean clean-cache dev dev-no-debug dev-ci kill-dev health health-ci export-openapi-spec export-asyncapi-spec docs-html generate-ws-routers $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
 	@echo "Backend targets:"
-	@echo "  ensure-python     Ensure Python 3.11+ is installed (offers auto-install)"
-	@echo "  ensure-python-ci  Ensure Python 3.11+ is installed (CI mode, no prompts)"
-	@echo "  ensure-poetry     Ensure Poetry is installed (auto-installs if needed)"
-	@echo "  install           Install backend dependencies"
+	@echo "  install           Install backend dependencies (auto-checks Python/Poetry/nginx)"
+	@echo "  install-ci        Install backend dependencies for CI (non-interactive)"
 	@echo ""
 	@echo "Testing targets:"
-	@echo "  test              Run all tests (boundaries + shared + modules + integration)"
+	@echo "  test              Run all tests (boundaries + modules + integration)"
 	@echo "  test-boundaries   Validate import boundaries between modules"
-	@echo "  test-shared       Run shared infrastructure tests"
 	@echo "  test-modules      Run all module tests (use modules=mod1,mod2 to select specific)"
 	@echo "  test-integration  Run integration tests"
-	@echo "  test-integration-verbose  Run integration tests with detailed output"
 	@echo "  test-cov          Run all tests with coverage"
-	@echo "  test-cov-modules  Run module tests with coverage (use modules=mod1,mod2)"
 	@echo ""
 	@echo "Module-specific test targets (auto-discovered):"
 	@for module in $(DISCOVERED_MODULES); do \
 		echo "  test-module-$$module"; \
 	done
 	@echo ""
-	@echo "Other targets:"
-	@echo "  lint              Run backend linting (check only)"
-	@echo "  lint-check        Run backend linting with type checking"
+	@echo "Code quality targets:"
+	@echo "  lint              Run backend linting (flake8 only)"
+	@echo "  type-check        Run backend linting with type checking (black, isort, flake8, mypy, pyright)"
 	@echo "  format            Format backend code"
-	@echo "  build             Build backend package"
+	@echo ""
+	@echo "Cleanup targets:"
+	@echo "  clean             Remove build artifacts and generated files"
+	@echo "  clean-cache       Remove Python caches (__pycache__, .pytest_cache, etc.)"
+	@echo "  clean-coverage    Remove coverage files (.coverage, coverage.xml, htmlcov/)"
+	@echo "  clean-generated   Remove all generated files (*_generated*)"
+	@echo ""
+	@echo "Development targets:"
 	@echo "  dev               Start backend development server with debugpy"
-	@echo "  dev-no-debug      Start backend development server without debugpy"
+	@echo "  dev-ci            Start backend server for CI (background)"
 	@echo "  kill-dev          Kill any running backend development server"
+	@echo "  health-ci         Check backend health (CI)"
+	@echo ""
+	@echo "Multi-process backend (with nginx):"
+	@echo "  backend-manager-start   Start multi-process backend with nginx (config=dev-config.yaml)"
+	@echo "  backend-manager-stop    Stop multi-process backend"
+	@echo "  backend-manager-status  Show backend process status"
+	@echo "  backend-manager-restart Restart multi-process backend"
+	@echo "  backend-manager-gen-nginx-conf Generate nginx config (debug)"
+	@echo ""
+	@echo "Build & cleanup targets:"
+	@echo "  build             Build backend package"
 	@echo "  clean             Clean build artifacts"
 	@echo "  clean-cache       Clean all Python caches (mypy, pytest, pycache, ruff)"
-	@echo "  health            Check backend health"
-	@echo "  export-openapi-spec   Export OpenAPI specification (offline)"
-	@echo "  export-asyncapi-spec  Export AsyncAPI specification (offline)"
-	@echo "  docs-html         Generate static HTML documentation"
-	@echo "  generate-ws-routers Generate WebSocket router classes"
+	@echo "  clean-generated   Clean all *_generated* files and directories"
+	@echo ""
+	@echo "Code generation targets:"
+	@echo "  list-modules          List all discovered modules"
+	@echo "  generate              Generate specs & clients for all modules"
+	@echo "                        Options: modules=mod1,mod2  (specific modules)"
+	@echo "                                 output_dir=/path   (custom output directory)"
+	@echo ""
+	@echo "Logging targets:"
+	@echo "  logs-tail         Tail unified backend log (all servers with prefixes)"
+	@echo "  logs-tail-nginx   Tail nginx logs (access + error)"
+	@echo "  logs-clean        Clean all backend log files"
 	@echo ""
 	@echo "Discovered modules: $(DISCOVERED_MODULES)"
 
-# Ensure Python 3.11+ is available
-ensure-python:
-	@echo "Checking Python version..."
-	@PYTHON_VERSION=$$(python3 --version 2>&1 | grep -oP '\d+\.\d+' | head -1); \
-	REQUIRED_VERSION="3.11"; \
-	PYTHON_TO_INSTALL="3.11.7"; \
-	if [ -z "$$PYTHON_VERSION" ]; then \
-		echo "❌ Python 3 not found!"; \
+# List all discovered modules
+list-modules:
+	@echo "📦 Discovered modules:"
+	@for module in $(DISCOVERED_MODULES); do \
+		echo "  - $$module"; \
+	done
+
+# Unified generation command
+# Usage: make generate [modules=mod1,mod2] [output_dir=/path/to/output]
+generate:
+	@echo "🔨 Generating for modules: $(SELECTED_MODULES)"
+	@if [ -n "$(output_dir)" ]; then \
+		echo "📁 Output directory: $(output_dir)"; \
+	fi
+	@for module in $(SELECTED_MODULES); do \
 		echo ""; \
-		if command -v pyenv >/dev/null 2>&1; then \
-			echo "Would you like to install Python $$PYTHON_TO_INSTALL via pyenv? [y/N]"; \
-			read -r REPLY; \
-			if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
-				echo "Installing Python $$PYTHON_TO_INSTALL..."; \
-				pyenv install $$PYTHON_TO_INSTALL && \
-				pyenv local $$PYTHON_TO_INSTALL && \
-				echo "✓ Python $$PYTHON_TO_INSTALL installed and activated!" && \
-				exit 0; \
-			fi; \
-		fi; \
-		echo "Please install Python 3.11 or higher:"; \
-		echo "  - Ubuntu/Debian: sudo apt install python3.11 python3.11-venv"; \
-		echo "  - Using pyenv: pyenv install $$PYTHON_TO_INSTALL && pyenv local $$PYTHON_TO_INSTALL"; \
-		exit 1; \
-	fi; \
-	if [ "$$(printf '%s\n' "$$REQUIRED_VERSION" "$$PYTHON_VERSION" | sort -V | head -n1)" != "$$REQUIRED_VERSION" ]; then \
-		echo "❌ Python $$PYTHON_VERSION detected (requires $$REQUIRED_VERSION or higher)"; \
-		echo ""; \
-		if command -v pyenv >/dev/null 2>&1; then \
-			INSTALLED_311=$$(pyenv versions 2>/dev/null | grep -E '^\s*3\.(1[1-9]|[2-9][0-9])' | head -1 | tr -d ' *'); \
-			if [ -n "$$INSTALLED_311" ]; then \
-				echo "✓ Found existing Python version: $$INSTALLED_311"; \
-				echo "Would you like to activate it for this project? [y/N]"; \
-				read -r REPLY; \
-				if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
-					pyenv local $$INSTALLED_311 && \
-					echo "✓ Python $$INSTALLED_311 activated!" && \
-					exit 0; \
-				fi; \
-			else \
-				echo "Would you like to install Python $$PYTHON_TO_INSTALL via pyenv? [y/N]"; \
-				read -r REPLY; \
-				if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
-					echo "Installing Python $$PYTHON_TO_INSTALL..."; \
-					pyenv install $$PYTHON_TO_INSTALL && \
-					pyenv local $$PYTHON_TO_INSTALL && \
-					echo "✓ Python $$PYTHON_TO_INSTALL installed and activated!" && \
-					exit 0; \
-				fi; \
-			fi; \
-			echo ""; \
-			echo "Manual installation:"; \
-			echo "  pyenv install $$PYTHON_TO_INSTALL"; \
-			echo "  pyenv local $$PYTHON_TO_INSTALL"; \
+		echo "======================================================================"; \
+		echo "🔨 Generating for module: $$module"; \
+		echo "======================================================================"; \
+		if [ -n "$(output_dir)" ]; then \
+			poetry run python scripts/module_codegen.py "$$module" "$(output_dir)" || { echo "❌ Failed for $$module"; exit 1; }; \
 		else \
-			echo "pyenv not found. Install it for automatic Python version management:"; \
-			echo "  curl https://pyenv.run | bash"; \
-			echo ""; \
-			echo "Or install Python manually:"; \
-			echo "  Ubuntu/Debian: sudo apt install python3.11 python3.11-venv"; \
-			echo "  Fedora: sudo dnf install python3.11"; \
-			echo "  Download: https://www.python.org/downloads/"; \
+			poetry run python scripts/module_codegen.py "$$module" || { echo "❌ Failed for $$module"; exit 1; }; \
 		fi; \
-		exit 1; \
-	else \
-		echo "✓ Python $$PYTHON_VERSION detected (meets requirement $$REQUIRED_VERSION+)"; \
-	fi
+	done
+	@echo ""
+	@echo "======================================================================"
+	@echo "✅ Generation complete for all modules"
+	@echo "======================================================================"
 
-# Ensure Python 3.11+ is available (CI mode - no interactive prompts)
-ensure-python-ci:
-	@echo "Checking Python version (CI mode)..."
-	@PYTHON_VERSION=$$(python3 --version 2>&1 | grep -oP '\d+\.\d+' | head -1); \
-	REQUIRED_VERSION="3.11"; \
-	PYTHON_TO_INSTALL="3.11.7"; \
-	if [ -z "$$PYTHON_VERSION" ]; then \
-		echo "❌ Python 3 not found!"; \
-		if command -v pyenv >/dev/null 2>&1; then \
-			echo "Installing Python $$PYTHON_TO_INSTALL via pyenv..."; \
-			pyenv install -s $$PYTHON_TO_INSTALL && \
-			pyenv local $$PYTHON_TO_INSTALL && \
-			echo "✓ Python $$PYTHON_TO_INSTALL installed and activated!" && \
-			exit 0; \
-		fi; \
-		echo "❌ Cannot auto-install Python in CI without pyenv"; \
-		exit 1; \
-	fi; \
-	if [ "$$(printf '%s\n' "$$REQUIRED_VERSION" "$$PYTHON_VERSION" | sort -V | head -n1)" != "$$REQUIRED_VERSION" ]; then \
-		echo "❌ Python $$PYTHON_VERSION detected (requires $$REQUIRED_VERSION or higher)"; \
-		if command -v pyenv >/dev/null 2>&1; then \
-			INSTALLED_311=$$(pyenv versions 2>/dev/null | grep -E '^\s*3\.(1[1-9]|[2-9][0-9])' | head -1 | tr -d ' *'); \
-			if [ -n "$$INSTALLED_311" ]; then \
-				echo "✓ Activating existing Python version: $$INSTALLED_311"; \
-				pyenv local $$INSTALLED_311 && \
-				echo "✓ Python $$INSTALLED_311 activated!" && \
-				exit 0; \
-			else \
-				echo "Installing Python $$PYTHON_TO_INSTALL via pyenv..."; \
-				pyenv install -s $$PYTHON_TO_INSTALL && \
-				pyenv local $$PYTHON_TO_INSTALL && \
-				echo "✓ Python $$PYTHON_TO_INSTALL installed and activated!" && \
-				exit 0; \
-			fi; \
-		fi; \
-		echo "❌ Cannot auto-install Python in CI without pyenv"; \
-		exit 1; \
-	else \
-		echo "✓ Python $$PYTHON_VERSION detected (meets requirement $$REQUIRED_VERSION+)"; \
-	fi
-
-# Ensure Poetry is installed
-ensure-poetry:
+# Backend dependency management
+install:
+	@echo "Installing backend dependencies..."
+	@echo ""
+	@echo "[1/3] Checking Poetry..."
 	@if ! command -v poetry >/dev/null 2>&1; then \
 		echo "Poetry not found. Installing Poetry..."; \
 		if command -v pipx >/dev/null 2>&1; then \
@@ -192,12 +136,10 @@ ensure-poetry:
 		fi; \
 		echo "Poetry installed successfully!"; \
 	else \
-		echo "Poetry is already installed: $$(poetry --version)"; \
+		echo "✓ Poetry is already installed: $$(poetry --version)"; \
 	fi
-
-# Backend dependency management
-install: ensure-poetry
-	@echo "Installing backend dependencies..."
+	@echo ""
+	@echo "[2/3] Checking Python version..."
 	@if [ -d ".venv" ] && [ -f ".venv/bin/python" ]; then \
 		VENV_PYTHON_VERSION=$$(.venv/bin/python --version 2>&1 | grep -oP '\d+\.\d+' | head -1); \
 		REQUIRED_VERSION="3.11"; \
@@ -207,28 +149,237 @@ install: ensure-poetry
 		else \
 			echo "⚠️  Existing venv has incompatible Python version ($$VENV_PYTHON_VERSION), recreating..."; \
 			rm -rf .venv; \
-			$(MAKE) ensure-python; \
+			PYTHON_VERSION=$$(python3 --version 2>&1 | grep -oP '\d+\.\d+' | head -1); \
+			REQUIRED_VERSION="3.11"; \
+			PYTHON_TO_INSTALL="3.11.7"; \
+			if [ -z "$$PYTHON_VERSION" ]; then \
+				echo "❌ Python 3 not found!"; \
+				echo ""; \
+				if command -v pyenv >/dev/null 2>&1; then \
+					echo "Would you like to install Python $$PYTHON_TO_INSTALL via pyenv? [y/N]"; \
+					read -r REPLY; \
+					if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
+						echo "Installing Python $$PYTHON_TO_INSTALL..."; \
+						pyenv install $$PYTHON_TO_INSTALL && \
+						pyenv local $$PYTHON_TO_INSTALL && \
+						echo "✓ Python $$PYTHON_TO_INSTALL installed and activated!"; \
+					else \
+						echo "Please install Python 3.11 or higher manually"; \
+						exit 1; \
+					fi; \
+				else \
+					echo "Please install Python 3.11 or higher:"; \
+					echo "  - Ubuntu/Debian: sudo apt install python3.11 python3.11-venv"; \
+					echo "  - Using pyenv: pyenv install $$PYTHON_TO_INSTALL && pyenv local $$PYTHON_TO_INSTALL"; \
+					exit 1; \
+				fi; \
+			fi; \
+			if [ "$$(printf '%s\n' "$$REQUIRED_VERSION" "$$PYTHON_VERSION" | sort -V | head -n1)" != "$$REQUIRED_VERSION" ]; then \
+				echo "❌ Python $$PYTHON_VERSION detected (requires $$REQUIRED_VERSION or higher)"; \
+				echo ""; \
+				if command -v pyenv >/dev/null 2>&1; then \
+					INSTALLED_311=$$(pyenv versions 2>/dev/null | grep -E '^\s*3\.(1[1-9]|[2-9][0-9])' | head -1 | tr -d ' *'); \
+					if [ -n "$$INSTALLED_311" ]; then \
+						echo "✓ Found existing Python version: $$INSTALLED_311"; \
+						echo "Would you like to activate it for this project? [y/N]"; \
+						read -r REPLY; \
+						if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
+							pyenv local $$INSTALLED_311 && \
+							echo "✓ Python $$INSTALLED_311 activated!"; \
+						else \
+							echo "Please activate Python manually"; \
+							exit 1; \
+						fi; \
+					else \
+						echo "Would you like to install Python $$PYTHON_TO_INSTALL via pyenv? [y/N]"; \
+						read -r REPLY; \
+						if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
+							echo "Installing Python $$PYTHON_TO_INSTALL..."; \
+							pyenv install $$PYTHON_TO_INSTALL && \
+							pyenv local $$PYTHON_TO_INSTALL && \
+							echo "✓ Python $$PYTHON_TO_INSTALL installed and activated!"; \
+						else \
+							echo "Please install Python manually"; \
+							exit 1; \
+						fi; \
+					fi; \
+				else \
+					echo "pyenv not found. Install it for automatic Python version management:"; \
+					echo "  curl https://pyenv.run | bash"; \
+					echo ""; \
+					echo "Or install Python manually:"; \
+					echo "  Ubuntu/Debian: sudo apt install python3.11 python3.11-venv"; \
+					exit 1; \
+				fi; \
+			else \
+				echo "✓ Python $$PYTHON_VERSION detected (meets requirement $$REQUIRED_VERSION+)"; \
+			fi; \
 			poetry install; \
 		fi; \
 	else \
 		echo "No existing virtual environment found, checking Python..."; \
-		$(MAKE) ensure-python; \
+		PYTHON_VERSION=$$(python3 --version 2>&1 | grep -oP '\d+\.\d+' | head -1); \
+		REQUIRED_VERSION="3.11"; \
+		PYTHON_TO_INSTALL="3.11.7"; \
+		if [ -z "$$PYTHON_VERSION" ]; then \
+			echo "❌ Python 3 not found!"; \
+			echo ""; \
+			if command -v pyenv >/dev/null 2>&1; then \
+				echo "Would you like to install Python $$PYTHON_TO_INSTALL via pyenv? [y/N]"; \
+				read -r REPLY; \
+				if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
+					echo "Installing Python $$PYTHON_TO_INSTALL..."; \
+					pyenv install $$PYTHON_TO_INSTALL && \
+					pyenv local $$PYTHON_TO_INSTALL && \
+					echo "✓ Python $$PYTHON_TO_INSTALL installed and activated!"; \
+				else \
+					echo "Please install Python 3.11 or higher manually"; \
+					exit 1; \
+				fi; \
+			else \
+				echo "Please install Python 3.11 or higher:"; \
+				echo "  - Ubuntu/Debian: sudo apt install python3.11 python3.11-venv"; \
+				echo "  - Using pyenv: pyenv install $$PYTHON_TO_INSTALL && pyenv local $$PYTHON_TO_INSTALL"; \
+				exit 1; \
+			fi; \
+		fi; \
+		if [ "$$(printf '%s\n' "$$REQUIRED_VERSION" "$$PYTHON_VERSION" | sort -V | head -n1)" != "$$REQUIRED_VERSION" ]; then \
+			echo "❌ Python $$PYTHON_VERSION detected (requires $$REQUIRED_VERSION or higher)"; \
+			echo ""; \
+			if command -v pyenv >/dev/null 2>&1; then \
+				INSTALLED_311=$$(pyenv versions 2>/dev/null | grep -E '^\s*3\.(1[1-9]|[2-9][0-9])' | head -1 | tr -d ' *'); \
+				if [ -n "$$INSTALLED_311" ]; then \
+					echo "✓ Found existing Python version: $$INSTALLED_311"; \
+					echo "Would you like to activate it for this project? [y/N]"; \
+					read -r REPLY; \
+					if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
+						pyenv local $$INSTALLED_311 && \
+						echo "✓ Python $$INSTALLED_311 activated!"; \
+					else \
+						echo "Please activate Python manually"; \
+						exit 1; \
+					fi; \
+				else \
+					echo "Would you like to install Python $$PYTHON_TO_INSTALL via pyenv? [y/N]"; \
+					read -r REPLY; \
+					if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
+						echo "Installing Python $$PYTHON_TO_INSTALL..."; \
+						pyenv install $$PYTHON_TO_INSTALL && \
+						pyenv local $$PYTHON_TO_INSTALL && \
+						echo "✓ Python $$PYTHON_TO_INSTALL installed and activated!"; \
+					else \
+						echo "Please install Python manually"; \
+						exit 1; \
+					fi; \
+				fi; \
+			else \
+				echo "pyenv not found. Install it for automatic Python version management:"; \
+				echo "  curl https://pyenv.run | bash"; \
+				echo ""; \
+				echo "Or install Python manually:"; \
+				echo "  Ubuntu/Debian: sudo apt install python3.11 python3.11-venv"; \
+				exit 1; \
+			fi; \
+		else \
+			echo "✓ Python $$PYTHON_VERSION detected (meets requirement $$REQUIRED_VERSION+)"; \
+		fi; \
 		poetry install; \
 	fi
+	@echo ""
+	@echo "[3/3] Checking nginx (required for multi-process mode)..."
+	@if [ -f ".local/bin/nginx" ]; then \
+		echo "✅ Local nginx available: $$(.local/bin/nginx -v 2>&1)"; \
+	elif command -v nginx >/dev/null 2>&1; then \
+		echo "✅ System nginx available: $$(nginx -v 2>&1)"; \
+	else \
+		echo "⚠️  nginx not found (optional - only needed for multi-process mode)"; \
+		echo ""; \
+		echo "Would you like to install standalone nginx? [y/N]"; \
+		read -r REPLY; \
+		if [ "$$REPLY" = "y" ] || [ "$$REPLY" = "Y" ]; then \
+			echo "Installing standalone nginx binary..."; \
+			poetry run python scripts/install_nginx.py && \
+			echo "✅ nginx installed successfully!"; \
+		else \
+			echo "Skipping nginx installation. You can install it later with:"; \
+			echo "  poetry run python scripts/install_nginx.py"; \
+			echo "  OR: sudo apt install nginx"; \
+		fi; \
+	fi
+	@echo ""
+	@echo "✅ Backend installation complete!"
 
 # CI-optimized install (non-interactive)
-install-ci: ensure-python-ci ensure-poetry
+install-ci:
 	@echo "Installing backend dependencies for CI..."
-	poetry install --no-interaction
+	@echo ""
+	@echo "[1/2] Checking Poetry..."
+	@if ! command -v poetry >/dev/null 2>&1; then \
+		echo "Poetry not found. Installing Poetry..."; \
+		if command -v pipx >/dev/null 2>&1; then \
+			echo "Installing Poetry via pipx (recommended)..."; \
+			pipx install poetry; \
+		elif command -v pip3 >/dev/null 2>&1; then \
+			echo "pipx not found. Installing Poetry via pip3..."; \
+			pip3 install --user poetry; \
+		else \
+			echo "Installing Poetry via official installer..."; \
+			curl -sSL https://install.python-poetry.org | python3 -; \
+		fi; \
+		if ! command -v poetry >/dev/null 2>&1; then \
+			echo "❌ Poetry installation failed"; \
+			exit 1; \
+		fi; \
+		echo "Poetry installed successfully!"; \
+	else \
+		echo "✓ Poetry is already installed: $$(poetry --version)"; \
+	fi
+	@echo ""
+	@echo "[2/2] Checking Python version..."
+	@PYTHON_VERSION=$$(python3 --version 2>&1 | grep -oP '\d+\.\d+' | head -1); \
+	REQUIRED_VERSION="3.11"; \
+	PYTHON_TO_INSTALL="3.11.7"; \
+	if [ -z "$$PYTHON_VERSION" ]; then \
+		echo "❌ Python 3 not found!"; \
+		if command -v pyenv >/dev/null 2>&1; then \
+			echo "Installing Python $$PYTHON_TO_INSTALL via pyenv..."; \
+			pyenv install -s $$PYTHON_TO_INSTALL && \
+			pyenv local $$PYTHON_TO_INSTALL && \
+			echo "✓ Python $$PYTHON_TO_INSTALL installed and activated!"; \
+		else \
+			echo "❌ Cannot auto-install Python in CI without pyenv"; \
+			exit 1; \
+		fi; \
+	fi; \
+	if [ "$$(printf '%s\n' "$$REQUIRED_VERSION" "$$PYTHON_VERSION" | sort -V | head -n1)" != "$$REQUIRED_VERSION" ]; then \
+		echo "❌ Python $$PYTHON_VERSION detected (requires $$REQUIRED_VERSION or higher)"; \
+		if command -v pyenv >/dev/null 2>&1; then \
+			INSTALLED_311=$$(pyenv versions 2>/dev/null | grep -E '^\s*3\.(1[1-9]|[2-9][0-9])' | head -1 | tr -d ' *'); \
+			if [ -n "$$INSTALLED_311" ]; then \
+				echo "✓ Activating existing Python version: $$INSTALLED_311"; \
+				pyenv local $$INSTALLED_311 && \
+				echo "✓ Python $$INSTALLED_311 activated!"; \
+			else \
+				echo "Installing Python $$PYTHON_TO_INSTALL via pyenv..."; \
+				pyenv install -s $$PYTHON_TO_INSTALL && \
+				pyenv local $$PYTHON_TO_INSTALL && \
+				echo "✓ Python $$PYTHON_TO_INSTALL installed and activated!"; \
+			fi; \
+		else \
+			echo "❌ Cannot auto-install Python in CI without pyenv"; \
+			exit 1; \
+		fi; \
+	else \
+		echo "✓ Python $$PYTHON_VERSION detected (meets requirement $$REQUIRED_VERSION+)"; \
+	fi
+	@echo ""
+	@echo "Installing dependencies..."
+	@poetry install --no-interaction
+	@echo "✅ CI installation complete!"
 
-# Testing
 test-boundaries:
-	@echo "Validating import boundaries..."
-	poetry run pytest tests/test_import_boundaries.py -v
-
-test-shared:
-	@echo "Running shared infrastructure tests..."
-	poetry run pytest src/trading_api/shared/tests/ -v -x
+	@echo "Running root-level tests..."
+	poetry run pytest tests/ -v --ignore=tests/integration/
 
 test-modules:
 	@echo "Running module tests..."
@@ -259,52 +410,44 @@ test-integration:
 	@echo "Running integration tests..."
 	poetry run pytest tests/integration/ -v -x -m integration
 
-test-integration-verbose:
-	@echo "Running integration tests with detailed output..."
-	poetry run pytest tests/integration/ -v -s -m integration
-
-test: test-boundaries test-shared test-modules test-integration
-	@echo "✅ All tests passed (boundaries + shared + modules + integration)"
+test: test-boundaries test-modules test-integration
+	@echo "✅ All tests passed (boundaries + modules + integration)"
 
 # Coverage targets
-test-cov-modules:
-	@echo "Running module tests with coverage..."
-	@if [ -z "$(SELECTED_MODULES)" ]; then \
-		echo "⚠️  No modules selected or found"; \
-	else \
-		echo "Testing modules with coverage: $(SELECTED_MODULES)"; \
-		MODULE_PATHS=$$(for m in $(SELECTED_MODULES); do echo "$(MODULES_DIR)/$$m/tests"; done); \
-		poetry run pytest $$MODULE_PATHS --cov=trading_api.modules --cov-report=xml --cov-report=term-missing; \
-	fi
-
 test-cov: test-boundaries
 	@echo "Running all tests with coverage..."
-	poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
+	@poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
+	@echo ""
+	@echo "Cleaning up coverage artifacts..."
+	@rm -f .coverage.* 2>/dev/null || true
+	@echo "✓ Removed intermediate .coverage.* files"
+	@echo "✅ Coverage report generated: coverage.xml"
 
 # Linting and formatting
 lint:
 	@echo "Running backend linting..."
-	poetry run flake8 src/ tests/
+	poetry run flake8 src/ tests/ --exclude='ws_generated,rest_generated'
 
-lint-check:
+type-check:
 	@echo "Running backend linting with full checks..."
-	poetry run black --check src/ tests/
-	poetry run isort --check-only src/ tests/
-	poetry run flake8 src/ tests/
-	poetry run mypy src/
-
-lint-response-models:
-	@echo "Validating FastAPI response models..."
-	poetry run python scripts/check_response_models.py src/trading_api/api/*.py
+	poetry run black --check --extend-exclude='/_generated/' src/ tests/
+	poetry run isort --check-only --extend-skip='ws_generated' --extend-skip='rest_generated' src/ tests/
+	poetry run flake8 src/ tests/ --exclude='ws_generated,rest_generated'
+	poetry run mypy src/ --exclude='.*_generated'
+	@echo "Running pyright type checking..."
+	poetry run pyright src/
 
 format:
 	@echo "Formatting backend code..."
-	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive src/ tests/
-	poetry run black src/ tests/
-	poetry run isort src/ tests/
+	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive --exclude='*_generated' src/ tests/
+	poetry run isort --extend-skip='ws_generated' --extend-skip='rest_generated' src/ tests/
+	poetry run black --extend-exclude='/_generated/' src/ tests/
+	@echo "Removing trailing whitespace..."
+	@find src/ tests/ -name "*.py" -type f -not -path '*_generated/*' -exec sed -i 's/[[:space:]]*$$//' {} +
+	@echo "✅ Backend formatting complete"
 
 # Development server
-dev:
+dev: clean-generated
 	@echo "Starting backend development server with debugpy on http://localhost:$(BACKEND_PORT)"
 	@echo "🔍 Checking if backend port is available..."
 	@if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
@@ -319,24 +462,17 @@ dev:
 	fi
 	@echo "✅ Port $(BACKEND_PORT) is available"
 	@echo "Debug server listening on port 5678 (attach debugger to localhost:5678)"
-	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --reload --host 0.0.0.0 --port $(BACKEND_PORT) --log-level info
-
-# Development server without debugger
-dev-no-debug:
-	@echo "Starting backend development server on http://localhost:$(BACKEND_PORT)"
-	@echo "🔍 Checking if backend port is available..."
-	@if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
-		echo "❌ Error: Backend port $(BACKEND_PORT) is already in use!"; \
-		echo ""; \
-		echo "Process using port $(BACKEND_PORT):"; \
-		lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN; \
-		echo ""; \
-		echo "Please stop the existing server or use a different port:"; \
-		echo "  export BACKEND_PORT=<new_port>"; \
-		exit 1; \
-	fi
-	@echo "✅ Port $(BACKEND_PORT) is available"
-	poetry run uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --reload --host 0.0.0.0 --port $(BACKEND_PORT) --log-level info
+	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" \
+		--reload \
+		--reload-exclude '**/ws_generated/*' \
+		--reload-exclude '**/.local/*' \
+		--reload-exclude '**/.pids/*' \
+		--reload-exclude '**/scripts/*' \
+		--reload-exclude '**/__pycache__/*' \
+		--reload-exclude '**/*.pyc' \
+		--host 0.0.0.0 \
+		--port $(BACKEND_PORT) \
+		--log-level info
 
 # Kill backend development server
 kill-dev:
@@ -362,31 +498,83 @@ kill-dev:
 # CI development server (background)
 dev-ci:
 	@echo "Starting backend server for CI..."
-	poetry run uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --host 0.0.0.0 --port $(BACKEND_PORT) &
-	sleep 10
+	@poetry run uvicorn "trading_api.main:$(BACKEND_APP_NAME)" --host 0.0.0.0 --port $(BACKEND_PORT) > /dev/null 2>&1 & \
+	echo "Waiting for backend to initialize..."; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		sleep 1; \
+		if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
+			echo "Backend is listening on port $(BACKEND_PORT)"; \
+			break; \
+		fi; \
+	done; \
+	echo "Waiting for backend startup sequence (codegen + reload cycles)..."; \
+	sleep 8; \
+	echo "Running health checks..."; \
+	$(MAKE) health-ci
 
 # Build
 build:
 	@echo "Building backend package..."
 	poetry build
-	@./scripts/generate-ws-routers.sh
-
-# Health check
-health:
-	@echo "Checking backend health..."
-	@curl -f http://localhost:$(BACKEND_PORT)/api/v1/health 2>/dev/null || echo "Backend not running"
 
 # CI health check
 health-ci:
-	@echo "Testing API endpoints for CI..."
-	curl -f http://localhost:$(BACKEND_PORT)/api/v1/health || exit 1
-	curl -f http://localhost:$(BACKEND_PORT)/api/v1/version || exit 1
+	@echo "🔍 Auto-discovering modules for health checks..."
+	@MODULES=$$(find $(MODULES_DIR) -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -v __pycache__ || echo ""); \
+	if [ -z "$$MODULES" ]; then \
+		echo "❌ No modules found in $(MODULES_DIR)"; \
+		exit 1; \
+	fi; \
+	echo "Found modules: $$MODULES"; \
+	echo ""; \
+	FAILED=0; \
+	for module in $$MODULES; do \
+		echo "Checking $$module module..."; \
+		SUCCESS=0; \
+		for attempt in 1 2 3 4 5; do \
+			if curl -f -s http://localhost:$(BACKEND_PORT)/api/v1/$$module/health > /dev/null 2>&1; then \
+				echo "  ✅ $$module is healthy (attempt $$attempt)"; \
+				SUCCESS=1; \
+				break; \
+			else \
+				if [ $$attempt -lt 5 ]; then \
+					echo "  ⏳ $$module not ready yet (attempt $$attempt/5), retrying in 2s..."; \
+					sleep 2; \
+				fi; \
+			fi; \
+		done; \
+		if [ $$SUCCESS -eq 0 ]; then \
+			echo "  ❌ $$module health check failed after 5 attempts"; \
+			FAILED=1; \
+		fi; \
+	done; \
+	echo ""; \
+	if [ $$FAILED -eq 0 ]; then \
+		echo "✅ All module health checks passed"; \
+	else \
+		echo "❌ Some module health checks failed"; \
+		exit 1; \
+	fi
 
 # Cleanup
 clean:
 	@echo "Cleaning backend build artifacts..."
-	rm -rf dist/ build/ *.egg-info/ .pytest_cache/ htmlcov/ .coverage clients/ src/trading_api/ws/generated/ openapi.json asyncapi.json
-	@echo "Backend clean complete."
+	@echo "Removing build directories..."
+	@rm -rf dist/ build/ *.egg-info
+	@echo "Removing generated files..."
+	@$(MAKE) clean-generated
+	@echo "Removing coverage files..."
+	@$(MAKE) clean-coverage
+	@echo "✅ Clean complete"
+
+# Clean coverage files
+clean-coverage:
+	@echo "Cleaning coverage files..."
+	@rm -f .coverage .coverage.* coverage.xml
+	@rm -rf htmlcov/
+	@echo "✓ Removed .coverage files"
+	@echo "✓ Removed coverage.xml"
+	@echo "✓ Removed htmlcov directory"
 
 # Clean all Python caches
 clean-cache:
@@ -408,21 +596,111 @@ clean-cache:
 	@echo "   Press Ctrl+Shift+P → 'Developer: Reload Window'"
 	@echo "   Or run: 'Python: Restart Language Server'"
 
-# Export OpenAPI specification (offline)
-export-openapi-spec:
-	@echo "Exporting OpenAPI specification (offline)..."
-	poetry run python scripts/export_openapi_spec.py
+# Clean all generated files using *_generated* pattern
+clean-generated:
+	@echo "🧹 Cleaning all generated files..."
+	@echo ""
+	@echo "Searching for *_generated* files and directories..."
+	@find . -name "*_generated*" -type f -o -name "*_generated*" -type d | while read item; do \
+		if [ -f "$$item" ]; then \
+			echo "  ✓ Removing file: $$item"; \
+			rm -f "$$item"; \
+		elif [ -d "$$item" ]; then \
+			echo "  ✓ Removing directory: $$item"; \
+			rm -rf "$$item"; \
+		fi; \
+	done
+	@echo ""
+	@echo "✅ All generated files removed!"
+	@echo ""
+	@echo "💡 Tip: Regenerate files with:"
+	@echo "   make generate                  # All specs, clients, and routers"
+	@echo "   make generate modules=broker   # Specific module only"
 
-# Export AsyncAPI specification (offline)
-export-asyncapi-spec:
-	@echo "Exporting AsyncAPI specification (offline)..."
-	poetry run python scripts/export_asyncapi_spec.py
+# Multi-process backend management (using backend-manager)
+backend-manager-start:
+	@echo "Checking nginx installation..."
+	@if [ -f ".local/bin/nginx" ]; then \
+		echo "✅ Local nginx available: $$(.local/bin/nginx -v 2>&1)"; \
+	elif command -v nginx >/dev/null 2>&1; then \
+		echo "✅ System nginx available: $$(nginx -v 2>&1)"; \
+	else \
+		echo "❌ nginx not found!"; \
+		echo ""; \
+		echo "Install options:"; \
+		echo "  1. Standalone (no sudo): poetry run python scripts/install_nginx.py"; \
+		echo "  2. System package: sudo apt install nginx"; \
+		exit 1; \
+	fi
+	@CONFIG=$${config:-dev-config.yaml}; \
+	echo "Starting multi-process backend with config: $$CONFIG"; \
+	poetry run python scripts/backend_manager.py start $$CONFIG --generate-nginx
 
-# Generate static HTML documentation
-docs-html:
-	@echo "Generating static HTML documentation..."
-	npx redoc-cli bundle openapi.json -o docs/api.html
+backend-manager-stop:
+	@CONFIG=$${config:-dev-config.yaml}; \
+	echo "Stopping multi-process backend..."; \
+	poetry run python scripts/backend_manager.py stop $$CONFIG
 
-# Generate WebSocket router classes
-generate-ws-routers:
-	@./scripts/generate-ws-routers.sh
+backend-manager-status:
+	@CONFIG=$${config:-dev-config.yaml}; \
+	poetry run python scripts/backend_manager.py status $$CONFIG
+
+backend-manager-restart:
+	@echo "Checking nginx installation..."
+	@if [ -f ".local/bin/nginx" ]; then \
+		echo "✅ Local nginx available: $$(.local/bin/nginx -v 2>&1)"; \
+	elif command -v nginx >/dev/null 2>&1; then \
+		echo "✅ System nginx available: $$(nginx -v 2>&1)"; \
+	else \
+		echo "❌ nginx not found!"; \
+		echo ""; \
+		echo "Install options:"; \
+		echo "  1. Standalone (no sudo): poetry run python scripts/install_nginx.py"; \
+		echo "  2. System package: sudo apt install nginx"; \
+		exit 1; \
+	fi
+	@CONFIG=$${config:-dev-config.yaml}; \
+	echo "Restarting multi-process backend with config: $$CONFIG"; \
+	poetry run python scripts/backend_manager.py restart $$CONFIG --generate-nginx
+
+backend-manager-gen-nginx-conf:
+	@CONFIG=$${config:-dev-config.yaml}; \
+	OUTPUT=$${output:-nginx-dev.conf}; \
+	echo "Generating nginx config from $$CONFIG to $$OUTPUT"; \
+	poetry run python scripts/backend_manager.py gen-nginx-conf $$CONFIG -o $$OUTPUT --validate
+
+# Logging commands
+logs-tail:
+	@echo "📋 Tailing all backend server logs..."
+	@echo "Press Ctrl+C to stop"
+	@echo ""
+	@if [ -d ".local/logs" ] && ls .local/logs/*-*.log >/dev/null 2>&1; then \
+		tail -f .local/logs/broker-*.log .local/logs/datafeed-*.log 2>/dev/null | awk '{print "[" strftime("%H:%M:%S") "] " $$0}'; \
+	else \
+		echo "❌ No server log files found in .local/logs/"; \
+		echo "Start the backend first: make backend-manager-start"; \
+		exit 1; \
+	fi
+
+logs-tail-nginx:
+	@echo "📋 Tailing nginx logs..."
+	@echo "Press Ctrl+C to stop"
+	@echo ""
+	@if [ -f ".local/logs/nginx-access.log" ] || [ -f ".local/logs/nginx-error.log" ]; then \
+		tail -f .local/logs/nginx-*.log 2>/dev/null; \
+	else \
+		echo "❌ Nginx log files not found"; \
+		echo "Start the backend first: make backend-manager-start"; \
+		exit 1; \
+	fi
+
+logs-clean:
+	@echo "🧹 Cleaning backend log files..."
+	@if [ -d ".local/logs" ]; then \
+		for file in .local/logs/*.log; do \
+			[ -f "$$file" ] && > "$$file"; \
+		done; \
+		echo "✅ All log files cleaned (truncated)"; \
+	else \
+		echo "✅ No log directory found (nothing to clean)"; \
+	fi

@@ -21,7 +21,7 @@ class TestOrdersWebSocket:
     def test_subscribe_to_orders(self, client: TestClient) -> None:
         """Test subscribing to order updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # Send subscribe message
             subscribe_msg = {
                 "type": "orders.subscribe",
@@ -41,7 +41,7 @@ class TestOrdersWebSocket:
     def test_unsubscribe_from_orders(self, client: TestClient) -> None:
         """Test unsubscribing from order updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # First subscribe
             websocket.send_json(
                 {"type": "orders.subscribe", "payload": {"accountId": "TEST-001"}}
@@ -67,7 +67,7 @@ class TestOrdersWebSocket:
     def test_subscribe_multiple_accounts(self, client: TestClient) -> None:
         """Test subscribing to orders for multiple accounts"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             accounts = ["DEMO-001", "DEMO-002", "DEMO-003"]
 
             for account in accounts:
@@ -88,7 +88,7 @@ class TestPositionsWebSocket:
     def test_subscribe_to_positions(self, client: TestClient) -> None:
         """Test subscribing to position updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # Send subscribe message
             subscribe_msg = {
                 "type": "positions.subscribe",
@@ -108,7 +108,7 @@ class TestPositionsWebSocket:
     def test_unsubscribe_from_positions(self, client: TestClient) -> None:
         """Test unsubscribing from position updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # First subscribe
             websocket.send_json(
                 {"type": "positions.subscribe", "payload": {"accountId": "TEST-001"}}
@@ -138,7 +138,7 @@ class TestExecutionsWebSocket:
     def test_subscribe_to_executions(self, client: TestClient) -> None:
         """Test subscribing to execution updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # Send subscribe message
             subscribe_msg = {
                 "type": "executions.subscribe",
@@ -161,7 +161,7 @@ class TestExecutionsWebSocket:
     ) -> None:
         """Test subscribing to executions with optional symbol filter"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # Send subscribe message with symbol filter
             subscribe_msg = {
                 "type": "executions.subscribe",
@@ -181,7 +181,7 @@ class TestExecutionsWebSocket:
     def test_unsubscribe_from_executions(self, client: TestClient) -> None:
         """Test unsubscribing from execution updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # First subscribe
             websocket.send_json(
                 {"type": "executions.subscribe", "payload": {"accountId": "TEST-001"}}
@@ -212,7 +212,7 @@ class TestEquityWebSocket:
     def test_subscribe_to_equity(self, client: TestClient) -> None:
         """Test subscribing to equity updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # Send subscribe message
             subscribe_msg = {
                 "type": "equity.subscribe",
@@ -232,7 +232,7 @@ class TestEquityWebSocket:
     def test_unsubscribe_from_equity(self, client: TestClient) -> None:
         """Test unsubscribing from equity updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # First subscribe
             websocket.send_json(
                 {"type": "equity.subscribe", "payload": {"accountId": "TEST-001"}}
@@ -262,7 +262,7 @@ class TestBrokerConnectionWebSocket:
     def test_subscribe_to_broker_connection(self, client: TestClient) -> None:
         """Test subscribing to broker connection status updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # Send subscribe message
             subscribe_msg = {
                 "type": "broker-connection.subscribe",
@@ -285,7 +285,7 @@ class TestBrokerConnectionWebSocket:
     def test_unsubscribe_from_broker_connection(self, client: TestClient) -> None:
         """Test unsubscribing from broker connection status updates"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # First subscribe
             websocket.send_json(
                 {
@@ -323,14 +323,14 @@ class TestBrokerWebSocketGeneral:
     def test_websocket_connection(self, client: TestClient) -> None:
         """Test basic WebSocket connection still works with broker routes"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # Connection successful if we get here
             assert websocket is not None
 
     def test_subscribe_to_all_broker_endpoints(self, client: TestClient) -> None:
         """Test subscribing to all broker endpoints in one session"""
 
-        with client.websocket_connect("/api/v1/ws") as websocket:
+        with client.websocket_connect("/api/v1/broker/ws") as websocket:
             endpoints = [
                 "orders",
                 "positions",

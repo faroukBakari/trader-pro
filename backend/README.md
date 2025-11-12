@@ -1,352 +1,132 @@
-# Trading API
+# Trading API Backend
 
-FastAPI backend that powers the Trading Pro platform. It exposes a RESTful API for health reporting, API versioning, and TradingView-compatible market data.
-
-## Features
-
-- REST API with typed responses generated from FastAPI + Pydantic models
-- WebSocket real-time streaming with FastWS and AsyncAPI documentation
-- Built-in market datafeed service compatible with the TradingView UDF contract
-- Versioned API surface (`/api/v1`) with pluggable future versions
-- Automatic OpenAPI + AsyncAPI generation for client tooling and contract tests
-- Test-driven development workflow with pytest and FastAPI TestClient
+FastAPI-based trading platform backend with modular architecture.
 
 ## Documentation
 
-- `ARCHITECTURE.md` – end-to-end system architecture
-  - **Backend Models Architecture** section – topic-based organization principles for Pydantic models
-- `docs/VERSIONING.md` – API versioning strategy and lifecycle
-- `docs/WEBSOCKETS.md` – WebSocket real-time data streaming guide
-- `backend/README.md` (this file) – backend setup and reference
-- `frontend/CLIENT-GENERATION.md` – TypeScript client generation that consumes the backend OpenAPI spec
-- `MAKEFILE-GUIDE.md` – consolidated command reference for the whole project
+For comprehensive project documentation, see the [root README](../README.md) and the [docs/](../docs/) directory.
 
-## Quick Start
+### Backend-Specific Documentation
 
-### Prerequisites
-
-- **Python 3.11+** (required by the project)
-  - Will be **automatically installed** if you have [pyenv](https://github.com/pyenv/pyenv)
-  - Or check version: `python3 --version`
-  - Manual install: `pyenv install 3.11 && pyenv local 3.11`
-- [Poetry](https://python-poetry.org/) for dependency management (auto-installed if missing)
-
-### Install dependencies
-
-```bash
-cd backend
-make install       # Validates Python 3.11+, offers to install if needed, then installs dependencies
-```
-
-The `make install` command will:
-
-1. **Check Python version** - Validates Python 3.11+ is available
-2. **Auto-install Python** - If wrong version and pyenv is available, **offers to install Python 3.11.7** (with confirmation)
-3. **Install Poetry** - Automatically installs Poetry if missing
-4. **Install dependencies** - Runs `poetry install` to set up the project
-
-**Interactive prompts:**
-
-- If Python 3.11+ is not found and pyenv is available, you'll be asked: `"Would you like to install Python 3.11.7 via pyenv? [y/N]"`
-- Type `y` and press Enter to automatically install and activate Python 3.11.7
-- Type `n` to skip and see manual installation instructions
-
-Alternatively, check prerequisites manually:
-
-```bash
-make ensure-python  # Check Python version
-make ensure-poetry  # Ensure Poetry is installed
-poetry install      # Install dependencies
-```
-
-### Run the API locally
-
-```bash
-# Start the development server on http://localhost:8000
-make dev
-
-# Or start without debug tooling
-make dev-no-debug
-
-# Manual start (inside Poetry shell)
-poetry run uvicorn "trading_api.main:$BACKEND_APP_NAME" --reload
-```
-
-### Run tests and quality checks
-
-```bash
-# Run all tests (boundaries + shared + modules + integration)
-make test
-
-# Run specific test suites
-make test-boundaries          # Import boundary validation
-make test-shared              # Shared infrastructure tests
-make test-module-broker       # Broker module tests only
-make test-module-datafeed     # Datafeed module tests only
-make test-integration         # Cross-module integration tests
-
-# Run tests for specific modules
-make test-modules modules=broker,datafeed
-
-# Code quality
-make lint              # flake8
-make lint-check        # black --check + isort --check-only + flake8 + mypy
-make format            # black + isort
-```
-
-## API Surface
-
-The backend publishes OpenAPI and AsyncAPI documentation at startup. After running the dev server, visit:
-
-### REST API Documentation
-
-- Root metadata: `http://127.0.0.1:8000/`
-- Interactive docs (Swagger UI): `http://127.0.0.1:8000/api/v1/docs`
-- ReDoc: `http://127.0.0.1:8000/api/v1/redoc`
-- Raw OpenAPI JSON: `http://127.0.0.1:8000/api/v1/openapi.json`
-
-### WebSocket API Documentation
-
-- AsyncAPI Interactive UI: `http://127.0.0.1:8000/api/v1/ws/asyncapi`
-- Raw AsyncAPI JSON: `http://127.0.0.1:8000/api/v1/ws/asyncapi.json`
-- WebSocket endpoint: `ws://127.0.0.1:8000/api/v1/ws`
-
-### Key REST Endpoints
-
-| Path                                | Method | Description                                         |
-| ----------------------------------- | ------ | --------------------------------------------------- |
-| `/api/v1/health`                    | GET    | Service health heartbeat including version metadata |
-| `/api/v1/versions`                  | GET    | List of supported API versions                      |
-| `/api/v1/version`                   | GET    | Details about the active API version                |
-| `/api/v1/datafeed/config`           | GET    | TradingView configuration contract                  |
-| `/api/v1/datafeed/search`           | GET    | Symbol search                                       |
-| `/api/v1/datafeed/resolve/{symbol}` | GET    | Symbol metadata                                     |
-| `/api/v1/datafeed/bars`             | GET    | Historical OHLC data                                |
-| `/api/v1/datafeed/quotes`           | POST   | Latest quote snapshot for multiple symbols          |
-| `/api/v1/datafeed/health`           | GET    | Datafeed service diagnostics                        |
-
-### WebSocket Operations
-
-| Operation          | Type    | Description                                     |
-| ------------------ | ------- | ----------------------------------------------- |
-| `bars.subscribe`   | SEND    | Subscribe to real-time bar updates for a symbol |
-| `bars.unsubscribe` | SEND    | Unsubscribe from bar updates                    |
-| `bars.update`      | RECEIVE | Real-time OHLC bar data broadcast               |
-
-⚠️ **IMPORTANT**: When implementing WebSocket features, always use the router code generation mechanism. See `src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` for the complete guide on creating type-safe WebSocket routers.
-
-See `docs/WEBSOCKETS.md` for detailed WebSocket documentation including the WsRouteService Protocol architecture.
+- [Modular Architecture](docs/MODULAR_BACKEND_ARCHITECTURE.md) - Module system and ABC patterns
+- [Backend Manager Guide](docs/BACKEND_MANAGER_GUIDE.md) - Multi-process deployment
+- [Backend Testing](docs/BACKEND_TESTING.md) - Testing strategy and module isolation
+- [WebSockets](docs/BACKEND_WEBSOCKETS.md) - FastWS integration
+- [API Specs & Client Generation](docs/SPECS_AND_CLIENT_GEN.md) - Spec generation workflow
+- [Modular Versioning](docs/MODULAR_VERSIONNING.md) - Module-level API versioning
+- [WebSocket Router Generation](docs/WS_ROUTERS_GEN.md) - WS router code generation
 
 ## Architecture Overview
 
-### Modular Factory-Based Architecture
+The backend implements a **modular factory-based architecture** with these key patterns:
 
-The backend uses a **modular factory-based architecture** enabling independent development, testing, and deployment of feature modules:
+- **Module ABC Pattern**: All feature modules (broker, datafeed) extend the `Module` abstract base class
+- **Application Factory**: Dynamic composition via `create_app()` with selective module loading
+- **Multi-Process Deployment**: Production mode runs modules in separate processes with nginx gateway
+- **Module Registry**: Centralized management with auto-discovery
 
-**Core Components**:
+**Key Benefits**:
 
-1. **Application Factory** (`app_factory.py`) - Dynamic composition with `create_app()`
-2. **Module System** - Protocol-based pluggable modules (broker, datafeed)
-3. **Shared Infrastructure** (`shared/`) - Always-loaded core (health, versioning, WS framework)
-4. **Centralized Models** (`models/`) - Topic-based Pydantic models
-5. **Test Isolation** - Factory-based fixtures for independent module testing
+- Independent module development and testing
+- Selective deployment (e.g., only broker module)
+- Horizontal scaling (modules in separate processes)
 
-**Module Architecture**:
+See [Modular Architecture](docs/MODULAR_BACKEND_ARCHITECTURE.md) for complete details.
 
-```
-modules/
-├── datafeed/              # Market data module
-│   ├── __init__.py       # DatafeedModule (implements Module Protocol)
-│   ├── service.py        # Business logic
-│   ├── api.py            # REST endpoints
-│   ├── ws.py             # WebSocket routers
-│   ├── ws_generated/     # Auto-generated WS routers
-│   └── tests/            # Module-specific tests
-└── broker/               # Trading operations module
-    ├── __init__.py       # BrokerModule (implements Module Protocol)
-    ├── service.py        # Business logic
-    ├── api.py            # REST endpoints
-    ├── ws.py             # WebSocket routers
-    ├── ws_generated/     # Auto-generated WS routers
-    └── tests/            # Module-specific tests
-```
-
-**Module-Specific Deployment**:
+## Quick Start
 
 ```bash
-# Start with only datafeed module
-ENABLED_MODULES=datafeed make dev
+# From project root
+make -f project.mk install
 
-# Start with only broker module
-ENABLED_MODULES=broker make dev
-
-# Start with all modules (default)
+# Run backend in dev mode
+cd backend
 make dev
 ```
 
-### Protocol-Based WebSocket Architecture
+## Development Workflows
 
-The backend uses a **Protocol-based service architecture** for WebSocket real-time updates:
+### Single Module Development
 
-1. **WsRouteService Protocol** - Simple two-method contract for topic lifecycle
+```bash
+# Start only the broker module
+ENABLED_MODULES=broker make dev
 
-   - `BrokerService` - Implements protocol for broker operations
-   - `DatafeedService` - Implements protocol for market data
+# Start only the datafeed module
+ENABLED_MODULES=datafeed make dev
 
-2. **Reference Counting** - Simple dict-based subscription tracking
-
-   - `topic_trackers: dict[str, int]` in routers
-   - First subscriber triggers `service.create_topic()`
-   - Last unsubscribe triggers `service.remove_topic()`
-
-3. **Router Factories** - Inject services into WebSocket routers
-   - `BrokerWsRouters(broker_service)` - Creates broker WS routers
-   - `DatafeedWsRouters(datafeed_service)` - Creates datafeed WS routers
-
-### BrokerService Execution Simulation
-
-The `BrokerService` implements a **realistic order execution simulator** with automatic lifecycle management:
-
-**Features:**
-
-- **Single Execution Loop**: Background task that randomly executes WORKING orders
-- **Configurable Delay**: 1-2 second intervals (customizable for testing)
-- **Automatic Lifecycle**: Starts when first subscription is created, stops when last subscription is removed
-- **Price Determination**: Uses `limitPrice`, `seenPrice`, or `currentQuotes` (in order of preference)
-- **Execution Cascade**: execution → order → equity → position updates
-
-**Testing with Custom Delays:**
-
-```python
-# Fast execution for testing
-service = BrokerService(execution_delay=0.1)  # 100ms
-
-# Disable automatic execution (manual trigger only)
-service = BrokerService(execution_delay=None)
-
-# Custom interval
-service = BrokerService(execution_delay=5.0)  # 5 seconds
+# Start all modules (default)
+make dev
 ```
 
-See `docs/BROKER-ARCHITECTURE.md` for detailed architecture documentation.
+### Multi-Process Development
 
-**Data Flow**:
+```bash
+# Start all modules in separate processes with nginx gateway
+make backend-dev-multi
 
-```
-Service Generators → FastWSAdapter Queues → WsRouter → FastWS → Clients
-```
+# Check status
+make backend-status
 
-See `docs/WEBSOCKETS.md` and `ARCHITECTURE.md` for detailed documentation.
+# View logs
+make backend-logs
 
-## API Versioning
-
-- Current stable surface: `/api/v1`
-- Future major versions are announced through `/api/v1/versions`
-- Version metadata is defined in `src/trading_api/core/versioning.py`
-- Planned `v2` changes (authentication, error payloads, renamed health endpoint) are tracked but not yet exposed
-
-## Client Generation
-
-- The OpenAPI specification is regenerated on application startup and saved to `backend/openapi.json`
-- Frontend consumers run `make generate-openapi-client` and `make generate-asyncapi-types` (defined in Makefiles)
-- For ad-hoc exports use `make export-openapi`
-
-## Development Workflow
-
-1. Write a failing test in `backend/tests`
-2. Implement the minimal change under `src/trading_api`
-3. Keep imports tidy and run formatters via `make format`
-4. Use `make lint-check` before raising a pull request
-
-## Project Layout
-
-```
-backend/
-├── Makefile
-├── pyproject.toml
-├── src/trading_api/
-│   ├── __init__.py
-│   ├── main.py                # Minimal entrypoint - calls create_app()
-│   ├── app_factory.py         # Application factory with module composition
-│   ├── models/                # Centralized Pydantic models
-│   │   ├── __init__.py
-│   │   ├── common.py          # BaseApiResponse, SubscriptionResponse, SubscriptionUpdate
-│   │   ├── health.py          # HealthResponse
-│   │   ├── versioning.py      # API version models
-│   │   ├── broker/
-│   │   │   ├── common.py      # SuccessResponse
-│   │   │   ├── orders.py      # Order models (REST + WebSocket)
-│   │   │   ├── positions.py   # Position models (REST + WebSocket)
-│   │   │   ├── executions.py  # Execution models (REST + WebSocket)
-│   │   │   ├── account.py     # Account/equity models (REST + WebSocket)
-│   │   │   ├── connection.py  # Connection status models (WebSocket)
-│   │   │   └── leverage.py    # Leverage models (REST)
-│   │   └── market/
-│   │       ├── bars.py        # Bar, BarsSubscriptionRequest
-│   │       ├── configuration.py
-│   │       ├── instruments.py
-│   │       ├── quotes.py
-│   │       └── search.py
-│   ├── shared/                # Always-loaded shared infrastructure
-│   │   ├── module_interface.py  # Module Protocol
-│   │   ├── module_registry.py   # ModuleRegistry
-│   │   ├── api/
-│   │   │   ├── health.py      # HealthApi class (service heartbeat)
-│   │   │   └── versions.py    # VersionApi class (API version catalogue)
-│   │   ├── ws/
-│   │   │   ├── router_interface.py  # WsRouterInterface, WsRouteService Protocol
-│   │   │   └── generic_route.py     # Generic WsRouter implementation
-│   │   ├── plugins/
-│   │   │   └── fastws_adapter.py  # FastWS integration adapter
-│   │   └── tests/
-│   │       └── conftest.py    # Shared test fixtures
-│   └── modules/               # Pluggable feature modules
-│       ├── datafeed/
-│       │   ├── __init__.py    # DatafeedModule
-│       │   ├── service.py     # DatafeedService (implements WsRouteService)
-│       │   ├── api.py         # DatafeedApi (TradingView-compatible REST)
-│       │   ├── ws.py          # DatafeedWsRouters factory
-│       │   ├── ws_generated/  # Auto-generated concrete router classes
-│       │   └── tests/
-│       │       ├── conftest.py
-│       │       └── test_ws_datafeed.py
-│       └── broker/
-│           ├── __init__.py    # BrokerModule
-│           ├── service.py     # BrokerService (implements WsRouteService)
-│           ├── api.py         # BrokerApi (REST endpoints)
-│           ├── ws.py          # BrokerWsRouters factory
-│           ├── ws_generated/  # Auto-generated concrete router classes
-│           └── tests/
-│               ├── conftest.py
-│               ├── test_api_broker.py
-│               └── test_ws_broker.py
-├── external_packages/
-│   └── fastws/                # FastWS framework (vendored)
-├── tests/
-│   ├── conftest.py            # Root test configuration
-│   ├── test_import_boundaries.py  # Import boundary enforcement
-│   └── integration/           # Cross-module integration tests
-│       ├── conftest.py
-│       ├── test_broker_datafeed_workflow.py
-│       ├── test_full_stack.py
-│       └── test_module_isolation.py
-├── shared/tests/
-│   ├── conftest.py            # Shared test factory
-│   ├── test_api_health.py
-│   └── test_api_versioning.py
-├── docs/
-│   ├── VERSIONING.md
-│   └── WEBSOCKETS.md          # WebSocket streaming guide + WsRouteService docs
-└── README.md
+# Stop all processes
+make backend-stop
 ```
 
-## Troubleshooting
+See [Backend Manager Guide](docs/BACKEND_MANAGER_GUIDE.md) for complete commands.
 
-- Ensure the Poetry environment is activated (`poetry shell`) before running manual commands
-- `make lint-response-models` validates that every FastAPI route declares a response model (used in CI)
-- Regenerate the OpenAPI file manually with `make export-openapi` if frontend tooling requires a fresh contract without starting the server
+### Spec Generation & Client Updates
 
-## Next Steps
+```bash
+# Generate OpenAPI/AsyncAPI specs and Python clients
+make generate
 
-- Track API changes in `docs/VERSIONING.md`
-- Coordinate with the frontend when updating models so that TypeScript clients remain in sync
+# Generate specs only (no clients)
+make generate-specs
+```
+
+See [API Specs & Client Generation](docs/SPECS_AND_CLIENT_GEN.md) for details.
+
+## Testing
+
+### Run All Tests
+
+```bash
+# All tests
+make test
+
+# With coverage
+make test-coverage
+```
+
+### Module-Specific Testing
+
+```bash
+# Test specific modules only
+make test-modules modules=broker,datafeed
+
+# Test single module
+make test-modules modules=broker
+```
+
+### Test Organization
+
+- `tests/` - Root integration tests (cross-module scenarios)
+- `tests/integration/` - Full-stack integration tests
+- `src/trading_api/modules/*/tests/` - Module-specific tests
+- `src/trading_api/shared/tests/` - Shared infrastructure tests
+
+Tests use **factory-based fixtures** for module isolation. See [Backend Testing](docs/BACKEND_TESTING.md) for strategy details.
+
+## Development
+
+This backend uses:
+
+- **FastAPI** for REST API and WebSocket endpoints
+- **Poetry** for dependency management
+- **Pytest** for testing
+- **Type checking** with mypy and pyright
+
+See [DEVELOPMENT.md](../docs/DEVELOPMENT.md) for detailed development guidelines.

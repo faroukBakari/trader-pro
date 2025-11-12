@@ -1,5 +1,7 @@
 # Git Hooks Setup
 
+**Last Updated:** November 11, 2025
+
 This directory contains centralized Git hooks for the trading-api project.
 
 ## Quick Setup
@@ -9,9 +11,6 @@ For new contributors or after cloning the repository:
 ```bash
 # Using Makefile (recommended)
 make install-hooks
-
-# Or using npm script (if working in frontend)
-cd frontend && npm run install:hooks
 
 # Or manually
 git config core.hooksPath .githooks

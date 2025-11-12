@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from external_packages.fastws import Client
 from trading_api.models import SubscriptionResponse, SubscriptionUpdate
-from trading_api.shared.ws.router_interface import WsRouterInterface, WsRouteService
+from trading_api.shared.ws.ws_route_interface import WsRouteInterface, WsRouteService
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +16,20 @@ _TData = TypeVar("_TData", bound=BaseModel)
 
 # TODO : implement secure route that encapsulates authentication/authorization per client
 # TODO : implement server side subscription cancelation
-class WsRouter(WsRouterInterface, Generic[_TRequest, _TData]):
+class WsRouter(WsRouteInterface, Generic[_TRequest, _TData]):
     def __init__(self, service: WsRouteService, *args: Any, **kwargs: Any) -> None:
+        # Validate service implements WsRouteService protocol BEFORE initialization
+        if not hasattr(service, "create_topic"):
+            raise TypeError(
+                f"Service must implement WsRouteService protocol (missing 'create_topic' method). "
+                f"Got: {type(service).__name__}"
+            )
+        if not hasattr(service, "remove_topic"):
+            raise TypeError(
+                f"Service must implement WsRouteService protocol (missing 'remove_topic' method). "
+                f"Got: {type(service).__name__}"
+            )
+
         super().__init__(*args, **kwargs)
         self.service = service
         self.topic_trackers: dict[str, int] = {}

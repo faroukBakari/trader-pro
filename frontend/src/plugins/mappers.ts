@@ -7,13 +7,13 @@
  *
  * When importing types in this file, ALWAYS use these naming patterns:
  *
- * 1. API Backend types (from OpenAPI):
- *    import type { TypeName as TypeName_Api_Backend } from '@clients/trader-client-generated'
- *    Example: PreOrder as PreOrder_Api_Backend
+ * 1. API Backend types (from OpenAPI - per module):
+ *    import type { TypeName as TypeName_Api_Backend } from '@clients/trader-client-{module}'
+ *    Example: PreOrder as PreOrder_Api_Backend from trader-client-broker
  *
- * 2. WebSocket Backend types (from AsyncAPI):
- *    import type { TypeName as TypeName_Ws_Backend } from '@clients/ws-types-generated'
- *    Example: PlacedOrder as PlacedOrder_Ws_Backend
+ * 2. WebSocket Backend types (from AsyncAPI - per module):
+ *    import type { TypeName as TypeName_Ws_Backend } from '@clients/ws-types-{module}'
+ *    Example: PlacedOrder as PlacedOrder_Ws_Backend from ws-types-broker
  *
  * 3. Frontend types (TradingView):
  *    import type { TypeName } from '@public/trading_terminal/charting_library'
@@ -31,18 +31,27 @@
  * ✅ CORRECT: import type { PlacedOrder as PlacedOrder_Ws_Backend }
  */
 
+// Per-module API Backend types (OpenAPI)
 import type {
-  PreOrder as PreOrder_Api_Backend,
+  PreOrder as PreOrder_Api_Backend
+} from '@clients/trader-client-broker_v1';
+import type {
   QuoteData as QuoteData_Api_Backend
-} from '@clients/trader-client-generated';
+} from '@clients/trader-client-datafeed_v1';
+
+// Per-module WebSocket Backend types (AsyncAPI)
 import type {
   BrokerConnectionStatus as BrokerConnectionStatus_Ws_Backend,
   EquityData as EquityData_Ws_Backend,
   Execution as Execution_Ws_Backend,
   PlacedOrder as PlacedOrder_Ws_Backend,
-  Position as Position_Ws_Backend,
+  Position as Position_Ws_Backend
+} from '@clients/ws-types-broker_v1';
+import type {
   QuoteData as QuoteData_Ws_Backend
-} from '@clients/ws-types-generated';
+} from '@clients/ws-types-datafeed_v1';
+
+// Frontend types (TradingView)
 import type {
   Execution,
   PlacedOrder,

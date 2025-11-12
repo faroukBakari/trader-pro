@@ -1,5 +1,6 @@
 # API Client Generation
 
+**Last Updated**: November 11, 2025  
 **Status**: ✅ Implemented | **Mode**: Offline Generation
 
 ## Overview
@@ -25,7 +26,7 @@ Frontend Build → Export Backend Specs → Generate Clients → Build/Dev
 
 ```
 ┌─────────────────────────────────────────┐
-│ Frontend: make client-generate          │
+│ Frontend: make generate                 │
 └────────────────┬────────────────────────┘
                  │
                  ▼
@@ -39,6 +40,15 @@ Frontend Build → Export Backend Specs → Generate Clients → Build/Dev
                  │
                  ▼
 ┌─────────────────────────────────────────┐
+│ Backend: Validate Package Names         │
+│ • Runs scripts/validate_modules.py│
+│ • Checks package name uniqueness        │
+│ • Validates module name correspondence  │
+│ • Prevents naming conflicts             │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
 │ Frontend: Generate TypeScript Clients   │
 │ • REST Client (OpenAPI spec)            │
 │ • WebSocket Types (AsyncAPI spec)       │
@@ -47,20 +57,89 @@ Frontend Build → Export Backend Specs → Generate Clients → Build/Dev
 
 ### REST API Client
 
-### Generation Command
+### Package Name Validation
+
+Before generating any clients, the system validates that package names are unique and follow module naming conventions:
+
+**Validation Rules:**
+
+1. **OpenAPI Clients**: Package names must follow `@trader-pro/client-{module}` pattern
+2. **AsyncAPI Types**: Package names must follow `ws-types-{module}` pattern
+3. **Python Clients**: Class names must follow `{Module}Client` pattern
+4. **Uniqueness**: No duplicate package names across all client types
+5. **Module Correspondence**: Package names must match their source module names
+
+**Automatic Validation:**
+
+Package name validation runs automatically before:
+
+- Frontend OpenAPI client generation (`make generate-openapi-client`)
+- Frontend AsyncAPI type generation (`make generate-asyncapi-types`)
+- Backend code generation (`make generate` - unified command for all specs and clients)
+
+**Example Output:**
+
+```
+🔍 Validating backend modules for generated clients...
+
+======================================================================
+📋 Package Name Validation Results
+======================================================================
+
+✅ OpenAPI Clients (2 modules):
+   broker          → @trader-pro/client-broker
+   datafeed        → @trader-pro/client-datafeed
+
+✅ AsyncAPI Types (2 modules):
+   broker          → ws-types-broker
+   datafeed        → ws-types-datafeed
+
+✅ Python Clients (2 modules):
+   broker          → BrokerClient
+   datafeed        → DatafeedClient
+
+======================================================================
+✅ All package name validations passed!
+```
+
+**Error Detection:**
+
+The validation catches common issues:
+
+- ❌ Duplicate package names
+- ❌ Package names not matching module names
+- ❌ Inconsistent naming conventions
+- ⚠️ Spec titles not indicating module names
+
+### REST API Client
+
+### Generation Command (Unified - Recommended)
 
 ```bash
-# From project root
-make generate-openapi-client
+# Generate all clients (REST + WebSocket) - RECOMMENDED
+make generate
 
-# Or from frontend directory
-make generate-openapi-client
+# This runs both:
+# 1. OpenAPI client generation (REST API)
+# 2. AsyncAPI types generation (WebSocket)
 ```
+
+#### Individual Commands (Still Available)
+
+For specific needs or backward compatibility, you can use these commands, but they internally call `make generate`:
+
+```bash
+# These are aliases to the unified command
+make generate-openapi-client  # Generates via 'make generate'
+make generate-asyncapi-types  # Generates via 'make generate'
+```
+
+**Note**: The unified `make generate` is the recommended approach for most workflows. Individual commands exist for backward compatibility and CI flexibility.
 
 ### Generated Files
 
 ```
-frontend/src/clients/trader-client-generated/
+frontend/src/clients_generated/trader-client-generated/
 ├── api/           # API client classes
 ├── models/        # TypeScript types
 ├── configuration.ts
@@ -81,20 +160,20 @@ const health = await healthApi.getHealth();
 
 ### Generation Command
 
-WebSocket types are automatically generated from AsyncAPI specification:
+WebSocket types are generated alongside REST clients via the unified command:
 
 ```bash
-# From project root
-make generate-asyncapi-types
+# Unified generation (REST + WebSocket) - RECOMMENDED
+make generate
 
-# Or from frontend directory
+# Or use the specific alias (also calls 'make generate')
 make generate-asyncapi-types
 ```
 
 ### Generated Files
 
 ```
-frontend/src/clients/
+frontend/src/clients_generated/
 └── ws-types-generated/     # TypeScript interfaces
     └── index.ts            # Bar, BarsSubscriptionRequest, etc.
 ```
@@ -421,7 +500,7 @@ make export-openapi-offline
 
 ```bash
 # Clean and regenerate
-rm -rf frontend/src/clients/*-generated
+rm -rf frontend/src/clients_generated/*
 make generate-openapi-client
 make generate-asyncapi-types
 ```
