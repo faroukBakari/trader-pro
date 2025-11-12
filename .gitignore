@@ -121,12 +121,17 @@ celerybeat.pid
 
 # Environments
 .env
+.env.local
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Backend secrets
+backend/.local/DB/*.json
+backend/.local/secrets/*.pem
 
 # Spyder project settings
 .spyderproject

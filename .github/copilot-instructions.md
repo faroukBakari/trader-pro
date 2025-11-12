@@ -19,6 +19,11 @@ These rules are critical and must be followed at all times.
 * **Strict Typing ONLY:** All code **must** be strictly typed.
     * **TypeScript (Frontend):** The `any` type is forbidden. Use `unknown` for values you cannot type precisely, followed by appropriate type-guarding.
     * **Python (Backend):** Use type hints for all function/method definitions and variables. Avoid using `Any` from the `typing` module.
+    * **Track Package Typing:** When adding any new package/dependency, you **must** verify its typing support and warn about compliance issues.
+        * **Python:** Prefer packages with built-in type hints or quality type stubs. Check `py.typed` markers and `@types` availability.
+        * **TypeScript:** Prefer packages with native TypeScript support. Warn if using packages requiring `@types/*` workarounds or `any` type assertions.
+        * **Alternative Suggestions:** Always suggest modern, type-safe alternatives when encountering poorly-typed packages.
+        * **Compliance Warnings:** Explicitly flag any typing compliance issues and propose mitigation strategies before proceeding.
 * **No Explanatory Comments:** Code **must** be self-explanatory. Comments are **only** for planning (e.g., `TODO`, `FIXME`), never for explaining *what* code does.
 * **Command Workflow:** You **MUST** prioritize using `make` commands (e.g., `make test`, `make format`) for all operations. If no suitable `make` command is available, you must first check if an environment needs to be sourced/activated (e.g., `source .env`, `poetry shell`) before running raw `poetry` or `npm` commands.
 * **NEVER Edit Generated Code:** Files in `*_generated/` directories are auto-generated. Propose triggering a regeneration instead of editing them manually.

@@ -1,7 +1,6 @@
----
 agent: "agent"
-name: "follow-plan"
-description: "Follow a predefined plan step-by-step."
+name: "follow-plan-v2"
+description: "Follow a predefined plan step-by-step with validation."
 ---
 We have defined and validated this plan that I need you to follow.
 
@@ -21,13 +20,17 @@ We have defined and validated this plan that I need you to follow.
 
 4.  **Strict Sequential Execution:** You must follow the plan steps *in the precise order they are written*. Do not skip steps or perform them out of order unless I explicitly instruct you to.
 
-5.  **Summarize at Milestones:** After completing any major phase, critical step, or logical group of tasks, provide me with a brief summary of the progress made and the changes implemented.
+5.  **CRITICAL: Validate Before Reporting:** After you believe you have completed the work for a step, you must run a **comprehensive validation** of the *entire* implementation so far.
+    * This *must* include running any and all relevant tests if applicable (pytest / vitest) as well as types and format checks.
+    * A step is **not complete** until this validation passes. If validation fails, you must debug and fix the issues *before* reporting or landing back to the user.
 
-6.  **Plan Amendments:** If we decide to change the plan while working, you must **immediately** update the plan file *and* the progress tracking section to reflect those changes.
+6.  **Summarize at Milestones:** After *completing and validating* (per Rule 5) any major phase, critical step, or logical group of tasks, provide me with a brief summary of the progress made and the changes implemented.
 
-7.  **CRITICAL: Always Update Progress Before Responding:** This is the most important rule. Before you finish your response and return control to me, you **must** update the progress tracking section in the plan file to accurately reflect the work you just completed.
+7.  **Plan Amendments:** If we decide to change the plan while working, you must **immediately** update the plan file *and* the progress tracking section to reflect those changes.
 
-8.  **CRITICAL: Context Window Guard:** If you determine the conversation context is nearing its limit, you must **immediately stop** your current work (even if you are in the middle of a step).
+8.  **CRITICAL: Always Update Progress Before Responding:** This is the most important rule. Before you finish your response and return control to me, you **must** update the progress tracking section in the plan file to accurately reflect the work you just completed and validated.
+
+9.  **CRITICAL: Context Window Guard:** If you determine the conversation context is nearing its limit, you must **immediately stop** your current work (even if you are in the middle of a step).
     * You must **avoid summarization** or any other conversational response.
     * Your **only** action before stopping must be to update the progress tracking file (as per Rule 8) to reflect all work completed up to this exact moment.
     * After updating the file, return control to me. Your *only* response should be to state: "Context window is nearly full. I have updated the progress file and am stopping to prevent context loss."

@@ -390,7 +390,13 @@ test-modules:
 		for module in $(SELECTED_MODULES); do \
 			if [ -d "$(MODULES_DIR)/$$module/tests" ]; then \
 				echo "Testing module: $$module"; \
-				poetry run pytest $(MODULES_DIR)/$$module/tests/ -v -x || exit 1; \
+				poetry run pytest $(MODULES_DIR)/$$module/tests/ -v -x; \
+				EXIT_CODE=$$?; \
+				if [ $$EXIT_CODE -eq 5 ]; then \
+					echo "⚠️  No tests collected for module: $$module (skipping)"; \
+				elif [ $$EXIT_CODE -ne 0 ]; then \
+					exit 1; \
+				fi; \
 			else \
 				echo "⚠️  No tests found for module: $$module"; \
 			fi; \
@@ -402,6 +408,12 @@ $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
 	@echo "Running tests for module: $*..."
 	@if [ -d "$(MODULES_DIR)/$*/tests" ]; then \
 		poetry run pytest $(MODULES_DIR)/$*/tests/ -v -x; \
+		EXIT_CODE=$$?; \
+		if [ $$EXIT_CODE -eq 5 ]; then \
+			echo "⚠️  No tests collected for module: $* (skipping)"; \
+		elif [ $$EXIT_CODE -ne 0 ]; then \
+			exit 1; \
+		fi; \
 	else \
 		echo "⚠️  No tests found for module: $*"; \
 	fi
