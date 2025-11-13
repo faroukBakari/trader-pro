@@ -173,9 +173,17 @@ export class ApiAdapter {
     // In multi-process mode, these could point to different services:
     // broker: http://broker-service:8001
     // datafeed: http://datafeed-service:8002
-    this.brokerConfig = new BrokerConfigurationV1
-      ({ basePath: ApiV1BasePath + '/broker' })
-    this.datafeedConfig = new DatafeedConfigurationV1({ basePath: ApiV1BasePath + '/datafeed' })
+    // withCredentials: true enables cookies to be sent with cross-origin requests
+    this.brokerConfig = new BrokerConfigurationV1({
+      basePath: ApiV1BasePath + '/broker',
+      // @ts-expect-error - withCredentials not in type definition but supported by axios
+      withCredentials: true,
+    })
+    this.datafeedConfig = new DatafeedConfigurationV1({
+      basePath: ApiV1BasePath + '/datafeed',
+      // @ts-expect-error - withCredentials not in type definition but supported by axios
+      withCredentials: true,
+    })
 
     // Initialize per-module API clients
     this.brokerApi = new BrokerApi(this.brokerConfig)

@@ -49,11 +49,10 @@ def extract_device_fingerprint(request: Request | WebSocket) -> str:
 
 async def get_current_user_ws(websocket: WebSocket) -> UserData:
     """
-    Validate JWT token from WebSocket query parameter or cookie and return user data.
+    Validate JWT token from WebSocket cookie and return user data.
 
-    WebSocket-specific auth dependency that extracts token from:
-    1. Cookie (access_token) - preferred for security
-    2. Query parameter (token) - fallback for backward compatibility
+    Cookie-only authentication for enhanced security.
+    Token must be in access_token cookie.
 
     Args:
         websocket: FastAPI WebSocket object (auto-injected by FastAPI)
@@ -64,17 +63,13 @@ async def get_current_user_ws(websocket: WebSocket) -> UserData:
     Raises:
         WebSocketException: 1008 if token is invalid, expired, or missing
     """
-    # Try cookie first (preferred for security)
+    # Extract token from cookie only
     token = websocket.cookies.get("access_token")
-    
-    # Fall back to query parameter for backward compatibility
-    if not token:
-        token = websocket.query_params.get("token")
 
     if not token:
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
-            reason="Missing authentication token",
+            reason="Missing authentication token in cookie",
         )
 
     try:
@@ -112,18 +107,15 @@ async def get_current_user_ws(websocket: WebSocket) -> UserData:
 
 async def get_current_user(
     request: Request,
-    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_http_bearer)],
 ) -> UserData:
     """
-    Validate JWT token and return user data.
+    Validate JWT token from cookie and return user data.
 
-    Supports two token extraction methods:
-    1. REST: Authorization header (Bearer token) - handled by HTTPBearer
-    2. WebSocket: Query parameter (?token=<jwt>) - fallback when credentials is None
+    Cookie-only authentication for enhanced security.
+    Token must be in access_token cookie (HttpOnly, Secure, SameSite=Strict).
 
     Args:
         request: FastAPI request object
-        credentials: HTTP Bearer credentials (None for WebSocket)
 
     Returns:
         UserData object with user_id, email, full_name, picture, device_fingerprint
@@ -131,19 +123,13 @@ async def get_current_user(
     Raises:
         HTTPException: 401 if token is invalid, expired, or missing
     """
-    token: str | None = None
-
-    # Extract token from Authorization header (REST)
-    if credentials is not None:
-        token = credentials.credentials
-    # Extract token from query parameter (WebSocket)
-    else:
-        token = request.query_params.get("token")
+    # Extract token from cookie only
+    token = request.cookies.get("access_token")
 
     if not token:
         raise HTTPException(
             status_code=401,
-            detail="Missing authentication token",
+            detail="Missing authentication token in cookie",
         )
 
     try:
