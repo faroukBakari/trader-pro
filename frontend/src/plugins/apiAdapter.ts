@@ -155,12 +155,17 @@ function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
 }
 
 export class ApiAdapter {
-  private brokerApi: BrokerApi
-  private datafeedApi: DatafeedApi
-  private brokerConfig: BrokerConfigurationV1
-  private datafeedConfig: DatafeedConfigurationV1
+  private static instance: ApiAdapter | null = null
+
+  private brokerApi!: BrokerApi
+  private datafeedApi!: DatafeedApi
+  private brokerConfig!: BrokerConfigurationV1
+  private datafeedConfig!: DatafeedConfigurationV1
 
   constructor() {
+    if (ApiAdapter.instance) {
+      return ApiAdapter.instance
+    }
 
     const ApiV1BasePath = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + "/v1"
 
@@ -173,6 +178,31 @@ export class ApiAdapter {
     this.datafeedConfig = new DatafeedConfigurationV1({ basePath: ApiV1BasePath + '/datafeed' })
 
     // Initialize per-module API clients
+    this.brokerApi = new BrokerApi(this.brokerConfig)
+    this.datafeedApi = new DatafeedApi(this.datafeedConfig)
+
+    ApiAdapter.instance = this
+  }
+
+  static getInstance(): ApiAdapter {
+    if (!ApiAdapter.instance) {
+      ApiAdapter.instance = new ApiAdapter()
+    }
+    return ApiAdapter.instance
+  }
+
+  updateAuthToken(token: string | null): void {
+    const ApiV1BasePath = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + "/v1"
+
+    this.brokerConfig = new BrokerConfigurationV1({
+      basePath: ApiV1BasePath + '/broker',
+      accessToken: token || undefined,
+    })
+    this.datafeedConfig = new DatafeedConfigurationV1({
+      basePath: ApiV1BasePath + '/datafeed',
+      accessToken: token || undefined,
+    })
+
     this.brokerApi = new BrokerApi(this.brokerConfig)
     this.datafeedApi = new DatafeedApi(this.datafeedConfig)
   }

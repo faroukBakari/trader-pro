@@ -2,9 +2,9 @@
 Datafeed API endpoints
 """
 
-from typing import Any, List, Optional
+from typing import Annotated, Any, List, Optional
 
-from fastapi import HTTPException, Query
+from fastapi import Depends, HTTPException, Query
 
 from trading_api.models import (
     DatafeedConfiguration,
@@ -14,7 +14,9 @@ from trading_api.models import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
+from trading_api.models.auth import UserData
 from trading_api.shared.api import APIRouterInterface
+from trading_api.shared.middleware.auth import get_current_user
 
 from ..service import DatafeedService
 
@@ -29,11 +31,15 @@ class DatafeedApi(APIRouterInterface):
             summary="Get datafeed configuration",
             operation_id="getConfig",
         )
-        async def get_config() -> DatafeedConfiguration:
+        async def get_config(
+            _: Annotated[UserData, Depends(get_current_user)],
+        ) -> DatafeedConfiguration:
             """
             Get datafeed configuration including supported resolutions, exchanges,
             and symbol types. This endpoint provides the configuration needed by
             TradingView charting library.
+
+            Requires authentication but data is global (market data).
             """
             try:
                 config = self.service.get_configuration()
@@ -50,6 +56,7 @@ class DatafeedApi(APIRouterInterface):
             operation_id="searchSymbols",
         )
         async def search_symbols(
+            _: Annotated[UserData, Depends(get_current_user)],
             user_input: str = Query(..., description="User search input"),
             exchange: str = Query("", description="Exchange filter"),
             symbol_type: str = Query("", description="Symbol type filter"),
@@ -57,6 +64,8 @@ class DatafeedApi(APIRouterInterface):
         ) -> List[SearchSymbolResultItem]:
             """
             Search symbols based on user input and optional filters.
+
+            Requires authentication but data is global (market data).
 
             - **user_input**: Text to search for in symbol name, description, or ticker
             - **exchange**: Filter by exchange (optional)
@@ -83,9 +92,14 @@ class DatafeedApi(APIRouterInterface):
             summary="Resolve symbol",
             operation_id="resolveSymbol",
         )
-        async def resolve_symbol(symbol: str) -> SymbolInfo:
+        async def resolve_symbol(
+            symbol: str,
+            _: Annotated[UserData, Depends(get_current_user)],
+        ) -> SymbolInfo:
             """
             Resolve symbol information by name or ticker.
+
+            Requires authentication but data is global (market data).
 
             - **symbol**: Symbol name or ticker to resolve
             """
@@ -108,6 +122,7 @@ class DatafeedApi(APIRouterInterface):
             operation_id="getBars",
         )
         async def get_bars(
+            _: Annotated[UserData, Depends(get_current_user)],
             symbol: str = Query(..., description="Symbol name"),
             resolution: str = Query(..., description="Resolution (e.g., '1D')"),
             from_time: int = Query(..., description="From timestamp (seconds)"),
@@ -116,6 +131,8 @@ class DatafeedApi(APIRouterInterface):
         ) -> GetBarsResponse:
             """
             Get historical OHLC bars for a symbol.
+
+            Requires authentication but data is global (market data).
 
             - **symbol**: Symbol name or ticker
             - **resolution**: Time resolution (currently only '1D' is supported)
@@ -143,9 +160,14 @@ class DatafeedApi(APIRouterInterface):
             summary="Get quotes for symbols",
             operation_id="getQuotes",
         )
-        async def get_quotes(body: GetQuotesRequest) -> List[QuoteData]:
+        async def get_quotes(
+            body: GetQuotesRequest,
+            _: Annotated[UserData, Depends(get_current_user)],
+        ) -> List[QuoteData]:
             """
             Get real-time quotes for multiple symbols.
+
+            Requires authentication but data is global (market data).
 
             - **symbols**: Array of symbol names to get quotes for
             """

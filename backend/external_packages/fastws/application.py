@@ -3,6 +3,7 @@
 # pyright: reportGeneralTypeIssues=false
 import asyncio
 import logging
+from email.mime import base
 from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from uuid import uuid4
 
@@ -21,6 +22,7 @@ class Client:
         self.ws = ws
         self.uid = uuid4().hex
         self.topics: set[str] = set()
+        self.user_data: BaseModel | None = None
 
     async def send(self, message: str) -> None:
         await self.ws.send_text(message)

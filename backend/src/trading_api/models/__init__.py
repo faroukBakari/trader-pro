@@ -13,6 +13,7 @@ organized by functionality:
 from .auth import (
     DeviceInfo,
     GoogleLoginRequest,
+    JWTPayload,
     LogoutRequest,
     RefreshRequest,
     RefreshTokenData,
@@ -20,6 +21,7 @@ from .auth import (
     TokenResponse,
     User,
     UserCreate,
+    UserData,
     UserInDB,
 )
 
@@ -102,6 +104,8 @@ __all__ = [
     "GoogleLoginRequest",
     "TokenData",
     "RefreshTokenData",
+    "JWTPayload",
+    "UserData",
     # Market data models
     "Bar",
     "DatafeedConfiguration",

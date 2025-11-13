@@ -5,12 +5,18 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from authlib.integrations.base_client import OAuthError
+import httpx
 from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException
 from jose import jwt
 
-from trading_api.models.auth import DeviceInfo, TokenResponse, User, UserCreate
+from trading_api.models.auth import (
+    DeviceInfo,
+    JWTPayload,
+    TokenResponse,
+    User,
+    UserCreate,
+)
 from trading_api.modules.auth.repository import (
     InMemoryRefreshTokenRepository,
     InMemoryUserRepository,
@@ -83,30 +89,40 @@ class AuthService(AuthServiceInterface, ServiceInterface):
         Raises HTTPException(401) if invalid.
         """
         try:
-            claims = await self.oauth.google.parse_id_token(
-                id_token,
-                claims_options={
-                    "aud": {"essential": True, "value": settings.GOOGLE_CLIENT_ID},
-                    "iss": {
-                        "essential": True,
-                        "values": [
-                            "accounts.google.com",
-                            "https://accounts.google.com",
-                        ],
-                    },
-                    "exp": {"essential": True},
-                },
-            )
-
-            if not claims.get("email_verified"):
-                raise HTTPException(
-                    status_code=401, detail="Email not verified by Google"
+            # Use Google's tokeninfo endpoint to verify the token
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://www.googleapis.com/oauth2/v3/tokeninfo",
+                    params={"id_token": id_token},
                 )
 
-            return dict(claims)
-        except OAuthError as e:
+                if resp.status_code != 200:
+                    raise HTTPException(
+                        status_code=401, detail=f"Invalid Google token: {resp.text}"
+                    )
+
+                claims = resp.json()
+
+                # Verify audience
+                if claims.get("aud") != settings.GOOGLE_CLIENT_ID:
+                    raise HTTPException(
+                        status_code=401, detail="Invalid token audience"
+                    )
+
+                # Verify email is verified
+                email_verified = claims.get("email_verified")
+                # Google returns string "true" or boolean True
+                if email_verified not in (True, "true"):
+                    raise HTTPException(
+                        status_code=401, detail="Email not verified by Google"
+                    )
+
+                return claims
+        except HTTPException:
+            raise
+        except Exception as e:
             raise HTTPException(
-                status_code=401, detail=f"Invalid Google token: {str(e)}"
+                status_code=500, detail=f"Token verification error: {str(e)}"
             )
 
     async def authenticate_google_user(
@@ -204,15 +220,19 @@ class AuthService(AuthServiceInterface, ServiceInterface):
         await self.token_repository.revoke_token(token_hash)
 
     def _create_access_token(self, user: User) -> str:
-        """Create RS256 JWT access token"""
+        """Create RS256 JWT access token with full user data"""
         now = datetime.now(timezone.utc)
         expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        to_encode = {
-            "user_id": user.id,
-            "exp": expire,
-        }
+        payload = JWTPayload(
+            user_id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+            picture=user.picture,
+            exp=int(expire.timestamp()),
+            iat=int(now.timestamp()),
+        )
         encoded_jwt = jwt.encode(
-            to_encode,
+            payload.model_dump(mode="json"),
             settings.jwt_private_key,
             algorithm=settings.JWT_ALGORITHM,
         )
@@ -223,6 +243,12 @@ class AuthService(AuthServiceInterface, ServiceInterface):
         return secrets.token_urlsafe(64)
 
     def _hash_token(self, token: str) -> str:
+        """
+        Hash token using SHA256.
+        Note: For production, consider using bcrypt/argon2 for better security.
+        SHA256 is used here to avoid bcrypt 72-byte limit and passlib/bcrypt compatibility issues.
+        """
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
         """
         Hash token using SHA256.
         Note: For production, consider using bcrypt/argon2 for better security.

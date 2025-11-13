@@ -5,11 +5,13 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from jose import jwt
 
 from trading_api.models.auth import TokenResponse
 from trading_api.modules.auth.service import AuthService
 from trading_api.modules.auth.tests.conftest import DeviceInfoFactory, UserCreateFactory
+from trading_api.shared.config import settings
 
 
 @pytest.fixture
@@ -30,7 +32,7 @@ def mock_google_claims() -> dict[str, Any]:
         "family_name": "User",
         "picture": "https://example.com/photo.jpg",
         "iss": "https://accounts.google.com",
-        "aud": "test-client-id",
+        "aud": settings.GOOGLE_CLIENT_ID,
     }
 
 
@@ -42,10 +44,13 @@ class TestAuthServiceGoogleTokenVerification:
         self, auth_service: AuthService, mock_google_claims: dict[str, Any]
     ) -> None:
         """Test verifying valid Google ID token"""
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
+        with patch("trading_api.modules.auth.service.httpx.AsyncClient") as mock_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                return_value=mock_response
+            )
 
             claims = await auth_service.verify_google_id_token("valid_id_token")
 
@@ -56,39 +61,38 @@ class TestAuthServiceGoogleTokenVerification:
     @pytest.mark.asyncio
     async def test_verify_invalid_google_token(self, auth_service: AuthService) -> None:
         """Test verifying invalid Google ID token raises HTTPException"""
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            from authlib.integrations.base_client import OAuthError
-
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(
-                side_effect=OAuthError("Invalid token")
+        with patch("trading_api.modules.auth.service.httpx.AsyncClient") as mock_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 400
+            mock_response.text = "Invalid token"
+            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                return_value=mock_response
             )
-            mock_oauth.return_value.google = mock_google
 
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:
                 await auth_service.verify_google_id_token("invalid_token")
 
-            assert "401" in str(exc_info.value) or "Invalid" in str(exc_info.value)
+            assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
     async def test_verify_unverified_email_rejected(
         self, auth_service: AuthService, mock_google_claims: dict[str, Any]
     ) -> None:
         """Test that unverified email is rejected"""
-        mock_google_claims["email_verified"] = False
+        with patch("trading_api.modules.auth.service.httpx.AsyncClient") as mock_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            unverified_claims = {**mock_google_claims, "email_verified": False}
+            mock_response.json.return_value = unverified_claims
+            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
+                return_value=mock_response
+            )
 
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
-
-            with pytest.raises(Exception) as exc_info:
+            with pytest.raises(HTTPException) as exc_info:
                 await auth_service.verify_google_id_token("token_with_unverified_email")
 
-            assert (
-                "401" in str(exc_info.value)
-                or "not verified" in str(exc_info.value).lower()
-            )
+            assert exc_info.value.status_code == 401
+            assert "Email not verified" in str(exc_info.value.detail)
 
 
 class TestAuthServiceAuthentication:
