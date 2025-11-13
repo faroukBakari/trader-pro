@@ -2,6 +2,7 @@ import hashlib
 import secrets
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from authlib.integrations.base_client import OAuthError
@@ -11,10 +12,13 @@ from jose import jwt
 
 from trading_api.models.auth import DeviceInfo, TokenResponse, User, UserCreate
 from trading_api.modules.auth.repository import (
+    InMemoryRefreshTokenRepository,
+    InMemoryUserRepository,
     RefreshTokenRepositoryInterface,
     UserRepositoryInterface,
 )
 from trading_api.shared import settings
+from trading_api.shared.service_interface import ServiceInterface
 
 
 class AuthServiceInterface(ABC):
@@ -50,23 +54,22 @@ class AuthServiceInterface(ABC):
         """Revoke refresh token (logout)"""
 
 
-class AuthService(AuthServiceInterface):
+class AuthService(AuthServiceInterface, ServiceInterface):
     """Authentication service implementation"""
 
-    def __init__(
-        self,
-        user_repository: UserRepositoryInterface,
-        token_repository: RefreshTokenRepositoryInterface,
-    ) -> None:
-        self.user_repository = user_repository
-        self.token_repository = token_repository
+    def __init__(self, module_dir: Path) -> None:
+        super().__init__(module_dir)
+        self.user_repository: UserRepositoryInterface = InMemoryUserRepository()
+        self.token_repository: RefreshTokenRepositoryInterface = (
+            InMemoryRefreshTokenRepository()
+        )
         self._oauth: OAuth | None = None
 
     @property
     def oauth(self) -> OAuth:
         """Lazy initialization of OAuth instance for testability"""
         if self._oauth is None:
-            self._oauth = OAuth()
+            self._oauth = OAuth()  # type: ignore[no-untyped-call]
             self._oauth.register(
                 name="google",
                 client_id=settings.GOOGLE_CLIENT_ID,

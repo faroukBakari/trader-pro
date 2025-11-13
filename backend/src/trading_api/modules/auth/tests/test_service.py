@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,27 +17,9 @@ from trading_api.modules.auth.tests.conftest import DeviceInfoFactory, UserCreat
 
 
 @pytest.fixture
-def user_repository() -> InMemoryUserRepository:
-    """Fixture providing user repository"""
-    return InMemoryUserRepository()
-
-
-@pytest.fixture
-def token_repository() -> InMemoryRefreshTokenRepository:
-    """Fixture providing token repository"""
-    return InMemoryRefreshTokenRepository()
-
-
-@pytest.fixture
-def auth_service(
-    user_repository: InMemoryUserRepository,
-    token_repository: InMemoryRefreshTokenRepository,
-) -> AuthService:
+def auth_service() -> AuthService:
     """Fixture providing auth service"""
-    return AuthService(
-        user_repository=user_repository,
-        token_repository=token_repository,
-    )
+    return AuthService(module_dir=Path(__file__).parent.parent)
 
 
 @pytest.fixture
@@ -119,7 +102,6 @@ class TestAuthServiceAuthentication:
     async def test_authenticate_new_user(
         self,
         auth_service: AuthService,
-        user_repository: InMemoryUserRepository,
         mock_google_claims: dict[str, Any],
     ) -> None:
         """Test authenticating a new user creates user and returns tokens"""
@@ -138,7 +120,7 @@ class TestAuthServiceAuthentication:
         assert response.token_type == "bearer"
         assert response.expires_in > 0
 
-        user = await user_repository.get_by_google_id("google-user-123")
+        user = await auth_service.user_repository.get_by_google_id("google-user-123")
         assert user is not None
         assert user.email == "test@example.com"
 
@@ -146,14 +128,13 @@ class TestAuthServiceAuthentication:
     async def test_authenticate_existing_user(
         self,
         auth_service: AuthService,
-        user_repository: InMemoryUserRepository,
         mock_google_claims: dict[str, Any],
     ) -> None:
         """Test authenticating existing user updates last_login"""
         existing_user_data = UserCreateFactory.build(
             email="test@example.com", google_id="google-user-123"
         )
-        created_user = await user_repository.create(existing_user_data)
+        created_user = await auth_service.user_repository.create(existing_user_data)
         original_last_login = created_user.last_login
 
         device_info = DeviceInfoFactory.build()
@@ -167,7 +148,7 @@ class TestAuthServiceAuthentication:
 
         assert isinstance(response, TokenResponse)
 
-        updated_user = await user_repository.get_by_id(created_user.id)
+        updated_user = await auth_service.user_repository.get_by_id(created_user.id)
         assert updated_user is not None
         assert updated_user.last_login > original_last_login
 
@@ -226,8 +207,6 @@ class TestAuthServiceTokenRefresh:
     async def test_refresh_access_token(
         self,
         auth_service: AuthService,
-        user_repository: InMemoryUserRepository,
-        token_repository: InMemoryRefreshTokenRepository,
         mock_google_claims: dict[str, Any],
     ) -> None:
         """Test refreshing access token with valid refresh token"""
@@ -288,7 +267,6 @@ class TestAuthServiceTokenRefresh:
     async def test_old_refresh_token_revoked_after_rotation(
         self,
         auth_service: AuthService,
-        token_repository: InMemoryRefreshTokenRepository,
         mock_google_claims: dict[str, Any],
     ) -> None:
         """Test that old refresh token is revoked after successful rotation"""
