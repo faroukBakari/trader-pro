@@ -21,7 +21,11 @@ export const useAuthStore = defineStore('auth', () => {
   const error = ref<string | null>(null)
   const isGoogleReady = ref(false)
 
-  const authApi = new AuthApi(new Configuration({ basePath: '/api/v1/auth' }))
+  const authApi = new AuthApi(new Configuration({
+    basePath: '/api/v1/auth',
+    // @ts-expect-error - withCredentials not in type definition but supported by axios
+    withCredentials: true,
+  }))
   let refreshTimeoutId: ReturnType<typeof setTimeout> | null = null
   let googleLogin: (() => void) | null = null
 
@@ -44,13 +48,8 @@ export const useAuthStore = defineStore('auth', () => {
 
           localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refresh_token)
 
-          const authApiWithToken = new AuthApi(
-            new Configuration({
-              basePath: '/api/v1/auth',
-              accessToken: result.data.access_token
-            })
-          )
-          const userResult = await authApiWithToken.getCurrentUser()
+          // Cookie-based auth: no need to pass accessToken, cookies sent automatically
+          const userResult = await authApi.getCurrentUser()
           user.value = userResult.data
 
           scheduleTokenRefresh()
@@ -121,13 +120,8 @@ export const useAuthStore = defineStore('auth', () => {
 
       localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refresh_token)
 
-      const authApiWithToken = new AuthApi(
-        new Configuration({
-          basePath: '/api/v1/auth',
-          accessToken: result.data.access_token
-        })
-      )
-      const userResult = await authApiWithToken.getCurrentUser()
+      // Cookie-based auth: no need to pass accessToken, cookies sent automatically
+      const userResult = await authApi.getCurrentUser()
       user.value = userResult.data
 
       scheduleTokenRefresh()
@@ -173,13 +167,8 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refresh_token)
 
       console.log('Fetching user data...')
-      const authApiWithToken = new AuthApi(
-        new Configuration({
-          basePath: '/api/v1/auth',
-          accessToken: result.data.access_token
-        })
-      )
-      const userResult = await authApiWithToken.getCurrentUser()
+      // Cookie-based auth: no need to pass accessToken, cookies sent automatically
+      const userResult = await authApi.getCurrentUser()
       user.value = userResult.data
 
       console.log('Login complete, user:', user.value?.email)

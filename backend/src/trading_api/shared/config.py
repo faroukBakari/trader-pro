@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 5
     GOOGLE_CLIENT_ID: str = ""
 
+    # CORS Configuration
+    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8000"]
+    CORS_ALLOW_CREDENTIALS: bool = True
+    
+    # Cookie Configuration
+    COOKIE_SECURE: bool = False  # Set to True in production (HTTPS only)
+
     model_config = SettingsConfigDict(env_file=".env.local", env_file_encoding="utf-8")
 
     @model_validator(mode="after")

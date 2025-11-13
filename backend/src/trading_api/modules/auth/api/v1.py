@@ -10,7 +10,7 @@ This module provides REST API endpoints for:
 
 from typing import Annotated, Any, cast
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Response
 
 from trading_api.models.auth import (
     DeviceInfo,
@@ -21,6 +21,7 @@ from trading_api.models.auth import (
     User,
     UserData,
 )
+from trading_api.shared import settings
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.middleware.auth import get_current_user
 
@@ -40,6 +41,7 @@ class AuthApi(APIRouterInterface):
             operation_id="login",
         )
         async def login(
+            response: Response,
             request: GoogleLoginRequest,
         ) -> TokenResponse:
             """
@@ -47,8 +49,10 @@ class AuthApi(APIRouterInterface):
 
             Verifies the Google ID token, creates or updates user,
             and returns access token + refresh token.
+            Sets access_token as HttpOnly cookie for enhanced security.
 
             Args:
+                response: FastAPI response object (for setting cookies)
                 request: Login request containing Google ID token
 
             Returns:
@@ -65,9 +69,21 @@ class AuthApi(APIRouterInterface):
             auth_service = cast(AuthService, self.service)
 
             try:
-                return await auth_service.authenticate_google_user(
+                tokens = await auth_service.authenticate_google_user(
                     request.google_token, device_info
                 )
+
+                # Set access token as HttpOnly cookie
+                response.set_cookie(
+                    key="access_token",
+                    value=tokens.access_token,
+                    httponly=True,  # Prevents JavaScript access (XSS protection)
+                    secure=settings.COOKIE_SECURE,  # HTTPS only when True
+                    samesite="strict",  # CSRF protection
+                    max_age=300,  # 5 minutes (matches token expiry)
+                )
+
+                return tokens
             except HTTPException:
                 raise
             except Exception as e:
@@ -80,14 +96,17 @@ class AuthApi(APIRouterInterface):
             operation_id="refreshToken",
         )
         async def refresh_token(
+            response: Response,
             request: RefreshRequest,
         ) -> TokenResponse:
             """
             Refresh access token using refresh token.
 
             Implements token rotation: issues new tokens and revokes old refresh token.
+            Updates access_token cookie with new token.
 
             Args:
+                response: FastAPI response object (for setting cookies)
                 request: Refresh request containing refresh token
 
             Returns:
@@ -103,9 +122,21 @@ class AuthApi(APIRouterInterface):
             auth_service = cast(AuthService, self.service)
 
             try:
-                return await auth_service.refresh_access_token(
+                tokens = await auth_service.refresh_access_token(
                     request.refresh_token, device_info
                 )
+
+                # Update access token cookie
+                response.set_cookie(
+                    key="access_token",
+                    value=tokens.access_token,
+                    httponly=True,
+                    secure=settings.COOKIE_SECURE,
+                    samesite="strict",
+                    max_age=300,  # 5 minutes
+                )
+
+                return tokens
             except HTTPException:
                 raise
             except Exception as e:
@@ -118,12 +149,15 @@ class AuthApi(APIRouterInterface):
             operation_id="logout",
         )
         async def logout(
+            response: Response,
             request: LogoutRequest,
         ) -> dict[str, str]:
             """
             Logout by revoking refresh token.
+            Clears access_token cookie.
 
             Args:
+                response: FastAPI response object (for clearing cookies)
                 request: Logout request containing refresh token
 
             Returns:
@@ -133,10 +167,19 @@ class AuthApi(APIRouterInterface):
 
             try:
                 await auth_service.logout(request.refresh_token)
-                return {"message": "Logged out successfully"}
             except Exception:
                 # Silent failure - logout always succeeds
-                return {"message": "Logged out successfully"}
+                pass
+
+            # Clear access token cookie
+            response.delete_cookie(
+                key="access_token",
+                httponly=True,
+                secure=settings.COOKIE_SECURE,
+                samesite="strict",
+            )
+
+            return {"message": "Logged out successfully"}
 
         @self.get(
             "/me",

@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
-from trading_api.shared import Module, ModuleApp, ModuleRegistry
+from trading_api.shared import Module, ModuleApp, ModuleRegistry, settings
 
 # Configure logging for the application
 logging.basicConfig(
@@ -307,8 +307,8 @@ class AppFactory:
         # Add CORS middleware
         modular_app.add_middleware(
             CORSMiddleware,
-            allow_origins=["*"],  # Allow all origins for development
-            allow_credentials=True,
+            allow_origins=settings.CORS_ORIGINS,
+            allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
             allow_methods=["*"],
             allow_headers=["*"],
         )

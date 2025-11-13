@@ -96,10 +96,8 @@ export class WebSocketBase {
     if (!this.wsCnxPromise) {
       this.wsCnxPromise = new Promise((resolve, reject) => {
         try {
-          // TODO: retrieve this.access_token from session cookies and use new WebSocket(this.config.wsUrl + "?access_token=...")
-          const url = this.config.wsUrl // + "?access_token=..."
-          this.logger.log('Connecting to', url)
-          this.ws = new WebSocket(url)
+          this.logger.log('Connecting to', this.config.wsUrl)
+          this.ws = new WebSocket(this.config.wsUrl)
 
           this.ws.onerror = async (error) => {
             this.logger.log('Error:', error)

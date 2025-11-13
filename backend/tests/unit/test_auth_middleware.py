@@ -26,6 +26,7 @@ def create_mock_request(
     host: str = "192.168.1.100",
     user_agent: str = "TestBrowser/1.0",
     query_params: list[tuple[str, str]] | None = None,
+    cookies: dict[str, str] | None = None,
 ) -> MagicMock:
     """
     Create properly-typed mock request for testing.
@@ -37,6 +38,7 @@ def create_mock_request(
         host: Client IP address
         user_agent: User-Agent header value
         query_params: List of (key, value) tuples for query parameters
+        cookies: Dictionary of cookie name/value pairs
 
     Returns:
         MagicMock configured as a Request with proper Starlette types
@@ -45,6 +47,7 @@ def create_mock_request(
     mock.client = Address(host=host, port=443)
     mock.headers = Headers({"user-agent": user_agent})
     mock.query_params = QueryParams(query_params or [])
+    mock.cookies = cookies or {}
     return mock
 
 
@@ -258,6 +261,99 @@ class TestGetCurrentUserREST:
 
         assert exc_info.value.status_code == 401
         assert "missing" in exc_info.value.detail.lower()
+
+
+class TestGetCurrentUserCookie:
+    """Tests for cookie-based authentication (preferred method)"""
+
+    @pytest.mark.asyncio
+    async def test_valid_token_from_cookie(self, valid_jwt_token: str) -> None:
+        """Test authentication with token in cookie"""
+        mock_request = create_mock_request(cookies={"access_token": valid_jwt_token})
+
+        result = await get_current_user(mock_request, None)
+
+        assert result.user_id == "USER-123"
+        assert result.email == "test@example.com"
+        assert hasattr(result, "device_fingerprint")
+
+    @pytest.mark.asyncio
+    async def test_expired_token_from_cookie_raises_401(
+        self, expired_jwt_token: str
+    ) -> None:
+        """Test cookie auth rejects expired token"""
+        mock_request = create_mock_request(cookies={"access_token": expired_jwt_token})
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(mock_request, None)
+
+        assert exc_info.value.status_code == 401
+        assert "expired" in exc_info.value.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_cookie_takes_priority_over_header(
+        self, valid_jwt_token: str, expired_jwt_token: str
+    ) -> None:
+        """Test that cookie is checked before Authorization header"""
+        mock_request = create_mock_request(cookies={"access_token": valid_jwt_token})
+
+        # Pass expired token in header - should be ignored
+        credentials = HTTPAuthorizationCredentials(
+            scheme="Bearer", credentials=expired_jwt_token
+        )
+
+        # Should succeed because cookie has valid token
+        result = await get_current_user(mock_request, credentials)
+        assert result.user_id == "USER-123"
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_header_when_no_cookie(
+        self, valid_jwt_token: str
+    ) -> None:
+        """Test that header auth works when no cookie present"""
+        mock_request = create_mock_request(cookies={})
+        credentials = HTTPAuthorizationCredentials(
+            scheme="Bearer", credentials=valid_jwt_token
+        )
+
+        result = await get_current_user(mock_request, credentials)
+        assert result.user_id == "USER-123"
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_query_param_when_no_cookie_or_header(
+        self, valid_jwt_token: str
+    ) -> None:
+        """Test that query param works when no cookie or header"""
+        mock_request = create_mock_request(
+            cookies={}, query_params=[("token", valid_jwt_token)]
+        )
+
+        result = await get_current_user(mock_request, None)
+        assert result.user_id == "USER-123"
+
+    @pytest.mark.asyncio
+    async def test_invalid_token_in_cookie_raises_401(self) -> None:
+        """Test that invalid token in cookie raises 401"""
+        mock_request = create_mock_request(
+            cookies={"access_token": "invalid.jwt.token"}
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(mock_request, None)
+
+        assert exc_info.value.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_empty_cookie_falls_back_to_other_methods(
+        self, valid_jwt_token: str
+    ) -> None:
+        """Test that empty cookie value falls back to other methods"""
+        mock_request = create_mock_request(
+            cookies={"access_token": ""}, query_params=[("token", valid_jwt_token)]
+        )
+
+        result = await get_current_user(mock_request, None)
+        assert result.user_id == "USER-123"
 
 
 class TestGetCurrentUserWebSocket:
