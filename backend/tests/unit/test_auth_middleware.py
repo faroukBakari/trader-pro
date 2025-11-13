@@ -2,6 +2,7 @@
 Tests for authentication middleware.
 
 Tests stateless JWT validation with public key only.
+Cookie-only authentication for REST endpoints.
 Follows strict typing rules - no type: ignore comments.
 """
 
@@ -10,10 +11,8 @@ from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
-from fastapi.security import HTTPAuthorizationCredentials
 from jose import jwt
 from starlette.datastructures import Address, Headers, QueryParams
-from starlette.requests import Request
 
 from trading_api.shared import settings
 from trading_api.shared.middleware.auth import (
@@ -160,60 +159,49 @@ class TestExtractDeviceFingerprint:
         assert len(fingerprint) == 32
 
 
-class TestGetCurrentUserREST:
-    """Tests for REST API authentication (Authorization header)"""
+class TestGetCurrentUserCookieAuth:
+    """Tests for cookie-based authentication (REST endpoints)"""
 
     @pytest.mark.asyncio
-    async def test_valid_token_returns_user_data(
-        self, mock_request: Request, valid_jwt_token: str
-    ) -> None:
-        """Test that valid token returns user_id and fingerprint"""
-        credentials = HTTPAuthorizationCredentials(
-            scheme="Bearer", credentials=valid_jwt_token
-        )
+    async def test_valid_token_returns_user_data(self, valid_jwt_token: str) -> None:
+        """Test that valid token in cookie returns user_id and fingerprint"""
+        mock_request = create_mock_request(cookies={"access_token": valid_jwt_token})
 
-        result = await get_current_user(mock_request, credentials)
+        result = await get_current_user(mock_request)
 
         assert result.user_id == "USER-123"
+        assert result.email == "test@example.com"
         assert hasattr(result, "device_fingerprint")
         assert len(result.device_fingerprint) == 32
 
     @pytest.mark.asyncio
-    async def test_expired_token_raises_401(
-        self, mock_request: Request, expired_jwt_token: str
-    ) -> None:
+    async def test_expired_token_raises_401(self, expired_jwt_token: str) -> None:
         """Test that expired token raises HTTPException 401"""
-        credentials = HTTPAuthorizationCredentials(
-            scheme="Bearer", credentials=expired_jwt_token
-        )
+        mock_request = create_mock_request(cookies={"access_token": expired_jwt_token})
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, credentials)
+            await get_current_user(mock_request)
 
         assert exc_info.value.status_code == 401
         assert "expired" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
-    async def test_invalid_signature_raises_401(self, mock_request: Request) -> None:
+    async def test_invalid_signature_raises_401(self) -> None:
         """Test that token with invalid signature raises 401"""
         payload = {
             "user_id": "USER-123",
             "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
         }
-        # Sign with wrong key
         invalid_token = jwt.encode(payload, "wrong-key", algorithm="HS256")
-
-        credentials = HTTPAuthorizationCredentials(
-            scheme="Bearer", credentials=invalid_token
-        )
+        mock_request = create_mock_request(cookies={"access_token": invalid_token})
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, credentials)
+            await get_current_user(mock_request)
 
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_missing_user_id_raises_401(self, mock_request: Request) -> None:
+    async def test_missing_user_id_raises_401(self) -> None:
         """Test that token without user_id raises 401"""
         payload = {
             "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
@@ -223,20 +211,19 @@ class TestGetCurrentUserREST:
             settings.jwt_private_key,
             algorithm=settings.JWT_ALGORITHM,
         )
-
-        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        mock_request = create_mock_request(cookies={"access_token": token})
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, credentials)
+            await get_current_user(mock_request)
 
         assert exc_info.value.status_code == 401
         assert "user_id" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
-    async def test_invalid_user_id_type_raises_401(self, mock_request: Request) -> None:
+    async def test_invalid_user_id_type_raises_401(self) -> None:
         """Test that token with non-string user_id raises 401"""
         payload = {
-            "user_id": 12345,  # Integer instead of string
+            "user_id": 12345,
             "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
         }
         token = jwt.encode(
@@ -244,169 +231,35 @@ class TestGetCurrentUserREST:
             settings.jwt_private_key,
             algorithm=settings.JWT_ALGORITHM,
         )
-
-        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        mock_request = create_mock_request(cookies={"access_token": token})
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, credentials)
+            await get_current_user(mock_request)
 
         assert exc_info.value.status_code == 401
         assert "user_id" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
-    async def test_missing_token_raises_401(self, mock_request: Request) -> None:
-        """Test that missing token raises 401"""
-        with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, None)
-
-        assert exc_info.value.status_code == 401
-        assert "missing" in exc_info.value.detail.lower()
-
-
-class TestGetCurrentUserCookie:
-    """Tests for cookie-based authentication (preferred method)"""
-
-    @pytest.mark.asyncio
-    async def test_valid_token_from_cookie(self, valid_jwt_token: str) -> None:
-        """Test authentication with token in cookie"""
-        mock_request = create_mock_request(cookies={"access_token": valid_jwt_token})
-
-        result = await get_current_user(mock_request, None)
-
-        assert result.user_id == "USER-123"
-        assert result.email == "test@example.com"
-        assert hasattr(result, "device_fingerprint")
-
-    @pytest.mark.asyncio
-    async def test_expired_token_from_cookie_raises_401(
-        self, expired_jwt_token: str
-    ) -> None:
-        """Test cookie auth rejects expired token"""
-        mock_request = create_mock_request(cookies={"access_token": expired_jwt_token})
-
-        with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, None)
-
-        assert exc_info.value.status_code == 401
-        assert "expired" in exc_info.value.detail.lower()
-
-    @pytest.mark.asyncio
-    async def test_cookie_takes_priority_over_header(
-        self, valid_jwt_token: str, expired_jwt_token: str
-    ) -> None:
-        """Test that cookie is checked before Authorization header"""
-        mock_request = create_mock_request(cookies={"access_token": valid_jwt_token})
-
-        # Pass expired token in header - should be ignored
-        credentials = HTTPAuthorizationCredentials(
-            scheme="Bearer", credentials=expired_jwt_token
-        )
-
-        # Should succeed because cookie has valid token
-        result = await get_current_user(mock_request, credentials)
-        assert result.user_id == "USER-123"
-
-    @pytest.mark.asyncio
-    async def test_fallback_to_header_when_no_cookie(
-        self, valid_jwt_token: str
-    ) -> None:
-        """Test that header auth works when no cookie present"""
+    async def test_missing_cookie_raises_401(self) -> None:
+        """Test that missing cookie raises 401"""
         mock_request = create_mock_request(cookies={})
-        credentials = HTTPAuthorizationCredentials(
-            scheme="Bearer", credentials=valid_jwt_token
-        )
-
-        result = await get_current_user(mock_request, credentials)
-        assert result.user_id == "USER-123"
-
-    @pytest.mark.asyncio
-    async def test_fallback_to_query_param_when_no_cookie_or_header(
-        self, valid_jwt_token: str
-    ) -> None:
-        """Test that query param works when no cookie or header"""
-        mock_request = create_mock_request(
-            cookies={}, query_params=[("token", valid_jwt_token)]
-        )
-
-        result = await get_current_user(mock_request, None)
-        assert result.user_id == "USER-123"
-
-    @pytest.mark.asyncio
-    async def test_invalid_token_in_cookie_raises_401(self) -> None:
-        """Test that invalid token in cookie raises 401"""
-        mock_request = create_mock_request(
-            cookies={"access_token": "invalid.jwt.token"}
-        )
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, None)
-
-        assert exc_info.value.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_empty_cookie_falls_back_to_other_methods(
-        self, valid_jwt_token: str
-    ) -> None:
-        """Test that empty cookie value falls back to other methods"""
-        mock_request = create_mock_request(
-            cookies={"access_token": ""}, query_params=[("token", valid_jwt_token)]
-        )
-
-        result = await get_current_user(mock_request, None)
-        assert result.user_id == "USER-123"
-
-
-class TestGetCurrentUserWebSocket:
-    """Tests for WebSocket authentication (query parameter)"""
-
-    @pytest.mark.asyncio
-    async def test_valid_token_from_query_param(self, valid_jwt_token: str) -> None:
-        """Test WebSocket auth with token in query parameter"""
-        mock_request = create_mock_request(query_params=[("token", valid_jwt_token)])
-
-        result = await get_current_user(mock_request, None)
-
-        assert result.user_id == "USER-123"
-        assert hasattr(result, "device_fingerprint")
-
-    @pytest.mark.asyncio
-    async def test_expired_token_from_query_param_raises_401(
-        self, expired_jwt_token: str
-    ) -> None:
-        """Test WebSocket auth rejects expired token"""
-        mock_request = create_mock_request(query_params=[("token", expired_jwt_token)])
-
-        with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, None)
-
-        assert exc_info.value.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_missing_query_param_raises_401(self) -> None:
-        """Test WebSocket auth fails without token query param"""
-        mock_request = create_mock_request(query_params=[])
-
-        with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, None)
+            await get_current_user(mock_request)
 
         assert exc_info.value.status_code == 401
         assert "missing" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
-    async def test_invalid_signature_from_query_param_raises_401(self) -> None:
-        """Test WebSocket auth rejects invalid signature"""
-        payload = {
-            "user_id": "USER-123",
-            "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
-        }
-        invalid_token = jwt.encode(payload, "wrong-key", algorithm="HS256")
-
-        mock_request = create_mock_request(query_params=[("token", invalid_token)])
+    async def test_empty_cookie_raises_401(self) -> None:
+        """Test that empty cookie value raises 401"""
+        mock_request = create_mock_request(cookies={"access_token": ""})
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, None)
+            await get_current_user(mock_request)
 
         assert exc_info.value.status_code == 401
+        assert "missing" in exc_info.value.detail.lower()
 
 
 class TestMiddlewareIndependence:
@@ -439,47 +292,32 @@ class TestTokenValidationEdgeCases:
     """Tests for edge cases in token validation"""
 
     @pytest.mark.asyncio
-    async def test_malformed_token_raises_401(self, mock_request: Request) -> None:
+    async def test_malformed_token_raises_401(self) -> None:
         """Test that malformed JWT raises 401"""
-        credentials = HTTPAuthorizationCredentials(
-            scheme="Bearer", credentials="not.a.valid.jwt.token"
+        mock_request = create_mock_request(
+            cookies={"access_token": "not.a.valid.jwt.token"}
         )
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, credentials)
+            await get_current_user(mock_request)
 
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_empty_token_raises_401(self, mock_request: Request) -> None:
-        """Test that empty token raises 401"""
-        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="")
-
-        with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, credentials)
-
-        assert exc_info.value.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_token_without_expiration_raises_401(
-        self, mock_request: MagicMock
-    ) -> None:
-        """Test that token without exp claim raises 401 (Pydantic validation enforces required fields)"""
+    async def test_token_without_expiration_raises_401(self) -> None:
+        """Test that token without exp claim raises 401"""
         payload = {
             "user_id": "USER-123",
-            # No 'exp' field - Pydantic validation should reject this
         }
         token = jwt.encode(
             payload,
             settings.jwt_private_key,
             algorithm=settings.JWT_ALGORITHM,
         )
+        mock_request = create_mock_request(cookies={"access_token": token})
 
-        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
-
-        # Should fail - Pydantic validation requires exp field
         with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(mock_request, credentials)
+            await get_current_user(mock_request)
 
         assert exc_info.value.status_code == 401
         assert "Invalid token payload" in exc_info.value.detail

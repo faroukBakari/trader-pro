@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # CORS Configuration
     CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:8000"]
     CORS_ALLOW_CREDENTIALS: bool = True
-    
+
     # Cookie Configuration
     COOKIE_SECURE: bool = False  # Set to True in production (HTTPS only)
 

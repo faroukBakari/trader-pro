@@ -18,6 +18,9 @@ def valid_jwt_token() -> str:
     settings = Settings()
     payload = {
         "user_id": "TEST-USER-001",
+        "email": "test@example.com",
+        "full_name": "Test User",
+        "picture": "https://example.com/avatar.jpg",
         "exp": int(time.time()) + 300,
         "iat": int(time.time()),
     }
@@ -40,19 +43,17 @@ class TestBarsWebSocketIntegration:
         self, client: TestClient, valid_jwt_token: str
     ) -> None:
         """Test basic WebSocket connection to /api/v1/datafeed/ws"""
+        client.cookies.set("access_token", valid_jwt_token)
 
-        with client.websocket_connect(
-            f"/api/v1/datafeed/ws?token={valid_jwt_token}"
-        ) as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Connection successful if we get here
             assert websocket is not None
 
     def test_subscribe_to_bars(self, client: TestClient, valid_jwt_token: str) -> None:
         """Test subscribing to bar updates"""
+        client.cookies.set("access_token", valid_jwt_token)
 
-        with client.websocket_connect(
-            f"/api/v1/datafeed/ws?token={valid_jwt_token}"
-        ) as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Send subscribe message
             subscribe_msg = {
                 "type": "bars.subscribe",
@@ -76,10 +77,9 @@ class TestBarsWebSocketIntegration:
         self, client: TestClient, valid_jwt_token: str
     ) -> None:
         """Test subscribing to different resolutions creates different topics"""
+        client.cookies.set("access_token", valid_jwt_token)
 
-        with client.websocket_connect(
-            f"/api/v1/datafeed/ws?token={valid_jwt_token}"
-        ) as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Subscribe to 1-minute bars
             websocket.send_json(
                 {
@@ -110,10 +110,9 @@ class TestBarsWebSocketIntegration:
         self, client: TestClient, valid_jwt_token: str
     ) -> None:
         """Test unsubscribing from bar updates"""
+        client.cookies.set("access_token", valid_jwt_token)
 
-        with client.websocket_connect(
-            f"/api/v1/datafeed/ws?token={valid_jwt_token}"
-        ) as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # First subscribe
             websocket.send_json(
                 {
@@ -146,10 +145,9 @@ class TestBarsWebSocketIntegration:
         self, client: TestClient, valid_jwt_token: str
     ) -> None:
         """Test subscribing to multiple symbols"""
+        client.cookies.set("access_token", valid_jwt_token)
 
-        with client.websocket_connect(
-            f"/api/v1/datafeed/ws?token={valid_jwt_token}"
-        ) as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             symbols = ["AAPL", "GOOGL", "MSFT"]
 
             for symbol in symbols:
@@ -170,10 +168,9 @@ class TestBarsWebSocketIntegration:
         self, client: TestClient, valid_jwt_token: str
     ) -> None:
         """Test that subscribing with explicit resolution works correctly"""
+        client.cookies.set("access_token", valid_jwt_token)
 
-        with client.websocket_connect(
-            f"/api/v1/datafeed/ws?token={valid_jwt_token}"
-        ) as websocket:
+        with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Subscribe with explicit resolution
             websocket.send_json(
                 {

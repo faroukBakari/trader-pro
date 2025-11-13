@@ -101,7 +101,7 @@ class AuthService(AuthServiceInterface, ServiceInterface):
                         status_code=401, detail=f"Invalid Google token: {resp.text}"
                     )
 
-                claims = resp.json()
+                claims: dict[str, Any] = resp.json()
 
                 # Verify audience
                 if claims.get("aud") != settings.GOOGLE_CLIENT_ID:
@@ -243,12 +243,6 @@ class AuthService(AuthServiceInterface, ServiceInterface):
         return secrets.token_urlsafe(64)
 
     def _hash_token(self, token: str) -> str:
-        """
-        Hash token using SHA256.
-        Note: For production, consider using bcrypt/argon2 for better security.
-        SHA256 is used here to avoid bcrypt 72-byte limit and passlib/bcrypt compatibility issues.
-        """
-        return hashlib.sha256(token.encode("utf-8")).hexdigest()
         """
         Hash token using SHA256.
         Note: For production, consider using bcrypt/argon2 for better security.

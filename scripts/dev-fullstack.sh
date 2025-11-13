@@ -8,6 +8,8 @@ set -e
 # Create a new process group so we can track all child processes
 set -m
 
+# TODO: refactor to optimize dev / reload flow
+
 # Environment configuration
 export BACKEND_PORT="${BACKEND_PORT:-8000}"
 export VITE_API_URL="${VITE_API_URL:-http://localhost:$BACKEND_PORT}"

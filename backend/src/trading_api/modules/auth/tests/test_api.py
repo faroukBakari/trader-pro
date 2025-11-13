@@ -9,9 +9,11 @@ Tests the REST API layer of the auth module, including:
 
 import time
 from collections.abc import Generator
+from http.cookies import SimpleCookie
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from jose import jwt
@@ -36,6 +38,10 @@ def client(auth_app: ModularApp) -> Generator[TestClient, None, None]:
 @pytest.fixture
 def mock_google_claims() -> dict[str, Any]:
     """Mock Google ID token claims"""
+    from trading_api.shared.config import Settings
+
+    settings = Settings()
+
     return {
         "sub": "google-user-123",
         "email": "test@example.com",
@@ -45,8 +51,18 @@ def mock_google_claims() -> dict[str, Any]:
         "family_name": "User",
         "picture": "https://example.com/photo.jpg",
         "iss": "https://accounts.google.com",
-        "aud": "test-client-id",
+        "aud": settings.GOOGLE_CLIENT_ID,  # Use actual client ID from settings
     }
+
+
+def extract_cookie(response: httpx.Response, cookie_name: str) -> str | None:
+    """Extract cookie value from response"""
+    cookies = SimpleCookie()
+    for header in response.headers.get_list("set-cookie"):
+        cookies.load(header)
+    if cookie_name in cookies:
+        return cookies[cookie_name].value
+    return None
 
 
 class TestLoginEndpoint:
@@ -56,10 +72,21 @@ class TestLoginEndpoint:
         self, client: TestClient, mock_google_claims: dict[str, Any]
     ) -> None:
         """Test successful login with valid Google ID token"""
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
+        # Mock the httpx client used for Google token verification in the service module
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
+            )
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
 
             response = client.post(
                 "/api/v1/auth/login",
@@ -69,7 +96,7 @@ class TestLoginEndpoint:
             assert response.status_code == 200
             data = response.json()
 
-            # Verify response structure
+            # Verify response structure (tokens still in JSON for backward compatibility)
             assert "access_token" in data
             assert "refresh_token" in data
             assert "token_type" in data
@@ -82,16 +109,28 @@ class TestLoginEndpoint:
             assert len(data["access_token"]) > 0
             assert len(data["refresh_token"]) > 0
 
+            # Verify access token is also set as cookie
+            cookie_token = extract_cookie(response, "access_token")
+            assert cookie_token is not None
+            assert cookie_token == data["access_token"]
+
     def test_login_with_invalid_google_token(self, client: TestClient) -> None:
         """Test login fails with invalid Google ID token"""
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            from authlib.integrations.base_client import OAuthError
+        # Mock httpx to return 400 error
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 400
+            mock_response.text = '{"error": "invalid_token"}'
 
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(
-                side_effect=OAuthError(description="Invalid token")
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
             )
-            mock_oauth.return_value.google = mock_google
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
 
             response = client.post(
                 "/api/v1/auth/login",
@@ -107,10 +146,21 @@ class TestLoginEndpoint:
         """Test login fails when Google email is not verified"""
         mock_google_claims["email_verified"] = False
 
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
+        # Mock httpx to return claims with unverified email
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
+            )
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
 
             response = client.post(
                 "/api/v1/auth/login",
@@ -135,10 +185,20 @@ class TestRefreshTokenEndpoint:
     ) -> None:
         """Test token refresh with valid refresh token"""
         # First, login to get tokens
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
+            )
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -169,6 +229,11 @@ class TestRefreshTokenEndpoint:
         assert refresh_data["access_token"] != login_data["access_token"]
         assert refresh_data["refresh_token"] != refresh_token
 
+        # Verify new access token is set as cookie
+        cookie_token = extract_cookie(refresh_response, "access_token")
+        assert cookie_token is not None
+        assert cookie_token == refresh_data["access_token"]
+
     def test_refresh_with_invalid_token(self, client: TestClient) -> None:
         """Test refresh fails with invalid refresh token"""
         response = client.post(
@@ -184,10 +249,20 @@ class TestRefreshTokenEndpoint:
     ) -> None:
         """Test refresh fails after token is revoked (logout)"""
         # Login
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
+            )
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -227,10 +302,20 @@ class TestLogoutEndpoint:
     ) -> None:
         """Test successful logout with valid refresh token"""
         # Login first
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
+            )
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -247,6 +332,11 @@ class TestLogoutEndpoint:
 
         assert logout_response.status_code == 200
         assert logout_response.json()["message"] == "Logged out successfully"
+
+        # Verify access token cookie is cleared
+        cookie_token = extract_cookie(logout_response, "access_token")
+        # Cookie should be empty or have max_age=0 to clear it
+        assert cookie_token == "" or cookie_token is None
 
     def test_logout_with_invalid_token(self, client: TestClient) -> None:
         """Test logout succeeds even with invalid token (silent failure)"""
@@ -274,10 +364,20 @@ class TestGetMeEndpoint:
     ) -> None:
         """Test getting current user info with valid JWT token"""
         # Login first
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
+            )
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -286,7 +386,8 @@ class TestGetMeEndpoint:
             login_data = login_response.json()
             access_token = login_data["access_token"]
 
-        # Get current user
+        # Get current user - test both cookie and header auth
+        # Test with Authorization header
         response = client.get(
             "/api/v1/auth/me",
             headers={"Authorization": f"Bearer {access_token}"},
@@ -301,7 +402,7 @@ class TestGetMeEndpoint:
         assert user["google_id"] == "google-user-123"
 
     def test_get_me_without_token(self, client: TestClient) -> None:
-        """Test /me fails without Authorization header"""
+        """Test /me fails without Authorization header or cookie"""
         response = client.get("/api/v1/auth/me")
 
         assert response.status_code == 401  # Unauthorized (no auth)
@@ -318,7 +419,7 @@ class TestGetMeEndpoint:
     def test_get_me_with_expired_token(
         self, client: TestClient, mock_google_claims: dict[str, Any]
     ) -> None:
-        """Test /me fails with expired JWT token"""
+        """Test /me fails with expired JWT token in cookie"""
         from datetime import datetime, timedelta, timezone
 
         from trading_api.shared.config import Settings
@@ -327,7 +428,10 @@ class TestGetMeEndpoint:
 
         # Create expired token (expired 1 minute ago)
         expired_claims = {
-            "sub": "USER-1",
+            "user_id": "USER-1",
+            "email": "test@example.com",
+            "full_name": "Test User",
+            "picture": "https://example.com/photo.jpg",
             "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
             "iat": datetime.now(timezone.utc) - timedelta(minutes=6),
         }
@@ -338,10 +442,10 @@ class TestGetMeEndpoint:
             algorithm=settings.JWT_ALGORITHM,
         )
 
-        response = client.get(
-            "/api/v1/auth/me",
-            headers={"Authorization": f"Bearer {expired_token}"},
-        )
+        # Set expired token as cookie on the client instance
+        client.cookies.set("access_token", expired_token)
+
+        response = client.get("/api/v1/auth/me")
 
         assert response.status_code == 401
         assert "expired" in response.json()["detail"].lower()
@@ -355,10 +459,20 @@ class TestTokenRotation:
     ) -> None:
         """Test old refresh token cannot be reused after rotation"""
         # Login
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
+            )
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -391,10 +505,20 @@ class TestAccessTokenStructure:
     ) -> None:
         """Test access token is a valid JWT with correct structure"""
         # Login
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
+            )
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -421,10 +545,20 @@ class TestAccessTokenStructure:
         from datetime import datetime, timezone
 
         # Login
-        with patch("trading_api.modules.auth.service.OAuth") as mock_oauth:
-            mock_google = MagicMock()
-            mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-            mock_oauth.return_value.google = mock_google
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
+            )
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
 
             before_login = datetime.now(timezone.utc)
             login_response = client.post(
