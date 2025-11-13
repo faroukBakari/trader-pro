@@ -10,14 +10,17 @@ This module provides REST API endpoints for:
 
 from typing import Annotated, Any, cast
 
-from fastapi import Depends, HTTPException, Response
+from fastapi import Depends, HTTPException, Request, Response
+from jose import JWTError, jwt
 
 from trading_api.models.auth import (
     DeviceInfo,
     GoogleLoginRequest,
     LogoutRequest,
     RefreshRequest,
+    TokenIntrospectResponse,
     TokenResponse,
+    TokenStatus,
     User,
     UserData,
 )
@@ -214,6 +217,57 @@ class AuthApi(APIRouterInterface):
                 raise
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
+
+        @self.get(
+            "/introspect",
+            response_model=TokenIntrospectResponse,
+            summary="Introspect access token",
+            operation_id="introspectToken",
+        )
+        async def introspect(
+            request: Request,
+        ) -> TokenIntrospectResponse:
+            """
+            Validate access token from cookie and return status.
+
+            Lightweight endpoint for checking token validity without
+            fetching full user data. Returns token status and expiration.
+
+            Returns:
+                TokenIntrospectResponse with:
+                - status: valid/expired/revoked/error
+                - exp: expiration timestamp (if available)
+                - error: error message (if status is error)
+            """
+            token = request.cookies.get("access_token")
+
+            if not token:
+                return TokenIntrospectResponse(
+                    status=TokenStatus.ERROR, exp=None, error="Missing access token"
+                )
+
+            try:
+                payload = jwt.decode(
+                    token,
+                    settings.jwt_public_key,
+                    algorithms=[settings.JWT_ALGORITHM],
+                )
+
+                exp = payload.get("exp")
+
+                return TokenIntrospectResponse(
+                    status=TokenStatus.VALID, exp=exp, error=None
+                )
+
+            except JWTError as e:
+                error_str = str(e).lower()
+                if "expired" in error_str:
+                    return TokenIntrospectResponse(
+                        status=TokenStatus.EXPIRED, exp=None, error=str(e)
+                    )
+                return TokenIntrospectResponse(
+                    status=TokenStatus.ERROR, exp=None, error=str(e)
+                )
 
 
 __all__ = ["AuthApi"]

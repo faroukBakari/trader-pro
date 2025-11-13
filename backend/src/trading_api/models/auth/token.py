@@ -1,7 +1,17 @@
 from datetime import datetime
+from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+
+class TokenStatus(str, Enum):
+    """Token validation status"""
+
+    VALID = "valid"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+    ERROR = "error"
 
 
 class DeviceInfo(BaseModel):
@@ -82,3 +92,13 @@ class UserData(BaseModel):
     device_fingerprint: str
 
     model_config = {"frozen": True}
+
+
+class TokenIntrospectResponse(BaseModel):
+    """Response from token introspection endpoint"""
+
+    status: TokenStatus = Field(..., description="Token validation status")
+    exp: Optional[int] = Field(
+        None, description="Token expiration time (Unix timestamp)"
+    )
+    error: Optional[str] = Field(None, description="Error message if status is ERROR")
