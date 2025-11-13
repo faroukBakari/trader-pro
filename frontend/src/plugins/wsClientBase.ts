@@ -79,7 +79,7 @@ export class WebSocketBase {
       reconnect: true,
       maxReconnectAttempts: 5,
       reconnectDelay: 1000,
-      debug: true,
+      debug: false,
       wsUrl,
     }
     this.logger = this.config.debug ? console : { log: () => { }, error: () => { } } as Console
@@ -92,30 +92,14 @@ export class WebSocketBase {
     return WebSocketBase.instances.get(wsUrl)!
   }
 
-  updateAuthToken(token: string | null): void {
-    const baseUrl = this.config.wsUrl.split('?')[0]
-    this.config.wsUrl = token ? `${baseUrl}?token=${token}` : baseUrl
-
-    if (this.ws && this.isConnected()) {
-      this.ws.close()
-      this.ws = null
-      this.wsCnxPromise = null
-
-      this.resubscribeAll()
-    }
-  }
-
   private async __socketConnect(): Promise<void> {
     if (!this.wsCnxPromise) {
       this.wsCnxPromise = new Promise((resolve, reject) => {
         try {
-          if (!this.config.wsUrl.includes('token=')) {
-            reject(new Error('Cannot connect to WebSocket without authentication token'))
-            return
-          }
-
-          this.logger.log('Connecting to', this.config.wsUrl)
-          this.ws = new WebSocket(this.config.wsUrl)
+          // TODO: retrieve this.access_token from session cookies and use new WebSocket(this.config.wsUrl + "?access_token=...")
+          const url = this.config.wsUrl // + "?access_token=..."
+          this.logger.log('Connecting to', url)
+          this.ws = new WebSocket(url)
 
           this.ws.onerror = async (error) => {
             this.logger.log('Error:', error)
@@ -136,24 +120,12 @@ export class WebSocketBase {
 
             this.ws!.onerror = async (error) => {
               this.logger.log('Error:', error)
-              this.ws = null
-              this.wsCnxPromise = null
-              setTimeout(() => {
-                this.resubscribeAll().catch(err => {
-                  this.logger.error('Resubscribe failed after error:', err)
-                })
-              }, 100)
+              setTimeout(() => this.resubscribeAll(), 0)
             }
 
             this.ws!.onclose = async (event) => {
               this.logger.log('Connection closed:', event)
-              this.ws = null
-              this.wsCnxPromise = null
-              setTimeout(() => {
-                this.resubscribeAll().catch(err => {
-                  this.logger.error('Resubscribe failed after close:', err)
-                })
-              }, 100)
+              setTimeout(() => this.resubscribeAll(), 0)
             }
             setTimeout(() => (this.wsCnxPromise = null), 0)
             resolve()
@@ -312,7 +284,7 @@ export class WebSocketBase {
   }
 
   private async resubscribeAll(): Promise<void> {
-    console.log('[WS] Resubscribing to all active subscriptions...', this.subscriptions.size, 'subscriptions')
+    this.logger.log('Resubscribing to all active subscriptions...')
 
     await new Promise(resolve => setTimeout(resolve, 200))
 
@@ -322,59 +294,44 @@ export class WebSocketBase {
 
     this.pendingRequests.clear()
 
-    if (this.subscriptions.size === 0) {
-      console.log('[WS] No subscriptions to resubscribe')
-      return
-    }
-
     for (const subscription of this.subscriptions.values()) {
-      console.log('[WS] Attempting to resubscribe:', subscription.topic)
       subscription.confirmed = false
 
-      while (!subscription.confirmed) {
-        try {
-          const response: SubscriptionResponse = await new Promise((resolve, reject) => {
-            const requestId = `${subscription.subscriptionType}-${subscription.topic}`
+      const response: SubscriptionResponse = await new Promise((resolve, reject) => {
+        const requestId = `${subscription.subscriptionType}-${subscription.topic}`
 
-            const timeout = setTimeout(() => {
-              this.pendingRequests.delete(requestId)
-              reject(new Error(`Request timeout: ${requestId}`))
-            }, 3000)
+        const timeout = setTimeout(() => {
+          this.pendingRequests.delete(requestId)
+          reject(new Error(`Request timeout: ${requestId}`))
+        }, 3000)
 
-            this.pendingRequests.set(requestId, {
-              resolve: (response: SubscriptionResponse) => {
-                clearTimeout(timeout)
-                resolve(response)
-              },
-              reject: (error: Error) => {
-                clearTimeout(timeout)
-                reject(error)
-              },
-              timeout,
-            })
+        this.pendingRequests.set(requestId, {
+          resolve: (response: SubscriptionResponse) => {
+            clearTimeout(timeout)
+            resolve(response)
+          },
+          reject: (error: Error) => {
+            clearTimeout(timeout)
+            reject(error)
+          },
+          timeout,
+        })
 
-            this.sendRequest(subscription.subscriptionType, subscription.subscriptionParams)
-              .catch((error) => {
-                this.pendingRequests.delete(requestId)
-                clearTimeout(timeout)
-                reject(error)
-              })
+        this.sendRequest(subscription.subscriptionType, subscription.subscriptionParams)
+          .catch((error) => {
+            this.pendingRequests.delete(requestId)
+            clearTimeout(timeout)
+            reject(error)
           })
+      })
 
-          if (response.status === 'ok') {
-            subscription.confirmed = true
-            console.log('[WS] Resubscription confirmed:', subscription.topic, response)
-          } else {
-            console.error('[WS] Resubscription failed:', subscription.topic, response)
-            await new Promise(resolve => setTimeout(resolve, 200))
-          }
-        } catch (error) {
-          console.error('[WS] Resubscription error:', error)
-          await new Promise(resolve => setTimeout(resolve, 200))
-        }
+      if (response.status === 'ok') {
+        subscription.confirmed = true
+        this.logger.log(`Resubscription confirmed: ${subscription.topic}`, response)
+      } else {
+        this.logger.error(`Resubscription failed: ${subscription.topic}`, response)
       }
     }
-    console.log('[WS] All subscriptions reestablished')
   }
 
   async unsubscribe(listenerId: string, topic?: string | undefined): Promise<void> {
@@ -402,7 +359,6 @@ export interface WebSocketInterface<TParams extends object, TData extends object
     onUpdate: (data: TData) => void
   ): Promise<string>
   unsubscribe(subscriptionId: string): Promise<void>
-  updateAuthToken(token: string | null): void
   destroy?(): void
 }
 
@@ -455,10 +411,6 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     this.listeners.delete(listenerId)
     await this.ws.unsubscribe(listenerId, topic)
   }
-
-  updateAuthToken(token: string | null): void {
-    this.ws.updateAuthToken(token)
-  }
 }
 
 export class WebSocketFallback<TParams extends object, TData extends object> implements WebSocketInterface<TParams, TData> {
@@ -489,11 +441,6 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
 
   async unsubscribe(subscriptionId: string): Promise<void> {
     this.subscriptions.delete(subscriptionId)
-  }
-
-  updateAuthToken(_token: string | null): void {
-
-    console.log('WebSocketFallback: updateAuthToken called, with token:', _token)
   }
 
   destroy(): void {
