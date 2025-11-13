@@ -6,8 +6,6 @@ import {
   type RefreshRequest,
   type User,
 } from '@/clients_generated/trader-client-auth_v1'
-import { ApiAdapter } from '@/plugins/apiAdapter'
-import { WsAdapter } from '@/plugins/wsAdapter'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { useTokenClient, type CredentialResponse } from 'vue3-google-signin'
@@ -45,9 +43,6 @@ export const useAuthStore = defineStore('auth', () => {
           refreshToken.value = result.data.refresh_token
 
           localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refresh_token)
-
-          ApiAdapter.getInstance().updateAuthToken(result.data.access_token)
-          WsAdapter.getInstance().updateAuthToken(result.data.access_token)
 
           const authApiWithToken = new AuthApi(
             new Configuration({
@@ -126,9 +121,6 @@ export const useAuthStore = defineStore('auth', () => {
 
       localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refresh_token)
 
-      ApiAdapter.getInstance().updateAuthToken(result.data.access_token)
-      WsAdapter.getInstance().updateAuthToken(result.data.access_token)
-
       const authApiWithToken = new AuthApi(
         new Configuration({
           basePath: '/api/v1/auth',
@@ -179,9 +171,6 @@ export const useAuthStore = defineStore('auth', () => {
       refreshToken.value = result.data.refresh_token
 
       localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refresh_token)
-
-      ApiAdapter.getInstance().updateAuthToken(result.data.access_token)
-      WsAdapter.getInstance().updateAuthToken(result.data.access_token)
 
       console.log('Fetching user data...')
       const authApiWithToken = new AuthApi(
@@ -248,9 +237,6 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = null
 
     localStorage.removeItem(REFRESH_TOKEN_KEY)
-
-    ApiAdapter.getInstance().updateAuthToken(null)
-    WsAdapter.getInstance().updateAuthToken(null)
 
     if (refreshTimeoutId) {
       clearTimeout(refreshTimeoutId)

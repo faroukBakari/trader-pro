@@ -49,10 +49,11 @@ def extract_device_fingerprint(request: Request | WebSocket) -> str:
 
 async def get_current_user_ws(websocket: WebSocket) -> UserData:
     """
-    Validate JWT token from WebSocket query parameter and return user data.
+    Validate JWT token from WebSocket query parameter or cookie and return user data.
 
-    WebSocket-specific auth dependency that extracts token from query parameter.
-    Browser WebSocket connections cannot send Authorization header.
+    WebSocket-specific auth dependency that extracts token from:
+    1. Cookie (access_token) - preferred for security
+    2. Query parameter (token) - fallback for backward compatibility
 
     Args:
         websocket: FastAPI WebSocket object (auto-injected by FastAPI)
@@ -63,7 +64,12 @@ async def get_current_user_ws(websocket: WebSocket) -> UserData:
     Raises:
         WebSocketException: 1008 if token is invalid, expired, or missing
     """
-    token = websocket.query_params.get("token")
+    # Try cookie first (preferred for security)
+    token = websocket.cookies.get("access_token")
+    
+    # Fall back to query parameter for backward compatibility
+    if not token:
+        token = websocket.query_params.get("token")
 
     if not token:
         raise WebSocketException(

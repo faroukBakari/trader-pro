@@ -191,22 +191,6 @@ export class ApiAdapter {
     return ApiAdapter.instance
   }
 
-  updateAuthToken(token: string | null): void {
-    const ApiV1BasePath = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + "/v1"
-
-    this.brokerConfig = new BrokerConfigurationV1({
-      basePath: ApiV1BasePath + '/broker',
-      accessToken: token || undefined,
-    })
-    this.datafeedConfig = new DatafeedConfigurationV1({
-      basePath: ApiV1BasePath + '/datafeed',
-      accessToken: token || undefined,
-    })
-
-    this.brokerApi = new BrokerApi(this.brokerConfig)
-    this.datafeedApi = new DatafeedApi(this.datafeedConfig)
-  }
-
   /**
    * Get list of integrated modules with their configuration.
    *

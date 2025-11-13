@@ -111,16 +111,6 @@ export class WsAdapter implements WsAdapterType {
     return WsAdapter.instance
   }
 
-  updateAuthToken(token: string | null): void {
-    this.bars.updateAuthToken(token)
-    this.quotes.updateAuthToken(token)
-    this.orders.updateAuthToken(token)
-    this.positions.updateAuthToken(token)
-    this.executions.updateAuthToken(token)
-    this.equity.updateAuthToken(token)
-    this.brokerConnection.updateAuthToken(token)
-  }
-
   /**
    * Get list of modules with WebSocket support.
    * Static method - hardcoded list based on which modules have WebSocket endpoints wired.
