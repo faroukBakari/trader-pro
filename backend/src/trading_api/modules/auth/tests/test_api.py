@@ -578,3 +578,131 @@ class TestAccessTokenStructure:
         # Verify expiration is ~5 minutes from issue time
         time_to_expiry = (exp_datetime - before_login).total_seconds()
         assert 290 <= time_to_expiry <= 310  # Allow 10s margin for test execution
+
+
+class TestIntrospectEndpoint:
+    """Tests for GET /introspect endpoint"""
+
+    def test_introspect_with_valid_token(
+        self, client: TestClient, mock_google_claims: dict[str, Any]
+    ) -> None:
+        """Test introspect returns valid status for valid token"""
+        # First, login to get a valid token
+        with patch(
+            "trading_api.modules.auth.service.httpx.AsyncClient"
+        ) as mock_async_client:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_google_claims
+
+            mock_client_instance = MagicMock()
+            mock_client_instance.get = AsyncMock(return_value=mock_response)
+            mock_client_instance.__aenter__ = AsyncMock(
+                return_value=mock_client_instance
+            )
+            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+            mock_async_client.return_value = mock_client_instance
+
+            login_response = client.post(
+                "/api/v1/auth/login",
+                json={"google_token": "valid_google_id_token"},
+            )
+
+        assert login_response.status_code == 200
+        access_token = extract_cookie(login_response, "access_token")
+        assert access_token is not None
+
+        # Set the cookie for introspect request
+        client.cookies.set("access_token", access_token)
+
+        # Introspect the token
+        response = client.get("/api/v1/auth/introspect")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["status"] == "valid"
+        assert "exp" in data
+        assert data["exp"] is not None
+        assert data.get("error") is None
+
+    def test_introspect_with_expired_token(self, client: TestClient) -> None:
+        """Test introspect returns expired status for expired token"""
+        from trading_api.shared.config import Settings
+
+        settings = Settings()
+
+        # Create an expired token manually
+        expired_payload = {
+            "user_id": "USER-123",
+            "email": "test@example.com",
+            "full_name": "Test User",
+            "picture": None,
+            "exp": int(time.time()) - 3600,  # Expired 1 hour ago
+            "iat": int(time.time()) - 3660,
+        }
+
+        expired_token = jwt.encode(
+            expired_payload,
+            settings.jwt_private_key,
+            algorithm=settings.JWT_ALGORITHM,
+        )
+
+        # Set the expired cookie
+        client.cookies.set("access_token", expired_token)
+
+        # Introspect the expired token
+        response = client.get("/api/v1/auth/introspect")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["status"] == "expired"
+        assert "error" in data
+        assert data["error"] is not None
+        assert "expired" in data["error"].lower()
+
+    def test_introspect_with_missing_token(self, client: TestClient) -> None:
+        """Test introspect returns error status when token is missing"""
+        # Clear any cookies
+        client.cookies.clear()
+
+        # Introspect without token
+        response = client.get("/api/v1/auth/introspect")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["status"] == "error"
+        assert data["error"] == "Missing access token"
+        assert data.get("exp") is None
+
+    def test_introspect_with_invalid_token(self, client: TestClient) -> None:
+        """Test introspect returns error status for invalid token"""
+        # Set an invalid token
+        client.cookies.set("access_token", "invalid.token.string")
+
+        # Introspect the invalid token
+        response = client.get("/api/v1/auth/introspect")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["status"] == "error"
+        assert "error" in data
+        assert data["error"] is not None
+
+    def test_introspect_with_malformed_token(self, client: TestClient) -> None:
+        """Test introspect returns error status for malformed token"""
+        # Set a malformed token
+        client.cookies.set("access_token", "not-a-jwt-token")
+
+        # Introspect the malformed token
+        response = client.get("/api/v1/auth/introspect")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["status"] == "error"
+        assert "error" in data
+        assert data["error"] is not None

@@ -6,7 +6,9 @@ from .token import (
     RefreshRequest,
     RefreshTokenData,
     TokenData,
+    TokenIntrospectResponse,
     TokenResponse,
+    TokenStatus,
     UserData,
 )
 from .user import User, UserCreate, UserInDB
@@ -16,6 +18,8 @@ __all__ = [
     "UserCreate",
     "UserInDB",
     "TokenResponse",
+    "TokenIntrospectResponse",
+    "TokenStatus",
     "RefreshRequest",
     "LogoutRequest",
     "DeviceInfo",

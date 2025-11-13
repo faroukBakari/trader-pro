@@ -7,6 +7,10 @@
 
 // Per-module-version API clients (versionned-microservice-ready architecture)
 import {
+  AuthApi,
+  Configuration as AuthConfigurationV1
+} from '@clients/trader-client-auth_v1';
+import {
   BrokerApi,
   Configuration as BrokerConfigurationV1
 } from '@clients/trader-client-broker_v1';
@@ -78,6 +82,12 @@ export interface GetBarsResponse {
 
 export interface GetQuotesRequest {
   symbols: string[]
+}
+
+export interface TokenIntrospectResponse {
+  status: 'valid' | 'expired' | 'revoked' | 'error'
+  exp: number | null
+  error: string | null
 }
 
 export type ApiResponse<T> = { status: number; data: T }
@@ -159,8 +169,10 @@ export class ApiAdapter {
 
   private brokerApi!: BrokerApi
   private datafeedApi!: DatafeedApi
+  private authApi!: AuthApi
   private brokerConfig!: BrokerConfigurationV1
   private datafeedConfig!: DatafeedConfigurationV1
+  private authConfig!: AuthConfigurationV1
 
   constructor() {
     if (ApiAdapter.instance) {
@@ -184,10 +196,16 @@ export class ApiAdapter {
       // @ts-expect-error - withCredentials not in type definition but supported by axios
       withCredentials: true,
     })
+    this.authConfig = new AuthConfigurationV1({
+      basePath: ApiV1BasePath + '/auth',
+      // @ts-expect-error - withCredentials not in type definition but supported by axios
+      withCredentials: true,
+    })
 
     // Initialize per-module API clients
     this.brokerApi = new BrokerApi(this.brokerConfig)
     this.datafeedApi = new DatafeedApi(this.datafeedConfig)
+    this.authApi = new AuthApi(this.authConfig)
 
     ApiAdapter.instance = this
   }
@@ -364,6 +382,20 @@ export class ApiAdapter {
     return {
       status: 200,
       data: new Map(versionChecks),
+    }
+  }
+
+  // Auth module endpoints
+  @ApiErrorHandler('/introspect')
+  async introspectToken(): ApiPromise<TokenIntrospectResponse> {
+    const response = await this.authApi.introspectToken()
+    return {
+      status: response.status,
+      data: {
+        status: response.data.status as TokenIntrospectResponse['status'],
+        exp: response.data.exp ?? null,
+        error: response.data.error ?? null,
+      }
     }
   }
 
