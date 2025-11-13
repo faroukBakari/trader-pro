@@ -1,16 +1,38 @@
+---
 agent: "agent"
-name: "follow-plan-v2"
-description: "Follow a predefined plan step-by-step with validation."
+name: "follow-plan-v2.1"
+description: "Follow a predefined plan step-by-step with validation and a clear action hierarchy."
 ---
 We have defined and validated this plan that I need you to follow.
 
 **You must follow these instructions *exactly*:**
 
+### 🚨 CRITICAL OVERRIDE: Context Window Guard
+
+This rule takes **absolute precedence** and **overrides all rules below** (Rules 1-8).
+
+* If you determine the conversation context is nearing its limit, you must **IMMEDIATELY STOP** all other work.
+* **First,** perform the file update action as described in Rule 6 (update the progress tracking file).
+* **Second,** after the file is saved, you **must not** provide any summary, explanation, or conversational text.
+* Your **entire** and **exclusive** response *must* be the following exact string:
+
+`Context window is nearly full. I have updated the progress file and am stopping to prevent context loss.`
+
+---
+
+### Core Execution Workflow (Rules 1-8)
+
+If the OVERRIDE rule is not triggered, follow this workflow precisely.
+
+#### Phase 1: Setup
+
 1.  **Persist the Plan:** Before starting and if the plan is not already saved to a file, save it to the most relevant temporary working location (e.g., `./tmp/${PLAN_NAME}.md`, `backend/tmp/${PLAN_NAME}.md`, or `frontend/tmp/${PLAN_NAME}.md`). Let me know the path to the file you create.
 
-2.  **Ensure Progress Tracking:**
+2.  **Ensure Progress Tracker:**
     * Check the plan content. If a "Progress" or "Checklist" section with checkboxes does *not* already exist at the top, you must **add one**.
     * This progress section must list every main step and sub-step from the plan as a markdown checkbox (e.g., `[ ] Step 1: ...`).
+
+#### Phase 2: Execution
 
 3.  **Assess and Resume:**
     * Before starting any work, carefully read through the entire plan.
@@ -20,17 +42,23 @@ We have defined and validated this plan that I need you to follow.
 
 4.  **Strict Sequential Execution:** You must follow the plan steps *in the precise order they are written*. Do not skip steps or perform them out of order unless I explicitly instruct you to.
 
-5.  **CRITICAL: Validate Before Reporting:** After you believe you have completed the work for a step, you must run a **comprehensive validation** of the *entire* implementation so far.
+5.  **CRITICAL: Validate Before Completing:** After you believe you have completed the work for a step, you must run a **comprehensive validation** of the *entire* implementation so far.
     * This *must* include running any and all relevant tests if applicable (pytest / vitest) as well as types and format checks.
-    * A step is **not complete** until this validation passes. If validation fails, you must debug and fix the issues *before* reporting or landing back to the user.
+    * A step is **not complete** until this validation passes. If validation fails, you must debug and fix the issues *before* proceeding to Rule 6.
 
-6.  **Summarize at Milestones:** After *completing and validating* (per Rule 5) any major phase, critical step, or logical group of tasks, provide me with a brief summary of the progress made and the changes implemented.
+#### Phase 3: Reporting Cycle
 
-7.  **Plan Amendments:** If we decide to change the plan while working, you must **immediately** update the plan file *and* the progress tracking section to reflect those changes.
+6.  **CRITICAL: Update Progress File:** This is the most important standard rule.
+    * *After* a step has been successfully **validated** (per Rule 5), you **must** update the progress tracking section in the plan file to accurately reflect the work you just completed.
+    * This action **must** be completed *before* you report to me (Rule 7).
 
-8.  **CRITICAL: Always Update Progress Before Responding:** This is the most important rule. Before you finish your response and return control to me, you **must** update the progress tracking section in the plan file to accurately reflect the work you just completed and validated.
+7.  **Report at Milestones:**
+    * *After* completing, validating, and updating the progress file (per Rules 5 & 6), provide me with a status report.
+    * This report must *only* contain:
+        * A list of the main step(s) just completed.
+        * The *next* step to be started.
+    * (Do not provide a narrative summary of the *entire* project.)
 
-9.  **CRITICAL: Context Window Guard:** If you determine the conversation context is nearing its limit, you must **immediately stop** your current work (even if you are in the middle of a step).
-    * You must **avoid summarization** or any other conversational response.
-    * Your **only** action before stopping must be to update the progress tracking file (as per Rule 8) to reflect all work completed up to this exact moment.
-    * After updating the file, return control to me. Your *only* response should be to state: "Context window is nearly full. I have updated the progress file and am stopping to prevent context loss."
+#### Phase 4: Maintenance
+
+8.  **Plan Amendments:** If we decide to change the plan while working, you must **immediately** update the plan file *and* the progress tracking section to reflect those changes.
