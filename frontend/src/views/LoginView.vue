@@ -1,17 +1,16 @@
 <script setup lang="ts">
-import { useAuthStore } from '@/stores/authStore'
-import { storeToRefs } from 'pinia'
+import { useAuthService } from '@/services/authService'
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { GoogleSignInButton, type CredentialResponse } from 'vue3-google-signin'
 
-const authStore = useAuthStore()
-const { isAuthenticated, isLoading, error } = storeToRefs(authStore)
+const authService = useAuthService()
 const router = useRouter()
 const showGoogleButton = ref(true)
 
-onMounted(() => {
-  if (isAuthenticated.value) {
+onMounted(async () => {
+  const isAuthenticated = await authService.checkAuthStatus()
+  if (isAuthenticated) {
     const redirectPath = router.currentRoute.value.query.redirect as string
     router.push(redirectPath || '/chart')
   }
@@ -20,33 +19,34 @@ onMounted(() => {
 async function handleGoogleSignIn(response: CredentialResponse) {
   console.log('Google Sign-In response received:', { hasCredential: !!response.credential })
   showGoogleButton.value = false
-  isLoading.value = true
-  error.value = null
+  authService.isLoading.value = true
+  authService.error.value = null
 
   try {
-    await authStore.loginWithGoogleToken(response.credential!)
+    await authService.loginWithGoogleToken(response.credential!)
 
-    if (isAuthenticated.value) {
+    const isAuthenticated = await authService.checkAuthStatus()
+    if (isAuthenticated) {
       const redirectPath = router.currentRoute.value.query.redirect as string
       router.push(redirectPath || '/chart')
     }
   } catch (err) {
     console.error('Login failed:', err)
     const errorMessage = err instanceof Error ? err.message : 'Login failed'
-    error.value = errorMessage.includes('401')
+    authService.error.value = errorMessage.includes('401')
       ? 'Invalid Google token. Please try again.'
       : errorMessage.includes('500')
         ? 'Server error. Please try again later.'
         : errorMessage
     showGoogleButton.value = true
   } finally {
-    isLoading.value = false
+    authService.isLoading.value = false
   }
 }
 
 function handleGoogleError() {
   console.error('Google Sign-In button error')
-  error.value = 'Google sign-in failed. Please check your connection and try again.'
+  authService.error.value = 'Google sign-in failed. Please check your connection and try again.'
 }
 </script>
 
@@ -59,13 +59,13 @@ function handleGoogleError() {
       </div>
 
       <div class="login-content">
-        <div v-if="error" class="error-message" role="alert">
-          {{ error }}
+        <div v-if="authService.error.value" class="error-message" role="alert">
+          {{ authService.error.value }}
         </div>
 
         <div class="login-button-container">
           <GoogleSignInButton
-            v-if="showGoogleButton && !isLoading"
+            v-if="showGoogleButton && !authService.isLoading.value"
             type="standard"
             theme="outline"
             size="large"
@@ -77,7 +77,7 @@ function handleGoogleError() {
             @error="handleGoogleError"
           />
 
-          <div v-if="isLoading" class="loading-state">
+          <div v-if="authService.isLoading.value" class="loading-state">
             <div class="spinner" aria-label="Loading"></div>
             <p>Signing in...</p>
           </div>
