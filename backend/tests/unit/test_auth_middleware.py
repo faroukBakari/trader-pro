@@ -57,9 +57,14 @@ def mock_request() -> MagicMock:
 @pytest.fixture
 def valid_jwt_token() -> str:
     """Create valid JWT token for testing"""
+    now = datetime.now(timezone.utc)
     payload = {
         "user_id": "USER-123",
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+        "email": "test@example.com",
+        "full_name": "Test User",
+        "picture": "https://example.com/avatar.jpg",
+        "exp": int((now + timedelta(minutes=5)).timestamp()),
+        "iat": int(now.timestamp()),
     }
     token = jwt.encode(
         payload,
@@ -72,9 +77,14 @@ def valid_jwt_token() -> str:
 @pytest.fixture
 def expired_jwt_token() -> str:
     """Create expired JWT token for testing"""
+    now = datetime.now(timezone.utc)
     payload = {
         "user_id": "USER-123",
-        "exp": datetime.now(timezone.utc) - timedelta(minutes=5),
+        "email": "test@example.com",
+        "full_name": "Test User",
+        "picture": "https://example.com/avatar.jpg",
+        "exp": int((now - timedelta(minutes=5)).timestamp()),
+        "iat": int((now - timedelta(minutes=10)).timestamp()),
     }
     token = jwt.encode(
         payload,
@@ -161,9 +171,9 @@ class TestGetCurrentUserREST:
 
         result = await get_current_user(mock_request, credentials)
 
-        assert result["user_id"] == "USER-123"
-        assert "device_fingerprint" in result
-        assert len(result["device_fingerprint"]) == 32
+        assert result.user_id == "USER-123"
+        assert hasattr(result, "device_fingerprint")
+        assert len(result.device_fingerprint) == 32
 
     @pytest.mark.asyncio
     async def test_expired_token_raises_401(
@@ -260,8 +270,8 @@ class TestGetCurrentUserWebSocket:
 
         result = await get_current_user(mock_request, None)
 
-        assert result["user_id"] == "USER-123"
-        assert "device_fingerprint" in result
+        assert result.user_id == "USER-123"
+        assert hasattr(result, "device_fingerprint")
 
     @pytest.mark.asyncio
     async def test_expired_token_from_query_param_raises_401(
@@ -355,13 +365,13 @@ class TestTokenValidationEdgeCases:
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_token_without_expiration_is_accepted(
+    async def test_token_without_expiration_raises_401(
         self, mock_request: MagicMock
     ) -> None:
-        """Test that token without exp claim is still accepted (jose doesn't enforce exp)"""
+        """Test that token without exp claim raises 401 (Pydantic validation enforces required fields)"""
         payload = {
             "user_id": "USER-123",
-            # No 'exp' field - jose library doesn't require it
+            # No 'exp' field - Pydantic validation should reject this
         }
         token = jwt.encode(
             payload,
@@ -371,8 +381,9 @@ class TestTokenValidationEdgeCases:
 
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
-        # Should succeed - jose doesn't enforce exp field presence
-        result = await get_current_user(mock_request, credentials)
+        # Should fail - Pydantic validation requires exp field
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(mock_request, credentials)
 
-        assert result["user_id"] == "USER-123"
-        assert "device_fingerprint" in result
+        assert exc_info.value.status_code == 401
+        assert "Invalid token payload" in exc_info.value.detail

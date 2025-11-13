@@ -57,3 +57,28 @@ class RefreshTokenData(BaseModel):
     ip_address: str = Field(..., description="IP address where token was issued")
     user_agent: str = Field(..., description="User agent string")
     fingerprint: str = Field(..., description="Device fingerprint hash")
+
+
+class JWTPayload(BaseModel):
+    """JWT access token payload structure"""
+
+    user_id: str
+    email: str
+    full_name: str | None
+    picture: str | None
+    exp: int
+    iat: int
+
+    model_config = {"frozen": True}
+
+
+class UserData(BaseModel):
+    """Authenticated user data available in endpoints"""
+
+    user_id: str
+    email: str
+    full_name: str | None
+    picture: str | None
+    device_fingerprint: str
+
+    model_config = {"frozen": True}

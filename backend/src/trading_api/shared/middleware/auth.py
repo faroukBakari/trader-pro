@@ -20,7 +20,9 @@ from fastapi import (
 )
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
+from pydantic import ValidationError
 
+from trading_api.models.auth import JWTPayload, UserData
 from trading_api.shared import settings
 
 # HTTPBearer security scheme for extracting Bearer tokens from REST endpoints
@@ -45,7 +47,7 @@ def extract_device_fingerprint(request: Request | WebSocket) -> str:
     return hashlib.sha256(fingerprint_string.encode()).hexdigest()[:32]
 
 
-async def get_current_user_ws(websocket: WebSocket) -> dict[str, str]:
+async def get_current_user_ws(websocket: WebSocket) -> UserData:
     """
     Validate JWT token from WebSocket query parameter and return user data.
 
@@ -56,7 +58,7 @@ async def get_current_user_ws(websocket: WebSocket) -> dict[str, str]:
         websocket: FastAPI WebSocket object (auto-injected by FastAPI)
 
     Returns:
-        dict with 'user_id' and 'device_fingerprint'
+        UserData object with user_id, email, full_name, picture, device_fingerprint
 
     Raises:
         WebSocketException: 1008 if token is invalid, expired, or missing
@@ -71,37 +73,41 @@ async def get_current_user_ws(websocket: WebSocket) -> dict[str, str]:
 
     try:
         # Validate JWT signature with public key
-        payload = jwt.decode(
+        payload_dict = jwt.decode(
             token,
             settings.jwt_public_key,
             algorithms=[settings.JWT_ALGORITHM],
         )
 
-        user_id = payload.get("user_id")
-        if not user_id or not isinstance(user_id, str):
-            raise WebSocketException(
-                code=status.WS_1008_POLICY_VIOLATION,
-                reason="Invalid token: missing user_id",
-            )
+        # Validate payload structure with Pydantic
+        payload = JWTPayload.model_validate(payload_dict)
 
         device_fingerprint = extract_device_fingerprint(websocket)
 
-        return {
-            "user_id": user_id,
-            "device_fingerprint": device_fingerprint,
-        }
+        return UserData(
+            user_id=payload.user_id,
+            email=payload.email,
+            full_name=payload.full_name,
+            picture=payload.picture,
+            device_fingerprint=device_fingerprint,
+        )
 
     except JWTError as e:
         raise WebSocketException(
             code=status.WS_1008_POLICY_VIOLATION,
             reason=f"Invalid token: {str(e)}",
         )
+    except ValidationError as e:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason=f"Invalid token payload: {str(e)}",
+        )
 
 
 async def get_current_user(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_http_bearer)],
-) -> dict[str, str]:
+) -> UserData:
     """
     Validate JWT token and return user data.
 
@@ -114,7 +120,7 @@ async def get_current_user(
         credentials: HTTP Bearer credentials (None for WebSocket)
 
     Returns:
-        dict with 'user_id' and 'device_fingerprint'
+        UserData object with user_id, email, full_name, picture, device_fingerprint
 
     Raises:
         HTTPException: 401 if token is invalid, expired, or missing
@@ -136,28 +142,32 @@ async def get_current_user(
 
     try:
         # Validate JWT signature with public key
-        payload = jwt.decode(
+        payload_dict = jwt.decode(
             token,
             settings.jwt_public_key,
             algorithms=[settings.JWT_ALGORITHM],
         )
 
-        user_id = payload.get("user_id")
-        if not user_id or not isinstance(user_id, str):
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid token: missing user_id",
-            )
+        # Validate payload structure with Pydantic
+        payload = JWTPayload.model_validate(payload_dict)
 
         device_fingerprint = extract_device_fingerprint(request)
 
-        return {
-            "user_id": user_id,
-            "device_fingerprint": device_fingerprint,
-        }
+        return UserData(
+            user_id=payload.user_id,
+            email=payload.email,
+            full_name=payload.full_name,
+            picture=payload.picture,
+            device_fingerprint=device_fingerprint,
+        )
 
     except JWTError as e:
         raise HTTPException(
             status_code=401,
             detail=f"Invalid token: {str(e)}",
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Invalid token payload: {str(e)}",
         )

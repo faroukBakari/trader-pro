@@ -19,6 +19,7 @@ from trading_api.models.auth import (
     RefreshRequest,
     TokenResponse,
     User,
+    UserData,
 )
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.middleware.auth import get_current_user
@@ -144,7 +145,7 @@ class AuthApi(APIRouterInterface):
             operation_id="getCurrentUser",
         )
         async def get_me(
-            user_data: Annotated[dict[str, str], Depends(get_current_user)],
+            user_data: Annotated[UserData, Depends(get_current_user)],
         ) -> User:
             """
             Get current authenticated user information.
@@ -157,7 +158,7 @@ class AuthApi(APIRouterInterface):
             Returns:
                 User: Current user information
             """
-            user_id = user_data["user_id"]
+            user_id = user_data.user_id
 
             auth_service = cast(AuthService, self.service)
 

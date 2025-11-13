@@ -9,10 +9,11 @@ This module provides REST API endpoints for broker operations:
 - Retrieve account information
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import HTTPException, Query
+from fastapi import Depends, HTTPException, Query
 
+from trading_api.models.auth import UserData
 from trading_api.models.broker import (
     AccountMetainfo,
     Brackets,
@@ -32,6 +33,7 @@ from trading_api.models.broker import (
     SuccessResponse,
 )
 from trading_api.shared.api import APIRouterInterface
+from trading_api.shared.middleware.auth import get_current_user
 
 from ..service import BrokerService
 
@@ -76,12 +78,18 @@ class BrokerApi(APIRouterInterface):
             summary="Place a new order",
             operation_id="placeOrder",
         )
-        async def placeOrder(order: PreOrder) -> PlaceOrderResult:
+        async def placeOrder(
+            order: PreOrder,
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> PlaceOrderResult:
             """
             Place a new order in the trading system.
 
+            Requires authentication. Orders are user-scoped.
+
             Args:
                 order: Order request with symbol, type, side, quantity, and optional prices
+                user_data: Authenticated user data (injected by middleware)
 
             Returns:
                 PlaceOrderResult: Result containing the generated order ID
@@ -97,12 +105,18 @@ class BrokerApi(APIRouterInterface):
             summary="Preview order costs and requirements",
             operation_id="previewOrder",
         )
-        async def previewOrder(order: PreOrder) -> OrderPreviewResult:
+        async def previewOrder(
+            order: PreOrder,
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> OrderPreviewResult:
             """
             Preview order costs, fees, margin, and requirements without placing it.
 
+            Requires authentication. Preview is user-scoped.
+
             Args:
                 order: Order to preview
+                user_data: Authenticated user data (injected by middleware)
 
             Returns:
                 OrderPreviewResult: Estimated costs, fees, margin, and confirmation ID
@@ -118,13 +132,20 @@ class BrokerApi(APIRouterInterface):
             summary="Modify an existing order",
             operation_id="modifyOrder",
         )
-        async def modifyOrder(order_id: str, order: PreOrder) -> SuccessResponse:
+        async def modifyOrder(
+            order_id: str,
+            order: PreOrder,
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> SuccessResponse:
             """
             Modify an existing order.
+
+            Requires authentication. Can only modify user's own orders.
 
             Args:
                 order_id: ID of the order to modify
                 order: Updated order details
+                user_data: Authenticated user data (injected by middleware)
 
             Returns:
                 SuccessResponse: Success confirmation
@@ -141,12 +162,18 @@ class BrokerApi(APIRouterInterface):
             summary="Cancel an order",
             operation_id="cancelOrder",
         )
-        async def cancelOrder(order_id: str) -> SuccessResponse:
+        async def cancelOrder(
+            order_id: str,
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> SuccessResponse:
             """
             Cancel an order.
 
+            Requires authentication. Can only cancel user's own orders.
+
             Args:
                 order_id: ID of the order to cancel
+                user_data: Authenticated user data (injected by middleware)
 
             Returns:
                 SuccessResponse: Success confirmation
@@ -163,12 +190,19 @@ class BrokerApi(APIRouterInterface):
             summary="Get all orders",
             operation_id="getOrders",
         )
-        async def getOrders() -> List[PlacedOrder]:
+        async def getOrders(
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> List[PlacedOrder]:
             """
             Get all orders with their current status.
 
+            Requires authentication. Returns only user's own orders.
+
+            Args:
+                user_data: Authenticated user data (injected by middleware)
+
             Returns:
-                List[PlacedOrder]: List of all orders
+                List[PlacedOrder]: List of user's orders
             """
             return await self.service.get_orders()
 
@@ -178,12 +212,19 @@ class BrokerApi(APIRouterInterface):
             summary="Get all positions",
             operation_id="getPositions",
         )
-        async def getPositions() -> List[Position]:
+        async def getPositions(
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> List[Position]:
             """
             Get all open positions.
 
+            Requires authentication. Returns only user's own positions.
+
+            Args:
+                user_data: Authenticated user data (injected by middleware)
+
             Returns:
-                List[Position]: List of all open positions
+                List[Position]: List of user's open positions
             """
             return await self.service.get_positions()
 
@@ -193,15 +234,21 @@ class BrokerApi(APIRouterInterface):
             summary="Get executions for a symbol",
             operation_id="getExecutions",
         )
-        async def getExecutions(symbol: str) -> List[Execution]:
+        async def getExecutions(
+            symbol: str,
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> List[Execution]:
             """
             Get execution history for a specific symbol.
 
+            Requires authentication. Returns only user's own executions.
+
             Args:
                 symbol: Symbol to get executions for
+                user_data: Authenticated user data (injected by middleware)
 
             Returns:
-                List[Execution]: List of trade executions for the specified symbol
+                List[Execution]: List of user's trade executions for the specified symbol
             """
             return await self.service.get_executions(symbol)
 
@@ -211,9 +258,16 @@ class BrokerApi(APIRouterInterface):
             summary="Get account information",
             operation_id="getAccountInfo",
         )
-        async def getAccountInfo() -> AccountMetainfo:
+        async def getAccountInfo(
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> AccountMetainfo:
             """
             Get account metadata.
+
+            Requires authentication. Returns user's account info.
+
+            Args:
+                user_data: Authenticated user data (injected by middleware)
 
             Returns:
                 AccountMetainfo: Account metadata including ID and name
@@ -227,7 +281,9 @@ class BrokerApi(APIRouterInterface):
             operation_id="closePosition",
         )
         async def closePosition(
-            position_id: str, amount: Optional[float] = Query(None)
+            position_id: str,
+            user_data: Annotated[UserData, Depends(get_current_user)],
+            amount: Optional[float] = Query(None),
         ) -> SuccessResponse:
             """
             Close a position (full or partial).
@@ -236,8 +292,11 @@ class BrokerApi(APIRouterInterface):
             If amount is provided, only closes that amount of the position (partial close).
             Otherwise, closes the entire position (full close).
 
+            Requires authentication. Can only close user's own positions.
+
             Args:
                 position_id: ID of the position to close
+                user_data: Authenticated user data (injected by middleware)
                 amount: Optional amount to close (if not provided, closes entire position)
 
             Returns:
@@ -263,6 +322,7 @@ class BrokerApi(APIRouterInterface):
         async def editPositionBrackets(
             position_id: str,
             brackets: Brackets,
+            user_data: Annotated[UserData, Depends(get_current_user)],
             customFields: Optional[Dict[str, Any]] = None,
         ) -> SuccessResponse:
             """
@@ -271,9 +331,12 @@ class BrokerApi(APIRouterInterface):
             This endpoint is called when the user modifies position brackets
             (stop-loss, take-profit, guaranteed stop, trailing stop).
 
+            Requires authentication. Can only modify user's own positions.
+
             Args:
                 position_id: ID of the position to modify
                 brackets: New bracket values
+                user_data: Authenticated user data (injected by middleware)
                 customFields: Optional custom fields
 
             Returns:
@@ -296,6 +359,7 @@ class BrokerApi(APIRouterInterface):
             operation_id="leverageInfo",
         )
         async def leverageInfo(
+            user_data: Annotated[UserData, Depends(get_current_user)],
             symbol: str = Query(..., description="Symbol identifier"),
             orderType: OrderType = Query(..., description="Order type"),
             side: Side = Query(..., description="Order side (buy or sell)"),
@@ -306,7 +370,10 @@ class BrokerApi(APIRouterInterface):
             This endpoint is called to display current leverage and available
             leverage range in the leverage dialog.
 
+            Requires authentication. Returns user-specific leverage settings.
+
             Args:
+                user_data: Authenticated user data (injected by middleware)
                 symbol: Symbol to get leverage info for
                 orderType: Type of order
                 side: Order side (buy or sell)
@@ -325,15 +392,21 @@ class BrokerApi(APIRouterInterface):
             summary="Set leverage",
             operation_id="setLeverage",
         )
-        async def setLeverage(params: LeverageSetParams) -> LeverageSetResult:
+        async def setLeverage(
+            params: LeverageSetParams,
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> LeverageSetResult:
             """
             Update leverage for a symbol.
 
             This endpoint is called when the user confirms a leverage change.
             The leverage value should be validated and adjusted if necessary.
 
+            Requires authentication. Sets leverage for user's account.
+
             Args:
                 params: Leverage set parameters including symbol and new leverage value
+                user_data: Authenticated user data (injected by middleware)
 
             Returns:
                 LeverageSetResult: Confirmed leverage value
@@ -349,15 +422,21 @@ class BrokerApi(APIRouterInterface):
             summary="Preview leverage changes",
             operation_id="previewLeverage",
         )
-        async def previewLeverage(params: LeverageSetParams) -> LeveragePreviewResult:
+        async def previewLeverage(
+            params: LeverageSetParams,
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> LeveragePreviewResult:
             """
             Preview leverage changes before applying them.
 
             This endpoint is called to display informational messages, warnings,
             and errors about the proposed leverage change in the leverage dialog.
 
+            Requires authentication. Preview is user-specific.
+
             Args:
                 params: Leverage set parameters including proposed leverage value
+                user_data: Authenticated user data (injected by middleware)
 
             Returns:
                 LeveragePreviewResult: Preview messages (infos, warnings, errors)
