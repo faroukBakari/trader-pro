@@ -21,6 +21,7 @@ Generate a detailed, actionable TDD implementation plan designed for a follow-up
 2.  **Read and internalize** the **Feature Description** and any **User Materials** from the inputs to understand requirements and constraints.
 3.  **Review testing strategy**: `docs/TESTING.md` for test organization and patterns.
 4.  **Select methodology** based on feature type:
+    * MODULE IMPLEMENTATION → Follow `backend/docs/MODULAR_BACKEND_ARCHITECTURE.md` (6-phase)
     * REST API → `API-METHODOLOGY.md` (6-phase)
     * WebSocket → `WEBSOCKET-METHODOLOGY.md` (6-phase)
     * Other → Red-Green-Refactor

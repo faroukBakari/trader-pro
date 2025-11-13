@@ -304,7 +304,7 @@ class TestGetMeEndpoint:
         """Test /me fails without Authorization header"""
         response = client.get("/api/v1/auth/me")
 
-        assert response.status_code == 403  # Forbidden (no auth)
+        assert response.status_code == 401  # Unauthorized (no auth)
 
     def test_get_me_with_invalid_token(self, client: TestClient) -> None:
         """Test /me fails with invalid JWT token"""

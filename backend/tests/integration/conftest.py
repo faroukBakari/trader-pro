@@ -17,14 +17,35 @@ import pytest
 import uvicorn
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
+from jose import jwt
 
 from trading_api.app_factory import ModularApp
 from trading_api.shared import FastWSAdapter
+from trading_api.shared.config import Settings
 
 # Add backend scripts to path for backend_manager imports
 backend_scripts_dir = Path(__file__).parent.parent.parent / "scripts"
 if str(backend_scripts_dir) not in sys.path:
     sys.path.insert(0, str(backend_scripts_dir))
+
+
+# ============================================================================
+# Authentication Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def valid_jwt_token() -> str:
+    """Generate a valid JWT token for WebSocket authentication."""
+    settings = Settings()
+    payload = {
+        "user_id": "TEST-USER-001",
+        "exp": int(time.time()) + 300,
+        "iat": int(time.time()),
+    }
+    return jwt.encode(
+        payload, settings.jwt_private_key, algorithm=settings.JWT_ALGORITHM
+    )
 
 
 # ============================================================================
