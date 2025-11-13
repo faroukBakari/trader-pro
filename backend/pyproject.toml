@@ -47,6 +47,7 @@ pyright = "^1.1.407"
 types-pyyaml = "^6.0.12"
 psutil = "^7.1.3"
 types-psutil = "^7.0.0.20251001"
+types-authlib = "^1.6.5.20251005"
 
 [build-system]
 requires = ["poetry-core"]
@@ -96,4 +97,10 @@ markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: marks tests as fast unit tests with mocks",
+]
+# Temporary: passlib 1.7.4 uses deprecated 'crypt' module (removed in Python 3.13)
+# Remove this filter after upgrading to Python 3.13 + passlib 1.8.0+
+# TODO: docs/tmp/python-3.13-upgrade-evaluation.md
+filterwarnings = [
+    "ignore:'crypt' is deprecated:DeprecationWarning",
 ]
