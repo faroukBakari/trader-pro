@@ -14,7 +14,6 @@ const REFRESH_TOKEN_KEY = 'trader_refresh_token'
 const TOKEN_REFRESH_INTERVAL = 4 * 60 * 1000
 
 export const useAuthStore = defineStore('auth', () => {
-  const accessToken = ref<string | null>(null)
   const refreshToken = ref<string | null>(null)
   const user = ref<User | null>(null)
   const isLoading = ref(false)
@@ -43,9 +42,7 @@ export const useAuthStore = defineStore('auth', () => {
           }
           const result = await authApi.login(loginRequest)
 
-          accessToken.value = result.data.access_token
           refreshToken.value = result.data.refresh_token
-
           localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refresh_token)
 
           // Cookie-based auth: no need to pass accessToken, cookies sent automatically
@@ -78,19 +75,7 @@ export const useAuthStore = defineStore('auth', () => {
     })
   }
 
-  const isAuthenticated = computed(() => !!accessToken.value && !!user.value)
-
-  const isTokenExpired = computed(() => {
-    if (!accessToken.value) return true
-
-    try {
-      const payload = JSON.parse(atob(accessToken.value.split('.')[1]))
-      const exp = payload.exp * 1000
-      return Date.now() >= exp
-    } catch {
-      return true
-    }
-  })
+  const isAuthenticated = computed(() => !!user.value)
 
   function scheduleTokenRefresh() {
     if (refreshTimeoutId) {
@@ -115,9 +100,7 @@ export const useAuthStore = defineStore('auth', () => {
       }
       const result = await authApi.refreshToken(refreshRequest)
 
-      accessToken.value = result.data.access_token
       refreshToken.value = result.data.refresh_token
-
       localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refresh_token)
 
       // Cookie-based auth: no need to pass accessToken, cookies sent automatically
@@ -161,9 +144,7 @@ export const useAuthStore = defineStore('auth', () => {
       const result = await authApi.login(loginRequest)
 
       console.log('Login successful, setting tokens...')
-      accessToken.value = result.data.access_token
       refreshToken.value = result.data.refresh_token
-
       localStorage.setItem(REFRESH_TOKEN_KEY, result.data.refresh_token)
 
       console.log('Fetching user data...')
@@ -220,7 +201,6 @@ export const useAuthStore = defineStore('auth', () => {
       }
     }
 
-    accessToken.value = null
     refreshToken.value = null
     user.value = null
     error.value = null
@@ -257,13 +237,11 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   return {
-    accessToken,
     refreshToken,
     user,
     isLoading,
     error,
     isAuthenticated,
-    isTokenExpired,
     isGoogleReady,
     handleGoogleSignIn,
     loginWithGoogleToken,
