@@ -377,11 +377,11 @@ install-ci:
 	@poetry install --no-interaction
 	@echo "✅ CI installation complete!"
 
-test-boundaries:
+test-boundaries: check-generate-keypair
 	@echo "Running root-level tests..."
 	poetry run pytest tests/ -v --ignore=tests/integration/
 
-test-modules:
+test-modules: check-generate-keypair
 	@echo "Running module tests..."
 	@if [ -z "$(SELECTED_MODULES)" ]; then \
 		echo "⚠️  No modules selected or found"; \
@@ -418,7 +418,7 @@ $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
 		echo "⚠️  No tests found for module: $*"; \
 	fi
 
-test-integration:
+test-integration: check-generate-keypair
 	@echo "Running integration tests..."
 	poetry run pytest tests/integration/ -v -x -m integration
 
@@ -426,7 +426,7 @@ test: test-boundaries test-modules test-integration
 	@echo "✅ All tests passed (boundaries + modules + integration)"
 
 # Coverage targets
-test-cov: test-boundaries
+test-cov: check-generate-keypair test-boundaries
 	@echo "Running all tests with coverage..."
 	@poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
 	@echo ""
