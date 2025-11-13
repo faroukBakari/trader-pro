@@ -29,14 +29,14 @@ def valid_jwt_token() -> str:
 
 
 @pytest.fixture
-def auth_headers(valid_jwt_token: str) -> dict[str, str]:
-    """Generate authorization headers for testing"""
-    return {"Authorization": f"Bearer {valid_jwt_token}"}
+def auth_cookies(valid_jwt_token: str) -> dict[str, str]:
+    """Generate authentication cookies for testing"""
+    return {"access_token": valid_jwt_token}
 
 
 @pytest.mark.asyncio
 async def test_place_order_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test placing a new order"""
     response = await async_client.post(
@@ -48,7 +48,7 @@ async def test_place_order_endpoint(
             "qty": 100,
             "limitPrice": 150.0,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 200
@@ -59,7 +59,7 @@ async def test_place_order_endpoint(
 
 @pytest.mark.asyncio
 async def test_preview_order_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test previewing order costs and requirements"""
     response = await async_client.post(
@@ -73,7 +73,7 @@ async def test_preview_order_endpoint(
             "takeProfit": 160.0,
             "stopLoss": 145.0,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 200
@@ -104,7 +104,7 @@ async def test_preview_order_endpoint(
 
 @pytest.mark.asyncio
 async def test_preview_market_order_warning(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test that market orders get appropriate warnings"""
     response = await async_client.post(
@@ -115,7 +115,7 @@ async def test_preview_market_order_warning(
             "side": 1,  # BUY
             "qty": 100,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 200
@@ -129,7 +129,7 @@ async def test_preview_market_order_warning(
 
 @pytest.mark.asyncio
 async def test_preview_large_order_warning(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test that large orders get slippage warnings"""
     response = await async_client.post(
@@ -141,7 +141,7 @@ async def test_preview_large_order_warning(
             "qty": 2000,  # Large order
             "limitPrice": 150.0,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 200
@@ -155,7 +155,7 @@ async def test_preview_large_order_warning(
 
 @pytest.mark.asyncio
 async def test_get_orders_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test getting all orders"""
     # First place an order
@@ -168,11 +168,11 @@ async def test_get_orders_endpoint(
             "qty": 100,
             "limitPrice": 150.0,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     # Then get all orders
-    response = await async_client.get("/api/v1/broker/orders", headers=auth_headers)
+    response = await async_client.get("/api/v1/broker/orders", cookies=auth_cookies)
 
     assert response.status_code == 200
     data = response.json()
@@ -182,7 +182,7 @@ async def test_get_orders_endpoint(
 
 @pytest.mark.asyncio
 async def test_modify_order_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test modifying an existing order"""
     # First place an order
@@ -195,7 +195,7 @@ async def test_modify_order_endpoint(
             "qty": 100,
             "limitPrice": 150.0,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
     order_id = place_response.json()["orderId"]
 
@@ -209,7 +209,7 @@ async def test_modify_order_endpoint(
             "qty": 200,  # Changed quantity
             "limitPrice": 155.0,  # Changed price
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 200
@@ -217,7 +217,7 @@ async def test_modify_order_endpoint(
 
 @pytest.mark.asyncio
 async def test_cancel_order_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test canceling an order"""
     # First place an order
@@ -230,13 +230,13 @@ async def test_cancel_order_endpoint(
             "qty": 100,
             "limitPrice": 150.0,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
     order_id = place_response.json()["orderId"]
 
     # Cancel the order
     response = await async_client.delete(
-        f"/api/v1/broker/orders/{order_id}", headers=auth_headers
+        f"/api/v1/broker/orders/{order_id}", cookies=auth_cookies
     )
 
     assert response.status_code == 200
@@ -244,10 +244,10 @@ async def test_cancel_order_endpoint(
 
 @pytest.mark.asyncio
 async def test_get_positions_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test getting all positions"""
-    response = await async_client.get("/api/v1/broker/positions", headers=auth_headers)
+    response = await async_client.get("/api/v1/broker/positions", cookies=auth_cookies)
 
     assert response.status_code == 200
     data = response.json()
@@ -256,11 +256,11 @@ async def test_get_positions_endpoint(
 
 @pytest.mark.asyncio
 async def test_get_executions_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test getting executions for a symbol"""
     response = await async_client.get(
-        "/api/v1/broker/executions/AAPL", headers=auth_headers
+        "/api/v1/broker/executions/AAPL", cookies=auth_cookies
     )
 
     assert response.status_code == 200
@@ -270,10 +270,10 @@ async def test_get_executions_endpoint(
 
 @pytest.mark.asyncio
 async def test_get_account_info_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test getting account information"""
-    response = await async_client.get("/api/v1/broker/account", headers=auth_headers)
+    response = await async_client.get("/api/v1/broker/account", cookies=auth_cookies)
 
     assert response.status_code == 200
     data = response.json()
@@ -283,7 +283,7 @@ async def test_get_account_info_endpoint(
 
 @pytest.mark.asyncio
 async def test_close_position_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test closing a position (full close) - verify closing order is created"""
     # Reset broker state
@@ -299,7 +299,7 @@ async def test_close_position_endpoint(
             "side": 1,  # BUY
             "qty": 100.0,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
     assert place_response.status_code == 200
 
@@ -309,7 +309,7 @@ async def test_close_position_endpoint(
 
     # Step 3: Verify position was created
     positions_response = await async_client.get(
-        "/api/v1/broker/positions", headers=auth_headers
+        "/api/v1/broker/positions", cookies=auth_cookies
     )
     positions = positions_response.json()
     assert len(positions) == 1
@@ -321,7 +321,7 @@ async def test_close_position_endpoint(
 
     # Step 4: Close the position
     close_response = await async_client.delete(
-        f"/api/v1/broker/positions/{position_id}", headers=auth_headers
+        f"/api/v1/broker/positions/{position_id}", cookies=auth_cookies
     )
     assert close_response.status_code == 200
     data = close_response.json()
@@ -329,7 +329,7 @@ async def test_close_position_endpoint(
 
     # Step 5: Verify closing order was created
     orders_response = await async_client.get(
-        "/api/v1/broker/orders", headers=auth_headers
+        "/api/v1/broker/orders", cookies=auth_cookies
     )
     orders = orders_response.json()
     # Should have 2 orders: original BUY (filled) + closing SELL (working)
@@ -345,7 +345,7 @@ async def test_close_position_endpoint(
 
 @pytest.mark.asyncio
 async def test_close_position_partial_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test partially closing a position - verify partial closing order is created"""
     # Reset broker state
@@ -361,7 +361,7 @@ async def test_close_position_partial_endpoint(
             "side": 1,  # BUY
             "qty": 100.0,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
     assert place_response.status_code == 200
 
@@ -371,7 +371,7 @@ async def test_close_position_partial_endpoint(
 
     # Step 3: Verify position was created
     positions_response = await async_client.get(
-        "/api/v1/broker/positions", headers=auth_headers
+        "/api/v1/broker/positions", cookies=auth_cookies
     )
     positions = positions_response.json()
     assert len(positions) == 1
@@ -383,13 +383,13 @@ async def test_close_position_partial_endpoint(
 
     # Step 4: Partially close position (50 units)
     close_response = await async_client.delete(
-        f"/api/v1/broker/positions/{position_id}?amount=50", headers=auth_headers
+        f"/api/v1/broker/positions/{position_id}?amount=50", cookies=auth_cookies
     )
     assert close_response.status_code == 200
 
     # Step 5: Verify closing order was created for partial amount
     orders_response = await async_client.get(
-        "/api/v1/broker/orders", headers=auth_headers
+        "/api/v1/broker/orders", cookies=auth_cookies
     )
     orders = orders_response.json()
     # Should have 2 orders: original BUY (filled) + partial closing SELL (working)
@@ -405,7 +405,7 @@ async def test_close_position_partial_endpoint(
 
 @pytest.mark.asyncio
 async def test_edit_position_brackets_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test editing position brackets (stop-loss, take-profit) - verify bracket orders are created"""
     # Reset broker state
@@ -421,7 +421,7 @@ async def test_edit_position_brackets_endpoint(
             "side": 1,  # BUY
             "qty": 100.0,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
     assert place_response.status_code == 200
 
@@ -431,7 +431,7 @@ async def test_edit_position_brackets_endpoint(
 
     # Step 3: Verify position was created
     positions_response = await async_client.get(
-        "/api/v1/broker/positions", headers=auth_headers
+        "/api/v1/broker/positions", cookies=auth_cookies
     )
     positions = positions_response.json()
     assert len(positions) == 1
@@ -452,7 +452,7 @@ async def test_edit_position_brackets_endpoint(
             },
             "customFields": None,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
     assert brackets_response.status_code == 200
     data = brackets_response.json()
@@ -460,7 +460,7 @@ async def test_edit_position_brackets_endpoint(
 
     # Step 5: Verify bracket orders were created
     orders_response = await async_client.get(
-        "/api/v1/broker/orders", headers=auth_headers
+        "/api/v1/broker/orders", cookies=auth_cookies
     )
     orders = orders_response.json()
     # Should have 3 orders: original BUY (filled) + 2 bracket orders (stop loss + take profit)
@@ -495,13 +495,13 @@ async def test_edit_position_brackets_endpoint(
 
 @pytest.mark.asyncio
 async def test_leverage_info_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test getting leverage information for a symbol"""
     response = await async_client.get(
         "/api/v1/broker/leverage/info",
         params={"symbol": "AAPL", "orderType": 1, "side": 1},
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 200
@@ -519,7 +519,7 @@ async def test_leverage_info_endpoint(
 
 @pytest.mark.asyncio
 async def test_set_leverage_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test setting leverage for a symbol"""
     response = await async_client.put(
@@ -531,7 +531,7 @@ async def test_set_leverage_endpoint(
             "leverage": 20.0,
             "customFields": None,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 200
@@ -543,7 +543,7 @@ async def test_set_leverage_endpoint(
     info_response = await async_client.get(
         "/api/v1/broker/leverage/info",
         params={"symbol": "AAPL", "orderType": 1, "side": 1},
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
     info_data = info_response.json()
     assert info_data["leverage"] == 20.0
@@ -551,7 +551,7 @@ async def test_set_leverage_endpoint(
 
 @pytest.mark.asyncio
 async def test_set_leverage_invalid_range_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test setting leverage with invalid value"""
     # Test leverage too high
@@ -564,7 +564,7 @@ async def test_set_leverage_invalid_range_endpoint(
             "leverage": 150.0,
             "customFields": None,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 400
@@ -572,7 +572,7 @@ async def test_set_leverage_invalid_range_endpoint(
 
 @pytest.mark.asyncio
 async def test_preview_leverage_endpoint(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test previewing leverage changes"""
     # Test moderate leverage
@@ -585,7 +585,7 @@ async def test_preview_leverage_endpoint(
             "leverage": 25.0,
             "customFields": None,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 200
@@ -605,7 +605,7 @@ async def test_preview_leverage_endpoint(
 
 @pytest.mark.asyncio
 async def test_preview_leverage_high_leverage_warning(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test leverage preview shows warning for high leverage"""
     response = await async_client.post(
@@ -617,7 +617,7 @@ async def test_preview_leverage_high_leverage_warning(
             "leverage": 75.0,
             "customFields": None,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 200
@@ -628,7 +628,7 @@ async def test_preview_leverage_high_leverage_warning(
 
 @pytest.mark.asyncio
 async def test_preview_leverage_invalid_range(
-    async_client: AsyncClient, auth_headers: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:
     """Test leverage preview shows error for invalid range"""
     response = await async_client.post(
@@ -640,7 +640,7 @@ async def test_preview_leverage_invalid_range(
             "leverage": 150.0,
             "customFields": None,
         },
-        headers=auth_headers,
+        cookies=auth_cookies,
     )
 
     assert response.status_code == 200

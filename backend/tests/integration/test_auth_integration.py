@@ -10,7 +10,7 @@ Tests the complete authentication flow including:
 """
 
 import time
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import patch
 
 import pytest
 from httpx import AsyncClient
@@ -23,7 +23,7 @@ from starlette.testclient import TestClient
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_login_refresh_logout_flow(async_client: AsyncClient) -> None:
+async def test_login_refresh_logout_flow(async_client_no_auth: AsyncClient) -> None:
     """Test complete authentication flow: login → access → refresh → logout.
 
     Verifies:
@@ -32,7 +32,7 @@ async def test_login_refresh_logout_flow(async_client: AsyncClient) -> None:
     - Refresh token rotation
     - Token revocation on logout
     """
-    # Mock Google OAuth verification
+    # Mock Google tokeninfo endpoint response
     mock_google_claims = {
         "sub": "google-user-123",
         "email": "test@example.com",
@@ -45,18 +45,14 @@ async def test_login_refresh_logout_flow(async_client: AsyncClient) -> None:
         "aud": "mock-client-id",
     }
 
-    with patch("trading_api.modules.auth.service.OAuth") as mock_oauth_class:
-        # Setup OAuth mock
-        mock_oauth_instance = Mock()
-        mock_oauth_class.return_value = mock_oauth_instance
-
-        # Mock parse_id_token to return claims
-        mock_google = Mock()
-        mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-        mock_oauth_instance.google = mock_google
+    with patch(
+        "trading_api.modules.auth.service.AuthService.verify_google_id_token"
+    ) as mock_verify:
+        # Mock the verification method to return claims
+        mock_verify.return_value = mock_google_claims
 
         # Step 1: Login with Google ID token
-        login_response = await async_client.post(
+        login_response = await async_client_no_auth.post(
             "/api/v1/auth/login", json={"google_token": "mock-google-id-token"}
         )
         assert login_response.status_code == 200
@@ -69,20 +65,19 @@ async def test_login_refresh_logout_flow(async_client: AsyncClient) -> None:
         assert login_data["token_type"] == "bearer"
         assert "expires_in" in login_data
 
-        access_token = login_data["access_token"]
+        # Extract cookies from response
+        cookies = login_response.cookies
         refresh_token = login_data["refresh_token"]
 
-        # Step 2: Access protected endpoint with access token
-        me_response = await async_client.get(
-            "/api/v1/auth/me", headers={"Authorization": f"Bearer {access_token}"}
-        )
+        # Step 2: Access protected endpoint with cookie
+        me_response = await async_client_no_auth.get("/api/v1/auth/me", cookies=cookies)
         assert me_response.status_code == 200
         user_data = me_response.json()
         assert user_data["email"] == "test@example.com"
         assert user_data["full_name"] == "Test User"
 
         # Step 3: Refresh access token
-        refresh_response = await async_client.post(
+        refresh_response = await async_client_no_auth.post(
             "/api/v1/auth/refresh-token", json={"refresh_token": refresh_token}
         )
         assert refresh_response.status_code == 200
@@ -91,33 +86,34 @@ async def test_login_refresh_logout_flow(async_client: AsyncClient) -> None:
         # Verify new tokens
         assert "access_token" in refresh_data
         assert "refresh_token" in refresh_data
-        new_access_token = refresh_data["access_token"]
         new_refresh_token = refresh_data["refresh_token"]
 
         # Verify refresh token changed (critical for security)
         assert new_refresh_token != refresh_token
-        # Note: access tokens might be same if created in same second (exp is time-based)
+
+        # Extract new cookies
+        new_cookies = refresh_response.cookies
 
         # Step 4: Verify old refresh token is invalid (rotation)
-        old_refresh_response = await async_client.post(
+        old_refresh_response = await async_client_no_auth.post(
             "/api/v1/auth/refresh-token", json={"refresh_token": refresh_token}
         )
         assert old_refresh_response.status_code == 401
 
-        # Step 5: Access protected endpoint with new token
-        new_me_response = await async_client.get(
-            "/api/v1/auth/me", headers={"Authorization": f"Bearer {new_access_token}"}
+        # Step 5: Access protected endpoint with new cookie
+        new_me_response = await async_client_no_auth.get(
+            "/api/v1/auth/me", cookies=new_cookies
         )
         assert new_me_response.status_code == 200
 
         # Step 6: Logout with new refresh token
-        logout_response = await async_client.post(
+        logout_response = await async_client_no_auth.post(
             "/api/v1/auth/logout", json={"refresh_token": new_refresh_token}
         )
         assert logout_response.status_code == 200
 
         # Step 7: Verify refresh token is revoked
-        revoked_refresh_response = await async_client.post(
+        revoked_refresh_response = await async_client_no_auth.post(
             "/api/v1/auth/refresh-token", json={"refresh_token": new_refresh_token}
         )
         assert revoked_refresh_response.status_code == 401
@@ -125,13 +121,13 @@ async def test_login_refresh_logout_flow(async_client: AsyncClient) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_concurrent_refresh_requests(async_client: AsyncClient) -> None:
+async def test_concurrent_refresh_requests(async_client_no_auth: AsyncClient) -> None:
     """Test concurrent refresh token requests (race condition handling).
 
     Verifies that only one refresh succeeds when multiple concurrent
     requests are made with the same refresh token.
     """
-    # Mock Google OAuth verification
+    # Mock Google tokeninfo endpoint response
     mock_google_claims = {
         "sub": "google-user-456",
         "email": "concurrent@example.com",
@@ -141,16 +137,14 @@ async def test_concurrent_refresh_requests(async_client: AsyncClient) -> None:
         "aud": "mock-client-id",
     }
 
-    with patch("trading_api.modules.auth.service.OAuth") as mock_oauth_class:
-        # Setup OAuth mock
-        mock_oauth_instance = Mock()
-        mock_oauth_class.return_value = mock_oauth_instance
-        mock_google = Mock()
-        mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-        mock_oauth_instance.google = mock_google
+    with patch(
+        "trading_api.modules.auth.service.AuthService.verify_google_id_token"
+    ) as mock_verify:
+        # Mock the verification method to return claims
+        mock_verify.return_value = mock_google_claims
 
         # Login to get refresh token
-        login_response = await async_client.post(
+        login_response = await async_client_no_auth.post(
             "/api/v1/auth/login", json={"google_token": "mock-google-id-token"}
         )
         assert login_response.status_code == 200
@@ -160,13 +154,13 @@ async def test_concurrent_refresh_requests(async_client: AsyncClient) -> None:
         import asyncio
 
         responses = await asyncio.gather(
-            async_client.post(
+            async_client_no_auth.post(
                 "/api/v1/auth/refresh-token", json={"refresh_token": refresh_token}
             ),
-            async_client.post(
+            async_client_no_auth.post(
                 "/api/v1/auth/refresh-token", json={"refresh_token": refresh_token}
             ),
-            async_client.post(
+            async_client_no_auth.post(
                 "/api/v1/auth/refresh-token", json={"refresh_token": refresh_token}
             ),
             return_exceptions=True,
@@ -195,7 +189,7 @@ async def test_concurrent_refresh_requests(async_client: AsyncClient) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_device_fingerprint_mismatch(async_client: AsyncClient) -> None:
+async def test_device_fingerprint_mismatch(async_client_no_auth: AsyncClient) -> None:
     """Test device fingerprint validation on refresh.
 
     Note: In integration tests, both clients share the same test context,
@@ -203,7 +197,7 @@ async def test_device_fingerprint_mismatch(async_client: AsyncClient) -> None:
     flow works correctly, while unit tests (in test_service.py) verify
     device fingerprint validation logic in isolation.
     """
-    # Mock Google OAuth verification
+    # Mock Google tokeninfo endpoint response
     mock_google_claims = {
         "sub": "google-user-789",
         "email": "device@example.com",
@@ -213,16 +207,14 @@ async def test_device_fingerprint_mismatch(async_client: AsyncClient) -> None:
         "aud": "mock-client-id",
     }
 
-    with patch("trading_api.modules.auth.service.OAuth") as mock_oauth_class:
-        # Setup OAuth mock
-        mock_oauth_instance = Mock()
-        mock_oauth_class.return_value = mock_oauth_instance
-        mock_google = Mock()
-        mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-        mock_oauth_instance.google = mock_google
+    with patch(
+        "trading_api.modules.auth.service.AuthService.verify_google_id_token"
+    ) as mock_verify:
+        # Mock the verification method to return claims
+        mock_verify.return_value = mock_google_claims
 
         # Login with original device fingerprint (default headers)
-        login_response = await async_client.post(
+        login_response = await async_client_no_auth.post(
             "/api/v1/auth/login", json={"google_token": "mock-google-id-token"}
         )
         assert login_response.status_code == 200
@@ -230,7 +222,7 @@ async def test_device_fingerprint_mismatch(async_client: AsyncClient) -> None:
 
         # Create new client with different headers (different device)
         async with AsyncClient(
-            app=async_client._transport.app,  # type: ignore
+            app=async_client_no_auth._transport.app,  # type: ignore
             base_url="http://test",
             headers={"User-Agent": "DifferentBrowser/1.0"},
         ) as different_client:
@@ -249,12 +241,12 @@ async def test_device_fingerprint_mismatch(async_client: AsyncClient) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_token_tampering_detection(async_client: AsyncClient) -> None:
+async def test_token_tampering_detection(async_client_no_auth: AsyncClient) -> None:
     """Test detection of tampered JWT tokens.
 
     Verifies that modified JWT tokens are rejected with 401.
     """
-    # Mock Google OAuth verification
+    # Mock Google tokeninfo endpoint response
     mock_google_claims = {
         "sub": "google-user-tamper",
         "email": "tamper@example.com",
@@ -264,34 +256,34 @@ async def test_token_tampering_detection(async_client: AsyncClient) -> None:
         "aud": "mock-client-id",
     }
 
-    with patch("trading_api.modules.auth.service.OAuth") as mock_oauth_class:
-        # Setup OAuth mock
-        mock_oauth_instance = Mock()
-        mock_oauth_class.return_value = mock_oauth_instance
-        mock_google = Mock()
-        mock_google.parse_id_token = AsyncMock(return_value=mock_google_claims)
-        mock_oauth_instance.google = mock_google
+    with patch(
+        "trading_api.modules.auth.service.AuthService.verify_google_id_token"
+    ) as mock_verify:
+        # Mock the verification method to return claims
+        mock_verify.return_value = mock_google_claims
 
         # Login to get access token
-        login_response = await async_client.post(
+        login_response = await async_client_no_auth.post(
             "/api/v1/auth/login", json={"google_token": "mock-google-id-token"}
         )
         assert login_response.status_code == 200
-        access_token = login_response.json()["access_token"]
+        cookies = login_response.cookies
 
-        # Tamper with token (modify last character)
-        tampered_token = access_token[:-5] + "XXXXX"
+        # Tamper with cookie token (modify last character)
+        tampered_cookies = dict(cookies)
+        original_token = tampered_cookies.get("access_token", "")
+        tampered_cookies["access_token"] = original_token[:-5] + "XXXXX"
 
         # Attempt to access protected endpoint with tampered token
-        me_response = await async_client.get(
-            "/api/v1/auth/me", headers={"Authorization": f"Bearer {tampered_token}"}
+        me_response = await async_client_no_auth.get(
+            "/api/v1/auth/me", cookies=tampered_cookies
         )
         assert me_response.status_code == 401
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_expired_token_rejection(async_client: AsyncClient) -> None:
+async def test_expired_token_rejection(async_client_no_auth: AsyncClient) -> None:
     """Test rejection of expired JWT tokens.
 
     Verifies that expired access tokens are rejected with 401.
@@ -313,9 +305,10 @@ async def test_expired_token_rejection(async_client: AsyncClient) -> None:
         expired_payload, settings.jwt_private_key, algorithm=settings.JWT_ALGORITHM
     )
 
-    # Attempt to access protected endpoint with expired token
-    me_response = await async_client.get(
-        "/api/v1/auth/me", headers={"Authorization": f"Bearer {expired_token}"}
+    # Attempt to access protected endpoint with expired cookie token
+    expired_cookies = {"access_token": expired_token}
+    me_response = await async_client_no_auth.get(
+        "/api/v1/auth/me", cookies=expired_cookies
     )
     assert me_response.status_code == 401
 
@@ -334,10 +327,8 @@ def test_websocket_connection_with_valid_token(
     Verifies that WebSocket connections with valid tokens are accepted
     and can communicate normally.
     """
-    # Connect to broker WebSocket with valid token
-    with client.websocket_connect(
-        f"/api/v1/broker/ws?token={valid_jwt_token}", timeout=2.0
-    ) as websocket:
+    # Connect to broker WebSocket with valid token in cookie
+    with client.websocket_connect("/api/v1/broker/ws", timeout=2.0) as websocket:
         # Send subscribe message
         websocket.send_json(
             {
@@ -352,7 +343,9 @@ def test_websocket_connection_with_valid_token(
 
 
 @pytest.mark.integration
-def test_websocket_connection_without_token_rejected(client: TestClient) -> None:
+def test_websocket_connection_without_token_rejected(
+    client_no_auth: TestClient,
+) -> None:
     """Test WebSocket connection without token is rejected.
 
     Verifies that WebSocket connections without authentication tokens
@@ -360,29 +353,32 @@ def test_websocket_connection_without_token_rejected(client: TestClient) -> None
     """
     with pytest.raises(Exception):
         # Should raise exception on connection attempt
-        with client.websocket_connect("/api/v1/broker/ws", timeout=1.0):
+        with client_no_auth.websocket_connect("/api/v1/broker/ws", timeout=1.0):
             pass
 
 
 @pytest.mark.integration
-def test_websocket_connection_with_invalid_token_rejected(client: TestClient) -> None:
+def test_websocket_connection_with_invalid_token_rejected(
+    client_no_auth: TestClient,
+) -> None:
     """Test WebSocket connection with invalid token is rejected.
 
     Verifies that WebSocket connections with tampered or malformed tokens
     are rejected.
     """
     invalid_token = "invalid.jwt.token"
+    client_no_auth.cookies.set("access_token", invalid_token)
 
     with pytest.raises(Exception):
         # Should raise exception on connection attempt
-        with client.websocket_connect(
-            f"/api/v1/broker/ws?token={invalid_token}", timeout=1.0
-        ):
+        with client_no_auth.websocket_connect("/api/v1/broker/ws", timeout=1.0):
             pass
 
 
 @pytest.mark.integration
-def test_websocket_connection_with_expired_token_rejected(client: TestClient) -> None:
+def test_websocket_connection_with_expired_token_rejected(
+    client_no_auth: TestClient,
+) -> None:
     """Test WebSocket connection with expired token is rejected.
 
     Verifies that WebSocket connections with expired tokens are rejected.
@@ -396,6 +392,9 @@ def test_websocket_connection_with_expired_token_rejected(client: TestClient) ->
     # Create an expired token
     expired_payload = {
         "user_id": "TEST-USER-WS-EXPIRED",
+        "email": "expired@example.com",
+        "full_name": "Expired User",
+        "picture": "https://example.com/avatar.jpg",
         "exp": int(time.time()) - 3600,  # Expired 1 hour ago
         "iat": int(time.time()) - 7200,
     }
@@ -404,16 +403,16 @@ def test_websocket_connection_with_expired_token_rejected(client: TestClient) ->
         expired_payload, settings.jwt_private_key, algorithm=settings.JWT_ALGORITHM
     )
 
+    client_no_auth.cookies.set("access_token", expired_token)
+
     with pytest.raises(Exception):
         # Should raise exception on connection attempt
-        with client.websocket_connect(
-            f"/api/v1/broker/ws?token={expired_token}", timeout=1.0
-        ):
+        with client_no_auth.websocket_connect("/api/v1/broker/ws", timeout=1.0):
             pass
 
 
 @pytest.mark.integration
-def test_websocket_token_validation_before_accept(client: TestClient) -> None:
+def test_websocket_token_validation_before_accept(client_no_auth: TestClient) -> None:
     """Test that token validation happens before accepting WebSocket connection.
 
     Verifies that invalid tokens are rejected before the connection is
@@ -421,10 +420,9 @@ def test_websocket_token_validation_before_accept(client: TestClient) -> None:
     """
     # Attempt connection with malformed token
     malformed_token = "not-a-jwt-token"
+    client_no_auth.cookies.set("access_token", malformed_token)
 
     with pytest.raises(Exception):
         # Should raise exception on connection attempt
-        with client.websocket_connect(
-            f"/api/v1/datafeed/ws?token={malformed_token}", timeout=1.0
-        ):
+        with client_no_auth.websocket_connect("/api/v1/datafeed/ws", timeout=1.0):
             pass

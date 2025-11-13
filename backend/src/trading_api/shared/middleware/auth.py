@@ -8,25 +8,13 @@ Authentication middleware for validating JWT tokens.
 """
 
 import hashlib
-from typing import Annotated
 
-from fastapi import (
-    Depends,
-    HTTPException,
-    Request,
-    WebSocket,
-    WebSocketException,
-    status,
-)
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import HTTPException, Request, WebSocket, WebSocketException, status
 from jose import JWTError, jwt
 from pydantic import ValidationError
 
 from trading_api.models.auth import JWTPayload, UserData
 from trading_api.shared import settings
-
-# HTTPBearer security scheme for extracting Bearer tokens from REST endpoints
-_http_bearer = HTTPBearer(auto_error=False)
 
 
 def extract_device_fingerprint(request: Request | WebSocket) -> str:
@@ -39,10 +27,10 @@ def extract_device_fingerprint(request: Request | WebSocket) -> str:
     Returns:
         SHA256 hash (32 chars) of IP + User-Agent
     """
-    components = [
-        request.client.host if request.client else "unknown",
-        request.headers.get("user-agent", "unknown"),
-    ]
+    host = (request.client.host or "unknown") if request.client else "unknown"
+    user_agent = request.headers.get("user-agent") or "unknown"
+
+    components = [host, user_agent]
     fingerprint_string = "|".join(components)
     return hashlib.sha256(fingerprint_string.encode()).hexdigest()[:32]
 

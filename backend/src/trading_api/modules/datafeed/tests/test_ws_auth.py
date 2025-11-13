@@ -1,9 +1,10 @@
 """WebSocket authentication tests for datafeed module.
 
 Tests WebSocket authentication success scenarios:
-- Valid token accepted
-- Token extracted from Authorization header
+- Valid token accepted via cookie
 - Connection established and operational
+
+Note: WebSocket authentication uses cookie-only approach for security.
 """
 
 import time
@@ -37,6 +38,9 @@ def valid_jwt_token() -> str:
     settings = Settings()
     payload = {
         "user_id": "USER-001",
+        "email": "test@example.com",
+        "full_name": "Test User",
+        "picture": "https://example.com/avatar.jpg",
         "exp": int(time.time()) + 300,
         "iat": int(time.time()),
     }
@@ -48,13 +52,13 @@ def valid_jwt_token() -> str:
 class TestWebSocketAuthSuccess:
     """Test WebSocket authentication success scenarios"""
 
-    def test_connection_with_valid_token_accepted(
+    def test_connection_with_valid_token_in_cookie(
         self, client: TestClient, valid_jwt_token: str
     ) -> None:
-        """WebSocket connection with valid token in query parameter should be accepted"""
-        with client.websocket_connect(
-            f"/api/v1/datafeed/ws?token={valid_jwt_token}",
-        ) as ws:
+        """WebSocket connection with valid token in cookie should be accepted"""
+        client.cookies.set("access_token", valid_jwt_token)
+
+        with client.websocket_connect("/api/v1/datafeed/ws") as ws:
             # Connection established successfully
             # Send a test subscription request to verify connection is operational
             ws.send_json(
@@ -67,16 +71,15 @@ class TestWebSocketAuthSuccess:
             )
 
             # Should receive subscription confirmation or data
-            # (Implementation may vary, so we just verify no exception)
             assert ws is not None
 
-    def test_token_extracted_from_query_parameter(
+    def test_token_extracted_from_cookie(
         self, client: TestClient, valid_jwt_token: str
     ) -> None:
-        """Token should be correctly extracted from query parameter"""
-        with client.websocket_connect(
-            f"/api/v1/datafeed/ws?token={valid_jwt_token}",
-        ) as ws:
+        """Token should be correctly extracted from cookie"""
+        client.cookies.set("access_token", valid_jwt_token)
+
+        with client.websocket_connect("/api/v1/datafeed/ws") as ws:
             # If we get here, token was successfully extracted and validated
             assert ws is not None
 
@@ -84,9 +87,9 @@ class TestWebSocketAuthSuccess:
         self, client: TestClient, valid_jwt_token: str
     ) -> None:
         """WebSocket connection should be fully operational after successful auth"""
-        with client.websocket_connect(
-            f"/api/v1/datafeed/ws?token={valid_jwt_token}",
-        ) as ws:
+        client.cookies.set("access_token", valid_jwt_token)
+
+        with client.websocket_connect("/api/v1/datafeed/ws") as ws:
             # Verify bidirectional communication works
             ws.send_json(
                 {
