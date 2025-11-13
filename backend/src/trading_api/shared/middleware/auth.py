@@ -10,22 +10,29 @@ Authentication middleware for validating JWT tokens.
 import hashlib
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import (
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketException,
+    status,
+)
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 
 from trading_api.shared import settings
 
-# HTTPBearer security scheme for extracting Bearer tokens
-_http_bearer = HTTPBearer()
+# HTTPBearer security scheme for extracting Bearer tokens from REST endpoints
+_http_bearer = HTTPBearer(auto_error=False)
 
 
-def extract_device_fingerprint(request: Request) -> str:
+def extract_device_fingerprint(request: Request | WebSocket) -> str:
     """
     Generate device fingerprint from request metadata.
 
     Args:
-        request: FastAPI request object
+        request: FastAPI Request or WebSocket object
 
     Returns:
         SHA256 hash (32 chars) of IP + User-Agent
@@ -38,6 +45,59 @@ def extract_device_fingerprint(request: Request) -> str:
     return hashlib.sha256(fingerprint_string.encode()).hexdigest()[:32]
 
 
+async def get_current_user_ws(websocket: WebSocket) -> dict[str, str]:
+    """
+    Validate JWT token from WebSocket query parameter and return user data.
+
+    WebSocket-specific auth dependency that extracts token from query parameter.
+    Browser WebSocket connections cannot send Authorization header.
+
+    Args:
+        websocket: FastAPI WebSocket object (auto-injected by FastAPI)
+
+    Returns:
+        dict with 'user_id' and 'device_fingerprint'
+
+    Raises:
+        WebSocketException: 1008 if token is invalid, expired, or missing
+    """
+    token = websocket.query_params.get("token")
+
+    if not token:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason="Missing authentication token",
+        )
+
+    try:
+        # Validate JWT signature with public key
+        payload = jwt.decode(
+            token,
+            settings.jwt_public_key,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+
+        user_id = payload.get("user_id")
+        if not user_id or not isinstance(user_id, str):
+            raise WebSocketException(
+                code=status.WS_1008_POLICY_VIOLATION,
+                reason="Invalid token: missing user_id",
+            )
+
+        device_fingerprint = extract_device_fingerprint(websocket)
+
+        return {
+            "user_id": user_id,
+            "device_fingerprint": device_fingerprint,
+        }
+
+    except JWTError as e:
+        raise WebSocketException(
+            code=status.WS_1008_POLICY_VIOLATION,
+            reason=f"Invalid token: {str(e)}",
+        )
+
+
 async def get_current_user(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_http_bearer)],
@@ -47,7 +107,7 @@ async def get_current_user(
 
     Supports two token extraction methods:
     1. REST: Authorization header (Bearer token) - handled by HTTPBearer
-    2. WebSocket: Query parameter (?token=<jwt>)
+    2. WebSocket: Query parameter (?token=<jwt>) - fallback when credentials is None
 
     Args:
         request: FastAPI request object

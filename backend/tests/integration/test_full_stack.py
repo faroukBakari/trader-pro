@@ -90,10 +90,12 @@ async def test_all_modules_loaded(async_client: AsyncClient) -> None:
 
 
 @pytest.mark.integration
-def test_websocket_all_channels(client: TestClient) -> None:
+def test_websocket_all_channels(client: TestClient, valid_jwt_token: str) -> None:
     """Verify all WebSocket channels available with all modules."""
     # Test datafeed WebSocket channels
-    with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
+    with client.websocket_connect(
+        f"/api/v1/datafeed/ws?token={valid_jwt_token}"
+    ) as websocket:
         # Test datafeed channels - bars
         websocket.send_json(
             {
@@ -117,7 +119,9 @@ def test_websocket_all_channels(client: TestClient) -> None:
         assert response["payload"]["status"] == "ok"
 
     # Test broker WebSocket channels
-    with client.websocket_connect("/api/v1/broker/ws") as websocket:
+    with client.websocket_connect(
+        f"/api/v1/broker/ws?token={valid_jwt_token}"
+    ) as websocket:
         # Test broker channels - orders
         websocket.send_json(
             {"type": "orders.subscribe", "payload": {"accountId": "test"}}
