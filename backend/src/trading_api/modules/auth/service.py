@@ -69,7 +69,7 @@ class AuthService(AuthServiceInterface, ServiceInterface):
     def oauth(self) -> OAuth:
         """Lazy initialization of OAuth instance for testability"""
         if self._oauth is None:
-            self._oauth = OAuth()  # type: ignore[no-untyped-call]
+            self._oauth = OAuth()
             self._oauth.register(
                 name="google",
                 client_id=settings.GOOGLE_CLIENT_ID,

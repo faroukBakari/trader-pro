@@ -6,7 +6,22 @@ organized by functionality:
 - common/: Shared base models and utilities
 - market/: Market data, instruments, quotes, and bars
 - broker/: Orders, positions, executions, and account operations
+- auth/: Authentication and user models
 """
+
+# Import from auth domain
+from .auth import (
+    DeviceInfo,
+    GoogleLoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    RefreshTokenData,
+    TokenData,
+    TokenResponse,
+    User,
+    UserCreate,
+    UserInDB,
+)
 
 # Import from broker domain
 from .broker import (
@@ -76,6 +91,17 @@ __all__ = [
     "ErrorApiResponse",
     "SubscriptionResponse",
     "BarsSubscriptionRequest",
+    # Auth models
+    "User",
+    "UserCreate",
+    "UserInDB",
+    "TokenResponse",
+    "RefreshRequest",
+    "LogoutRequest",
+    "DeviceInfo",
+    "GoogleLoginRequest",
+    "TokenData",
+    "RefreshTokenData",
     # Market data models
     "Bar",
     "DatafeedConfiguration",

@@ -40,9 +40,7 @@ def extract_device_fingerprint(request: Request) -> str:
 
 async def get_current_user(
     request: Request,
-    credentials: (
-        Annotated[HTTPAuthorizationCredentials, Depends(_http_bearer)] | None
-    ) = None,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_http_bearer)],
 ) -> dict[str, str]:
     """
     Validate JWT token and return user data.
