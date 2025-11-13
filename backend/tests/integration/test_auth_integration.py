@@ -349,7 +349,6 @@ def test_websocket_connection_with_valid_token(
 
         # Connection accepted successfully - that's enough for integration test
         # Note: receive_json would block, so we just verify connection was established
-        pass
 
 
 @pytest.mark.integration
