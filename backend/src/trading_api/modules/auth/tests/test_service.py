@@ -8,10 +8,6 @@ import pytest
 from jose import jwt
 
 from trading_api.models.auth import TokenResponse
-from trading_api.modules.auth.repository import (
-    InMemoryRefreshTokenRepository,
-    InMemoryUserRepository,
-)
 from trading_api.modules.auth.service import AuthService
 from trading_api.modules.auth.tests.conftest import DeviceInfoFactory, UserCreateFactory
 
