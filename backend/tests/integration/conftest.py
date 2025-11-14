@@ -17,14 +17,44 @@ import pytest
 import uvicorn
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
+from jose import jwt
 
 from trading_api.app_factory import ModularApp
 from trading_api.shared import FastWSAdapter
+from trading_api.shared.config import Settings
 
 # Add backend scripts to path for backend_manager imports
 backend_scripts_dir = Path(__file__).parent.parent.parent / "scripts"
 if str(backend_scripts_dir) not in sys.path:
     sys.path.insert(0, str(backend_scripts_dir))
+
+
+# ============================================================================
+# Authentication Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def valid_jwt_token() -> str:
+    """Generate a valid JWT token for authentication."""
+    settings = Settings()
+    payload = {
+        "user_id": "TEST-USER-001",
+        "email": "test@example.com",
+        "full_name": "Test User",
+        "picture": "https://example.com/avatar.jpg",
+        "exp": int(time.time()) + 300,
+        "iat": int(time.time()),
+    }
+    return jwt.encode(
+        payload, settings.jwt_private_key, algorithm=settings.JWT_ALGORITHM
+    )
+
+
+@pytest.fixture
+def auth_cookies(valid_jwt_token: str) -> dict[str, str]:
+    """Generate authentication cookies for testing."""
+    return {"access_token": valid_jwt_token}
 
 
 # ============================================================================
@@ -150,8 +180,19 @@ def ws_app(ws_apps: list[FastWSAdapter]) -> FastWSAdapter | None:
 
 
 @pytest.fixture
-def client(app: ModularApp):
-    """Sync test client for WebSocket tests.
+def client(app: ModularApp, valid_jwt_token: str):
+    """Sync test client for WebSocket tests with authentication cookies.
+
+    Uses context manager to ensure proper cleanup of TestClient's internal event loop.
+    """
+    with TestClient(app) as c:
+        c.cookies.set("access_token", valid_jwt_token)
+        yield c
+
+
+@pytest.fixture
+def client_no_auth(app: ModularApp):
+    """Sync test client WITHOUT authentication (for testing auth rejection).
 
     Uses context manager to ensure proper cleanup of TestClient's internal event loop.
     """
@@ -160,8 +201,17 @@ def client(app: ModularApp):
 
 
 @pytest.fixture
-async def async_client(app: ModularApp) -> AsyncGenerator[AsyncClient, None]:
-    """Async test client for API tests."""
+async def async_client(
+    app: ModularApp, auth_cookies: dict[str, str]
+) -> AsyncGenerator[AsyncClient, None]:
+    """Async test client for API tests with authentication cookies."""
+    async with AsyncClient(app=app, base_url="http://test", cookies=auth_cookies) as ac:
+        yield ac
+
+
+@pytest.fixture
+async def async_client_no_auth(app: ModularApp) -> AsyncGenerator[AsyncClient, None]:
+    """Async test client for API tests WITHOUT authentication (for testing auth flows)."""
     async with AsyncClient(app=app, base_url="http://test") as ac:
         yield ac
 

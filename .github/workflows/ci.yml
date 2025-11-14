@@ -94,6 +94,10 @@ jobs:
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
         fail-on-cache-miss: false
 
+    - name: Generate JWT key pair for tests
+      working-directory: backend
+      run: make check-generate-keypair
+
     - name: Run import boundary tests
       working-directory: backend
       run: make test-boundaries
@@ -131,6 +135,10 @@ jobs:
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
         fail-on-cache-miss: false
 
+    - name: Generate JWT key pair for tests
+      working-directory: backend
+      run: make check-generate-keypair
+
     - name: Run ${{ matrix.module }} module tests
       working-directory: backend
       run: make test-module-${{ matrix.module }}
@@ -165,6 +173,10 @@ jobs:
         path: backend/.venv
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
         fail-on-cache-miss: false
+
+    - name: Generate JWT key pair for tests
+      working-directory: backend
+      run: make check-generate-keypair
 
     - name: Run all tests with coverage (final report)
       working-directory: backend

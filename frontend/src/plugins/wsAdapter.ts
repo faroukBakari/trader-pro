@@ -62,17 +62,22 @@ export type WsAdapterType = {
 }
 
 export class WsAdapter implements WsAdapterType {
+  private static instance: WsAdapter | null = null
 
-  bars: WebSocketInterface<BarsSubscriptionRequest, Bar>
-  quotes: WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>
-  orders: WebSocketInterface<OrderSubscriptionRequest, PlacedOrder>
-  positions: WebSocketInterface<PositionSubscriptionRequest, Position>
-  executions: WebSocketInterface<ExecutionSubscriptionRequest, Execution>
-  equity: WebSocketInterface<EquitySubscriptionRequest, EquityData>
-  brokerConnection: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
+  bars!: WebSocketInterface<BarsSubscriptionRequest, Bar>
+  quotes!: WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>
+  orders!: WebSocketInterface<OrderSubscriptionRequest, PlacedOrder>
+  positions!: WebSocketInterface<PositionSubscriptionRequest, Position>
+  executions!: WebSocketInterface<ExecutionSubscriptionRequest, Execution>
+  equity!: WebSocketInterface<EquitySubscriptionRequest, EquityData>
+  brokerConnection!: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
 
   // frontend dev have to set the resired version /{version}/{module}/ws
   constructor() {
+    if (WsAdapter.instance) {
+      return WsAdapter.instance
+    }
+
     const datafeedWsUrl = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + '/v1/datafeed/ws'
     this.bars = new WebSocketClient<BarsSubscriptionRequest, Bar_Ws_Backend, Bar>(datafeedWsUrl, 'bars', data => data)
     this.quotes = new WebSocketClient<QuoteDataSubscriptionRequest, QuoteData_Ws_Backend, QuoteData>(
@@ -95,6 +100,15 @@ export class WsAdapter implements WsAdapterType {
     this.brokerConnection = new WebSocketClient<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus_Ws_Backend, BrokerConnectionStatus>(
       brokerWsUrl, 'broker-connection', mapBrokerConnectionStatus
     )
+
+    WsAdapter.instance = this
+  }
+
+  static getInstance(): WsAdapter {
+    if (!WsAdapter.instance) {
+      WsAdapter.instance = new WsAdapter()
+    }
+    return WsAdapter.instance
   }
 
   /**

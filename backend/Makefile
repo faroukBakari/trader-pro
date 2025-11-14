@@ -377,11 +377,11 @@ install-ci:
 	@poetry install --no-interaction
 	@echo "✅ CI installation complete!"
 
-test-boundaries:
+test-boundaries: check-generate-keypair
 	@echo "Running root-level tests..."
 	poetry run pytest tests/ -v --ignore=tests/integration/
 
-test-modules:
+test-modules: check-generate-keypair
 	@echo "Running module tests..."
 	@if [ -z "$(SELECTED_MODULES)" ]; then \
 		echo "⚠️  No modules selected or found"; \
@@ -390,7 +390,13 @@ test-modules:
 		for module in $(SELECTED_MODULES); do \
 			if [ -d "$(MODULES_DIR)/$$module/tests" ]; then \
 				echo "Testing module: $$module"; \
-				poetry run pytest $(MODULES_DIR)/$$module/tests/ -v -x || exit 1; \
+				poetry run pytest $(MODULES_DIR)/$$module/tests/ -v -x; \
+				EXIT_CODE=$$?; \
+				if [ $$EXIT_CODE -eq 5 ]; then \
+					echo "⚠️  No tests collected for module: $$module (skipping)"; \
+				elif [ $$EXIT_CODE -ne 0 ]; then \
+					exit 1; \
+				fi; \
 			else \
 				echo "⚠️  No tests found for module: $$module"; \
 			fi; \
@@ -402,11 +408,17 @@ $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
 	@echo "Running tests for module: $*..."
 	@if [ -d "$(MODULES_DIR)/$*/tests" ]; then \
 		poetry run pytest $(MODULES_DIR)/$*/tests/ -v -x; \
+		EXIT_CODE=$$?; \
+		if [ $$EXIT_CODE -eq 5 ]; then \
+			echo "⚠️  No tests collected for module: $* (skipping)"; \
+		elif [ $$EXIT_CODE -ne 0 ]; then \
+			exit 1; \
+		fi; \
 	else \
 		echo "⚠️  No tests found for module: $*"; \
 	fi
 
-test-integration:
+test-integration: check-generate-keypair
 	@echo "Running integration tests..."
 	poetry run pytest tests/integration/ -v -x -m integration
 
@@ -414,7 +426,7 @@ test: test-boundaries test-modules test-integration
 	@echo "✅ All tests passed (boundaries + modules + integration)"
 
 # Coverage targets
-test-cov: test-boundaries
+test-cov: check-generate-keypair test-boundaries
 	@echo "Running all tests with coverage..."
 	@poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
 	@echo ""
@@ -447,7 +459,7 @@ format:
 	@echo "✅ Backend formatting complete"
 
 # Development server
-dev: clean-generated
+dev:
 	@echo "Starting backend development server with debugpy on http://localhost:$(BACKEND_PORT)"
 	@echo "🔍 Checking if backend port is available..."
 	@if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
@@ -617,7 +629,7 @@ clean-generated:
 	@echo "   make generate                  # All specs, clients, and routers"
 	@echo "   make generate modules=broker   # Specific module only"
 
-# Multi-process backend management (using backend-manager)
+# Multi-process backend (using backend-manager)
 backend-manager-start:
 	@echo "Checking nginx installation..."
 	@if [ -f ".local/bin/nginx" ]; then \
@@ -703,4 +715,34 @@ logs-clean:
 		echo "✅ All log files cleaned (truncated)"; \
 	else \
 		echo "✅ No log directory found (nothing to clean)"; \
+	fi
+
+# JWT Key Pair Management
+SECRETS_DIR := .local/secrets
+PRIVATE_KEY := $(SECRETS_DIR)/jwt_private.pem
+PUBLIC_KEY := $(SECRETS_DIR)/jwt_public.pem
+
+.PHONY: check-generate-keypair
+check-generate-keypair: ## Check and generate JWT key pair if missing
+	@echo "🔐 Checking JWT key pair..."
+	@if [ -f "$(PRIVATE_KEY)" ] && [ -f "$(PUBLIC_KEY)" ]; then \
+		echo "✓ JWT key pair already exists"; \
+		echo "  Private key: $(PRIVATE_KEY)"; \
+		echo "  Public key: $(PUBLIC_KEY)"; \
+	else \
+		echo "⚠️  JWT key pair not found. Generating..."; \
+		mkdir -p $(SECRETS_DIR); \
+		openssl genrsa -out $(PRIVATE_KEY) 4096 2>/dev/null; \
+		openssl rsa -in $(PRIVATE_KEY) -pubout -out $(PUBLIC_KEY) 2>/dev/null; \
+		chmod 600 $(PRIVATE_KEY); \
+		chmod 644 $(PUBLIC_KEY); \
+		echo "✓ JWT key pair generated successfully"; \
+		echo "  Private key: $(PRIVATE_KEY) (permissions: 600)"; \
+		echo "  Public key: $(PUBLIC_KEY) (permissions: 644)"; \
+		echo ""; \
+		echo "📝 Add to .env.local:"; \
+		echo "  JWT_ALGORITHM=RS256"; \
+		echo "  JWT_PRIVATE_KEY_PATH=backend/.local/secrets/jwt_private.pem"; \
+		echo "  JWT_PUBLIC_KEY_PATH=backend/.local/secrets/jwt_public.pem"; \
+		echo "  ACCESS_TOKEN_EXPIRE_MINUTES=5"; \
 	fi

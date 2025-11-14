@@ -905,54 +905,61 @@ class BrokerService(WsRouteService):
         """
         Update equity after execution and broadcast changes.
 
+        P/L Calculation Rules:
+        - Long position: P/L = (exit_price - entry_price) * qty
+        - Short position: P/L = (entry_price - exit_price) * qty
+
         Args:
             execution: Execution that affects equity
         """
-
-        execution_value = execution.side * execution.qty * execution.price
-        new_position_value = execution_value
         position = self._positions.get(execution.symbol)
+
         if position is not None and position.qty != 0:
-            position_value = position.side * position.avgPrice * position.qty
-            new_position_size = abs(position.side * position.qty) + (
-                execution.side * execution.qty
-            )
-            new_position_value += position_value
-            new_position_side = (0 <= new_position_value) and Side.BUY or Side.SELL
-
+            # Check if this execution is closing/reducing position or adding to it
             if position.side == execution.side:
-                new_position_avg_price = new_position_value / new_position_size
-                unrealized_pnl = (
-                    (execution.price - new_position_avg_price)
-                    * new_position_side
-                    * new_position_size
-                )
-                self.unrealizedPL[execution.symbol] = unrealized_pnl
-                self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
-                self.accounting.equity = (
-                    self.accounting.balance + self.accounting.unrealizedPL
-                )
+                # Adding to existing position - no realized P/L, only unrealized
+                # Unrealized P/L will be recalculated after position update
+                pass
+            else:
+                # Closing or reducing position - realize P/L
+                qty_to_close = min(execution.qty, position.qty)
 
-            if position.side != execution.side:
-                pnl = (
-                    (execution.price - position.avgPrice)
-                    * execution.side
-                    * execution.qty
-                )
+                # Calculate realized P/L based on position type
+                if position.side == Side.BUY:
+                    # Closing long: P/L = (exit_price - entry_price) * qty
+                    pnl = (execution.price - position.avgPrice) * qty_to_close
+                else:
+                    # Closing short: P/L = (entry_price - exit_price) * qty
+                    pnl = (position.avgPrice - execution.price) * qty_to_close
+
                 self.accounting.balance += pnl
                 self.accounting.realizedPL += pnl
+
+                # Clear or reduce unrealized P/L for closed portion
+                remaining_qty = position.qty - qty_to_close
+                if remaining_qty == 0:
+                    # Position fully closed
+                    if execution.symbol in self.unrealizedPL:
+                        del self.unrealizedPL[execution.symbol]
+                # Unrealized P/L for remaining position will be recalculated after position update
 
         # Broadcast equity update
         if "equity" in self._update_callbacks:
             logger.info(f"Broadcasting equity update: {self.accounting}")
             self._update_callbacks["equity"](self.accounting)
 
-        # Trigger position update (which broadcasts)
+        # Trigger position update (which broadcasts and recalculates unrealized P/L)
         self._update_position(execution)
 
     def _update_position(self, execution: Execution) -> None:
         """
         Update position from execution and broadcast changes.
+
+        Position Update Rules:
+        1. Same side: Add to position, calculate weighted average price
+        2. Opposite side (partial close): Reduce qty, keep original avg price
+        3. Opposite side (full close): Set qty to 0, delete position
+        4. Opposite side (reverse): Close existing, open new opposite position
 
         Args:
             execution: Execution to update position from
@@ -960,35 +967,99 @@ class BrokerService(WsRouteService):
         existing = self._positions.get(execution.symbol)
 
         if existing:
-            total_qty = abs(
-                (existing.qty * existing.side) + (execution.qty * execution.side)
-            )
-            total_cost = abs(
-                (existing.qty * existing.avgPrice * existing.side)
-                + (execution.qty * execution.price * execution.side)
-            )
+            if existing.side == execution.side:
+                # Adding to position - weighted average price
+                total_cost = (existing.qty * existing.avgPrice) + (
+                    execution.qty * execution.price
+                )
+                total_qty = existing.qty + execution.qty
 
-            total_side = (
-                existing.side if existing.qty > execution.qty else execution.side
-            )
-
-            if total_qty > 0:
-                existing.side = total_side
                 existing.qty = total_qty
                 existing.avgPrice = total_cost / total_qty
+
+                # Calculate unrealized P/L for the new position
+                # Using execution price as current market price
+                if existing.side == Side.BUY:
+                    unrealized = (execution.price - existing.avgPrice) * existing.qty
+                else:
+                    unrealized = (existing.avgPrice - execution.price) * existing.qty
+
+                self.unrealizedPL[execution.symbol] = unrealized
+                self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
+                self.accounting.equity = (
+                    self.accounting.balance + self.accounting.unrealizedPL
+                )
 
                 # Broadcast position update
                 if "positions" in self._update_callbacks:
                     logger.info(f"Broadcasting position update: {existing.symbol}")
                     self._update_callbacks["positions"](existing)
             else:
-                existing.qty = total_qty
-                # Position closed - broadcast before deletion
-                if "positions" in self._update_callbacks:
-                    logger.info(f"Broadcasting position closure: {existing.symbol}")
-                    self._update_callbacks["positions"](existing)
+                # Opposite side - closing or reversing
+                if execution.qty < existing.qty:
+                    # Partial close - reduce quantity, keep avg price
+                    existing.qty -= execution.qty
 
-                del self._positions[execution.symbol]
+                    # Recalculate unrealized P/L for remaining position
+                    # Using execution price as current market price
+                    if existing.side == Side.BUY:
+                        unrealized = (
+                            execution.price - existing.avgPrice
+                        ) * existing.qty
+                    else:
+                        unrealized = (
+                            existing.avgPrice - execution.price
+                        ) * existing.qty
+
+                    self.unrealizedPL[execution.symbol] = unrealized
+                    self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
+                    self.accounting.equity = (
+                        self.accounting.balance + self.accounting.unrealizedPL
+                    )
+
+                    # Broadcast position update
+                    if "positions" in self._update_callbacks:
+                        logger.info(f"Broadcasting position update: {existing.symbol}")
+                        self._update_callbacks["positions"](existing)
+
+                elif execution.qty == existing.qty:
+                    # Full close - position eliminated
+                    existing.qty = 0
+
+                    # Clear unrealized P/L
+                    if execution.symbol in self.unrealizedPL:
+                        del self.unrealizedPL[execution.symbol]
+                    self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
+                    self.accounting.equity = (
+                        self.accounting.balance + self.accounting.unrealizedPL
+                    )
+
+                    # Broadcast position closure
+                    if "positions" in self._update_callbacks:
+                        logger.info(f"Broadcasting position closure: {existing.symbol}")
+                        self._update_callbacks["positions"](existing)
+
+                    del self._positions[execution.symbol]
+
+                else:
+                    # Reverse - close existing and open new opposite position
+                    new_qty = execution.qty - existing.qty
+
+                    existing.side = execution.side
+                    existing.qty = new_qty
+                    existing.avgPrice = execution.price
+
+                    # New position starts with 0 unrealized P/L
+                    self.unrealizedPL[execution.symbol] = 0.0
+                    self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
+                    self.accounting.equity = (
+                        self.accounting.balance + self.accounting.unrealizedPL
+                    )
+
+                    # Broadcast position update
+                    if "positions" in self._update_callbacks:
+                        logger.info(f"Broadcasting position update: {existing.symbol}")
+                        self._update_callbacks["positions"](existing)
         else:
             # New position created
             new_position = Position(
@@ -999,6 +1070,13 @@ class BrokerService(WsRouteService):
                 avgPrice=execution.price,
             )
             self._positions[execution.symbol] = new_position
+
+            # New position starts with 0 unrealized P/L
+            self.unrealizedPL[execution.symbol] = 0.0
+            self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
+            self.accounting.equity = (
+                self.accounting.balance + self.accounting.unrealizedPL
+            )
 
             # Broadcast new position
             if "positions" in self._update_callbacks:

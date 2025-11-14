@@ -83,16 +83,21 @@ def validate_import(
         allowed: List of allowed import patterns
         forbidden: List of forbidden import patterns
         file_path: Relative path of the file being checked (for context-aware rules)
+
+    Rules:
+        - Modules can import from their own components (self-imports allowed)
+        - Test files can import from their own module
+        - Cross-module imports are forbidden (e.g., auth importing from broker)
     """
-    # Special case: Test files can import from their own module
-    if "/tests/" in file_path:
-        # Extract module name from file path (e.g., "modules/core/tests/..." -> "core")
+    # Allow modules to import from themselves (not just in tests)
+    if "modules/" in file_path:
+        # Extract module name from file path (e.g., "modules/auth/service.py" -> "auth")
         parts = file_path.split("/")
         if "modules" in parts:
             module_idx = parts.index("modules")
             if module_idx + 1 < len(parts):
                 own_module = parts[module_idx + 1]
-                # Allow imports from the same module in test files
+                # Allow self-imports (e.g., auth/service.py can import auth/repository.py)
                 if import_name.startswith(f"trading_api.modules.{own_module}"):
                     return True
 

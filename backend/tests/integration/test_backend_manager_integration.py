@@ -23,15 +23,18 @@ import asyncio
 import os
 import signal
 import socket
+import time
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import httpx
 import pytest
 import pytest_asyncio
+from jose import jwt
 from pytest import TempPathFactory
 
 from scripts.backend_manager import ServerManager, generate_nginx_config, is_port_in_use
+from trading_api.shared.config import Settings
 from trading_api.shared.deployment import (
     DeploymentConfig,
     NginxConfig,
@@ -42,6 +45,29 @@ from trading_api.shared.deployment import (
 # ============================================================================
 # Fixtures and Helpers
 # ============================================================================
+
+
+@pytest.fixture(scope="session")
+def valid_jwt_token() -> str:
+    """Generate a valid JWT token for testing (session-scoped)."""
+    settings = Settings()
+    payload = {
+        "user_id": "TEST-USER-001",
+        "email": "test@example.com",
+        "full_name": "Test User",
+        "picture": "https://example.com/avatar.jpg",
+        "exp": int(time.time()) + 300,
+        "iat": int(time.time()),
+    }
+    return jwt.encode(
+        payload, settings.jwt_private_key, algorithm=settings.JWT_ALGORITHM
+    )
+
+
+@pytest.fixture(scope="session")
+def auth_cookies(valid_jwt_token: str) -> dict[str, str]:
+    """Generate authentication cookies for testing (session-scoped)."""
+    return {"access_token": valid_jwt_token}
 
 
 async def ensure_started(manager: ServerManager) -> None:
@@ -339,7 +365,7 @@ class TestBackendManagerIntegration:
                 ), f"Process {name} has same PID after restart"
 
     async def test_06_broker_routes_through_nginx(
-        self, session_backend_manager: ServerManager
+        self, session_backend_manager: ServerManager, auth_cookies: dict[str, str]
     ) -> None:
         """Test that broker routes are accessible through nginx."""
         await ensure_started(session_backend_manager)
@@ -349,18 +375,22 @@ class TestBackendManagerIntegration:
         async with httpx.AsyncClient() as client:
             # Broker endpoint
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/broker/orders", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/orders",
+                cookies=auth_cookies,
+                timeout=5.0,
             )
             assert response.status_code in [200, 404]
 
             # Positions endpoint
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/broker/positions", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/positions",
+                cookies=auth_cookies,
+                timeout=5.0,
             )
             assert response.status_code in [200, 404]
 
     async def test_07_datafeed_routes_through_nginx(
-        self, session_backend_manager: ServerManager
+        self, session_backend_manager: ServerManager, auth_cookies: dict[str, str]
     ) -> None:
         """Test that datafeed routes are accessible through nginx."""
         await ensure_started(session_backend_manager)
@@ -368,13 +398,16 @@ class TestBackendManagerIntegration:
         nginx_port = session_backend_manager.config.nginx.port
 
         async with httpx.AsyncClient() as client:
+            # Datafeed config endpoint (protected, requires auth)
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/datafeed/config", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/datafeed/config",
+                cookies=auth_cookies,
+                timeout=5.0,
             )
             assert response.status_code == 200
 
     async def test_08_broker_health_endpoint_format(
-        self, session_backend_manager: ServerManager
+        self, session_backend_manager: ServerManager, auth_cookies: dict[str, str]
     ) -> None:
         """Test broker health endpoint returns correct format."""
         await ensure_started(session_backend_manager)
@@ -382,7 +415,7 @@ class TestBackendManagerIntegration:
         nginx_port = session_backend_manager.config.nginx.port
 
         async with httpx.AsyncClient() as client:
-            # Health endpoint through nginx
+            # Health endpoint through nginx (public endpoint, no auth required)
             response = await client.get(
                 f"http://127.0.0.1:{nginx_port}/api/v1/broker/health", timeout=5.0
             )
@@ -391,14 +424,14 @@ class TestBackendManagerIntegration:
             assert "module_name" in data
             assert data["module_name"] == "broker"
 
-            # Versions endpoint
+            # Versions endpoint (public endpoint, no auth required)
             response = await client.get(
                 f"http://127.0.0.1:{nginx_port}/api/v1/broker/versions", timeout=5.0
             )
             assert response.status_code == 200
 
     async def test_09_direct_server_access_broker(
-        self, session_backend_manager: ServerManager
+        self, session_backend_manager: ServerManager, auth_cookies: dict[str, str]
     ) -> None:
         """Test direct access to broker server (bypassing nginx)."""
         await ensure_started(session_backend_manager)
@@ -406,20 +439,22 @@ class TestBackendManagerIntegration:
         broker_port = session_backend_manager.config.servers["broker"].port
 
         async with httpx.AsyncClient() as client:
-            # Direct broker health check
+            # Direct broker health check (public endpoint, no auth required)
             response = await client.get(
                 f"http://127.0.0.1:{broker_port}/api/v1/broker/health", timeout=5.0
             )
             assert response.status_code == 200
 
-            # Broker endpoint
+            # Broker endpoint (protected, requires auth)
             response = await client.get(
-                f"http://127.0.0.1:{broker_port}/api/v1/broker/orders", timeout=5.0
+                f"http://127.0.0.1:{broker_port}/api/v1/broker/orders",
+                cookies=auth_cookies,
+                timeout=5.0,
             )
             assert response.status_code in [200, 404]
 
     async def test_10_direct_server_access_datafeed(
-        self, session_backend_manager: ServerManager
+        self, session_backend_manager: ServerManager, auth_cookies: dict[str, str]
     ) -> None:
         """Test direct access to datafeed server (bypassing nginx)."""
         await ensure_started(session_backend_manager)
@@ -427,21 +462,22 @@ class TestBackendManagerIntegration:
         datafeed_port = session_backend_manager.config.servers["datafeed"].port
 
         async with httpx.AsyncClient() as client:
-            # Direct datafeed health check
+            # Direct datafeed health check (public endpoint, no auth required)
             response = await client.get(
                 f"http://127.0.0.1:{datafeed_port}/api/v1/datafeed/health", timeout=5.0
             )
             assert response.status_code == 200
 
-            # Datafeed endpoint
+            # Datafeed config endpoint (protected, requires auth)
             response = await client.get(
                 f"http://127.0.0.1:{datafeed_port}/api/v1/datafeed/config",
+                cookies=auth_cookies,
                 timeout=5.0,
             )
             assert response.status_code == 200
 
     async def test_11_module_isolation_broker_server(
-        self, session_backend_manager: ServerManager
+        self, session_backend_manager: ServerManager, auth_cookies: dict[str, str]
     ) -> None:
         """Test that broker server does NOT serve datafeed routes."""
         await ensure_started(session_backend_manager)
@@ -450,13 +486,16 @@ class TestBackendManagerIntegration:
 
         async with httpx.AsyncClient() as client:
             # Datafeed route should NOT be available on broker server
+            # (Module routing happens before auth, so 404 expected regardless of auth)
             response = await client.get(
-                f"http://127.0.0.1:{broker_port}/api/v1/datafeed/config", timeout=5.0
+                f"http://127.0.0.1:{broker_port}/api/v1/datafeed/config",
+                cookies=auth_cookies,
+                timeout=5.0,
             )
             assert response.status_code == 404
 
     async def test_12_module_isolation_datafeed_server(
-        self, session_backend_manager: ServerManager
+        self, session_backend_manager: ServerManager, auth_cookies: dict[str, str]
     ) -> None:
         """Test that datafeed server does NOT serve broker routes."""
         await ensure_started(session_backend_manager)
@@ -465,8 +504,11 @@ class TestBackendManagerIntegration:
 
         async with httpx.AsyncClient() as client:
             # Broker route should NOT be available on datafeed server
+            # (Module routing happens before auth, so 404 expected regardless of auth)
             response = await client.get(
-                f"http://127.0.0.1:{datafeed_port}/api/v1/broker/orders", timeout=5.0
+                f"http://127.0.0.1:{datafeed_port}/api/v1/broker/orders",
+                cookies=auth_cookies,
+                timeout=5.0,
             )
             assert response.status_code == 404
 
