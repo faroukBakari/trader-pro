@@ -150,6 +150,363 @@ describe("API Integration", () => {
 });
 ```
 
+## Authentication Testing
+
+### Overview
+
+The authentication system has comprehensive test coverage (92 tests) across multiple layers:
+
+- Repository tests (19)
+- Service tests (14)
+- Middleware tests (21)
+- API tests (18)
+- Integration tests (10)
+- Module-specific authenticated endpoint tests (10)
+
+### Backend Authentication Tests
+
+**Test Organization:**
+
+```
+backend/
+├── src/trading_api/modules/auth/tests/
+│   ├── conftest.py                    # Auth fixtures
+│   ├── test_repository.py             # Repository tests
+│   ├── test_service.py                # Service tests
+│   └── test_api.py                    # API tests
+├── tests/unit/
+│   └── test_auth_middleware.py        # Middleware tests
+└── tests/integration/
+    └── test_auth_integration.py       # Integration tests
+```
+
+**Running Auth Tests:**
+
+```bash
+# All auth module tests
+cd backend
+pytest src/trading_api/modules/auth/tests/ -v
+
+# Middleware tests
+pytest tests/unit/test_auth_middleware.py -v
+
+# Integration tests
+pytest tests/integration/test_auth_integration.py -v
+```
+
+### Mocking Google OAuth
+
+**Pattern:** Use `monkeypatch` to mock Google OAuth verification:
+
+```python
+@pytest.fixture
+def mock_google_oauth(monkeypatch):
+    """Mock Google OAuth token verification."""
+    async def mock_parse_id_token(token, claims_options):
+        return {
+            "sub": "104857234567890123456",
+            "email": "test@example.com",
+            "email_verified": True,
+            "name": "Test User",
+            "picture": "https://lh3.googleusercontent.com/test"
+        }
+
+    monkeypatch.setattr(
+        "authlib.integrations.starlette_client.OAuth.google.parse_id_token",
+        mock_parse_id_token
+    )
+    return mock_parse_id_token
+```
+
+**Usage:**
+
+```python
+async def test_login_with_google(client, mock_google_oauth):
+    """Test login with mocked Google OAuth."""
+    response = await client.post("/api/v1/auth/login", json={
+        "google_token": "mock_google_token"
+    })
+
+    assert response.status_code == 200
+    assert "access_token" in response.json()
+    assert "access_token" in response.cookies
+```
+
+### Testing JWT Tokens
+
+**Creating Test Tokens:**
+
+```python
+from datetime import datetime, timedelta
+import jwt
+
+@pytest.fixture
+def valid_jwt_token(test_user):
+    """Generate valid JWT token for testing."""
+    payload = {
+        "user_id": test_user.id,
+        "email": test_user.email,
+        "full_name": test_user.full_name,
+        "picture": test_user.picture,
+        "exp": datetime.utcnow() + timedelta(minutes=5),
+        "iat": datetime.utcnow()
+    }
+    return jwt.encode(payload, private_key, algorithm="RS256")
+
+@pytest.fixture
+def expired_jwt_token(test_user):
+    """Generate expired JWT token for testing."""
+    payload = {
+        "user_id": test_user.id,
+        "email": test_user.email,
+        "exp": datetime.utcnow() - timedelta(minutes=5),  # Expired
+        "iat": datetime.utcnow() - timedelta(minutes=10)
+    }
+    return jwt.encode(payload, private_key, algorithm="RS256")
+```
+
+**Testing Protected Endpoints:**
+
+```python
+async def test_authenticated_endpoint(client, valid_jwt_token):
+    """Test accessing protected endpoint with valid token."""
+    response = await client.get(
+        "/api/v1/broker/orders",
+        cookies={"access_token": valid_jwt_token}
+    )
+    assert response.status_code == 200
+
+async def test_unauthenticated_endpoint(client):
+    """Test accessing protected endpoint without token."""
+    response = await client.get("/api/v1/broker/orders")
+    assert response.status_code == 401
+    assert "Missing authentication token" in response.json()["detail"]
+
+async def test_expired_token(client, expired_jwt_token):
+    """Test accessing protected endpoint with expired token."""
+    response = await client.get(
+        "/api/v1/broker/orders",
+        cookies={"access_token": expired_jwt_token}
+    )
+    assert response.status_code == 401
+    assert "expired" in response.json()["detail"].lower()
+```
+
+### Testing Refresh Token Flow
+
+```python
+async def test_refresh_token_flow(client, mock_google_oauth):
+    """Test complete token refresh flow."""
+    # 1. Login
+    login_response = await client.post("/api/v1/auth/login", json={
+        "google_token": "mock_token"
+    })
+    refresh_token = login_response.json()["refresh_token"]
+
+    # 2. Wait for access token to expire (or mock time)
+    # ...
+
+    # 3. Refresh token
+    refresh_response = await client.post("/api/v1/auth/refresh-token", json={
+        "refresh_token": refresh_token
+    })
+    assert refresh_response.status_code == 200
+
+    new_access_token = refresh_response.cookies.get("access_token")
+    new_refresh_token = refresh_response.json()["refresh_token"]
+
+    # 4. Old refresh token should be revoked
+    old_refresh_response = await client.post("/api/v1/auth/refresh-token", json={
+        "refresh_token": refresh_token
+    })
+    assert old_refresh_response.status_code == 401
+
+    # 5. New tokens should work
+    protected_response = await client.get("/api/v1/broker/orders")
+    assert protected_response.status_code == 200
+```
+
+### Testing Device Fingerprinting
+
+```python
+async def test_device_fingerprint_validation(client, mock_google_oauth):
+    """Test refresh token requires same device."""
+    # Login from device 1
+    response1 = await client.post(
+        "/api/v1/auth/login",
+        json={"google_token": "mock_token"},
+        headers={"User-Agent": "Device1", "X-Forwarded-For": "192.168.1.1"}
+    )
+    refresh_token = response1.json()["refresh_token"]
+
+    # Try refresh from device 2 (different IP/User-Agent)
+    response2 = await client.post(
+        "/api/v1/auth/refresh-token",
+        json={"refresh_token": refresh_token},
+        headers={"User-Agent": "Device2", "X-Forwarded-For": "192.168.1.2"}
+    )
+    assert response2.status_code == 401
+    assert "device mismatch" in response2.json()["detail"].lower()
+```
+
+### Frontend Authentication Tests
+
+**Test Organization:**
+
+```
+frontend/
+└── src/services/tests/
+    ├── authService.spec.ts            # Service unit tests
+    └── authService.integration.spec.ts # Integration tests
+```
+
+**Mocking Auth Service:**
+
+```typescript
+import { vi } from "vitest";
+import { useAuthService } from "@/services/authService";
+
+describe("authService", () => {
+  it("should login successfully", async () => {
+    const authService = useAuthService();
+
+    // Mock API response
+    vi.spyOn(authService.apiAdapter, "loginWithGoogleToken").mockResolvedValue({
+      access_token: "jwt_token",
+      refresh_token: "refresh_token",
+      token_type: "bearer",
+      expires_in: 300,
+    });
+
+    await authService.loginWithGoogleToken("google_token");
+
+    expect(authService.error.value).toBeNull();
+  });
+
+  it("should handle login errors", async () => {
+    const authService = useAuthService();
+
+    vi.spyOn(authService.apiAdapter, "loginWithGoogleToken").mockRejectedValue(
+      new Error("Invalid token")
+    );
+
+    await authService.loginWithGoogleToken("invalid_token");
+
+    expect(authService.error.value).toContain("Invalid token");
+  });
+});
+```
+
+**Testing Router Guards:**
+
+```typescript
+import { describe, it, expect, vi } from "vitest";
+import { createRouter } from "@/router";
+import { useAuthService } from "@/services/authService";
+
+describe("authentication guards", () => {
+  it("should redirect to login when not authenticated", async () => {
+    const router = createRouter();
+    const authService = useAuthService();
+
+    // Mock unauthenticated state
+    vi.spyOn(authService, "checkAuthStatus").mockResolvedValue(false);
+
+    await router.push("/broker");
+
+    expect(router.currentRoute.value.path).toBe("/login");
+    expect(router.currentRoute.value.query.redirect).toBe("/broker");
+  });
+
+  it("should allow access when authenticated", async () => {
+    const router = createRouter();
+    const authService = useAuthService();
+
+    // Mock authenticated state
+    vi.spyOn(authService, "checkAuthStatus").mockResolvedValue(true);
+
+    await router.push("/broker");
+
+    expect(router.currentRoute.value.path).toBe("/broker");
+  });
+});
+```
+
+### WebSocket Authentication Tests
+
+**Testing WebSocket Cookie Authentication:**
+
+```python
+async def test_websocket_authentication(client, valid_jwt_token):
+    """Test WebSocket connection with valid cookie."""
+    async with client.websocket_connect(
+        "/api/v1/broker/ws",
+        cookies={"access_token": valid_jwt_token}
+    ) as ws:
+        # Connection established successfully
+        await ws.send_json({
+            "type": "orders.subscribe",
+            "payload": {"orderId": "123"}
+        })
+
+        response = await ws.receive_json()
+        assert response["type"] == "orders.subscribe.response"
+        assert response["payload"]["status"] == "ok"
+
+async def test_websocket_without_authentication(client):
+    """Test WebSocket connection without authentication."""
+    with pytest.raises(WebSocketException) as exc:
+        async with client.websocket_connect("/api/v1/broker/ws"):
+            pass
+
+    assert exc.value.code == 1008  # Policy Violation
+    assert "authentication" in exc.value.reason.lower()
+```
+
+### Best Practices
+
+**Backend:**
+
+1. **Use Fixtures**: Create reusable test fixtures for users, tokens, and auth data
+2. **Mock External Services**: Always mock Google OAuth (don't make real API calls)
+3. **Test Negative Cases**: Test expired tokens, invalid tokens, missing tokens
+4. **Test Device Fingerprinting**: Verify refresh tokens tied to devices
+5. **Test Token Rotation**: Ensure old refresh tokens are invalidated
+
+**Frontend:**
+
+1. **Mock API Calls**: Use `vi.spyOn()` to mock auth service methods
+2. **Test Loading States**: Verify loading indicators during auth operations
+3. **Test Error States**: Check error message display
+4. **Test Router Guards**: Verify redirect behavior for protected routes
+5. **Test Cookie Handling**: Ensure cookies are included in requests
+
+**Integration:**
+
+1. **Test Complete Flows**: Login → Access → Refresh → Logout
+2. **Test Concurrent Requests**: Multiple simultaneous authenticated requests
+3. **Test Token Expiry**: Access token expiration and refresh
+4. **Test WebSocket Auth**: Cookie authentication in WebSocket handshake
+
+### Running Complete Auth Test Suite
+
+```bash
+# Backend (92 tests)
+cd backend
+pytest src/trading_api/modules/auth/tests/ -v
+pytest tests/unit/test_auth_middleware.py -v
+pytest tests/integration/test_auth_integration.py -v
+
+# Frontend
+cd frontend
+npm run test -- authService
+
+# All tests
+make -f project.mk test-all
+```
+
+See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete authentication system documentation.
+
 ## CI/CD Testing
 
 ### Parallel Execution

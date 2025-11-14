@@ -20,7 +20,7 @@ For comprehensive project documentation, see the [root README](../README.md) and
 
 The backend implements a **modular factory-based architecture** with these key patterns:
 
-- **Module ABC Pattern**: All feature modules (broker, datafeed) extend the `Module` abstract base class
+- **Module ABC Pattern**: All feature modules (auth, broker, datafeed) extend the `Module` abstract base class
 - **Application Factory**: Dynamic composition via `create_app()` with selective module loading
 - **Multi-Process Deployment**: Production mode runs modules in separate processes with nginx gateway
 - **Module Registry**: Centralized management with auto-discovery
@@ -32,6 +32,17 @@ The backend implements a **modular factory-based architecture** with these key p
 - Horizontal scaling (modules in separate processes)
 
 See [Modular Architecture](docs/MODULAR_BACKEND_ARCHITECTURE.md) for complete details.
+
+### Authentication Module
+
+The system includes a JWT-based authentication module with:
+
+- Google OAuth integration
+- Cookie-based session management (HttpOnly, Secure, SameSite=Strict)
+- Refresh token rotation with device fingerprinting
+- Stateless middleware for REST and WebSocket authentication
+
+All broker and datafeed endpoints require authentication. See [auth module documentation](src/trading_api/modules/auth/README.md) for details.
 
 ## Quick Start
 
@@ -49,6 +60,9 @@ make dev
 ### Single Module Development
 
 ```bash
+# Start only the auth module
+ENABLED_MODULES=auth make dev
+
 # Start only the broker module
 ENABLED_MODULES=broker make dev
 

@@ -8,10 +8,15 @@ A Vue.js frontend application for the Trading API built with TypeScript, Vue Rou
 - ✅ TypeScript support
 - ✅ Vue Router for navigation
 - ✅ Pinia for state management
+- ✅ JWT-based authentication with Google OAuth
+- ✅ Cookie-based session management
+- ✅ Service-based auth architecture (no Pinia store)
+- ✅ Protected routes with stateless guards
 - ✅ Vitest for testing
 - ✅ ESLint + Prettier for code quality
 - ✅ API service integration with FastAPI backend
 - ✅ Real-time API status monitoring
+- ✅ WebSocket authentication via cookies
 
 ## Development Setup
 
@@ -22,6 +27,42 @@ A Vue.js frontend application for the Trading API built with TypeScript, Vue Rou
   - Or check version: `node --version`
   - Manual install: `nvm install 22.20.0 && nvm use 22.20.0`
 - npm (comes with Node.js)
+
+### Authentication Setup
+
+The application requires authentication to access protected routes.
+
+**Quick Start:**
+
+1. Start the backend (includes auth module): `cd ../backend && make dev`
+2. Navigate to http://localhost:5173/login
+3. Sign in with Google OAuth
+4. Access protected routes (all routes except `/login` require authentication)
+
+**Architecture:**
+
+The frontend uses a **service-based authentication architecture**:
+
+- **Service Layer**: `authService.ts` singleton with composable interface
+- **Cookie-Based**: HttpOnly cookies for access tokens (XSS protection)
+- **Stateless Guards**: Router guards use direct API introspection
+- **Google OAuth**: Integration via `vue3-google-signin`
+- **No Store**: Authentication managed entirely through service + cookies
+
+**Key Features:**
+
+- ✅ JWT access tokens in HttpOnly cookies (5-minute expiry)
+- ✅ Refresh token rotation with device fingerprinting
+- ✅ Automatic cookie handling (no manual token management)
+- ✅ Stateless router guards (API introspection with 30s cache)
+- ✅ WebSocket authentication via cookies (automatic)
+- ✅ Protected routes with redirect preservation
+
+**Documentation:**
+
+- **Auth Service**: See `src/services/README.md` for service layer details
+- **Router Guards**: See `src/router/README.md` for authentication guards
+- **Authentication Guide**: See `../docs/AUTHENTICATION.md` for complete system documentation
 
 ## Quick Start
 

@@ -544,6 +544,8 @@ backend/src/trading_api/
 │   ├── client_generation_service.py  # Python client generation
 │   ├── api/                   # Shared API utilities
 │   │   └── api_router_interface.py  # APIRouterInterface (auto health/version)
+│   ├── middleware/            # Shared middleware
+│   │   └── auth.py           # Stateless JWT validation (public key only)
 │   ├── plugins/               # FastWS adapter and plugins
 │   ├── ws/                    # WebSocket framework
 │   │   ├── fastws_adapter.py  # FastWSAdapter integration
@@ -551,6 +553,16 @@ backend/src/trading_api/
 │   └── templates/             # Code generation templates
 │
 ├── modules/                   # Feature modules (pluggable)
+│   ├── auth/                 # Auth module (optional)
+│   │   ├── __init__.py       # AuthModule class
+│   │   ├── service.py        # AuthService (extends ServiceInterface)
+│   │   ├── repository.py     # User and refresh token repositories
+│   │   ├── api/              # Versioned API routers
+│   │   │   └── v1.py         # ✅ v1 API router (file pattern)
+│   │   ├── specs_generated/  # OpenAPI specs
+│   │   ├── client_generated/ # Python HTTP client
+│   │   └── tests/            # Module tests
+│   │
 │   ├── broker/               # Broker module (optional)
 │   │   ├── __init__.py       # BrokerModule class
 │   │   ├── service.py        # BrokerService (extends ServiceInterface)
@@ -1047,6 +1059,157 @@ class BrokerWsRouters(WsRouterInterface):
 
         super().__init__([order_router, position_router], service=service)
 ```
+
+---
+
+## Authentication Integration
+
+The platform uses JWT-based authentication with stateless middleware for both REST and WebSocket endpoints.
+
+### Shared Middleware Pattern
+
+Authentication middleware is located in `shared/middleware/auth.py` and is **independent** of the auth module:
+
+- ✅ NO database queries
+- ✅ NO private key access (public key only)
+- ✅ Stateless validation only
+- ✅ Works with REST and WebSocket
+
+**Functions:**
+
+```python
+from trading_api.shared.middleware.auth import get_current_user, get_current_user_ws
+from trading_api.models.auth import UserData
+
+# REST endpoint authentication
+async def get_current_user(request: Request) -> UserData:
+    """Validates JWT from cookie and returns user data."""
+    # 1. Extract token from cookie
+    # 2. Decode JWT with public key (RS256)
+    # 3. Validate payload structure
+    # 4. Return UserData object
+
+# WebSocket authentication
+async def get_current_user_ws(websocket: WebSocket) -> UserData:
+    """WebSocket-specific authentication (same process, different exception type)."""
+```
+
+### Authenticated Endpoint Pattern
+
+Modules add authentication to endpoints via dependency injection:
+
+```python
+from typing import Annotated
+from fastapi import Depends
+from trading_api.models.auth import UserData
+from trading_api.shared.middleware.auth import get_current_user
+
+class BrokerApi(APIRouterInterface):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        @self.get("/orders")
+        async def get_orders(
+            user_data: Annotated[UserData, Depends(get_current_user)]
+        ) -> list[Order]:
+            """Get orders for authenticated user."""
+            return await self.service.get_user_orders(user_data.user_id)
+
+        @self.post("/orders")
+        async def create_order(
+            order: Order,
+            user_data: Annotated[UserData, Depends(get_current_user)]
+        ) -> OrderResponse:
+            """Create order for authenticated user."""
+            return await self.service.create_order(order, user_data.user_id)
+```
+
+**UserData Model:**
+
+```python
+class UserData(BaseModel):
+    """User data extracted from JWT token."""
+    user_id: str
+    email: str
+    full_name: str | None
+    picture: str | None
+```
+
+### WebSocket Authentication
+
+WebSocket connections are authenticated automatically via cookies:
+
+```python
+from trading_api.shared.middleware.auth import get_current_user_ws
+
+class BrokerWsRouters(WsRouterInterface):
+    def __init__(self, service: WsRouteService):
+        # Router automatically validates authentication
+        order_router = OrderWsRouter(route="orders", service=service)
+
+        # Access user data in route handler
+        @order_router.on_subscribe
+        async def handle_subscribe(client: Client, topic: str):
+            # Extract user data from connection
+            user_data = await get_current_user_ws(client.websocket)
+            # Filter data by user_id
+            await service.subscribe_user_orders(user_data.user_id, topic)
+```
+
+**Key Points:**
+
+- Browser automatically includes cookies in WebSocket handshake
+- No query parameters needed
+- Same security as REST endpoints (HttpOnly cookies)
+- `get_current_user_ws` middleware validates token
+
+### Cookie-Based Authentication
+
+**Cookie Configuration:**
+
+- **Name:** `access_token`
+- **Flags:** `httponly=True, secure=True, samesite="strict"`
+- **Expiry:** 5 minutes (matches JWT expiry)
+
+**Security Benefits:**
+
+1. **XSS Protection**: HttpOnly prevents JavaScript access
+2. **CSRF Protection**: SameSite=Strict blocks cross-site requests
+3. **Automatic Handling**: Browser sends cookies automatically (REST + WebSocket)
+4. **No Manual Management**: Frontend never touches access tokens
+
+**CORS Configuration Required:**
+
+```python
+# backend/src/trading_api/shared/config.py
+CORS_ALLOW_CREDENTIALS = True
+CORS_ORIGINS = ["http://localhost:5173"]  # Frontend URL
+```
+
+### Auth Module Architecture
+
+The auth module follows the standard modular pattern:
+
+```
+modules/auth/
+├── __init__.py         # AuthModule class
+├── service.py          # AuthService (Google OAuth, JWT generation)
+├── repository.py       # User and refresh token repositories
+├── api/v1.py          # REST API (/login, /refresh-token, /logout, /me, /introspect)
+└── tests/             # 92 tests (repository, service, API, integration)
+```
+
+**Endpoints:**
+
+| Endpoint                     | Method | Purpose                           |
+| ---------------------------- | ------ | --------------------------------- |
+| `/api/v1/auth/login`         | POST   | Authenticate with Google OAuth    |
+| `/api/v1/auth/refresh-token` | POST   | Refresh access token              |
+| `/api/v1/auth/logout`        | POST   | Logout and revoke refresh token   |
+| `/api/v1/auth/me`            | GET    | Get current user info             |
+| `/api/v1/auth/introspect`    | GET    | Validate token (for route guards) |
+
+See [auth module documentation](../src/trading_api/modules/auth/README.md) for complete implementation details.
 
 ---
 

@@ -176,6 +176,181 @@ class WsRouteService(ServiceInterface):
 
 ---
 
+## WebSocket Authentication
+
+WebSocket connections are authenticated automatically via cookies, providing the same security as REST endpoints.
+
+### Cookie-Based Authentication
+
+**How It Works:**
+
+1. Browser automatically includes cookies in WebSocket handshake request
+2. `get_current_user_ws` middleware extracts token from `websocket.cookies.get("access_token")`
+3. JWT validated with public key (RS256)
+4. User data extracted and passed to route handlers
+5. No query parameters or manual token passing needed
+
+**Cookie Configuration:**
+
+- **Name:** `access_token`
+- **Flags:** `httponly=True, secure=True, samesite="strict"`
+- **Expiry:** 5 minutes (matches JWT expiry)
+
+**Security Benefits:**
+
+- ✅ Same security as REST endpoints (HttpOnly cookies)
+- ✅ Automatic handling by browser
+- ✅ No XSS attack surface (JavaScript cannot access token)
+- ✅ CSRF protection via SameSite=Strict
+
+### Authentication Middleware
+
+**Location:** `backend/src/trading_api/shared/middleware/auth.py`
+
+```python
+from trading_api.shared.middleware.auth import get_current_user_ws
+from trading_api.models.auth import UserData
+
+async def get_current_user_ws(websocket: WebSocket) -> UserData:
+    """Validates JWT from cookie and returns user data.
+
+    Raises:
+        WebSocketException(1008): If authentication fails
+    """
+    # 1. Extract token from websocket.cookies.get("access_token")
+    # 2. Decode JWT with public key (RS256)
+    # 3. Validate payload structure
+    # 4. Return UserData object
+```
+
+**Key Points:**
+
+- **Stateless:** No database queries, only JWT validation
+- **Public Key Only:** No access to private key
+- **Independent:** Not part of auth module (shared infrastructure)
+
+### Authenticated WebSocket Routers
+
+Add authentication to WebSocket operations via dependency injection:
+
+```python
+from typing import Annotated
+from fastapi import Depends, WebSocket
+from trading_api.shared.middleware.auth import get_current_user_ws
+from trading_api.models.auth import UserData
+
+class BrokerWsRouters(WsRouterInterface):
+    def __init__(self, service: WsRouteService):
+        self.generate_routers(__file__)
+
+        from .ws_generated import OrderWsRouter, PositionWsRouter
+
+        order_router = OrderWsRouter(route="orders", service=service)
+        position_router = PositionWsRouter(route="positions", service=service)
+
+        # Add authentication middleware to routers
+        @order_router.on_connect
+        async def authenticate_order_connection(
+            client: Client,
+            user_data: Annotated[UserData, Depends(get_current_user_ws)]
+        ):
+            """Authenticate WebSocket connection."""
+            client.state["user_data"] = user_data
+
+        @order_router.on_subscribe
+        async def handle_order_subscribe(
+            client: Client,
+            topic: str
+        ):
+            """Subscribe to user's orders only."""
+            user_data = client.state.get("user_data")
+            if not user_data:
+                raise WebSocketException(1008, "Not authenticated")
+
+            # Filter by user_id
+            await service.subscribe_user_orders(user_data.user_id, topic)
+
+        super().__init__([order_router, position_router], service=service)
+```
+
+**Pattern:**
+
+1. **Connection Handler:** Validate authentication on connect, store `user_data` in `client.state`
+2. **Operation Handlers:** Access `user_data` from `client.state` for authorization
+3. **Service Integration:** Pass `user_id` to service methods for user-scoped data
+
+### Service-Level Authorization
+
+Implement user-scoped data filtering in service:
+
+```python
+class BrokerService(WsRouteService):
+    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+        """Start streaming data for topic (first subscriber)."""
+        if ":" not in topic:
+            raise ValueError(f"Invalid topic format: {topic}")
+
+        route, params_json = topic.split(":", 1)
+
+        if route == "orders":
+            params_dict = json.loads(params_json)
+            subscription_request = OrderSubscriptionRequest.model_validate(params_dict)
+
+            # Extract user_id from subscription request
+            user_id = subscription_request.user_id
+
+            # Start streaming user's orders only
+            task = asyncio.create_task(
+                self._stream_user_orders(user_id, topic_update)
+            )
+            self._topic_generators[topic] = task
+
+    async def _stream_user_orders(self, user_id: str, callback: Callable) -> None:
+        """Stream orders for specific user."""
+        while True:
+            # Fetch orders for user_id only
+            orders = await self._order_repo.get_user_orders(user_id)
+            for order in orders:
+                await callback(order)
+            await asyncio.sleep(1)
+```
+
+**Key Points:**
+
+- **User-Scoped Topics:** Include `user_id` in subscription parameters
+- **Authorization at Service Layer:** Filter data by `user_id` before streaming
+- **No Global Broadcasts:** Each user receives only their own data
+
+### Client Example
+
+Frontend connects without manual token passing:
+
+```typescript
+// Browser automatically sends cookies in WebSocket handshake
+const ws = new WebSocket("ws://localhost:8000/api/v1/broker/ws");
+
+// Subscribe to authenticated endpoint
+ws.send(
+  JSON.stringify({
+    type: "orders.subscribe",
+    payload: { userId: "USER-123" }, // User's own ID from auth context
+  })
+);
+
+// Receive user-scoped updates
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  if (message.type === "orders.update") {
+    console.log("My order update:", message.payload); // Only my orders
+  }
+};
+```
+
+**Note:** No `Authorization` header or query parameter needed. Browser includes cookies automatically.
+
+---
+
 ## Creating a WebSocket-Ready Module
 
 ### Checklist

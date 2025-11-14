@@ -39,12 +39,12 @@ trader-pro/
 
 **Organization Decision Rules:**
 
-| Scope        | Path                                   | Description                               | Examples                                     |
-| :----------- | :------------------------------------- | :---------------------------------------- | :------------------------------------------- |
-| **Root**     | `README.md`, `docs/`                   | Project-wide, cross-cutting concerns      | `docs/TESTING.md`, `docs/WORKSPACE-SETUP.md` |
-| **Backend**  | `backend/README.md`, `backend/docs/`   | Backend-specific architecture & patterns  | `backend/docs/BACKEND_WEBSOCKETS.md`         |
-| **Frontend** | `frontend/README.md`, `frontend/docs/` | Frontend-specific architecture & patterns | `frontend/docs/WEBSOCKET-CLIENT-PATTERN.md`  |
-| **Module**   | `.../src/module/README.md`             | Specific implementation details           | `backend/src/trading_api/auth/README.md`     |
+| Scope        | Path                                   | Description                               | Examples                                         |
+| :----------- | :------------------------------------- | :---------------------------------------- | :----------------------------------------------- |
+| **Root**     | `README.md`, `docs/`                   | Project-wide, cross-cutting concerns      | `docs/TESTING.md`, `docs/WORKSPACE-SETUP.md`     |
+| **Backend**  | `backend/README.md`, `backend/docs/`   | Backend-specific architecture & patterns  | `backend/docs/BACKEND_WEBSOCKETS.md`             |
+| **Frontend** | `frontend/README.md`, `frontend/docs/` | Frontend-specific architecture & patterns | `frontend/docs/WEBSOCKET-ARCHITECTURE.md`        |
+| **Module**   | `.../src/module/README.md`             | Specific implementation details           | `backend/src/trading_api/modules/auth/README.md` |
 
 ### Update Strategy: Specific-to-Global
 
@@ -75,7 +75,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 | ---------------------------- | ---------------------------------------------------------- |
 | **README.md**                | Project overview, quick start, and basic setup             |
 | **ARCHITECTURE.md**          | System architecture, technology stack, design patterns     |
-| **AUTH_IMPLEMENTATION.md**   | Authentication system architecture and implementation plan |
+| **AUTHENTICATION.md**        | JWT-based authentication with Google OAuth implementation  |
 | **API-METHODOLOGY.md**       | Generic TDD methodology for backend service implementation |
 | **WEBSOCKET-METHODOLOGY.md** | Generic 6-phase TDD methodology for WebSocket features     |
 | **WORKSPACE-SETUP.md**       | VS Code multi-root workspace configuration guide           |
@@ -263,7 +263,7 @@ When updating documentation for large-scale changes, follow this three-phase app
   - Component architecture with detailed backend/frontend structure
   - **Backend Models Architecture** - Topic-based organization principles (business concepts over technical layers)
 - **docs/BROKER-ARCHITECTURE.md** - Broker service execution simulator architecture
-- **AUTH_IMPLEMENTATION.md** - Authentication system design and planning
+- **AUTHENTICATION.md** - JWT-based authentication with Google OAuth
 - **API-METHODOLOGY.md** - TDD methodology
 - **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket architecture diagrams
 
@@ -309,6 +309,14 @@ When updating documentation for large-scale changes, follow this three-phase app
 - **frontend/docs/tradingview/TYPE-DEFINITIONS.md** - TradingView types
 - **frontend/public/datafeeds/README.md** - Datafeeds library documentation
 - **frontend/public/datafeeds/udf/README.md** - UDF documentation
+
+### Authentication & Security
+
+- **AUTHENTICATION.md** - ⭐ **Complete authentication system documentation**
+- **backend/src/trading_api/modules/auth/README.md** - Auth module implementation details
+- **frontend/src/services/README.md** - Auth service architecture
+- **frontend/src/router/README.md** - Router authentication guards
+- **docs/TESTING.md** - Authentication testing strategies
 
 ### Build & DevOps
 
