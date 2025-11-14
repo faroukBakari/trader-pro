@@ -26,6 +26,7 @@ This document describes the complete **WebSocket Architecture** implemented in t
 
 - ✅ **Singleton Pattern** - One WebSocket connection per backend module
 - ✅ **Modular Architecture** - Separate connections for broker and datafeed modules
+- ✅ **Cookie-Based Authentication** - Automatic authentication via HttpOnly cookies
 - ✅ **Mapper-Based Transformations** - Type-safe data conversions (backend ↔ frontend)
 - ✅ **Adapter Facade** - Clean, unified API via `WsAdapter`
 - ✅ **Fallback Support** - Seamless mock data for offline development
@@ -55,6 +56,82 @@ class DatafeedService {
   private subscriptions = new Map() // NO! Base client handles this
 }
 ```
+
+### WebSocket Authentication
+
+WebSocket connections are **automatically authenticated** using cookies. No manual token management is required in the frontend.
+
+**How It Works:**
+
+1. **Login Flow**: User authenticates via `/login`, backend sets `access_token` HttpOnly cookie
+2. **WebSocket Handshake**: Browser automatically includes cookies in WebSocket connection request
+3. **Backend Validation**: Backend middleware extracts and validates JWT from cookie
+4. **Connection Established**: If valid, WebSocket connection is established
+5. **Transparent to Frontend**: Frontend code doesn't need to handle tokens
+
+**Cookie Configuration:**
+
+- **Name:** `access_token`
+- **Flags:** `httponly=True, secure=True, samesite="strict"`
+- **Expiry:** 5 minutes (matches JWT expiry)
+- **Automatic Renewal:** Access token refreshed automatically by auth service
+
+**Security Benefits:**
+
+- ✅ **XSS Protection**: HttpOnly prevents JavaScript access to token
+- ✅ **CSRF Protection**: SameSite=Strict blocks cross-site requests
+- ✅ **Automatic Handling**: Browser manages cookies automatically
+- ✅ **No Manual Token Passing**: WebSocket clients don't need authentication code
+
+**Frontend Code:**
+
+```typescript
+// No authentication code needed!
+const ws = new WebSocket('ws://localhost:8000/api/v1/broker/ws')
+
+// Browser automatically sends cookies
+// Backend validates token from cookie
+// Connection established if authenticated
+```
+
+**What This Means for WebSocket Clients:**
+
+- ✅ No `Authorization` header needed
+- ✅ No token management in `WebSocketBase`
+- ✅ No authentication in `WsAdapter`
+- ✅ Connection fails gracefully if not authenticated (401/403)
+- ✅ Auto-reconnection uses same cookie mechanism
+
+**Authentication Flow:**
+
+```
+User Login
+    ↓
+Backend sets access_token cookie (HttpOnly)
+    ↓
+Frontend creates WebSocket connection
+    ↓
+Browser includes cookie in handshake
+    ↓
+Backend validates JWT from cookie
+    ↓
+Connection established (if valid)
+    ↓
+WebSocket messages flow
+```
+
+**Error Handling:**
+
+```typescript
+// WebSocketBase handles authentication errors
+private handleError(event: Event): void {
+  // Connection refused (401/403) triggers reconnection
+  // Auth service handles token refresh if needed
+  // Reconnection uses updated cookie automatically
+}
+```
+
+See [Authentication Guide](../../docs/AUTHENTICATION.md) for complete authentication system documentation.
 
 ---
 

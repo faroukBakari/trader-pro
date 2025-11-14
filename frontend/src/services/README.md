@@ -1,15 +1,17 @@
 # API Services
 
-**Last Updated**: November 11, 2025
+**Last Updated**: November 14, 2025
 
-This directory contains the API service layer for the frontend application.
+This directory contains the service layer for the frontend application, including API communication, authentication, and trading platform integration.
 
 ## Structure
 
 ```
 src/services/
 ├── apiService.ts           # Main API service wrapper (use this in components)
+├── authService.ts          # Authentication service (login, logout, token management)
 ├── datafeedService.ts      # TradingView Datafeed service (implement methods)
+├── brokerTerminalService.ts # Broker terminal integration
 ├── testIntegration.ts      # Integration test utility
 ├── generated/              # Auto-generated API client (gitignored)
 │   ├── api/               # Generated API classes
@@ -17,8 +19,245 @@ src/services/
 │   ├── client-config.ts   # Pre-configured client instance
 │   └── ...
 └── __tests__/
-    └── apiService.spec.ts  # Unit tests with mocking examples
+    ├── apiService.spec.ts          # Unit tests with mocking examples
+    ├── authService.spec.ts         # Auth service unit tests
+    └── authService.integration.spec.ts  # Auth integration tests
 ```
+
+## AuthService
+
+The `AuthService` provides authentication functionality with a service-based architecture (no Pinia store).
+
+### Architecture
+
+```
+AuthService (Singleton)
+    ↓ uses
+AuthApi (Generated Client)
+    ↓ calls
+Backend Auth Module
+    ↓ sets
+HttpOnly Cookies (access_token)
+```
+
+### Key Features
+
+✅ **Service-Based Pattern**: Singleton with composable interface (no Pinia store)  
+✅ **Cookie-Based Auth**: HttpOnly cookies for XSS protection  
+✅ **Reactive State**: Vue refs for UI binding (`isLoading`, `error`)  
+✅ **Auto Token Refresh**: Silent refresh when access token expires  
+✅ **Stateless Guards**: Router guards use API introspection  
+✅ **Google OAuth**: Integration via `vue3-google-signin`
+
+### Usage
+
+```typescript
+import { useAuthService } from '@/services/authService'
+
+const authService = useAuthService()
+
+// Check authentication status (with auto-refresh)
+const isAuthenticated = await authService.checkAuthStatus()
+
+// Login with Google token
+await authService.loginWithGoogleToken(googleToken)
+
+// Logout
+await authService.logout()
+
+// Reactive state for UI
+watch(authService.isLoading, (loading) => {
+  console.log('Loading:', loading)
+})
+
+watch(authService.error, (error) => {
+  if (error) console.error('Auth error:', error)
+})
+```
+
+### Methods
+
+#### `checkAuthStatus(): Promise<boolean>`
+
+Checks if user is authenticated by introspecting the access token cookie.
+
+**Flow:**
+
+1. Calls `/api/v1/auth/introspect` endpoint
+2. If token is valid, returns `true`
+3. If token is expired, attempts silent refresh
+4. If refresh succeeds, returns `true`
+5. If no refresh token or refresh fails, returns `false`
+
+**Use Cases:**
+
+- Router guards (check before navigation)
+- App initialization (restore session)
+- Periodic auth monitoring
+
+#### `loginWithGoogleToken(googleToken: string): Promise<void>`
+
+Exchanges Google ID token for JWT access token.
+
+**Flow:**
+
+1. Calls `/api/v1/auth/login` with Google token
+2. Backend verifies token with Google's public keys
+3. Backend sets `access_token` HttpOnly cookie
+4. Backend returns refresh token in response body
+5. Service stores refresh token in localStorage
+
+**Throws:** Error with user-friendly message on failure
+
+#### `logout(): Promise<void>`
+
+Logs out the user and cleans up tokens.
+
+**Flow:**
+
+1. Calls `/api/v1/auth/logout` with refresh token
+2. Backend clears `access_token` cookie
+3. Backend revokes refresh token
+4. Service removes refresh token from localStorage
+
+**Note:** Always succeeds (silent failure for logout API call)
+
+### Reactive State
+
+#### `isLoading: Ref<boolean>`
+
+Indicates if an authentication operation is in progress.
+
+**Use Cases:**
+
+- Show loading spinners
+- Disable login button during authentication
+- Prevent double-submissions
+
+#### `error: Ref<string | null>`
+
+Contains error message from last failed operation.
+
+**Use Cases:**
+
+- Display error messages to user
+- Form validation feedback
+- Error logging
+
+### Cookie-Based Authentication
+
+**Access Token:**
+
+- **Storage**: HttpOnly cookie (set by backend)
+- **Name**: `access_token`
+- **Flags**: `httponly=True, secure=True, samesite="strict"`
+- **Lifetime**: 5 minutes
+- **Security**: JavaScript cannot access (XSS protection)
+
+**Refresh Token:**
+
+- **Storage**: localStorage (frontend)
+- **Key**: `trader_refresh_token`
+- **Lifetime**: 7 days (configurable in backend)
+- **Purpose**: Silent token refresh
+
+### Integration with ApiAdapter
+
+The auth service integrates with `ApiAdapter` for token introspection:
+
+```typescript
+// Router guard example
+import { ApiAdapter } from '@/plugins/apiAdapter'
+
+router.beforeEach(async (to) => {
+  if (to.meta.requiresAuth) {
+    const result = await ApiAdapter.getInstance().introspectToken()
+
+    if (result.data.status !== 'valid') {
+      // Redirect to login
+      return { name: 'login', query: { redirect: to.fullPath } }
+    }
+  }
+})
+```
+
+### No Pinia Store Pattern
+
+**Why Service-Only?**
+
+- ✅ **Simplicity**: Direct service → API flow, no store middleware
+- ✅ **Reactivity**: Vue refs provide reactive state
+- ✅ **Consistency**: Matches `ApiAdapter` singleton pattern
+- ✅ **Testability**: Service can be unit tested independently
+- ✅ **Composable**: `useAuthService()` provides Vue-like interface
+
+**Migration from Store:**
+
+The auth service replaces the traditional Pinia store pattern:
+
+```typescript
+// ❌ Old pattern (Pinia store)
+import { useAuthStore } from '@/stores/auth'
+const authStore = useAuthStore()
+await authStore.login(token)
+
+// ✅ New pattern (Service)
+import { useAuthService } from '@/services/authService'
+const authService = useAuthService()
+await authService.loginWithGoogleToken(token)
+```
+
+### Security Considerations
+
+**Strengths:**
+
+- HttpOnly cookies prevent XSS token theft
+- SameSite=Strict prevents CSRF attacks
+- Refresh token rotation on every use
+- Device fingerprinting (backend validates IP + User-Agent)
+- Short access token lifetime (5 minutes)
+
+**Limitations:**
+
+- Refresh token in localStorage (consider httpOnly cookie in future)
+- Basic device fingerprinting (can be enhanced)
+
+### Testing
+
+**Unit Tests:**
+
+```bash
+npm run test:unit -- authService.spec.ts
+```
+
+Tests:
+
+- `checkAuthStatus()` with valid/expired/missing tokens
+- `loginWithGoogleToken()` with success/failure scenarios
+- `logout()` cleanup verification
+- Error handling and reactive state updates
+- localStorage management
+
+**Integration Tests:**
+
+```bash
+npm run test:unit -- authService.integration.spec.ts
+```
+
+Tests:
+
+- Full login flow with backend
+- Token introspection via ApiAdapter
+- Router guard integration
+- Cross-tab logout via storage events
+
+### Related Documentation
+
+- [Router Guards](../router/README.md) - Stateless authentication guards
+- [Auth Module](../../../backend/src/trading_api/modules/auth/README.md) - Backend implementation
+- [Authentication Guide](../../../docs/AUTHENTICATION.md) - Comprehensive cross-cutting guide
+
+---
 
 ## DatafeedService
 

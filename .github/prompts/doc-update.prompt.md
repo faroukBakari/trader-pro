@@ -1,111 +1,97 @@
 ---
 agent: "agent"
 name: "doc-update"
-description: "Update project documentation to reflect recent code changes."
+description: "Generate a self-sufficient documentation update plan (no edits made)."
 ---
 
-## 🎯 Update Documentation
+## 🎯 Documentation Update Planning
 
-You are a technical writer specializing in technical documentation. Your goal is to update project documentation to accurately reflect recent code changes.
+Analyze code changes and generate a **complete, executable plan** for documentation updates. **You will NOT make any edits** - only produce the plan.
 
 ### ⚙️ Workflow
 
-1.  **Understand the Change:**
+1. **Analyze User Context First**
+   - **Read all user-provided reference files** (e.g., implementation files, architectural docs, specs)
+   - Analyze user's description of changes and intent
+   - Identify topics, features, and modules affected by changes
+   - Build comprehensive understanding of what changed and why
+   - Extract key details: function signatures, class names, endpoints, patterns
+   - Use `@workspace` for additional context if needed
+   - Use git commands to discover/identify update scope and insights on code changes
 
-    - Analyze the user's description of what code was added, modified, or removed.
-    - Use `@workspace` to locate and examine the relevant code changes.
-    - Identify which modules, features, or architectural patterns are affected.
+2. **Map to Documentation Structure**
+   - Read `docs/DOCUMENTATION-GUIDE.md` for hierarchy and conventions
+   - Map identified topics/changes to specific documentation files
+   - Determine which docs need updates: module READMEs, sub-system docs, root docs
+   - Exclude `**/tmp/**.md` files (out of scope)
 
-2.  **Review Documentation Structure:**
+3. **Compare Current vs. New State**
+   - **Read each identified doc file** to capture current state
+   - Cross-reference user's context/code against existing documentation
+   - Identify gaps, outdated content, and inconsistencies
+   - Quote existing content that needs updating (with surrounding context)
 
-    - Read `docs/DOCUMENTATION-GUIDE.md` to understand the documentation hierarchy and conventions.
-    - **Verify** the project adheres to the standard documentation organization (see "Structure Mandate" in Critical Rules).
-    - Identify which specific documentation files need updates (e.g., root `README.md`, `frontend/README.md`, `backend/docs/ARCHITECTURE.md`, module READMEs, etc.).
-    - **!!IMPORTANT!!** Only update git tracked documentation files. **/tmp/**.md files are out of update scope.
+4. **Generate Self-Sufficient Plan**
+   - For each file update, provide:
+     - **File Path:** Absolute path
+     - **Sections:** Exact sections/headings to modify
+     - **Current Content:** summary of existing content and why it needs change
+     - **Required Changes:** Summary of new content to add:
+      - Include Markdown formatting instructions (headings, lists, tables, etc.)
+      - Reference source files for code context (never paste full files)
+      - Link to related docs (architectural docs, examples, plans) for insights
+     - **Rationale:** Summary of why this reflects the code accurately
+   - Ensure plan requires further code examination for execution
 
-3.  **Verify Accuracy:**
-
-    - Cross-reference the actual code implementation against existing documentation.
-    - Identify gaps, outdated information, or inconsistencies.
-
-4.  **Propose Specific Changes:**
-
-    - List each file that needs updating with specific sections to modify.
-    - For each change, explain:
-      - What currently exists (if anything).
-      - What needs to be added/modified/removed.
-      - Why this change reflects the code accurately.
-    - Ensure consistency across all related documentation files.
-    - **Present this proposal to the user for review before proceeding.**
-
-5.  **Apply Changes:**
-    - **After user approval,** update all identified documentation files.
-    - Ensure all internal documentation references are formatted as **relative links**.
-    - Verify all links and cross-references are valid.
-    - Ensure all formatting and content follows project conventions and critical rules.
+5. **Structure: Specific-to-Global**
+   - **Phase 1:** Module-level READMEs (implementation details)
+   - **Phase 2:** Sub-system docs (backend/frontend READMEs, architecture)
+   - **Phase 3:** Root docs (project-wide guides, cross-cutting concerns)
 
 ### 🚨 Critical Rules
 
-- **Accuracy First:** Documentation must precisely match the actual code implementation. Do not speculate, assume, or document future plans.
-- **Cross-Reference:** Update all related docs, not just one file (e.g., if you update a backend module's README, check if the main `backend/README.md` or `backend/docs/ARCHITECTURE.md` also needs a summary update).
-- **Validate Links:** All file paths and internal documentation references must be correct **relative links**.
-- **Documentation Principles:** All new or modified content must be:
-  - **Simple:** Easy to understand, avoiding unnecessary jargon.
-  - **Specific:** Clear, unambiguous, and directly related to the point.
-  - **Short:** Concise and to the point.
-- **Code Snippets, Not Raw Code:**
-  - **Do not** paste full, raw code files into documentation.
-  - **Use** short, illustrative code snippets that explain a specific design, pattern, or implementation detail.
-  - **Always** accompany snippets with a source file reference (e.g., `For the full implementation, see: /src/utils/authHelper.js`).
+- **Context First:** Thoroughly analyze ALL user-provided files/context before planning
+- **Planning Only:** Generate plan, make NO edits
+- **Self-Sufficient:** Include ALL info needed for later execution (absolute paths, content summaries, quotes, links, rationale)
+- **Accuracy:** Add instructions to match user's context and actual implementation exactly (read referenced files AND existing docs)
+- **Cross-Reference:** Check all related docs (module → sub-system → root)
+- **Links:** Use relative links for internal references
+- **Documentation Style:** Simple, specific, short
+- **Code Snippets:** Short examples with source file references (never full files)
 
-### 💡 Strategy for Complex Updates (Specific-to-Global)
+### 📋 Plan Output Format
 
-When the user indicates a **large-scale refactor** or a **feature implementation** that impacts multiple systems (e.g., both `frontend` and `backend`), you must structure your `Propose Specific Changes` (Workflow Step 4) to follow a **specific-to-global** update plan.
+```markdown
+## Documentation Update Plan
 
-This ensures the most granular details are captured first, and those details are then correctly summarized at higher levels of the documentation.
+**Summary:** Brief description of changes
 
-Present your proposed plan in this three-phase order:
+### Phase 1: Module-Level Updates
 
-**Phase 1: Module & Implementation Docs (The "Specific")**
+#### `/absolute/path/to/module/README.md`
+**Section:** "Section Name"
+**Current:** `summary of existing text...`
+**New:** `summary of replacement text with update approach explanation...`
+**Rationale:** Summarize why this change is needed
 
-- **Goal:** Document the new implementation details, function signatures, module responsibilities, or component logic.
-- **Files to target:** `README.md` files located _inside_ the specific modules or components that were changed (e.g., `backend/src/trading_api/auth/README.md`, `frontend/src/components/common/Button/README.md`).
+### Phase 2: Sub-System Updates
 
-**Phase 2: Sub-System & Architecture Docs (The "Summary")**
+#### `/absolute/path/to/backend/docs/ARCHITECTURE.md`
+**Section:** "Module Architecture"
+**Current:** `existing section...`
+**New:** `updated section with diagrams...`
+**Current:** `summary of existing text...`
+**New:** `summary of replacement text with with diagrams...`
+**Rationale:** Reflects new architecture
 
-- **Goal:** Summarize the changes from Phase 1 and show how they impact the sub-system's architecture or public-facing API.
-- **Files to target:** The top-level `README.md` and `docs/` for the affected area (e.g., `backend/README.md`, `backend/docs/ARCHITECTURE.md`, `frontend/README.md`).
-- **Action:** Update architectural diagrams, API contracts, or high-level explanations to reflect the new state of the modules documented in Phase 1.
+### Phase 3: Root-Level Updates
 
-**Phase 3: Root & Project-Wide Docs (The "Global")**
+#### `/absolute/path/to/docs/GUIDE.md`
+**Section:** "Cross-Cutting Concern"
+**Current:** _(new section)_
+**New:** `summary of new section content with reference to source files and other documentation files for insights...`
+**Rationale:** New cross-cutting pattern
 
-- **Goal:** Update project-wide documentation to reflect any changes that cross-cut the entire system.
-- **Files to target:** The root `README.md` and root `docs/` (e.g., `README.md`, `docs/ARCHITECTURE.md`, `docs/WORKSPACE-SETUP.md`).
-- **Action:** Update the main project overview, high-level architecture diagrams, or cross-cutting guides (like testing or setup) that are impacted by the sub-system changes from Phase 2.
-
-**Example Proposal Structure:**
-
-> "I've analyzed the large-scale auth refactor. To update the documentation accurately, I propose the following plan, moving from specific implementation details up to the global project overview:
->
-> **Phase 1: Module-Level Updates**
->
-> 1.  `backend/src/auth/README.md`:
->     - **Change:** Add new sections documenting the `JwtStrategy` and `LocalStrategy`.
->     - **Reason:** Reflects the new code implementation and explains the specific authentication logic.
->
-> **Phase 2: Sub-System Updates**
->
-> 1.  `backend/docs/ARCHITECTURE.md`:
->     - **Change:** Update the "Authentication" section and its accompanying diagram to show the new two-step (local + JWT) flow.
->     - **Reason:** The high-level backend architecture has changed.
-> 2.  `backend/README.md`:
->     - **Change:** Modify the API endpoint summary for `/auth` to reflect the new request/response bodies.
->     - **Reason:** Summarizes the new public contract for the backend.
->
-> **Phase 3: Root-Level Updates**
->
-> 1.  `docs/TESTING.md`:
->     - **Change:** Add a new section on "How to mock the auth flow" for integration tests.
->     - **Reason:** This is a new cross-cutting concern that all developers need to be aware of.
->
-> Please review this plan. If you approve, I will proceed with applying these changes."
+## Execution
+Apply updates in phase order. Each "New" block will require deeper examination to determine exact changes.
+```

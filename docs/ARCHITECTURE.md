@@ -109,6 +109,54 @@ Module-specific API clients (broker, datafeed)
 - ✅ Per-module documentation links (OpenAPI/AsyncAPI)
 - ✅ Independent module versioning displayed
 
+### 7. Authentication & Authorization (Stateless JWT)
+
+The system implements **cookie-based JWT authentication** with Google OAuth integration:
+
+```
+Google OAuth → Backend Auth Module → JWT Access Token (Cookie) → Stateless Middleware → Protected Endpoints
+```
+
+**Key Design Decisions:**
+
+- **Cookie-Based Sessions**: HttpOnly cookies for XSS protection
+- **Stateless Validation**: Middleware validates JWT with public key only (no database)
+- **Modular Auth**: Auth module follows standard modular pattern (optional)
+- **WebSocket Authentication**: Automatic via cookies (no query params)
+- **Refresh Token Rotation**: Device fingerprinting for security
+- **Service-Based Frontend**: No Pinia store, authentication in service layer
+
+**Authentication Flow:**
+
+```
+User Login (Google OAuth)
+    ↓
+Auth Module validates token, creates JWT
+    ↓
+Set access_token cookie (HttpOnly, Secure, SameSite=Strict)
+    ↓
+Frontend router guard checks auth via API introspection
+    ↓
+Protected REST/WebSocket endpoints validate cookie
+```
+
+**Security Architecture:**
+
+- **Frontend**: Service-based auth (`authService.ts`), stateless guards, no manual token handling
+- **Backend**: Shared middleware (`shared/middleware/auth.py`), public key validation, no DB queries
+- **WebSocket**: Automatic cookie authentication in handshake, same security as REST
+
+**Benefits:**
+
+- ✅ XSS Protection (HttpOnly cookies)
+- ✅ CSRF Protection (SameSite=Strict)
+- ✅ Stateless middleware (horizontally scalable)
+- ✅ Independent auth module (can be disabled)
+- ✅ Type-safe JWT payload (`UserData` model)
+- ✅ Automatic WebSocket auth (no frontend code needed)
+
+See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete implementation details.
+
 ---
 
 ## Technology Stack
@@ -624,8 +672,9 @@ def create_app(enabled_modules: list[str] | None = None) -> tuple[FastAPI, FastW
     registry.clear()  # Critical for test isolation
 
     # Register all available modules
-    registry.register(DatafeedModule())
-    registry.register(BrokerModule())
+    registry.register(AuthModule())      # Authentication (JWT, Google OAuth)
+    registry.register(BrokerModule())    # Trading operations
+    registry.register(DatafeedModule())  # Market data
 
     # Filter modules if specified
     if enabled_modules:
@@ -2322,12 +2371,42 @@ Services Layer
 
 ## Security
 
+### Authentication & Authorization
+
+**Implementation Status**: ✅ **Production Ready** (MVP with in-memory storage)
+
+- **JWT Access Tokens**: RS256-signed tokens (5-minute expiry)
+- **Refresh Token Rotation**: Opaque tokens with device fingerprinting
+- **Cookie-Based Sessions**: HttpOnly, Secure, SameSite=Strict cookies
+- **Google OAuth Integration**: ID token verification via `authlib`
+- **Stateless Middleware**: Public key validation only (no database queries)
+- **WebSocket Authentication**: Automatic via cookies
+
+**Architecture:**
+
+- **Auth Module**: `backend/src/trading_api/modules/auth/` (JWT generation, Google OAuth)
+- **Shared Middleware**: `backend/src/trading_api/shared/middleware/auth.py` (stateless validation)
+- **Frontend Service**: `frontend/src/services/authService.ts` (service-based, no Pinia store)
+- **Router Guards**: Stateless with API introspection (30s cache)
+
+**Production Migration Path:**
+
+- Replace in-memory user storage with PostgreSQL
+- Replace in-memory refresh tokens with Redis (TTL + persistence)
+- Enhanced device fingerprinting (more entropy)
+- Rate limiting on login endpoints
+
+See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete details.
+
 ### Current Measures
 
-- CORS configuration
+- CORS configuration with credentials support
 - Pydantic input validation
 - MyPy + TypeScript static analysis
-- Comprehensive test coverage
+- Comprehensive test coverage (92 auth-specific tests)
+- JWT signature verification (RS256)
+- HttpOnly cookies (XSS protection)
+- SameSite=Strict (CSRF protection)
 
 ### Planned Enhancements
 

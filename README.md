@@ -3,9 +3,20 @@
 [![CI](https://github.com/faroukBakari/trading-api/actions/workflows/ci.yml/badge.svg)](https://github.com/faroukBakari/trading-api/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/faroukBakari/trading-api/branch/main/graph/badge.svg)](https://codecov.io/gh/faroukBakari/trading-api)
 
-A modern full-stack trading platform with FastAPI backend and Vue.js frontend. Features REST API for traditional request/response operations and WebSocket streaming for real-time market data updates.
+A modern full-stack trading platform with FastAPI backend and Vue.js frontend. Features JWT-based authentication with Google OAuth, REST API for traditional request/response operations, and WebSocket streaming for real-time market data updates.
 
-## 🏗️ Project Structure
+## 💻 Features
+
+- ✅ **JWT Authentication** - Google OAuth integration with cookie-based sessions
+- ✅ **Modular Backend** - Pluggable feature modules (auth, broker, datafeed)
+- ✅ **REST API** - FastAPI with automatic OpenAPI documentation
+- ✅ **WebSocket Streaming** - Real-time data with FastWS and AsyncAPI
+- ✅ **Protected Routes** - Stateless authentication guards for frontend
+- ✅ **Type-Safe Clients** - Auto-generated TypeScript and Python clients
+- ✅ **Testing** - Comprehensive unit, integration, and e2e tests
+- ✅ **CI/CD** - GitHub Actions with quality gates
+
+## 🏭️ Project Structure
 
 ```
 trader-pro/
@@ -73,6 +84,34 @@ code trader-pro.code-workspace
 See [WORKSPACE-SETUP.md](./docs/WORKSPACE-SETUP.md) for details.
 
 ### Development
+
+#### Authentication
+
+The platform uses JWT-based authentication with Google OAuth:
+
+1. **Start the backend** (includes auth module): `make -f project.mk dev-backend`
+2. **Start the frontend**: `make -f project.mk dev-frontend`
+3. **Navigate to login**: http://localhost:5173/login
+4. **Sign in with Google OAuth**
+5. **Access protected routes** (all routes except `/login` require authentication)
+
+**Authentication Features:**
+
+- ✅ Cookie-based sessions (HttpOnly, Secure, SameSite=Strict)
+- ✅ JWT access tokens (5-minute expiry, RS256)
+- ✅ Refresh token rotation with device fingerprinting
+- ✅ Automatic token refresh
+- ✅ WebSocket authentication via cookies (automatic)
+- ✅ Stateless router guards with API introspection
+
+**Documentation:**
+
+- **Complete Guide**: [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md)
+- **Backend Auth Module**: [backend/src/trading_api/modules/auth/README.md](backend/src/trading_api/modules/auth/README.md)
+- **Frontend Auth Service**: [frontend/src/services/README.md](frontend/src/services/README.md)
+- **Router Guards**: [frontend/src/router/README.md](frontend/src/router/README.md)
+
+#### Development Servers
 
 ```bash
 # Start backend (terminal 1)
@@ -152,6 +191,7 @@ make -C backend format
 ### Core Documentation
 
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture and design
+- **[Authentication](docs/AUTHENTICATION.md)** - JWT-based authentication with Google OAuth
 - **[Development Guide](docs/DEVELOPMENT.md)** - Development workflows and setup
 - **[Testing Strategy](docs/TESTING.md)** - Testing approach and best practices
 - **[Client Generation](docs/CLIENT-GENERATION.md)** - API client auto-generation
