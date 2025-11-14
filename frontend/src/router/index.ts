@@ -1,15 +1,9 @@
-import { ApiAdapter } from '@/plugins/apiAdapter'
+import { WebSocketBase } from '@/plugins/wsClientBase'
+import { useAuthService } from '@/services/authService'
 import { createRouter, createWebHistory } from 'vue-router'
 
-const apiAdapter = ApiAdapter.getInstance()
-
-interface CachedAuthCheck {
-  isValid: boolean
-  timestamp: number
-}
-
-let cachedAuthCheck: CachedAuthCheck | null = null
-const CACHE_TTL = 30000 // 30 seconds
+const authService = useAuthService()
+let authMonitorTimeout: NodeJS.Timeout | null = null
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -42,44 +36,51 @@ const router = createRouter({
   ],
 })
 
-async function checkAuthStatus(): Promise<boolean> {
-  const now = Date.now()
 
-  if (cachedAuthCheck && cachedAuthCheck.isValid && now - cachedAuthCheck.timestamp < CACHE_TTL) {
-    return cachedAuthCheck.isValid
-  }
+async function watchAuthStatus() {
+  if (router.currentRoute.value.meta.requiresAuth) {
+    const isValid = await authService.checkAuthStatus()
 
-  try {
-    const result = await apiAdapter.introspectToken()
-    const isValid = result.data.status === 'valid'
+    if (!isValid) {
+      console.log('Token expired or invalid - disconnecting WebSockets and redirecting to login')
 
-    cachedAuthCheck = { isValid, timestamp: now }
+      WebSocketBase.logout()
 
-    return isValid
-  } catch {
-    cachedAuthCheck = { isValid: false, timestamp: now }
-    return false
+      router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+
+    } else {
+      authMonitorTimeout = setTimeout(watchAuthStatus, 10 * 1000) // Check again in 10 seconds
+    }
   }
 }
 
-router.beforeEach(async (to, from, next) => {
-  const requiresAuth = to.meta.requiresAuth === true
-  const isAuthenticated = await checkAuthStatus()
+router.beforeEach(async (to, _, next) => {
+  const isAuthenticated = await authService.checkAuthStatus()
 
-  if (requiresAuth && !isAuthenticated) {
-    next({
-      name: 'login',
-      query: { redirect: to.fullPath },
-    })
-    return
+  if (authMonitorTimeout) {
+    clearTimeout(authMonitorTimeout)
+    authMonitorTimeout = null
   }
 
   if (to.name === 'login' && isAuthenticated) {
-    next({ name: 'trader-chart' })
-    return
+    return next({ name: 'trader-chart' })
   }
 
-  next()
+  if (to.meta.requiresAuth) {
+    if (isAuthenticated) {
+      authMonitorTimeout = setTimeout(watchAuthStatus, 10 * 1000)
+      return next()
+    }
+
+    return to.name != 'login'
+      ? next({
+        name: 'login',
+        query: { redirect: to.fullPath },
+      })
+      : next()
+  }
+
+  return next()
 })
 
 export default router

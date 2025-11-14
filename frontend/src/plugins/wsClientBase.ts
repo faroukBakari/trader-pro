@@ -51,6 +51,9 @@ function buildTopicParams(obj: unknown): string {
 }
 
 export class WebSocketBase {
+  // dont defaut to identity dataMapper to detect types missmatch (data => data as unknown as TData)
+  private static instances = new Map<string, WebSocketBase>()
+
   private readonly config: {
     reconnect: boolean
     maxReconnectAttempts: number
@@ -71,9 +74,6 @@ export class WebSocketBase {
   >()
   protected subscriptions = new Map<string, SubscriptionState>()
 
-  // dont defaut to identity dataMapper to detect types missmatch (data => data as unknown as TData)
-  private static instances = new Map<string, WebSocketBase>()
-
   private constructor(wsUrl: string) {
     this.config = {
       reconnect: true,
@@ -92,6 +92,18 @@ export class WebSocketBase {
     return WebSocketBase.instances.get(wsUrl)!
   }
 
+  // Close all WebSocket connections on logout
+  static logout(): void {
+    WebSocketBase.instances.forEach((instance, wsUrl) => {
+      try {
+        instance.ws?.close()
+      } finally {
+        console.log(`WebSocket connection for ${wsUrl} ===> CLOSED`)
+        instance.ws = null
+      }
+    })
+  }
+
   private async __socketConnect(): Promise<void> {
     if (!this.wsCnxPromise) {
       this.wsCnxPromise = new Promise((resolve, reject) => {
@@ -101,36 +113,45 @@ export class WebSocketBase {
 
           this.ws.onerror = async (error) => {
             this.logger.log('Error:', error)
-            reject(error)
+            setTimeout(() => {
+              this.wsCnxPromise = null
+              reject(error)
+            }, 200)
           }
 
           this.ws.onclose = async (event) => {
-            this.logger.log('Connection closed:', event)
-            reject(new Error('WebSocket closed'))
+            this.logger.log('WS Connection closed:', event)
+            setTimeout(() => {
+              this.wsCnxPromise = null
+              reject(event)
+            }, 200)
           }
 
           this.ws.onopen = () => {
-            this.logger.log('Connected')
+            this.logger.log('WS Connected')
 
             this.ws!.onmessage = (event) => {
               this.handleMessage(event)
             }
 
             this.ws!.onerror = async (error) => {
-              this.logger.log('Error:', error)
+              this.logger.log('WS Connection Error:', error)
               setTimeout(() => this.resubscribeAll(), 0)
             }
 
             this.ws!.onclose = async (event) => {
-              this.logger.log('Connection closed:', event)
+              this.logger.log('WS Connection closed:', event)
               setTimeout(() => this.resubscribeAll(), 0)
             }
-            setTimeout(() => (this.wsCnxPromise = null), 0)
             resolve()
+            this.wsCnxPromise = null
           }
         } catch (error) {
-          setTimeout(() => (this.wsCnxPromise = null), 0)
-          reject(error)
+          this.logger.log('WS creation Error:', error)
+          setTimeout(() => {
+            this.wsCnxPromise = null
+            reject(error)
+          }, 200)
         }
       })
     }
@@ -139,13 +160,18 @@ export class WebSocketBase {
   }
 
   private async connect(): Promise<void> {
-    while (!this.isConnected()) {
+
+    let attemps = 0
+    while (!this.isConnected() && attemps++ < this.config.maxReconnectAttempts) {
       try {
         await this.__socketConnect()
       } catch (error) {
         this.logger.log('Connection error:', error)
-        await new Promise(resolve => setTimeout(resolve, 200))
+        await new Promise(resolve => setTimeout(resolve, 1000))
       }
+    }
+    if (this.config.maxReconnectAttempts <= attemps) {
+      throw new Error('Max reconnect attempts reached')
     }
   }
 
@@ -295,31 +321,24 @@ export class WebSocketBase {
     for (const subscription of this.subscriptions.values()) {
       subscription.confirmed = false
 
-      const response: SubscriptionResponse = await new Promise((resolve, reject) => {
+      const response: SubscriptionResponse = await new Promise((_resolve, _reject) => {
         const requestId = `${subscription.subscriptionType}-${subscription.topic}`
-
-        const timeout = setTimeout(() => {
-          this.pendingRequests.delete(requestId)
-          reject(new Error(`Request timeout: ${requestId}`))
-        }, 3000)
 
         this.pendingRequests.set(requestId, {
           resolve: (response: SubscriptionResponse) => {
-            clearTimeout(timeout)
-            resolve(response)
+            _resolve(response)
           },
           reject: (error: Error) => {
-            clearTimeout(timeout)
-            reject(error)
+            _reject(error)
           },
-          timeout,
+          // undefently awaits resubscription
+          timeout: null as unknown as NodeJS.Timeout,
         })
 
         this.sendRequest(subscription.subscriptionType, subscription.subscriptionParams)
           .catch((error) => {
             this.pendingRequests.delete(requestId)
-            clearTimeout(timeout)
-            reject(error)
+            _reject(error)
           })
       })
 
@@ -334,7 +353,7 @@ export class WebSocketBase {
 
   async unsubscribe(listenerId: string, topic?: string | undefined): Promise<void> {
     for (const subscription of this.subscriptions.values()) {
-      if (subscription.topic === topic && subscription.listeners.has(listenerId)) {
+      if ((!topic || subscription.topic === topic) && subscription.listeners.has(listenerId)) {
         subscription.listeners.delete(listenerId)
         if (subscription.listeners.size === 0) {
           try {
@@ -342,7 +361,11 @@ export class WebSocketBase {
             const unsubscribePayload = subscription.subscriptionParams
             await this.sendRequest(unsubscribeType, unsubscribePayload)
           } finally {
-            this.subscriptions.delete(topic)
+            this.subscriptions.delete(subscription.topic)
+          }
+          if (this.subscriptions.size === 0) {
+            this.ws?.close()
+            this.ws = null
           }
         }
       }
@@ -361,7 +384,7 @@ export interface WebSocketInterface<TParams extends object, TData extends object
 }
 
 export class WebSocketClient<TParams extends object, TBackendData extends object, TData extends object> implements WebSocketInterface<TParams, TData> {
-  protected ws: WebSocketBase
+  protected baseSocket: WebSocketBase
   protected listeners: Map<string, Set<string>>
 
   private wsRoute: string = ''
@@ -371,7 +394,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
   constructor(wsUrl: string, wsRoute: string, dataMapper: ((data: TBackendData) => TData)) {
     this.wsRoute = wsRoute
     this.dataMapper = dataMapper
-    this.ws = WebSocketBase.getInstance(wsUrl)
+    this.baseSocket = WebSocketBase.getInstance(wsUrl)
     this.listeners = new Map<string, Set<string>>()
   }
 
@@ -389,7 +412,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     }
 
 
-    await this.ws.subscribe(
+    await this.baseSocket.subscribe(
       topic,
       this.wsRoute + '.subscribe',
       subscriptionParams,
@@ -407,7 +430,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
       return
     }
     this.listeners.delete(listenerId)
-    await this.ws.unsubscribe(listenerId, topic)
+    await this.baseSocket.unsubscribe(listenerId, topic)
   }
 }
 
