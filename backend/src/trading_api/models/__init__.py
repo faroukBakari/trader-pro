@@ -6,7 +6,25 @@ organized by functionality:
 - common/: Shared base models and utilities
 - market/: Market data, instruments, quotes, and bars
 - broker/: Orders, positions, executions, and account operations
+- auth/: Authentication and user models
 """
+
+# Import from auth domain
+from .auth import (
+    DeviceInfo,
+    GoogleLoginRequest,
+    JWTPayload,
+    LogoutRequest,
+    RefreshRequest,
+    RefreshTokenData,
+    TokenData,
+    TokenIntrospectResponse,
+    TokenResponse,
+    User,
+    UserCreate,
+    UserData,
+    UserInDB,
+)
 
 # Import from broker domain
 from .broker import (
@@ -72,10 +90,24 @@ from .versioning import APIMetadata, VersionInfo
 __all__ = [
     # Common utilities
     "BaseApiResponse",
-    "SubscriptionUpdate",
+    "BarsSubscriptionRequest",
     "ErrorApiResponse",
     "SubscriptionResponse",
-    "BarsSubscriptionRequest",
+    "SubscriptionUpdate",
+    # Auth models
+    "DeviceInfo",
+    "GoogleLoginRequest",
+    "JWTPayload",
+    "LogoutRequest",
+    "RefreshRequest",
+    "RefreshTokenData",
+    "TokenData",
+    "TokenIntrospectResponse",
+    "TokenResponse",
+    "User",
+    "UserCreate",
+    "UserData",
+    "UserInDB",
     # Market data models
     "Bar",
     "DatafeedConfiguration",
@@ -85,40 +117,40 @@ __all__ = [
     "GetBarsResponse",
     "GetQuotesRequest",
     "QuoteData",
+    "QuoteDataSubscriptionRequest",
     "QuoteValues",
     "SearchSymbolResultItem",
     "SearchSymbolsRequest",
     "SymbolInfo",
-    "QuoteDataSubscriptionRequest",
     # Broker models
-    "OrderStatus",
-    "OrderType",
-    "Side",
-    "StopType",
-    "PreOrder",
-    "PlacedOrder",
-    "PlaceOrderResult",
+    "AccountMetainfo",
+    "Brackets",
+    "Execution",
+    "LeverageInfo",
+    "LeverageInfoParams",
+    "LeveragePreviewResult",
+    "LeverageSetParams",
+    "LeverageSetResult",
     "OrderPreviewResult",
     "OrderPreviewSection",
     "OrderPreviewSectionRow",
+    "OrderStatus",
+    "OrderType",
+    "PlaceOrderResult",
+    "PlacedOrder",
     "Position",
-    "Execution",
-    "AccountMetainfo",
-    "Brackets",
-    "LeverageInfo",
-    "LeverageInfoParams",
-    "LeverageSetParams",
-    "LeverageSetResult",
-    "LeveragePreviewResult",
+    "PreOrder",
+    "Side",
+    "StopType",
     "SuccessResponse",
     # Broker WebSocket models
-    "OrderSubscriptionRequest",
-    "PositionSubscriptionRequest",
-    "ExecutionSubscriptionRequest",
-    "EquityData",
-    "EquitySubscriptionRequest",
     "BrokerConnectionStatus",
     "BrokerConnectionSubscriptionRequest",
+    "EquityData",
+    "EquitySubscriptionRequest",
+    "ExecutionSubscriptionRequest",
+    "OrderSubscriptionRequest",
+    "PositionSubscriptionRequest",
     # Health model
     "HealthResponse",
     # Versioning models

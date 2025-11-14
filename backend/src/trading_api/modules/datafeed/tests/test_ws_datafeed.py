@@ -3,8 +3,30 @@ Integration tests for WebSocket endpoints
 """
 
 import json
+import time
 
+import pytest
 from fastapi.testclient import TestClient
+from jose import jwt
+
+from trading_api.shared.config import Settings
+
+
+@pytest.fixture
+def valid_jwt_token() -> str:
+    """Create a valid JWT token for WebSocket authentication"""
+    settings = Settings()
+    payload = {
+        "user_id": "TEST-USER-001",
+        "email": "test@example.com",
+        "full_name": "Test User",
+        "picture": "https://example.com/avatar.jpg",
+        "exp": int(time.time()) + 300,
+        "iat": int(time.time()),
+    }
+    return jwt.encode(
+        payload, settings.jwt_private_key, algorithm=settings.JWT_ALGORITHM
+    )
 
 
 def build_topic(symbol: str, resolution: str) -> str:
@@ -17,15 +39,19 @@ def build_topic(symbol: str, resolution: str) -> str:
 class TestBarsWebSocketIntegration:
     """Integration tests for bars WebSocket endpoint"""
 
-    def test_websocket_connection(self, client: TestClient) -> None:
+    def test_websocket_connection(
+        self, client: TestClient, valid_jwt_token: str
+    ) -> None:
         """Test basic WebSocket connection to /api/v1/datafeed/ws"""
+        client.cookies.set("access_token", valid_jwt_token)
 
         with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Connection successful if we get here
             assert websocket is not None
 
-    def test_subscribe_to_bars(self, client: TestClient) -> None:
+    def test_subscribe_to_bars(self, client: TestClient, valid_jwt_token: str) -> None:
         """Test subscribing to bar updates"""
+        client.cookies.set("access_token", valid_jwt_token)
 
         with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Send subscribe message
@@ -47,8 +73,11 @@ class TestBarsWebSocketIntegration:
             )
             assert "Subscribed" in response["payload"]["message"]
 
-    def test_subscribe_with_different_resolutions(self, client: TestClient) -> None:
+    def test_subscribe_with_different_resolutions(
+        self, client: TestClient, valid_jwt_token: str
+    ) -> None:
         """Test subscribing to different resolutions creates different topics"""
+        client.cookies.set("access_token", valid_jwt_token)
 
         with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Subscribe to 1-minute bars
@@ -77,8 +106,11 @@ class TestBarsWebSocketIntegration:
                 == 'bars:{"resolution":"D","symbol":"AAPL"}'
             )
 
-    def test_unsubscribe_from_bars(self, client: TestClient) -> None:
+    def test_unsubscribe_from_bars(
+        self, client: TestClient, valid_jwt_token: str
+    ) -> None:
         """Test unsubscribing from bar updates"""
+        client.cookies.set("access_token", valid_jwt_token)
 
         with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # First subscribe
@@ -109,8 +141,11 @@ class TestBarsWebSocketIntegration:
             )
             assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
-    def test_multiple_symbols_subscription(self, client: TestClient) -> None:
+    def test_multiple_symbols_subscription(
+        self, client: TestClient, valid_jwt_token: str
+    ) -> None:
         """Test subscribing to multiple symbols"""
+        client.cookies.set("access_token", valid_jwt_token)
 
         with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             symbols = ["AAPL", "GOOGL", "MSFT"]
@@ -129,8 +164,11 @@ class TestBarsWebSocketIntegration:
                     == f'bars:{{"resolution":"1","symbol":"{symbol}"}}'
                 )
 
-    def test_subscribe_with_explicit_resolution(self, client: TestClient) -> None:
+    def test_subscribe_with_explicit_resolution(
+        self, client: TestClient, valid_jwt_token: str
+    ) -> None:
         """Test that subscribing with explicit resolution works correctly"""
+        client.cookies.set("access_token", valid_jwt_token)
 
         with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             # Subscribe with explicit resolution

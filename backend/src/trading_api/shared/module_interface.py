@@ -15,8 +15,10 @@ from typing import Annotated, Any, Type
 from fastapi import Depends, FastAPI
 
 from external_packages.fastws import Client
+from trading_api.models.auth import UserData
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.client_generation_service import ClientGenerationService
+from trading_api.shared.middleware.auth import get_current_user_ws
 from trading_api.shared.service_interface import ServiceInterface
 from trading_api.shared.ws.fastws_adapter import FastWSAdapter
 from trading_api.shared.ws.ws_route_interface import WsRouterInterface
@@ -526,10 +528,18 @@ class ModuleApp:
 
                 @api_app.websocket("/ws")
                 async def _(
+                    user_data: Annotated[UserData, Depends(get_current_user_ws)],
                     client: Annotated[Client, Depends(_ws_app.manage)],
                 ) -> None:
                     f"""WebSocket endpoint for {module.name} real-time streaming"""
-                    await _ws_app.serve(client)
+                    client.user_data = user_data
+                    try:
+                        await _ws_app.serve(client)
+                    except Exception as e:
+                        logger.error(f"WebSocket connection error: {e}")
+                        await client.ws.close(
+                            code=1011, reason=f"Server connection error: {e}"
+                        )
 
                 ws_app = _ws_app
 

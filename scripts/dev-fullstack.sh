@@ -5,8 +5,12 @@
 
 set -e
 
-# Create a new process group so we can track all child processes
-set -m
+# Create a new process group for this script
+# This ensures all child processes belong to the same group
+set -o monitor
+trap '' SIGTSTP  # Ignore Ctrl+Z
+
+# TODO: refactor to optimize dev / reload flow
 
 # Environment configuration
 export BACKEND_PORT="${BACKEND_PORT:-8000}"
@@ -38,6 +42,38 @@ print_error() {
     echo -e "${RED}❌ $1${NC}"
 }
 
+# Step 0: Check ports availability before doing anything
+print_step "0. Checking port availability..."
+PORTS_BLOCKED=false
+
+if lsof -Pi :$BACKEND_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+    print_error "Backend port $BACKEND_PORT is already in use!"
+    lsof -Pi :$BACKEND_PORT -sTCP:LISTEN
+    PORTS_BLOCKED=true
+fi
+
+if lsof -Pi :$FRONTEND_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+    print_error "Frontend port $FRONTEND_PORT is already in use!"
+    lsof -Pi :$FRONTEND_PORT -sTCP:LISTEN
+    PORTS_BLOCKED=true
+fi
+
+if [ "$PORTS_BLOCKED" = true ]; then
+    print_error ""
+    print_error "Cannot start - ports already in use. Stop existing servers first."
+    exit 1
+fi
+print_success "Ports $BACKEND_PORT and $FRONTEND_PORT are available"
+
+# Global variables for process IDs and process group
+BACKEND_PID=""
+WATCHER_PID=""
+FRONTEND_PID=""
+SCRIPT_PGID=$$
+
+print_step "🚀 Starting full-stack development environment..."
+print_step "   Process Group ID: $SCRIPT_PGID"
+
 # Function to check if a process is running
 is_process_running() {
     local pid=$1
@@ -46,14 +82,6 @@ is_process_running() {
     fi
     kill -0 "$pid" 2>/dev/null
 }
-
-# Global variables for process IDs
-BACKEND_PID=""
-WATCHER_PID=""
-FRONTEND_PID=""
-SCRIPT_PGID=$$  # Store our process group ID
-
-print_step "🚀 Starting full-stack development environment..."
 
 # Helper function to get all processes in our process group
 get_process_group_pids() {
@@ -101,29 +129,6 @@ kill_process_tree() {
     done
 }
 
-# Step 0: Check ports availability before doing anything
-print_step "0. Checking port availability..."
-PORTS_BLOCKED=false
-
-if lsof -Pi :$BACKEND_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
-    print_error "Backend port $BACKEND_PORT is already in use!"
-    lsof -Pi :$BACKEND_PORT -sTCP:LISTEN
-    PORTS_BLOCKED=true
-fi
-
-if lsof -Pi :$FRONTEND_PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
-    print_error "Frontend port $FRONTEND_PORT is already in use!"
-    lsof -Pi :$FRONTEND_PORT -sTCP:LISTEN
-    PORTS_BLOCKED=true
-fi
-
-if [ "$PORTS_BLOCKED" = true ]; then
-    print_error ""
-    print_error "Cannot start - ports already in use. Stop existing servers first."
-    exit 1
-fi
-print_success "Ports $BACKEND_PORT and $FRONTEND_PORT are available"
-
 # Function to cleanup background processes
 cleanup() {
     print_step "🛑 Shutting down full-stack development environment..."
@@ -147,7 +152,7 @@ cleanup() {
     fi
 
     # Step 2: Wait for graceful shutdown
-    sleep 2
+    sleep 1
 
     # Step 3: Kill remaining process group members
     print_step "Cleaning up any remaining processes..."
@@ -157,10 +162,10 @@ cleanup() {
         for pid in $remaining_pids; do
             kill -TERM $pid 2>/dev/null || true
         done
+        sleep 1
     fi
 
     # Step 4: Force kill stubborn processes
-    sleep 2
     remaining_pids=$(get_process_group_pids)
     if [ ! -z "$remaining_pids" ]; then
         for pid in $remaining_pids; do
@@ -181,20 +186,66 @@ make -C backend clean-generated
 make -C frontend clean-generated
 print_success "   Environment cleaned"
 
+
+make -C backend generate
+
 # Step 2: Start backend server in background
 print_step "2. Starting backend server..."
 make -C backend dev &
 BACKEND_PID=$!
 print_step "   Backend started with PID: $BACKEND_PID"
 
-# Step 3: Wait for backend to be ready
-print_step "3. Waiting for backend to initialize and generate specs..."
-print_step "   (Backend will auto-generate openapi.json and asyncapi.json on startup)"
-sleep 5  # Give backend time to start and generate specs
+RETRY_CTR=0
+for ((; RETRY_CTR<30; RETRY_CTR++)); do
+    if is_process_running "$BACKEND_PID"; then
+        if curl -s "http://localhost:$BACKEND_PORT/api/v1/auth/health" >/dev/null 2>&1; then
+            print_success "   Backend is up and running at http://localhost:$BACKEND_PORT"
+            break
+        else
+            print_step "   Waiting for backend to be ready..."
+            sleep 1
+        fi
+    else
+        print_error "   Backend process has exited unexpectedly."
+        exit 1
+    fi
+done
+if [ $RETRY_CTR -ge 30 ]; then
+    print_error "   Backend failed to start within expected time."
+    exit 1
+fi
 
-# Step 4: Start unified spec watcher
-print_step "4. Starting unified spec watcher..."
+make -C frontend generate
 
+print_step "5. Starting frontend development server..."
+print_step "🌐 Frontend will be available at: $FRONTEND_URL"
+print_step "🔧 Backend API is running at: $VITE_API_URL"
+print_step ""
+print_step "👁️  Watch Mode Active:"
+print_step "   🔄 Backend: Uvicorn --reload (auto-restart on Python file changes)"
+print_step "   🔄 Frontend: Vite HMR (hot module replacement)"
+print_step "   📄 Spec watcher → Auto-regenerates REST client & WebSocket types"
+print_step ""
+print_step "💡 Change Flow:"
+print_step "   Backend .py change → Uvicorn restart → Specs regenerate → Frontend clients update"
+print_step "   Frontend .ts/.vue change → Vite HMR → Browser auto-refresh"
+print_step ""
+print_warning "Press Ctrl+C to stop all servers and watchers"
+print_step ""
+
+# Start frontend in background and capture PID
+make -C frontend dev &
+FRONTEND_PID=$!
+
+print_step "Frontend started with PID: $FRONTEND_PID"
+
+# Monitor all three processes
+print_step ""
+print_step "🎯 All services running. Monitoring processes..."
+print_step ""
+
+
+# Start unified watcher in background
 # Unified spec watcher function
 watch_specs() {
     # Per-module spec watching
@@ -287,57 +338,12 @@ watch_specs() {
         fi
     done
 }
-
-# Start unified watcher in background
 watch_specs &
 WATCHER_PID=$!
 print_step "   Spec watcher started with PID: $WATCHER_PID"
 
-print_step "5. Starting frontend development server..."
-print_step "🌐 Frontend will be available at: $FRONTEND_URL"
-print_step "🔧 Backend API is running at: $VITE_API_URL"
-print_step ""
-print_step "👁️  Watch Mode Active:"
-print_step "   🔄 Backend: Uvicorn --reload (auto-restart on Python file changes)"
-print_step "   🔄 Frontend: Vite HMR (hot module replacement)"
-print_step "   📄 Spec watcher → Auto-regenerates REST client & WebSocket types"
-print_step ""
-print_step "💡 Change Flow:"
-print_step "   Backend .py change → Uvicorn restart → Specs regenerate → Frontend clients update"
-print_step "   Frontend .ts/.vue change → Vite HMR → Browser auto-refresh"
-print_step ""
-print_warning "Press Ctrl+C to stop all servers and watchers"
-print_step ""
 
-# Start frontend in background and capture PID
-make -C frontend dev &
-FRONTEND_PID=$!
-
-print_step "Frontend started with PID: $FRONTEND_PID"
-
-# Monitor all three processes
-print_step ""
-print_step "🎯 All services running. Monitoring processes..."
-print_step ""
-
-while true; do
-    # Check if backend is still running
-    if ! is_process_running "$BACKEND_PID"; then
-        print_error "Backend process exited unexpectedly!"
-        exit 1
-    fi
-    
-    # Check if spec watcher is still running
-    if ! is_process_running "$WATCHER_PID"; then
-        print_error "Spec watcher exited unexpectedly!"
-        exit 1
-    fi
-    
-    # Check if frontend is still running  
-    if ! is_process_running "$FRONTEND_PID"; then
-        print_error "Frontend process exited unexpectedly!"
-        exit 1
-    fi
-    
-    sleep 1
-done
+# Wait for all background processes
+wait $FRONTEND_PID
+wait $BACKEND_PID
+wait $WATCHER_PID

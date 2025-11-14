@@ -81,6 +81,7 @@ const props = defineProps({
 
 const chartContainer = ref<HTMLDivElement>()
 let chartWidget: IChartingLibraryWidget | null = null
+let brokerService: BrokerTerminalService | null = null
 
 // Add chartWidget to global context for external access
 declare global {
@@ -138,7 +139,7 @@ onMounted(() => {
       // Trading functionality
       ...(props.enableTrading && {
         broker_factory: (host: IBrokerConnectionAdapterHost) => {
-          const brokerService = new BrokerTerminalService(host, datafeed)
+          brokerService = new BrokerTerminalService(host, datafeed)
           return brokerService
         },
         broker_config: {
@@ -213,7 +214,12 @@ onMounted(() => {
   }
 })
 
-onUnmounted(() => {
+onUnmounted(async () => {
+  if (brokerService) {
+    await brokerService.destroy()
+    brokerService = null
+  }
+
   if (chartWidget !== null) {
     chartWidget.remove()
     chartWidget = null

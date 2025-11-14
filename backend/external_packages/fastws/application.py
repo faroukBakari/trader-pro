@@ -3,13 +3,14 @@
 # pyright: reportGeneralTypeIssues=false
 import asyncio
 import logging
+from email.mime import base
 from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, WebSocketException, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ValidationError
-from starlette.websockets import WebSocket
+from starlette.websockets import WebSocket, WebSocketState
 
 from .broker import Broker
 from .docs import get_asyncapi_html
@@ -21,9 +22,11 @@ class Client:
         self.ws = ws
         self.uid = uuid4().hex
         self.topics: set[str] = set()
+        self.user_data: BaseModel | None = None
 
     async def send(self, message: str) -> None:
-        await self.ws.send_text(message)
+        if self.ws.client_state == WebSocketState.CONNECTED:
+            await self.ws.send_text(message)
 
     def subscribe(self, topic: str) -> None:
         if topic not in self.topics:
