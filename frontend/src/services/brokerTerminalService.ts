@@ -609,6 +609,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   private readonly accountId: string
   private brokerConnectionStatus: ConnectionStatusType = ConnectionStatus.Disconnected
+  private subscriptionTopics: string[] = []
 
   constructor(
     host: IBrokerConnectionAdapterHost,
@@ -682,8 +683,9 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
             )
           }
         }
-      ).then((response) => {
-        console.log('Subscribed to WebSocket order updates:', response)
+      ).then((topic) => {
+        console.log('Subscribed to WebSocket order updates:', topic)
+        this.subscriptionTopics.push(topic)
       }).catch((error) => {
         console.error('Failed to subscribe to WebSocket order updates:', error)
       }),
@@ -696,8 +698,9 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
           console.log('Received position update via WebSocket:', position)
           this._hostAdapter.positionUpdate(position)
         }
-      ).then((response) => {
-        console.log('Subscribed to WebSocket position updates:', response)
+      ).then((topic) => {
+        console.log('Subscribed to WebSocket position updates:', topic)
+        this.subscriptionTopics.push(topic)
       }).catch((error) => {
         console.error('Failed to subscribe to WebSocket position updates:', error)
       }),
@@ -710,8 +713,9 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
           console.log('Received execution update via WebSocket:', execution)
           this._hostAdapter.executionUpdate(execution)
         }
-      ).then((response) => {
-        console.log('Subscribed to WebSocket execution updates:', response)
+      ).then((topic) => {
+        console.log('Subscribed to WebSocket execution updates:', topic)
+        this.subscriptionTopics.push(topic)
       }).catch((error) => {
         console.error('Failed to subscribe to WebSocket execution updates:', error)
       }),
@@ -732,8 +736,9 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
             this.equity.setValue(data.equity)
           }
         }
-      ).then((response) => {
-        console.log('Subscribed to WebSocket equity updates:', response)
+      ).then((topic) => {
+        console.log('Subscribed to WebSocket equity updates:', topic)
+        this.subscriptionTopics.push(topic)
       }).catch((error) => {
         console.error('Failed to subscribe to WebSocket equity updates:', error)
       }),
@@ -764,12 +769,34 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
             )
           }
         }
-      ).then((response) => {
-        console.log('Subscribed to WebSocket broker-connection updates:', response)
+      ).then((topic) => {
+        console.log('Subscribed to WebSocket broker-connection updates:', topic)
+        this.subscriptionTopics.push(topic)
       }).catch((error) => {
         console.error('Failed to subscribe to WebSocket broker-connection updates:', error)
       }),
     ])
+  }
+
+  /**
+   * Cleanup WebSocket subscriptions and resources
+   * Should be called when the broker service is no longer needed (e.g., component unmount)
+   */
+  async destroy(): Promise<void> {
+    console.log('[BrokerTerminalService] Cleaning up WebSocket subscriptions')
+
+    const unsubscribePromises = [
+      this._getWsAdapter().orders?.unsubscribe('orders'),
+      this._getWsAdapter().positions?.unsubscribe('positions'),
+      this._getWsAdapter().executions?.unsubscribe('executions'),
+      this._getWsAdapter().equity?.unsubscribe('equity'),
+      this._getWsAdapter().brokerConnection?.unsubscribe('broker-connection'),
+    ].filter((promise): promise is Promise<void> => promise !== undefined)
+
+    await Promise.all(unsubscribePromises)
+
+    this.subscriptionTopics = []
+    console.log('[BrokerTerminalService] Cleanup complete')
   }
 
   // IBrokerWithoutRealtime interface implementation
