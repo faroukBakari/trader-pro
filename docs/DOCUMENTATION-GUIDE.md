@@ -312,11 +312,13 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### Authentication & Security
 
-- **AUTHENTICATION.md** - ⭐ **Complete authentication system documentation**
-- **backend/src/trading_api/modules/auth/README.md** - Auth module implementation details
-- **frontend/src/services/README.md** - Auth service architecture
-- **frontend/src/router/README.md** - Router authentication guards
-- **docs/TESTING.md** - Authentication testing strategies
+- **AUTHENTICATION.md** - ⭐ **Complete authentication system documentation (Google OAuth, JWT, cookies, security)**
+- **backend/src/trading_api/modules/auth/README.md** - Auth module implementation (repository, service, API, middleware)
+- **backend/src/trading_api/shared/middleware/auth.py** - Stateless middleware implementation (public key validation)
+- **frontend/src/services/README.md** - Auth service architecture (service-based, no Pinia store)
+- **frontend/src/router/README.md** - Router authentication guards (stateless, API introspection)
+- **frontend/src/views/LoginView.vue** - Google OAuth login UI
+- **docs/TESTING.md** - Authentication testing strategies (92 backend tests, frontend unit/integration)
 
 ### Build & DevOps
 

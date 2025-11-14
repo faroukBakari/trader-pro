@@ -35,14 +35,87 @@ See [Modular Architecture](docs/MODULAR_BACKEND_ARCHITECTURE.md) for complete de
 
 ### Authentication Module
 
-The system includes a JWT-based authentication module with:
+The system includes a JWT-based authentication module providing secure, stateless authentication for all endpoints:
 
-- Google OAuth integration
-- Cookie-based session management (HttpOnly, Secure, SameSite=Strict)
-- Refresh token rotation with device fingerprinting
-- Stateless middleware for REST and WebSocket authentication
+**Architecture:**
 
-All broker and datafeed endpoints require authentication. See [auth module documentation](src/trading_api/modules/auth/README.md) for details.
+- **Google OAuth Integration**: Verify Google ID tokens via `authlib`
+- **JWT Access Tokens**: RS256-signed tokens with 5-minute expiry
+- **Cookie-Based Sessions**: HttpOnly, Secure, SameSite=Strict cookies for XSS protection
+- **Refresh Token Rotation**: Device fingerprinting with bcrypt hashing
+- **Stateless Middleware**: Public key validation (no database queries)
+- **WebSocket Authentication**: Automatic via cookies (no query params)
+
+**Key Features:**
+
+✅ All broker and datafeed endpoints require authentication  
+✅ Type-safe JWT payload with `UserData` model  
+✅ In-memory storage (MVP) with PostgreSQL/Redis migration path  
+✅ Comprehensive test coverage (92 tests, 100% passing)  
+✅ Independent module (follows standard modular pattern)
+
+**Documentation:**
+
+- **Module Details**: [Auth Module README](src/trading_api/modules/auth/README.md)
+- **Implementation Guide**: [Authentication System Documentation](../docs/AUTHENTICATION.md)
+- **Middleware**: Shared middleware in `shared/middleware/auth.py`
+- **Models**: JWT and user models in `models/auth/`
+
+**Quick Start:**
+
+```bash
+# Start backend with auth module
+make dev
+
+# Test authentication endpoints
+curl http://localhost:8000/api/v1/auth/health
+```
+
+### Protecting Endpoints with Authentication
+
+All endpoints outside the auth module require authentication via dependency injection.
+
+**REST Endpoints:**
+
+```python
+from typing import Annotated
+from fastapi import Depends
+from trading_api.models.auth import UserData
+from trading_api.shared.middleware.auth import get_current_user
+
+@router.get("/orders")
+async def get_orders(
+    user_data: Annotated[UserData, Depends(get_current_user)]
+) -> list[Order]:
+    """Get orders for authenticated user."""
+    # user_data contains: user_id, email, full_name, picture, device_fingerprint
+    return await service.get_user_orders(user_data.user_id)
+```
+
+**WebSocket Endpoints:**
+
+```python
+from trading_api.shared.middleware.auth import get_current_user_ws
+
+@router.on_connect
+async def authenticate(
+    client: Client,
+    user_data: Annotated[UserData, Depends(get_current_user_ws)]
+):
+    """Authenticate WebSocket connection."""
+    client.state["user_data"] = user_data
+```
+
+**Key Points:**
+
+- ✅ Middleware validates JWT from cookie (no manual extraction)
+- ✅ Middleware uses public key only (stateless, no DB queries)
+- ✅ `UserData` model provides type-safe access to user info
+- ✅ WebSocket authentication automatic via cookies
+- ✅ Same middleware for REST and WebSocket
+- ✅ 401/403 errors handled automatically
+
+See [Authentication Documentation](../docs/AUTHENTICATION.md) for complete implementation details.
 
 ## Quick Start
 

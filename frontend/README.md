@@ -30,39 +30,84 @@ A Vue.js frontend application for the Trading API built with TypeScript, Vue Rou
 
 ### Authentication Setup
 
-The application requires authentication to access protected routes.
+The application requires authentication to access protected routes. All authentication is managed via a **service-based architecture** with cookie-based session management.
 
 **Quick Start:**
 
-1. Start the backend (includes auth module): `cd ../backend && make dev`
-2. Navigate to http://localhost:5173/login
-3. Sign in with Google OAuth
-4. Access protected routes (all routes except `/login` require authentication)
+1. **Configure Google OAuth**:
+
+   ```bash
+   # Set Google Client ID in .env.local
+   VITE_GOOGLE_CLIENT_ID=your-google-client-id
+   ```
+
+2. **Start the backend** (includes auth module):
+
+   ```bash
+   cd ../backend && make dev
+   ```
+
+3. **Start the frontend**:
+
+   ```bash
+   cd ../frontend && npm run dev
+   ```
+
+4. **Login**: Navigate to http://localhost:5173/login and sign in with Google
+
+5. **Access protected routes**: All routes except `/login` require authentication
 
 **Architecture:**
 
-The frontend uses a **service-based authentication architecture**:
+The frontend uses a **service-based authentication architecture** (no Pinia store):
 
-- **Service Layer**: `authService.ts` singleton with composable interface
-- **Cookie-Based**: HttpOnly cookies for access tokens (XSS protection)
-- **Stateless Guards**: Router guards use direct API introspection
-- **Google OAuth**: Integration via `vue3-google-signin`
-- **No Store**: Authentication managed entirely through service + cookies
+```
+LoginView (Google OAuth)
+    ↓
+AuthService.loginWithGoogleToken()
+    ↓
+Backend Auth Module (validates + sets cookie)
+    ↓
+Router Guard (API introspection)
+    ↓
+Protected Routes (automatic cookie auth)
+```
+
+**Key Components:**
+
+- **Service Layer**: `authService.ts` - Singleton with reactive refs
+- **Router Guards**: `router/index.ts` - Stateless guards with API introspection
+- **Login View**: `views/LoginView.vue` - Google OAuth integration
+- **API Adapter**: `plugins/apiAdapter.ts` - Cookie-based HTTP client
+- **WebSocket Client**: `plugins/wsClientBase.ts` - Automatic cookie auth
 
 **Key Features:**
 
-- ✅ JWT access tokens in HttpOnly cookies (5-minute expiry)
-- ✅ Refresh token rotation with device fingerprinting
-- ✅ Automatic cookie handling (no manual token management)
-- ✅ Stateless router guards (API introspection with 30s cache)
-- ✅ WebSocket authentication via cookies (automatic)
-- ✅ Protected routes with redirect preservation
+- ✅ **HttpOnly Cookies**: XSS protection (JavaScript cannot access tokens)
+- ✅ **Stateless Guards**: Direct API introspection (no store dependency)
+- ✅ **Auto Token Refresh**: Silent refresh when access token expires
+- ✅ **Redirect Preservation**: Returns to intended route after login
+- ✅ **WebSocket Auth**: Automatic via cookies (no frontend code needed)
+- ✅ **Google OAuth**: Integration via `vue3-google-signin` library
+- ✅ **No Manual Tokens**: All token management via browser cookies
 
 **Documentation:**
 
 - **Auth Service**: See `src/services/README.md` for service layer details
 - **Router Guards**: See `src/router/README.md` for authentication guards
 - **Authentication Guide**: See `../docs/AUTHENTICATION.md` for complete system documentation
+- **Backend Auth Module**: See `../backend/src/trading_api/modules/auth/README.md`
+
+**Troubleshooting:**
+
+Common issues and solutions:
+
+- **"Missing authentication token"**: Check browser cookies (DevTools → Application → Cookies → `access_token`)
+- **Login redirects to `/login`**: Verify backend is running (`curl http://localhost:8000/api/v1/auth/health`)
+- **Google OAuth fails**: Verify `VITE_GOOGLE_CLIENT_ID` is set and matches Google Console
+- **WebSocket connection fails**: Access token cookie expired, login again
+
+See [Authentication Documentation](../docs/AUTHENTICATION.md#troubleshooting) for complete troubleshooting guide.
 
 ## Quick Start
 
