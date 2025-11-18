@@ -715,8 +715,8 @@ class BrokerService:
 
 ## Related Documentation
 
-- **[WEBSOCKET-METHODOLOGY.md](../WEBSOCKET-METHODOLOGY.md)** - TDD workflow for WebSocket features
-- **[API-METHODOLOGY.md](../API-METHODOLOGY.md)** - TDD workflow for REST API features
+- **[docs/methodologies/WEBSOCKET-METHODOLOGY.md](methodologies/WEBSOCKET-METHODOLOGY.md)** - TDD workflow for WebSocket features
+- **[docs/methodologies/API-METHODOLOGY.md](methodologies/API-METHODOLOGY.md)** - TDD workflow for REST API features
 - **[ARCHITECTURE.md](../ARCHITECTURE.md)** - Overall system architecture
 
 ---

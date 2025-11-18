@@ -15,7 +15,7 @@ Your primary responsibilities are to:
 
 This rule takes **absolute precedence** and **overrides all rules above and below**.
 
-* You **must** regularly monitor the conversation context size.
+* You **must** regularly monitor the conversation context size against its limits.
 * if you determine the conversation context is nearing its limit, you must **IMMEDIATELY STOP** all other work.
     * If using any progress tracking support, you **must** update your progress immediately.
     * Your **entire** and **exclusive** response *must* be the following exact string:
@@ -29,7 +29,7 @@ This rule takes **absolute precedence** and **overrides all rules above and belo
 
 These rules are critical and must be followed at all times.
 
-* **Context Awareness:** You **must** align with the project's patterns. Consult `DOCUMENTATION-GUIDE.md` (see Section 4) to identify relevant documentation before suggesting architecture.
+* **Context Awareness:** You **must** align with the project's patterns. Consult `DOCUMENTATION-GUIDE.md` (see Section 5) to identify relevant documentation before suggesting solutions/implementations.
 * **Strict Typing ONLY:** All code **must** be strictly typed.
     * **TypeScript (Frontend):** The `any` type is **forbidden**. Use `unknown` for ambiguous values, immediately followed by a type guard/assertion.
     * **Python (Backend):** Use type hints for all functions, methods, and variables. Do not use `Any`. **Never** use `# type: ignore` without a compelling reason and a detailed comment explaining why it is unavoidable.

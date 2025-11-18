@@ -41,7 +41,7 @@ trader-pro/
 
 | Scope        | Path                                   | Description                               | Examples                                         |
 | :----------- | :------------------------------------- | :---------------------------------------- | :----------------------------------------------- |
-| **Root**     | `README.md`, `docs/`                   | Project-wide, cross-cutting concerns      | `docs/TESTING.md`, `docs/WORKSPACE-SETUP.md`     |
+| **Root**     | `README.md`, `docs/`                   | Project-wide, cross-cutting concerns      | `docs/TESTING.md`, `docs/GETTING-STARTED.md`     |
 | **Backend**  | `backend/README.md`, `backend/docs/`   | Backend-specific architecture & patterns  | `backend/docs/BACKEND_WEBSOCKETS.md`             |
 | **Frontend** | `frontend/README.md`, `frontend/docs/` | Frontend-specific architecture & patterns | `frontend/docs/WEBSOCKET-ARCHITECTURE.md`        |
 | **Module**   | `.../src/module/README.md`             | Specific implementation details           | `backend/src/trading_api/modules/auth/README.md` |
@@ -71,17 +71,12 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ## 🎯 Root Level Documentation (Project-Wide)
 
-| File                         | Purpose                                                    |
-| ---------------------------- | ---------------------------------------------------------- |
-| **README.md**                | Project overview, quick start, and basic setup             |
-| **ARCHITECTURE.md**          | System architecture, technology stack, design patterns     |
-| **AUTHENTICATION.md**        | JWT-based authentication with Google OAuth implementation  |
-| **API-METHODOLOGY.md**       | Generic TDD methodology for backend service implementation |
-| **WEBSOCKET-METHODOLOGY.md** | Generic 6-phase TDD methodology for WebSocket features     |
-| **WORKSPACE-SETUP.md**       | VS Code multi-root workspace configuration guide           |
-| **MAKEFILE-GUIDE.md**        | Makefile commands reference for all components             |
-| **HOOKS-SETUP.md**           | Git hooks installation and usage                           |
-| **ENVIRONMENT-CONFIG.md**    | Environment variables configuration                        |
+| File                  | Purpose                                                   |
+| --------------------- | --------------------------------------------------------- |
+| **README.md**         | Project overview, quick start, and basic setup            |
+| **ARCHITECTURE.md**   | System architecture, technology stack, design patterns    |
+| **AUTHENTICATION.md** | JWT-based authentication with Google OAuth implementation |
+| **MAKEFILE-GUIDE.md** | Makefile commands reference for all components            |
 
 ---
 
@@ -91,6 +86,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 | ------------------------------- | ----------------------------------------------- |
 | **docs/README.md**              | Documentation index and navigation guide        |
 | **docs/DOCUMENTATION-GUIDE.md** | This file - complete documentation index        |
+| **docs/GETTING-STARTED.md**     | Complete setup guide (workspace, hooks, env)    |
 | **docs/BROKER-ARCHITECTURE.md** | Broker service execution simulator architecture |
 | **docs/CLIENT-GENERATION.md**   | REST and WebSocket client auto-generation       |
 | **docs/WEBSOCKET-CLIENTS.md**   | WebSocket implementation overview               |
@@ -98,6 +94,14 @@ When updating documentation for large-scale changes, follow this three-phase app
 | **docs/TESTING.md**             | Testing strategy and best practices             |
 | **docs/FULLSTACK-DEV-MODE.md**  | Full-stack dev mode with auto-regeneration      |
 | **docs/CI-TROUBLESHOOTING.md**  | CI/CD troubleshooting guide                     |
+
+### docs/methodologies/ (Implementation Methodologies)
+
+| File                                            | Purpose                                        |
+| ----------------------------------------------- | ---------------------------------------------- |
+| **docs/methodologies/README.md**                | Implementation methodologies index             |
+| **docs/methodologies/API-METHODOLOGY.md**       | TDD methodology for REST API backend services  |
+| **docs/methodologies/WEBSOCKET-METHODOLOGY.md** | 6-phase TDD methodology for WebSocket features |
 
 ---
 
@@ -129,10 +133,9 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### frontend/ (Frontend Root)
 
-| File                                | Purpose                                     |
-| ----------------------------------- | ------------------------------------------- |
-| **frontend/README.md**              | Frontend overview, setup, and structure     |
-| **frontend/FRONTEND-EXCLUSIONS.md** | Public folder exclusions (linting, testing) |
+| File                   | Purpose                                 |
+| ---------------------- | --------------------------------------- |
+| **frontend/README.md** | Frontend overview, setup, and structure |
 
 ### frontend/docs/ (Frontend-Specific Documentation)
 
@@ -177,10 +180,9 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### frontend/public/ (Third-Party Documentation)
 
-| File                                        | Purpose                                     |
-| ------------------------------------------- | ------------------------------------------- |
-| **frontend/public/datafeeds/README.md**     | TradingView datafeeds library documentation |
-| **frontend/public/datafeeds/udf/README.md** | UDF (Universal Data Feed) documentation     |
+| File                          | Purpose                                                 |
+| ----------------------------- | ------------------------------------------------------- |
+| **frontend/public/README.md** | TradingView public assets reference (external examples) |
 
 ---
 
@@ -206,8 +208,8 @@ When updating documentation for large-scale changes, follow this three-phase app
 ### New Developers (Start Here)
 
 1. **README.md** - Understand the project
-2. **docs/DEVELOPMENT.md** - Get development environment set up
-3. **WORKSPACE-SETUP.md** - Configure VS Code workspace
+2. **docs/GETTING-STARTED.md** - Complete setup guide (workspace, hooks, environment)
+3. **docs/DEVELOPMENT.md** - Get development workflows
 4. **docs/FULLSTACK-DEV-MODE.md** - Learn the dev workflow and watch mode
 5. **ARCHITECTURE.md** - Learn the system architecture
 6. **MAKEFILE-GUIDE.md** - Familiarize with build commands
@@ -219,8 +221,8 @@ When updating documentation for large-scale changes, follow this three-phase app
 3. **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process deployment with nginx
 4. **backend/docs/BACKEND_WEBSOCKETS.md** - FastWS integration and creating WebSocket modules
 5. **backend/docs/SPECS_AND_CLIENT_GEN.md** - Spec and client generation flow
-6. **API-METHODOLOGY.md** - TDD implementation workflow
-7. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
+6. **docs/methodologies/API-METHODOLOGY.md** - TDD implementation workflow
+7. **docs/methodologies/WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
 8. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
 9. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
 10. **docs/TESTING.md** - General testing strategies
@@ -238,17 +240,16 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 1. **MAKEFILE-GUIDE.md** - Build system commands
 2. **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process backend deployment
-3. **HOOKS-SETUP.md** - Git hooks setup
-4. **ENVIRONMENT-CONFIG.md** - Environment configuration
-5. **docs/CI-TROUBLESHOOTING.md** - CI/CD troubleshooting
-6. **docs/TESTING.md** - Testing infrastructure
+3. **docs/GETTING-STARTED.md** - Setup guide (hooks, environment, workspace)
+4. **docs/CI-TROUBLESHOOTING.md** - CI/CD troubleshooting
+5. **docs/TESTING.md** - Testing infrastructure
 
 ### Full-Stack Developers
 
 1. **ARCHITECTURE.md** - Overall system design
 2. **docs/FULLSTACK-DEV-MODE.md** - Development mode and watch system
-3. **API-METHODOLOGY.md** - Backend service implementation
-4. **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
+3. **docs/methodologies/API-METHODOLOGY.md** - Backend service implementation
+4. **docs/methodologies/WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
 5. **docs/CLIENT-GENERATION.md** - Client generation workflow
 6. **docs/WEBSOCKET-CLIENTS.md** - Real-time communication
 7. **docs/DEVELOPMENT.md** - Full-stack workflows
@@ -264,15 +265,13 @@ When updating documentation for large-scale changes, follow this three-phase app
   - **Backend Models Architecture** - Topic-based organization principles (business concepts over technical layers)
 - **docs/BROKER-ARCHITECTURE.md** - Broker service execution simulator architecture
 - **AUTHENTICATION.md** - JWT-based authentication with Google OAuth
-- **API-METHODOLOGY.md** - TDD methodology
+- **docs/methodologies/API-METHODOLOGY.md** - TDD methodology
 - **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket architecture diagrams
 
 ### Setup & Configuration
 
-- **WORKSPACE-SETUP.md** - VS Code workspace
-- **ENVIRONMENT-CONFIG.md** - Environment variables
-- **HOOKS-SETUP.md** - Git hooks
-- **docs/DEVELOPMENT.md** - Development setup
+- **docs/GETTING-STARTED.md** - Complete setup guide (workspace, hooks, environment)
+- **docs/DEVELOPMENT.md** - Development workflows
 - **docs/FULLSTACK-DEV-MODE.md** - Full-stack dev mode and watch system
 
 ### API & Client Generation
@@ -285,7 +284,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 ### API Versioning
 
 - **backend/docs/MODULAR_VERSIONNING.md** - ⭐ **Module-level versioning (start here for independent module versions)**
-- **API-METHODOLOGY.md** - TDD methodology for API implementation
+- **docs/methodologies/API-METHODOLOGY.md** - TDD methodology for API implementation
 
 ### WebSocket & Real-Time
 
@@ -329,9 +328,9 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### Code Quality
 
-- **HOOKS-SETUP.md** - Pre-commit hooks
+- **docs/GETTING-STARTED.md** - Git hooks setup (section 5)
 - **.github/copilot-instructions.md** - Coding guidelines
-- **frontend/FRONTEND-EXCLUSIONS.md** - Exclusion patterns
+- **frontend/docs/FRONTEND-EXCLUSIONS.md** - Exclusion patterns
 
 ---
 
@@ -365,18 +364,26 @@ When updating documentation for large-scale changes, follow this three-phase app
 - Regular reviews ensure accuracy and relevance
 - **Note:** Files in `**/tmp/` directories are excluded from documentation updates (temporary/scratch files)
 
-**Documentation Refactoring** (November 12, 2025):
+**Documentation Refactoring** (November 18, 2025):
 
-- **WebSocket Documentation Consolidation**: 3 files → 1 comprehensive guide
-  - Created `frontend/docs/WEBSOCKET-ARCHITECTURE.md` (consolidated from WEBSOCKET-CLIENT-PATTERN, WEBSOCKET-CLIENT-BASE, WEBSOCKET-ARCHITECTURE-DIAGRAMS)
-  - Old files archived to `frontend/docs/archive/`
-- **Broker Integration Consolidation**: 2 files → 1 comprehensive guide
-  - Created `frontend/docs/BROKER-INTEGRATION.md` (merged BROKER-TERMINAL-SERVICE + BROKER-WEBSOCKET-INTEGRATION)
-  - Old files archived to `frontend/docs/archive/`
+- **Setup Documentation Consolidation**: 3 files → 1 comprehensive guide
+  - Created `docs/GETTING-STARTED.md` (merged WORKSPACE-SETUP, HOOKS-SETUP, ENVIRONMENT-CONFIG)
+  - Old files archived to `docs/archive/`
+- **Methodologies Organization**: Created `docs/methodologies/` subdirectory
+  - Moved API-METHODOLOGY.md and WEBSOCKET-METHODOLOGY.md
+  - Added `methodologies/README.md` navigation index
+  - Updated 13+ cross-references
+- **TradingView Public Documentation**: 2 nested files → 1 root file
+  - Created `frontend/public/README.md` (merged datafeeds/ and udf/ READMEs)
+  - Old files archived to `docs/archive/`
+- **Duplicate Removal**: Removed duplicate `frontend/FRONTEND-EXCLUSIONS.md`
+- **Result**: Improved organization, clearer structure, enhanced discoverability (see `docs/tmp/documentation-assessment-report.md`)
+
+**Previous Refactoring** (November 12, 2025):
+
+- **WebSocket Documentation Consolidation**: 3 files → 1 comprehensive guide (`frontend/docs/WEBSOCKET-ARCHITECTURE.md`)
+- **Broker Integration Consolidation**: 2 files → 1 comprehensive guide (`frontend/docs/BROKER-INTEGRATION.md`)
 - **TradingView Organization**: Created `frontend/docs/tradingview/` subdirectory
-  - Moved 3 TradingView-specific files to dedicated directory
-  - Added `tradingview/README.md` index
-- **Result**: Better organization, reduced duplication, improved discoverability
 
 **Recent Assessment** (November 11, 2025):
 
@@ -402,5 +409,5 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ---
 
-**Last Updated**: November 12, 2025
+**Last Updated**: November 18, 2025
 **Maintained by**: Development Team

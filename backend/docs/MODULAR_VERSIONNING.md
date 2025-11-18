@@ -512,7 +512,7 @@ When introducing breaking changes in new version:
 - **[MODULAR_BACKEND_ARCHITECTURE.md](MODULAR_BACKEND_ARCHITECTURE.md)** - Module system and ServiceInterface base class
 - **[MODULAR_VERSIONNING.md](MODULAR_VERSIONNING.md)** - Auto-discovery and version management
 - **[SPECS_AND_CLIENT_GEN.md](SPECS_AND_CLIENT_GEN.md)** - Client generation
-- **[API-METHODOLOGY.md](../../API-METHODOLOGY.md)** - API design patterns
+- **[docs/methodologies/API-METHODOLOGY.md](../../docs/methodologies/API-METHODOLOGY.md)** - API design patterns
 - **[ARCHITECTURE.md](../../ARCHITECTURE.md)** - Overall system design
 
 ---
