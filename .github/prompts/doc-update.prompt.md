@@ -20,7 +20,7 @@ Analyze code changes and generate a **complete, executable plan** for documentat
    - Use git commands to discover/identify update scope and insights on code changes
 
 2. **Map to Documentation Structure**
-   - Read `docs/DOCUMENTATION-GUIDE.md` for hierarchy and conventions
+   - Briefly explore existing documentation for cartography
    - Map identified topics/changes to specific documentation files
    - Determine which docs need updates: module READMEs, sub-system docs, root docs
    - Exclude `**/tmp/**.md` files (out of scope)
@@ -44,8 +44,8 @@ Analyze code changes and generate a **complete, executable plan** for documentat
    - Ensure plan requires further code examination for execution
 
 5. **Structure: Specific-to-Global**
-   - **Phase 1:** Module-level READMEs (implementation details)
-   - **Phase 2:** Sub-system docs (backend/frontend READMEs, architecture)
+   - **Phase 1:** Implementation details documentation
+   - **Phase 2:** Sub-system docs (TWS integration, Redis Integration, etc.)
    - **Phase 3:** Root docs (project-wide guides, cross-cutting concerns)
 
 ### 🚨 Critical Rules
@@ -54,10 +54,12 @@ Analyze code changes and generate a **complete, executable plan** for documentat
 - **Planning Only:** Generate plan, make NO edits
 - **Self-Sufficient:** Include ALL info needed for later execution (absolute paths, content summaries, quotes, links, rationale)
 - **Accuracy:** Add instructions to match user's context and actual implementation exactly (read referenced files AND existing docs)
-- **Cross-Reference:** Check all related docs (module → sub-system → root)
+- **Cross-Reference:** Check all related docs (Implementation → sub-system → root)
 - **Links:** Use relative links for internal references
 - **Documentation Style:** Simple, specific, short
 - **Code Snippets:** Short examples with source file references (never full files)
+- **UML design** diagrams if architecture changes
+- **No Temporary Files:** Exclude `**/tmp/**.md` files
 
 ### 📋 Plan Output Format
 
@@ -66,9 +68,9 @@ Analyze code changes and generate a **complete, executable plan** for documentat
 
 **Summary:** Brief description of changes
 
-### Phase 1: Module-Level Updates
+### Phase 1: Implementation-details-Level Updates
 
-#### `/absolute/path/to/module/README.md`
+#### `/absolute/path/to/Implementation/README.md`
 **Section:** "Section Name"
 **Current:** `summary of existing text...`
 **New:** `summary of replacement text with update approach explanation...`
@@ -76,7 +78,7 @@ Analyze code changes and generate a **complete, executable plan** for documentat
 
 ### Phase 2: Sub-System Updates
 
-#### `/absolute/path/to/backend/docs/ARCHITECTURE.md`
+#### `/absolute/path/to/sub-system/docs/ARCHITECTURE.md`
 **Section:** "Module Architecture"
 **Current:** `existing section...`
 **New:** `updated section with diagrams...`

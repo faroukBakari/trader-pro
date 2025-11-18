@@ -5,28 +5,13 @@ description: "Follow a predefined plan step-by-step with validation and a clear 
 ---
 We have defined and validated this plan that I need you to follow.
 
-**You must follow these instructions *exactly*:**
-
-### 🚨 CRITICAL OVERRIDE: Context Window Guard
-
-This rule takes **absolute precedence** and **overrides all rules below** (Rules 1-8).
-
-* If you determine the conversation context is nearing its limit, you must **IMMEDIATELY STOP** all other work.
-* **First,** perform the file update action as described in Rule 6 (update the progress tracking file).
-* **Second,** after the file is saved, you **must not** provide any summary, explanation, or conversational text.
-* Your **entire** and **exclusive** response *must* be the following exact string:
-
-`Context window is nearly full. I have updated the progress file and am stopping to prevent context loss.`
-
----
-
 ### Core Execution Workflow (Rules 1-8)
 
 If the OVERRIDE rule is not triggered, follow this workflow precisely.
 
 #### Phase 1: Setup
 
-1.  **Persist the Plan:** Before starting and if the plan is not already saved to a file, save it to the most relevant temporary working location (e.g., `./tmp/${PLAN_NAME}.md`, `backend/tmp/${PLAN_NAME}.md`, or `frontend/tmp/${PLAN_NAME}.md`). Let me know the path to the file you create.
+1.  **Persist the Plan:** Before starting and if the plan is not already saved to a file, save it to the most relevant temporary working document location (e.g., `./docs/tmp/${PLAN_NAME}.md` or `path/to/dep/or/module/tmp/${PLAN_NAME}.md`). Let me know the path to the file you create.
 
 2.  **Ensure Progress Tracker:**
     * Check the plan content. If a "Progress" or "Checklist" section with checkboxes does *not* already exist at the top, you must **add one**.
