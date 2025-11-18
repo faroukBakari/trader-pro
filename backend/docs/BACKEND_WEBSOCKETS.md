@@ -894,7 +894,7 @@ logger.info(f"Broadcast tasks: {len(ws_app._broadcast_tasks)}")
 - **[MODULAR_BACKEND_ARCHITECTURE.md](MODULAR_BACKEND_ARCHITECTURE.md)** - Module system overview
 - **[WS_ROUTERS_GEN.md](WS_ROUTERS_GEN.md)** - Router generation details
 - **[SPECS_AND_CLIENT_GEN.md](SPECS_AND_CLIENT_GEN.md)** - Spec generation
-- **[WEBSOCKET-METHODOLOGY.md](../../WEBSOCKET-METHODOLOGY.md)** - WebSocket design patterns
+- **[docs/methodologies/WEBSOCKET-METHODOLOGY.md](../../docs/methodologies/WEBSOCKET-METHODOLOGY.md)** - WebSocket design patterns
 
 ---
 

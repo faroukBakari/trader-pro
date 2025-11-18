@@ -539,8 +539,8 @@ poetry run isort src/trading_api/modules/{module}/ws/v{N}/ws_generated/
 
 ### Related Methodologies
 
-- `WEBSOCKET-METHODOLOGY.md` - WebSocket implementation methodology
-- `API-METHODOLOGY.md` - REST API design patterns
+- `docs/methodologies/WEBSOCKET-METHODOLOGY.md` - WebSocket implementation methodology
+- `docs/methodologies/API-METHODOLOGY.md` - REST API design patterns
 - `ARCHITECTURE.md` - Overall system architecture
 
 ---

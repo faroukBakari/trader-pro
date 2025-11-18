@@ -2447,8 +2447,8 @@ See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete details.
 ### Core Documentation
 
 - **ARCHITECTURE.md** - System architecture (this file)
-- **API-METHODOLOGY.md** - TDD implementation guide
-- **WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
+- **docs/methodologies/API-METHODOLOGY.md** - TDD implementation guide
+- **docs/methodologies/WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
 - **docs/DEVELOPMENT.md** - Development workflows
 - **docs/TESTING.md** - Testing strategies
 - **docs/CLIENT-GENERATION.md** - API client generation

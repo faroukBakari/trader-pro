@@ -687,8 +687,8 @@ wait_for_backend() {
 ## Related Documentation
 
 - [Backend Testing](../backend/docs/BACKEND_TESTING.md) - Backend test setup
-- [API Methodology](../API-METHODOLOGY.md) - REST API patterns
-- [WebSocket Methodology](../WEBSOCKET-METHODOLOGY.md) - WebSocket patterns
+- [API Methodology](methodologies/API-METHODOLOGY.md) - REST API patterns
+- [WebSocket Methodology](methodologies/WEBSOCKET-METHODOLOGY.md) - WebSocket patterns
 - [Client Generation](CLIENT-GENERATION.md) - OpenAPI/AsyncAPI client generation
 - [Makefile Guide](../MAKEFILE-GUIDE.md) - All available make targets
 
