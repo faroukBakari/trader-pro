@@ -12,6 +12,7 @@ src/services/
 ├── authService.ts          # Authentication service (login, logout, token management)
 ├── datafeedService.ts      # TradingView Datafeed service (implement methods)
 ├── brokerTerminalService.ts # Broker terminal integration
+├── ihmControllerService.ts # IHM Controller service (component tool registration)
 ├── testIntegration.ts      # Integration test utility
 ├── generated/              # Auto-generated API client (gitignored)
 │   ├── api/               # Generated API classes
@@ -21,7 +22,8 @@ src/services/
 └── __tests__/
     ├── apiService.spec.ts          # Unit tests with mocking examples
     ├── authService.spec.ts         # Auth service unit tests
-    └── authService.integration.spec.ts  # Auth integration tests
+    ├── authService.integration.spec.ts  # Auth integration tests
+    └── ihmControllerService.spec.ts    # IHM Controller unit tests
 ```
 
 ## AuthService
@@ -256,6 +258,310 @@ Tests:
 - [Router Guards](../router/README.md) - Stateless authentication guards
 - [Auth Module](../../../backend/src/trading_api/modules/auth/README.md) - Backend implementation
 - [Authentication Guide](../../../docs/AUTHENTICATION.md) - Comprehensive cross-cutting guide
+
+---
+
+## IHMControllerService
+
+The `IHMControllerService` allows Vue components to register "tools" (programmatic APIs) that can be invoked remotely via WebSocket by external services (AI agents, automation tools, etc.).
+
+### Architecture
+
+```
+Vue Component
+    ↓ registers tool
+IHMControllerService (Singleton)
+    ↓ creates subscription
+WsAdapter.tools (WebSocket Client)
+    ↓ receives commands
+Backend IHM Module
+```
+
+### Key Features
+
+✅ **Tool Registration**: Components expose programmatic APIs via OpenAPI-style schemas  
+✅ **WebSocket Integration**: Each tool creates a dedicated WebSocket subscription  
+✅ **Type-Safe**: Full TypeScript support with generic handlers  
+✅ **Error Handling**: Automatic success/error response propagation  
+✅ **Graceful Degradation**: Works without backend (logs warning)
+
+### Tool Schema Format
+
+Tools use OpenAPI-style schemas for documentation and validation:
+
+```typescript
+import type { ToolSchema } from '@/types/ihmController'
+
+const displayChartSchema: ToolSchema = {
+  name: 'displayStockChart',
+  description: 'Display stock chart. Use for "show AAPL chart" or "plot TSLA".',
+  parameters: {
+    type: 'object',
+    properties: {
+      symbol: {
+        type: 'string',
+        description: 'Stock ticker symbol (e.g., "AAPL", "TSLA")',
+        pattern: '^[A-Z]{1,5}$',
+      },
+      timeframe: {
+        type: 'string',
+        description: 'Chart interval',
+        enum: ['1', '5', '15', '60', '1D', '1W', '1M'],
+        default: '1D',
+      },
+    },
+    required: ['symbol'],
+  },
+}
+```
+
+### Usage in Components
+
+**Basic Pattern:**
+
+```typescript
+import { onMounted, onUnmounted } from 'vue'
+import { ihmController } from '@/services/ihmControllerService'
+import type { ToolSchema } from '@/types/ihmController'
+
+// Define tool schema
+const myToolSchema: ToolSchema = {
+  name: 'myTool',
+  description: 'Description for AI agents',
+  parameters: {
+    type: 'object',
+    properties: {
+      param1: { type: 'string', description: 'Parameter description' },
+    },
+    required: ['param1'],
+  },
+}
+
+// Define handler
+const myToolHandler = async (params: { param1: string }) => {
+  // Execute tool logic
+  console.log('Tool called with:', params.param1)
+  return { success: true }
+}
+
+// Register on mount
+onMounted(() => {
+  ihmController.registerTool(myToolSchema, myToolHandler)
+})
+
+// Unregister on unmount
+onUnmounted(async () => {
+  await ihmController.unregisterTool('myTool')
+})
+```
+
+**Real Example (TraderChartContainer):**
+
+```typescript
+import { ihmController } from '@/services/ihmControllerService'
+import type { ToolSchema } from '@/types/ihmController'
+
+// Tool schema
+const displayStockChartSchema: ToolSchema = {
+  name: 'displayStockChart',
+  description: 'Display stock chart for a symbol',
+  parameters: {
+    type: 'object',
+    properties: {
+      symbol: {
+        type: 'string',
+        description: 'Stock ticker symbol',
+        pattern: '^[A-Z]{1,5}$',
+      },
+      timeframe: {
+        type: 'string',
+        description: 'Chart interval',
+        enum: ['1', '5', '15', '60', '1D', '1W', '1M'],
+        default: '1D',
+      },
+    },
+    required: ['symbol'],
+  },
+}
+
+// Handler implementation
+const displayStockChartHandler = async (params: { symbol: string; timeframe?: string }) => {
+  if (!chartWidget) throw new Error('Chart not ready')
+
+  await new Promise<void>((resolve) => {
+    chartWidget.setSymbol(params.symbol, (params.timeframe || '1D') as ResolutionString, () => {
+      console.log(`Switched to ${params.symbol}`)
+      resolve()
+    })
+  })
+}
+
+// Register when chart is ready
+chartWidget.onChartReady(() => {
+  ihmController.registerTool(displayStockChartSchema, displayStockChartHandler)
+})
+
+// Cleanup on unmount
+onUnmounted(async () => {
+  await ihmController.unregisterTool('displayStockChart')
+})
+```
+
+### Methods
+
+#### `registerTool<TParams, TResult>(schema: ToolSchema, handler: ToolHandler<TParams, TResult>): void`
+
+Registers a component tool with the IHM Controller.
+
+**Flow:**
+
+1. Checks if WebSocket tools client is available
+2. If available: Creates WebSocket subscription with schema as params
+3. If unavailable: Logs warning and skips subscription (graceful degradation)
+4. Stores tool schema in registry
+
+**Parameters:**
+
+- `schema`: OpenAPI-style tool description
+- `handler`: Async function to execute when tool is invoked
+
+**Handler Signature:**
+
+```typescript
+type ToolHandler<TParams, TResult> = (params: TParams) => Promise<TResult>
+```
+
+#### `unregisterTool(toolName: string): Promise<void>`
+
+Unregisters a tool and cleans up its WebSocket subscription.
+
+**Flow:**
+
+1. Unsubscribes from WebSocket (if client available)
+2. Removes tool from registry
+3. Logs completion
+
+#### `getRegisteredTools(): ToolSchema[]`
+
+Returns array of all registered tool schemas (for debugging/inspection).
+
+### WebSocket Message Flow
+
+**Command from Backend → Frontend:**
+
+```typescript
+interface ToolCommandWrapper {
+  commandId: string // For response correlation
+  params: TParams // Tool-specific parameters
+}
+```
+
+**Response from Frontend → Backend:**
+
+```typescript
+interface ToolResponseWrapper {
+  commandId: string // Correlates with command
+  tool: string // Tool name
+  success: boolean
+  result?: unknown // Tool result (if successful)
+  error?: string // Error message (if failed)
+}
+```
+
+### Error Handling
+
+The service automatically handles errors and sends responses:
+
+```typescript
+// Handler throws error
+const handler = async (params) => {
+  throw new Error('Chart not ready')
+}
+
+// Service catches and sends error response
+// {
+//   commandId: "cmd-123",
+//   tool: "displayStockChart",
+//   success: false,
+//   error: "Chart not ready"
+// }
+```
+
+### Backend Integration (Future)
+
+**Current State:**
+
+- ✅ Frontend implementation complete
+- ⚠️ Backend IHM module not yet created
+- ✅ Graceful degradation when backend unavailable
+
+**When Backend Ready:**
+
+1. Generate AsyncAPI spec for IHM module
+2. Run `make generate-asyncapi-types`
+3. Enable WebSocket client in `WsAdapter`:
+
+```typescript
+// In wsAdapter.ts
+const ihmWsUrl = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + '/v1/ihm/ws'
+this.tools = new WebSocketClient<ToolCommandRequest, ToolCommandData>(
+  ihmWsUrl,
+  'ihm-command',
+  (data) => data,
+)
+```
+
+4. Replace placeholder types with generated types
+
+### Testing
+
+**Unit Tests:**
+
+```bash
+npm run test:unit -- ihmControllerService.spec.ts
+```
+
+Tests cover:
+
+- Singleton pattern
+- Tool registration/unregistration
+- WebSocket integration (mocked)
+- Handler execution and response sending
+- Error handling
+
+**Component Integration Tests:**
+
+```bash
+npm run test:unit -- TraderChartContainer.spec.ts
+```
+
+Tests verify:
+
+- Tool registration on chart ready
+- Tool unregistration on component unmount
+- Correct schema structure
+
+### Troubleshooting
+
+**Tools client not available:**
+
+- **Cause**: Backend IHM module not running
+- **Effect**: Tools registered in registry but no WebSocket subscription
+- **Log**: `[IHMController] Tools client not available - tool registration skipped`
+- **Action**: Normal during development, backend not required yet
+
+**Tool registration fails:**
+
+- **Cause**: WebSocket subscription error
+- **Effect**: Tool not added to registry
+- **Log**: `[IHMController] Failed to register tool: <name>`
+- **Action**: Check backend WebSocket availability, check schema validity
+
+### Related Documentation
+
+- [IHM Controller Types](../types/ihmController.ts) - Type definitions
+- [WebSocket Architecture](../../docs/WEBSOCKET-ARCHITECTURE.md) - WebSocket patterns
+- [WsAdapter](../plugins/wsAdapter.ts) - WebSocket client wrapper
 
 ---
 

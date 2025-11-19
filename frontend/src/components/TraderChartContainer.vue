@@ -12,6 +12,8 @@
 import { onMounted, ref, onUnmounted } from 'vue'
 import { DatafeedService } from '@/services/datafeedService'
 import { BrokerTerminalService } from '@/services/brokerTerminalService'
+import { ihmController } from '@/services/ihmControllerService'
+import type { ToolSchema } from '@/types/ihmController'
 import { widget } from '@public/trading_terminal'
 import type {
   IChartingLibraryWidget,
@@ -82,6 +84,43 @@ const props = defineProps({
 const chartContainer = ref<HTMLDivElement>()
 let chartWidget: IChartingLibraryWidget | null = null
 let brokerService: BrokerTerminalService | null = null
+
+// Tool schema definition for IHM Controller
+const displayStockChartSchema: ToolSchema = {
+  name: 'displayStockChart',
+  description: 'Display stock chart. Use for requests like "show AAPL chart" or "plot TSLA".',
+  parameters: {
+    type: 'object',
+    properties: {
+      symbol: {
+        type: 'string',
+        description: 'Stock ticker symbol (e.g., "AAPL", "TSLA")',
+        pattern: '^[A-Z]{1,5}$',
+      },
+      timeframe: {
+        type: 'string',
+        description: 'Chart interval (e.g., "1D", "1W")',
+        enum: ['1', '5', '15', '60', '1D', '1W', '1M'],
+        default: '1D',
+      },
+    },
+    required: ['symbol'],
+  },
+}
+
+// Handler implementation for chart display tool
+const displayStockChartHandler = async (params: { symbol: string; timeframe?: string }) => {
+  if (!chartWidget) {
+    throw new Error('Chart not ready')
+  }
+
+  await new Promise<void>((resolve) => {
+    chartWidget!.setSymbol(params.symbol, (params.timeframe || '1D') as ResolutionString, () => {
+      console.log(`[Chart] Switched to ${params.symbol} ${params.timeframe}`)
+      resolve()
+    })
+  })
+}
 
 // Add chartWidget to global context for external access
 declare global {
@@ -181,6 +220,10 @@ onMounted(() => {
       chartWidget.onChartReady(() => {
         if (chartWidget) {
           chartWidget.setDebugMode(widgetOptions.debug || false)
+
+          // Register IHM Controller tool when chart is ready
+          ihmController.registerTool(displayStockChartSchema, displayStockChartHandler)
+
           chartWidget.headerReady().then(() => {
             if (chartWidget) {
               const button = chartWidget.createButton()
@@ -215,6 +258,9 @@ onMounted(() => {
 })
 
 onUnmounted(async () => {
+  // Unregister IHM Controller tool
+  await ihmController.unregisterTool('displayStockChart')
+
   if (brokerService) {
     await brokerService.destroy()
     brokerService = null
