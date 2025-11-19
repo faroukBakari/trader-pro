@@ -7,20 +7,20 @@
 // }
 
 
-interface DataFeed<TBackendData extends object = object> {
-  topic: string
-  payload: TBackendData
-}
-
 interface SubscriptionResponse {
   status: 'ok' | 'error'
   message: string
   topic: string
 }
 
+interface SubscriptionUpdate<TBackendData extends object = object> {
+  topic: string
+  payload: TBackendData
+}
+
 interface WebSocketMessage<TBackendData extends object = object> {
   type: string
-  payload: DataFeed<TBackendData> | SubscriptionResponse
+  payload: SubscriptionUpdate<TBackendData> | SubscriptionResponse
 }
 
 interface SubscriptionState<TParams extends object = object, TData extends object = object> {
@@ -192,7 +192,7 @@ export class WebSocketBase {
       const { type, payload } = message
 
       if (type.endsWith('.update')) {
-        const update = payload as DataFeed
+        const update = payload as SubscriptionUpdate
         this.routeUpdateMessage(update)
       } else {
         this.logger.log('Received:', type, payload)
@@ -217,7 +217,7 @@ export class WebSocketBase {
     }
   }
 
-  private routeUpdateMessage(data: DataFeed): void {
+  private routeUpdateMessage(data: SubscriptionUpdate): void {
     if (!(data.topic.startsWith('quotes:') || data.topic.startsWith('bars:'))) {
       console.log(`${data.topic} message received:`, data)
     }

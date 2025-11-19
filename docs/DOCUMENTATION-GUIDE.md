@@ -143,6 +143,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 | ------------------------------------------- | ------------------------------------------------- |
 | **frontend/docs/WEBSOCKET-ARCHITECTURE.md** | ✅ Complete WebSocket architecture guide (v2.0.0) |
 | **frontend/docs/BROKER-INTEGRATION.md**     | ✅ Complete broker integration guide (v2.0.0)     |
+| **frontend/docs/IHM-CONTROLLER.md**         | IHM Controller service design and usage (v1.0.0)  |
 | **frontend/docs/FRONTEND-EXCLUSIONS.md**    | Public folder exclusions (linting, testing, etc.) |
 
 > **Note**: These documents were comprehensively updated on November 12, 2025 during documentation refactoring:
@@ -164,10 +165,10 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### frontend/src/ (Component Documentation)
 
-| File                                          | Purpose                                              |
-| --------------------------------------------- | ---------------------------------------------------- |
-| **frontend/src/services/README.md**           | Services layer overview and multi-module API methods |
-| **frontend/src/services/**tests**/README.md** | Testing guide for services                           |
+| File                                          | Purpose                                                       |
+| --------------------------------------------- | ------------------------------------------------------------- |
+| **frontend/src/services/README.md**           | Services layer overview, multi-module API, and IHM Controller |
+| **frontend/src/services/**tests**/README.md** | Testing guide for services                                    |
 
 **Note:** Component-level documentation is primarily in `frontend/README.md`. The API Status component is documented in the "API Status Component" section.
 

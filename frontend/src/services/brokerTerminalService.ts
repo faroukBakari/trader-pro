@@ -685,7 +685,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         }
       ).then((topic) => {
         console.log('Subscribed to WebSocket order updates:', topic)
-        this.subscriptionTopics.push(topic)
       }).catch((error) => {
         console.error('Failed to subscribe to WebSocket order updates:', error)
       }),
@@ -700,7 +699,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         }
       ).then((topic) => {
         console.log('Subscribed to WebSocket position updates:', topic)
-        this.subscriptionTopics.push(topic)
       }).catch((error) => {
         console.error('Failed to subscribe to WebSocket position updates:', error)
       }),
@@ -715,7 +713,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         }
       ).then((topic) => {
         console.log('Subscribed to WebSocket execution updates:', topic)
-        this.subscriptionTopics.push(topic)
       }).catch((error) => {
         console.error('Failed to subscribe to WebSocket execution updates:', error)
       }),
@@ -738,7 +735,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         }
       ).then((topic) => {
         console.log('Subscribed to WebSocket equity updates:', topic)
-        this.subscriptionTopics.push(topic)
       }).catch((error) => {
         console.error('Failed to subscribe to WebSocket equity updates:', error)
       }),
@@ -771,7 +767,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         }
       ).then((topic) => {
         console.log('Subscribed to WebSocket broker-connection updates:', topic)
-        this.subscriptionTopics.push(topic)
       }).catch((error) => {
         console.error('Failed to subscribe to WebSocket broker-connection updates:', error)
       }),
@@ -795,7 +790,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
     await Promise.all(unsubscribePromises)
 
-    this.subscriptionTopics = []
     console.log('[BrokerTerminalService] Cleanup complete')
   }
 

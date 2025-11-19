@@ -31,6 +31,9 @@ import {
   type PositionSubscriptionRequest as PositionSubscriptionRequest_Ws_Backend,
 } from '../clients_generated/ws-types-broker_v1/index.js';
 
+// IHM Controller types (placeholder - will be replaced with generated types when backend ready)
+import type { ToolCommandWrapper, ToolSchema } from '@/types/ihmController';
+
 import {
   mapBrokerConnectionStatus,
   mapEquityData,
@@ -51,6 +54,10 @@ export type BrokerConnectionSubscriptionRequest = BrokerConnectionSubscriptionRe
 export type EquityData = EquityData_Ws_Backend
 export type BrokerConnectionStatus = BrokerConnectionStatus_Ws_Backend
 
+// IHM Controller types (placeholder - will be replaced with generated types when backend ready)
+export type ToolCommandRequest = ToolSchema
+export type ToolCommandData = ToolCommandWrapper
+
 export type WsAdapterType = {
   bars: WebSocketInterface<BarsSubscriptionRequest, Bar>
   quotes: WebSocketInterface<QuoteDataSubscriptionRequest, QuoteData>
@@ -59,6 +66,7 @@ export type WsAdapterType = {
   executions: WebSocketInterface<ExecutionSubscriptionRequest, Execution>
   equity: WebSocketInterface<EquitySubscriptionRequest, EquityData>
   brokerConnection: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
+  tools?: WebSocketInterface<ToolCommandRequest, ToolCommandData>
 }
 
 export class WsAdapter implements WsAdapterType {
@@ -71,6 +79,7 @@ export class WsAdapter implements WsAdapterType {
   executions!: WebSocketInterface<ExecutionSubscriptionRequest, Execution>
   equity!: WebSocketInterface<EquitySubscriptionRequest, EquityData>
   brokerConnection!: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
+  tools?: WebSocketInterface<ToolCommandRequest, ToolCommandData>
 
   // frontend dev have to set the resired version /{version}/{module}/ws
   constructor() {
@@ -100,6 +109,13 @@ export class WsAdapter implements WsAdapterType {
     this.brokerConnection = new WebSocketClient<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus_Ws_Backend, BrokerConnectionStatus>(
       brokerWsUrl, 'broker-connection', mapBrokerConnectionStatus
     )
+
+    // TODO: Enable IHM tools client once backend module is ready
+    // const ihmWsUrl = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + '/v1/ihm/ws'
+    // this.tools = new WebSocketClient<ToolCommandRequest, ToolCommandData, ToolCommandData>(
+    //   ihmWsUrl, 'ihm-command', (data) => data
+    // )
+    console.warn('[WsAdapter] IHM tools client disabled - backend module not ready')
 
     WsAdapter.instance = this
   }
