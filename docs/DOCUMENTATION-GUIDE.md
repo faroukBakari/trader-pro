@@ -127,6 +127,23 @@ When updating documentation for large-scale changes, follow this three-phase app
 | ---------------------------------------------- | ---------------------------- |
 | **backend/external_packages/fastws/README.md** | FastWS package documentation |
 
+### backend/external_packages/tws/docs/ (TWS API Documentation)
+
+Complete offline documentation for Interactive Brokers TWS API for Python.
+
+| File                                                                        | Purpose                                                                                                     |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **backend/external_packages/tws/docs/README.md**                            | ⭐ **TWS API documentation index (start here)** - Complete navigation, quick start, learning paths          |
+| **backend/external_packages/tws/docs/01-API-REFERENCE-CLASSES.md**          | Core API classes: `EClient` (50+ methods), `EWrapper` (70+ callbacks), `Contract`, `ContractDetails`, `Bar` |
+| **backend/external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md** | Order & contract classes: `Order` (100+ parameters), `Execution`, `OrderState`, `ScannerSubscription`       |
+| **backend/external_packages/tws/docs/03-API-REFERENCE-EXECUTIONS.md**       | Trade data: `CommissionAndFeesReport`, `Liquidity`, Historical ticks, Tick attributes                       |
+| **backend/external_packages/tws/docs/04-API-REFERENCE-CONDITIONS.md**       | Order conditions: Price, Time, Margin, Execution, Volume, PercentChange (with examples)                     |
+| **backend/external_packages/tws/docs/05-API-REFERENCE-DATA-TYPES.md**       | Helper classes: Market depth, News providers, Price increments, Smart components                            |
+| **backend/external_packages/tws/docs/06-SETUP-GUIDE.md**                    | Installation, TWS/Gateway configuration, Python setup, verification, troubleshooting                        |
+| **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md**             | Connection patterns, threading models, error handling, auto-reconnect strategies                            |
+
+> **Note**: TWS API documentation created November 19, 2025 from [TWS API Campus](https://ibkrcampus.com/campus/ibkr-api-page/) for complete offline development capability. Additional guides (market data, order management, account/portfolio) coming soon.
+
 ---
 
 ## 🎨 Frontend Documentation
@@ -227,6 +244,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 8. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
 9. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
 10. **docs/TESTING.md** - General testing strategies
+11. **backend/external_packages/tws/docs/README.md** - TWS API documentation (for broker integration)
 
 ### Frontend Developers
 
@@ -333,6 +351,15 @@ When updating documentation for large-scale changes, follow this three-phase app
 - **.github/copilot-instructions.md** - Coding guidelines
 - **frontend/docs/FRONTEND-EXCLUSIONS.md** - Exclusion patterns
 
+### TWS API Integration
+
+- **backend/external_packages/tws/docs/README.md** - ⭐ **TWS API documentation index (start here for broker integration)**
+- **backend/external_packages/tws/docs/06-SETUP-GUIDE.md** - TWS/Gateway installation and configuration
+- **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md** - Connection management, threading, error handling
+- **backend/external_packages/tws/docs/01-API-REFERENCE-CLASSES.md** - Core API classes (EClient, EWrapper, Contract)
+- **backend/external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md** - Order placement and execution
+- **backend/external_packages/tws/docs/04-API-REFERENCE-CONDITIONS.md** - Advanced conditional orders
+
 ---
 
 ## 📊 Documentation Overview
@@ -341,7 +368,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 - **Root Documentation**: 10 essential project-wide guides
 - **docs/ Folder**: 9 core cross-cutting documentation files
-- **Backend Documentation**: 7 current backend guides + 1 third-party doc
+- **Backend Documentation**: 7 current backend guides + 8 TWS API guides + 1 third-party doc
 - **Frontend Documentation**: 10 frontend-specific guides + 2 third-party docs
 - **Auto-Generated Docs**: Per-module generated clients and type definitions
 - **DevOps & Git**: 2 setup and operations guides
@@ -349,10 +376,11 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### Total Documentation Files
 
-- **User-Maintained**: ~36 actively maintained documentation files
+- **User-Maintained**: ~44 actively maintained documentation files
   - Files consolidated: 5 → 2 (Nov 12, 2025 documentation refactoring)
   - Files archived: 5 old files preserved in `frontend/docs/archive/`
   - New organization: TradingView docs in dedicated `frontend/docs/tradingview/` subdirectory
+  - TWS API docs added: 8 files (Nov 19, 2025)
 - **Auto-Generated**: Per-module client documentation (regenerated on API changes)
 - **Third-Party**: 3 external package documentation files
 
@@ -379,6 +407,18 @@ When updating documentation for large-scale changes, follow this three-phase app
   - Old files archived to `docs/archive/`
 - **Duplicate Removal**: Removed duplicate `frontend/FRONTEND-EXCLUSIONS.md`
 - **Result**: Improved organization, clearer structure, enhanced discoverability (see `docs/tmp/documentation-assessment-report.md`)
+
+**TWS API Documentation Addition** (November 19, 2025):
+
+- **Complete Offline TWS API Reference**: Created comprehensive offline documentation for Interactive Brokers TWS API
+  - Added 8 documentation files in `backend/external_packages/tws/docs/`
+  - **API Reference**: 5 files covering all classes, methods, attributes (01-05)
+  - **Implementation Guides**: 2 files for setup and connectivity (06-07)
+  - **Navigation**: README.md with quick start, learning paths, cheat sheets
+  - **Purpose**: Enable offline development with TWS API without internet searches
+  - **Source**: [TWS API Campus](https://ibkrcampus.com/campus/ibkr-api-page/)
+  - **Coverage**: Core classes (EClient, EWrapper), Orders (100+ params), Conditions, Setup, Threading patterns
+  - **Future**: Additional guides for market data, order management, account/portfolio planned
 
 **Previous Refactoring** (November 12, 2025):
 
@@ -410,5 +450,5 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ---
 
-**Last Updated**: November 18, 2025
+**Last Updated**: November 19, 2025
 **Maintained by**: Development Team
