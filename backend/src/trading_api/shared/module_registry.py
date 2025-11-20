@@ -92,22 +92,27 @@ class ModuleRegistry:
             logger.info(f"Auto-discovered module: {module_name}")
             self.register(module_class, module_name)
 
-    def _get_instance(self, module_name: str) -> Module:
+    def _get_instance(self, module_name: str, version: str | None = None) -> Module:
         """Get or create module instance (lazy loading).
 
         Args:
             module_name: Name of module to instantiate
+            version: Specific version to load (e.g., "v1"), or None for all versions
 
         Returns:
             Module: Module instance
         """
-        if module_name not in self._instances:
+        # Cache key includes version for proper isolation
+        cache_key = f"{module_name}:{version}" if version else module_name
+
+        if cache_key not in self._instances:
             module_class = self._module_classes[module_name]
-            instance = module_class()
-            instance.enable()
-            self._instances[module_name] = instance
-            logger.debug(f"Lazy-loaded module instance: {module_name}")
-        return self._instances[module_name]
+            # Pass as single-item list or None
+            versions = [version] if version else None
+            instance = module_class(versions)
+            self._instances[cache_key] = instance
+            logger.debug(f"Lazy-loaded module instance: {cache_key}")
+        return self._instances[cache_key]
 
     def get_modules(self, enabled_modules: list[str] | None = None) -> list[Module]:
         """Get modules filtered by enabled list.
@@ -115,20 +120,22 @@ class ModuleRegistry:
         Lazy-loads module instances only when requested.
 
         Args:
-            enabled_modules: List of module names to return, or None for all modules
+            enabled_modules: List of module specs (e.g., ["broker:v1", "datafeed:v2"])
+                            or None for all modules with all versions
 
         Returns:
             list[Module]: Filtered list of module instances
         """
         if enabled_modules is None:
-            # Return all modules
+            # Return all modules with all versions
             return [self._get_instance(name) for name in self._module_classes.keys()]
         else:
-            # Return only specified modules
+            # Return only specified modules with specified versions
             modules = []
-            for module_name in enabled_modules:
+            for module_spec in enabled_modules:
+                module_name, version = self._parse_module_spec(module_spec)
                 if module_name in self._module_classes:
-                    modules.append(self._get_instance(module_name))
+                    modules.append(self._get_instance(module_name, version))
             return modules
 
     def get_module(self, name: str) -> Module | None:
@@ -153,6 +160,20 @@ class ModuleRegistry:
         """
         self._module_classes.clear()
         self._instances.clear()
+
+    def _parse_module_spec(self, spec: str) -> tuple[str, str | None]:
+        """Parse module specification.
+
+        Args:
+            spec: "module_name" or "module_name:version"
+
+        Returns:
+            Tuple of (module_name, version or None)
+        """
+        if ":" in spec:
+            module_name, version = spec.split(":", 1)
+            return module_name.strip(), version.strip()
+        return spec.strip(), None  # None = all versions
 
     def _validate_module_names(self, module_names: set[str]) -> list[str]:
         """Validate module naming conventions and uniqueness.

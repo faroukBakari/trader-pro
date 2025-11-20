@@ -625,27 +625,30 @@ See [backend/docs/BACKEND_MANAGER_GUIDE.md](../backend/docs/BACKEND_MANAGER_GUID
 ```python
 # shared/module_interface.py
 class Module(Protocol):
-    @property
-    def name(self) -> str:
-        """Unique module identifier (e.g., 'broker', 'datafeed')"""
-        ...
+  @property
+  def name(self) -> str:
+    """Unique module identifier (e.g., 'broker', 'datafeed')"""
+    ...
 
-    @property
-    def enabled(self) -> bool:
-        """Whether module is currently active"""
-        ...
+  def get_api_routers(self) -> list[APIRouter]:
+    """Return module's REST API routers"""
+    ...
 
-    def get_api_routers(self) -> list[APIRouter]:
-        """Return module's REST API routers"""
-        ...
+  def get_ws_routers(self) -> list[WsRouteInterface]:
+    """Return module's WebSocket routers"""
+    ...
 
-    def get_ws_routers(self) -> list[WsRouteInterface]:
-        """Return module's WebSocket routers"""
-        ...
+  def configure_app(self, api_app: FastAPI, ws_app: FastWSAdapter) -> None:
+    """Optional module-specific app configuration"""
+    ...
 
-    def configure_app(self, api_app: FastAPI, ws_app: FastWSAdapter) -> None:
-        """Optional module-specific app configuration"""
-        ...
+# Note: Modules are lazily instantiated when requested via
+# `ModuleRegistry.get_modules(enabled_modules: list[str] | None)`.
+# Module specs can optionally include version filters (e.g., "broker:v1")
+# to load only specific versions. Per-module mutable `enabled` state was
+# removed to keep the registry functional and stateless; the selection of
+# which modules to load is driven by the registry call (e.g. from
+# `ENABLED_MODULES` env var like "broker:v1,datafeed:v2").
 ```
 
 **Module Implementation Pattern**:
@@ -653,25 +656,25 @@ class Module(Protocol):
 ```python
 # modules/broker/__init__.py
 class BrokerModule:
-    def __init__(self):
-        self._service: BrokerService | None = None
-        self._enabled = True
+  def __init__(self) -> None:
+    # Service instances remain lazily created on first access
+    self._service: BrokerService | None = None
 
-    @property
-    def name(self) -> str:
-        return \"broker\"
+  @property
+  def name(self) -> str:
+    return "broker"
 
-    @property
-    def service(self) -> BrokerService:
-        if self._service is None:
-            self._service = BrokerService()  # Lazy load
-        return self._service
+  @property
+  def service(self) -> BrokerService:
+    if self._service is None:
+      self._service = BrokerService()  # Lazy load
+    return self._service
 
-    def get_api_routers(self) -> list[APIRouter]:
-        return [BrokerApi(service=self.service, prefix=f\"/{self.name}\")]
+  def get_api_routers(self) -> list[APIRouter]:
+    return [BrokerApi(service=self.service, prefix=f"/{self.name}")]
 
-    def get_ws_routers(self) -> list[WsRouteInterface]:
-        return BrokerWsRouters(broker_service=self.service)
+  def get_ws_routers(self) -> list[WsRouteInterface]:
+    return BrokerWsRouters(broker_service=self.service)
 ```
 
 **Application Factory Pattern**:
@@ -705,11 +708,16 @@ def create_app(enabled_modules: list[str] | None = None) -> ModularApp:
 **Module-Specific Deployment**:
 
 ```bash
-# Start with only datafeed module
+# Start with specific module (all versions)
 ENABLED_MODULES=datafeed uvicorn trading_api.main:app
-
-# Start with only broker module
 ENABLED_MODULES=broker uvicorn trading_api.main:app
+
+# Start with specific module version only
+ENABLED_MODULES=broker:v1 uvicorn trading_api.main:app
+ENABLED_MODULES=datafeed:v2 uvicorn trading_api.main:app
+
+# Start with multiple specific versions
+ENABLED_MODULES=broker:v1,datafeed:v2 uvicorn trading_api.main:app
 
 # Start with all modules (default)
 uvicorn trading_api.main:app

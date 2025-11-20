@@ -10,10 +10,13 @@ from trading_api.app_factory import AppFactory
 
 # Parse ENABLED_MODULES environment variable
 # Examples:
-#   ENABLED_MODULES=all (default) - loads all modules
-#   ENABLED_MODULES=datafeed - loads only datafeed module
-#   ENABLED_MODULES=broker - loads only broker module
-#   ENABLED_MODULES=datafeed,broker - loads specific modules
+#   ENABLED_MODULES=all (default) - loads all modules with all versions
+#   ENABLED_MODULES=datafeed - loads only datafeed module (all versions)
+#   ENABLED_MODULES=broker - loads only broker module (all versions)
+#   ENABLED_MODULES=datafeed,broker - loads specific modules (all versions)
+#   ENABLED_MODULES=broker:v1 - loads broker module with v1 only
+#   ENABLED_MODULES=broker:v1,datafeed:v2 - loads specific modules with specific versions
+#   ENABLED_MODULES=broker:v1,datafeed - loads broker v1 and datafeed (all versions)
 enabled_modules_str = os.getenv("ENABLED_MODULES", "all")
 
 enabled_modules: list[str] | None

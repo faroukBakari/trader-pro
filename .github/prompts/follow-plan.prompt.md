@@ -1,5 +1,6 @@
 ---
 agent: "agent"
+model: "Claude Sonnet 4.5"
 name: "follow-plan-v2.1"
 description: "Follow a predefined plan step-by-step with validation and a clear action hierarchy."
 ---
@@ -27,9 +28,12 @@ If the OVERRIDE rule is not triggered, follow this workflow precisely.
 
 4.  **Strict Sequential Execution:** You must follow the plan steps *in the precise order they are written*. Do not skip steps or perform them out of order unless I explicitly instruct you to.
 
-5.  **CRITICAL: Validate Before Completing:** After you believe you have completed the work for a step, you must run a **comprehensive validation** of the *entire* implementation so far.
-    * This *must* include running any and all relevant tests if applicable (pytest / vitest) as well as types and format checks.
-    * A step is **not complete** until this validation passes. If validation fails, you must debug and fix the issues *before* proceeding to Rule 6.
+5.  **CRITICAL: Validate Before Completing:** After you believe you have completed the work for a step, you must run a **comprehensive validation** of the *entire* work so far.
+    * If the source files were changed/updated, this *must* include running any and all relevant tests if applicable (pytest / vitest) as well as type checking and format validation.
+    * If documentation was changed/updated, you must ensure:
+        * All internal links and cross-references are valid and point to existing sections/files.
+        * Document structure, headings hierarchy, and numbering are consistent and accurate.
+    * A step is **not complete** until this validation passes. If validation fails, you must analyze and fix the issues *before* proceeding to Rule 6.
 
 #### Phase 3: Reporting Cycle
 

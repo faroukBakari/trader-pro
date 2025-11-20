@@ -1,6 +1,7 @@
 ---
 agent: "Plan"
 name: "tdd-plan-v3"
+model: "Claude Sonnet 4.5"
 description: "Generate a step-by-step TDD action plan, save it to docs/tmp/, and report the file path."
 ---
 

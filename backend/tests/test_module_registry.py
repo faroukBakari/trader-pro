@@ -173,3 +173,128 @@ class TestModuleRegistryExistingFunctionality:
         # Verify known modules were registered
         assert "broker" in registry._module_classes
         assert "datafeed" in registry._module_classes
+
+
+class TestModuleVersionSelection:
+    """Test suite for version-specific module loading optimization."""
+
+    @pytest.fixture
+    def registry(self) -> Generator[ModuleRegistry, None, None]:
+        """Create a fresh registry for each test."""
+        from pathlib import Path
+
+        backend_dir = Path(__file__).parent.parent
+        modules_dir = backend_dir / "src" / "trading_api" / "modules"
+        reg = ModuleRegistry(modules_dir=modules_dir)
+        yield reg
+        reg.clear()
+
+    def test_parse_module_spec_with_version(self, registry: ModuleRegistry):
+        """Test parsing module spec with version."""
+        name, version = registry._parse_module_spec("broker:v1")
+
+        assert name == "broker"
+        assert version == "v1"
+
+    def test_parse_module_spec_without_version(self, registry: ModuleRegistry):
+        """Test parsing module spec without version."""
+        name, version = registry._parse_module_spec("broker")
+
+        assert name == "broker"
+        assert version is None
+
+    def test_parse_module_spec_with_whitespace(self, registry: ModuleRegistry):
+        """Test parsing module spec with whitespace."""
+        name, version = registry._parse_module_spec(" broker : v1 ")
+
+        assert name == "broker"
+        assert version == "v1"
+
+    def test_get_modules_with_specific_version(self, registry: ModuleRegistry):
+        """Test loading a module with a specific version."""
+        from trading_api.modules.broker import BrokerModule
+
+        registry.register(BrokerModule, "broker")
+
+        # Load broker with only v1
+        modules = registry.get_modules(["broker:v1"])
+
+        assert len(modules) == 1
+        assert modules[0].name == "broker"
+        assert modules[0].versions == ["v1"]
+        assert len(modules[0].api_routers) == 1
+        assert "v1" in modules[0].api_routers
+
+    def test_get_modules_mixed_version_specs(self, registry: ModuleRegistry):
+        """Test loading modules with mixed version specifications."""
+        from trading_api.modules.broker import BrokerModule
+        from trading_api.modules.datafeed import DatafeedModule
+
+        registry.register(BrokerModule, "broker")
+        registry.register(DatafeedModule, "datafeed")
+
+        # Load broker:v1 and datafeed (all versions)
+        modules = registry.get_modules(["broker:v1", "datafeed"])
+
+        assert len(modules) == 2
+        broker = next(m for m in modules if m.name == "broker")
+        datafeed = next(m for m in modules if m.name == "datafeed")
+
+        assert broker.versions == ["v1"]  # Only v1
+        assert len(datafeed.versions) >= 1  # All versions
+
+    def test_cache_isolation_for_different_versions(self, registry: ModuleRegistry):
+        """Test that different versions create separate instances."""
+        from trading_api.modules.broker import BrokerModule
+        from trading_api.modules.datafeed import DatafeedModule
+
+        registry.register(BrokerModule, "broker")
+        registry.register(DatafeedModule, "datafeed")
+
+        # Load broker:v1 (specific version)
+        modules_broker = registry.get_modules(["broker:v1"])
+        # Load datafeed without version (all versions)
+        modules_datafeed = registry.get_modules(["datafeed"])
+
+        # Should be different instances with different version lists
+        broker = modules_broker[0]
+        datafeed = modules_datafeed[0]
+
+        assert broker is not datafeed
+        assert broker.versions == ["v1"]  # Only v1
+        assert len(datafeed.versions) >= 1  # All available versions
+
+        # Test same module with different version specs creates different instances
+        modules_broker_all = registry.get_modules(["broker"])
+        broker_all = modules_broker_all[0]
+
+        assert broker is not broker_all  # Different instances
+        assert broker.versions == ["v1"]
+        assert len(broker_all.versions) >= 1
+
+    def test_cache_reuses_same_version_instance(self, registry: ModuleRegistry):
+        """Test that requesting the same version twice returns the same instance."""
+        from trading_api.modules.broker import BrokerModule
+
+        registry.register(BrokerModule, "broker")
+
+        # Load broker:v1 twice
+        modules_1 = registry.get_modules(["broker:v1"])
+        modules_2 = registry.get_modules(["broker:v1"])
+
+        # Should be the same instance (cached)
+        assert modules_1[0] is modules_2[0]
+
+    def test_get_modules_all_versions_when_no_spec(self, registry: ModuleRegistry):
+        """Test that omitting version spec loads all versions."""
+        from trading_api.modules.broker import BrokerModule
+
+        registry.register(BrokerModule, "broker")
+
+        # Load broker without version spec
+        modules = registry.get_modules(["broker"])
+
+        assert len(modules) == 1
+        # Should have multiple versions
+        assert len(modules[0].versions) >= 1
+        assert len(modules[0].api_routers) >= 1

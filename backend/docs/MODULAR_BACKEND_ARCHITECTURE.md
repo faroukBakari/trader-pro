@@ -115,8 +115,11 @@ class MyModuleApi(APIRouterInterface):
 **6. Test in isolation**:
 
 ```bash
-# Start only your new module
+# Start only your new module (all versions)
 ENABLED_MODULES=my_module make dev
+
+# Start only specific version
+ENABLED_MODULES=my_module:v1 make dev
 
 # Access your endpoint
 curl http://localhost:8000/api/v1/my_module/data
@@ -871,6 +874,52 @@ modules = registry.get_modules(["broker"])
 
 ---
 
+## Module Registry
+
+The `ModuleRegistry` provides centralized, functional module management with lazy instantiation and version selection.
+
+### Version-Specific Module Loading
+
+**[PERFORMANCE]** Modules can be loaded with specific versions to optimize memory and startup time:
+
+```python
+# Load specific versions
+registry.get_modules(["broker:v1", "datafeed:v2"])
+
+# Mix versioned and all-versions
+registry.get_modules(["broker:v1", "datafeed"])  # datafeed loads all versions
+
+# Load all versions (default)
+registry.get_modules(["broker"])  # loads all available versions
+```
+
+### Module Spec Format
+
+Module specifications use the format `module_name:version`:
+
+- `broker` → Loads all versions (v1, v2, etc.)
+- `broker:v1` → Loads only v1
+- `broker:v2` → Loads only v2
+
+**[DECISION]**: Version is optional. Omitting version loads all available versions for backward compatibility [performance-vs-convenience tradeoff] [rejected: requiring version - breaks existing configs] [2025-11-20]
+
+### Cache Isolation
+
+The registry maintains separate instances for different version combinations:
+
+```python
+broker_v1 = registry.get_modules(["broker:v1"])[0]
+broker_v2 = registry.get_modules(["broker:v2"])[0]
+broker_all = registry.get_modules(["broker"])[0]
+
+# broker_v1, broker_v2, and broker_all are different instances
+# Cache keys: "broker:v1", "broker:v2", "broker"
+```
+
+**Reference:** See `backend/src/trading_api/shared/module_registry.py` for implementation details.
+
+---
+
 ## Module Structure
 
 ### Anatomy of a Module
@@ -1246,10 +1295,27 @@ See [auth module documentation](../src/trading_api/modules/auth/README.md) for c
 Run all modules in one process:
 
 ```bash
-make dev  # Starts with all modules
+# All modules with all versions
+python -m trading_api.main
 
-# Or selective loading
+# Specific modules with all versions
+ENABLED_MODULES=broker,datafeed python -m trading_api.main
+
+# Specific modules with specific versions
+ENABLED_MODULES=broker:v1,datafeed:v2 python -m trading_api.main
+
+# Mix of versioned and all-versions
+ENABLED_MODULES=broker:v1,datafeed python -m trading_api.main
+```
+
+Or using make:
+
+```bash
+make dev  # Starts with all modules (all versions)
+
+# Selective loading
 ENABLED_MODULES=broker,datafeed make dev
+ENABLED_MODULES=broker:v1 make dev  # Load only v1
 ```
 
 ### 2. Multi-Process Mode (Production)
