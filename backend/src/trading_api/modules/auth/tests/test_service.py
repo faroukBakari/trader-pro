@@ -15,9 +15,19 @@ from trading_api.shared.config import settings
 
 
 @pytest.fixture
-def auth_service() -> AuthService:
-    """Fixture providing auth service"""
-    return AuthService(module_dir=Path(__file__).parent.parent)
+async def auth_service() -> AuthService:
+    """Fixture providing auth service with provider injection"""
+    from trading_api.models.auth.provider_configs import GoogleProviderConfig
+    from trading_api.providers.google import GoogleProvider
+
+    # Create Google provider with test config
+    google_config = GoogleProviderConfig(client_id=settings.GOOGLE_CLIENT_ID)
+    google_provider = GoogleProvider(config=google_config)
+
+    # Create auth service with provider
+    return AuthService(
+        module_dir=Path(__file__).parent.parent, providers=[google_provider]
+    )
 
 
 @pytest.fixture
@@ -108,7 +118,7 @@ class TestAuthServiceAuthentication:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -140,7 +150,7 @@ class TestAuthServiceAuthentication:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -162,7 +172,7 @@ class TestAuthServiceAuthentication:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -190,7 +200,7 @@ class TestAuthServiceAuthentication:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -213,7 +223,7 @@ class TestAuthServiceTokenRefresh:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             initial_response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -252,7 +262,7 @@ class TestAuthServiceTokenRefresh:
         device_info2 = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             initial_response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info1
@@ -273,7 +283,7 @@ class TestAuthServiceTokenRefresh:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             initial_response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -302,7 +312,7 @@ class TestAuthServiceLogout:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -334,7 +344,7 @@ class TestAuthServiceTokenExpiration:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info

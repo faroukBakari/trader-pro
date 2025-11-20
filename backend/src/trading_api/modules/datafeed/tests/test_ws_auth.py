@@ -19,10 +19,10 @@ from trading_api.shared.config import Settings
 
 
 @pytest.fixture
-def datafeed_app() -> ModularApp:
+async def datafeed_app() -> ModularApp:
     """Create app with datafeed module enabled"""
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=["datafeed"])
+    return await factory.create_app(enabled_module_names=["datafeed"])
 
 
 @pytest.fixture

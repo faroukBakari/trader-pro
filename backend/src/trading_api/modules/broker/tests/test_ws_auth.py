@@ -18,10 +18,10 @@ from trading_api.shared.config import Settings
 
 
 @pytest.fixture
-def broker_app() -> ModularApp:
+async def broker_app() -> ModularApp:
     """Create app with broker module enabled"""
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=["broker"])
+    return await factory.create_app(enabled_module_names=["broker"])
 
 
 @pytest.fixture

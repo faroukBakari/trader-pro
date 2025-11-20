@@ -256,7 +256,20 @@ class Module(ABC):
             # WebSocket support is optional
             return None
 
-    def __init__(self, versions: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,  # Force keyword-only arguments
+        versions: list[str] | None = None,
+        providers: list[Any] | None = None,
+    ) -> None:
+        """Initialize module.
+
+        Args:
+            versions: API versions to load (None = all discovered versions)
+            providers: Provider instances for capabilities (None = no providers)
+
+        [BACKWARD-COMPATIBLE]: Keyword-only ensures existing code works.
+        """
         # Auto-discover available versions if not specified
         if versions is None:
             versions = self._discover_versions()
@@ -265,7 +278,7 @@ class Module(ABC):
 
         # Import shared service (version-agnostic)
         service_class = self._service_class()
-        self._service = service_class(self.module_dir())
+        self._service = service_class(self.module_dir(), providers=providers)
 
         # Import version-specific API and WS routers
         # Structure: {"v1": [router1, router2], "v2": [router1, router2]}

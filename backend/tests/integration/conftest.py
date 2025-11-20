@@ -63,39 +63,39 @@ def auth_cookies(valid_jwt_token: str) -> dict[str, str]:
 
 
 @pytest.fixture(scope="session")
-def datafeed_only_app() -> ModularApp:
+async def datafeed_only_app() -> ModularApp:
     """Session-scoped datafeed-only app for isolation tests."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=["datafeed"])
+    return await factory.create_app(enabled_module_names=["datafeed"])
 
 
 @pytest.fixture(scope="session")
-def broker_only_app() -> ModularApp:
+async def broker_only_app() -> ModularApp:
     """Session-scoped broker-only app for isolation tests."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=["broker"])
+    return await factory.create_app(enabled_module_names=["broker"])
 
 
 @pytest.fixture(scope="session")
-def all_modules_app() -> ModularApp:
+async def all_modules_app() -> ModularApp:
     """Session-scoped app with all modules for isolation tests."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=None)
+    return await factory.create_app(enabled_module_names=None)
 
 
 @pytest.fixture(scope="session")
-def no_modules_app() -> ModularApp:
+async def no_modules_app() -> ModularApp:
     """Session-scoped app with no modules (shared infrastructure only)."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=[])
+    return await factory.create_app(enabled_module_names=[])
 
 
 # ============================================================================
@@ -148,12 +148,12 @@ def wait_for_service_sync(base_url: str, max_attempts: int = 30) -> bool:
 
 
 @pytest.fixture(scope="module")
-def apps() -> ModularApp:
+async def apps() -> ModularApp:
     """Full application with all modules enabled (shared per test module)."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=None)  # None = all modules
+    return await factory.create_app(enabled_module_names=None)  # None = all modules
 
 
 @pytest.fixture(scope="module")

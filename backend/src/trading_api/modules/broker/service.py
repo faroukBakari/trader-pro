@@ -55,6 +55,7 @@ from trading_api.models.broker import (
     PreOrder,
     Side,
 )
+from trading_api.models.common import CapabilitySpec
 from trading_api.shared.ws.ws_route_interface import WsRouteService
 
 logger = logging.getLogger(__name__)
@@ -125,18 +126,32 @@ class BrokerService(WsRouteService):
 
     """
 
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        """Return required capabilities for broker service.
+
+        Broker service doesn't require any capabilities (no auth/external providers).
+
+        Returns:
+            Empty list - no capabilities required
+        """
+        return []
+
     def __init__(
         self,
         module_dir: Path,
+        *,  # Force keyword-only arguments
         execution_delay: float | None = None,
+        providers: list | None = None,
     ) -> None:
         """Initialize broker service.
 
         Args:
             module_dir: Path to the module directory
             execution_delay: Delay between executions in seconds (default: None)
+            providers: Provider instances for capabilities (unused, for interface compatibility)
         """
-        super().__init__(module_dir)
+        super().__init__(module_dir, providers=providers)
         self._orders: Dict[str, PlacedOrder] = {}
         self._positions: Dict[str, Position] = {}
         self._executions: List[Execution] = []

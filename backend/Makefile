@@ -379,7 +379,11 @@ install-ci:
 
 test-boundaries: check-generate-keypair
 	@echo "Running root-level tests..."
-	poetry run pytest tests/ -v --ignore=tests/integration/
+	poetry run pytest tests/ -v --ignore=tests/integration/ $(ARGS)
+
+test-providers: check-generate-keypair
+	@echo "Running provider system tests..."
+	poetry run pytest src/trading_api/providers/tests/ -v $(ARGS)
 
 test-modules: check-generate-keypair
 	@echo "Running module tests..."
@@ -390,7 +394,7 @@ test-modules: check-generate-keypair
 		for module in $(SELECTED_MODULES); do \
 			if [ -d "$(MODULES_DIR)/$$module/tests" ]; then \
 				echo "Testing module: $$module"; \
-				poetry run pytest $(MODULES_DIR)/$$module/tests/ -v -x; \
+				poetry run pytest $(MODULES_DIR)/$$module/tests/ -v -x $(ARGS); \
 				EXIT_CODE=$$?; \
 				if [ $$EXIT_CODE -eq 5 ]; then \
 					echo "⚠️  No tests collected for module: $$module (skipping)"; \
@@ -407,7 +411,7 @@ test-modules: check-generate-keypair
 $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
 	@echo "Running tests for module: $*..."
 	@if [ -d "$(MODULES_DIR)/$*/tests" ]; then \
-		poetry run pytest $(MODULES_DIR)/$*/tests/ -v -x; \
+		poetry run pytest $(MODULES_DIR)/$*/tests/ -v -x $(ARGS); \
 		EXIT_CODE=$$?; \
 		if [ $$EXIT_CODE -eq 5 ]; then \
 			echo "⚠️  No tests collected for module: $* (skipping)"; \
@@ -420,7 +424,7 @@ $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
 
 test-integration: check-generate-keypair
 	@echo "Running integration tests..."
-	poetry run pytest tests/integration/ -v -x -m integration
+	poetry run pytest tests/integration/ -v -x -m integration $(ARGS)
 
 test: test-boundaries test-modules test-integration
 	@echo "✅ All tests passed (boundaries + modules + integration)"

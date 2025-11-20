@@ -18,93 +18,16 @@ Your primary responsibilities are to:
 
 ---
 
-## 2. 🛠️ Project Stack & Architecture
+## 2. 📚 Key Resources
 
-- **Key Patterns:** Modularity, Service Discovery, Code Autogeneration, TDD (Red-Green-Refactor).
-
-- **Backend:** FastAPI + Uvicorn, Python (Poetry), Pytest, **Strict MyPy**.
-
-- **Frontend:** Vue.js, TypeScript, Vitest, **Strict TSConfig**.
-
-- **Databases:** PostgreSQL (Relational), Redis (Cache/Queue), MongoDB (Document).
-
-- **DevOps:** GitHub Actions, Makefile, Docker.
+- **[Documentation Guide](../docs/DOCUMENTATION-GUIDE.md)**: This document serves as the map for the existing documentation.
+- **Your Mandate:**
+  1. Always scan this guide first to locate relevant documentation to the specific task you are working on.
+  2. Then explore those documents to align your work with the project's established patterns and standards.
 
 ---
 
-## 3. 🚨 Terminal Commands Workflow (MANDATORY EXECUTION PRIORITY)
-
-Before executing ANY terminal command, you **MUST** follow this strict priority order:
-
-1. **State Your Intent & Verify:**
-
-   - Declare: "I need to run [X action]"
-   - Check: "Looking for Makefile target in [frontend/backend/root]..."
-   - Justify:
-     - ✅ "Found `make [target]` - using it" OR
-     - ⚠️ "No Makefile target found - using `[(nvm use && npm)/poetry] run [cmd]`" OR
-     - 🔴 "System command required: [reason]"
-
-2. **Priority 1 - Check Makefile (MANDATORY):**
-   You **MUST** check the `Makefile` first. If a target exists that is a good fit for the job (e.g., `make test`, `make format`), use it.
-
-3. **Priority 2 - Environment Aware Commands (ACTIVATION MANDATORY):**
-   Only if no suitable Makefile target exists, use package manager commands **but environment activation is NOT optional**.
-
-   - _Python:_ You **MUST** use `poetry` (e.g., `poetry run pytest`).
-   - _TypeScript/Node:_ You **MUST** source `.nvmrc` or ensure environment sourcing (e.g., `nvm use && npm run`).
-
-4. **Priority 3 - System-Level Commands (LAST RESORT):**
-   If no environment aware command could satisfy the requirement, you can fallback to system-level commands (e.g., `git`, `docker compose`, `psql`). Keep in mind that these commands might not be aware of the project's specific runtime environment.
-
----
-
-## 4. 🤝 Your Workflow
-
-1.  **Analysis:** Load all the user request content provided and summarize --> Scan `DOCUMENTATION-GUIDE.md` for additional relevant materials --> Explore materials and summarize --> Synthesise insights.
-
-2.  **Plan:** Define the required subtasks for the user request and plan them with parallel and/or sequential executions.
-
-3.  **Implementation:**
-    - **⚠️ BEFORE EVERY TERMINAL COMMAND:** You MUST follow Section 3 (Terminal Commands Workflow):
-      1. State intent
-      2. Check Makefile FIRST
-      3. Use environment-aware commands (poetry <command>/ nvm use && npm <command>)
-      4. System commands LAST RESORT only
-    - Follow your plan while monitoring the conversation context size.
-    - Track your progress frequently.
-    - Stick to the plan strictly unless the user instructs otherwise.
-
-4.  **Reporting:** Briefly and concisely summarize what have been done at the end.
-
----
-
-## 5. 📚 Key Resources
-
-- **[Documentation Guide](../docs/DOCUMENTATION-GUIDE.md)**: This document serves as the map for the project.
-- **Your Mandate:** When `@workspace` is invoked, or when starting a complex task, you must scan this guide first to locate the detailed documentation relevant to the specific feature you are working on.
-
----
-
-## 6. 💬 Documentation
-  * When writing or updating documentation, keep it simple, short and focused/specific.
-  * Prefer bullet points over long paragraphs.
-  * Prefer example snippets with source references over full code implementations.
-  * Prefer tables and diagrams over long textual explanations.
-  * never use commands to update documentation. Always use the appropriate built-in mcp tools.
-  * **Key Techniques for AI Agent Readability:**
-    1. Use ADR-style callouts for architectural decisions : `**[DECISION]**: Use XYZ pattern for ABC [rationale] [alternatives-rejected] [date]`
-    2. Add or update structured metadata at section starts for quick AI parsing: `<!-- METADATA: scope=..., priority=..., dependencies=[...] -->`
-    3. Add or update semantic markers throughout ([PERFORMANCE], [PITFALL], etc.)
-    4. Add or update quick reference cards for common workflows
-    5. Ensure proper section numbering afrer finalizing changes to make the cross-references work correctly
-    6. Add or update bidirectional section links afrer finalizing changes
-    7. Add or update the cross-reference table using section numbering at top afrer finalizing changes.
-    8. **!!ALWAYS!!** Double check all links at the end to ensure they work correctly.
-
----
-
-## 7. 🚨 CRITICAL OVERRIDE: Context Window Guard
+## 3. 🚨 CRITICAL OVERRIDE: Context Window Guard
 
 This rule takes **absolute precedence** and **overrides all rules above and below**.
 
@@ -117,7 +40,7 @@ This rule takes **absolute precedence** and **overrides all rules above and belo
 
 ---
 
-## 8. ❗ Immutable Rules
+## 4. ❗ Immutable Rules
 
 These rules are critical and must be followed at all times.
 

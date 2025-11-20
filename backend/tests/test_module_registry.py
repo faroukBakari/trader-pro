@@ -148,7 +148,7 @@ class TestModuleRegistryExistingFunctionality:
         registry.register(BrokerModule, "broker")
         registry.register(DatafeedModule, "datafeed")
 
-        modules = registry.get_modules(["broker"])
+        modules = registry.get_modules(module_names=["broker"])
 
         assert len(modules) == 1
         assert isinstance(modules[0], BrokerModule)
@@ -217,7 +217,7 @@ class TestModuleVersionSelection:
         registry.register(BrokerModule, "broker")
 
         # Load broker with only v1
-        modules = registry.get_modules(["broker:v1"])
+        modules = registry.get_modules(module_names=["broker:v1"])
 
         assert len(modules) == 1
         assert modules[0].name == "broker"
@@ -234,7 +234,7 @@ class TestModuleVersionSelection:
         registry.register(DatafeedModule, "datafeed")
 
         # Load broker:v1 and datafeed (all versions)
-        modules = registry.get_modules(["broker:v1", "datafeed"])
+        modules = registry.get_modules(module_names=["broker:v1", "datafeed"])
 
         assert len(modules) == 2
         broker = next(m for m in modules if m.name == "broker")
@@ -252,9 +252,9 @@ class TestModuleVersionSelection:
         registry.register(DatafeedModule, "datafeed")
 
         # Load broker:v1 (specific version)
-        modules_broker = registry.get_modules(["broker:v1"])
+        modules_broker = registry.get_modules(module_names=["broker:v1"])
         # Load datafeed without version (all versions)
-        modules_datafeed = registry.get_modules(["datafeed"])
+        modules_datafeed = registry.get_modules(module_names=["datafeed"])
 
         # Should be different instances with different version lists
         broker = modules_broker[0]
@@ -265,7 +265,7 @@ class TestModuleVersionSelection:
         assert len(datafeed.versions) >= 1  # All available versions
 
         # Test same module with different version specs creates different instances
-        modules_broker_all = registry.get_modules(["broker"])
+        modules_broker_all = registry.get_modules(module_names=["broker"])
         broker_all = modules_broker_all[0]
 
         assert broker is not broker_all  # Different instances
@@ -279,8 +279,8 @@ class TestModuleVersionSelection:
         registry.register(BrokerModule, "broker")
 
         # Load broker:v1 twice
-        modules_1 = registry.get_modules(["broker:v1"])
-        modules_2 = registry.get_modules(["broker:v1"])
+        modules_1 = registry.get_modules(module_names=["broker:v1"])
+        modules_2 = registry.get_modules(module_names=["broker:v1"])
 
         # Should be the same instance (cached)
         assert modules_1[0] is modules_2[0]
@@ -292,7 +292,7 @@ class TestModuleVersionSelection:
         registry.register(BrokerModule, "broker")
 
         # Load broker without version spec
-        modules = registry.get_modules(["broker"])
+        modules = registry.get_modules(module_names=["broker"])
 
         assert len(modules) == 1
         # Should have multiple versions

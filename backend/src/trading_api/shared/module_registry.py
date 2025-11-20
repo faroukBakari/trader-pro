@@ -6,7 +6,7 @@ Provides registration, discovery, and filtering of pluggable modules.
 import importlib
 import logging
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 
 from .module_interface import Module
 
@@ -92,12 +92,18 @@ class ModuleRegistry:
             logger.info(f"Auto-discovered module: {module_name}")
             self.register(module_class, module_name)
 
-    def _get_instance(self, module_name: str, version: str | None = None) -> Module:
+    def _get_instance(
+        self,
+        module_name: str,
+        version: str | None = None,
+        providers: list[Any] | None = None,
+    ) -> Module:
         """Get or create module instance (lazy loading).
 
         Args:
             module_name: Name of module to instantiate
             version: Specific version to load (e.g., "v1"), or None for all versions
+            providers: Provider instances to inject
 
         Returns:
             Module: Module instance
@@ -109,33 +115,47 @@ class ModuleRegistry:
             module_class = self._module_classes[module_name]
             # Pass as single-item list or None
             versions = [version] if version else None
-            instance = module_class(versions)
+            # Instantiate with keyword arguments
+            instance = module_class(versions=versions, providers=providers)
             self._instances[cache_key] = instance
             logger.debug(f"Lazy-loaded module instance: {cache_key}")
         return self._instances[cache_key]
 
-    def get_modules(self, enabled_modules: list[str] | None = None) -> list[Module]:
-        """Get modules filtered by enabled list.
-
-        Lazy-loads module instances only when requested.
+    def get_modules(
+        self,
+        *,  # Force keyword-only
+        module_names: list[str] | None = None,
+        providers: list[Any] | None = None,
+    ) -> list[Module]:
+        """Get modules filtered by enabled list with providers injected.
 
         Args:
-            enabled_modules: List of module specs (e.g., ["broker:v1", "datafeed:v2"])
-                            or None for all modules with all versions
+            module_names: Module specs (e.g., ["broker:v1", "datafeed:v2"])
+                         or None for all modules
+            providers: Provider instances to inject into modules
 
         Returns:
-            list[Module]: Filtered list of module instances
+            List of module instances
+
+        [KEYWORD-ONLY]: Prevents positional argument errors.
         """
-        if enabled_modules is None:
+        if module_names is None:
             # Return all modules with all versions
-            return [self._get_instance(name) for name in self._module_classes.keys()]
+            return [
+                self._get_instance(name, providers=providers)
+                for name in self._module_classes.keys()
+            ]
         else:
-            # Return only specified modules with specified versions
+            # Return only specified modules
             modules = []
-            for module_spec in enabled_modules:
+            for module_spec in module_names:
                 module_name, version = self._parse_module_spec(module_spec)
                 if module_name in self._module_classes:
-                    modules.append(self._get_instance(module_name, version))
+                    modules.append(
+                        self._get_instance(
+                            module_name, version=version, providers=providers
+                        )
+                    )
             return modules
 
     def get_module(self, name: str) -> Module | None:

@@ -5,6 +5,7 @@ This module contains shared base classes and utilities
 that are used across multiple domains.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Generic, Literal, Optional, TypeVar
 
@@ -51,4 +52,94 @@ __all__ = [
     "ErrorApiResponse",
     "SubscriptionResponse",
     "SubscriptionUpdate",
+    "CapabilityName",
+    "CapabilitySpec",
+    "ProviderConfig",
+    "ProviderError",
+    "AuthenticationError",
+    "ProviderNotFoundError",
+    "CapabilityNotFoundError",
 ]
+
+
+# ==============================================================================
+# Provider/Capability System Models
+# ==============================================================================
+
+# Capability name for auth (future: "broker", "datafeed", etc.)
+CapabilityName = Literal["auth"]
+
+
+@dataclass(frozen=True)
+class CapabilitySpec:
+    """Type-safe capability specification.
+
+    Used by both services (to declare requirements) and providers
+    (to declare what they provide).
+
+    [IMMUTABLE]: Frozen dataclass ensures specs cannot be mutated after creation.
+    """
+
+    name: CapabilityName
+    version: str | None = None  # None = any version
+
+    def matches(self, provider_capability: "CapabilitySpec") -> bool:
+        """Check if provider capability satisfies this requirement.
+
+        Args:
+            provider_capability: Capability offered by provider
+
+        Returns:
+            True if provider can satisfy this requirement
+
+        Examples:
+            >>> # Service requires auth (any version)
+            >>> req = CapabilitySpec(name="auth")
+            >>> prov = CapabilitySpec(name="auth", version="v1")
+            >>> req.matches(prov)  # True
+
+            >>> # Service requires specific version
+            >>> req = CapabilitySpec(name="auth", version="v1")
+            >>> prov = CapabilitySpec(name="auth", version="v2")
+            >>> req.matches(prov)  # False
+        """
+        # Name must match exactly
+        if self.name != provider_capability.name:
+            return False  # type: ignore[unreachable]
+
+        # If no version specified, accept any provider version
+        if self.version is None:
+            return True
+
+        # If version specified, must match exactly
+        return provider_capability.version == self.version
+
+    def __str__(self) -> str:
+        """String representation for logging."""
+        return f"{self.name}:{self.version}" if self.version else self.name
+
+
+class ProviderConfig(BaseModel):
+    """Base configuration for all providers.
+
+    [EXTENSIBLE]: Each provider subclasses to add specific config fields.
+    """
+
+    enabled: bool = True
+
+
+# Provider-specific exceptions
+class ProviderError(Exception):
+    """Base exception for all provider errors."""
+
+
+class AuthenticationError(ProviderError):
+    """Authentication verification failed."""
+
+
+class ProviderNotFoundError(ProviderError):
+    """Required provider not found."""
+
+
+class CapabilityNotFoundError(ProviderError):
+    """Required capability not satisfied by any provider."""

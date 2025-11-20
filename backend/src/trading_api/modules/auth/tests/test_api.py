@@ -22,10 +22,10 @@ from trading_api.app_factory import AppFactory, ModularApp
 
 
 @pytest.fixture
-def auth_app() -> ModularApp:
+async def auth_app() -> ModularApp:
     """Create app with only auth module enabled (function-scoped for test isolation)"""
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=["auth"])
+    return await factory.create_app(enabled_module_names=["auth"])
 
 
 @pytest.fixture

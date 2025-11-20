@@ -60,8 +60,29 @@ make dev               # Start dev server (checks port)
 make kill-dev          # Kill backend dev server (port 8000)
 
 # Testing
-make test              # Run tests
-make test-cov          # Tests with coverage
+make test                    # Run all tests (boundaries + modules + integration)
+make test-boundaries         # Root-level tests only (excluding integration)
+make test-providers          # Provider system tests only
+make test-modules            # All module tests (auto-discovers modules)
+make test-module-<name>      # Specific module tests (e.g., make test-module-auth)
+make test-integration        # Integration tests only
+make test-cov                # Tests with coverage
+
+# Testing with ARGS (pytest arguments)
+make test-providers ARGS="-k test_lazy_loading"           # Single test by pattern
+make test-boundaries ARGS="-k 'not slow'"                 # Exclude tests
+make test-module-auth ARGS="-k TestClassName -vv"         # Test class with verbose
+make test-integration ARGS="-k 'pattern1 or pattern2'"    # Multiple patterns
+make test-modules SELECTED_MODULES="auth broker" ARGS="-x"  # Stop on first failure
+
+# Common ARGS examples:
+# ARGS="-k test_name"              # Filter by test/class/module name
+# ARGS="-vv"                       # Extra verbose output
+# ARGS="-x"                        # Stop on first failure
+# ARGS="--tb=short"                # Short traceback format
+# ARGS="--collect-only"            # List tests without running
+# ARGS="-k 'pattern1 or pattern2'" # Multiple test patterns
+# ARGS="-k 'not slow'"             # Exclude tests matching pattern
 
 # Quality
 make lint              # Flake8 only
@@ -103,6 +124,38 @@ make logs-clean                     # Clean all backend log files
 
 ```bash
 cd backend
+
+# Testing Targets
+make test                          # Run all tests (boundaries + modules + integration)
+make test-boundaries               # Root-level tests (tests/ excluding integration/)
+make test-boundaries ARGS="-vv"    # With extra verbosity
+make test-providers                # Provider system tests (src/trading_api/providers/tests/)
+make test-providers ARGS="-k test_lazy_loading"  # Specific provider tests
+make test-modules                  # All module tests (auto-discovers modules)
+make test-modules SELECTED_MODULES="auth broker"  # Specific modules
+make test-modules SELECTED_MODULES="auth" ARGS="-x"  # Stop on first failure
+make test-module-<name>            # Individual module (e.g., test-module-auth)
+make test-module-auth ARGS="-k TestAuthService"  # Filter auth module tests
+make test-integration              # Integration tests only
+make test-integration ARGS="-k broker_routes"  # Specific integration tests
+make test-cov                      # All tests with coverage report
+
+# ARGS Parameter Usage:
+# All test targets support ARGS for passing pytest arguments:
+#   -k PATTERN          # Filter tests by name/class/module pattern
+#   -vv                 # Extra verbose output
+#   -x                  # Stop on first failure
+#   --tb=short          # Short traceback format
+#   --collect-only      # List tests without running
+#   --maxfail=N         # Stop after N failures
+#
+# Pattern matching examples:
+#   ARGS="-k test_specific_function"        # Single test function
+#   ARGS="-k TestClassName"                 # All tests in a class
+#   ARGS="-k 'pattern1 or pattern2'"        # Multiple patterns (OR)
+#   ARGS="-k 'pattern1 and pattern2'"       # Both patterns (AND)
+#   ARGS="-k 'not slow'"                    # Exclude pattern
+#   ARGS="-k TestAuth -vv --tb=short"       # Combined flags
 
 # Unified Code Generation
 make list-modules             # List all discovered modules
@@ -196,6 +249,31 @@ make install  # Installs hooks + all dependencies
 
 ```bash
 make dev-fullstack  # One command, full stack
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+make -C backend test
+
+# Run specific test categories
+make -C backend test-boundaries        # Root-level tests
+make -C backend test-providers         # Provider system tests
+make -C backend test-modules           # All module tests
+make -C backend test-integration       # Integration tests
+
+# Run specific module tests
+make -C backend test-module-auth       # Auth module only
+make -C backend test-module-broker     # Broker module only
+
+# Filter tests with ARGS
+make -C backend test-providers ARGS="-k test_lazy_loading"  # Single test
+make -C backend test-module-auth ARGS="-k TestAuthService"  # Test class
+make -C backend test-integration ARGS="-k 'broker or datafeed'"  # Multiple patterns
+
+# Quick iteration on failing tests
+make -C backend test-module-auth ARGS="-x -vv"  # Stop on first failure, verbose
 ```
 
 ### Stopping Development Servers

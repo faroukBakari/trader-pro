@@ -9,30 +9,60 @@ import pytest
 
 # Generic rules - no hardcoded module names
 BOUNDARY_RULES = {
-    "modules/*": {
+    "models/*": {
+        "allowed_patterns": [],
+        "forbidden_patterns": ["trading_api.*"],
+        "description": "Models are pure data - no trading_api imports allowed",
+    },
+    "providers/*": {
         "allowed_patterns": [
             "trading_api.models.*",
-            "trading_api.shared.*",
-            "trading_api.app_factory",
+            "trading_api.shared.config",
+            "trading_api.providers.*",  # Providers can import other providers
         ],
-        "forbidden_patterns": [
-            "trading_api.modules.*"
-        ],  # Block ALL cross-module imports
-        "description": "Modules can import from models, shared, and app_factory, but not from other modules",
+        "forbidden_patterns": ["trading_api.modules.*"],
+        "description": "Providers can import models, config, and other providers, but not modules",
     },
     "shared/*": {
         "allowed_patterns": [
             "trading_api.models.*",
             "trading_api.shared.*",
+            "trading_api.providers.base",  # Provider ABC for type hints
             "trading_api.app_factory",
         ],
-        "forbidden_patterns": ["trading_api.modules.*"],
-        "description": "Shared code can import from models and other shared code, but not from modules",
+        "forbidden_patterns": [
+            "trading_api.modules.*",
+            "trading_api.providers.google",  # Block concrete providers
+            "trading_api.providers.capabilities.*",  # Block capability interfaces
+        ],
+        "description": "Shared can import models, Provider ABC (types only), but not modules or capability interfaces",
     },
-    "models/*": {
-        "allowed_patterns": [],
-        "forbidden_patterns": ["trading_api.*"],
-        "description": "Models are pure data - no trading_api imports allowed",
+    "modules/*": {
+        "allowed_patterns": [
+            "trading_api.models.*",
+            "trading_api.shared.*",
+            "trading_api.providers.base",  # Provider ABC for types
+            "trading_api.providers.capabilities.*",  # Capability interfaces
+            "trading_api.app_factory",
+        ],
+        "forbidden_patterns": [
+            "trading_api.modules.*",  # Block ALL cross-module imports
+            "trading_api.providers.google",  # Block concrete providers
+        ],
+        "description": "Modules can import models, shared, provider"
+        "interfaces, but not other modules or concrete providers",
+    },
+    "modules/*/tests/*": {
+        "allowed_patterns": [
+            "trading_api.models.*",
+            "trading_api.shared.*",
+            "trading_api.providers.*",  # Tests can import concrete providers for DI
+            "trading_api.app_factory",
+        ],
+        "forbidden_patterns": [
+            "trading_api.modules.*"  # Still block cross-module imports
+        ],
+        "description": "Module tests can import providers for dependency injection fixtures, but not other modules",
     },
 }
 
@@ -63,8 +93,17 @@ def matches_pattern(path: str, pattern: str) -> bool:
 
 
 def get_applicable_rule(relative_path: str) -> dict | None:
-    """Get the boundary rule applicable to this file path."""
-    for pattern, rule in BOUNDARY_RULES.items():
+    """Get the boundary rule applicable to this file path.
+
+    Note: More specific patterns are checked first (e.g., modules/*/tests/* before modules/*)
+    """
+    # Sort patterns by specificity (more specific patterns first)
+    # Count path separators - more separators = more specific
+    sorted_patterns = sorted(
+        BOUNDARY_RULES.items(), key=lambda x: x[0].count("/"), reverse=True
+    )
+
+    for pattern, rule in sorted_patterns:
         if matches_pattern(relative_path, pattern):
             return rule
     return None
