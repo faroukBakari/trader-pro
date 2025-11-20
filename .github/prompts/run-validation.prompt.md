@@ -1,6 +1,7 @@
 ---
 agent: "agent"
 name: "run-validation"
+model: "Claude Sonnet 4.5"
 description: "Validate unstaged changes in the workspace based on what has been modified."
 ---
 ## Validate Current Changes
@@ -37,7 +38,7 @@ Expected: Auto-fixes formatting issues
 
 **Resources**:
 
-- [MAKEFILE-GUIDE.md](../MAKEFILE-GUIDE.md) - Backend make targets
+- [docs/MAKEFILE-GUIDE.md](./docs/MAKEFILE-GUIDE.md) - Backend make targets
 - Backend uses: black, isort
 
 #### 2.2. Lint & Type-Check Backend
@@ -50,8 +51,8 @@ Expected: No linting or type errors (flake8, mypy, pyright)
 
 **Resources**:
 
-- [backend/docs/BACKEND_TESTING.md](../backend/docs/BACKEND_TESTING.md) - Testing guide
-- [docs/TESTING.md](../docs/TESTING.md) - Testing strategy
+- [backend/docs/BACKEND_TESTING.md](./backend/docs/BACKEND_TESTING.md) - Testing guide
+- [docs/TESTING.md](./docs/TESTING.md) - Testing strategy
 
 On failure: Review errors and fix code
 
@@ -71,9 +72,9 @@ Test levels:
 
 **Resources**:
 
-- [backend/docs/BACKEND_TESTING.md](../backend/docs/BACKEND_TESTING.md) - Comprehensive testing guide
-- [API-METHODOLOGY.md](../API-METHODOLOGY.md) - TDD methodology
-- [WEBSOCKET-METHODOLOGY.md](../WEBSOCKET-METHODOLOGY.md) - WebSocket TDD
+- [backend/docs/BACKEND_TESTING.md](./backend/docs/BACKEND_TESTING.md) - Comprehensive testing guide
+- [docs/methodologies/API-METHODOLOGY.md](./docs/methodologies/API-METHODOLOGY.md) - TDD methodology
+- [docs/methodologies/WEBSOCKET-METHODOLOGY.md](./docs/methodologies/WEBSOCKET-METHODOLOGY.md) - WebSocket TDD
 
 On failure: Run specific test with `poetry run pytest path/to/test.py -v -s`
 
@@ -91,7 +92,7 @@ Expected: Auto-fixes formatting issues
 
 **Resources**:
 
-- [MAKEFILE-GUIDE.md](../MAKEFILE-GUIDE.md) - Frontend make targets
+- [docs/MAKEFILE-GUIDE.md](./docs/MAKEFILE-GUIDE.md) - Frontend make targets
 - Frontend uses: Prettier
 
 #### 3.2. Lint & Type-Check Frontend
@@ -105,8 +106,8 @@ Expected: No linting or type errors (ESLint, TypeScript)
 
 **Resources**:
 
-- [frontend/README.md](../frontend/README.md) - Frontend overview
-- [docs/CLIENT-GENERATION.md](../docs/CLIENT-GENERATION.md) - Generated clients
+- [frontend/README.md](./frontend/README.md) - Frontend overview
+- [docs/CLIENT-GENERATION.md](./docs/CLIENT-GENERATION.md) - Generated clients
 
 On failure: Fix issues or use `make -C frontend lint-fix` for auto-fixable errors
 
@@ -120,8 +121,8 @@ Expected: All tests pass
 
 **Resources**:
 
-- [docs/TESTING.md](../docs/TESTING.md) - Testing strategy
-- [frontend/src/services/**tests**/README.md](../frontend/src/services/__tests__/README.md) - Service testing
+- [docs/TESTING.md](./docs/TESTING.md) - Testing strategy
+- [frontend/src/services/**tests**/README.md](./frontend/src/services/__tests__/README.md) - Service testing
 
 On failure: Run `make test` for watch mode to debug
 
@@ -131,7 +132,7 @@ If changes include root-level configuration:
 
 - **Makefile**: Verify syntax with `make -f project.mk help`
 - **GitHub Actions**: Check workflow syntax
-- **Environment config**: Review [ENVIRONMENT-CONFIG.md](../ENVIRONMENT-CONFIG.md)
+- **Environment config**: Review [GETTING-STARTED.md](./docs/GETTING-STARTED.md)
 
 ### Output Format
 
@@ -195,7 +196,7 @@ make -f project.mk lint-all
 make -f project.mk test-all
 ```
 
-**Resources**: [MAKEFILE-GUIDE.md](../MAKEFILE-GUIDE.md), [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md)
+**Resources**: [docs/MAKEFILE-GUIDE.md](./docs/MAKEFILE-GUIDE.md), [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)
 
 #### 2. Integration Testing
 
@@ -221,14 +222,14 @@ make -f project.mk dev-fullstack
 make -C smoke-tests test
 ```
 
-**Resources**: [smoke-tests/README.md](../smoke-tests/README.md)
+**Resources**: [smoke-tests/README.md](./smoke-tests/README.md)
 
 **Note**: Present these as suggestions only. Do not execute them unless specifically requested by the user.
 
 ### Key Resources
 
-- **Documentation Index**: [docs/DOCUMENTATION-GUIDE.md](../docs/DOCUMENTATION-GUIDE.md)
-- **Makefile Commands**: [MAKEFILE-GUIDE.md](../MAKEFILE-GUIDE.md)
-- **Testing Strategy**: [docs/TESTING.md](../docs/TESTING.md)
-- **Backend Testing**: [backend/docs/BACKEND_TESTING.md](../backend/docs/BACKEND_TESTING.md)
-- **Development Workflows**: [docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md)
+- **Documentation Index**: [docs/DOCUMENTATION-GUIDE.md](./docs/DOCUMENTATION-GUIDE.md)
+- **Makefile Commands**: [docs/MAKEFILE-GUIDE.md](./docs/MAKEFILE-GUIDE.md)
+- **Testing Strategy**: [docs/TESTING.md](./docs/TESTING.md)
+- **Backend Testing**: [backend/docs/BACKEND_TESTING.md](./backend/docs/BACKEND_TESTING.md)
+- **Development Workflows**: [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md)

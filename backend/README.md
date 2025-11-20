@@ -133,14 +133,20 @@ make dev
 ### Single Module Development
 
 ```bash
-# Start only the auth module
+# Start only the auth module (all versions)
 ENABLED_MODULES=auth make dev
 
-# Start only the broker module
+# Start only the broker module (all versions)
 ENABLED_MODULES=broker make dev
 
-# Start only the datafeed module
+# Start only specific broker version
+ENABLED_MODULES=broker:v1 make dev
+
+# Start only the datafeed module (all versions)
 ENABLED_MODULES=datafeed make dev
+
+# Start specific versions of multiple modules
+ENABLED_MODULES=broker:v1,datafeed:v2 make dev
 
 # Start all modules (default)
 make dev

@@ -120,8 +120,6 @@ class Module(ABC):
     """
 
     def __init__(self, versions: list[str] | None = None) -> None:
-        self._enabled: bool = False
-
         # Auto-discover available versions if not specified
         if versions is None:
             versions = self._discover_versions()
@@ -278,19 +276,6 @@ class Module(ABC):
     def versions(self) -> list[str]:
         """Available versions for this module."""
         return self._versions
-
-    def enable(self) -> None:
-        """Enable the module for loading."""
-        self._enabled = True
-
-    @property
-    def enabled(self) -> bool:
-        """Check if the module is enabled.
-
-        Returns:
-            bool: True if the module is enabled, False otherwise
-        """
-        return self._enabled
 
     @property
     def name(self) -> str:

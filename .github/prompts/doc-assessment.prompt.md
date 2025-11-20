@@ -1,5 +1,6 @@
 ---
 agent: "Plan"
+model: "Claude Sonnet 4.5"
 name: "doc-assessment-planner"
 description: "Conduct a comprehensive structural assessment of project documentation and generate a detailed refactoring and update plan."
 ---
@@ -29,6 +30,7 @@ The plan you generate must instruct the *next* agent to follow these principles:
 
 -   **Accuracy First**: Documentation must precisely match actual code implementation.
 -   **No Speculation**: Do not document future plans or assumptions.
+-   **No History**: Do not keep past changes or historical context and decisions; document only actual relevant data.
 -   **Cross-Reference**: Update all related docs when making changes.
 -   **Relative Links**: All internal documentation references use relative links.
 -   **Simple, Specific, Short**: Content must be easy to understand, unambiguous, and concise.

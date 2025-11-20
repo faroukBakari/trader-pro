@@ -270,6 +270,9 @@ class AppFactory:
         base_url = "/api"
 
         # Get modules to enable (None = all modules)
+        # Note: ModuleRegistry is functional and lazily instantiates modules.
+        # Module instances no longer expose `enable()`/`enabled` — they are
+        # created only when returned by `get_modules(...)`.
         enabled_modules = self.module_registry.get_modules(enabled_module_names)
 
         @asynccontextmanager

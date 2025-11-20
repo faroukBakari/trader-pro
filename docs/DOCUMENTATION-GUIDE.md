@@ -109,15 +109,15 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### backend/docs/ (Current Backend Documentation)
 
-| File                                             | Purpose                                            |
-| ------------------------------------------------ | -------------------------------------------------- |
-| **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture and module system     |
-| **backend/docs/MODULAR_VERSIONNING.md**          | Module-level API versioning strategy               |
-| **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx        |
-| **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules     |
-| **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation        |
-| **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide                  |
-| **backend/docs/BACKEND_TESTING.md**              | Backend testing strategy and overhead optimization |
+| File                                             | Purpose                                                                                                |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture, functional `ModuleRegistry.get_modules(...)` workflow, and module system |
+| **backend/docs/MODULAR_VERSIONNING.md**          | Module-level API versioning strategy                                                                   |
+| **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx                                                            |
+| **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules                                                         |
+| **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation                                                            |
+| **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide                                                                      |
+| **backend/docs/BACKEND_TESTING.md**              | Backend testing strategy and overhead optimization                                                     |
 
 > **Note**: Historical documentation from previous refactors has been cleaned up. All current backend documentation listed above is accurate and actively maintained.
 
@@ -234,7 +234,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### Backend Developers
 
-1. **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** - Modular architecture and module system
+1. **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** - Modular architecture, functional `ModuleRegistry.get_modules(...)` lifecycle, and module system
 2. **backend/docs/MODULAR_VERSIONNING.md** - Module-level API versioning strategy
 3. **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process deployment with nginx
 4. **backend/docs/BACKEND_WEBSOCKETS.md** - FastWS integration and creating WebSocket modules
