@@ -19,8 +19,8 @@ class DatafeedModule(Module):
         _enabled: Whether this module is enabled for loading
     """
 
-    @property
-    def module_dir(self) -> Path:
+    @classmethod
+    def module_dir(cls) -> Path:
         """Return the directory path for this module.
 
         Returns:
