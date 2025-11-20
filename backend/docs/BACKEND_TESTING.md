@@ -1029,11 +1029,9 @@ flowchart TB
     CreateFactory --> Discover[Auto-discover Modules<br/>from modules/]
 
     Discover --> Register[Register Modules<br/>in ModuleRegistry]
-    Register --> Filter{Filter Enabled<br/>Modules}
+    Register --> GetModules[Get Modules<br/>registry.get_modules]
 
-    Filter --> EnabledModules[Get Enabled Modules]
-
-    EnabledModules --> CreateModular[Create ModularApp]
+    GetModules --> CreateModular[Create ModularApp]
 
     CreateModular --> InitModules[Initialize Each Module]
 

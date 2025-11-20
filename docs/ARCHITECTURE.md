@@ -678,37 +678,28 @@ class BrokerModule:
 
 ```python
 # app_factory.py
-def create_app(enabled_modules: list[str] | None = None) -> tuple[FastAPI, FastWSAdapter]:
-    registry = ModuleRegistry()
+def create_app(enabled_modules: list[str] | None = None) -> ModularApp:
+    registry = ModuleRegistry(modules_dir)
     registry.clear()  # Critical for test isolation
 
-    # Register all available modules
-    registry.register(AuthModule())      # Authentication (JWT, Google OAuth)
-    registry.register(BrokerModule())    # Trading operations
-    registry.register(DatafeedModule())  # Market data
-
-    # Filter modules if specified
-    if enabled_modules:
-        for module in registry._modules.values():
-            module._enabled = module.name in enabled_modules
+    # Auto-discover and register all available modules
+    registry.auto_discover()  # Discovers: AuthModule, BrokerModule, DatafeedModule
 
     # Create apps
     api_app = FastAPI(...)
-    ws_app = FastWSAdapter(...)
 
     # Include shared infrastructure (always loaded)
     api_app.include_router(HealthApi(...), ...)
     api_app.include_router(VersionApi(...), ...)
 
-    # Load enabled modules dynamically
-    for module in registry.get_enabled_modules():
+    # Get modules to enable (None = all modules, list = specific modules)
+    for module in registry.get_modules(enabled_modules):
         for router in module.get_api_routers():
-            api_app.include_router(router, prefix=f\"/api/v1/{module.name}\", ...)
+            api_app.include_router(router, prefix=f"/api/v1/{module.name}", ...)
         for ws_router in module.get_ws_routers():
             ws_app.include_router(ws_router)
-        module.configure_app(api_app, ws_app)
 
-    return api_app, ws_app
+    return api_app
 ```
 
 **Module-Specific Deployment**:

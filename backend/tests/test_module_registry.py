@@ -140,19 +140,18 @@ class TestModuleRegistryExistingFunctionality:
         assert module is not None
         assert isinstance(module, BrokerModule)
 
-    def test_get_enabled_modules(self, registry: ModuleRegistry):
-        """Verify getting enabled modules works."""
+    def test_get_modules_filtered(self, registry: ModuleRegistry):
+        """Verify getting filtered modules works."""
         from trading_api.modules.broker import BrokerModule
         from trading_api.modules.datafeed import DatafeedModule
 
         registry.register(BrokerModule, "broker")
         registry.register(DatafeedModule, "datafeed")
-        registry.set_enabled_modules(["broker"])
 
-        enabled = registry.get_enabled_modules()
+        modules = registry.get_modules(["broker"])
 
-        assert len(enabled) == 1
-        assert isinstance(enabled[0], BrokerModule)
+        assert len(modules) == 1
+        assert isinstance(modules[0], BrokerModule)
 
     def test_clear_registry(self, registry: ModuleRegistry):
         """Verify clearing registry works."""
@@ -165,7 +164,6 @@ class TestModuleRegistryExistingFunctionality:
 
         assert len(registry._module_classes) == 0
         assert len(registry._instances) == 0
-        assert registry._enabled_modules is None
 
     def test_auto_discover_with_real_modules(self, registry: ModuleRegistry):
         """Verify auto_discover works with real modules (broker, datafeed)."""
