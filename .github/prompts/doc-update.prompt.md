@@ -24,6 +24,7 @@ Analyze code changes and generate a **complete, executable plan** for documentat
    - Briefly explore existing documentation for cartography
    - Map identified topics/changes to specific documentation files
    - Determine which docs need updates: module READMEs, sub-system docs, root docs
+   - Determine if new docs are needed for new features/patterns
    - Exclude `**/tmp/**.md` files (out of scope)
 
 3. **Compare Current vs. New State**
@@ -33,10 +34,10 @@ Analyze code changes and generate a **complete, executable plan** for documentat
    - Quote existing content that needs updating (with surrounding context)
 
 4. **Generate Self-Sufficient Plan**
-   - For each file update, provide:
+   - For each file creation or update, provide:
      - **File Path:** Absolute path
      - **Sections:** Exact sections/headings to modify
-     - **Current Content:** summary of existing content and why it needs change
+     - **Current Content (if existing):** summary of existing content and why it needs change
      - **Required Changes:** Summary of new content to add:
       - Include Markdown formatting instructions (headings, lists, tables, etc.)
       - Reference source files for code context (never paste full files)
@@ -69,7 +70,7 @@ Analyze code changes and generate a **complete, executable plan** for documentat
 
 **Summary:** Brief description of changes
 
-### Phase 1: Implementation-details-Level Updates
+### Phase 1: Implementation-details-Level Creations / Updates
 
 #### `/absolute/path/to/Implementation/README.md`
 **Section:** "Section Name"
@@ -77,7 +78,7 @@ Analyze code changes and generate a **complete, executable plan** for documentat
 **New:** `summary of replacement text with update approach explanation...`
 **Rationale:** Summarize why this change is needed
 
-### Phase 2: Sub-System Updates
+### Phase 2: Sub-System Creations / Updates
 
 #### `/absolute/path/to/sub-system/docs/ARCHITECTURE.md`
 **Section:** "Module Architecture"
@@ -87,7 +88,7 @@ Analyze code changes and generate a **complete, executable plan** for documentat
 **New:** `summary of replacement text with with diagrams...`
 **Rationale:** Reflects new architecture
 
-### Phase 3: Root-Level Updates
+### Phase 3: Root-Level Creations / Updates
 
 #### `/absolute/path/to/docs/GUIDE.md`
 **Section:** "Cross-Cutting Concern"

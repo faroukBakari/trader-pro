@@ -13,6 +13,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
+from trading_api.models.common import CapabilitySpec
+from trading_api.providers.registry import ProviderRegistry
 from trading_api.shared import Module, ModuleApp, ModuleRegistry, settings
 
 # Configure logging for the application
@@ -244,36 +246,99 @@ class ModularApp(FastAPI):
 class AppFactory:
     """Factory for creating ModularApp applications with dynamic module loading."""
 
-    def __init__(self, modules_dir: Path | None = None):
-        """Initialize factory with fresh registry.
+    def __init__(
+        self,
+        modules_dir: Path | None = None,
+        providers_dir: Path | None = None,
+    ):
+        """Initialize factory with fresh registries.
 
         Args:
             modules_dir: Path to modules directory.
                         Defaults to trading_api/modules/
+            providers_dir: Path to providers directory.
+                          Defaults to trading_api/providers/
         """
         self.module_registry = ModuleRegistry(
             modules_dir or Path(__file__).parent / "modules"
         )
+        self.provider_registry = ProviderRegistry(
+            providers_dir or Path(__file__).parent / "providers"
+        )
 
-    def create_app(
+    def _resolve_capabilities(
+        self, module_names: list[str] | None
+    ) -> list[CapabilitySpec]:
+        """Resolve required capabilities from module service classes.
+
+        [STATIC ANALYSIS]: No instances created, uses classmethods.
+
+        Args:
+            module_names: Module specs to enable (None = all)
+
+        Returns:
+            Deduplicated list of required capabilities
+        """
+        capabilities: set[CapabilitySpec] = set()
+
+        # Get module specs to enable
+        module_specs = module_names or list(self.module_registry._module_classes.keys())
+
+        for spec in module_specs:
+            # Parse "broker:v1" → "broker"
+            module_name = spec.split(":")[0] if ":" in spec else spec
+
+            # Get module class (not instance)
+            module_class = self.module_registry._module_classes.get(module_name)
+            if module_class is None:
+                continue
+
+            # Get service class (static, no instantiation)
+            service_class = module_class._service_class()
+
+            # Get capabilities (classmethod, no instance)
+            # NOTE: Services may not have capabilities() yet (Phase 4)
+            if hasattr(service_class, "capabilities"):
+                service_caps = service_class.capabilities()
+                if service_caps is not None:
+                    capabilities.update(service_caps)
+
+        return list(capabilities)
+
+    async def create_app(
         self,
         enabled_module_names: list[str] | None = None,
     ) -> ModularApp:
-        """Create a ModularApp with specified enabled modules."""
-        # Clear registry to allow fresh registration (important for tests)
-        self.module_registry.clear()
+        """Create a ModularApp with specified enabled modules.
 
-        # Auto-discover and register all available modules
+        [TWO-PHASE LOADING]: Discover classes, analyze, then instantiate.
+        [ASYNC]: Required for provider lifecycle hooks (on_startup).
+        """
+        # Clear registries for fresh start
+        # [TESTING]: Enables multiple create_app() calls with different configs
+        # [PRODUCTION]: create_app() typically called once during app startup
+        self.module_registry.clear()
+        self.provider_registry.clear()
+
+        # Phase 1: Auto-discover module and provider classes
         self.module_registry.auto_discover()
+        self.provider_registry.auto_discover()
+
+        # Phase 2: Resolve required capabilities (static analysis)
+        required_capabilities = self._resolve_capabilities(enabled_module_names)
+
+        # Phase 3: Get provider instances for capabilities
+        required_providers = await self.provider_registry.get_providers(
+            required_capabilities
+        )
+
+        # Phase 4: Instantiate modules with providers
+        enabled_modules = self.module_registry.get_modules(
+            module_names=enabled_module_names, providers=required_providers
+        )
 
         # Create base URL
         base_url = "/api"
-
-        # Get modules to enable (None = all modules)
-        # Note: ModuleRegistry is functional and lazily instantiates modules.
-        # Module instances no longer expose `enable()`/`enabled` — they are
-        # created only when returned by `get_modules(...)`.
-        enabled_modules = self.module_registry.get_modules(enabled_module_names)
 
         @asynccontextmanager
         async def lifespan(app: ModularApp) -> AsyncGenerator[None, None]:
@@ -287,6 +352,9 @@ class AppFactory:
             app.start()
 
             yield
+
+            # Shutdown providers
+            await self.provider_registry.shutdown()
 
             # Shutdown: Cleanup is handled by FastAPIAdapter
             print("🛑 FastAPI application shutdown complete")

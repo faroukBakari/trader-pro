@@ -17,6 +17,7 @@ from trading_api.models.auth import (
     User,
     UserCreate,
 )
+from trading_api.models.common import CapabilitySpec
 from trading_api.modules.auth.repository import (
     InMemoryRefreshTokenRepository,
     InMemoryUserRepository,
@@ -63,13 +64,42 @@ class AuthServiceInterface(ABC):
 class AuthService(AuthServiceInterface, ServiceInterface):
     """Authentication service implementation"""
 
-    def __init__(self, module_dir: Path) -> None:
-        super().__init__(module_dir)
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        """Return required capabilities for this service.
+
+        Returns:
+            List containing auth capability requirement
+        """
+        return [CapabilitySpec(name="auth")]
+
+    def __init__(self, module_dir: Path, **kwargs: Any) -> None:
+        super().__init__(module_dir, **kwargs)
         self.user_repository: UserRepositoryInterface = InMemoryUserRepository()
         self.token_repository: RefreshTokenRepositoryInterface = (
             InMemoryRefreshTokenRepository()
         )
         self._oauth: OAuth | None = None
+
+    @property
+    def auth_provider(self) -> Any:  # Return type will be AuthCapability
+        """Get auth capability provider.
+
+        Returns:
+            Provider implementing AuthCapability
+
+        Raises:
+            TypeError: If provider doesn't implement AuthCapability
+        """
+        from trading_api.providers.capabilities.auth import AuthCapability
+
+        provider = self._get_capability_provider("auth")
+
+        # Type narrowing
+        if not isinstance(provider, AuthCapability):
+            raise TypeError(f"Expected AuthCapability, got {type(provider).__name__}")
+
+        return provider
 
     @property
     def oauth(self) -> OAuth:
@@ -87,6 +117,10 @@ class AuthService(AuthServiceInterface, ServiceInterface):
         """
         Verify Google ID token and return claims.
         Raises HTTPException(401) if invalid.
+
+        .. deprecated::
+            Use auth_provider.verify_token() instead.
+            This method will be removed in a future version.
         """
         try:
             # Use Google's tokeninfo endpoint to verify the token
@@ -132,7 +166,8 @@ class AuthService(AuthServiceInterface, ServiceInterface):
         Authenticate user with Google ID token.
         Returns access token and refresh token.
         """
-        claims = await self.verify_google_id_token(id_token)
+        # Use injected auth provider instead of direct Google API call
+        claims = await self.auth_provider.verify_token(id_token)
 
         google_id = claims["sub"]
         email = claims["email"]

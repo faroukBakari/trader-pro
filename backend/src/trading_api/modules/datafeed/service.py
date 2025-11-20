@@ -20,6 +20,7 @@ from trading_api.models import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
+from trading_api.models.common import CapabilitySpec
 from trading_api.shared.ws.ws_route_interface import WsRouteService
 
 logger = logging.getLogger(__name__)
@@ -28,15 +29,33 @@ logger = logging.getLogger(__name__)
 class DatafeedService(WsRouteService):
     """Service for handling datafeed operations"""
 
-    def __init__(self, module_dir: Path, symbols_file_path: Optional[str] = None):
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        """Return required capabilities for datafeed service.
+
+        Datafeed service doesn't require any capabilities (no auth/external providers).
+
+        Returns:
+            Empty list - no capabilities required
+        """
+        return []
+
+    def __init__(
+        self,
+        module_dir: Path,
+        *,  # Force keyword-only arguments
+        symbols_file_path: Optional[str] = None,
+        providers: list | None = None,
+    ):
         """Initialize the datafeed service
 
         Args:
             module_dir: Path to the module directory
             symbols_file_path: Path to symbols JSON file. If None, uses
                 default embedded symbols.
+            providers: Provider instances for capabilities (unused, for interface compatibility)
         """
-        super().__init__(module_dir)
+        super().__init__(module_dir, providers=providers)
         self.configuration = DatafeedConfiguration()
         self.symbols_file_path = symbols_file_path
         self._symbols: List[SymbolInfo] = []

@@ -4,50 +4,69 @@ model: "Claude Sonnet 4.5"
 name: "follow-plan-v2.1"
 description: "Follow a predefined plan step-by-step with validation and a clear action hierarchy."
 ---
-We have defined and validated this plan that I need you to follow.
 
-### Core Execution Workflow (Rules 1-8)
+We have defined and validated a plan that I need you to follow. You must adhere to the following Operational Constraints and Execution Workflow strictly.
 
-If the OVERRIDE rule is not triggered, follow this workflow precisely.
+# I. Operational Constraints (Terminal & Environment)
 
-#### Phase 1: Setup
+**CRITICAL:** Before executing **ANY** terminal command, you must follow this priority logic. Do not bypass this structure.
 
-1.  **Persist the Plan:** Before starting and if the plan is not already saved to a file, save it to the most relevant temporary working document location (e.g., `./docs/tmp/${PLAN_NAME}.md` or `path/to/dep/or/module/tmp/${PLAN_NAME}.md`). Let me know the path to the file you create.
+1.  **Identify the Target:**
+    * Declare your intent: "I need to run [action]."
+    * Check for a `Makefile` in the project root/module.
 
-2.  **Ensure Progress Tracker:**
-    * Check the plan content. If a "Progress" or "Checklist" section with checkboxes does *not* already exist at the top, you must **add one**.
-    * This progress section must list every main step and sub-step from the plan as a markdown checkbox (e.g., `[ ] Step 1: ...`).
+2.  **Select the Command Strategy (Priority Order):**
+    * **Priority 1: Makefile Target (MANDATORY).** If a target exists (e.g., `make test`, `make format`), you *must* use it.
+    * **Priority 2: Environment-Aware Package Managers.** If no Makefile target exists:
+        * *Python:* You **MUST** use `poetry run [cmd]` (or `pipenv run`).
+        * *Node/TS:* You **MUST** explicitly call the executable (e.g., `nvm use && npm run [script]`) or use `node_modules/.bin/[cmd]`.
+    * **Priority 3: System Commands (Last Resort).** Only use raw system commands (git, docker, etc.) if no project-specific alternative exists.
 
-#### Phase 2: Execution
+# II. Core Execution Workflow
+
+Follow these phases in strict sequential order.
+
+### Phase 1: Setup
+
+1.  **Persist the Plan:**
+    * If the plan is not already saved, save it immediately to `./.cursor/plans/${PLAN_NAME}.md` or a relevant `./docs/` path.
+    * **Action:** Tell me the path where the file is saved.
+
+2.  **Initialize Progress Tracking:**
+    * Read the plan file. If a "Progress" or "Checklist" section does not exist, **add one** at the top of the file.
+    * Convert every main step and sub-step into a Markdown checkbox (e.g., `- [ ] Step 1: ...`).
+
+### Phase 2: Execution Loop
 
 3.  **Assess and Resume:**
-    * Before starting any work, carefully read through the entire plan.
-    * Analyze the current state of the project files to determine if any steps are already completed.
-    * Update the checkboxes in the plan file to reflect this initial assessment (checking off any completed steps).
-    * Begin your work from the **first uncompleted step**.
+    * Read the plan and analyze the current project state.
+    * Mark off any steps that are *already completed* in the plan file.
+    * Identify the **first uncompleted step** and begin there.
 
-4.  **Strict Sequential Execution:** You must follow the plan steps *in the precise order they are written*. Do not skip steps or perform them out of order unless I explicitly instruct you to.
+4.  **Strict Sequential Execution:**
+    * Execute steps exactly in the order written.
+    * Do not skip steps or jump ahead unless explicitly instructed.
 
-5.  **CRITICAL: Validate Before Completing:** After you believe you have completed the work for a step, you must run a **comprehensive validation** of the *entire* work so far.
-    * If the source files were changed/updated, this *must* include running any and all relevant tests if applicable (pytest / vitest) as well as type checking and format validation.
-    * If documentation was changed/updated, you must ensure:
-        * All internal links and cross-references are valid and point to existing sections/files.
-        * Document structure, headings hierarchy, and numbering are consistent and accurate.
-    * A step is **not complete** until this validation passes. If validation fails, you must analyze and fix the issues *before* proceeding to Rule 6.
+5.  **Validate Before Completing (The "Definition of Done"):**
+    * You are NOT allowed to check off a step until you run a **Comprehensive Validation**:
+    * **Code Changes:** Run relevant tests (pytest/vitest), type checks, and linters.
+    * **Documentation:** Verify internal links, heading hierarchy, and rendering.
+    * **Correction:** If validation fails, you must fix the issue immediately. Do not proceed to the next step until validation passes.
 
-#### Phase 3: Reporting Cycle
+### Phase 3: Reporting & State Management
 
-6.  **CRITICAL: Update Progress File:** This is the most important standard rule.
-    * *After* a step has been successfully **validated** (per Rule 5), you **must** update the progress tracking section in the plan file to accurately reflect the work you just completed.
-    * This action **must** be completed *before* you report to me (Rule 7).
+6.  **Update Progress File (CRITICAL):**
+    * *Immediately* after a step passes validation (Rule 5), update the plan file on disk.
+    * Mark the specific step as checked `[x]`.
 
-7.  **Report at Milestones:**
-    * *After* completing, validating, and updating the progress file (per Rules 5 & 6), provide me with a status report.
-    * This report must *only* contain:
-        * A list of the main step(s) just completed.
-        * The *next* step to be started.
-    * (Do not provide a narrative summary of the *entire* project.)
+7.  **Milestone Reporting:**
+    * Only *after* updating the file, provide a status report to the user.
+    * **Report Format:**
+        * ✅ **Completed:** [List step(s) finished]
+        * ⏭️ **Next:** [The exact next step you will start]
+    * *Constraint:* Do not provide a narrative summary of the whole project. Keep it atomic.
 
-#### Phase 4: Maintenance
+### Phase 4: Maintenance
 
-8.  **Plan Amendments:** If we decide to change the plan while working, you must **immediately** update the plan file *and* the progress tracking section to reflect those changes.
+8.  **Dynamic Amendments:**
+    * If user feedback requires changing the plan, you must update the plan file text and the checkboxes **before** writing any code for the new requirements.
