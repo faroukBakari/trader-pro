@@ -21,8 +21,8 @@ class AuthModule(Module):
         _api_routers: List of FastAPI routers
     """
 
-    @property
-    def module_dir(self) -> Path:
+    @classmethod
+    def module_dir(cls) -> Path:
         """Return the directory path for this module.
 
         Returns:

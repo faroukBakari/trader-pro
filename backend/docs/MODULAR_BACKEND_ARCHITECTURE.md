@@ -1,8 +1,8 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: November 11, 2025  
-**Version**: 5.1.0
+**Last Updated**: November 20, 2025  
+**Version**: 5.2.0
 
 ## Table of Contents
 
@@ -70,12 +70,8 @@ from pathlib import Path
 from trading_api.shared import Module
 
 class MyModuleModule(Module):
-    @property
-    def name(self) -> str:
-        return "my_module"
-
-    @property
-    def module_dir(self) -> Path:
+    @classmethod
+    def module_dir(cls) -> Path:
         return Path(__file__).parent
 
     @property
@@ -140,13 +136,25 @@ Every module extends the `Module` abstract base class defined in `shared/module_
 class Module(ABC):
     """Abstract base class defining the interface for pluggable modules."""
 
+    @classmethod
+    @abstractmethod
+    def module_dir(cls) -> Path:
+        """Module's directory path.
+
+        Must be a class method because it's used during version discovery
+        and service class loading, which occur before instantiation.
+        """
+
     def __init__(self, versions: list[str] | None = None):
         # Auto-discover versions from api/ and ws/ directories
         if versions is None:
             versions = self._discover_versions()
 
         self._versions = versions
-        self._service = self._import_service()
+
+        # Import shared service (version-agnostic)
+        service_class = self._service_class()
+        self._service = service_class(self.module_dir())
 
         # Import version-specific routers
         self._api_routers: dict[str, APIRouterInterface] = {}
@@ -161,14 +169,9 @@ class Module(ABC):
                 self._ws_routers[version] = ws_router
 
     @property
-    @abstractmethod
     def name(self) -> str:
         """Unique module identifier (e.g., 'broker', 'datafeed')"""
-
-    @property
-    @abstractmethod
-    def module_dir(self) -> Path:
-        """Module's directory path"""
+        return self.module_dir().name
 
     @property
     def service(self) -> ServiceInterface:
@@ -201,6 +204,26 @@ class Module(ABC):
 
 - Uses **ABC-based design** with Python's `abc.ABC` and `@abstractmethod`
 - Subclasses must implement abstract methods at instantiation time
+
+#### Class Methods vs Instance Methods
+
+The Module ABC uses a hybrid approach with both class methods and instance methods:
+
+**Class Methods** (called before or during instantiation):
+
+- `module_dir()` - Returns module directory path, used by version discovery
+- `_discover_versions()` - Scans api/ and ws/ directories for available versions
+- `_get_import_path()` - Constructs import path for dynamic module loading
+- `_service_class()` - Imports and returns the service class (not instance)
+
+**Instance Methods** (require instantiated module):
+
+- `_import_api_routers_for_version()` - Imports API routers (needs service instance)
+- `_import_ws_routers_for_version()` - Imports WebSocket routers (needs service instance)
+
+**Rationale**: Version discovery and service class loading must occur before instance state is available. The `module_dir()` class method enables these operations to work with the class itself rather than requiring an instance. The service is then instantiated in `__init__()` and passed to router imports.
+
+**Reference**: See `backend/src/trading_api/shared/module_interface.py` for complete implementation.
 
 ### 2. APIRouterInterface Auto-Exposing Health and Version Endpoints
 
@@ -1574,8 +1597,8 @@ from pathlib import Path
 from trading_api.shared.module_interface import Module
 
 class MymoduleModule(Module):
-    @property
-    def module_dir(self) -> Path:
+    @classmethod
+    def module_dir(cls) -> Path:
         return Path(__file__).parent
 
     @property
