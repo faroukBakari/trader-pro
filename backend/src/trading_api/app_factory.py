@@ -251,7 +251,9 @@ class AppFactory:
             modules_dir: Path to modules directory.
                         Defaults to trading_api/modules/
         """
-        self.registry = ModuleRegistry(modules_dir or Path(__file__).parent / "modules")
+        self.module_registry = ModuleRegistry(
+            modules_dir or Path(__file__).parent / "modules"
+        )
 
     def create_app(
         self,
@@ -259,20 +261,16 @@ class AppFactory:
     ) -> ModularApp:
         """Create a ModularApp with specified enabled modules."""
         # Clear registry to allow fresh registration (important for tests)
-        self.registry.clear()
+        self.module_registry.clear()
 
         # Auto-discover and register all available modules
-        self.registry.auto_discover()
-
-        # Set which modules should be enabled (core will be included)
-        self.registry.set_enabled_modules(enabled_module_names)
+        self.module_registry.auto_discover()
 
         # Create base URL
         base_url = "/api"
 
-        # Compute OpenAPI tags dynamically from enabled modules (including core)
-
-        enabled_modules = self.registry.get_enabled_modules()
+        # Get modules to enable (None = all modules)
+        enabled_modules = self.module_registry.get_modules(enabled_module_names)
 
         @asynccontextmanager
         async def lifespan(app: ModularApp) -> AsyncGenerator[None, None]:

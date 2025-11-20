@@ -618,10 +618,9 @@ backend/src/trading_api/
 ```
 1. Discovery    → registry.auto_discover(modules_dir)
 2. Registration → registry.register(ModuleClass, "module_name")
-3. Filtering    → registry.set_enabled_modules(["broker", "datafeed"])
-4. Loading      → registry.get_enabled_modules()  # Lazy instantiation
-5. App Wrapping → ModuleApp(module)  # Creates FastAPI apps per version
-6. Mounting     → main_app.mount(f"/api/{version}/{module.name}", api_app)
+3. Loading      → registry.get_modules(["broker", "datafeed"])  # Filtering + lazy instantiation (None = all modules)
+4. App Wrapping → ModuleApp(module)  # Creates FastAPI apps per version
+5. Mounting     → main_app.mount(f"/api/{version}/{module.name}", api_app)
 ```
 
 ### Module Implementation Example
@@ -819,9 +818,9 @@ class AppFactory:
         """Create app with selective module loading."""
         self.registry.clear()
         self.registry.auto_discover(self.modules_dir)
-        self.registry.set_enabled_modules(enabled_module_names)
 
-        enabled_modules = self.registry.get_enabled_modules()
+        # Get modules to enable (None = all modules, list = specific modules)
+        enabled_modules = self.registry.get_modules(enabled_module_names)
 
         app = ModularApp(
             modules=enabled_modules,
@@ -842,6 +841,33 @@ app = factory.create_app()  # Load all modules
 app = factory.create_app(enabled_module_names=["broker", "datafeed"])  # Specific modules
 app = factory.create_app(enabled_module_names=["broker"])  # Single module
 ```
+
+#### Registry API Simplification
+
+The module registry uses a **functional API** for module filtering:
+
+- **Single method**: `get_modules(enabled_modules)` replaces three methods
+- **Stateless**: No internal state to manage
+- **Easier testing**: Direct input/output, no setup required
+
+**Before (old API)**:
+
+```python
+registry.set_enabled_modules(["broker"])
+modules = registry.get_enabled_modules()
+```
+
+**After (current API)**:
+
+```python
+modules = registry.get_modules(["broker"])
+```
+
+**Benefits**:
+
+- Eliminates two-step workflow
+- Functional (no side effects)
+- Clearer intent at call site
 
 ---
 

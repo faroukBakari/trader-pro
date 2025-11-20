@@ -22,14 +22,12 @@ class ModuleRegistry:
     Attributes:
         _module_classes: Dictionary mapping module names to module classes
         _instances: Dictionary mapping module names to lazy-loaded instances
-        _enabled_modules: Set of module names to enable (None = all enabled)
     """
 
     def __init__(self, modules_dir: Path) -> None:
         """Initialize an empty module registry."""
         self._module_classes: Dict[str, type[Module]] = {}
         self._instances: Dict[str, Module] = {}
-        self._enabled_modules: set[str] | None = None
         self._modules_dir = modules_dir
 
     def register(self, module_class: type[Module], module_name: str) -> None:
@@ -106,54 +104,32 @@ class ModuleRegistry:
         if module_name not in self._instances:
             module_class = self._module_classes[module_name]
             instance = module_class()
-
-            # Set enabled state based on registry's enabled modules list
-            # Only enable if in the enabled modules set
-            if self._enabled_modules is None or module_name in self._enabled_modules:
-                # None means all modules enabled
-                instance.enable()
-
+            instance.enable()
             self._instances[module_name] = instance
             logger.debug(f"Lazy-loaded module instance: {module_name}")
         return self._instances[module_name]
 
-    def set_enabled_modules(self, enabled_modules: list[str] | None) -> None:
-        """Set which modules should be enabled.
-
-        Args:
-            enabled_modules: List of module names to enable, or None to enable all
-        """
-        if enabled_modules is None:
-            self._enabled_modules = None  # Enable all
-        else:
-            self._enabled_modules = set(enabled_modules)  # Enable specific modules
-
-    def get_enabled_modules(self) -> list[Module]:
-        """Get all registered modules that are currently enabled.
+    def get_modules(self, enabled_modules: list[str] | None = None) -> list[Module]:
+        """Get modules filtered by enabled list.
 
         Lazy-loads module instances only when requested.
 
-        Returns:
-            list[Module]: List of enabled module instances
-        """
-        enabled_modules = []
-        for module_name in self._module_classes.keys():
-            # Check if module should be enabled
-            if self._enabled_modules is None or module_name in self._enabled_modules:
-                module = self._get_instance(module_name)
-                if module.enabled:
-                    enabled_modules.append(module)
-        return enabled_modules
-
-    def get_all_modules(self) -> list[Module]:
-        """Get all registered modules regardless of enabled status.
-
-        Lazy-loads all module instances.
+        Args:
+            enabled_modules: List of module names to return, or None for all modules
 
         Returns:
-            list[Module]: List of all registered module instances
+            list[Module]: Filtered list of module instances
         """
-        return [self._get_instance(name) for name in self._module_classes.keys()]
+        if enabled_modules is None:
+            # Return all modules
+            return [self._get_instance(name) for name in self._module_classes.keys()]
+        else:
+            # Return only specified modules
+            modules = []
+            for module_name in enabled_modules:
+                if module_name in self._module_classes:
+                    modules.append(self._get_instance(module_name))
+            return modules
 
     def get_module(self, name: str) -> Module | None:
         """Get a specific module by name.
@@ -177,7 +153,6 @@ class ModuleRegistry:
         """
         self._module_classes.clear()
         self._instances.clear()
-        self._enabled_modules = None
 
     def _validate_module_names(self, module_names: set[str]) -> list[str]:
         """Validate module naming conventions and uniqueness.
