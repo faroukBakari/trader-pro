@@ -25,8 +25,9 @@ help:
 	@echo "  install-ci        Install backend dependencies for CI (non-interactive)"
 	@echo ""
 	@echo "Testing targets:"
-	@echo "  test              Run all tests (boundaries + modules + integration)"
+	@echo "  test              Run all tests (boundaries + providers + modules + integration)"
 	@echo "  test-boundaries   Validate import boundaries between modules"
+	@echo "  test-providers    Run provider system tests"
 	@echo "  test-modules      Run all module tests (use modules=mod1,mod2 to select specific)"
 	@echo "  test-integration  Run integration tests"
 	@echo "  test-cov          Run all tests with coverage"
@@ -430,8 +431,8 @@ test-integration: check-generate-keypair
 	@echo "Running integration tests..."
 	poetry run pytest tests/integration/ -v -x -m integration $(ARGS)
 
-test: test-boundaries test-modules test-integration
-	@echo "✅ All tests passed (boundaries + modules + integration)"
+test: test-boundaries test-providers test-modules test-integration
+	@echo "✅ All tests passed (boundaries + providers + modules + integration)"
 
 # Coverage targets
 test-cov: check-generate-keypair test-boundaries

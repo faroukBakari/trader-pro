@@ -102,6 +102,45 @@ jobs:
       working-directory: backend
       run: make test-boundaries
 
+  # Backend provider tests (runs once, tests provider system)
+  backend-providers:
+    runs-on: ubuntu-latest
+    needs: [backend-setup]
+    if: success()
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Poetry
+      uses: snok/install-poetry@v1
+      with:
+        version: latest
+        virtualenvs-create: true
+        virtualenvs-in-project: true
+
+    - name: Restore cached venv
+      uses: actions/cache@v3
+      with:
+        path: backend/.venv
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+        fail-on-cache-miss: false
+
+    - name: Generate JWT key pair for tests
+      working-directory: backend
+      run: make check-generate-keypair
+
+    - name: Run provider system tests
+      working-directory: backend
+      run: make test-providers
+
   # Backend module tests (runs in parallel per module)
   backend-modules:
     runs-on: ubuntu-latest
@@ -146,7 +185,7 @@ jobs:
   # Backend integration tests (runs once, requires all modules)
   backend-integration:
     runs-on: ubuntu-latest
-    needs: [backend-boundaries, backend-modules]
+    needs: [backend-boundaries, backend-providers, backend-modules]
     if: success()
     strategy:
       matrix:
