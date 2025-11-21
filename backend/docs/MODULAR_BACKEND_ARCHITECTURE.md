@@ -271,15 +271,35 @@ curl http://localhost:8000/api/v2/broker/health  # Different version
 - Version-aware - Each version has its own health endpoint
 - Module-scoped - Health checks specific to each module
 
-### 3. ServiceInterface Base Class with Version Discovery
+### 3. ServiceInterface Base Class with Version Discovery and Provider Resolution
 
-The `ServiceInterface` base class provides **automatic version discovery** and metadata:
+The `ServiceInterface` base class provides **automatic version discovery**, metadata, and **provider capability resolution**:
 
 ```python
 # shared/service_interface.py
 class ServiceInterface(ABC):
-    def __init__(self, module_dir: Path) -> None:
+    def __init__(
+        self,
+        module_dir: Path,
+        *,  # Force keyword-only
+        providers: list["Provider"] | None = None,
+    ) -> None:
+        """Initialize service.
+
+        Args:
+            module_dir: Module directory path
+            providers: Provider instances for required capabilities
+
+        Raises:
+            CapabilityNotFoundError: If required capability not satisfied
+        """
+        super().__init__()
         self.module_dir = module_dir
+        self._providers = providers or []
+
+        # Build capability map and fail-fast validate
+        self._capability_map: dict[str, "Provider"] = {}
+        self._resolve_capabilities()
 
         # Auto-discover versions from api/ directory structure
         api_dir = self.module_dir / "api"
@@ -305,6 +325,74 @@ class ServiceInterface(ABC):
             current_version=version_dirs[-1] if version_dirs else "v1",
             available_versions=available_versions,
         )
+
+    @classmethod
+    @abstractmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        """Return required capabilities for this service.
+
+        [CLASSMETHOD]: Static declaration for app startup analysis.
+
+        Returns:
+            List of capability requirements
+
+        Examples:
+            >>> AuthService.capabilities()
+            [CapabilitySpec(name="auth")]
+        """
+        ...
+
+    def _resolve_capabilities(self) -> None:
+        """Resolve and cache capability → provider mapping.
+
+        [FAIL-FAST]: Validates at initialization, not at request time.
+
+        Raises:
+            CapabilityNotFoundError: If required capability not found
+        """
+        from trading_api.models.common import CapabilityNotFoundError
+
+        required_capabilities = self.capabilities()
+
+        for req_cap in required_capabilities:
+            matched = False
+
+            for provider in self._providers:
+                # Check if provider offers matching capability
+                for prov_cap in provider.capabilities():
+                    if req_cap.matches(prov_cap):
+                        self._capability_map[req_cap.name] = provider
+                        matched = True
+                        break
+
+                if matched:
+                    break
+
+            if not matched:
+                raise CapabilityNotFoundError(
+                    f"Service '{self.module_name}' requires capability "
+                    f"'{req_cap}' but no provider found. "
+                    f"Available providers: {[p.name for p in self._providers]}"
+                )
+
+    def _get_capability_provider(self, capability_name: str) -> "Provider":
+        """Get provider for specific capability (cached lookup).
+
+        Args:
+            capability_name: Name of capability to get
+
+        Returns:
+            Provider instance
+
+        [PERFORMANCE]: O(1) lookup after initialization.
+        """
+        provider = self._capability_map.get(capability_name)
+        if provider is None:
+            raise RuntimeError(
+                f"Capability '{capability_name}' not initialized. "
+                "This should never happen - validation should occur at init."
+            )
+        return provider
 ```
 
 **Benefits**:
@@ -312,6 +400,11 @@ class ServiceInterface(ABC):
 - Auto-discovery from directory structure
 - Convention-based versioning
 - Automatic API metadata generation
+- **Fail-fast provider validation** at service initialization
+- **O(1) provider lookup** via cached capability map
+- **Type-safe capability matching** with CapabilitySpec
+
+**Reference**: See `backend/src/trading_api/shared/service_interface.py` for complete implementation.
 
 ### 4. Version Discovery Patterns
 
@@ -556,6 +649,87 @@ Benefits:
   • Auto-discovered versions from directory structure
 ```
 
+### Provider System Integration
+
+The modular architecture integrates a **pluggable provider/capability system** for external integrations (authentication, broker APIs, data feeds). Providers are auto-discovered and injected into services that declare capability requirements.
+
+**Provider-Enabled Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      AppFactory                              │
+│  ┌────────────────────┐         ┌────────────────────┐     │
+│  │  ModuleRegistry    │         │ ProviderRegistry   │     │
+│  │  - auto_discover() │         │ - auto_discover()  │     │
+│  │  - get_modules()   │         │ - get_providers()  │     │
+│  └────────────────────┘         └────────────────────┘     │
+│           │                               │                 │
+│           │  1. Resolve capabilities      │                 │
+│           │  from service classes         │                 │
+│           │                               │                 │
+│           │  2. Request providers ────────┤                 │
+│           │                               │                 │
+│           │  3. Instantiate modules ◄─────┤                 │
+│           │     with providers            │                 │
+└───────────┼───────────────────────────────┼─────────────────┘
+            │                               │
+            ▼                               ▼
+    ┌──────────────┐              ┌─────────────────┐
+    │    Module    │              │    Provider     │
+    │  __init__(   │              │  - capabilities │
+    │   providers) │              │  - verify_token │
+    └──────┬───────┘              └─────────────────┘
+           │                               ▲
+           │  4. Inject providers          │
+           ▼                               │
+    ┌──────────────┐                      │
+    │   Service    │                      │
+    │  __init__(   │──────────────────────┘
+    │   providers) │   5. Cache capability map
+    │              │      (fail-fast validation)
+    └──────────────┘
+```
+
+**Two-Phase Loading Process:**
+
+The AppFactory uses a two-phase loading pattern to resolve provider dependencies:
+
+1. **Phase 1 - Discovery**: Auto-discover module and provider classes (no instantiation)
+2. **Phase 2 - Static Analysis**: Use `ServiceInterface.capabilities()` classmethod to determine required capabilities
+3. **Phase 3 - Provider Loading**: Get provider instances matching required capabilities (lazy-loading with lifecycle hooks)
+4. **Phase 4 - Module Instantiation**: Create modules with providers injected via `Module.__init__(providers=...)`
+
+**Key Integration Points:**
+
+- **`ServiceInterface.capabilities()`**: Classmethod declaring required capabilities (e.g., `[CapabilitySpec(name="auth")]`)
+- **`ServiceInterface.__init__(providers=...)`**: Receives provider instances, validates at initialization (fail-fast)
+- **`ServiceInterface._get_capability_provider(name)`**: O(1) cached lookup for provider access
+- **`Module.__init__(providers=...)`**: Keyword-only parameter passes providers to service initialization
+
+**Example - AuthService with Provider:**
+
+```python
+class AuthService(ServiceInterface):
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="auth")]  # Requires auth capability
+
+    @property
+    def auth_provider(self) -> AuthCapability:
+        """Get auth capability provider (cached lookup)."""
+        provider = self._get_capability_provider("auth")
+        if not isinstance(provider, AuthCapability):
+            raise TypeError(f"Expected AuthCapability, got {type(provider).__name__}")
+        return provider
+
+    async def authenticate_google_user(self, id_token: str) -> TokenResponse:
+        # Use injected provider instead of direct Google API call
+        claims = await self.auth_provider.verify_token(id_token)
+        # ... rest of authentication logic
+```
+
+**Reference**: See `backend/docs/PROVIDER-SYSTEM.md` for complete provider implementation guide.
+
 ### Directory Structure
 
 ```
@@ -642,12 +816,25 @@ backend/src/trading_api/
 ### Module Lifecycle
 
 ```
-1. Discovery    → registry.auto_discover(modules_dir)
-2. Registration → registry.register(ModuleClass, "module_name")
-3. Loading      → registry.get_modules(["broker", "datafeed"])  # Filtering + lazy instantiation (None = all modules)
-4. App Wrapping → ModuleApp(module)  # Creates FastAPI apps per version
-5. Mounting     → main_app.mount(f"/api/{version}/{module.name}", api_app)
+1. Discovery              → registry.auto_discover(modules_dir)
+2. Registration           → registry.register(ModuleClass, "module_name")
+3. Capability Resolution  → factory._resolve_capabilities(enabled_modules)  # Static analysis
+4. Provider Discovery     → provider_registry.auto_discover()
+5. Provider Instantiation → provider_registry.get_providers(capabilities)  # Lazy-loading with lifecycle hooks
+6. Module Loading         → registry.get_modules(module_names, providers)  # Filtering + lazy instantiation with providers
+7. Service Validation     → service._resolve_capabilities()  # Fail-fast validation in each service
+8. App Wrapping           → ModuleApp(module)  # Creates FastAPI apps per version
+9. Mounting               → main_app.mount(f"/api/{version}/{module.name}", api_app)
 ```
+
+**Key Points:**
+
+- **Async Requirement**: Lifecycle requires `async` due to provider hooks (`Provider.on_startup()`, `Provider.on_shutdown()`)
+- **Two-Phase Loading**: Classes discovered before instances created (prevents circular dependencies)
+- **Fail-Fast Validation**: Services validate capabilities at initialization, not request time
+- **Lazy Provider Loading**: Providers instantiated only when first needed, with thread-safe locking
+
+**Reference**: See `backend/src/trading_api/app_factory.py` lines 139-191 for complete implementation.
 
 ### Module Implementation Example
 
@@ -940,6 +1127,239 @@ broker_all = registry.get_modules(["broker"])[0]
 ```
 
 **Reference:** See `backend/src/trading_api/shared/module_registry.py` for implementation details.
+
+---
+
+## Provider/Capability System
+
+The backend implements a **pluggable provider/capability system** for external integrations, enabling services to declare required capabilities (authentication, broker APIs, data feeds) and have matching provider implementations automatically injected at runtime.
+
+### Overview
+
+The provider system decouples service logic from external implementation details through:
+
+- **Capability Declarations**: Services use `capabilities()` classmethod to declare requirements
+- **Provider Auto-Discovery**: Providers discovered automatically from `providers/` directory
+- **Type-Safe Matching**: `CapabilitySpec` dataclass ensures capability matching correctness
+- **Dependency Injection**: AppFactory resolves and injects providers into modules/services
+- **Fail-Fast Validation**: Capability requirements validated at app startup, not request time
+
+**Reference**: See `backend/docs/PROVIDER-SYSTEM.md` for complete developer guide including step-by-step provider creation.
+
+### Core Concepts
+
+#### CapabilitySpec - Type-Safe Capability Declaration
+
+```python
+from trading_api.models.common import CapabilitySpec
+
+# Service declares: "I need any auth provider"
+req = CapabilitySpec(name="auth")
+
+# Provider declares: "I provide auth v1"
+prov = CapabilitySpec(name="auth", version="v1")
+
+# Matching: Does provider satisfy service requirement?
+req.matches(prov)  # True - version matches or not specified
+```
+
+**File**: `backend/src/trading_api/models/common.py`
+
+#### Provider ABC - Base Class for All Providers
+
+```python
+from trading_api.providers.base import Provider
+
+class MyProvider(Provider):
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        """What this provider offers"""
+        return [CapabilitySpec(name="auth")]
+
+    @property
+    def name(self) -> str:
+        """Provider identifier"""
+        return "myprovider"
+
+    # ... implement abstract methods (config, provider_dir)
+```
+
+**Convention**: `providers/{name}/__init__.py` exports `{Name}Provider` class (e.g., `GoogleProvider`)
+
+**File**: `backend/src/trading_api/providers/base.py`
+
+#### AuthCapability - Authentication Contract Interface
+
+```python
+from trading_api.providers.capabilities.auth import AuthCapability
+
+class MyProvider(Provider, AuthCapability):
+    async def verify_token(self, token: str) -> dict[str, Any]:
+        """Implement the auth capability"""
+        # Your verification logic
+        return {"sub": "user_id", "email": "user@example.com"}
+```
+
+**File**: `backend/src/trading_api/providers/capabilities/auth.py`
+
+### Integration Points
+
+#### AppFactory.\_resolve_capabilities() - Static Analysis
+
+```python
+def _resolve_capabilities(self, module_names: list[str] | None) -> list[CapabilitySpec]:
+    """Resolve required capabilities from module service classes.
+
+    [STATIC ANALYSIS]: No instances created, uses classmethods.
+    """
+    capabilities: set[CapabilitySpec] = set()
+
+    for module_name in module_names:
+        # Get service class (not instance)
+        service_class = module_class._service_class()
+
+        # Get capabilities (classmethod, no instance)
+        if hasattr(service_class, 'capabilities'):
+            capabilities.update(service_class.capabilities())
+
+    return list(capabilities)
+```
+
+**File**: `backend/src/trading_api/app_factory.py` lines 139-172
+
+#### ServiceInterface Methods
+
+**capabilities() - Classmethod Declaration**
+
+```python
+@classmethod
+@abstractmethod
+def capabilities(cls) -> list[CapabilitySpec]:
+    """Return required capabilities for this service.
+
+    Examples:
+        >>> AuthService.capabilities()
+        [CapabilitySpec(name="auth")]
+    """
+    ...
+```
+
+**\_get_capability_provider() - Cached Lookup**
+
+```python
+def _get_capability_provider(self, capability_name: str) -> "Provider":
+    """Get provider for specific capability (O(1) cached lookup).
+
+    [PERFORMANCE]: O(1) lookup after initialization.
+    """
+    provider = self._capability_map.get(capability_name)
+    if provider is None:
+        raise RuntimeError(f"Capability '{capability_name}' not initialized.")
+    return provider
+```
+
+**File**: `backend/src/trading_api/shared/service_interface.py` lines 15-110
+
+### Example - AuthService Using GoogleProvider
+
+**Service Declaration:**
+
+```python
+# modules/auth/service.py
+from trading_api.models.common import CapabilitySpec
+from trading_api.providers.capabilities.auth import AuthCapability
+
+class AuthService(ServiceInterface):
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="auth")]  # Requires auth capability
+
+    @property
+    def auth_provider(self) -> AuthCapability:
+        """Get auth capability provider (cached, type-safe lookup)."""
+        provider = self._get_capability_provider("auth")
+
+        # Type narrowing
+        if not isinstance(provider, AuthCapability):
+            raise TypeError(f"Expected AuthCapability, got {type(provider).__name__}")
+
+        return provider
+
+    async def authenticate_google_user(self, id_token: str) -> TokenResponse:
+        # Use injected provider instead of direct Google API call
+        claims = await self.auth_provider.verify_token(id_token)
+
+        # Extract user info from claims
+        google_id = claims["sub"]
+        email = claims["email"]
+        # ... rest of authentication logic
+```
+
+**Provider Implementation:**
+
+```python
+# providers/google/__init__.py
+from trading_api.providers.base import Provider
+from trading_api.providers.capabilities.auth import AuthCapability
+
+class GoogleProvider(Provider, AuthCapability):
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="auth")]
+
+    async def verify_token(self, token: str) -> dict[str, Any]:
+        # Verify Google ID token via tokeninfo endpoint
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://www.googleapis.com/oauth2/v3/tokeninfo",
+                params={"id_token": token}
+            )
+
+            if resp.status_code != 200:
+                raise AuthenticationError(f"Invalid Google token: {resp.text}")
+
+            claims = resp.json()
+
+            # Validate audience and email
+            if claims.get("aud") != self.config.client_id:
+                raise AuthenticationError("Invalid token audience")
+
+            return claims
+```
+
+### File Locations
+
+**Provider Infrastructure:**
+
+- **Provider Base**: `backend/src/trading_api/providers/base.py`
+- **Provider Registry**: `backend/src/trading_api/providers/registry.py`
+- **Auth Capability**: `backend/src/trading_api/providers/capabilities/auth.py`
+
+**Provider Implementations:**
+
+- **GoogleProvider**: `backend/src/trading_api/providers/google/__init__.py`
+- **Future Providers**: `providers/local/`, `providers/ibkr/`, etc.
+
+**Models & Configuration:**
+
+- **Shared Models**: `backend/src/trading_api/models/common.py` (CapabilitySpec, ProviderConfig, exceptions)
+- **Provider Configs**: `backend/src/trading_api/models/providers/google_oauth_configs.py` (GoogleProviderConfig, etc.)
+
+**Integration:**
+
+- **AppFactory**: `backend/src/trading_api/app_factory.py` (two-phase loading, capability resolution)
+- **ServiceInterface**: `backend/src/trading_api/shared/service_interface.py` (provider resolution, cached lookup)
+- **Module Interface**: `backend/src/trading_api/shared/module_interface.py` (providers parameter)
+
+### Benefits
+
+- ✅ **Easy Provider Addition**: Follow naming convention, auto-discovered
+- ✅ **Test with Mocks**: Inject mock providers in tests (no external API calls)
+- ✅ **Clean Separation**: Service logic vs provider implementation decoupled
+- ✅ **Type-Safe**: Strict MyPy validation, compile-time error detection
+- ✅ **Fail-Fast**: Capability mismatches caught at app startup
+- ✅ **Performance**: O(1) provider lookup via cached capability map
+- ✅ **Future-Ready**: Architecture supports broker/datafeed providers
 
 ---
 

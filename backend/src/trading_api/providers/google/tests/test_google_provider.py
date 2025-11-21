@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from trading_api.models.auth.provider_configs import GoogleProviderConfig
 from trading_api.models.common import AuthenticationError, CapabilitySpec
+from trading_api.models.providers.google_oauth_configs import GoogleProviderConfig
 from trading_api.providers.google import GoogleProvider
 
 

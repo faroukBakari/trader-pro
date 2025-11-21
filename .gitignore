@@ -210,3 +210,4 @@ Thumbs.db
 .playwright-mcp*
 tmp/
 **/archive/
+.cursor

@@ -9,6 +9,7 @@ For comprehensive project documentation, see the [root README](../README.md) and
 ### Backend-Specific Documentation
 
 - [Modular Architecture](docs/MODULAR_BACKEND_ARCHITECTURE.md) - Module system and ABC patterns
+- [Provider System](docs/PROVIDER-SYSTEM.md) - Pluggable provider/capability system for external integrations
 - [Backend Manager Guide](docs/BACKEND_MANAGER_GUIDE.md) - Multi-process deployment
 - [Backend Testing](docs/BACKEND_TESTING.md) - Testing strategy and module isolation
 - [WebSockets](docs/BACKEND_WEBSOCKETS.md) - FastWS integration
@@ -21,6 +22,7 @@ For comprehensive project documentation, see the [root README](../README.md) and
 The backend implements a **modular factory-based architecture** with these key patterns:
 
 - **Module ABC Pattern**: All feature modules (auth, broker, datafeed) extend the `Module` abstract base class
+- **Pluggable Provider System**: Capability-based dependency injection for external integrations (auth, future: broker/datafeed)
 - **Application Factory**: Dynamic composition via `create_app()` with selective module loading
 - **Multi-Process Deployment**: Production mode runs modules in separate processes with nginx gateway
 - **Module Registry**: Centralized management with auto-discovery

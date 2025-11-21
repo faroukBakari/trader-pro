@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-import httpx
 from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException
 from jose import jwt
@@ -24,6 +23,7 @@ from trading_api.modules.auth.repository import (
     RefreshTokenRepositoryInterface,
     UserRepositoryInterface,
 )
+from trading_api.providers.capabilities.auth import AuthCapability
 from trading_api.shared import settings
 from trading_api.shared.service_interface import ServiceInterface
 
@@ -82,7 +82,7 @@ class AuthService(AuthServiceInterface, ServiceInterface):
         self._oauth: OAuth | None = None
 
     @property
-    def auth_provider(self) -> Any:  # Return type will be AuthCapability
+    def auth_provider(self) -> AuthCapability:  # Return type will be AuthCapability
         """Get auth capability provider.
 
         Returns:
@@ -91,7 +91,6 @@ class AuthService(AuthServiceInterface, ServiceInterface):
         Raises:
             TypeError: If provider doesn't implement AuthCapability
         """
-        from trading_api.providers.capabilities.auth import AuthCapability
 
         provider = self._get_capability_provider("auth")
 
@@ -123,38 +122,15 @@ class AuthService(AuthServiceInterface, ServiceInterface):
             This method will be removed in a future version.
         """
         try:
-            # Use Google's tokeninfo endpoint to verify the token
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    "https://www.googleapis.com/oauth2/v3/tokeninfo",
-                    params={"id_token": id_token},
-                )
-
-                if resp.status_code != 200:
-                    raise HTTPException(
-                        status_code=401, detail=f"Invalid Google token: {resp.text}"
-                    )
-
-                claims: dict[str, Any] = resp.json()
-
-                # Verify audience
-                if claims.get("aud") != settings.GOOGLE_CLIENT_ID:
-                    raise HTTPException(
-                        status_code=401, detail="Invalid token audience"
-                    )
-
-                # Verify email is verified
-                email_verified = claims.get("email_verified")
-                # Google returns string "true" or boolean True
-                if email_verified not in (True, "true"):
-                    raise HTTPException(
-                        status_code=401, detail="Email not verified by Google"
-                    )
-
-                return claims
-        except HTTPException:
-            raise
+            # Delegate to auth provider (refactored to use provider pattern)
+            claims = await self.auth_provider.verify_token(id_token)
+            return claims
         except Exception as e:
+            # Convert provider exceptions to HTTPException for backward compatibility
+            from trading_api.models.common import AuthenticationError
+
+            if isinstance(e, AuthenticationError):
+                raise HTTPException(status_code=401, detail=str(e))
             raise HTTPException(
                 status_code=500, detail=f"Token verification error: {str(e)}"
             )
