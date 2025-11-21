@@ -23,6 +23,16 @@ BOUNDARY_RULES = {
         "forbidden_patterns": ["trading_api.modules.*"],
         "description": "Providers can import models, config, and other providers, but not modules",
     },
+    "shared/tests/*": {
+        "allowed_patterns": [
+            "trading_api.models.*",
+            "trading_api.shared.*",
+            "trading_api.providers.*",  # Tests can import concrete providers for DI
+            "trading_api.app_factory",
+        ],
+        "forbidden_patterns": ["trading_api.modules.*"],  # Block cross-module imports
+        "description": "Shared tests can import providers for testing dependency injection, but not modules",
+    },
     "shared/*": {
         "allowed_patterns": [
             "trading_api.models.*",

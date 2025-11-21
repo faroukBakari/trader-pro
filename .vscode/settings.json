@@ -15,5 +15,8 @@
         "editor.defaultFormatter": "ms-python.black-formatter"
     },
     "python.analysis.autoImportCompletions": true,
+    "python.analysis.diagnosticSeverityOverrides": {
+        "reportCallIssue": "none"
+    },
     "isort.args": ["--profile", "black"],
 }

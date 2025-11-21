@@ -48,8 +48,8 @@ class ProviderRegistry:
             if not provider_path.is_dir() or provider_path.name.startswith("_"):
                 continue
 
-            # Skip capabilities/ subdirectory
-            if provider_path.name == "capabilities":
+            # Skip capabilities/ and tests/ subdirectories
+            if provider_path.name in ("capabilities", "tests"):
                 continue
 
             provider_name = provider_path.name

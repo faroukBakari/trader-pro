@@ -5,8 +5,8 @@ from typing import Any
 
 import httpx
 
-from trading_api.models.auth.provider_configs import GoogleProviderConfig
 from trading_api.models.common import AuthenticationError, CapabilitySpec
+from trading_api.models.providers.google_oauth_configs import GoogleProviderConfig
 from trading_api.providers.base import Provider
 from trading_api.providers.capabilities.auth import AuthCapability
 
