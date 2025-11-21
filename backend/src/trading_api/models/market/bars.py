@@ -5,9 +5,25 @@ This module contains models related to OHLC bars,
 historical data requests, and responses.
 """
 
+from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
+
+
+class TimeFrame(str, Enum):
+    """Timeframe enum for bars and historical data."""
+
+    SEC_5 = "5"
+    SEC_10 = "10"
+    MIN_1 = "1"
+    MIN_5 = "5"
+    MIN_15 = "15"
+    MIN_30 = "30"
+    HOUR_1 = "60"
+    DAY_1 = "1D"
+    WEEK_1 = "1W"
+    MONTH_1 = "1M"
 
 
 class Bar(BaseModel):
@@ -49,7 +65,9 @@ class BarsSubscriptionRequest(BaseModel):
 
 
 __all__ = [
+    "TimeFrame",
     "Bar",
     "GetBarsRequest",
     "GetBarsResponse",
+    "BarsSubscriptionRequest",
 ]

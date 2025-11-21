@@ -18,5 +18,10 @@
     "python.analysis.diagnosticSeverityOverrides": {
         "reportCallIssue": "none"
     },
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/backend/external_packages/tws/source/pythonclient",
+        "${workspaceFolder}/backend/external_packages",
+        "${workspaceFolder}/backend/stubs"
+    ],
     "isort.args": ["--profile", "black"],
 }

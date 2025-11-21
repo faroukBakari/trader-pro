@@ -15,7 +15,7 @@ class GoogleProviderConfig(BaseSettings):
     """
 
     enabled: bool = True
-    client_id: str
+    client_id: str = ""  # Required at runtime, optional during code generation
 
     model_config = SettingsConfigDict(
         env_prefix="GOOGLE_",
