@@ -16,7 +16,7 @@ else
 endif
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws validate-tws $(addprefix test-module-, $(DISCOVERED_MODULES))
 
 # Default target
 help:
@@ -46,6 +46,10 @@ help:
 	@echo "  clean-cache       Remove Python caches (__pycache__, .pytest_cache, etc.)"
 	@echo "  clean-coverage    Remove coverage files (.coverage, coverage.xml, htmlcov/)"
 	@echo "  clean-generated   Remove all generated files (*_generated*)"
+	@echo ""
+	@echo "TWS API targets:"
+	@echo "  install-tws       Install TWS API and protobuf dependencies"
+	@echo "  validate-tws      Validate TWS API installation"
 	@echo ""
 	@echo "Development targets:"
 	@echo "  dev               Start backend development server with debugpy"
@@ -720,6 +724,34 @@ logs-clean:
 	else \
 		echo "✅ No log directory found (nothing to clean)"; \
 	fi
+
+# TWS API Installation & Validation
+.PHONY: install-tws validate-tws
+
+install-tws: ## Install TWS API and protobuf dependencies
+	@echo "Installing TWS API from local package..."
+	@echo ""
+	@echo "[1/2] Adding TWS API to dependencies..."
+	@if ! grep -q 'ibapi.*=.*{path.*=.*"external_packages/tws' pyproject.toml; then \
+		echo "Adding ibapi to pyproject.toml..."; \
+		sed -i '/\[tool.poetry.dependencies\]/a ibapi = {path = "external_packages/tws/source/pythonclient", develop = true}' pyproject.toml; \
+		sed -i '/\[tool.poetry.dependencies\]/a protobuf = "5.29.3"' pyproject.toml; \
+		echo "✓ Dependencies added to pyproject.toml"; \
+	else \
+		echo "✓ TWS API already in pyproject.toml"; \
+	fi
+	@echo ""
+	@echo "[2/2] Installing dependencies..."
+	@poetry lock
+	@poetry install
+	@echo ""
+	@echo "✅ TWS API installation complete!"
+	@echo ""
+	@$(MAKE) validate-tws
+
+validate-tws: ## Validate TWS API installation
+	@echo "Validating TWS API installation..."
+	@poetry run python scripts/validate_tws_install.py
 
 # JWT Key Pair Management
 SECRETS_DIR := .local/secrets

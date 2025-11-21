@@ -66,8 +66,8 @@ __all__ = [
 # Provider/Capability System Models
 # ==============================================================================
 
-# Capability name for auth (future: "broker", "datafeed", etc.)
-CapabilityName = Literal["auth"]
+# Capability name for auth, datafeed (future: "broker", etc.)
+CapabilityName = Literal["auth", "datafeed"]
 
 
 @dataclass(frozen=True)
@@ -105,7 +105,7 @@ class CapabilitySpec:
         """
         # Name must match exactly
         if self.name != provider_capability.name:
-            return False  # type: ignore[unreachable]
+            return False
 
         # If no version specified, accept any provider version
         if self.version is None:
