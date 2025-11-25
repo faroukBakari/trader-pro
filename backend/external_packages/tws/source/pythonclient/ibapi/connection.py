@@ -8,13 +8,13 @@ Just a thin wrapper around a socket.
 It allows us to keep some other info along with it.
 """
 
-import socket
-import threading
 import logging
+import socket
 import sys
-from ibapi.errors import FAIL_CREATE_SOCK
-from ibapi.errors import CONNECT_FAIL
+import threading
+
 from ibapi.const import NO_VALID_ID
+from ibapi.errors import CONNECT_FAIL, FAIL_CREATE_SOCK
 from ibapi.utils import currentTimeMillis
 
 # TODO: support SSL !!
@@ -26,7 +26,7 @@ class Connection:
     def __init__(self, host, port):
         self.host = host
         self.port = port
-        self.socket = None
+        self.socket = socket.socket()
         self.wrapper = None
         self.lock = threading.Lock()
 
@@ -37,16 +37,24 @@ class Connection:
         except socket.error:
             if self.wrapper:
                 self.wrapper.error(
-                    NO_VALID_ID, currentTimeMillis(), FAIL_CREATE_SOCK.code(), FAIL_CREATE_SOCK.msg()
+                    NO_VALID_ID,
+                    currentTimeMillis(),
+                    FAIL_CREATE_SOCK.code(),
+                    FAIL_CREATE_SOCK.msg(),
                 )
 
         try:
+            assert self.socket is not None, "Socket is None"
             self.socket.connect((self.host, self.port))
+            self.socket.settimeout(1)  # non-blocking
         except socket.error:
             if self.wrapper:
-                self.wrapper.error(NO_VALID_ID, currentTimeMillis(), CONNECT_FAIL.code(), CONNECT_FAIL.msg())
-
-        self.socket.settimeout(1)  # non-blocking
+                self.wrapper.error(
+                    NO_VALID_ID,
+                    currentTimeMillis(),
+                    CONNECT_FAIL.code(),
+                    CONNECT_FAIL.msg(),
+                )
 
     def disconnect(self):
         self.lock.acquire()
@@ -54,7 +62,6 @@ class Connection:
             if self.socket is not None:
                 logger.debug("disconnecting")
                 self.socket.close()
-                self.socket = None
                 logger.debug("disconnected")
                 if self.wrapper:
                     self.wrapper.connectionClosed()
@@ -102,12 +109,11 @@ class Connection:
             buf = b""
         except socket.error:
             logger.debug("socket broken, disconnecting")
-            self.disconnect()
+            try:
+                self.disconnect()
+            except Exception:
+                logger.debug("Socket is broken or closed.")
             buf = b""
-        except OSError:
-            # Thrown if the socket was closed (ex: disconnected at end of script)
-            # while waiting for self.socket.recv() to timeout.
-            logger.debug("Socket is broken or closed.")
 
         return buf
 

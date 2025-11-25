@@ -705,37 +705,6 @@ class ThrottledApp(EWrapper, EClient):
         return request_func(*args, **kwargs)
 ```
 
-### 6.6 Clean Shutdown
-
-**[PATTERN]** Graceful shutdown sequence:
-
-```python
-def shutdown(app):
-    """Graceful shutdown"""
-    print("Shutting down...")
-
-    # Cancel all active subscriptions
-    app.cancelMktData(1)
-    app.cancelMktDepth(2)
-
-    # Wait for pending messages
-    time.sleep(1)
-
-    # Disconnect
-    app.disconnect()
-
-    # Wait for threads
-    time.sleep(1)
-
-    print("Shutdown complete")
-
-# Register signal handler
-import signal
-signal.signal(signal.SIGINT, lambda sig, frame: shutdown(app))
-```
-
----
-
 ## 📋 Quick Reference Cards
 
 ### Connection Error Codes & Solutions

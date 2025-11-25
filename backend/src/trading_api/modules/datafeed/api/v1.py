@@ -74,7 +74,7 @@ class DatafeedApi(APIRouterInterface):
             """
 
             try:
-                results = self.service.search_symbols(
+                results = await self.service.search_symbols(
                     user_input=user_input,
                     exchange=exchange,
                     symbol_type=symbol_type,
@@ -141,7 +141,7 @@ class DatafeedApi(APIRouterInterface):
             - **count_back**: Number of bars to count back (optional)
             """
             try:
-                bars = self.service.get_bars(
+                bars = await self.service.get_bars(
                     symbol=symbol,
                     resolution=resolution,
                     from_time=from_time,

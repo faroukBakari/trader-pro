@@ -65,9 +65,6 @@ async def main_async() -> None:
 
         print(f"✅ Successfully generated for {module_name}")
 
-        # Cleanup: shutdown providers
-        await provider_registry.shutdown()
-
     except Exception as e:
         print(f"❌ Failed for {module_name}: {e}", file=sys.stderr)
         import traceback

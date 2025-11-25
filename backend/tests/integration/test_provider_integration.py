@@ -54,7 +54,7 @@ async def test_auth_service_uses_provider():
     # Should be AuthCapability instance
     from trading_api.providers.capabilities.auth import AuthCapability
 
-    assert isinstance(auth_service.auth_provider, AuthCapability)
+    assert isinstance(auth_service.get_capability_provider("auth"), AuthCapability)
 
 
 @pytest.mark.asyncio
@@ -86,8 +86,3 @@ async def test_provider_lifecycle_hooks():
 
     # Verify provider instance was created
     assert "google" in factory.provider_registry._instances
-
-    # Shutdown should call on_shutdown hooks
-    await factory.provider_registry.shutdown()
-    # No assertions here - just verify no exceptions
-    # No assertions here - just verify no exceptions

@@ -5,32 +5,34 @@ Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is su
 This module has tools for implementing the IB low level messaging.
 """
 
-import struct
 import logging
+import struct
 import sys
 
-from ibapi.const import UNSET_INTEGER, UNSET_DOUBLE, DOUBLE_INFINITY, INFINITY_STR
-from ibapi.utils import ClientException
-from ibapi.utils import isAsciiPrintable
+from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.errors import INVALID_SYMBOL
+from ibapi.utils import ClientException, isAsciiPrintable
 
 logger = logging.getLogger(__name__)
 
+
 def make_msg_proto(msgId: int, protobufData: bytes) -> bytes:
     """adds the length prefix"""
-    byteArray = msgId.to_bytes(4, 'big') + protobufData
+    byteArray = msgId.to_bytes(4, "big") + protobufData
     msg = struct.pack(f"!I{len(byteArray)}s", len(byteArray), byteArray)
     return msg
 
-def make_msg(msgId:int, useRawIntMsgId: bool, text: str) -> bytes:
+
+def make_msg(msgId: int, useRawIntMsgId: bool, text: str) -> bytes:
     """adds the length prefix"""
     if useRawIntMsgId:
-        text = msgId.to_bytes(4, 'big') + str.encode(text)
+        buff = msgId.to_bytes(4, "big") + str.encode(text)
     else:
-        text = str.encode(make_field(msgId) + text)
+        buff = str.encode(make_field(msgId) + text)
 
-    msg = struct.pack(f"!I{len(text)}s", len(text), text)
+    msg = struct.pack(f"!I{len(buff)}s", len(buff), buff)
     return msg
+
 
 def make_initial_msg(text: str) -> bytes:
     """adds the length prefix"""
@@ -93,7 +95,7 @@ def read_fields(buf: bytes) -> tuple:
         buf = buf.encode()
 
     """ msg payload is made of fields terminated/separated by NULL chars """
-    fields = buf.split(b"\0")
+    fields = bytes(buf).split(b"\0")
 
     return tuple(
         fields[0:-1]

@@ -1,9 +1,10 @@
 """Pure TWS protocol - synchronous callbacks with zero-copy dispatch.
 
 Layer 1 of TWS integration:
-- Extends EWrapper (callbacks) and EClient (requests)
+- Pure EWrapper implementation (callbacks only)
 - Zero-copy callback dispatch (< 2µs latency target)
-- Thread-safe request ID generation
+- No connection management (handled by TWSProvider)
+- No request ID generation (handled by TWSProvider)
 - No AsyncIO - pure sync callbacks in TWS reader thread
 - Signals end-of-stream with None parameter
 - Passes Exception objects directly (no re-wrapping)
@@ -12,194 +13,356 @@ Performance Design:
 - Callback dispatch: Direct dict lookup + function call
 - No data copying: Pass TWS objects by reference
 - No string operations: Use None for end signals
-- Minimal locking: Only for request ID generation
+
+Architecture:
+- Pure EWrapper inheritance (no EClient)
+- Callback registry for request-based dispatch
+- Used via composition by TWSProvider
 """
 
+import asyncio
 import logging
+import queue
 import threading
+import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Callable
+from socket import error as socketError
+from socket import socket
+from socket import timeout as socketTimeout
+from typing import Any
 
-from ibapi.client import EClient
-from ibapi.reader import EReader
+from ibapi.common import *
+from ibapi.contract import ContractDescription
+from ibapi.decoder import Decoder
+from ibapi.errors import CONNECT_FAIL, FAIL_CREATE_SOCK
+from ibapi.message import OUT
+from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.wrapper import EWrapper
 
 logger = logging.getLogger(__name__)
 
 
-class TWSConnection(EWrapper, EClient):
-    """Pure TWS protocol - synchronous callbacks with zero-copy dispatch.
+NO_VALID_ID = -1
+MIN_CLIENT_VER = 100
+MAX_CLIENT_VER = 203
+PROTOBUF_MSG_ID = 200
+VERSION = 2
 
-    Performance targets:
-    - Callback dispatch: < 2 µs (dict lookup + call)
-    - Data copying: Zero-copy (pass by reference)
-    - String operations: None (use None for end signals)
 
-    Thread Safety:
-    - Callbacks execute in TWS reader thread
-    - Request ID generation uses lock
-    - Callback registry accessed from both threads (dict is thread-safe for reads)
-    """
+def make_fields(values: list) -> bytes:
+    return b"".join(str(v).encode() + b"\0" for v in values)
 
-    def __init__(self) -> None:
-        """Initialize TWSConnection."""
-        EClient.__init__(self, self)
-        self.callbacks: dict[int, Callable] = {}  # Direct callback registry
-        self.next_req_id = 1
-        self._req_id_lock = threading.Lock()  # Only for ID generation
-        self.is_ready = threading.Event()  # Connection state
 
-    def get_req_id(self) -> int:
-        """Thread-safe request ID generation.
+def decode_data(buf: bytes, buf_siz: int) -> tuple[int, bytes, bytes, int]:
+    msg_size = int.from_bytes(buf[:4], byteorder="big")
+    if msg_size <= buf_siz - 4:
+        logger.debug("received length: %d", msg_size)
+        remaining_buff = buf[4 + msg_size :]
+        buf_siz -= 4 + msg_size
+        assert len(remaining_buff) == buf_siz, "Buffer size mismatch after decoding."
+        return (
+            int.from_bytes(buf[4:8], "big"),
+            # [chunk for chunk in buf[8 : 4 + msg_size].split(b"\0")],
+            buf[8 : 4 + msg_size],
+            remaining_buff,
+            buf_siz,
+        )
+    else:
+        return -1, b"", buf, buf_siz
 
-        Returns:
-            Unique request ID for TWS API calls
-        """
-        with self._req_id_lock:
-            req_id = self.next_req_id
-            self.next_req_id += 1
-            return req_id
 
-    def connect_and_run(
-        self, host: str = "127.0.0.1", port: int = 7497, client_id: int = 1
+class IBSocket:
+    def __init__(
+        self, host: str, port: int, client_id: int, block_interval: float = 1
     ) -> None:
-        """Connect and start message loop (blocking - must run in thread).
+        self._host = host
+        self._port = port
+        self._client_id = client_id
+        self._block_interval = block_interval
+        self._server_version: int = 203
+        self.connection_time: str = ""
+        self._socket = socket()
+        self._lock = threading.Lock()
 
-        Args:
-            host: TWS/Gateway hostname
-            port: TWS/Gateway port
-            client_id: Client ID (1-32)
+    @property
+    def server_version(self) -> int:
+        return self._server_version
+
+    def connect(self, soc: socket | None = None) -> None:
+        with self._lock:
+            while True:
+                try:
+                    self._socket = soc or socket()
+                # TODO: list the exceptions you want to catch
+                except socketError:
+                    logger.error(
+                        NO_VALID_ID,
+                        round(time.time() * 1000),
+                        FAIL_CREATE_SOCK.code(),
+                        FAIL_CREATE_SOCK.msg(),
+                    )
+
+                try:
+                    self._socket.connect((self._host, self._port))
+                    self._socket.settimeout(self._block_interval)
+                    break
+                except socketError:
+                    logger.error(
+                        NO_VALID_ID,
+                        round(time.time() * 1000),
+                        CONNECT_FAIL.code(),
+                        CONNECT_FAIL.msg(),
+                    )
+                    time.sleep(1)
+            connected = self.isConnected()
+            assert connected, "Socket connection failed."
+            logger.info(f"Socket connected: {connected}: {self._socket.getpeername()}")
+
+            # Send initial handshake message
+            v100prefix = "API\0"
+            msg_prefix = str.encode(v100prefix, "ascii")
+            v100version = "v%d..%d" % (MIN_CLIENT_VER, MAX_CLIENT_VER)
+            msg_content = len(v100version).to_bytes(4, "big") + v100version.encode()
+            message = msg_prefix + msg_content
+            self._socket.sendall(message)
+            logger.debug("Sent initial message: %s", message)
+            data = self._socket.recv(4096)
+            buf_size = len(data)
+            msg_size = int.from_bytes(data[:4], byteorder="big")
+            logger.debug("received length: %d", msg_size)
+            assert (
+                msg_size <= buf_size - 4
+            ), f"Initial read buffer size exceeds message size: {buf_size}"
+            fields = [chunk for chunk in data[4 : 4 + msg_size].split(b"\0") if chunk]
+            assert len(fields) == 2, "Expected at two fields in handshake message."
+            server_version, self.connection_time = [
+                msg.decode("ascii") for msg in fields
+            ]
+            self._server_version = int(server_version)
+            logger.debug(
+                f"Server version: {self.server_version}, Connection time: {self.connection_time}"
+            )
+            text = make_fields([VERSION, self._client_id, ""])
+            msg2 = (
+                (len(text) + 4).to_bytes(4, "big")
+                + OUT.START_API.to_bytes(4, "big")
+                + text
+            )
+            self._socket.sendall(msg2)
+            connected = self.isConnected()
+            assert connected, "Socket connection failed."
+            logger.info("IBSocket connection successfully.")
+
+    def isConnected(self):
+        return (
+            self._socket is not None
+            and self._socket.fileno() != -1
+            and self._socket.getpeername() is not None
+        )
+
+    def disconnect(self):
+        with self._lock:
+            if self.isConnected():
+                self._socket.close()
+                logger.info("IBSocket Socket disconnected.")
+
+    def send_message(self, msgId: int, values: list[object]):
+        text = make_fields(values)
+        msg2 = (len(text) + 4).to_bytes(4, "big") + msgId.to_bytes(4, "big") + text
+        logger.debug(f"Sending message: {msg2.decode('ascii', errors='ignore')}")
+        assert self.isConnected(), "Socket is not connected."
+        with self._lock:
+            self._socket.sendall(msg2)
+
+    def receive_data(
+        self, read_buf: bytes = b"", buf_siz: int = 0
+    ) -> tuple[int, bytes, bytes, int]:
+        chunks = [read_buf]
+        assert self.isConnected() is not None, "Socket is not connected."
+        new_data_received = False
+        while True:
+            try:
+                data = self._socket.recv(4096)
+                assert data, "Socket connection closed."
+                chunks.append(data)
+                receiv_siz = len(data)
+                buf_siz += receiv_siz
+                new_data_received = True
+                if receiv_siz < 4096:
+                    break
+            except socketTimeout:
+                # No more data available right now
+                break
+
+        if new_data_received:
+            read_buf = b"".join([chunk for chunk in chunks if chunk])
+            logger.debug(
+                f"Final received data: <{read_buf.decode('ascii', errors='ignore')}>"
+            )
+        return decode_data(read_buf, buf_siz)
+
+
+@dataclass
+class TWSError(Exception):
+    """TWS API Error with structured error details."""
+
+    reqId: int
+    errorCode: int
+    errorString: str
+    errorTime: int = 0
+    advancedOrderRejectJson: str = ""
+
+    def __str__(self) -> str:
+        return f"TWS error {self.errorCode} (reqId={self.reqId}): {self.errorString}"
+
+
+class TWSClientHelper(EWrapper):
+    """ """
+
+    def __init__(
+        self,
+        ibsocket: IBSocket,
+        client_thread: threading.Thread | None = None,
+        running: threading.Event | None = None,
+        loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
+        """Initialize IBSocket (pure callback handler).
+
+        Note: No EClient instance - caller must provide via composition.
+        """
+        self._ibsocket = ibsocket
+        self._loop = loop or asyncio.get_event_loop()
+        self._running = running or threading.Event()
+        self._client_thread = client_thread or threading.Thread(
+            target=self._client_loop, daemon=True
+        )
+        self._client_thread.start()
+        self._next_req_id = 0
+        self._futures: dict[int, asyncio.Future] = {}
+
+    def __del__(self) -> None:
+        """Destructor to ensure clean shutdown."""
+        self.disconnect()
+
+    @property
+    def curr_req_id(self) -> int:
+        return self._next_req_id
+
+    @property
+    def loop(self) -> asyncio.AbstractEventLoop:
+        return self._loop
+
+    @property
+    def running(self) -> threading.Event:
+        return self._running
+
+    @property
+    def client_thread(self) -> threading.Thread:
+        return self._client_thread
+
+    @property
+    def next_req_id(self) -> int:
+        current_req_id = self._next_req_id
+        self._next_req_id += 1
+        return current_req_id
+
+    def connect(self) -> threading.Thread:
+        """Connect to TWS via IBSocket."""
+        if not self._client_thread.is_alive():
+            logger.info("Starting TWSClient reader thread.")
+            self._client_thread = threading.Thread(
+                target=self._client_loop, daemon=True
+            )
+            self._client_thread.start()
+        return self._client_thread
+
+    def disconnect(self) -> None:
+        """Destructor to ensure clean shutdown."""
+        self._running.clear()
+        self._client_thread.join(timeout=2)
+        self._ibsocket.disconnect()
+
+    def _client_loop(self) -> None:
+        """TWS reader loop - to be run in a separate thread.
 
         Note:
-            This method blocks until disconnect - must be run in a separate thread.
+            This method should be called in a dedicated thread to continuously
+            read messages from the TWSClient connection and dispatch them to
+            the appropriate EWrapper callback methods.
         """
-        self.connect(host, port, client_id)
-        reader = EReader(self.conn, self.msg_queue)
-        reader.start()
-        self.run()  # Blocks until disconnect
+        self._running.set()
+        while self._running.is_set():
+            try:
+                self._ibsocket.connect()
+                decoder = Decoder(self, self._ibsocket.server_version)
+                logger.info("TWSClient reader loop started.")
+                buf = b""
+                buf_siz = 0
+                while self._ibsocket.isConnected() and self._running.is_set():
+                    try:
+                        msgId, data, buf, buf_siz = self._ibsocket.receive_data(
+                            buf, buf_siz
+                        )
+                        if msgId == -1:
+                            continue
 
-    def nextValidId(self, orderId: int) -> None:
-        """Connection ready callback - called by TWS after successful connection.
+                        logger.debug(
+                            f"Dispatching message ID: {msgId} with fields: {data.decode('ascii', errors='ignore')}"
+                        )
+                        if msgId > PROTOBUF_MSG_ID:
+                            msgId -= PROTOBUF_MSG_ID
+                            logger.debug("msgId: %d, protobuf: %s", msgId, data)
+                            decoder.processProtoBuf(data, msgId)
+                        else:
+                            fields = [chunk for chunk in data.split(b"\0")]
+                            logger.debug("msgId: %d, fields: %s", msgId, fields)
+                            # Remove trailing empty field
+                            decoder.interpret(fields[:-1], msgId)
+                    except Exception as e:
+                        logger.debug(f"Exception in TWSClient reader loop: {e}")
+                        time.sleep(0.5)
+            except Exception as e:
+                logger.debug(f"Exception in TWSClient client loop: {e}")
+                time.sleep(0.5)
+        logger.info("TWSClient reader loop finished.")
 
-        Args:
-            orderId: Next valid order ID from TWS
-        """
-        self.next_req_id = orderId
-        self.is_ready.set()
-        logger.info(f"TWS connected - next valid ID: {orderId}")
+    def _resolve_future(self, reqId: int, result) -> None:
+        """Helper to resolve a future in the asyncio loop."""
+        assert reqId in self._futures, f"Unknown reqId {reqId} in _resolve_future."
+        future = self._futures.pop(reqId)
+        if not future.done():
+            self._loop.call_soon_threadsafe(future.set_result, result)
 
-    # === Market Data Callbacks (Zero-Copy Dispatch) ===
+    def _reject_future(self, reqId: int, exception: Exception) -> None:
+        """Helper to reject a future with an exception in the asyncio loop."""
+        assert reqId in self._futures, f"Unknown reqId {reqId} in _resolve_future."
+        future = self._futures.pop(reqId)
+        if not future.done():
+            self._loop.call_soon_threadsafe(future.set_exception, exception)
 
-    def symbolSamples(self, reqId: int, contractDescriptions: Sequence[Any]) -> None:
-        """Single-response pattern - complete list of matching symbols.
+    # === symbolSamples ===
 
-        Args:
-            reqId: Request ID
-            contractDescriptions: List of ContractDescription objects
-        """
-        if cb := self.callbacks.get(reqId):
-            cb(contractDescriptions)  # Pass by reference - no copy
+    def symbolSamples(
+        self, reqId: int, contractDescriptions: list[ContractDescription]
+    ):
+        self._resolve_future(reqId, contractDescriptions)
 
-    def contractDetails(self, reqId: int, contractDetails: Any) -> None:
-        """Multi-response pattern - called once per contract.
+    async def reqMatchingSymbols(self, pattern: str) -> list[ContractDescription]:
+        reqId = self.next_req_id
+        # Create a future attached to the current running loop
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[list[ContractDescription]] = loop.create_future()
+        self._futures[reqId] = future
+        self._ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
+        logger.debug(
+            f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'"
+        )
+        contractDescriptions = await future
+        return contractDescriptions
 
-        Args:
-            reqId: Request ID
-            contractDetails: ContractDetails object
-        """
-        if cb := self.callbacks.get(reqId):
-            cb(contractDetails)  # Called multiple times
-
-    def contractDetailsEnd(self, reqId: int) -> None:
-        """End-of-stream signal for contractDetails.
-
-        Args:
-            reqId: Request ID
-        """
-        if cb := self.callbacks.get(reqId):
-            cb(None)  # Signal completion with None
-
-    def historicalData(self, reqId: int, bar: Any) -> None:
-        """Multi-response pattern - called once per historical bar.
-
-        Args:
-            reqId: Request ID
-            bar: BarData object
-        """
-        if cb := self.callbacks.get(reqId):
-            cb(bar)  # Pass TWS BarData by reference
-
-    def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
-        """End-of-stream signal for historicalData.
-
-        Args:
-            reqId: Request ID
-            start: Start date string
-            end: End date string
-        """
-        if cb := self.callbacks.get(reqId):
-            cb(None)  # Signal completion with None
-
-    def realtimeBar(
-        self,
-        reqId: int,
-        time: int,
-        open_: float,
-        high: float,
-        low: float,
-        close: float,
-        volume: Decimal,
-        wap: Decimal,
-        count: int,
-    ) -> None:
-        """Continuous subscription - real-time 5-second bars.
-
-        Args:
-            reqId: Request ID
-            time: Bar timestamp
-            open_: Open price
-            high: High price
-            low: Low price
-            close: Close price
-            volume: Volume (Decimal from TWS)
-            wap: Weighted average price (Decimal from TWS)
-            count: Trade count
-        """
-        if cb := self.callbacks.get(reqId):
-            cb(time, open_, high, low, close, volume, wap, count)
-
-    def tickPrice(self, reqId: int, tickType: int, price: float, attrib: Any) -> None:
-        """Continuous subscription - price tick updates.
-
-        Args:
-            reqId: Request ID
-            tickType: Type of tick (bid/ask/last/etc)
-            price: Price value
-            attrib: Tick attributes
-        """
-        if cb := self.callbacks.get(reqId):
-            cb(tickType, price, attrib)
-
-    def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
-        """Continuous subscription - size tick updates.
-
-        Args:
-            reqId: Request ID
-            tickType: Type of tick (bid/ask/volume/etc)
-            size: Size value (Decimal from TWS)
-        """
-        if cb := self.callbacks.get(reqId):
-            cb(tickType, size)
-
-    def tickSnapshotEnd(self, reqId: int) -> None:
-        """Snapshot end signal for market data snapshot.
-
-        Args:
-            reqId: Request ID
-        """
-        if cb := self.callbacks.get(reqId):
-            cb(None)  # Signal completion with None
+    # === symbolSamples ===
 
     def error(
         self,
@@ -218,9 +381,68 @@ class TWSConnection(EWrapper, EClient):
             errorString: Error message
             advancedOrderRejectJson: Advanced order reject details (optional)
         """
-        logger.error(
-            f"TWS error [reqId={reqId}, time={errorTime}, code={errorCode}]: {errorString}"
+        if reqId == -1:
+            logger.error(
+                f"TWS error [reqId={reqId}, time={errorTime}, code={errorCode}]: {errorString}"
+            )
+        else:
+            self._reject_future(
+                reqId,
+                TWSError(
+                    reqId=reqId,
+                    errorTime=errorTime,
+                    errorCode=errorCode,
+                    errorString=errorString,
+                    advancedOrderRejectJson=advancedOrderRejectJson,
+                ),
+            )
+
+    def errorProtoBuf(self, errorMessageProto: ErrorMessageProto) -> None:
+        """Error callback using protobuf format (newer TWS API versions).
+
+        Args:
+            errorMessageProto: ErrorMessage protobuf object
+        """
+        # Extract fields from protobuf
+        reqId = errorMessageProto.id if errorMessageProto.HasField("id") else -1
+        errorCode = (
+            errorMessageProto.errorCode
+            if errorMessageProto.HasField("errorCode")
+            else 0
         )
-        if reqId != -1 and (cb := self.callbacks.get(reqId)):
-            exc = Exception(f"TWS error {errorCode}: {errorString}")
-            cb(exc)  # Pass Exception object - not string
+        errorMsg = (
+            errorMessageProto.errorMsg if errorMessageProto.HasField("errorMsg") else ""
+        )
+        errorTime = (
+            errorMessageProto.errorTime
+            if errorMessageProto.HasField("errorTime")
+            else 0
+        )
+        advancedOrderRejectJson = (
+            errorMessageProto.advancedOrderRejectJson
+            if errorMessageProto.HasField("advancedOrderRejectJson")
+            else ""
+        )
+
+        # Delegate to standard error() method
+        self.error(reqId, errorTime, errorCode, errorMsg, advancedOrderRejectJson)
+
+
+class TWSClient(TWSClientHelper):
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        client_id: int,
+        loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
+        """Initialize IBSocket (pure callback handler).
+
+        Note: No EClient instance - caller must provide via composition.
+        """
+        self._ibsocket = IBSocket(host, port, client_id, block_interval=1)
+        super().__init__(
+            ibsocket=self._ibsocket,
+            loop=loop,
+        )

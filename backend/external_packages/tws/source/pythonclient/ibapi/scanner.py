@@ -3,9 +3,8 @@ Copyright (C) 2019 Interactive Brokers LLC. All rights reserved. This code is su
  and conditions of the IB API Non-Commercial License or the IB API Commercial License, as applicable.
 """
 
-
+from ibapi.const import UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.object_implem import Object
-from ibapi.const import UNSET_INTEGER, UNSET_DOUBLE
 
 
 class ScanData(Object):
@@ -26,6 +25,7 @@ class ScanData(Object):
         self.legsStr = legsStr
 
     def __str__(self):
+        assert self.contract is not None
         return (
             "Rank: %d, Symbol: %s, SecType: %s, Currency: %s, Distance: %s, Benchmark: %s, Projection: %s, Legs String: %s"
             % (

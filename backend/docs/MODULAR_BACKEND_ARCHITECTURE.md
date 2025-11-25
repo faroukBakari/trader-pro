@@ -829,7 +829,6 @@ backend/src/trading_api/
 
 **Key Points:**
 
-- **Async Requirement**: Lifecycle requires `async` due to provider hooks (`Provider.on_startup()`, `Provider.on_shutdown()`)
 - **Two-Phase Loading**: Classes discovered before instances created (prevents circular dependencies)
 - **Fail-Fast Validation**: Services validate capabilities at initialization, not request time
 - **Lazy Provider Loading**: Providers instantiated only when first needed, with thread-safe locking

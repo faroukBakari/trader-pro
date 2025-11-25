@@ -15,59 +15,73 @@ message use the 'unified version': the agreed up min version of both
 server and client.
 
 """
-import logging
-from decimal import Decimal
 
+import logging
+import sys
+from abc import ABC
+from decimal import Decimal
+from typing import Callable
+
+from ibapi.commission_and_fees_report import CommissionAndFeesReport
 from ibapi.common import (
-    TickerId,
-    TickAttrib,
-    OrderId,
-    FaDataType,
     BarData,
-    SetOfString,
-    SetOfFloat,
-    ListOfFamilyCode,
+    FaDataType,
+    HistogramData,
     ListOfContractDescription,
     ListOfDepthExchanges,
-    SmartComponentMap,
-    ListOfNewsProviders,
-    HistogramData,
-    ListOfPriceIncrements,
+    ListOfFamilyCode,
+    ListOfHistoricalSessions,
     ListOfHistoricalTick,
     ListOfHistoricalTickBidAsk,
     ListOfHistoricalTickLast,
-    TickAttribLast,
+    ListOfNewsProviders,
+    ListOfPriceIncrements,
+    OrderId,
+    SetOfFloat,
+    SetOfString,
+    SmartComponentMap,
+    TickAttrib,
     TickAttribBidAsk,
-    ListOfHistoricalSessions,
+    TickAttribLast,
+    TickerId,
 )
-
 from ibapi.contract import Contract, ContractDetails, DeltaNeutralContract
+from ibapi.execution import Execution
 from ibapi.order import Order
 from ibapi.order_state import OrderState
-from ibapi.execution import Execution
-
-from ibapi.commission_and_fees_report import CommissionAndFeesReport
-from ibapi.ticktype import TickType
-from ibapi.utils import current_fn_name, log_
-
-from ibapi.protobuf.OrderStatus_pb2 import OrderStatus as OrderStatusProto
+from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
+from ibapi.protobuf.ExecutionDetails_pb2 import (
+    ExecutionDetails as ExecutionDetailsProto,
+)
+from ibapi.protobuf.ExecutionDetailsEnd_pb2 import (
+    ExecutionDetailsEnd as ExecutionDetailsEndProto,
+)
 from ibapi.protobuf.OpenOrder_pb2 import OpenOrder as OpenOrderProto
 from ibapi.protobuf.OpenOrdersEnd_pb2 import OpenOrdersEnd as OpenOrdersEndProto
-from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
-from ibapi.protobuf.ExecutionDetails_pb2 import ExecutionDetails as ExecutionDetailsProto
-from ibapi.protobuf.ExecutionDetailsEnd_pb2 import ExecutionDetailsEnd as ExecutionDetailsEndProto
-
+from ibapi.protobuf.OrderStatus_pb2 import OrderStatus as OrderStatusProto
+from ibapi.ticktype import TickType
 
 logger = logging.getLogger(__name__)
 
 
-def logAnswer(fnName, fnParams):
-    log_(fnName, fnParams, "ANSWER")
+def default_dispatcher(fnName: str, fnParams: dict):
+    if logger.isEnabledFor(logging.INFO):
+        if "self" in fnParams:
+            fnParams = dict(fnParams)
+            del fnParams["self"]
+        logger.info(f"TWS MESSAGE: {fnName} {fnParams}")
 
 
-class EWrapper:
-    def __init__(self):
-        pass
+def current_fn_name(parent_idx=0):
+    # depth is 1 bc this is already a fn, so we need the caller
+    return sys._getframe(1 + parent_idx).f_code.co_name
+
+
+class EWrapper(ABC):
+    def __init__(
+        self, dispatcher: Callable[[str, dict], None] = default_dispatcher
+    ) -> None:
+        self.dispatchMessage: Callable[[str, dict], None] = dispatcher
 
     def error(
         self,
@@ -80,7 +94,7 @@ class EWrapper:
         """This event is called when there is an error with the
         communication or when TWS wants to send a message to the client."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
         if advancedOrderRejectJson:
             logger.error(
                 "ERROR %s %s %s %s %s",
@@ -94,11 +108,11 @@ class EWrapper:
             logger.error("ERROR %s %s %s %s", reqId, errorTime, errorCode, errorString)
 
     def winError(self, text: str, lastError: int):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def connectAck(self):
         """callback signifying completion of successful connection"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def marketDataType(self, reqId: TickerId, marketDataType: int):
         """TWS sends a marketDataType(type) callback to the API, where
@@ -109,31 +123,31 @@ class EWrapper:
         every subscription because different contracts can generally trade on a
         different schedule."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickPrice(
         self, reqId: TickerId, tickType: TickType, price: float, attrib: TickAttrib
     ):
         """Market data tick price callback. Handles all price related ticks."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickSize(self, reqId: TickerId, tickType: TickType, size: Decimal):
         """Market data tick size callback. Handles all size-related ticks."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickSnapshotEnd(self, reqId: int):
         """When requesting market data snapshots, this market will indicate the
         snapshot reception is finished."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickGeneric(self, reqId: TickerId, tickType: TickType, value: float):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickString(self, reqId: TickerId, tickType: TickType, value: str):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickEFP(
         self,
@@ -147,7 +161,7 @@ class EWrapper:
         dividendImpact: float,
         dividendsToLastTradeDate: float,
     ):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
         """ market data call back for Exchange for Physical
         tickerId -      The request's identifier.
         tickType -      The type of tick being received.
@@ -163,7 +177,7 @@ class EWrapper:
         dividendsToLastTradeDate - The dividends expected until the expiration
             of the single stock future."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def orderStatus(
         self,
@@ -204,7 +218,7 @@ class EWrapper:
 
         """
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def openOrder(
         self, orderId: OrderId, contract: Contract, order: Order, orderState: OrderState
@@ -218,24 +232,24 @@ class EWrapper:
         orderState: OrderState - The orderState class includes attributes Used
             for both pre and post trade margin and commission and fees data."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def openOrderEnd(self):
         """This is called at the end of a given request for open orders."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def connectionClosed(self):
         """This function is called when TWS closes the sockets
         connection with the ActiveX control, or when TWS is shut down."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def updateAccountValue(self, key: str, val: str, currency: str, accountName: str):
         """This function is called only when ReqAccountUpdates on
         EEClientSocket object has been called."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def updatePortfolio(
         self,
@@ -251,53 +265,53 @@ class EWrapper:
         """This function is called only when reqAccountUpdates on
         EEClientSocket object has been called."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def updateAccountTime(self, timeStamp: str):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def accountDownloadEnd(self, accountName: str):
         """This is called after a batch updateAccountValue() and
         updatePortfolio() is sent."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def nextValidId(self, orderId: int):
         """Receives next valid order id."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def contractDetails(self, reqId: int, contractDetails: ContractDetails):
         """Receives the full contract's definitions. This method will return all
         contracts matching the requested via EEClientSocket::reqContractDetails.
         For example, one can obtain the whole option chain with it."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def bondContractDetails(self, reqId: int, contractDetails: ContractDetails):
         """This function is called when reqContractDetails function
         has been called for bonds."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def contractDetailsEnd(self, reqId: int):
         """This function is called once all contract details for a given
         request are received. This helps to define the end of an option
         chain."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def execDetails(self, reqId: int, contract: Contract, execution: Execution):
         """This event is fired when the reqExecutions() functions is
         invoked, or when an order is filled."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def execDetailsEnd(self, reqId: int):
         """This function is called once all executions have been sent to
         a client in response to reqExecutions()."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def updateMktDepth(
         self,
@@ -320,7 +334,7 @@ class EWrapper:
         price - the order's price
         size -  the order's size"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def updateMktDepthL2(
         self,
@@ -347,7 +361,7 @@ class EWrapper:
         size -  the order's size
         isSmartDepth - is SMART Depth request"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def updateNewsBulletin(
         self, msgId: int, msgType: int, newsMessage: str, originExch: str
@@ -359,11 +373,11 @@ class EWrapper:
         message - the message
         origExchange -    the exchange where the message comes from."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def managedAccounts(self, accountsList: str):
         """Receives a comma-separated string with the managed account ids."""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def receiveFA(self, faData: FaDataType, cxml: str):
         """receives the Financial Advisor's configuration available in the TWS
@@ -375,7 +389,7 @@ class EWrapper:
                  names rather than account numbers.
         faXmlData -  the xml-formatted configuration"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def historicalData(self, reqId: int, bar: BarData):
         """returns the requested historical data bars
@@ -393,18 +407,18 @@ class EWrapper:
         WAP -   the bar's Weighted Average Price
         hasGaps  -indicates if the data has gaps or not."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def historicalDataEnd(self, reqId: int, start: str, end: str):
         """Marks the ending of the historical bars reception."""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def scannerParameters(self, xml: str):
         """Provides the xml-formatted parameters available to create a market
         scanner.
 
         xml -   the xml-formatted string with the available parameters."""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def scannerData(
         self,
@@ -426,14 +440,14 @@ class EWrapper:
         projection -    according to query.
         legStr - describes the combo legs when the scanner is returning EFP"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def scannerDataEnd(self, reqId: int):
         """Indicates the scanner data reception has terminated.
 
         reqId - the request's identifier"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def realtimeBar(
         self,
@@ -461,20 +475,20 @@ class EWrapper:
         bar.count - the number of trades during the bar's timespan (only available
             for TRADES)."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def currentTime(self, time: int):
         """Server's current time. This method will receive IB server's system
         time resulting after the invocation of reqCurrentTime."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def fundamentalData(self, reqId: TickerId, data: str):
         """This function is called to receive fundamental
         market data. The appropriate market data subscription must be set
         up in Account Management before you can receive this data."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def deltaNeutralValidation(
         self, reqId: int, deltaNeutralContract: DeltaNeutralContract
@@ -486,14 +500,14 @@ class EWrapper:
         server. These values are locked when the RFQ is processed and remain
         locked until the RFQ is canceled."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def commissionAndFeesReport(self, commissionAndFeesReport: CommissionAndFeesReport):
         """The commissionAndFeesReport() callback is triggered as follows:
         - immediately after a trade execution
         - by calling reqExecutions()."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def position(
         self, account: str, contract: Contract, position: Decimal, avgCost: float
@@ -501,13 +515,13 @@ class EWrapper:
         """This event returns real-time positions for all accounts in
         response to the reqPositions() method."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def positionEnd(self):
         """This is called once all position data for a given request are
         received and functions as an end marker for the position() data."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def accountSummary(
         self, reqId: int, account: str, tag: str, value: str, currency: str
@@ -515,26 +529,26 @@ class EWrapper:
         """Returns the data from the TWS Account Window Summary tab in
         response to reqAccountSummary()."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def accountSummaryEnd(self, reqId: int):
         """This method is called once all account summary data for a
         given request are received."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def verifyMessageAPI(self, apiData: str):
         """Deprecated Function"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def verifyCompleted(self, isSuccessful: bool, errorText: str):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def verifyAndAuthMessageAPI(self, apiData: str, xyzChallange: str):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def verifyAndAuthCompleted(self, isSuccessful: bool, errorText: str):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def displayGroupList(self, reqId: int, groups: str):
         """This callback is a one-time response to queryDisplayGroups().
@@ -545,7 +559,7 @@ class EWrapper:
              not change during TWS session (in other words, user cannot add a
             new group; sorting can change though)."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def displayGroupUpdated(self, reqId: int, contractInfo: str):
         """This is sent by TWS to the API client once after receiving
@@ -561,7 +575,7 @@ class EWrapper:
                 Examples: 8314@SMART for IBM SMART; 8314@ARCA for IBM @ARCA.
             combo = if any combo is selected."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def positionMulti(
         self,
@@ -575,13 +589,13 @@ class EWrapper:
         """same as position() except it can be for a certain
         account/model"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def positionMultiEnd(self, reqId: int):
         """same as positionEnd() except it can be for a certain
         account/model"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def accountUpdateMulti(
         self,
@@ -595,13 +609,13 @@ class EWrapper:
         """same as updateAccountValue() except it can be for a certain
         account/model"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def accountUpdateMultiEnd(self, reqId: int):
         """same as accountDownloadEnd() except it can be for a certain
         account/model"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickOptionComputation(
         self,
@@ -622,7 +636,7 @@ class EWrapper:
         deltas, along with the present value of dividends expected on that
         options underlier are received."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def securityDefinitionOptionParameter(
         self,
@@ -648,7 +662,7 @@ class EWrapper:
         strikes - a list of the possible strikes for options of this underlying
              on this exchange"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def securityDefinitionOptionParameterEnd(self, reqId: int):
         """Called when all callbacks to securityDefinitionOptionParameter are
@@ -656,7 +670,7 @@ class EWrapper:
 
         reqId - the ID used in the call to securityDefinitionOptionParameter"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def softDollarTiers(self, reqId: int, tiers: list):
         """Called when receives Soft Dollar Tier configuration information
@@ -665,21 +679,21 @@ class EWrapper:
         tiers - Stores a list of SoftDollarTier that contains all Soft Dollar
             Tiers information"""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def familyCodes(self, familyCodes: ListOfFamilyCode):
         """returns array of family codes"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def symbolSamples(
         self, reqId: int, contractDescriptions: ListOfContractDescription
     ):
         """returns array of sample contract descriptions"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def mktDepthExchanges(self, depthMktDataDescriptions: ListOfDepthExchanges):
         """returns array of exchanges which return depth to UpdateMktDepthL2"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickNews(
         self,
@@ -691,25 +705,25 @@ class EWrapper:
         extraData: str,
     ):
         """returns news headlines"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def smartComponents(self, reqId: int, smartComponentMap: SmartComponentMap):
         """returns exchange component mapping"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickReqParams(
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
     ):
         """returns exchange map of a particular contract"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def newsProviders(self, newsProviders: ListOfNewsProviders):
         """returns available, subscribed API news providers"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def newsArticle(self, requestId: int, articleType: int, articleText: str):
         """returns body of news article"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def historicalNews(
         self,
@@ -720,41 +734,41 @@ class EWrapper:
         headline: str,
     ):
         """returns historical news headlines"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def historicalNewsEnd(self, requestId: int, hasMore: bool):
         """signals end of historical news"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def headTimestamp(self, reqId: int, headTimestamp: str):
         """returns earliest available data of a type of data for a particular contract"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
-    def histogramData(self, reqId: int, items: HistogramData):
+    def histogramData(self, reqId: int, items: list[HistogramData]):
         """returns histogram data for a contract"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def historicalDataUpdate(self, reqId: int, bar: BarData):
         """returns updates in real time when keepUpToDate is set to True"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def rerouteMktDataReq(self, reqId: int, conId: int, exchange: str):
         """returns reroute CFD contract information for market data request"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def rerouteMktDepthReq(self, reqId: int, conId: int, exchange: str):
         """returns reroute CFD contract information for market depth request"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def marketRule(self, marketRuleId: int, priceIncrements: ListOfPriceIncrements):
         """returns minimum price increment structure for a particular market rule ID"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def pnl(
         self, reqId: int, dailyPnL: float, unrealizedPnL: float, realizedPnL: float
     ):
         """returns the daily PnL for the account"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def pnlSingle(
         self,
@@ -766,23 +780,23 @@ class EWrapper:
         value: float,
     ):
         """returns the daily PnL for a single position in the account"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def historicalTicks(self, reqId: int, ticks: ListOfHistoricalTick, done: bool):
         """returns historical tick data when whatToShow=MIDPOINT"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def historicalTicksBidAsk(
         self, reqId: int, ticks: ListOfHistoricalTickBidAsk, done: bool
     ):
         """returns historical tick data when whatToShow=BID_ASK"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def historicalTicksLast(
         self, reqId: int, ticks: ListOfHistoricalTickLast, done: bool
     ):
         """returns historical tick data when whatToShow=TRADES"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickByTickAllLast(
         self,
@@ -796,7 +810,7 @@ class EWrapper:
         specialConditions: str,
     ):
         """returns tick-by-tick data for tickType = "Last" or "AllLast" """
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickByTickBidAsk(
         self,
@@ -809,15 +823,15 @@ class EWrapper:
         tickAttribBidAsk: TickAttribBidAsk,
     ):
         """returns tick-by-tick data for tickType = "BidAsk" """
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def tickByTickMidPoint(self, reqId: int, time: int, midPoint: float):
         """returns tick-by-tick data for tickType = "MidPoint" """
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def orderBound(self, permId: int, clientId: int, orderId: int):
         """returns orderBound notification"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def completedOrder(self, contract: Contract, order: Order, orderState: OrderState):
         """This function is called to feed in completed orders.
@@ -827,23 +841,23 @@ class EWrapper:
         orderState: OrderState - The orderState class includes completed order status details.
         """
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def completedOrdersEnd(self):
         """This is called at the end of a given request for completed orders."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def replaceFAEnd(self, reqId: int, text: str):
         """This is called at the end of a replace FA."""
 
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def wshMetaData(self, reqId: int, dataJson: str):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def wshEventData(self, reqId: int, dataJson: str):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def historicalSchedule(
         self,
@@ -854,32 +868,35 @@ class EWrapper:
         sessions: ListOfHistoricalSessions,
     ):
         """returns historical schedule for historical data request with whatToShow=SCHEDULE"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def userInfo(self, reqId: int, whiteBrandingId: str):
         """returns user info"""
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def currentTimeInMillis(self, timeInMillis: int):
         """Server's current time in milliseconds. This method will receive IB server's system
-        time in milliseconds resulting after the invocation of reqCurrentTimeInMillis."""
-        logAnswer(current_fn_name(), vars())
+        time in milliseconds resulting after the invocation of reqCurrentTimeInMillis.
+        """
+        self.dispatchMessage(current_fn_name(), vars())
 
     # Protobuf
     def orderStatusProtoBuf(self, orderStatusProto: OrderStatusProto):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def openOrderProtoBuf(self, openOrderProto: OpenOrderProto):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def openOrdersEndProtoBuf(self, openOrdersEndProto: OpenOrdersEndProto):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def errorProtoBuf(self, errorMessageProto: ErrorMessageProto):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
     def executionDetailsProtoBuf(self, executionDetailsProto: ExecutionDetailsProto):
-        logAnswer(current_fn_name(), vars())
+        self.dispatchMessage(current_fn_name(), vars())
 
-    def executionDetailsEndProtoBuf(self, executionDetailsProto: ExecutionDetailsProto):
-        logAnswer(current_fn_name(), vars())
+    def executionDetailsEndProtoBuf(
+        self, executionDetailsProto: ExecutionDetailsEndProto
+    ):
+        self.dispatchMessage(current_fn_name(), vars())

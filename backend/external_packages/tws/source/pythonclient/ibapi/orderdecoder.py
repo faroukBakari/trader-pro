@@ -2,43 +2,44 @@
 Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is subject to the terms
  and conditions of the IB API Non-Commercial License or the IB API Commercial License, as applicable.
 """
-import logging
-from _decimal import Decimal
 
+import logging
+
+from _decimal import Decimal
 from ibapi import order_condition
 from ibapi.const import UNSET_DOUBLE
+from ibapi.contract import ComboLeg
 from ibapi.object_implem import Object
 from ibapi.order import OrderComboLeg
 from ibapi.order_state import OrderAllocation
-from ibapi.contract import ComboLeg
 from ibapi.server_versions import (
-    MIN_SERVER_VER_FA_PROFILE_DESUPPORT,
-    MIN_SERVER_VER_MODELS_SUPPORT,
-    MIN_SERVER_VER_SSHORTX_OLD,
-    MIN_SERVER_VER_WHAT_IF_EXT_FIELDS,
-    MIN_SERVER_VER_PEGGED_TO_BENCHMARK,
-    MIN_SERVER_VER_SOFT_DOLLAR_TIER,
-    MIN_SERVER_VER_CASH_QTY,
-    MIN_SERVER_VER_AUTO_PRICE_FOR_HEDGE,
-    MIN_SERVER_VER_ORDER_CONTAINER,
-    MIN_SERVER_VER_D_PEG_ORDERS,
     MIN_CLIENT_VER,
-    MIN_SERVER_VER_PRICE_MGMT_ALGO,
-    MIN_SERVER_VER_DURATION,
-    MIN_SERVER_VER_POST_TO_ATS,
-    MIN_SERVER_VER_PEGBEST_PEGMID_OFFSETS,
-    MIN_SERVER_VER_CUSTOMER_ACCOUNT,
-    MIN_SERVER_VER_PROFESSIONAL_CUSTOMER,
+    MIN_SERVER_VER_AUTO_PRICE_FOR_HEDGE,
     MIN_SERVER_VER_BOND_ACCRUED_INTEREST,
-    MIN_SERVER_VER_INCLUDE_OVERNIGHT,
+    MIN_SERVER_VER_CASH_QTY,
     MIN_SERVER_VER_CME_TAGGING_FIELDS_IN_OPEN_ORDER,
+    MIN_SERVER_VER_CUSTOMER_ACCOUNT,
+    MIN_SERVER_VER_D_PEG_ORDERS,
+    MIN_SERVER_VER_DURATION,
+    MIN_SERVER_VER_FA_PROFILE_DESUPPORT,
     MIN_SERVER_VER_FULL_ORDER_PREVIEW_FIELDS,
-    MIN_SERVER_VER_SUBMITTER
+    MIN_SERVER_VER_INCLUDE_OVERNIGHT,
+    MIN_SERVER_VER_MODELS_SUPPORT,
+    MIN_SERVER_VER_ORDER_CONTAINER,
+    MIN_SERVER_VER_PEGBEST_PEGMID_OFFSETS,
+    MIN_SERVER_VER_PEGGED_TO_BENCHMARK,
+    MIN_SERVER_VER_POST_TO_ATS,
+    MIN_SERVER_VER_PRICE_MGMT_ALGO,
+    MIN_SERVER_VER_PROFESSIONAL_CUSTOMER,
+    MIN_SERVER_VER_SOFT_DOLLAR_TIER,
+    MIN_SERVER_VER_SSHORTX_OLD,
+    MIN_SERVER_VER_SUBMITTER,
+    MIN_SERVER_VER_WHAT_IF_EXT_FIELDS,
 )
-from ibapi.tag_value import TagValue
-from ibapi.utils import decode, SHOW_UNSET, isPegBenchOrder
-from ibapi.wrapper import DeltaNeutralContract
 from ibapi.softdollartier import SoftDollarTier
+from ibapi.tag_value import TagValue
+from ibapi.utils import SHOW_UNSET, decode, isPegBenchOrder
+from ibapi.wrapper import DeltaNeutralContract
 
 logger = logging.getLogger(__name__)
 
@@ -365,21 +366,39 @@ class OrderDecoder(Object):
         self.orderState.minCommissionAndFees = decode(float, fields, SHOW_UNSET)
         self.orderState.maxCommissionAndFees = decode(float, fields, SHOW_UNSET)
         self.orderState.commissionAndFeesCurrency = decode(str, fields)
-        
+
         if self.serverVersion >= MIN_SERVER_VER_FULL_ORDER_PREVIEW_FIELDS:
             self.orderState.marginCurrency = decode(str, fields)
-            self.orderState.initMarginBeforeOutsideRTH = decode(float, fields, SHOW_UNSET)
-            self.orderState.maintMarginBeforeOutsideRTH = decode(float, fields, SHOW_UNSET)
-            self.orderState.equityWithLoanBeforeOutsideRTH = decode(float, fields, SHOW_UNSET)
-            self.orderState.initMarginChangeOutsideRTH = decode(float, fields, SHOW_UNSET)
-            self.orderState.maintMarginChangeOutsideRTH = decode(float, fields, SHOW_UNSET)
-            self.orderState.equityWithLoanChangeOutsideRTH = decode(float, fields, SHOW_UNSET)
-            self.orderState.initMarginAfterOutsideRTH = decode(float, fields, SHOW_UNSET)
-            self.orderState.maintMarginAfterOutsideRTH = decode(float, fields, SHOW_UNSET)
-            self.orderState.equityWithLoanAfterOutsideRTH = decode(float, fields, SHOW_UNSET)
+            self.orderState.initMarginBeforeOutsideRTH = decode(
+                float, fields, SHOW_UNSET
+            )
+            self.orderState.maintMarginBeforeOutsideRTH = decode(
+                float, fields, SHOW_UNSET
+            )
+            self.orderState.equityWithLoanBeforeOutsideRTH = decode(
+                float, fields, SHOW_UNSET
+            )
+            self.orderState.initMarginChangeOutsideRTH = decode(
+                float, fields, SHOW_UNSET
+            )
+            self.orderState.maintMarginChangeOutsideRTH = decode(
+                float, fields, SHOW_UNSET
+            )
+            self.orderState.equityWithLoanChangeOutsideRTH = decode(
+                float, fields, SHOW_UNSET
+            )
+            self.orderState.initMarginAfterOutsideRTH = decode(
+                float, fields, SHOW_UNSET
+            )
+            self.orderState.maintMarginAfterOutsideRTH = decode(
+                float, fields, SHOW_UNSET
+            )
+            self.orderState.equityWithLoanAfterOutsideRTH = decode(
+                float, fields, SHOW_UNSET
+            )
             self.orderState.suggestedSize = decode(Decimal, fields)
             self.orderState.rejectReason = decode(str, fields)
-        
+
             accountsCount = decode(int, fields)
             if accountsCount > 0:
                 self.orderState.orderAllocations = []
@@ -391,7 +410,7 @@ class OrderDecoder(Object):
                     orderAllocation.positionAfter = decode(Decimal, fields)
                     orderAllocation.desiredAllocQty = decode(Decimal, fields)
                     orderAllocation.allowedAllocQty = decode(Decimal, fields)
-                    orderAllocation.isMonetary = decode(bool, fields)
+                    orderAllocation.isMonetary = bool(decode(bool, fields))
                     self.orderState.orderAllocations.append(orderAllocation)
         self.orderState.warningText = decode(str, fields)
 
@@ -417,6 +436,7 @@ class OrderDecoder(Object):
                 for _ in range(conditionsSize):
                     conditionType = decode(int, fields)
                     condition = order_condition.Create(conditionType)
+                    assert condition is not None, "Unknown condition type"
                     condition.decode(fields)
                     self.order.conditions.append(condition)
 
@@ -536,4 +556,3 @@ class OrderDecoder(Object):
     def decodeSubmitter(self, fields):
         if self.serverVersion >= MIN_SERVER_VER_SUBMITTER:
             self.order.submitter = decode(str, fields)
-
