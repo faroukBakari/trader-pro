@@ -273,7 +273,7 @@ class TestGetSymbolInfo:
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
-            result = await provider.get_symbol_info("AAPL", exchange="NASDAQ")
+            await provider.get_symbol_info("AAPL", exchange="NASDAQ")
 
         # Verify exchange was passed through
         call_args = mock_client.reqContractDetails.call_args[0][0]

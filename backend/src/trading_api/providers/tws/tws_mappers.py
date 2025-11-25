@@ -3,9 +3,13 @@
 Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar, etc.).
 """
 
+from datetime import datetime
+from decimal import Decimal
+
+from ibapi.common import BarData
 from ibapi.contract import ContractDescription, ContractDetails
 
-from trading_api.models.market import SearchSymbolResultItem, SymbolInfo
+from trading_api.models.market import Bar, SearchSymbolResultItem, SymbolInfo
 
 # TWS secType → TradingView-style symbol type
 SEC_TYPE_MAP: dict[str, str] = {
@@ -97,9 +101,49 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     )
 
 
+def tws_bar_to_domain_bar(tws_bar: BarData, symbol: str) -> Bar:
+    """Map TWS BarData → domain Bar.
+
+    Args:
+        tws_bar: TWS BarData object
+        symbol: Symbol name (TWS doesn't include in BarData - unused)
+
+    Returns:
+        Domain Bar model
+    """
+    # Parse TWS date format: "yyyyMMdd  HH:mm:ss" or epoch
+    # TWS returns string dates like "20231215  16:00:00" (note: two spaces)
+    try:
+        # Try parsing as datetime string first
+        dt = datetime.strptime(tws_bar.date.strip(), "%Y%m%d  %H:%M:%S US/Eastern")
+        time_ms = int(dt.timestamp() * 1000)
+    except ValueError:
+        try:
+            # Try single space format
+            dt = datetime.strptime(tws_bar.date.strip(), "%Y%m%d %H:%M:%S UTC")
+            time_ms = int(dt.timestamp() * 1000)
+        except ValueError:
+            # Fall back to epoch format (if formatDate=2 was used)
+            time_ms = int(tws_bar.date) * 1000
+
+    return Bar(
+        time=time_ms,
+        open=float(tws_bar.open),
+        high=float(tws_bar.high),
+        low=float(tws_bar.low),
+        close=float(tws_bar.close),
+        volume=(
+            int(tws_bar.volume)
+            if isinstance(tws_bar.volume, Decimal)
+            else tws_bar.volume
+        ),
+    )
+
+
 __all__ = [
     "SEC_TYPE_MAP",
     "DEFAULT_SUPPORTED_RESOLUTIONS",
     "contract_description_to_search_result",
     "contract_details_to_symbol_info",
+    "tws_bar_to_domain_bar",
 ]

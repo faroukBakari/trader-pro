@@ -22,18 +22,16 @@ Architecture:
 
 import asyncio
 import logging
-import queue
 import threading
 import time
-from collections.abc import Sequence
 from dataclasses import dataclass
-from decimal import Decimal
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
 from typing import Any
 
-from ibapi.common import *
+from ibapi.common import BarData
+from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.decoder import Decoder
 from ibapi.errors import CONNECT_FAIL, FAIL_CREATE_SOCK
@@ -51,10 +49,38 @@ PROTOBUF_MSG_ID = 200
 VERSION = 2
 
 
+def to_str(val) -> str:
+    if isinstance(val, bool):
+        return str(int(val))
+
+    if isinstance(val, list):
+        # Convert list to concatenated string (like official API)
+        return "".join(to_str(item) for item in val)
+
+    if UNSET_INTEGER == val or UNSET_DOUBLE == val:
+        return ""
+
+    if DOUBLE_INFINITY == val:
+        return INFINITY_STR
+
+    return str(val)
+
+
 def make_fields(values: list) -> bytes:
-    return b"".join(
-        str(int(v) if isinstance(v, bool) else v).encode() + b"\0" for v in values
-    )
+    return b"".join(to_str(v).encode() + b"\0" for v in values)
+
+
+# def make_fields(values: list) -> bytes:
+#     def encode_value(v):
+#         if isinstance(v, bool):
+#             return str(int(v))
+#         elif isinstance(v, list):
+#             # Convert list to concatenated string (like official API)
+#             return "".join(encode_value(item) for item in v)
+#         else:
+#             return str(v)
+
+#     return b"".join(encode_value(v).encode() + b"\0" for v in values)
 
 
 def decode_data(buf: bytes, buf_siz: int) -> tuple[int, bytes, bytes, int]:
@@ -355,7 +381,7 @@ class TWSClientHelper(EWrapper):
 
     def symbolSamples(
         self, reqId: int, contractDescriptions: list[ContractDescription]
-    ):
+    ) -> None:
         self._resolve_future(reqId, contractDescriptions)
 
     async def reqMatchingSymbols(self, pattern: str) -> list[ContractDescription]:
@@ -385,6 +411,23 @@ class TWSClientHelper(EWrapper):
 
     def contractDetailsEnd(self, reqId: int) -> None:
         """End signal for contract details - resolve Future with accumulated results."""
+        results = self._accumulators.pop(reqId, [])
+        self._resolve_future(reqId, results)
+
+    # === historicalData (streaming accumulation pattern) ===
+
+    def historicalData(self, reqId: int, bar: BarData) -> None:
+        """Accumulate historical bars (may be called multiple times).
+
+        TWS sends one historicalData callback per bar.
+        Results are accumulated until historicalDataEnd is called.
+        """
+        if reqId not in self._accumulators:
+            self._accumulators[reqId] = []
+        self._accumulators[reqId].append(bar)
+
+    def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
+        """End signal for historical data - resolve Future with accumulated results."""
         results = self._accumulators.pop(reqId, [])
         self._resolve_future(reqId, results)
 
@@ -430,6 +473,71 @@ class TWSClientHelper(EWrapper):
         self._ibsocket.send_message(OUT.REQ_CONTRACT_DATA, fields)
         logger.debug(
             f"awaiting contractDetails for reqId {reqId} and symbol '{contract.symbol}'"
+        )
+        return await future
+
+    # === historicalData ===
+
+    async def reqHistoricalData(
+        self,
+        contract: Contract,
+        end_date_time: str,
+        duration_str: str,
+        bar_size_setting: str,
+        what_to_show: str = "TRADES",
+        use_rth: int = 1,
+        format_date: int = 1,
+    ) -> list[BarData]:
+        """Request historical bars from TWS.
+
+        Args:
+            contract: TWS Contract object
+            end_date_time: End datetime ("20231215 16:00:00" or "" for now)
+            duration_str: Time range ("1 D", "2 W", "1 M", etc.)
+            bar_size_setting: Bar size ("1 min", "5 mins", "1 hour", "1 day")
+            what_to_show: Data type (default: "TRADES")
+            use_rth: 1=regular hours only, 0=all hours (default: 1)
+            format_date: 1=string format, 2=epoch (default: 1)
+
+        Returns:
+            List of BarData objects (one per bar, in ascending time order)
+        """
+        reqId = self.next_req_id
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[list[BarData]] = loop.create_future()
+        self._futures[reqId] = future
+        self._accumulators[reqId] = []  # Initialize accumulator
+
+        # Build message fields (VERSION=6 per ibapi/client.py)
+        fields: list[object] = [
+            reqId,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            contract.includeExpired,
+            end_date_time,
+            bar_size_setting,
+            duration_str,
+            use_rth,
+            what_to_show,
+            format_date,
+            False,  # keepUpToDate (always False for historical)
+            [],  # chartOptions (empty list)
+        ]
+
+        self._ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, fields)
+        logger.debug(
+            f"awaiting historicalData for reqId {reqId}, "
+            f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{bar_size_setting}'"
         )
         return await future
 
@@ -500,7 +608,6 @@ class TWSClientHelper(EWrapper):
 
 
 class TWSClient(TWSClientHelper):
-
     def __init__(
         self,
         host: str,

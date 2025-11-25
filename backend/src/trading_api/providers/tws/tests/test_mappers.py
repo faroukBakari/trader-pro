@@ -5,7 +5,6 @@ Tests cover:
 - contract_details_to_symbol_info (get_symbol_info)
 """
 
-import pytest
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
 from trading_api.providers.tws.tws_mappers import (
