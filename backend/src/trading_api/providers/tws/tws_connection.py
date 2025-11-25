@@ -34,7 +34,7 @@ from socket import timeout as socketTimeout
 from typing import Any
 
 from ibapi.common import *
-from ibapi.contract import ContractDescription
+from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.decoder import Decoder
 from ibapi.errors import CONNECT_FAIL, FAIL_CREATE_SOCK
 from ibapi.message import OUT
@@ -52,7 +52,9 @@ VERSION = 2
 
 
 def make_fields(values: list) -> bytes:
-    return b"".join(str(v).encode() + b"\0" for v in values)
+    return b"".join(
+        str(int(v) if isinstance(v, bool) else v).encode() + b"\0" for v in values
+    )
 
 
 def decode_data(buf: bytes, buf_siz: int) -> tuple[int, bytes, bytes, int]:
@@ -219,7 +221,12 @@ class TWSError(Exception):
 
 
 class TWSClientHelper(EWrapper):
-    """ """
+    """TWSClient helper base class - enables mock injection for testing.
+
+    Inherits EWrapper for callback methods.
+    Manages asyncio.Future registry for request/response patterns.
+    Uses _accumulators for streaming accumulation pattern (multiple callbacks → single result).
+    """
 
     def __init__(
         self,
@@ -240,7 +247,9 @@ class TWSClientHelper(EWrapper):
         )
         self._client_thread.start()
         self._next_req_id = 0
-        self._futures: dict[int, asyncio.Future] = {}
+        self._futures: dict[int, asyncio.Future[Any]] = {}
+        # Accumulators for streaming responses (contractDetails, historicalData, etc.)
+        self._accumulators: dict[int, list[Any]] = {}
 
     def __del__(self) -> None:
         """Destructor to ensure clean shutdown."""
@@ -362,7 +371,69 @@ class TWSClientHelper(EWrapper):
         contractDescriptions = await future
         return contractDescriptions
 
-    # === symbolSamples ===
+    # === contractDetails (streaming accumulation pattern) ===
+
+    def contractDetails(self, reqId: int, contractDetails: ContractDetails) -> None:
+        """Accumulate contract details (may be called multiple times).
+
+        TWS sends one contractDetails callback per matching contract.
+        Results are accumulated until contractDetailsEnd is called.
+        """
+        if reqId not in self._accumulators:
+            self._accumulators[reqId] = []
+        self._accumulators[reqId].append(contractDetails)
+
+    def contractDetailsEnd(self, reqId: int) -> None:
+        """End signal for contract details - resolve Future with accumulated results."""
+        results = self._accumulators.pop(reqId, [])
+        self._resolve_future(reqId, results)
+
+    async def reqContractDetails(self, contract: Contract) -> list[ContractDetails]:
+        """Request contract details for a symbol.
+
+        Args:
+            contract: TWS Contract object specifying symbol, secType, exchange, etc.
+
+        Returns:
+            List of ContractDetails matching the contract specification.
+            May return multiple results for ambiguous queries.
+        """
+        reqId = self.next_req_id
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[list[ContractDetails]] = loop.create_future()
+        self._futures[reqId] = future
+        self._accumulators[reqId] = []  # Initialize accumulator
+
+        # Build message fields (VERSION=8 per ibapi/client.py)
+        version = 8
+        fields: list[object] = [
+            version,
+            reqId,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            contract.includeExpired,
+            contract.secIdType,
+            contract.secId,
+            contract.issuerId,
+        ]
+
+        self._ibsocket.send_message(OUT.REQ_CONTRACT_DATA, fields)
+        logger.debug(
+            f"awaiting contractDetails for reqId {reqId} and symbol '{contract.symbol}'"
+        )
+        return await future
+
+    # === error handling ===
 
     def error(
         self,

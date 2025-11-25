@@ -1,22 +1,23 @@
 """TWS provider - Interactive Brokers datafeed integration.
 
-Layer 2 of TWS integration:
-- Manages TWS connection lifecycle
-- Implements DatafeedCapability with AsyncIO bridge
-- Domain conversion (TWS types ↔ core models)
-- Thread-safe AsyncIO bridge (main thread ↔ TWS reader thread)
+Layer 3 of TWS integration:
+- Implements DatafeedCapability interface
+- Domain conversion (TWS types ↔ core models) via tws_mappers
+- Delegates TWS communication to TWSClient (Layer 2)
 - Provider-agnostic error translation
 
 Architecture:
-- TWSConnection (Layer 1): Pure callback handler (EWrapper)
-- EClient (TWS API): Request interface (owned by TWSProvider)
-- TWSProvider (Layer 2): Connection lifecycle, AsyncIO bridge, capability impl
+- TWSProvider (Layer 3): DatafeedCapability impl, domain conversion
+- TWSClient (Layer 2): AsyncIO bridge, EWrapper callbacks
+- IBSocket (Layer 1): Raw TCP protocol, message framing
 """
 
 import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
+
+from ibapi.contract import Contract
 
 from trading_api.models.common import CapabilitySpec, DatafeedError
 from trading_api.models.market import (
@@ -31,7 +32,10 @@ from trading_api.providers.base import Provider
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.providers.tws.tws_connection import TWSClient
 
-from .tws_mappers import contract_description_to_search_result
+from .tws_mappers import (
+    contract_description_to_search_result,
+    contract_details_to_symbol_info,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +94,33 @@ class TWSProvider(Provider, DatafeedCapability):
         """
         return self._config
 
+    # === Helper Methods ===
+
+    def _build_contract(
+        self,
+        symbol: str,
+        exchange: str = "SMART",
+        sec_type: str = "STK",
+        currency: str = "USD",
+    ) -> Contract:
+        """Build TWS Contract object from domain parameters.
+
+        Args:
+            symbol: Symbol name (e.g., "AAPL")
+            exchange: Exchange name (default: "SMART" for smart routing)
+            sec_type: Security type (default: "STK" for stocks)
+            currency: Currency code (default: "USD")
+
+        Returns:
+            TWS Contract object ready for API calls
+        """
+        contract = Contract()
+        contract.symbol = symbol
+        contract.secType = sec_type
+        contract.exchange = exchange
+        contract.currency = currency
+        return contract
+
     # === DatafeedCapability Implementation ===
 
     async def search_symbols(
@@ -125,19 +156,39 @@ class TWSProvider(Provider, DatafeedCapability):
     ) -> SymbolInfo:
         """Get detailed symbol information.
 
+        [ASYNC-BRIDGE]: Wraps sync TWS callback with async Future.
+        [ACCUMULATION]: TWS may return multiple ContractDetails, we use first match.
+        [DOMAIN-ONLY]: Returns domain SymbolInfo (no TWS types).
+
         Args:
-            symbol: Symbol name
-            exchange: Optional exchange filter
+            symbol: Symbol name (e.g., "AAPL")
+            exchange: Optional exchange filter (default: "SMART" for smart routing)
             timeout: Request timeout in seconds
 
         Returns:
-            Detailed symbol metadata
+            Detailed symbol metadata (SymbolInfo)
 
         Raises:
-            TimeoutError: If request exceeds timeout
             DatafeedError: If symbol not found or request fails
         """
-        raise DatafeedError("get_symbol_info not yet implemented")
+        # Build TWS Contract for the request
+        contract = self._build_contract(symbol, exchange=exchange or "SMART")
+
+        try:
+            # Get contract details via TWSClient (returns list)
+            contract_details_list = await self._tws_client.reqContractDetails(contract)
+
+            if not contract_details_list:
+                raise DatafeedError(f"Symbol not found: {symbol}")
+
+            # Use first match (most common case is single result)
+            return contract_details_to_symbol_info(contract_details_list[0])
+
+        except DatafeedError:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting symbol info for {symbol}: {e}")
+            raise DatafeedError(f"Failed to get symbol info for {symbol}: {e}") from e
 
     async def get_historical_bars(
         self,
@@ -246,5 +297,4 @@ class TWSProvider(Provider, DatafeedCapability):
 # Alias for auto-discovery compatibility (provider registry expects TwsProvider)
 TwsProvider = TWSProvider
 
-__all__ = ["TWSProvider", "TwsProvider"]
 __all__ = ["TWSProvider", "TwsProvider"]
