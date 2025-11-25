@@ -13,9 +13,10 @@ Architecture:
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 from ibapi.contract import Contract
 
@@ -121,6 +122,96 @@ class TWSProvider(Provider, DatafeedCapability):
         contract.currency = currency
         return contract
 
+    def _map_timeframe_to_tws_bar_size(self, resolution: TimeFrame) -> str:
+        """Map domain TimeFrame → TWS barSizeSetting.
+
+        Args:
+            resolution: Domain TimeFrame enum
+
+        Returns:
+            TWS bar size string ("1 min", "5 mins", "1 hour", "1 day", etc.)
+
+        Raises:
+            DatafeedError: If resolution not supported
+        """
+        # TimeFrame enum values: SEC_5="5", MIN_1="1", HOUR_1="60", DAY_1="1D"
+        # Use TimeFrame enum members to avoid duplicate keys
+        mapping: dict[str, str] = {
+            TimeFrame.SEC_5.value: "5 secs",  # 5 seconds
+            TimeFrame.SEC_10.value: "10 secs",  # 10 seconds
+            TimeFrame.MIN_1.value: "1 min",  # 1 minute
+            TimeFrame.MIN_5.value: "5 mins",  # 5 minutes
+            TimeFrame.MIN_15.value: "15 mins",  # 15 minutes
+            TimeFrame.MIN_30.value: "30 mins",  # 30 minutes
+            TimeFrame.HOUR_1.value: "1 hour",  # 1 hour
+            TimeFrame.DAY_1.value: "1 day",  # 1 day
+            TimeFrame.WEEK_1.value: "1 week",  # 1 week
+            TimeFrame.MONTH_1.value: "1 month",  # 1 month
+        }
+
+        bar_size = mapping.get(resolution.value)
+        if not bar_size:
+            raise DatafeedError(
+                f"Unsupported resolution: {resolution.value}. "
+                f"Supported: {list(mapping.keys())}"
+            )
+        return bar_size
+
+    def _calculate_tws_duration(
+        self, start_time: datetime, end_time: datetime, resolution: TimeFrame
+    ) -> str:
+        """Calculate TWS duration string from time range.
+
+        TWS requires duration in format: "n S|D|W|M|Y"
+        Maximum durations depend on bar size (e.g., 1 sec bars max 2000 S)
+
+        Args:
+            start_time: Start datetime
+            end_time: End datetime
+            resolution: Bar timeframe (used to select appropriate unit)
+
+        Returns:
+            TWS duration string (e.g., "1 D", "2 W", "86400 S")
+        """
+        delta = end_time - start_time
+        total_seconds = int(delta.total_seconds())
+
+        # Select duration unit based on resolution and time range
+        # TWS limits: seconds (max 2000 S), days (max 365 D), weeks, months, years
+
+        # Sub-minute bars (5, 10 seconds)
+        if resolution in [TimeFrame.SEC_5, TimeFrame.SEC_10]:
+            # Use seconds for short durations
+            if total_seconds <= 2000:
+                return f"{total_seconds} S"
+            # Fall back to days for longer ranges
+            days = delta.days + 1
+            return f"{days} D"
+
+        # Intraday bars (1 min - 1 hour)
+        elif resolution in [
+            TimeFrame.MIN_1,
+            TimeFrame.MIN_5,
+            TimeFrame.MIN_15,
+            TimeFrame.MIN_30,
+            TimeFrame.HOUR_1,
+        ]:
+            # Use days for intraday bars
+            days = delta.days + 1
+            if days <= 365:
+                return f"{days} D"
+            # Use years for very long ranges
+            years = days // 365 + 1
+            return f"{years} Y"
+
+        # Daily and above
+        else:
+            days = delta.days + 1
+            if days <= 365:
+                return f"{days} D"
+            years = days // 365 + 1
+            return f"{years} Y"
+
     # === DatafeedCapability Implementation ===
 
     async def search_symbols(
@@ -201,24 +292,69 @@ class TWSProvider(Provider, DatafeedCapability):
     ) -> list[Bar]:
         """Get historical OHLCV bars.
 
+        [ASYNC-BRIDGE]: Wraps sync TWS callbacks with async Future.
         [ACCUMULATION]: TWS sends bars one-by-one, we accumulate until end signal.
+        [DOMAIN-ONLY]: Returns domain Bar models (no TWS types).
 
         Args:
-            symbol: Symbol name
-            start_time: Start of time range
-            end_time: End of time range
-            resolution: Bar timeframe
-            exchange: Optional exchange filter
+            symbol: Symbol name (e.g., "AAPL")
+            start_time: Start of time range (inclusive)
+            end_time: End of time range (inclusive)
+            resolution: Bar timeframe (TimeFrame enum)
+            exchange: Optional exchange filter (default: "SMART")
             timeout: Request timeout in seconds
 
         Returns:
             List of historical bars (ascending time order)
 
         Raises:
+            DatafeedError: If request fails or symbol invalid
             TimeoutError: If request exceeds timeout
-            DatafeedError: If request fails
         """
-        raise DatafeedError("get_historical_bars not yet implemented")
+        # Build TWS contract
+        contract = self._build_contract(symbol, exchange=exchange or "SMART")
+
+        # Map domain parameters to TWS format
+        bar_size = self._map_timeframe_to_tws_bar_size(resolution)
+        duration_str = self._calculate_tws_duration(start_time, end_time, resolution)
+
+        # Format datetime with timezone (TWS requires explicit timezone)
+        # Convert to UTC if naive, otherwise use existing timezone
+        if end_time.tzinfo is None:
+            end_time_tz = end_time.replace(tzinfo=timezone.utc)
+
+        end_time_tz = end_time.astimezone(ZoneInfo("US/Eastern"))
+
+        # Format: yyyymmdd-hh:mm:ss UTC (note hyphen separator and timezone suffix)
+        end_dt_str = end_time_tz.strftime("%Y%m%d %H:%M:%S US/Eastern")
+
+        try:
+            # Request historical data via TWSClient (returns list[BarData])
+            tws_bars = await self._tws_client.reqHistoricalData(
+                contract=contract,
+                end_date_time=end_dt_str,
+                duration_str=duration_str,
+                bar_size_setting=bar_size,
+                what_to_show="TRADES",
+                use_rth=0,  # Regular trading hours only
+                format_date=1,  # String format (yyyyMMdd HH:mm:ss)
+            )
+
+            # Convert TWS BarData → domain Bar
+            from .tws_mappers import tws_bar_to_domain_bar
+
+            domain_bars = [tws_bar_to_domain_bar(bar, symbol) for bar in tws_bars]
+
+            return domain_bars
+
+        except Exception as e:
+            logger.error(
+                f"Error getting historical bars for {symbol} "
+                f"({start_time} to {end_time}, {resolution.value}): {e}"
+            )
+            raise DatafeedError(
+                f"Failed to get historical bars for {symbol}: {e}"
+            ) from e
 
     def subscribe_realtime_bars(
         self,
@@ -297,4 +433,5 @@ class TWSProvider(Provider, DatafeedCapability):
 # Alias for auto-discovery compatibility (provider registry expects TwsProvider)
 TwsProvider = TWSProvider
 
+__all__ = ["TWSProvider", "TwsProvider"]
 __all__ = ["TWSProvider", "TwsProvider"]
