@@ -42,12 +42,6 @@ class MockProvider(Provider):
     def config(self) -> ProviderConfig:
         return MockProviderConfig()
 
-    async def on_startup(self) -> None:
-        MockProvider._startup_called = True
-
-    async def on_shutdown(self) -> None:
-        MockProvider._shutdown_called = True
-
 
 @pytest.fixture
 def registry() -> ProviderRegistry:
@@ -111,23 +105,6 @@ async def test_lazy_loading(registry: ProviderRegistry) -> None:
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_hooks_called(registry: ProviderRegistry) -> None:
-    """Lifecycle hooks called during startup/shutdown."""
-    MockProvider._startup_called = False
-    MockProvider._shutdown_called = False
-
-    registry.register(MockProvider, "mock")
-
-    # on_startup called during lazy loading
-    await registry.get_providers([CapabilitySpec(name="auth")])
-    assert MockProvider._startup_called
-
-    # on_shutdown called during shutdown
-    await registry.shutdown()
-    assert MockProvider._shutdown_called
-
-
-@pytest.mark.asyncio
 async def test_get_provider_by_name(registry: ProviderRegistry) -> None:
     """Get specific provider by name."""
     registry.register(MockProvider, "mock")
@@ -165,7 +142,3 @@ async def test_deduplication(registry: ProviderRegistry) -> None:
 
     # Should only have one instance (deduplicated)
     assert len(providers) == 1
-
-    # Cleanup
-    await registry.shutdown()
-    await registry.shutdown()

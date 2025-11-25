@@ -92,7 +92,7 @@ class AuthService(AuthServiceInterface, ServiceInterface):
             TypeError: If provider doesn't implement AuthCapability
         """
 
-        provider = self._get_capability_provider("auth")
+        provider = self.get_capability_provider("auth")
 
         # Type narrowing
         if not isinstance(provider, AuthCapability):

@@ -44,4 +44,4 @@ async def test_service_succeeds_with_required_capability() -> None:
     # Should succeed
     service = MockServiceRequiringAuth(module_dir=Path("/tmp"), providers=[provider])
 
-    assert service._get_capability_provider("auth") == provider
+    assert service.get_capability_provider("auth") == provider

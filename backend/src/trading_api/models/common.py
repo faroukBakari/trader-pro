@@ -59,6 +59,7 @@ __all__ = [
     "AuthenticationError",
     "ProviderNotFoundError",
     "CapabilityNotFoundError",
+    "DatafeedError",
 ]
 
 
@@ -143,3 +144,15 @@ class ProviderNotFoundError(ProviderError):
 
 class CapabilityNotFoundError(ProviderError):
     """Required capability not satisfied by any provider."""
+
+
+class DatafeedError(ProviderError):
+    """Datafeed operation failed.
+
+    Raised by datafeed providers when:
+    - Symbol search fails
+    - Symbol not found
+    - Historical data request fails
+    - Subscription fails
+    - Invalid parameters
+    """

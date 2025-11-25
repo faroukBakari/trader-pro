@@ -2,9 +2,13 @@
 Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is subject to the terms
  and conditions of the IB API Non-Commercial License or the IB API Commercial License, as applicable.
 """
+
+from types import MappingProxyType
+
+from click import Parameter
+from ibapi.common import PROTOBUF_MSG_ID
 from ibapi.const import NO_VALID_ID
 from ibapi.utils import getEnumTypeFromString
-from ibapi.common import PROTOBUF_MSG_ID
 
 """
 The Decoder knows how to transform a message's payload into higher level
@@ -13,37 +17,50 @@ It will call the corresponding method from the EWrapper so that customer's code
 (eg: class derived from EWrapper) can make further use of the data.
 """
 
-from ibapi.message import IN
-from ibapi.wrapper import *  # @UnusedWildImport
-from ibapi.contract import ContractDescription
-from ibapi.server_versions import *  # @UnusedWildImport
-from ibapi.utils import *  # @UnusedWildImport
-from ibapi.softdollartier import SoftDollarTier
-from ibapi.ticktype import *  # @UnusedWildImport
-from ibapi.tag_value import TagValue
-from ibapi.scanner import ScanData
-from ibapi.errors import BAD_MESSAGE
 from ibapi.common import *  # @UnusedWildImport
-from ibapi.orderdecoder import OrderDecoder
-from ibapi.contract import FundDistributionPolicyIndicator
-from ibapi.contract import FundAssetType
+from ibapi.contract import (
+    ContractDescription,
+    FundAssetType,
+    FundDistributionPolicyIndicator,
+)
+from ibapi.decoder_utils import (
+    decodeContract,
+    decodeExecution,
+    decodeOrder,
+    decodeOrderState,
+)
+from ibapi.errors import BAD_MESSAGE
 from ibapi.ineligibility_reason import IneligibilityReason
-from ibapi.decoder_utils import decodeContract, decodeOrder, decodeExecution, decodeOrderState
-
-from ibapi.protobuf.OrderStatus_pb2 import OrderStatus as OrderStatusProto
+from ibapi.message import IN
+from ibapi.orderdecoder import OrderDecoder
+from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
+from ibapi.protobuf.ExecutionDetails_pb2 import (
+    ExecutionDetails as ExecutionDetailsProto,
+)
+from ibapi.protobuf.ExecutionDetailsEnd_pb2 import (
+    ExecutionDetailsEnd as ExecutionDetailsEndProto,
+)
 from ibapi.protobuf.OpenOrder_pb2 import OpenOrder as OpenOrderProto
 from ibapi.protobuf.OpenOrdersEnd_pb2 import OpenOrdersEnd as OpenOrdersEndProto
-from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
-from ibapi.protobuf.ExecutionDetails_pb2 import ExecutionDetails as ExecutionDetailsProto
-from ibapi.protobuf.ExecutionDetailsEnd_pb2 import ExecutionDetailsEnd as ExecutionDetailsEndProto
+from ibapi.protobuf.OrderStatus_pb2 import OrderStatus as OrderStatusProto
+from ibapi.scanner import ScanData
+from ibapi.server_versions import *  # @UnusedWildImport
+from ibapi.softdollartier import SoftDollarTier
+from ibapi.tag_value import TagValue
+from ibapi.ticktype import *  # @UnusedWildImport
+from ibapi.utils import *  # @UnusedWildImport
+from ibapi.wrapper import *  # @UnusedWildImport
 
 logger = logging.getLogger(__name__)
 
+from decimal import Decimal
+from typing import Callable, Iterator, overload
+
 
 class HandleInfo(Object):
-    def __init__(self, wrap=None, proc=None):
+    def __init__(self, wrap: Callable | None = None, proc: Callable | None = None):
         self.wrapperMeth = wrap
-        self.wrapperParams = None
+        self.wrapperParams: MappingProxyType[str, Parameter] | None = None
         self.processMeth = proc
         if wrap is None and proc is None:
             raise ValueError("both wrap and proc can't be None")
@@ -54,7 +71,7 @@ class HandleInfo(Object):
 
 
 class Decoder(Object):
-    def __init__(self, wrapper, serverVersion):
+    def __init__(self, wrapper: EWrapper, serverVersion: int):
         self.wrapper = wrapper
         self.serverVersion = serverVersion
         self.discoverParams()
@@ -123,10 +140,7 @@ class Decoder(Object):
         clientId = decode(int, fields)  # ver 5 field
         whyHeld = decode(str, fields)  # ver 6 field
 
-        if self.serverVersion >= MIN_SERVER_VER_MARKET_CAP_PRICE:
-            mktCapPrice = decode(float, fields)
-        else:
-            mktCapPrice = None
+        mktCapPrice = decode(float, fields)
 
         self.wrapper.orderStatus(
             orderId,
@@ -148,19 +162,69 @@ class Decoder(Object):
 
         self.wrapper.orderStatusProtoBuf(orderStatusProto)
 
-        orderId = orderStatusProto.orderId if orderStatusProto.HasField('orderId') else UNSET_INTEGER
-        status = orderStatusProto.status if orderStatusProto.HasField('status') else ""
-        filled = orderStatusProto.filled if orderStatusProto.HasField('filled') else UNSET_DECIMAL
-        remaining = orderStatusProto.remaining if orderStatusProto.HasField('remaining') else UNSET_DECIMAL
-        avgFillPrice = orderStatusProto.avgFillPrice if orderStatusProto.HasField('avgFillPrice') else UNSET_DOUBLE
-        permId = orderStatusProto.permId if orderStatusProto.HasField('permId') else UNSET_LONG
-        parentId = orderStatusProto.parentId if orderStatusProto.HasField('parentId') else UNSET_INTEGER
-        lastFillPrice = orderStatusProto.lastFillPrice if orderStatusProto.HasField('lastFillPrice') else UNSET_DOUBLE
-        clientId = orderStatusProto.clientId if orderStatusProto.HasField('clientId') else UNSET_INTEGER
-        whyHeld = orderStatusProto.whyHeld if orderStatusProto.HasField('whyHeld') else ""
-        mktCapPrice = orderStatusProto.mktCapPrice if orderStatusProto.HasField('mktCapPrice') else UNSET_DOUBLE
+        orderId = (
+            orderStatusProto.orderId
+            if orderStatusProto.HasField("orderId")
+            else UNSET_INTEGER
+        )
+        status = orderStatusProto.status if orderStatusProto.HasField("status") else ""
+        filled = (
+            Decimal(orderStatusProto.filled)
+            if orderStatusProto.HasField("filled")
+            else UNSET_DECIMAL
+        )
+        remaining = (
+            Decimal(orderStatusProto.remaining)
+            if orderStatusProto.HasField("remaining")
+            else UNSET_DECIMAL
+        )
+        avgFillPrice = (
+            orderStatusProto.avgFillPrice
+            if orderStatusProto.HasField("avgFillPrice")
+            else UNSET_DOUBLE
+        )
+        permId = (
+            orderStatusProto.permId
+            if orderStatusProto.HasField("permId")
+            else UNSET_LONG
+        )
+        parentId = (
+            orderStatusProto.parentId
+            if orderStatusProto.HasField("parentId")
+            else UNSET_INTEGER
+        )
+        lastFillPrice = (
+            orderStatusProto.lastFillPrice
+            if orderStatusProto.HasField("lastFillPrice")
+            else UNSET_DOUBLE
+        )
+        clientId = (
+            orderStatusProto.clientId
+            if orderStatusProto.HasField("clientId")
+            else UNSET_INTEGER
+        )
+        whyHeld = (
+            orderStatusProto.whyHeld if orderStatusProto.HasField("whyHeld") else ""
+        )
+        mktCapPrice = (
+            orderStatusProto.mktCapPrice
+            if orderStatusProto.HasField("mktCapPrice")
+            else UNSET_DOUBLE
+        )
 
-        self.wrapper.orderStatus(orderId, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice)
+        self.wrapper.orderStatus(
+            orderId,
+            status,
+            filled,
+            remaining,
+            avgFillPrice,
+            permId,
+            parentId,
+            lastFillPrice,
+            clientId,
+            whyHeld,
+            mktCapPrice,
+        )
 
     def processOpenOrder(self, fields):
         order = Order()
@@ -172,95 +236,90 @@ class Decoder(Object):
         else:
             version = self.serverVersion
 
-        OrderDecoder.__init__(
-            self, contract, order, orderState, version, self.serverVersion
+        orderDecoder = OrderDecoder(
+            contract, order, orderState, version, self.serverVersion
         )
 
         # read orderId
-        OrderDecoder.decodeOrderId(self, fields)
-
+        orderDecoder.decodeOrderId(fields)
         # read contract fields
-        OrderDecoder.decodeContractFields(self, fields)
+        orderDecoder.decodeContractFields(fields)
 
         # read order fields
-        OrderDecoder.decodeAction(self, fields)
-        OrderDecoder.decodeTotalQuantity(self, fields)
-        OrderDecoder.decodeOrderType(self, fields)
-        OrderDecoder.decodeLmtPrice(self, fields)
-        OrderDecoder.decodeAuxPrice(self, fields)
-        OrderDecoder.decodeTIF(self, fields)
-        OrderDecoder.decodeOcaGroup(self, fields)
-        OrderDecoder.decodeAccount(self, fields)
-        OrderDecoder.decodeOpenClose(self, fields)
-        OrderDecoder.decodeOrigin(self, fields)
-        OrderDecoder.decodeOrderRef(self, fields)
-        OrderDecoder.decodeClientId(self, fields)
-        OrderDecoder.decodePermId(self, fields)
-        OrderDecoder.decodeOutsideRth(self, fields)
-        OrderDecoder.decodeHidden(self, fields)
-        OrderDecoder.decodeDiscretionaryAmt(self, fields)
-        OrderDecoder.decodeGoodAfterTime(self, fields)
-        OrderDecoder.skipSharesAllocation(self, fields)
-        OrderDecoder.decodeFAParams(self, fields)
-        OrderDecoder.decodeModelCode(self, fields)
-        OrderDecoder.decodeGoodTillDate(self, fields)
-        OrderDecoder.decodeRule80A(self, fields)
-        OrderDecoder.decodePercentOffset(self, fields)
-        OrderDecoder.decodeSettlingFirm(self, fields)
-        OrderDecoder.decodeShortSaleParams(self, fields)
-        OrderDecoder.decodeAuctionStrategy(self, fields)
-        OrderDecoder.decodeBoxOrderParams(self, fields)
-        OrderDecoder.decodePegToStkOrVolOrderParams(self, fields)
-        OrderDecoder.decodeDisplaySize(self, fields)
-        OrderDecoder.decodeBlockOrder(self, fields)
-        OrderDecoder.decodeSweepToFill(self, fields)
-        OrderDecoder.decodeAllOrNone(self, fields)
-        OrderDecoder.decodeMinQty(self, fields)
-        OrderDecoder.decodeOcaType(self, fields)
-        OrderDecoder.skipETradeOnly(self, fields)
-        OrderDecoder.skipFirmQuoteOnly(self, fields)
-        OrderDecoder.skipNbboPriceCap(self, fields)
-        OrderDecoder.decodeParentId(self, fields)
-        OrderDecoder.decodeTriggerMethod(self, fields)
-        OrderDecoder.decodeVolOrderParams(self, fields, True)
-        OrderDecoder.decodeTrailParams(self, fields)
-        OrderDecoder.decodeBasisPoints(self, fields)
-        OrderDecoder.decodeComboLegs(self, fields)
-        OrderDecoder.decodeSmartComboRoutingParams(self, fields)
-        OrderDecoder.decodeScaleOrderParams(self, fields)
-        OrderDecoder.decodeHedgeParams(self, fields)
-        OrderDecoder.decodeOptOutSmartRouting(self, fields)
-        OrderDecoder.decodeClearingParams(self, fields)
-        OrderDecoder.decodeNotHeld(self, fields)
-        OrderDecoder.decodeDeltaNeutral(self, fields)
-        OrderDecoder.decodeAlgoParams(self, fields)
-        OrderDecoder.decodeSolicited(self, fields)
-        OrderDecoder.decodeWhatIfInfoAndCommissionAndFees(self, fields)
-        OrderDecoder.decodeVolRandomizeFlags(self, fields)
-        OrderDecoder.decodePegToBenchParams(self, fields)
-        OrderDecoder.decodeConditions(self, fields)
-        OrderDecoder.decodeAdjustedOrderParams(self, fields)
-        OrderDecoder.decodeSoftDollarTier(self, fields)
-        OrderDecoder.decodeCashQty(self, fields)
-        OrderDecoder.decodeDontUseAutoPriceForHedge(self, fields)
-        OrderDecoder.decodeIsOmsContainers(self, fields)
-        OrderDecoder.decodeDiscretionaryUpToLimitPrice(self, fields)
-        OrderDecoder.decodeUsePriceMgmtAlgo(self, fields)
-        OrderDecoder.decodeDuration(self, fields)
-        OrderDecoder.decodePostToAts(self, fields)
-        OrderDecoder.decodeAutoCancelParent(
-            self, fields, MIN_SERVER_VER_AUTO_CANCEL_PARENT
-        )
-        OrderDecoder.decodePegBestPegMidOrderAttributes(self, fields)
-        OrderDecoder.decodeCustomerAccount(self, fields)
-        OrderDecoder.decodeProfessionalCustomer(self, fields)
-        OrderDecoder.decodeBondAccruedInterest(self, fields)
-        OrderDecoder.decodeIncludeOvernight(self, fields)
-        OrderDecoder.decodeCMETaggingFields(self, fields)
-        OrderDecoder.decodeSubmitter(self, fields)
-        OrderDecoder.decodeImbalanceOnly(
-            self, fields, MIN_SERVER_VER_IMBALANCE_ONLY
-        )
+        orderDecoder.decodeAction(fields)
+        orderDecoder.decodeTotalQuantity(fields)
+        orderDecoder.decodeOrderType(fields)
+        orderDecoder.decodeLmtPrice(fields)
+        orderDecoder.decodeAuxPrice(fields)
+        orderDecoder.decodeTIF(fields)
+        orderDecoder.decodeOcaGroup(fields)
+        orderDecoder.decodeAccount(fields)
+        orderDecoder.decodeOpenClose(fields)
+        orderDecoder.decodeOrigin(fields)
+        orderDecoder.decodeOrderRef(fields)
+        orderDecoder.decodeClientId(fields)
+        orderDecoder.decodePermId(fields)
+        orderDecoder.decodeOutsideRth(fields)
+        orderDecoder.decodeHidden(fields)
+        orderDecoder.decodeDiscretionaryAmt(fields)
+        orderDecoder.decodeGoodAfterTime(fields)
+        orderDecoder.skipSharesAllocation(fields)
+        orderDecoder.decodeFAParams(fields)
+        orderDecoder.decodeModelCode(fields)
+        orderDecoder.decodeGoodTillDate(fields)
+        orderDecoder.decodeRule80A(fields)
+        orderDecoder.decodePercentOffset(fields)
+        orderDecoder.decodeSettlingFirm(fields)
+        orderDecoder.decodeShortSaleParams(fields)
+        orderDecoder.decodeAuctionStrategy(fields)
+        orderDecoder.decodeBoxOrderParams(fields)
+        orderDecoder.decodePegToStkOrVolOrderParams(fields)
+        orderDecoder.decodeDisplaySize(fields)
+        orderDecoder.decodeBlockOrder(fields)
+        orderDecoder.decodeSweepToFill(fields)
+        orderDecoder.decodeAllOrNone(fields)
+        orderDecoder.decodeMinQty(fields)
+        orderDecoder.decodeOcaType(fields)
+        orderDecoder.skipETradeOnly(fields)
+        orderDecoder.skipFirmQuoteOnly(fields)
+        orderDecoder.skipNbboPriceCap(fields)
+        orderDecoder.decodeParentId(fields)
+        orderDecoder.decodeTriggerMethod(fields)
+        orderDecoder.decodeVolOrderParams(fields, True)
+        orderDecoder.decodeTrailParams(fields)
+        orderDecoder.decodeBasisPoints(fields)
+        orderDecoder.decodeComboLegs(fields)
+        orderDecoder.decodeSmartComboRoutingParams(fields)
+        orderDecoder.decodeScaleOrderParams(fields)
+        orderDecoder.decodeHedgeParams(fields)
+        orderDecoder.decodeOptOutSmartRouting(fields)
+        orderDecoder.decodeClearingParams(fields)
+        orderDecoder.decodeNotHeld(fields)
+        orderDecoder.decodeDeltaNeutral(fields)
+        orderDecoder.decodeAlgoParams(fields)
+        orderDecoder.decodeSolicited(fields)
+        orderDecoder.decodeWhatIfInfoAndCommissionAndFees(fields)
+        orderDecoder.decodeVolRandomizeFlags(fields)
+        orderDecoder.decodePegToBenchParams(fields)
+        orderDecoder.decodeConditions(fields)
+        orderDecoder.decodeAdjustedOrderParams(fields)
+        orderDecoder.decodeSoftDollarTier(fields)
+        orderDecoder.decodeCashQty(fields)
+        orderDecoder.decodeDontUseAutoPriceForHedge(fields)
+        orderDecoder.decodeIsOmsContainers(fields)
+        orderDecoder.decodeDiscretionaryUpToLimitPrice(fields)
+        orderDecoder.decodeUsePriceMgmtAlgo(fields)
+        orderDecoder.decodeDuration(fields)
+        orderDecoder.decodePostToAts(fields)
+        orderDecoder.decodeAutoCancelParent(fields, MIN_SERVER_VER_AUTO_CANCEL_PARENT)
+        orderDecoder.decodePegBestPegMidOrderAttributes(fields)
+        orderDecoder.decodeCustomerAccount(fields)
+        orderDecoder.decodeProfessionalCustomer(fields)
+        orderDecoder.decodeBondAccruedInterest(fields)
+        orderDecoder.decodeIncludeOvernight(fields)
+        orderDecoder.decodeCMETaggingFields(fields)
+        orderDecoder.decodeSubmitter(fields)
+        orderDecoder.decodeImbalanceOnly(fields, MIN_SERVER_VER_IMBALANCE_ONLY)
 
         self.wrapper.openOrder(order.orderId, contract, order, orderState)
 
@@ -270,24 +329,24 @@ class Decoder(Object):
 
         self.wrapper.openOrderProtoBuf(openOrderProto)
 
-        orderId = openOrderProto.orderId if openOrderProto.HasField('orderId') else 0
+        orderId = openOrderProto.orderId if openOrderProto.HasField("orderId") else 0
 
         # decode contract fields
-        if not openOrderProto.HasField('contract'):
+        if not openOrderProto.HasField("contract"):
             return
         contract = decodeContract(openOrderProto.contract)
 
         # decode order fields
-        if not openOrderProto.HasField('order'):
+        if not openOrderProto.HasField("order"):
             return
         order = decodeOrder(openOrderProto.contract, openOrderProto.order)
-        
+
         # decode order state fields
-        if not openOrderProto.HasField('orderState'):
+        if not openOrderProto.HasField("orderState"):
             return
         orderState = decodeOrderState(openOrderProto.orderState)
 
-        self.wrapper.openOrder(orderId, contract, order, orderState);
+        self.wrapper.openOrder(orderId, contract, order, orderState)
 
     def processOpenOrdersEndMsgProtoBuf(self, protobuf):
         openOrdersEndProto = OpenOrdersEndProto()
@@ -443,16 +502,20 @@ class Decoder(Object):
             contract.fundBackLoad = decode(str, fields)
             contract.fundBackLoadTimeInterval = decode(str, fields)
             contract.fundManagementFee = decode(str, fields)
-            contract.fundClosed = decode(bool, fields)
-            contract.fundClosedForNewInvestors = decode(bool, fields)
-            contract.fundClosedForNewMoney = decode(bool, fields)
+            contract.fundClosed = bool(bool(decode(bool, fields)))
+            contract.fundClosedForNewInvestors = bool(bool(decode(bool, fields)))
+            contract.fundClosedForNewMoney = bool(bool(decode(bool, fields)))
             contract.fundNotifyAmount = decode(str, fields)
             contract.fundMinimumInitialPurchase = decode(str, fields)
             contract.fundSubsequentMinimumPurchase = decode(str, fields)
             contract.fundBlueSkyStates = decode(str, fields)
             contract.fundBlueSkyTerritories = decode(str, fields)
-            contract.fundDistributionPolicyIndicator = getEnumTypeFromString(FundDistributionPolicyIndicator, decode(str, fields))
-            contract.fundAssetType = getEnumTypeFromString(FundAssetType, decode(str, fields))
+            contract.fundDistributionPolicyIndicator = getEnumTypeFromString(
+                FundDistributionPolicyIndicator, decode(str, fields)
+            )
+            contract.fundAssetType = getEnumTypeFromString(
+                FundAssetType, decode(str, fields)
+            )
 
         if self.serverVersion >= MIN_SERVER_VER_INELIGIBILITY_REASONS:
             ineligibilityReasonListCount = decode(int, fields)
@@ -479,15 +542,15 @@ class Decoder(Object):
         contract.contract.symbol = decode(str, fields)
         contract.contract.secType = decode(str, fields)
         contract.cusip = decode(str, fields)
-        contract.coupon = decode(float, fields)
+        contract.coupon = int(decode(float, fields))
         self.readLastTradeDate(fields, contract, True)
         contract.issueDate = decode(str, fields)
         contract.ratings = decode(str, fields)
         contract.bondType = decode(str, fields)
         contract.couponType = decode(str, fields)
-        contract.convertible = decode(bool, fields)
-        contract.callable = decode(bool, fields)
-        contract.putable = decode(bool, fields)
+        contract.convertible = bool(decode(bool, fields))
+        contract.callable = bool(decode(bool, fields))
+        contract.putable = bool(decode(bool, fields))
         contract.descAppend = decode(str, fields)
         contract.contract.exchange = decode(str, fields)
         contract.contract.currency = decode(str, fields)
@@ -504,7 +567,7 @@ class Decoder(Object):
         contract.validExchanges = decode(str, fields)
         contract.nextOptionDate = decode(str, fields)  # ver 2 field
         contract.nextOptionType = decode(str, fields)  # ver 2 field
-        contract.nextOptionPartial = decode(bool, fields)  # ver 2 field
+        contract.nextOptionPartial = bool(decode(bool, fields))  # ver 2 field
         contract.notes = decode(str, fields)  # ver 2 field
         if version >= 4:
             contract.longName = decode(str, fields)
@@ -633,7 +696,7 @@ class Decoder(Object):
         if self.serverVersion >= MIN_SERVER_VER_LAST_LIQUIDITY:
             execution.lastLiquidity = decode(int, fields)
         if self.serverVersion >= MIN_SERVER_VER_PENDING_PRICE_REVISION:
-            execution.pendingPriceRevision = decode(bool, fields)
+            execution.pendingPriceRevision = bool(decode(bool, fields))
         if self.serverVersion >= MIN_SERVER_VER_SUBMITTER:
             execution.submitter = decode(str, fields)
 
@@ -645,7 +708,11 @@ class Decoder(Object):
 
         self.wrapper.executionDetailsEndProtoBuf(executionDetailsEndProto)
 
-        reqId = executionDetailsEndProto.reqId if executionDetailsEndProto.HasField('reqId') else 0
+        reqId = (
+            executionDetailsEndProto.reqId
+            if executionDetailsEndProto.HasField("reqId")
+            else 0
+        )
 
         self.wrapper.execDetailsEnd(reqId)
 
@@ -655,15 +722,19 @@ class Decoder(Object):
 
         self.wrapper.executionDetailsProtoBuf(executionDetailsProto)
 
-        reqId = executionDetailsProto.reqId if executionDetailsProto.HasField('reqId') else 0
+        reqId = (
+            executionDetailsProto.reqId
+            if executionDetailsProto.HasField("reqId")
+            else 0
+        )
 
         # decode contract fields
-        if not executionDetailsProto.HasField('contract'):
+        if not executionDetailsProto.HasField("contract"):
             return
         contract = decodeContract(executionDetailsProto.contract)
 
         # decode execution fields
-        if not executionDetailsProto.HasField('execution'):
+        if not executionDetailsProto.HasField("execution"):
             return
         execution = decodeExecution(executionDetailsProto.execution)
 
@@ -674,7 +745,7 @@ class Decoder(Object):
             decode(int, fields)
 
         reqId = decode(int, fields)
-        
+
         if self.serverVersion < MIN_SERVER_VER_HISTORICAL_DATA_END:
             startDateStr = decode(str, fields)  # ver 2 field
             endDateStr = decode(str, fields)  # ver 2 field
@@ -702,12 +773,11 @@ class Decoder(Object):
             # send end of dataset marker
             self.wrapper.historicalDataEnd(reqId, startDateStr, endDateStr)
 
-
     def processHistoricalDataEndMsg(self, fields):
         reqId = decode(int, fields)
         startDateStr = decode(str, fields)
         endDateStr = decode(str, fields)
-        
+
         self.wrapper.historicalDataEnd(reqId, startDateStr, endDateStr)
 
     def processHistoricalDataUpdateMsg(self, fields):
@@ -729,7 +799,7 @@ class Decoder(Object):
 
         bar = RealTimeBar()
         bar.time = decode(int, fields)
-        bar.open = decode(float, fields)
+        bar.open_ = decode(float, fields)
         bar.high = decode(float, fields)
         bar.low = decode(float, fields)
         bar.close = decode(float, fields)
@@ -740,7 +810,7 @@ class Decoder(Object):
         self.wrapper.realtimeBar(
             reqId,
             bar.time,
-            bar.open,
+            bar.open_,
             bar.high,
             bar.low,
             bar.close,
@@ -804,6 +874,15 @@ class Decoder(Object):
             if undPrice == -1:  # -1 is the "not computed" indicator
                 undPrice = None
 
+        assert tickAttrib is not None
+        assert impliedVol is not None
+        assert delta is not None
+        assert optPrice is not None
+        assert pvDividend is not None
+        assert gamma is not None
+        assert vega is not None
+        assert theta is not None
+        assert undPrice is not None
         self.wrapper.tickOptionComputation(
             reqId,
             tickTypeInt,
@@ -1071,7 +1150,7 @@ class Decoder(Object):
 
     def processHistoricalNewsEnd(self, fields):
         reqId = decode(int, fields)
-        hasMore = decode(bool, fields)
+        hasMore = bool(decode(bool, fields))
         self.wrapper.historicalNewsEnd(reqId, hasMore)
 
     def processHistogramData(self, fields):
@@ -1122,11 +1201,9 @@ class Decoder(Object):
         unrealizedPnL = None
         realizedPnL = None
 
-        if self.serverVersion >= MIN_SERVER_VER_UNREALIZED_PNL:
-            unrealizedPnL = decode(float, fields)
+        unrealizedPnL = decode(float, fields)
 
-        if self.serverVersion >= MIN_SERVER_VER_REALIZED_PNL:
-            realizedPnL = decode(float, fields)
+        realizedPnL = decode(float, fields)
 
         self.wrapper.pnl(reqId, dailyPnL, unrealizedPnL, realizedPnL)
 
@@ -1137,11 +1214,9 @@ class Decoder(Object):
         unrealizedPnL = None
         realizedPnL = None
 
-        if self.serverVersion >= MIN_SERVER_VER_UNREALIZED_PNL:
-            unrealizedPnL = decode(float, fields)
+        unrealizedPnL = decode(float, fields)
 
-        if self.serverVersion >= MIN_SERVER_VER_REALIZED_PNL:
-            realizedPnL = decode(float, fields)
+        realizedPnL = decode(float, fields)
 
         value = decode(float, fields)
 
@@ -1161,7 +1236,7 @@ class Decoder(Object):
             historicalTick.size = decode(Decimal, fields)
             ticks.append(historicalTick)
 
-        done = decode(bool, fields)
+        done = bool(decode(bool, fields))
 
         self.wrapper.historicalTicks(reqId, ticks, done)
 
@@ -1185,7 +1260,7 @@ class Decoder(Object):
             historicalTickBidAsk.sizeAsk = decode(Decimal, fields)
             ticks.append(historicalTickBidAsk)
 
-        done = decode(bool, fields)
+        done = bool(decode(bool, fields))
 
         self.wrapper.historicalTicksBidAsk(reqId, ticks, done)
 
@@ -1209,7 +1284,7 @@ class Decoder(Object):
             historicalTickLast.specialConditions = decode(str, fields)
             ticks.append(historicalTickLast)
 
-        done = decode(bool, fields)
+        done = bool(decode(bool, fields))
 
         self.wrapper.historicalTicksLast(reqId, ticks, done)
 
@@ -1295,7 +1370,7 @@ class Decoder(Object):
         isSmartDepth = False
 
         if self.serverVersion >= MIN_SERVER_VER_SMART_DEPTH:
-            isSmartDepth = decode(bool, fields)
+            isSmartDepth = bool(decode(bool, fields))
 
         self.wrapper.updateMktDepthL2(
             reqId, position, marketMaker, operation, side, price, size, isSmartDepth
@@ -1306,78 +1381,78 @@ class Decoder(Object):
         contract = Contract()
         orderState = OrderState()
 
-        OrderDecoder.__init__(
-            self, contract, order, orderState, UNSET_INTEGER, self.serverVersion
+        orderDecoder = OrderDecoder(
+            contract, order, orderState, UNSET_INTEGER, self.serverVersion
         )
 
         # read contract fields
-        OrderDecoder.decodeContractFields(self, fields)
+        orderDecoder.decodeContractFields(fields)
 
         # read order fields
-        OrderDecoder.decodeAction(self, fields)
-        OrderDecoder.decodeTotalQuantity(self, fields)
-        OrderDecoder.decodeOrderType(self, fields)
-        OrderDecoder.decodeLmtPrice(self, fields)
-        OrderDecoder.decodeAuxPrice(self, fields)
-        OrderDecoder.decodeTIF(self, fields)
-        OrderDecoder.decodeOcaGroup(self, fields)
-        OrderDecoder.decodeAccount(self, fields)
-        OrderDecoder.decodeOpenClose(self, fields)
-        OrderDecoder.decodeOrigin(self, fields)
-        OrderDecoder.decodeOrderRef(self, fields)
-        OrderDecoder.decodePermId(self, fields)
-        OrderDecoder.decodeOutsideRth(self, fields)
-        OrderDecoder.decodeHidden(self, fields)
-        OrderDecoder.decodeDiscretionaryAmt(self, fields)
-        OrderDecoder.decodeGoodAfterTime(self, fields)
-        OrderDecoder.decodeFAParams(self, fields)
-        OrderDecoder.decodeModelCode(self, fields)
-        OrderDecoder.decodeGoodTillDate(self, fields)
-        OrderDecoder.decodeRule80A(self, fields)
-        OrderDecoder.decodePercentOffset(self, fields)
-        OrderDecoder.decodeSettlingFirm(self, fields)
-        OrderDecoder.decodeShortSaleParams(self, fields)
-        OrderDecoder.decodeBoxOrderParams(self, fields)
-        OrderDecoder.decodePegToStkOrVolOrderParams(self, fields)
-        OrderDecoder.decodeDisplaySize(self, fields)
-        OrderDecoder.decodeSweepToFill(self, fields)
-        OrderDecoder.decodeAllOrNone(self, fields)
-        OrderDecoder.decodeMinQty(self, fields)
-        OrderDecoder.decodeOcaType(self, fields)
-        OrderDecoder.decodeTriggerMethod(self, fields)
-        OrderDecoder.decodeVolOrderParams(self, fields, False)
-        OrderDecoder.decodeTrailParams(self, fields)
-        OrderDecoder.decodeComboLegs(self, fields)
-        OrderDecoder.decodeSmartComboRoutingParams(self, fields)
-        OrderDecoder.decodeScaleOrderParams(self, fields)
-        OrderDecoder.decodeHedgeParams(self, fields)
-        OrderDecoder.decodeClearingParams(self, fields)
-        OrderDecoder.decodeNotHeld(self, fields)
-        OrderDecoder.decodeDeltaNeutral(self, fields)
-        OrderDecoder.decodeAlgoParams(self, fields)
-        OrderDecoder.decodeSolicited(self, fields)
-        OrderDecoder.decodeOrderStatus(self, fields)
-        OrderDecoder.decodeVolRandomizeFlags(self, fields)
-        OrderDecoder.decodePegToBenchParams(self, fields)
-        OrderDecoder.decodeConditions(self, fields)
-        OrderDecoder.decodeStopPriceAndLmtPriceOffset(self, fields)
-        OrderDecoder.decodeCashQty(self, fields)
-        OrderDecoder.decodeDontUseAutoPriceForHedge(self, fields)
-        OrderDecoder.decodeIsOmsContainers(self, fields)
-        OrderDecoder.decodeAutoCancelDate(self, fields)
-        OrderDecoder.decodeFilledQuantity(self, fields)
-        OrderDecoder.decodeRefFuturesConId(self, fields)
-        OrderDecoder.decodeAutoCancelParent(self, fields)
-        OrderDecoder.decodeShareholder(self, fields)
-        OrderDecoder.decodeImbalanceOnly(self, fields)
-        OrderDecoder.decodeRouteMarketableToBbo(self, fields)
-        OrderDecoder.decodeParentPermId(self, fields)
-        OrderDecoder.decodeCompletedTime(self, fields)
-        OrderDecoder.decodeCompletedStatus(self, fields)
-        OrderDecoder.decodePegBestPegMidOrderAttributes(self, fields)
-        OrderDecoder.decodeCustomerAccount(self, fields)
-        OrderDecoder.decodeProfessionalCustomer(self, fields)
-        OrderDecoder.decodeSubmitter(self, fields)
+        orderDecoder.decodeAction(fields)
+        orderDecoder.decodeTotalQuantity(fields)
+        orderDecoder.decodeOrderType(fields)
+        orderDecoder.decodeLmtPrice(fields)
+        orderDecoder.decodeAuxPrice(fields)
+        orderDecoder.decodeTIF(fields)
+        orderDecoder.decodeOcaGroup(fields)
+        orderDecoder.decodeAccount(fields)
+        orderDecoder.decodeOpenClose(fields)
+        orderDecoder.decodeOrigin(fields)
+        orderDecoder.decodeOrderRef(fields)
+        orderDecoder.decodePermId(fields)
+        orderDecoder.decodeOutsideRth(fields)
+        orderDecoder.decodeHidden(fields)
+        orderDecoder.decodeDiscretionaryAmt(fields)
+        orderDecoder.decodeGoodAfterTime(fields)
+        orderDecoder.decodeFAParams(fields)
+        orderDecoder.decodeModelCode(fields)
+        orderDecoder.decodeGoodTillDate(fields)
+        orderDecoder.decodeRule80A(fields)
+        orderDecoder.decodePercentOffset(fields)
+        orderDecoder.decodeSettlingFirm(fields)
+        orderDecoder.decodeShortSaleParams(fields)
+        orderDecoder.decodeBoxOrderParams(fields)
+        orderDecoder.decodePegToStkOrVolOrderParams(fields)
+        orderDecoder.decodeDisplaySize(fields)
+        orderDecoder.decodeSweepToFill(fields)
+        orderDecoder.decodeAllOrNone(fields)
+        orderDecoder.decodeMinQty(fields)
+        orderDecoder.decodeOcaType(fields)
+        orderDecoder.decodeTriggerMethod(fields)
+        orderDecoder.decodeVolOrderParams(fields, False)
+        orderDecoder.decodeTrailParams(fields)
+        orderDecoder.decodeComboLegs(fields)
+        orderDecoder.decodeSmartComboRoutingParams(fields)
+        orderDecoder.decodeScaleOrderParams(fields)
+        orderDecoder.decodeHedgeParams(fields)
+        orderDecoder.decodeClearingParams(fields)
+        orderDecoder.decodeNotHeld(fields)
+        orderDecoder.decodeDeltaNeutral(fields)
+        orderDecoder.decodeAlgoParams(fields)
+        orderDecoder.decodeSolicited(fields)
+        orderDecoder.decodeOrderStatus(fields)
+        orderDecoder.decodeVolRandomizeFlags(fields)
+        orderDecoder.decodePegToBenchParams(fields)
+        orderDecoder.decodeConditions(fields)
+        orderDecoder.decodeStopPriceAndLmtPriceOffset(fields)
+        orderDecoder.decodeCashQty(fields)
+        orderDecoder.decodeDontUseAutoPriceForHedge(fields)
+        orderDecoder.decodeIsOmsContainers(fields)
+        orderDecoder.decodeAutoCancelDate(fields)
+        orderDecoder.decodeFilledQuantity(fields)
+        orderDecoder.decodeRefFuturesConId(fields)
+        orderDecoder.decodeAutoCancelParent(fields)
+        orderDecoder.decodeShareholder(fields)
+        orderDecoder.decodeImbalanceOnly(fields)
+        orderDecoder.decodeRouteMarketableToBbo(fields)
+        orderDecoder.decodeParentPermId(fields)
+        orderDecoder.decodeCompletedTime(fields)
+        orderDecoder.decodeCompletedStatus(fields)
+        orderDecoder.decodePegBestPegMidOrderAttributes(fields)
+        orderDecoder.decodeCustomerAccount(fields)
+        orderDecoder.decodeProfessionalCustomer(fields)
+        orderDecoder.decodeSubmitter(fields)
 
         self.wrapper.completedOrder(contract, order, orderState)
 
@@ -1448,7 +1523,9 @@ class Decoder(Object):
         if self.serverVersion >= MIN_SERVER_VER_ERROR_TIME:
             errorTime = decode(int, fields)
 
-        self.wrapper.error(reqId, errorTime, errorCode, errorString, advancedOrderRejectJson)
+        self.wrapper.error(
+            reqId, errorTime, errorCode, errorString, advancedOrderRejectJson
+        )
 
     def processErrorMsgProtoBuf(self, protobuf):
         errorMessageProto = ErrorMessageProto()
@@ -1456,13 +1533,29 @@ class Decoder(Object):
 
         self.wrapper.errorProtoBuf(errorMessageProto)
 
-        reqId = errorMessageProto.id if errorMessageProto.HasField('id') else 0
-        errorCode = errorMessageProto.errorCode if errorMessageProto.HasField('errorCode') else 0
-        errorMsg = errorMessageProto.errorMsg if errorMessageProto.HasField('errorMsg') else ""
-        advancedOrderRejectJson = errorMessageProto.advancedOrderRejectJson if errorMessageProto.HasField('advancedOrderRejectJson') else ""
-        errorTime = errorMessageProto.errorTime if errorMessageProto.HasField('errorTime') else 0
+        reqId = errorMessageProto.id if errorMessageProto.HasField("id") else 0
+        errorCode = (
+            errorMessageProto.errorCode
+            if errorMessageProto.HasField("errorCode")
+            else 0
+        )
+        errorMsg = (
+            errorMessageProto.errorMsg if errorMessageProto.HasField("errorMsg") else ""
+        )
+        advancedOrderRejectJson = (
+            errorMessageProto.advancedOrderRejectJson
+            if errorMessageProto.HasField("advancedOrderRejectJson")
+            else ""
+        )
+        errorTime = (
+            errorMessageProto.errorTime
+            if errorMessageProto.HasField("errorTime")
+            else 0
+        )
 
-        self.wrapper.error(reqId, errorTime, errorCode, errorMsg, advancedOrderRejectJson)
+        self.wrapper.error(
+            reqId, errorTime, errorCode, errorMsg, advancedOrderRejectJson
+        )
 
     ######################################################################
 
@@ -1510,9 +1603,7 @@ class Decoder(Object):
                 logger.debug("meth %s", handleInfo.wrapperMeth.__name__)
                 if handleInfo.wrapperParams is not None:
                     for pname, param in handleInfo.wrapperParams.items():
-                        logger.debug(
-                            "\tparam %s %s %s", pname, param.name, param.annotation
-                        )
+                        logger.debug("\tparam %s %s", pname, param.name)
 
     def interpretWithSignature(self, fields, handleInfo):
         if handleInfo.wrapperParams is None:
@@ -1581,7 +1672,10 @@ class Decoder(Object):
         except BadMessage:
             theBadMsg = ",".join(fields)
             self.wrapper.error(
-                NO_VALID_ID, currentTimeMillis(), BAD_MESSAGE.code(), BAD_MESSAGE.msg() + theBadMsg
+                NO_VALID_ID,
+                currentTimeMillis(),
+                BAD_MESSAGE.code(),
+                BAD_MESSAGE.msg() + theBadMsg,
             )
             raise
 
@@ -1602,7 +1696,10 @@ class Decoder(Object):
         except BadMessage:
             theBadMsg = ",".join(protoBuf)
             self.wrapper.error(
-                NO_VALID_ID, currentTimeMillis(), BAD_MESSAGE.code(), BAD_MESSAGE.msg() + theBadMsg
+                NO_VALID_ID,
+                currentTimeMillis(),
+                BAD_MESSAGE.code(),
+                BAD_MESSAGE.msg() + theBadMsg,
             )
             raise
 
@@ -1644,7 +1741,9 @@ class Decoder(Object):
         IN.DELTA_NEUTRAL_VALIDATION: HandleInfo(proc=processDeltaNeutralValidationMsg),
         IN.TICK_SNAPSHOT_END: HandleInfo(wrap=EWrapper.tickSnapshotEnd),
         IN.MARKET_DATA_TYPE: HandleInfo(wrap=EWrapper.marketDataType),
-        IN.COMMISSION_AND_FEES_REPORT: HandleInfo(proc=processCommissionAndFeesReportMsg),
+        IN.COMMISSION_AND_FEES_REPORT: HandleInfo(
+            proc=processCommissionAndFeesReportMsg
+        ),
         IN.POSITION_DATA: HandleInfo(proc=processPositionDataMsg),
         IN.POSITION_END: HandleInfo(wrap=EWrapper.positionEnd),
         IN.ACCOUNT_SUMMARY: HandleInfo(wrap=EWrapper.accountSummary),
@@ -1699,6 +1798,15 @@ class Decoder(Object):
         IN.USER_INFO: HandleInfo(proc=processUserInfo),
         IN.HISTORICAL_DATA_END: HandleInfo(proc=processHistoricalDataEndMsg),
         IN.CURRENT_TIME_IN_MILLIS: HandleInfo(proc=processCurrentTimeInMillis),
+    }
+
+    msgId2handleInfoProtoBuf = {
+        IN.ORDER_STATUS: HandleInfo(proc=processOrderStatusMsgProtoBuf),
+        IN.ERR_MSG: HandleInfo(proc=processErrorMsgProtoBuf),
+        IN.OPEN_ORDER: HandleInfo(proc=processOpenOrderMsgProtoBuf),
+        IN.EXECUTION_DATA: HandleInfo(proc=processExecutionDataMsgProtoBuf),
+        IN.OPEN_ORDER_END: HandleInfo(proc=processOpenOrdersEndMsgProtoBuf),
+        IN.EXECUTION_DATA_END: HandleInfo(proc=processExecutionDataEndMsgProtoBuf),
     }
 
     msgId2handleInfoProtoBuf = {

@@ -159,9 +159,6 @@ class ProviderRegistry:
             provider_class = self._provider_classes[name]
             instance = provider_class()
 
-            # Call lifecycle hook
-            await instance.on_startup()
-
             self._instances[name] = instance
             logger.debug(f"Lazy-loaded provider instance: {name}")
 
@@ -184,15 +181,6 @@ class ProviderRegistry:
     def list_providers(self) -> list[str]:
         """List all registered provider names."""
         return list(self._provider_classes.keys())
-
-    async def shutdown(self) -> None:
-        """Shutdown all provider instances (call lifecycle hooks).
-
-        Should be called during application shutdown.
-        """
-        for name, instance in self._instances.items():
-            logger.debug(f"Shutting down provider: {name}")
-            await instance.on_shutdown()
 
     def clear(self) -> None:
         """Clear all registered providers (testing only)."""

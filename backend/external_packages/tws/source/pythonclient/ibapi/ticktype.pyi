@@ -1,0 +1,119 @@
+"""
+Type stub for ticktype module to provide static type checking for dynamically created Enum attributes.
+"""
+
+from ibapi.enum_implem import Enum
+
+TickType = int
+
+class _TickTypeEnum(Enum):
+    """Type stub for TickTypeEnum instance with all dynamically set attributes."""
+
+    BID_SIZE: int
+    BID: int
+    ASK: int
+    ASK_SIZE: int
+    LAST: int
+    LAST_SIZE: int
+    HIGH: int
+    LOW: int
+    VOLUME: int
+    CLOSE: int
+    BID_OPTION_COMPUTATION: int
+    ASK_OPTION_COMPUTATION: int
+    LAST_OPTION_COMPUTATION: int
+    MODEL_OPTION: int
+    OPEN: int
+    LOW_13_WEEK: int
+    HIGH_13_WEEK: int
+    LOW_26_WEEK: int
+    HIGH_26_WEEK: int
+    LOW_52_WEEK: int
+    HIGH_52_WEEK: int
+    AVG_VOLUME: int
+    OPEN_INTEREST: int
+    OPTION_HISTORICAL_VOL: int
+    OPTION_IMPLIED_VOL: int
+    OPTION_BID_EXCH: int
+    OPTION_ASK_EXCH: int
+    OPTION_CALL_OPEN_INTEREST: int
+    OPTION_PUT_OPEN_INTEREST: int
+    OPTION_CALL_VOLUME: int
+    OPTION_PUT_VOLUME: int
+    INDEX_FUTURE_PREMIUM: int
+    BID_EXCH: int
+    ASK_EXCH: int
+    AUCTION_VOLUME: int
+    AUCTION_PRICE: int
+    AUCTION_IMBALANCE: int
+    MARK_PRICE: int
+    BID_EFP_COMPUTATION: int
+    ASK_EFP_COMPUTATION: int
+    LAST_EFP_COMPUTATION: int
+    OPEN_EFP_COMPUTATION: int
+    HIGH_EFP_COMPUTATION: int
+    LOW_EFP_COMPUTATION: int
+    CLOSE_EFP_COMPUTATION: int
+    LAST_TIMESTAMP: int
+    SHORTABLE: int
+    FUNDAMENTAL_RATIOS: int
+    RT_VOLUME: int
+    HALTED: int
+    BID_YIELD: int
+    ASK_YIELD: int
+    LAST_YIELD: int
+    CUST_OPTION_COMPUTATION: int
+    TRADE_COUNT: int
+    TRADE_RATE: int
+    VOLUME_RATE: int
+    LAST_RTH_TRADE: int
+    RT_HISTORICAL_VOL: int
+    IB_DIVIDENDS: int
+    BOND_FACTOR_MULTIPLIER: int
+    REGULATORY_IMBALANCE: int
+    NEWS_TICK: int
+    SHORT_TERM_VOLUME_3_MIN: int
+    SHORT_TERM_VOLUME_5_MIN: int
+    SHORT_TERM_VOLUME_10_MIN: int
+    DELAYED_BID: int
+    DELAYED_ASK: int
+    DELAYED_LAST: int
+    DELAYED_BID_SIZE: int
+    DELAYED_ASK_SIZE: int
+    DELAYED_LAST_SIZE: int
+    DELAYED_HIGH: int
+    DELAYED_LOW: int
+    DELAYED_VOLUME: int
+    DELAYED_CLOSE: int
+    DELAYED_OPEN: int
+    RT_TRD_VOLUME: int
+    CREDITMAN_MARK_PRICE: int
+    CREDITMAN_SLOW_MARK_PRICE: int
+    DELAYED_BID_OPTION: int
+    DELAYED_ASK_OPTION: int
+    DELAYED_LAST_OPTION: int
+    DELAYED_MODEL_OPTION: int
+    LAST_EXCH: int
+    LAST_REG_TIME: int
+    FUTURES_OPEN_INTEREST: int
+    AVG_OPT_VOLUME: int
+    DELAYED_LAST_TIMESTAMP: int
+    SHORTABLE_SHARES: int
+    DELAYED_HALTED: int
+    REUTERS_2_MUTUAL_FUNDS: int
+    ETF_NAV_CLOSE: int
+    ETF_NAV_PRIOR_CLOSE: int
+    ETF_NAV_BID: int
+    ETF_NAV_ASK: int
+    ETF_NAV_LAST: int
+    ETF_FROZEN_NAV_LAST: int
+    ETF_NAV_HIGH: int
+    ETF_NAV_LOW: int
+    SOCIAL_MARKET_ANALYTICS: int
+    ESTIMATED_IPO_MIDPOINT: int
+    FINAL_IPO_LAST: int
+    DELAYED_YIELD_BID: int
+    DELAYED_YIELD_ASK: int
+    NOT_SET: int
+
+TickTypeEnum: _TickTypeEnum

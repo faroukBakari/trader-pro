@@ -1,14 +1,11 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.health import HealthResponse
 from trading_api.models.versioning import APIMetadata, VersionInfo
-
-if TYPE_CHECKING:
-    from trading_api.providers.base import Provider
+from trading_api.providers.base import Provider
 
 
 class ServiceInterface(ABC):
@@ -116,7 +113,7 @@ class ServiceInterface(ABC):
                     f"Available providers: {[p.name for p in self._providers]}"
                 )
 
-    def _get_capability_provider(self, capability_name: str) -> "Provider":
+    def get_capability_provider(self, capability_name: str) -> Provider:
         """Get provider for specific capability (cached lookup).
 
         Args:

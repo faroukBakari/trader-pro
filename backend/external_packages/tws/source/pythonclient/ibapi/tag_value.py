@@ -12,7 +12,7 @@ from ibapi.object_implem import Object
 
 
 class TagValue(Object):
-    def __init__(self, tag: str = None, value: str = None):
+    def __init__(self, tag: str = "", value: str = ""):
         self.tag = str(tag)
         self.value = str(value)
 

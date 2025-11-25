@@ -312,7 +312,6 @@ class AppFactory:
         """Create a ModularApp with specified enabled modules.
 
         [TWO-PHASE LOADING]: Discover classes, analyze, then instantiate.
-        [ASYNC]: Required for provider lifecycle hooks (on_startup).
         """
         # Clear registries for fresh start
         # [TESTING]: Enables multiple create_app() calls with different configs
@@ -352,9 +351,6 @@ class AppFactory:
             app.start()
 
             yield
-
-            # Shutdown providers
-            await self.provider_registry.shutdown()
 
             # Shutdown: Cleanup is handled by FastAPIAdapter
             print("🛑 FastAPI application shutdown complete")

@@ -175,6 +175,12 @@ When updating documentation for large-scale changes, follow this three-phase app
 | ---------------------------------------------- | ---------------------------- |
 | **backend/external_packages/fastws/README.md** | FastWS package documentation |
 
+### backend/src/trading_api/providers/tws/ (TWS Provider Implementation)
+
+| File                                                | Purpose                                                                                                                                              |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **backend/src/trading_api/providers/tws/README.md** | ⭐ **TWS Datafeed Provider implementation guide** - Three-layer architecture (TWSProvider → TWSClient → IBSocket), threading model, testing patterns |
+
 ### backend/external_packages/tws/docs/ (TWS API Documentation)
 
 Complete offline documentation for Interactive Brokers TWS API for Python.
@@ -293,7 +299,8 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 9. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
 10. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
 11. **docs/TESTING.md** - General testing strategies
-12. **backend/external_packages/tws/docs/README.md** - TWS API documentation (for broker integration)
+12. **backend/src/trading_api/providers/tws/README.md** - TWS Datafeed Provider implementation guide
+13. **backend/external_packages/tws/docs/README.md** - TWS API documentation (for broker integration)
 
 ### Frontend Developers
 
@@ -336,7 +343,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 | "Authentication/auth/login"    | `AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`             | Auth doc first        |
 | "Testing [component]"          | `TESTING.md` → component-specific testing docs                                     | General first         |
 | "Error/CI/build issue"         | `CI-TROUBLESHOOTING.md` + relevant architecture docs                               | Troubleshooting first |
-| "TWS API/broker integration"   | `backend/external_packages/tws/docs/README.md` → specific API docs                 | Index first           |
+| "TWS API/broker integration"   | `providers/tws/README.md` → `tws/docs/README.md` → specific API docs               | Provider then API     |
 | "TradingView [anything]"       | `BROKER-INTEGRATION.md` → `tradingview/` docs                                      | Integration first     |
 | "Client generation"            | `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`                                 | Backend then frontend |
 | "Module/versioning"            | `MODULAR_BACKEND_ARCHITECTURE.md` → `MODULAR_VERSIONNING.md`                       | Architecture first    |
@@ -357,7 +364,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md`
 - **Authentication**: `AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
 - **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BROKER-CONNECTION-ADAPTER.md`
-- **TWS API Integration**: `tws/docs/README.md` → specific API reference docs
+- **TWS Provider Integration**: `providers/tws/README.md` → `tws/docs/README.md` → specific API reference docs
 - **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md` → `WS_ROUTERS_GEN.md`
 
 ### Testing Chains
@@ -511,7 +518,8 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 **Scope**: Interactive Brokers TWS API integration  
 **Out of Scope**: Other broker APIs, custom trading protocols
 
-- **backend/external_packages/tws/docs/README.md** - ⭐ TWS API documentation index (start here)
+- **backend/src/trading_api/providers/tws/README.md** - ⭐ TWS Datafeed Provider implementation guide (start here for integration)
+- **backend/external_packages/tws/docs/README.md** - TWS API documentation index
 - **backend/external_packages/tws/docs/06-SETUP-GUIDE.md** - TWS/Gateway installation and configuration
 - **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md** - Connection management, threading, error handling
 - **backend/external_packages/tws/docs/01-API-REFERENCE-CLASSES.md** - Core API classes (EClient, EWrapper, Contract)

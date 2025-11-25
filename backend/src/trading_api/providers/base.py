@@ -61,28 +61,3 @@ class Provider(ABC):
             ProviderConfig: Configuration instance
         """
         ...
-
-    async def on_startup(self) -> None:
-        """Lifecycle hook called when application starts.
-
-        Override to initialize connections, warm caches, or validate config.
-        Default implementation does nothing.
-
-        Examples:
-            >>> class GoogleProvider(Provider):
-            ...     async def on_startup(self):
-            ...         # Validate Google API is reachable
-            ...         await self._health_check()
-        """
-
-    async def on_shutdown(self) -> None:
-        """Lifecycle hook called when application shuts down.
-
-        Override to close connections, flush buffers, or cleanup resources.
-        Default implementation does nothing.
-
-        Examples:
-            >>> class DatabaseProvider(Provider):
-            ...     async def on_shutdown(self):
-            ...         await self.connection_pool.close()
-        """

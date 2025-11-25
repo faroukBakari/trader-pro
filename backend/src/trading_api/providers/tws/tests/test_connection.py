@@ -1,209 +1,173 @@
-"""Tests for TWSConnection - Layer 1 (Pure TWS Protocol)."""
+"""Tests for TWSClient - TWS protocol layer with async bridge.
 
-import concurrent.futures
-from decimal import Decimal
+Tests cover:
+- Initialization and configuration
+- symbolSamples callback dispatch (search_symbols POC)
+- Error handling
+
+Note: Tests use TWSClientHelper directly with mocked IBSocket to avoid
+spawning threads that attempt real TWS connections.
+"""
+
+import asyncio
+import threading
 from unittest.mock import Mock
 
-from trading_api.providers.tws.tws_connection import TWSConnection
+import pytest
+
+from trading_api.providers.tws.tws_connection import TWSClientHelper, TWSError
 
 
-class TestConnectionInitialization:
-    """Test TWSConnection initialization and basic setup."""
+def create_test_client() -> TWSClientHelper:
+    """Create a TWSClientHelper with mocked IBSocket for testing.
 
-    def test_connection_initialization(self) -> None:
-        """Test TWSConnection initialization."""
-        conn = TWSConnection()
-        assert conn.callbacks == {}
-        assert conn.next_req_id == 1
-        assert not conn.is_ready.is_set()
+    No real socket connection, no background thread trying to connect.
+    """
+    mock_ibsocket = Mock()
+    mock_ibsocket._host = "127.0.0.1"
+    mock_ibsocket._port = 7497
+    mock_ibsocket._client_id = 1
 
-    def test_get_req_id_increments(self) -> None:
+    # Create a stopped thread (won't run)
+    stopped_event = threading.Event()
+    stopped_event.clear()  # Thread loop won't run
+
+    # Dummy thread that does nothing
+    dummy_thread = threading.Thread(target=lambda: None, daemon=True)
+
+    return TWSClientHelper(
+        ibsocket=mock_ibsocket,
+        client_thread=dummy_thread,
+        running=stopped_event,
+        loop=asyncio.get_event_loop(),
+    )
+
+
+class TestTWSClientHelperInitialization:
+    """Test TWSClientHelper initialization."""
+
+    def test_client_initialization(self) -> None:
+        """Test TWSClientHelper initializes with mocked IBSocket."""
+        client = create_test_client()
+
+        assert client._ibsocket._host == "127.0.0.1"
+        assert client._ibsocket._port == 7497
+        assert client._ibsocket._client_id == 1
+        assert client._futures == {}
+        assert client._next_req_id == 0
+
+    def test_next_req_id_increments(self) -> None:
         """Test request ID generation increments."""
-        conn = TWSConnection()
-        id1 = conn.get_req_id()
-        id2 = conn.get_req_id()
-        assert id2 == id1 + 1
+        client = create_test_client()
 
-    def test_get_req_id_thread_safe(self) -> None:
-        """Test request ID generation is thread-safe."""
-        conn = TWSConnection()
+        id1 = client.next_req_id
+        id2 = client.next_req_id
+        id3 = client.next_req_id
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [executor.submit(conn.get_req_id) for _ in range(100)]
-            req_ids = [f.result() for f in futures]
+        assert id1 == 0
+        assert id2 == 1
+        assert id3 == 2
 
-        # All IDs should be unique
-        assert len(set(req_ids)) == 100
+    def test_curr_req_id_does_not_increment(self) -> None:
+        """Test curr_req_id returns current ID without incrementing."""
+        client = create_test_client()
 
-    def test_nextValidId_sets_ready(self) -> None:
-        """Test nextValidId sets ready event."""
-        conn = TWSConnection()
-        conn.nextValidId(42)
+        # Get current ID multiple times
+        curr1 = client.curr_req_id
+        curr2 = client.curr_req_id
 
-        assert conn.is_ready.is_set()
-        assert conn.next_req_id == 42
+        assert curr1 == curr2 == 0
+
+        # After next_req_id, curr_req_id should reflect the new value
+        _ = client.next_req_id
+        assert client.curr_req_id == 1
 
 
-class TestCallbackDispatch:
-    """Test callback dispatch mechanism."""
+class TestSymbolSamplesCallback:
+    """Test symbolSamples callback - core of search_symbols POC."""
 
-    def test_callback_dispatch(self) -> None:
-        """Test TWSConnection dispatches callbacks by reqId."""
-        conn = TWSConnection()
+    @pytest.mark.asyncio
+    async def test_symbol_samples_resolves_future(self) -> None:
+        """Test symbolSamples callback resolves the pending future."""
+        from ibapi.contract import Contract, ContractDescription
 
-        # Register callback
-        callback_invoked = False
-        received_data = None
+        client = create_test_client()
+        # Update loop to current running loop
+        client._loop = asyncio.get_running_loop()
 
-        def test_callback(data: object) -> None:
-            nonlocal callback_invoked, received_data
-            callback_invoked = True
-            received_data = data
-
+        # Create a future and register it
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[list[ContractDescription]] = loop.create_future()
         req_id = 1
-        conn.callbacks[req_id] = test_callback
+        client._futures[req_id] = future
 
-        # Simulate TWS callback (we'll add symbolSamples in next phase)
-        # For now, just test the callback mechanism directly
-        if cb := conn.callbacks.get(req_id):
-            test_data = [Mock(symbol="AAPL", exchange="SMART")]
-            cb(test_data)
+        # Create proper ContractDescription objects
+        contract1 = Contract()
+        contract1.symbol = "AAPL"
+        contract1.exchange = "NASDAQ"
+        desc1 = ContractDescription()
+        desc1.contract = contract1
 
-        # Verify callback invoked with correct data
-        assert callback_invoked
-        assert received_data is not None
+        contract2 = Contract()
+        contract2.symbol = "AAPL"
+        contract2.exchange = "NYSE"
+        desc2 = ContractDescription()
+        desc2.contract = contract2
 
-    def test_missing_callback_no_error(self) -> None:
-        """Test that missing callback doesn't raise error."""
-        conn = TWSConnection()
+        descriptions = [desc1, desc2]
 
-        # Try to get callback for non-existent reqId
-        cb = conn.callbacks.get(999)
-        assert cb is None  # Should return None, not raise
+        # Call the callback (simulates TWS response)
+        client.symbolSamples(req_id, descriptions)
 
-    def test_symbol_samples_callback(self) -> None:
-        """Test TWSConnection symbolSamples dispatches to callback."""
-        conn = TWSConnection()
+        # Future should be resolved
+        result = await future
+        assert result == descriptions
+        assert req_id not in client._futures  # Cleaned up
 
-        received_data = None
 
-        def callback(data: object) -> None:
-            nonlocal received_data
-            received_data = data
+class TestErrorHandling:
+    """Test error callback handling."""
 
-        req_id = 1
-        conn.callbacks[req_id] = callback
-
-        # Simulate TWS callback
-        test_data = [Mock(symbol="AAPL", exchange="SMART")]
-        conn.symbolSamples(req_id, test_data)
-
-        assert received_data == test_data
-
-    def test_end_signal_with_none(self) -> None:
-        """Test TWSConnection signals end-of-stream with None."""
-        conn = TWSConnection()
-
-        received_signal = None
-
-        def callback(data: object) -> None:
-            nonlocal received_signal
-            received_signal = data
-
-        conn.callbacks[1] = callback
-        conn.contractDetailsEnd(1)
-
-        assert received_signal is None
-
-    def test_error_passes_exception(self) -> None:
-        """Test error callback passes Exception object."""
-        conn = TWSConnection()
-
-        received_exception = None
-
-        def callback(data: object) -> None:
-            nonlocal received_exception
-            if isinstance(data, Exception):
-                received_exception = data
-
-        conn.callbacks[1] = callback
-        conn.error(1, 0, 200, "Test error")
-
-        assert received_exception is not None
-        assert "TWS error 200" in str(received_exception)
-
-    def test_historical_data_callback(self) -> None:
-        """Test historicalData callback dispatch."""
-        conn = TWSConnection()
-
-        received_bars = []
-
-        def callback(bar: object) -> None:
-            if bar is not None:
-                received_bars.append(bar)
-
-        conn.callbacks[1] = callback
-
-        # Simulate multiple bar callbacks
-        bar1 = Mock(date="1609459200", open=100.0, high=101.0)
-        bar2 = Mock(date="1609459260", open=101.0, high=102.0)
-
-        conn.historicalData(1, bar1)
-        conn.historicalData(1, bar2)
-        conn.historicalDataEnd(1, "20210101", "20210102")
-
-        assert len(received_bars) == 2
-        assert received_bars[0] == bar1
-        assert received_bars[1] == bar2
-
-    def test_realtime_bar_callback(self) -> None:
-        """Test realtimeBar callback with all parameters."""
-        conn = TWSConnection()
-
-        received_params = None
-
-        def callback(*args: object) -> None:
-            nonlocal received_params
-            received_params = args
-
-        conn.callbacks[1] = callback
-
-        # Simulate real-time bar
-        conn.realtimeBar(
-            1,
-            1609459200,
-            100.0,
-            101.0,
-            99.0,
-            100.5,
-            Decimal("1000"),
-            Decimal("100.25"),
-            50,
+    def test_tws_error_dataclass(self) -> None:
+        """Test TWSError dataclass structure."""
+        error = TWSError(
+            reqId=1,
+            errorCode=200,
+            errorString="No security definition",
+            errorTime=1234567890,
         )
 
-        assert received_params is not None
-        assert len(received_params) == 8
-        assert received_params[0] == 1609459200  # time
-        assert received_params[1] == 100.0  # open
-        assert received_params[4] == 100.5  # close
-        assert received_params[5] == 1000  # volume
+        assert error.reqId == 1
+        assert error.errorCode == 200
+        assert error.errorString == "No security definition"
+        assert "TWS error 200" in str(error)
 
-    def test_tick_price_callback(self) -> None:
-        """Test tickPrice callback dispatch."""
-        conn = TWSConnection()
+    @pytest.mark.asyncio
+    async def test_error_rejects_future(self) -> None:
+        """Test error callback rejects the pending future."""
+        client = create_test_client()
+        # Update loop to current running loop
+        client._loop = asyncio.get_running_loop()
 
-        received_ticks = []
+        # Create a future and register it
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[list[object]] = loop.create_future()
+        req_id = 1
+        client._futures[req_id] = future
 
-        def callback(tick_type: object, price: object, attrib: object) -> None:
-            received_ticks.append((tick_type, price, attrib))
+        # Simulate TWS error callback
+        client.error(req_id, 1234567890, 200, "No security definition")
 
-        conn.callbacks[1] = callback
+        # Future should be rejected with TWSError
+        with pytest.raises(TWSError) as exc_info:
+            await future
 
-        # Simulate tick updates
-        attrib = Mock()
-        conn.tickPrice(1, 1, 150.25, attrib)  # Bid
-        conn.tickPrice(1, 2, 150.30, attrib)  # Ask
+        assert exc_info.value.errorCode == 200
+        assert "No security definition" in exc_info.value.errorString
 
-        assert len(received_ticks) == 2
-        assert received_ticks[0] == (1, 150.25, attrib)
-        assert received_ticks[1] == (2, 150.30, attrib)
+    def test_general_error_no_future(self) -> None:
+        """Test general error (reqId=-1) doesn't crash when no future."""
+        client = create_test_client()
+
+        # Should not raise - general errors have reqId=-1
+        client.error(-1, 1234567890, 502, "Couldn't connect to TWS")

@@ -21,6 +21,8 @@ from trading_api.models import (
     SymbolInfo,
 )
 from trading_api.models.common import CapabilitySpec
+from trading_api.models.market import TimeFrame
+from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.shared.ws.ws_route_interface import WsRouteService
 
 logger = logging.getLogger(__name__)
@@ -33,12 +35,27 @@ class DatafeedService(WsRouteService):
     def capabilities(cls) -> list[CapabilitySpec]:
         """Return required capabilities for datafeed service.
 
-        Datafeed service doesn't require any capabilities (no auth/external providers).
+        Requires datafeed capability from provider (e.g., TWSProvider).
 
         Returns:
-            Empty list - no capabilities required
+            List with datafeed capability requirement
         """
-        return []
+        return [CapabilitySpec(name="datafeed")]
+
+    @property
+    def datafeed_provider(self) -> DatafeedCapability:
+        """Cached O(1) lookup - type-safe provider access.
+
+        Returns:
+            DatafeedCapability provider instance
+
+        Raises:
+            RuntimeError: If datafeed provider not available
+        """
+        provider = self.get_capability_provider("datafeed")
+        # Type assertion: provider must implement DatafeedCapability (validated at init)
+        assert isinstance(provider, DatafeedCapability)
+        return provider
 
     def __init__(
         self,
@@ -65,32 +82,133 @@ class DatafeedService(WsRouteService):
 
         # temporarly broadcast mocked data / should be replaced with real datafeed logic
         self._topic_generators: dict[str, asyncio.Task] = {}
+        # Track provider subscription IDs for each topic (for cleanup)
+        self._topic_to_subscription_id: dict[str, int | list[int]] = {}
+
+    # === Helper Methods ===
+
+    def _parse_ticker(self, ticker: str) -> tuple[str, str]:
+        """Parse ticker format 'SYMBOL:EXCHANGE' into components.
+
+        Args:
+            ticker: Ticker in format 'SYMBOL:EXCHANGE' or just 'SYMBOL'
+
+        Returns:
+            Tuple of (symbol, exchange)
+                - If ticker contains ':', returns (SYMBOL, EXCHANGE)
+                - If ticker has no ':', returns (SYMBOL, 'SMART')
+
+        Examples:
+            >>> self._parse_ticker('AAPL:NASDAQ')
+            ('AAPL', 'NASDAQ')
+            >>> self._parse_ticker('GOOGL')
+            ('GOOGL', 'SMART')
+        """
+        if ":" in ticker:
+            symbol, exchange = ticker.split(":", 1)
+            return symbol.strip(), exchange.strip()
+        return ticker.strip(), "SMART"
+
+    def _convert_resolution_to_timeframe(self, resolution: str) -> TimeFrame:
+        """Convert TradingView resolution string to TimeFrame enum.
+
+        Args:
+            resolution: TradingView resolution string
+                - Intraday: "1", "5", "15", "30", "60" (minutes)
+                - Daily+: "1D", "1W", "1M"
+
+        Returns:
+            TimeFrame enum value
+
+        Raises:
+            ValueError: If resolution is not supported
+
+        Examples:
+            >>> self._convert_resolution_to_timeframe('1')
+            TimeFrame.MIN_1
+            >>> self._convert_resolution_to_timeframe('1D')
+            TimeFrame.DAY_1
+        """
+        # Map TradingView resolution strings to TimeFrame enum
+        resolution_map: dict[str, TimeFrame] = {
+            "1": TimeFrame.MIN_1,
+            "5": TimeFrame.MIN_5,
+            "15": TimeFrame.MIN_15,
+            "30": TimeFrame.MIN_30,
+            "60": TimeFrame.HOUR_1,
+            "1D": TimeFrame.DAY_1,
+            "1W": TimeFrame.WEEK_1,
+            "1M": TimeFrame.MONTH_1,
+        }
+
+        if resolution not in resolution_map:
+            raise ValueError(
+                f"Unsupported resolution: {resolution}. "
+                f"Supported: {list(resolution_map.keys())}"
+            )
+
+        return resolution_map[resolution]
 
     # temporarly broadcast mocked data / should be replaced with real datafeed logic
-    async def _bar_generator(
-        self, symbol: str, topic_update: Callable[[Bar], None]
-    ) -> None:
-        """Start broadcasting real-time bar updates to all subscribed topics"""
-        logger.info(f"Starting service _bar_generator loop for symbol: {symbol}")
+    def _subscribe_to_realtime_bars(
+        self, symbol: str, exchange: str, topic_update: Callable[[Bar], None]
+    ) -> int:
+        """Subscribe to real-time bars via provider.
 
-        while True:
-            updated_bar = self.mock_last_bar(symbol)
-            if updated_bar:
-                topic_update(updated_bar)
-            await asyncio.sleep(0.2)
+        Args:
+            symbol: Symbol name (e.g., 'AAPL')
+            exchange: Exchange name (e.g., 'NASDAQ', 'SMART')
+            topic_update: Callback for bar updates
 
-    # temporarly broadcast mocked data / should be replaced with real datafeed logic
-    async def _quote_generator(
-        self, symbols: List[str], topic_update: Callable[[QuoteData], None]
-    ) -> None:
-        """Start broadcasting real-time quote updates for subscribed symbols"""
-        logger.info(f"Starting service _quote_generator loop for symbols: {symbols}")
+        Returns:
+            Subscription ID for cleanup
+        """
+        logger.info(f"Subscribing to real-time bars for {symbol}:{exchange}")
 
-        while True:
-            quotes = self.get_quotes(symbols)
-            for quote in quotes:
-                topic_update(quote)
-            await asyncio.sleep(0.2)
+        # Subscribe via provider - callback will be invoked in TWS reader thread
+        subscription_id = self.datafeed_provider.subscribe_realtime_bars(
+            symbol=symbol,
+            callback=topic_update,  # Pass callback directly
+            exchange=exchange,
+            resolution=TimeFrame.SEC_5,  # TWS only supports 5-second bars
+        )
+
+        logger.info(f"Subscribed to bars for {symbol} with ID {subscription_id}")
+        return subscription_id
+
+    def _subscribe_to_market_data(
+        self, symbols: list[str], topic_update: Callable[[QuoteData], None]
+    ) -> list[int]:
+        """Subscribe to real-time market data (quotes) for multiple symbols via provider.
+
+        Args:
+            symbols: List of symbol names (e.g., ['AAPL', 'GOOGL'])
+            topic_update: Callback for quote updates
+
+        Returns:
+            List of subscription IDs (one per symbol) for cleanup
+        """
+        logger.info(f"Subscribing to market data for {len(symbols)} symbols: {symbols}")
+
+        subscription_ids: list[int] = []
+
+        for symbol in symbols:
+            # Parse ticker to get symbol and exchange
+            parsed_symbol, exchange = self._parse_ticker(symbol)
+
+            # Subscribe via provider - callback will be invoked in TWS reader thread
+            subscription_id = self.datafeed_provider.subscribe_market_data(
+                symbol=parsed_symbol,
+                callback=topic_update,  # Pass callback directly
+                exchange=exchange,
+            )
+
+            subscription_ids.append(subscription_id)
+            logger.info(
+                f"Subscribed to quotes for {parsed_symbol} with ID {subscription_id}"
+            )
+
+        return subscription_ids
 
     async def create_topic(self, topic: str, topic_update: Callable) -> None:
         """Parse topic and create appropriate subscription task.
@@ -119,10 +237,16 @@ class DatafeedService(WsRouteService):
                     params_dict
                 )
 
-                # Create task with parsed symbol
-                self._topic_generators[topic] = asyncio.create_task(
-                    self._bar_generator(subscription_request.symbol, topic_update)
+                # Parse ticker to get symbol and exchange
+                symbol, exchange = self._parse_ticker(subscription_request.symbol)
+
+                # Subscribe to real-time bars via provider (sync method, returns subscription ID)
+                subscription_id = self._subscribe_to_realtime_bars(
+                    symbol=symbol, exchange=exchange, topic_update=topic_update
                 )
+
+                # Track subscription ID for cleanup
+                self._topic_to_subscription_id[topic] = subscription_id
             elif topic_type == "quotes":
                 # Parse the JSON params part / Validate model
                 params_dict = json.loads(params_json)
@@ -141,19 +265,60 @@ class DatafeedService(WsRouteService):
                 if not all_symbols:
                     raise ValueError("No symbols provided for quote subscription")
 
-                # Create task with all symbols
-                self._topic_generators[topic] = asyncio.create_task(
-                    self._quote_generator(all_symbols, topic_update)
+                # Subscribe to market data for all symbols via provider (returns list of subscription IDs)
+                subscription_ids = self._subscribe_to_market_data(
+                    symbols=all_symbols, topic_update=topic_update
                 )
+
+                # Track subscription IDs for cleanup (list for quotes, int for bars)
+                self._topic_to_subscription_id[topic] = subscription_ids
             else:
                 raise ValueError(f"Unknown topic type: {topic_type}")
 
     def remove_topic(self, topic: str) -> None:
+        """Remove topic and cleanup subscriptions.
+
+        Handles both legacy asyncio tasks and provider subscriptions.
+        """
         logger.info(f"Deleting topic queue for: {topic}")
+
+        # Cancel legacy asyncio task if exists
         task = self._topic_generators.get(topic)
         if task:
             task.cancel()
-        self._topic_generators.pop(topic, None)
+            self._topic_generators.pop(topic, None)
+
+        # Unsubscribe from provider if subscription exists
+        subscription_id = self._topic_to_subscription_id.get(topic)
+        if subscription_id is not None:
+            # Determine topic type from topic string
+            if ":" in topic:
+                topic_type = topic.split(":", 1)[0]
+
+                if topic_type == "bars":
+                    # Single subscription ID for bars (always int)
+                    if isinstance(subscription_id, int):
+                        logger.info(
+                            f"Unsubscribing from bars: subscription ID {subscription_id}"
+                        )
+                        self.datafeed_provider.unsubscribe_realtime_bars(
+                            subscription_id
+                        )
+                elif topic_type == "quotes":
+                    # Multiple subscription IDs for quotes (one per symbol)
+                    if isinstance(subscription_id, list):
+                        logger.info(
+                            f"Unsubscribing from quotes: subscription IDs {subscription_id}"
+                        )
+                        for sub_id in subscription_id:
+                            self.datafeed_provider.unsubscribe_market_data(sub_id)
+                    else:
+                        logger.info(
+                            f"Unsubscribing from quotes: subscription ID {subscription_id}"
+                        )
+                        self.datafeed_provider.unsubscribe_market_data(subscription_id)
+
+            self._topic_to_subscription_id.pop(topic, None)
 
     def _load_symbols(self) -> None:
         """Load symbols from JSON file or use default symbols"""
@@ -282,61 +447,53 @@ class DatafeedService(WsRouteService):
         """Get datafeed configuration"""
         return self.configuration
 
-    def search_symbols(
+    async def search_symbols(
         self,
         user_input: str,
         exchange: str = "",
         symbol_type: str = "",
         max_results: int = 50,
     ) -> List[SearchSymbolResultItem]:
-        """Search symbols based on user input and filters"""
-        filtered_symbols = self._symbols
+        """Search symbols based on user input and filters.
 
-        # Filter by user input (search in name, description, or ticker)
-        if user_input and user_input.strip():
-            search_term = user_input.lower().strip()
-            filtered_symbols = [
-                symbol
-                for symbol in filtered_symbols
-                if (
-                    search_term in symbol.name.lower()
-                    or search_term in symbol.description.lower()
-                    or (symbol.ticker and search_term in symbol.ticker.lower())
-                )
-            ]
+        Delegates to datafeed provider and applies business logic filters.
 
-        # Filter by exchange
+        Args:
+            user_input: Search pattern (symbol, description, ticker)
+            exchange: Optional exchange filter (applied after provider search)
+            symbol_type: Optional symbol type filter (applied after provider search)
+            max_results: Maximum results to return (applied after filtering)
+
+        Returns:
+            List of matching symbols with business filters applied
+        """
+        # Delegate to provider for raw search results
+        provider_results = await self.datafeed_provider.search_symbols(
+            pattern=user_input if user_input.strip() else "*",
+            timeout=5.0,
+        )
+
+        # Apply business logic filters on provider results
+        filtered_results = provider_results
+
+        # Filter by exchange (case-insensitive)
         if exchange:
-            filtered_symbols = [
-                symbol
-                for symbol in filtered_symbols
-                if symbol.exchange.lower() == exchange.lower()
+            filtered_results = [
+                result
+                for result in filtered_results
+                if result.exchange.lower() == exchange.lower()
             ]
 
-        # Filter by symbol type
+        # Filter by symbol type (case-insensitive)
         if symbol_type:
-            filtered_symbols = [
-                symbol
-                for symbol in filtered_symbols
-                if symbol.type.lower() == symbol_type.lower()
+            filtered_results = [
+                result
+                for result in filtered_results
+                if result.type.lower() == symbol_type.lower()
             ]
 
         # Limit results
-        limited_symbols = filtered_symbols[:max_results]
-
-        # Convert to search result items
-        results = [
-            SearchSymbolResultItem(
-                symbol=symbol.name,
-                description=symbol.description,
-                exchange=symbol.exchange,
-                ticker=symbol.ticker,
-                type=symbol.type,
-            )
-            for symbol in limited_symbols
-        ]
-
-        return results
+        return filtered_results[:max_results]
 
     def resolve_symbol(self, symbol_name: str) -> Optional[SymbolInfo]:
         """Resolve symbol information by name or ticker"""
@@ -350,7 +507,7 @@ class DatafeedService(WsRouteService):
                 return symbol
         return None
 
-    def get_bars(
+    async def get_bars(
         self,
         symbol: str,
         resolution: str,
@@ -358,25 +515,54 @@ class DatafeedService(WsRouteService):
         to_time: int,
         count_back: Optional[int] = None,
     ) -> List[Bar]:
-        """Get historical bars for a symbol"""
-        # Only support 1D resolution for now
-        if resolution != "1D":
+        """Get historical bars for a symbol.
+
+        Delegates to datafeed provider with proper parameter conversion.
+
+        Args:
+            symbol: Symbol ticker (format: "SYMBOL" or "SYMBOL:EXCHANGE")
+            resolution: TradingView resolution string ("1", "5", "1D", etc.)
+            from_time: Start time (Unix milliseconds)
+            to_time: End time (Unix milliseconds)
+            count_back: Optional limit on number of bars to return
+
+        Returns:
+            List of bars in ascending time order
+        """
+        # Parse ticker to extract symbol and exchange
+        parsed_symbol, exchange = self._parse_ticker(symbol)
+
+        # Convert resolution to TimeFrame enum
+        try:
+            timeframe = self._convert_resolution_to_timeframe(resolution)
+        except ValueError as e:
+            logger.warning(f"Unsupported resolution '{resolution}': {e}")
             return []
 
-        # Check if symbol exists
-        symbol_info = self.resolve_symbol(symbol)
-        if not symbol_info:
+        # Convert timestamps from milliseconds to datetime
+        start_time = datetime.fromtimestamp(from_time / 1000)
+        end_time = datetime.fromtimestamp(to_time / 1000)
+
+        # Delegate to provider
+        try:
+            bars = await self.datafeed_provider.get_historical_bars(
+                symbol=parsed_symbol,
+                start_time=start_time,
+                end_time=end_time,
+                resolution=timeframe,
+                exchange=exchange,
+                timeout=30.0,
+            )
+
+            # Apply count_back filter if specified
+            if count_back and count_back > 0:
+                bars = bars[-count_back:]
+
+            return bars
+
+        except Exception as e:
+            logger.error(f"Failed to get bars for {symbol}: {e}")
             return []
-
-        # Filter bars within the requested time range
-        filtered_bars = [
-            bar for bar in self._sample_bars if from_time <= bar.time <= to_time
-        ]
-
-        # Sort bars by time
-        filtered_bars.sort(key=lambda x: x.time)
-
-        return filtered_bars[count_back * -1 :] if count_back else filtered_bars
 
     def get_quotes(self, symbols: List[str]) -> List[QuoteData]:
         """Get quotes for multiple symbols"""

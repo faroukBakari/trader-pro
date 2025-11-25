@@ -196,8 +196,6 @@ AppFactory._resolve_capabilities() (static analysis)
     ↓
 ProviderRegistry.get_providers(required_capabilities)
     ↓
-Provider.on_startup() (lifecycle hook)
-    ↓
 ModuleRegistry.get_modules(providers=[...])
     ↓
 Service._resolve_capabilities() (fail-fast validation)
@@ -1123,12 +1121,6 @@ class Provider(ABC):
     @property
     def name(self) -> str:
         """Unique provider identifier."""
-
-    async def on_startup(self) -> None:
-        """Lifecycle hook for initialization."""
-
-    async def on_shutdown(self) -> None:
-        """Lifecycle hook for cleanup."""
 ```
 
 **3. Capability Interfaces** (`providers/capabilities/`)
@@ -1174,8 +1166,6 @@ Application Startup (AppFactory.create_app)
 3. AppFactory._resolve_capabilities() - Static analysis of service requirements
     ↓
 4. ProviderRegistry.get_providers() - Lazy-load matching providers
-    ↓
-5. Provider.on_startup() - Initialize provider resources
     ↓
 6. ModuleRegistry.get_modules(providers=...) - Inject providers into modules
     ↓

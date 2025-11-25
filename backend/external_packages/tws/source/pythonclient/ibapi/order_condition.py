@@ -5,10 +5,9 @@ Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is su
 
 from ibapi import comm
 from ibapi.const import UNSET_DOUBLE
-from ibapi.object_implem import Object
 from ibapi.enum_implem import Enum
+from ibapi.object_implem import Object
 from ibapi.utils import decode
-
 
 # TODO: add support for Rebate, P/L, ShortableShares conditions
 
@@ -71,11 +70,11 @@ class ExecutionCondition(OrderCondition):
     def __str__(self):
         return (
             "trade occurs for "
-            + self.symbol
+            + (self.symbol or "")
             + " symbol on "
-            + self.exchange
+            + (self.exchange or "")
             + " exchange for "
-            + self.secType
+            + (self.secType or "")
             + " security type"
         )
 
@@ -149,7 +148,7 @@ class ContractCondition(OperatorCondition):
 
     def valueToString(self) -> str:
         # todo
-        pass
+        return "ContractCondition::valueToString not implemented"
 
     def setValueFromString(self, text: str) -> None:
         # todo
@@ -160,7 +159,7 @@ class ContractCondition(OperatorCondition):
 
 
 class TimeCondition(OperatorCondition):
-    def __init__(self, isMore=None, time=None):
+    def __init__(self, isMore, time: str):
         OperatorCondition.__init__(self, OrderCondition.Time, isMore)
         self.time = time
 

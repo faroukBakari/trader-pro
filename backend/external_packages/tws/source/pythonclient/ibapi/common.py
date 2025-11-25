@@ -3,16 +3,15 @@ Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is su
  and conditions of the IB API Non-Commercial License or the IB API Commercial License, as applicable.
 """
 
-
-from ibapi.const import UNSET_INTEGER, UNSET_DECIMAL
+from ibapi.const import UNSET_DECIMAL, UNSET_INTEGER
 from ibapi.enum_implem import Enum
-from ibapi.object_implem import Object
-from ibapi.utils import floatMaxString, decimalMaxString, intMaxString
 from ibapi.message import OUT
+from ibapi.object_implem import Object
 from ibapi.server_versions import (
     MIN_SERVER_VER_PROTOBUF,
-    MIN_SERVER_VER_PROTOBUF_PLACE_ORDER
+    MIN_SERVER_VER_PROTOBUF_PLACE_ORDER,
 )
+from ibapi.utils import decimalMaxString, floatMaxString, intMaxString
 
 TickerId = int
 OrderId = int
@@ -34,7 +33,7 @@ ListOfFamilyCode = list
 ListOfContractDescription = list
 ListOfDepthExchanges = list
 ListOfNewsProviders = list
-SmartComponentMap = dict
+SmartComponentMap = list
 HistogramDataList = list
 ListOfPriceIncrements = list
 ListOfHistoricalTick = list
@@ -44,11 +43,12 @@ ListOfHistoricalSessions = list
 
 PROTOBUF_MSG_ID = 200
 PROTOBUF_MSG_IDS = {
-    OUT.REQ_EXECUTIONS :  MIN_SERVER_VER_PROTOBUF,
-    OUT.PLACE_ORDER :  MIN_SERVER_VER_PROTOBUF_PLACE_ORDER,
-    OUT.CANCEL_ORDER :  MIN_SERVER_VER_PROTOBUF_PLACE_ORDER,
-    OUT.REQ_GLOBAL_CANCEL :  MIN_SERVER_VER_PROTOBUF_PLACE_ORDER
+    OUT.REQ_EXECUTIONS: MIN_SERVER_VER_PROTOBUF,
+    OUT.PLACE_ORDER: MIN_SERVER_VER_PROTOBUF_PLACE_ORDER,
+    OUT.CANCEL_ORDER: MIN_SERVER_VER_PROTOBUF_PLACE_ORDER,
+    OUT.REQ_GLOBAL_CANCEL: MIN_SERVER_VER_PROTOBUF_PLACE_ORDER,
 }
+
 
 class BarData(Object):
     def __init__(self):

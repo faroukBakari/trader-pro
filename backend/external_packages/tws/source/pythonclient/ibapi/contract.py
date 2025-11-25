@@ -3,13 +3,11 @@ Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is su
  and conditions of the IB API Non-Commercial License or the IB API Commercial License, as applicable.
 """
 
-from ibapi.object_implem import Object
-from ibapi.const import UNSET_DECIMAL, UNSET_DOUBLE
-
-from ibapi.utils import intMaxString
-from ibapi.utils import floatMaxString
-from ibapi.utils import decimalMaxString
 from enum import Enum
+
+from ibapi.const import UNSET_DECIMAL, UNSET_DOUBLE
+from ibapi.object_implem import Object
+from ibapi.utils import decimalMaxString, floatMaxString, intMaxString
 
 """
 SAME_POS    = open/close leg value is same as combo
@@ -86,7 +84,7 @@ class Contract(Object):
             ""
         )  # type: str #received in open order 14 and up for all combos
         self.comboLegs = []  # type: list[ComboLeg]
-        self.deltaNeutralContract = None
+        self.deltaNeutralContract: DeltaNeutralContract | None = None
 
     def __str__(self):
         s = (
@@ -148,7 +146,7 @@ class ContractDetails(Object):
         self.underSymbol = ""
         self.underSecType = ""
         self.marketRuleIds = ""
-        self.secIdList = None
+        self.secIdList = []
         self.realExpirationDate = ""
         self.lastTradeTime = ""
         self.stockType = ""
@@ -189,7 +187,7 @@ class ContractDetails(Object):
         self.fundBlueSkyTerritories = ""
         self.fundDistributionPolicyIndicator = FundDistributionPolicyIndicator.NoneItem
         self.fundAssetType = FundAssetType.NoneItem
-        self.ineligibilityReasonList = None
+        self.ineligibilityReasonList = []
 
     def __str__(self):
         s = ",".join(
@@ -248,9 +246,10 @@ class ContractDescription(Object):
         self.contract = Contract()
         self.derivativeSecTypes = []  # type: list[str]
 
+
 class FundAssetType(Enum):
     NoneItem = ("None", "None")
-    Others = ("000", "Others"), 
+    Others = (("000", "Others"),)
     MoneyMarket = ("001", "Money Market")
     FixedIncome = ("002", "Fixed Income")
     MultiAsset = ("003", "Multi-asset")
@@ -258,6 +257,7 @@ class FundAssetType(Enum):
     Sector = ("005", "Sector")
     Guaranteed = ("006", "Guaranteed")
     Alternative = ("007", "Alternative")
+
 
 class FundDistributionPolicyIndicator(Enum):
     NoneItem = ("None", "None")

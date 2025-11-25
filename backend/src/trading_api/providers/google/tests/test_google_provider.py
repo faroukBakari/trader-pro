@@ -107,20 +107,6 @@ async def test_verify_token_email_not_verified(provider: GoogleProvider) -> None
             await provider.verify_token("invalid_token")
 
 
-@pytest.mark.asyncio
-async def test_on_startup_lifecycle_hook(provider: GoogleProvider) -> None:
-    """Lifecycle hook on_startup can be called."""
-    # Default implementation does nothing, should not raise
-    await provider.on_startup()
-
-
-@pytest.mark.asyncio
-async def test_on_shutdown_lifecycle_hook(provider: GoogleProvider) -> None:
-    """Lifecycle hook on_shutdown can be called."""
-    # Default implementation does nothing, should not raise
-    await provider.on_shutdown()
-
-
 def test_provider_dir() -> None:
     """Provider directory is correctly identified."""
     provider_dir = GoogleProvider.provider_dir()

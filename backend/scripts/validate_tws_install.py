@@ -77,14 +77,39 @@ def validate_imports() -> bool:
     print("\n4. Checking protobuf compiled files...")
     try:
         from ibapi.protobuf import (  # type: ignore[import-not-found]
-            FAMessage_pb2,
-            ibkr_acct_summary_pb2,
+            ErrorMessage_pb2,
+            OrderStatus_pb2,
         )
 
         print("   ✓ Protobuf compiled files (_pb2.py) accessible")
     except ImportError as e:
         print(f"   ⚠ Warning: Some protobuf files not accessible: {e}")
         print("   (This is usually not critical)")
+
+    # Test 4b: Protobuf type stub files (.pyi)
+    print("\n4b. Checking protobuf type stub files (.pyi)...")
+    try:
+        protobuf_dir = (
+            Path(__file__).parent.parent
+            / "external_packages"
+            / "tws"
+            / "source"
+            / "pythonclient"
+            / "ibapi"
+            / "protobuf"
+        )
+
+        pyi_files = list(protobuf_dir.glob("*_pb2.pyi"))
+
+        if pyi_files:
+            print(f"   ✓ Found {len(pyi_files)} type stub files (.pyi)")
+            print("   ✓ Type checkers (Pylance/Pyright) will have full type support")
+        else:
+            print("   ⚠ Warning: No .pyi stub files found")
+            print("   ⚠ Type checkers may report 'unknown import symbol' errors")
+            print(f"   → Run: {Path(__file__).parent}/regenerate_tws_protobufs.sh")
+    except Exception as e:
+        print(f"   ⚠ Warning: Could not check stub files: {e}")
 
     # Test 5: Installation path verification
     print("\n5. Verifying installation path...")

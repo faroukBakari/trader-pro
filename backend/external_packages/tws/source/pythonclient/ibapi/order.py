@@ -3,13 +3,10 @@ Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is su
  and conditions of the IB API Non-Commercial License or the IB API Commercial License, as applicable.
 """
 
-from ibapi.const import UNSET_INTEGER, UNSET_DOUBLE, UNSET_DECIMAL, DOUBLE_INFINITY
+from ibapi.const import DOUBLE_INFINITY, UNSET_DECIMAL, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.object_implem import Object
 from ibapi.softdollartier import SoftDollarTier
-from ibapi.utils import decimalMaxString
-from ibapi.utils import intMaxString
-from ibapi.utils import floatMaxString
-from ibapi.utils import longMaxString
+from ibapi.utils import decimalMaxString, floatMaxString, intMaxString, longMaxString
 
 # enum Origin
 (CUSTOMER, FIRM, UNKNOWN) = range(3)
@@ -85,7 +82,7 @@ class Order(Object):
         self.exemptCode = -1
 
         # SMART routing only
-        self.discretionaryAmt = 0
+        self.discretionaryAmt: float = 0
         self.optOutSmartRouting = False
 
         # BOX exchange orders only
@@ -149,8 +146,8 @@ class Order(Object):
         # ALGO ORDERS ONLY
         self.algoStrategy = ""
 
-        self.algoParams = None  # TagValueList
-        self.smartComboRoutingParams = None  # TagValueList
+        self.algoParams = []  # TagValueList
+        self.smartComboRoutingParams = []  # TagValueList
 
         self.algoId = ""
 
@@ -166,9 +163,9 @@ class Order(Object):
 
         # order combo legs
 
-        self.orderComboLegs = None  # OrderComboLegListSPtr
+        self.orderComboLegs = []  # OrderComboLegListSPtr
 
-        self.orderMiscOptions = None  # TagValueList
+        self.orderMiscOptions = []  # TagValueList
 
         # VER PEG2BENCH fields:
         self.referenceContractId = 0
@@ -215,7 +212,7 @@ class Order(Object):
         self.routeMarketableToBbo = False
         self.parentPermId = 0
 
-        self.usePriceMgmtAlgo = None
+        self.usePriceMgmtAlgo: int | None = None
         self.duration = UNSET_INTEGER
         self.postToAts = UNSET_INTEGER
         self.advancedErrorOverride = ""

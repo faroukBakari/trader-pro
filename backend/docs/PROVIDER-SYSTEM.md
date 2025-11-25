@@ -216,13 +216,11 @@ providers = await registry.get_providers([CapabilitySpec(name="auth")])
    ↓
 5. ProviderRegistry.get_providers() - lazy-loads matching providers
    ↓
-6. Provider.on_startup() - lifecycle hook for initialization
+6. ModuleRegistry.get_modules(providers=...) - injects providers
    ↓
-7. ModuleRegistry.get_modules(providers=...) - injects providers
+7. Service._resolve_capabilities() - builds capability map (FAIL-FAST)
    ↓
-8. Service._resolve_capabilities() - builds capability map (FAIL-FAST)
-   ↓
-9. Application ready!
+8. Application ready!
 ```
 
 **Request Handling:**
@@ -242,9 +240,7 @@ providers = await registry.get_providers([CapabilitySpec(name="auth")])
 **Application Shutdown:**
 
 ```text
-1. AppFactory cleanup
-   ↓
-2. Provider.on_shutdown() - lifecycle hook for cleanup
+AppFactory cleanup
 ```
 
 ---
@@ -394,15 +390,6 @@ class LocalProvider(Provider, AuthCapability):
             raise AuthenticationError("Token has expired")
         except jwt.InvalidTokenError as e:
             raise AuthenticationError(f"Invalid token: {e}")
-
-    async def on_startup(self) -> None:
-        """Validate configuration on startup."""
-        # Example: Verify JWT secret is strong enough
-        if len(self.config.jwt_secret) < 32:
-            import logging
-            logging.warning(
-                "JWT secret is short. Use at least 32 characters in production."
-            )
 
 
 __all__ = ["LocalProvider", "LocalProviderConfig"]
@@ -769,31 +756,7 @@ class IBKRProvider(Provider, AuthCapability, BrokerCapability):
 
 **Benefit:** Both AuthService and BrokerService share the same IBKR connection.
 
-### 6.2 Provider Lifecycle Hooks
-
-**Use `on_startup`/`on_shutdown` for resource management:**
-
-```python
-class DatabaseProvider(Provider):
-    def __init__(self):
-        self._connection_pool = None
-
-    async def on_startup(self) -> None:
-        """Initialize connection pool."""
-        self._connection_pool = await create_pool(
-            host=self.config.db_host,
-            port=self.config.db_port
-        )
-        logger.info("Database connection pool initialized")
-
-    async def on_shutdown(self) -> None:
-        """Close connections."""
-        if self._connection_pool:
-            await self._connection_pool.close()
-            logger.info("Database connection pool closed")
-```
-
-### 6.3 Conditional Provider Loading
+### 6.2 Conditional Provider Loading
 
 **Use `enabled` flag to disable providers:**
 
@@ -815,7 +778,7 @@ class DebugProviderConfig(ProviderConfig):
 DEBUG_PROVIDER_ENABLED=true  # Only in development
 ```
 
-### 6.4 Versioned Capabilities
+### 6.3 Versioned Capabilities
 
 **Support multiple versions of same capability:**
 
@@ -956,31 +919,7 @@ providers = await registry.get_providers([CapabilitySpec(name="auth")])
 print("Matched providers:", [p.name for p in providers])
 ```
 
-### 7.3 Testing Provider in Isolation
-
-**Quick test script:**
-
-```python
-# test_my_provider.py
-import asyncio
-from trading_api.providers.myprovider import MyProvider
-from trading_api.models.myprovider.config import MyProviderConfig
-
-async def test():
-    config = MyProviderConfig(api_key="test_key")
-    provider = MyProvider(config=config)
-
-    await provider.on_startup()
-
-    result = await provider.some_method()
-    print("Result:", result)
-
-    await provider.on_shutdown()
-
-asyncio.run(test())
-```
-
-### 7.4 Logging Best Practices
+### 7.3 Logging Best Practices
 
 **Add structured logging to your provider:**
 
@@ -1045,25 +984,7 @@ class MyProvider(Provider):
 
 ### 8.3 Performance
 
-1. **Use connection pooling:**
-
-   ```python
-   class MyProvider(Provider):
-       def __init__(self):
-           self._http_client = None
-
-       async def on_startup(self):
-           # Reuse connection pool across requests
-           self._http_client = httpx.AsyncClient(
-               timeout=30.0,
-               limits=httpx.Limits(max_connections=100)
-           )
-
-       async def on_shutdown(self):
-           await self._http_client.aclose()
-   ```
-
-2. **Cache expensive operations:**
+1. **Cache expensive operations:**
 
    ```python
    from functools import lru_cache
@@ -1075,7 +996,7 @@ class MyProvider(Provider):
            ...
    ```
 
-3. **Lazy-load resources:**
+2. **Lazy-load resources:**
    ```python
    class MyProvider(Provider):
        @property
@@ -1214,12 +1135,6 @@ class Provider(ABC):
     @abstractmethod
     def config(self) -> ProviderConfig:
         """Return provider configuration."""
-
-    async def on_startup(self) -> None:
-        """Lifecycle hook for initialization."""
-
-    async def on_shutdown(self) -> None:
-        """Lifecycle hook for cleanup."""
 ```
 
 #### ProviderConfig
@@ -1253,10 +1168,6 @@ class ProviderRegistry:
         """Get specific provider by name."""
 
     def list_providers(self) -> list[str]:
-        """List all registered provider names."""
-
-    async def shutdown(self) -> None:
-        """Shutdown all providers."""
 ```
 
 ### 9.2 Capability Interfaces
