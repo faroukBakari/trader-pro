@@ -27,6 +27,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
         self._search_symbols_mock = AsyncMock()
         self._get_symbol_info_mock = AsyncMock()
         self._get_historical_bars_mock = AsyncMock()
+        self._get_quotes_snapshot_mock = AsyncMock()
         self._subscribe_realtime_bars_mock = Mock()
         self._subscribe_market_data_mock = Mock()
         self._unsubscribe_realtime_bars_mock = Mock()
@@ -105,6 +106,16 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     def unsubscribe_market_data(self, subscription_id: int) -> None:
         self._unsubscribe_market_data_mock(subscription_id)
+
+    async def get_quotes_snapshot(
+        self,
+        symbols: list[str],
+        exchange: str | None = None,
+        timeout: float = 15.0,
+    ) -> list[QuoteData]:
+        return await self._get_quotes_snapshot_mock(  # type: ignore[no-any-return]
+            symbols=symbols, exchange=exchange, timeout=timeout
+        )
 
 
 @pytest.mark.asyncio
