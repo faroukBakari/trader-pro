@@ -388,9 +388,9 @@ class TWSProvider(Provider, DatafeedCapability):
         # Await all snapshots with timeout
         try:
             results: list[QuoteData] = [
-                tws_ticks_to_quote_data(symbol, ticks)  # type: ignore
+                tws_ticks_to_quote_data(symbol, ticks)
                 for symbol, ticks in zip(symbols, results_raw)
-                if not isinstance(ticks, dict)
+                if isinstance(ticks, dict)
             ]
 
             return results
