@@ -4,8 +4,8 @@
 
 > **Offline Documentation Collection**  
 > **Source:** [TWS API Campus](https://ibkrcampus.com/campus/ibkr-api-page/)  
-> **Last Updated:** November 19, 2025  
-> **API Version:** 10.19.1+
+> **Last Updated:** November 26, 2025  
+> **API Version:** 10.37.02
 
 Complete offline reference documentation for developing applications with the Interactive Brokers TWS API for Python.
 
@@ -883,6 +883,66 @@ This documentation is maintained alongside the TWS API library at `/home/farouk/
 3. Update relevant documentation sections
 4. Test code examples with new API version
 5. Update "Last Updated" dates in modified files
+
+---
+
+## 11.0 Local Modifications & Project Integration
+
+<!-- METADATA: scope=local-mods, priority=high, dependencies=[providers/tws/README] -->
+
+This project includes local enhancements to the TWS API library for improved developer experience.
+
+### 11.1 Type Stub Files (`.pyi`)
+
+**Location:** `backend/external_packages/tws/source/pythonclient/ibapi/`
+
+15 type stub files provide full Pylance/Pyright support:
+
+| Stub File                  | Purpose                                              |
+| -------------------------- | ---------------------------------------------------- |
+| `client.pyi`               | `EClient` class with 50+ method signatures           |
+| `wrapper.pyi`              | `EWrapper` class with 70+ callback signatures        |
+| `contract.pyi`             | `Contract`, `ContractDetails`, `ContractDescription` |
+| `order.pyi`                | `Order` class with 100+ typed parameters             |
+| `execution.pyi`            | `Execution`, `ExecutionFilter`                       |
+| `common.pyi`               | `BarData`, `TickAttrib`, `HistoricalTick` types      |
+| `decoder.pyi`              | `Decoder` class for message parsing                  |
+| `reader.pyi`               | `EReader` class (not used in our implementation)     |
+| `connection.pyi`           | `Connection` class for raw socket operations         |
+| `comm.pyi`                 | Low-level communication utilities                    |
+| `order_condition.pyi`      | Order condition types                                |
+| `tag_value.pyi`            | `TagValue` for scanner/FA parameters                 |
+| `scanner.pyi`              | `ScannerSubscription` for market scanners            |
+| `account_summary_tags.pyi` | Account summary tag constants                        |
+| `softdollartier.pyi`       | Soft dollar tier configuration                       |
+
+**Benefits:**
+
+- IDE autocomplete for all EClient methods and EWrapper callbacks
+- Type checking catches errors before runtime
+- Hover documentation shows parameter types
+
+### 11.2 Utility Modules
+
+**`decoder_utils.py`** - Protobuf message decoding utilities  
+**`client_utils.py`** - Client-side connection and configuration helpers
+
+### 11.3 Protobuf Regeneration
+
+**Script:** `backend/scripts/regenerate_tws_protobufs.sh`
+
+Regenerates protobuf Python files from `.proto` definitions when:
+
+- Protobuf compiler version changes
+- Proto definitions are modified
+- Files become corrupted
+
+### 11.4 Related Documentation
+
+**[CROSS-REFERENCE]** For implementation details, see:
+
+- **[TWS Provider README](../../../src/trading_api/providers/tws/README.md)** - Three-layer architecture (TWSProvider → TWSClient → IBSocket)
+- **[Provider System Guide](../../docs/PROVIDER-SYSTEM.md)** - Capability-based provider architecture
 
 ---
 

@@ -1219,6 +1219,15 @@ class CapabilityNotFoundError(ProviderError):
 5. Set env vars: `.env.local`
 6. Run tests: `make test`
 
+**Real-World Example:**
+
+See **[TWS Provider Implementation Guide](../src/trading_api/providers/tws/README.md)** for a production-ready provider implementing:
+
+- Three-layer architecture (TWSProvider → TWSClient → IBSocket)
+- DatafeedCapability interface
+- Async/await with Future-based threading bridge
+- Comprehensive domain mappers
+
 **File Template:**
 
 ```python
