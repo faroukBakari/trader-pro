@@ -2,7 +2,7 @@
 document_type: documentation_index
 primary_purpose: discovery_and_navigation
 target_audience: ai_agents
-last_updated: 2025-11-21
+last_updated: 2025-11-26
 total_documents: 45
 coverage_areas:
   [
@@ -364,7 +364,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md`
 - **Authentication**: `AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
 - **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BROKER-CONNECTION-ADAPTER.md`
-- **TWS Provider Integration**: `providers/tws/README.md` → `tws/docs/README.md` → specific API reference docs
+- **TWS Provider Integration**: `PROVIDER-SYSTEM.md` → `providers/tws/README.md` → `tws/docs/README.md` → specific API reference docs
 - **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md` → `WS_ROUTERS_GEN.md`
 
 ### Testing Chains
@@ -513,18 +513,21 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TWS API Integration
 
-**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution
+**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSProvider, TWSClient, IBSocket
 
 **Scope**: Interactive Brokers TWS API integration  
 **Out of Scope**: Other broker APIs, custom trading protocols
 
 - **backend/src/trading_api/providers/tws/README.md** - ⭐ TWS Datafeed Provider implementation guide (start here for integration)
-- **backend/external_packages/tws/docs/README.md** - TWS API documentation index
+  - Three-layer architecture: TWSProvider → TWSClient → IBSocket
+  - Threading model, domain mappers, testing patterns
+- **backend/external_packages/tws/docs/README.md** - TWS API documentation index (includes local modifications)
 - **backend/external_packages/tws/docs/06-SETUP-GUIDE.md** - TWS/Gateway installation and configuration
 - **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md** - Connection management, threading, error handling
 - **backend/external_packages/tws/docs/01-API-REFERENCE-CLASSES.md** - Core API classes (EClient, EWrapper, Contract)
 - **backend/external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md** - Order placement and execution
 - **backend/external_packages/tws/docs/04-API-REFERENCE-CONDITIONS.md** - Advanced conditional orders
+- **Type Stubs**: 15 `.pyi` files in `backend/external_packages/tws/source/pythonclient/ibapi/` for Pylance/Pyright support
 
 ---
 
@@ -558,6 +561,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2025-11-26**: TWS Provider documentation refresh (type stubs, local modifications, expanded chains)
 - **2025-11-21**: AI agent optimization (added metadata, discovery rules, query patterns, dependencies)
 - **2025-11-19**: TWS API docs added (8 files in `backend/external_packages/tws/docs/`)
 - **2025-11-18**: Setup consolidation (3→1), methodologies organization, TradingView public docs (2→1)
@@ -580,5 +584,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: November 21, 2025  
+**Last Updated**: November 26, 2025  
 **Maintained by**: Development Team
