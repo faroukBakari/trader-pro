@@ -18,7 +18,7 @@ server and client.
 
 import logging
 import sys
-from abc import ABC
+from abc import ABC, abstractmethod
 from decimal import Decimal
 from typing import Callable
 
@@ -64,24 +64,19 @@ from ibapi.ticktype import TickType
 logger = logging.getLogger(__name__)
 
 
-def default_dispatcher(fnName: str, fnParams: dict):
-    if logger.isEnabledFor(logging.INFO):
-        if "self" in fnParams:
-            fnParams = dict(fnParams)
-            del fnParams["self"]
-        logger.info(f"TWS MESSAGE: {fnName} {fnParams}")
-
-
 def current_fn_name(parent_idx=0):
     # depth is 1 bc this is already a fn, so we need the caller
     return sys._getframe(1 + parent_idx).f_code.co_name
 
 
 class EWrapper(ABC):
-    def __init__(
-        self, dispatcher: Callable[[str, dict], None] = default_dispatcher
-    ) -> None:
-        self.dispatchMessage: Callable[[str, dict], None] = dispatcher
+
+    def dispatchMessage(self, fnName: str, fnParams: dict):
+        if logger.isEnabledFor(logging.INFO):
+            if "self" in fnParams:
+                fnParams = dict(fnParams)
+                del fnParams["self"]
+            logger.info(f"TWS MESSAGE: {fnName} {fnParams}")
 
     def error(
         self,

@@ -101,6 +101,29 @@ class DatafeedCapability(ABC):
         ...
 
     @abstractmethod
+    async def get_quotes_snapshot(
+        self,
+        symbols: list[str],
+        exchange: str | None = None,
+        timeout: float = 15.0,
+    ) -> list[QuoteData]:
+        """Get current market quotes for multiple symbols (snapshot).
+
+        Args:
+            symbols: List of symbol names
+            exchange: Optional exchange filter
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of QuoteData (one per symbol)
+
+        Raises:
+            DatafeedError: If request fails
+            TimeoutError: If snapshot exceeds timeout
+        """
+        ...
+
+    @abstractmethod
     def subscribe_realtime_bars(
         self,
         symbol: str,

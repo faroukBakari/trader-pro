@@ -1,6 +1,6 @@
 """TWS domain mappers.
 
-Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar, etc.).
+Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar, QuoteData, etc.).
 """
 
 from datetime import datetime
@@ -8,8 +8,15 @@ from decimal import Decimal
 
 from ibapi.common import BarData
 from ibapi.contract import ContractDescription, ContractDetails
+from ibapi.ticktype import TickTypeEnum
 
-from trading_api.models.market import Bar, SearchSymbolResultItem, SymbolInfo
+from trading_api.models.market import (
+    Bar,
+    QuoteData,
+    QuoteValues,
+    SearchSymbolResultItem,
+    SymbolInfo,
+)
 
 # TWS secType → TradingView-style symbol type
 SEC_TYPE_MAP: dict[str, str] = {
@@ -140,10 +147,74 @@ def tws_bar_to_domain_bar(tws_bar: BarData, symbol: str) -> Bar:
     )
 
 
+def tws_ticks_to_quote_data(
+    symbol: str,
+    ticks: dict[str, dict[int, float | int]],
+) -> QuoteData:
+    """Convert TWS tick data → domain QuoteData.
+
+    Args:
+        symbol: Symbol name
+        ticks: Dictionary with "prices" and "sizes" from TWS callbacks
+               Example: {"prices": {1: 150.25, 2: 150.30}, "sizes": {0: 100}}
+
+    Returns:
+        QuoteData with status="ok" and QuoteValues populated from ticks
+    """
+    prices = ticks.get("prices", {})
+    sizes = ticks.get("sizes", {})
+
+    # Extract tick values (None if not present)
+    bid = prices.get(TickTypeEnum.BID)
+    ask = prices.get(TickTypeEnum.ASK)
+    last = prices.get(TickTypeEnum.LAST)
+    open_price = prices.get(TickTypeEnum.OPEN)
+    high_price = prices.get(TickTypeEnum.HIGH)
+    low_price = prices.get(TickTypeEnum.LOW)
+    close_price = prices.get(TickTypeEnum.CLOSE)
+
+    sizes.get(TickTypeEnum.BID_SIZE)
+    sizes.get(TickTypeEnum.ASK_SIZE)
+    volume = sizes.get(TickTypeEnum.VOLUME)
+
+    # Calculate spread (if both bid and ask available)
+    spread = (ask - bid) if (ask is not None and bid is not None) else 0.0
+
+    # Calculate change and change percent (if last and close available)
+    if last is not None and close_price is not None and close_price != 0:
+        change = last - close_price
+        change_percent = (change / close_price) * 100
+    else:
+        change = 0.0
+        change_percent = 0.0
+
+    # Build QuoteValues with available data (use 0.0 for missing prices)
+    quote_values = QuoteValues(
+        lp=last or 0.0,
+        ask=ask or 0.0,
+        bid=bid or 0.0,
+        spread=spread,
+        open_price=open_price or 0.0,
+        high_price=high_price or 0.0,
+        low_price=low_price or 0.0,
+        prev_close_price=close_price or 0.0,
+        volume=int(volume) if volume is not None else 0,
+        ch=change,
+        chp=change_percent,
+        short_name=symbol,
+        exchange="",  # Not provided in tick data
+        description=f"Quote for {symbol}",
+        original_name=symbol,
+    )
+
+    return QuoteData(s="ok", n=symbol, v=quote_values)
+
+
 __all__ = [
     "SEC_TYPE_MAP",
     "DEFAULT_SUPPORTED_RESOLUTIONS",
     "contract_description_to_search_result",
     "contract_details_to_symbol_info",
     "tws_bar_to_domain_bar",
+    "tws_ticks_to_quote_data",
 ]

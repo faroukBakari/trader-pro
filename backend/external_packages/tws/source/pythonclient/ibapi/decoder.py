@@ -17,9 +17,13 @@ It will call the corresponding method from the EWrapper so that customer's code
 (eg: class derived from EWrapper) can make further use of the data.
 """
 
+from ibapi.commission_and_fees_report import CommissionAndFeesReport
 from ibapi.common import *  # @UnusedWildImport
 from ibapi.contract import (
+    Contract,
     ContractDescription,
+    ContractDetails,
+    DeltaNeutralContract,
     FundAssetType,
     FundDistributionPolicyIndicator,
 )
@@ -30,8 +34,11 @@ from ibapi.decoder_utils import (
     decodeOrderState,
 )
 from ibapi.errors import BAD_MESSAGE
+from ibapi.execution import Execution
 from ibapi.ineligibility_reason import IneligibilityReason
 from ibapi.message import IN
+from ibapi.order import Order
+from ibapi.order_state import OrderState
 from ibapi.orderdecoder import OrderDecoder
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.protobuf.ExecutionDetails_pb2 import (
@@ -54,10 +61,10 @@ from ibapi.wrapper import *  # @UnusedWildImport
 logger = logging.getLogger(__name__)
 
 from decimal import Decimal
-from typing import Callable, Iterator, overload
+from typing import Callable
 
 
-class HandleInfo(Object):
+class HandleInfo(object):
     def __init__(self, wrap: Callable | None = None, proc: Callable | None = None):
         self.wrapperMeth = wrap
         self.wrapperParams: MappingProxyType[str, Parameter] | None = None
@@ -70,7 +77,7 @@ class HandleInfo(Object):
         return s
 
 
-class Decoder(Object):
+class Decoder(object):
     def __init__(self, wrapper: EWrapper, serverVersion: int):
         self.wrapper = wrapper
         self.serverVersion = serverVersion
@@ -1625,7 +1632,7 @@ class Decoder(Object):
         args = []
         for pname, param in handleInfo.wrapperParams.items():
             if pname != "self":
-                logger.debug("field %s ", fields[fieldIdx])
+                # logger.debug("field %s ", fields[fieldIdx])
                 try:
                     arg = fields[fieldIdx].decode(
                         "unicode-escape"
@@ -1634,7 +1641,7 @@ class Decoder(Object):
                     )
                 except UnicodeDecodeError:
                     arg = fields[fieldIdx].decode("latin-1")
-                logger.debug("arg %s type %s", arg, param.annotation)
+                # logger.debug("arg %s type %s", arg, param.annotation)
                 if param.annotation is int:
                     arg = int(arg)
                 elif param.annotation is float:
@@ -1649,7 +1656,7 @@ class Decoder(Object):
                 fieldIdx += 1
 
         method = getattr(self.wrapper, handleInfo.wrapperMeth.__name__)
-        logger.debug("calling %s with %s %s", method, self.wrapper, args)
+        # logger.debug("calling %s with %s %s", method, self.wrapper, args)
         method(*args)
 
     def interpret(self, fields, msgId):
@@ -1665,7 +1672,7 @@ class Decoder(Object):
 
         try:
             if handleInfo.wrapperMeth is not None:
-                logger.debug("In interpret(), handleInfo: %s", handleInfo)
+                # logger.debug("In interpret(), handleInfo: %s", handleInfo)
                 self.interpretWithSignature(fields, handleInfo)
             elif handleInfo.processMeth is not None:
                 handleInfo.processMeth(self, iter(fields))

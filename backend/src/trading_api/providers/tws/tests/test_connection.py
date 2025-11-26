@@ -16,10 +16,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from trading_api.providers.tws.tws_connection import TWSClientHelper, TWSError
+from trading_api.providers.tws.tws_connection import TWSCallback, TWSError
 
 
-def create_test_client() -> TWSClientHelper:
+def create_test_client() -> TWSCallback:
     """Create a TWSClientHelper with mocked IBSocket for testing.
 
     No real socket connection, no background thread trying to connect.
@@ -36,7 +36,7 @@ def create_test_client() -> TWSClientHelper:
     # Dummy thread that does nothing
     dummy_thread = threading.Thread(target=lambda: None, daemon=True)
 
-    return TWSClientHelper(
+    return TWSCallback(
         ibsocket=mock_ibsocket,
         client_thread=dummy_thread,
         running=stopped_event,
