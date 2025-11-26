@@ -1,7 +1,7 @@
 ---
 agent: "agent"
 name: "tdd-plan-v3"
-model: "Claude Sonnet 4.5"
+model: "Claude Opus 4.5 (Preview)"
 description: "Generate a step-by-step TDD action plan ONLY. Do not implement or modify code. Save plan to docs/tmp/, and report the file path."
 ---
 

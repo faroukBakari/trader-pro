@@ -12,6 +12,7 @@ Architecture:
 - IBSocket (Layer 1): Raw TCP protocol, message framing
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -62,15 +63,6 @@ class TWSProvider(Provider, DatafeedCapability):
         self._tws_client = TWSClient(
             self._config.host, self._config.port, self._config.client_id
         )
-
-    # === Provider Implementation ===
-
-    def __del__(self) -> None:
-        """Cleanup TWS connection on deletion."""
-        try:
-            self._tws_client.disconnect()
-        except Exception as e:
-            logger.warning(f"Error disconnecting TWS client: {e}")
 
     @classmethod
     def provider_dir(cls) -> Path:
@@ -355,6 +347,60 @@ class TWSProvider(Provider, DatafeedCapability):
             raise DatafeedError(
                 f"Failed to get historical bars for {symbol}: {e}"
             ) from e
+
+    async def get_quotes_snapshot(
+        self,
+        symbols: list[str],
+        exchange: str | None = None,
+        timeout: float = 15.0,
+    ) -> list[QuoteData]:
+        """Get current market quotes for multiple symbols (snapshot).
+
+        [ASYNC-BRIDGE]: Wraps sync TWS callbacks with async Future.
+        [ACCUMULATION]: TWS sends multiple tickPrice/tickSize callbacks, accumulates until tickSnapshotEnd.
+        [DOMAIN-ONLY]: Returns domain QuoteData models (no TWS types).
+
+        Args:
+            symbols: List of symbol names (e.g., ["AAPL", "GOOGL", "MSFT"])
+            exchange: Optional exchange filter (default: "SMART")
+            timeout: Request timeout in seconds (default: 15s for snapshot completion)
+
+        Returns:
+            List of QuoteData (one per symbol, same order as input)
+
+        Raises:
+            DatafeedError: If request fails
+            TimeoutError: If snapshot exceeds timeout
+        """
+        from .tws_mappers import tws_ticks_to_quote_data
+
+        # Request quotes for all symbols concurrently
+        tasks = [
+            self._tws_client.reqMktDataSnapshot(
+                self._build_contract(symbol, exchange=exchange or "SMART"),
+                generic_tick_list="",
+            )
+            for symbol in symbols
+        ]
+
+        results_raw = await asyncio.gather(*tasks)
+
+        # Await all snapshots with timeout
+        try:
+            results: list[QuoteData] = [
+                tws_ticks_to_quote_data(symbol, ticks)  # type: ignore
+                for symbol, ticks in zip(symbols, results_raw)
+                if not isinstance(ticks, dict)
+            ]
+
+            return results
+
+        except asyncio.TimeoutError:
+            logger.error(f"Quote snapshot timed out after {timeout}s")
+            raise TimeoutError(f"Quote snapshot timed out after {timeout}s")
+        except Exception as e:
+            logger.error(f"Error getting quote snapshot: {e}")
+            raise DatafeedError(f"Failed to get quote snapshot: {e}") from e
 
     def subscribe_realtime_bars(
         self,
