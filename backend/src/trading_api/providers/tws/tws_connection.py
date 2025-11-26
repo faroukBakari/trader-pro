@@ -182,7 +182,16 @@ class IBSocket:
 
     @property
     def closed(self) -> bool:
-        return self._socket.fileno() == -1
+        if self._socket.fileno() == -1:
+            return True
+        try:
+            r, _, _ = select.select([self._socket], [], [], 0)
+            if r:
+                data = self._socket.recv(1, MSG_PEEK)
+                return data == b""
+            return False
+        except OSError:
+            return False
 
     def _reader_loop(self, cb_wrapper: EWrapper) -> None:
         """TWS reader loop - to be run in a separate thread.
@@ -520,7 +529,7 @@ class TWSCallback(EWrapper):
     # === Market data snapshot (accumulation pattern) ===
 
     def tickPrice(
-        self, reqId: int, tickType: int, price: float, tickAttrib: TickAttrib
+        self, reqId: int, tickType: int, price: float, attrib: TickAttrib
     ) -> None:
         """Accumulate price ticks for market data snapshot.
 
@@ -552,7 +561,7 @@ class TWSCallback(EWrapper):
 
     def tickReqParams(
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
-    ):
+    ) -> None:
         """returns exchange map of a particular contract"""
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
