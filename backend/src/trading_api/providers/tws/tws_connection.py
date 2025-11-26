@@ -22,11 +22,16 @@ Architecture:
 
 import asyncio
 import logging
+import os
+import select
+import struct
 import threading
 import time
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from decimal import Decimal
+from itertools import count
+from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
@@ -39,9 +44,14 @@ from ibapi.decoder import Decoder
 from ibapi.errors import CONNECT_FAIL, FAIL_CREATE_SOCK
 from ibapi.message import OUT
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
-from ibapi.wrapper import EWrapper
+from ibapi.ticktype import TickTypeEnum
+from ibapi.wrapper import EWrapper, current_fn_name
 
 logger = logging.getLogger(__name__)
+DEBUG_TWS_SEND = os.environ.get("DEBUG_TWS_SEND") == "true"
+DEBUG_TWS_RECEIVE = os.environ.get("DEBUG_TWS_RECEIVE") == "true"
+DEBUG_TWS_DISPATCH = os.environ.get("DEBUG_TWS_DISPATCH") == "true"
+DEBUG_TWS_CALLBACK = os.environ.get("DEBUG_TWS_CALLBACK") == "true"
 
 
 NO_VALID_ID = -1
@@ -51,42 +61,71 @@ PROTOBUF_MSG_ID = 200
 VERSION = 2
 
 
+def clean_self(param: dict) -> dict:
+    """Helper to remove 'self' from method parameters for logging."""
+    if isinstance(param, dict) and "self" in param:
+        del param["self"]
+    return param
+
+
 def to_str(val: object) -> str:
-    if isinstance(val, bool):
-        return str(int(val))
+    match val:
+        # 1. Type Check: Boolean
+        # Must act before int checks usually, though here we cast to int explicitly
+        case bool():
+            return str(int(val))
 
-    if isinstance(val, list):
-        # Convert list to concatenated string (like official API)
-        return "".join(to_str(item) for item in val)
+        # 2. Type Check: List
+        case list():
+            return "".join(to_str(item) for item in val)
 
-    if UNSET_INTEGER == val or UNSET_DOUBLE == val:
-        return ""
+        # 3. Value Check: Unset constants
+        case _:
+            if val == UNSET_INTEGER or val == UNSET_DOUBLE:
+                return ""
+            if val == DOUBLE_INFINITY:
+                return str(INFINITY_STR)
+            return str(val)
 
-    if DOUBLE_INFINITY == val:
-        return str(INFINITY_STR)
 
-    return str(val)
+NULL = b"\0"
 
 
 def make_fields(values: list) -> bytes:
-    return b"".join(to_str(v).encode() + b"\0" for v in values)
+    result = bytearray()
+    for v in values:
+        result.extend(to_str(v).encode())
+        result.extend(NULL)
+    return bytes(result)
 
 
-def decode_data(buf: bytes, buf_siz: int) -> tuple[int, bytes, bytes, int]:
-    msg_size = int.from_bytes(buf[:4], byteorder="big")
-    if msg_size <= buf_siz - 4:
-        remaining_buff = buf[4 + msg_size :]
-        buf_siz -= 4 + msg_size
-        assert len(remaining_buff) == buf_siz, "Buffer size mismatch after decoding."
+HEADER_STRUCT = struct.Struct(">I")
+
+
+def decode_data(buf: bytearray, buf_siz: int) -> tuple[int, bytes, bytearray, int]:
+    if buf_siz < 4:
+        return -1, b"", buf, buf_siz
+    msg_size = HEADER_STRUCT.unpack_from(buf, 0)[0]
+    packet_end = 4 + msg_size
+    if buf_siz >= packet_end:
+        msgId = HEADER_STRUCT.unpack_from(buf, 4)[0]
+        payload = bytes(buf[8:packet_end])
+        del buf[:packet_end]
+        buf_siz -= packet_end
+        if DEBUG_TWS_RECEIVE:
+            assert len(buf) == buf_siz, "Buffer size mismatch after decoding."
         return (
-            int.from_bytes(buf[4:8], "big"),
-            # [chunk for chunk in buf[8 : 4 + msg_size].split(b"\0")],
-            buf[8 : 4 + msg_size],
-            remaining_buff,
+            msgId,
+            payload,
+            buf,
             buf_siz,
         )
     else:
         return -1, b"", buf, buf_siz
+
+
+get_tick_type_name = TickTypeEnum.idx2name.get
+debug_log = logger.debug
 
 
 class IBSocket:
@@ -95,7 +134,7 @@ class IBSocket:
     ) -> None:
         self._server_version: int = 203
         self.connection_time: str = ""
-        self._next_req_id: int = 0
+        self._req_id_counter = count()
         self._lock = loc or threading.Lock()
         self._reader_thread: threading.Thread | None = None
         try:
@@ -117,10 +156,7 @@ class IBSocket:
 
     @property
     def next_req_id(self) -> int:
-        with self._lock:
-            current_req_id = self._next_req_id
-            self._next_req_id += 1
-            return current_req_id
+        return next(self._req_id_counter)
 
     @property
     def ready(self) -> bool:
@@ -136,7 +172,11 @@ class IBSocket:
         if self._socket.fileno() == -1:
             return False
         try:
-            return self._socket.getpeername() is not None
+            r, _, _ = select.select([self._socket], [], [], 0)
+            if r:
+                data = self._socket.recv(1, MSG_PEEK)
+                return data != b""
+            return True
         except OSError:
             return False
 
@@ -154,30 +194,51 @@ class IBSocket:
         """
         decoder = Decoder(cb_wrapper, self.server_version)
         logger.info("IBSocket reader loop started.")
-        buf = b""
+
+        # Cache method references for hot path (avoid attribute lookup per iteration)
+        recv = self.receive_data
+        process_proto = decoder.processProtoBuf
+        interpret = decoder.interpret
+
+        buf = bytearray()
         buf_siz = 0
-        while self.running:
+        running = self.running
+        while running:
             try:
-                msgId, data, buf, buf_siz = self.receive_data(buf, buf_siz)
+                msgId, data, buf, buf_siz = recv(buf, buf_siz)
                 if msgId == -1:
-                    if buf_siz > 0:
-                        logger.debug(
-                            f"Incomplete message in buffer, waiting for more data. "
-                            f"Buffer size: {buf_siz}"
+                    # Incomplete message - only log if debugging enabled
+                    if buf_siz > 0 and logger.isEnabledFor(logging.WARNING):
+                        logger.warning(
+                            "Incomplete message in buffer, waiting for more data. "
+                            "Buffer size: %d",
+                            buf_siz,
                         )
                     continue
 
                 if msgId > PROTOBUF_MSG_ID:
                     msgId -= PROTOBUF_MSG_ID
-                    logger.debug("msgId: %d, protobuf: %s", msgId, data)
-                    decoder.processProtoBuf(data, msgId)
+                    if DEBUG_TWS_DISPATCH:
+                        debug_log("msgId: %d, protobuf: %s", msgId, data)
+                    process_proto(data, msgId)
                 else:
-                    fields = [chunk for chunk in data.split(b"\0")]
-                    logger.debug("msgId: %d, fields: %s", msgId, fields)
-                    # Remove trailing empty field
-                    decoder.interpret(fields[:-1], msgId)
+                    # Direct split - no list comprehension wrapper needed
+                    fields = data.split(NULL)[:-1]  # Remove trailing empty field
+                    if DEBUG_TWS_DISPATCH:
+                        debug_log("msgId: %d, interpret: %s", msgId, fields)
+                    # Remove trailing empty field (split always produces one)
+                    interpret(fields, msgId)
+            except (socketError, socketTimeout) as e:
+                running = self.running
+                logger.exception("Socket exception in reader loop: %s", e)
+                time.sleep(0.5)
             except Exception as e:
-                logger.debug(f"Exception in IBSocket reader loop: {e}")
+                running = self.running
+                logger.exception(
+                    "Unexpected exception in IBSocket reader loop (running: %d): %s",
+                    running,
+                    e,
+                )
                 time.sleep(0.5)
 
         logger.info("IBSocket reader loop finished.")
@@ -188,7 +249,7 @@ class IBSocket:
         port: int,
         client_id: int,
         cb_wrapper: EWrapper,
-        block_interval: float = 1,
+        block_interval: float = 0.01,
     ) -> threading.Thread:
         assert self.ready, "Socket already used!"
 
@@ -222,7 +283,8 @@ class IBSocket:
             msg_content = len(v100version).to_bytes(4, "big") + v100version.encode()
             message = str.encode("API\0", "ascii") + msg_content
             self._socket.sendall(message)
-            logger.debug("Sent initial message: %s", message)
+            if DEBUG_TWS_SEND:
+                debug_log(f"Sent initial message: {str(message)}")
             nb_retries = 3
             while True:
                 try:
@@ -234,18 +296,19 @@ class IBSocket:
                         nb_retries > 0
                     ), f"Error while waiting for handshake response: {e}"
             buf_size = len(data)
-            msg_size = int.from_bytes(data[:4], byteorder="big")
-            logger.debug("received length: %d", msg_size)
+            msg_size = HEADER_STRUCT.unpack_from(data, 0)[0]
+            if DEBUG_TWS_RECEIVE:
+                debug_log(f"Received handshake data: {str(data)}")
             assert (
                 msg_size <= buf_size - 4
             ), f"Initial read buffer size exceeds message size: {buf_size}"
-            fields = [chunk for chunk in data[4 : 4 + msg_size].split(b"\0") if chunk]
+            fields = [chunk for chunk in data[4 : 4 + msg_size].split(NULL) if chunk]
             assert len(fields) == 2, "Expected at two fields in handshake message."
             server_version, self.connection_time = [
                 msg.decode("ascii") for msg in fields
             ]
             self._server_version = int(server_version)
-            logger.debug(
+            debug_log(
                 f"Server version: {self.server_version}, Connection time: {self.connection_time}"
             )
             text = make_fields([VERSION, client_id, ""])
@@ -280,22 +343,24 @@ class IBSocket:
     def send_message(self, msgId: int, values: list[object]) -> None:
         text = make_fields(values)
         msg2 = (len(text) + 4).to_bytes(4, "big") + msgId.to_bytes(4, "big") + text
-        logger.debug(f"Sending message: {msg2.decode('ascii', errors='ignore')}")
+        if DEBUG_TWS_SEND:
+            debug_log(f"Sending message: {str(msg2)}")
         assert self.running, "Socket is not connected."
         with self._lock:
             self._socket.sendall(msg2)
 
     def receive_data(
-        self, read_buf: bytes = b"", buf_siz: int = 0
-    ) -> tuple[int, bytes, bytes, int]:
-        chunks = [read_buf]
+        self, read_buf: bytearray, buf_siz: int = 0
+    ) -> tuple[int, bytes, bytearray, int]:
+        """Optimized receive - called in hot path from _reader_loop."""
         new_data_received = False
         assert self.running, "Socket is not connected."
+        sock_recv = self._socket.recv  # Cache method lookup
         while True:
             try:
-                data = self._socket.recv(4096)
+                data = sock_recv(4096)
                 assert data, "Socket connection closed."
-                chunks.append(data)
+                read_buf.extend(data)
                 receiv_siz = len(data)
                 buf_siz += receiv_siz
                 new_data_received = True
@@ -306,10 +371,12 @@ class IBSocket:
                 break
 
         if new_data_received:
-            read_buf = b"".join([chunk for chunk in chunks if chunk])
-            logger.debug(
-                f"Final received data: <{read_buf.decode('ascii', errors='ignore')}>"
-            )
+            # Direct join - chunks list never contains falsy values
+            if DEBUG_TWS_RECEIVE:
+                debug_log(
+                    "Final received data: <%s>",
+                    read_buf.decode("ascii", errors="ignore"),
+                )
         return decode_data(read_buf, buf_siz)
 
 
@@ -345,20 +412,22 @@ class TWSCallback(EWrapper):
         """
         self._loop = loop or asyncio.get_event_loop()
         self._futures: dict[int, asyncio.Future[Any]] = {}
-        self._accumulators: dict[
-            int, list[Any] | dict[str, dict[int, float | int]]
-        ] = {}
+        self._accumulators: dict[int, Any] = {}
+        self._nxt_order_id: int | None = None
+        self._accounts: list[str] = []
+        self._ready_event = threading.Event()  # Signals when nextValidId received
 
     def dispatchMessage(self, fnName: str, fnParams: dict) -> None:
-        if logger.isEnabledFor(logging.INFO):
-            if "self" in fnParams:
-                fnParams = dict(fnParams)
-                del fnParams["self"]
-            logger.info(f"!!!WARNING!!!: unimplemented {fnName} --> {fnParams}")
+        if "self" in fnParams:
+            fnParams = dict(fnParams)
+            del fnParams["self"]
+        logger.warning(f"!!!WARNING!!!: unimplemented {fnName} --> {fnParams}")
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
         return self._loop
+
+    # === Future / Coroutine management ===
 
     def create_future_coroutine(self, reqId: int, timeout: float = 5) -> Awaitable[Any]:
         """Create a new Future attached to the current event loop."""
@@ -368,27 +437,42 @@ class TWSCallback(EWrapper):
 
     def _resolve_future(self, reqId: int, result: object) -> None:
         """Helper to resolve a future in the asyncio loop."""
-        if reqId in self._futures:
-            future = self._futures.pop(reqId)
-            if not future.done():
-                self.loop.call_soon_threadsafe(future.set_result, result)
+        future = self._futures.pop(reqId, None)
+        if future is not None and not future.done():
+            self.loop.call_soon_threadsafe(future.set_result, result)
         else:
             logger.error(f"Unknown reqId {reqId} in _resolve_future.")
 
     def _reject_future(self, reqId: int, exception: Exception) -> None:
         """Helper to reject a future with an exception in the asyncio loop."""
-        if reqId in self._futures:
-            future = self._futures.pop(reqId)
-            if not future.done():
-                self.loop.call_soon_threadsafe(future.set_exception, exception)
+        future = self._futures.pop(reqId, None)
+        if future is not None and not future.done():
+            self.loop.call_soon_threadsafe(future.set_exception, exception)
         else:
             logger.error(f"Unknown reqId {reqId} in _reject_future.")
+
+    # === Trading / account management ===
+
+    def managedAccounts(self, accountsList: str) -> None:
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        # should be sent upon connection
+        self._accounts = accountsList.split(",")
+
+    def nextValidId(self, orderId: int) -> None:
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        # Signals connection fully established - safe to make requests
+        self._nxt_order_id = orderId
+        self._ready_event.set()
 
     # === symbolSamples ===
 
     def symbolSamples(
         self, reqId: int, contractDescriptions: list[ContractDescription]
     ) -> None:
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         self._resolve_future(reqId, contractDescriptions)
 
     # === contractDetails (streaming accumulation pattern) ===
@@ -399,15 +483,16 @@ class TWSCallback(EWrapper):
         TWS sends one contractDetails callback per matching contract.
         Results are accumulated until contractDetailsEnd is called.
         """
-        if reqId not in self._accumulators:
-            self._accumulators[reqId] = []
-        # Type assertion: accumulator is list for contractDetails
-        accumulator = self._accumulators[reqId]
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        accumulator = self._accumulators.setdefault(reqId, [])
         if isinstance(accumulator, list):
             accumulator.append(contractDetails)
 
     def contractDetailsEnd(self, reqId: int) -> None:
         """End signal for contract details - resolve Future with accumulated results."""
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         results = self._accumulators.pop(reqId, [])
         self._resolve_future(reqId, results)
 
@@ -419,15 +504,16 @@ class TWSCallback(EWrapper):
         TWS sends one historicalData callback per bar.
         Results are accumulated until historicalDataEnd is called.
         """
-        if reqId not in self._accumulators:
-            self._accumulators[reqId] = []
-        # Type assertion: accumulator is list for historicalData
-        accumulator = self._accumulators[reqId]
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        accumulator = self._accumulators.setdefault(reqId, [])
         if isinstance(accumulator, list):
             accumulator.append(bar)
 
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
         """End signal for historical data - resolve Future with accumulated results."""
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         results = self._accumulators.pop(reqId, [])
         self._resolve_future(reqId, results)
 
@@ -441,12 +527,10 @@ class TWSCallback(EWrapper):
         Called multiple times per snapshot with different tick types.
         Results accumulated until tickSnapshotEnd is called.
         """
-        if reqId not in self._accumulators:
-            self._accumulators[reqId] = {"prices": {}, "sizes": {}}
-        # Type assertion: accumulator is dict for tick data
-        accumulator = self._accumulators[reqId]
-        if isinstance(accumulator, dict):
-            accumulator["prices"][tickType] = price
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        accumulator = self._accumulators.setdefault(reqId, {})
+        accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = price
 
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
         """Accumulate size ticks for market data snapshot.
@@ -454,12 +538,42 @@ class TWSCallback(EWrapper):
         Called multiple times per snapshot with different tick types.
         Results accumulated until tickSnapshotEnd is called.
         """
-        if reqId not in self._accumulators:
-            self._accumulators[reqId] = {"prices": {}, "sizes": {}}
-        # Type assertion: accumulator is dict for tick data
-        accumulator = self._accumulators[reqId]
-        if isinstance(accumulator, dict):
-            accumulator["sizes"][tickType] = int(size)
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        accumulator = self._accumulators.setdefault(reqId, {})
+        accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = int(size)
+
+    def marketDataType(self, reqId: int, marketDataType: int) -> None:
+        """Set market data type for the request."""
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        accumulator = self._accumulators.setdefault(reqId, {})
+        accumulator["marketDataType"] = marketDataType
+
+    def tickReqParams(
+        self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
+    ):
+        """returns exchange map of a particular contract"""
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        accumulator = self._accumulators.setdefault(tickerId, {})
+        accumulator["minTick"] = minTick
+        accumulator["bboExchange"] = bboExchange
+        accumulator["snapshotPermissions"] = snapshotPermissions
+
+    def tickString(self, reqId: int, tickType: int, value: str) -> None:
+        """Generic string tick for market data snapshot."""
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        accumulator = self._accumulators.setdefault(reqId, {})
+        accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = value
+
+    def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
+        """Generic float tick for market data snapshot."""
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        accumulator = self._accumulators.setdefault(reqId, {})
+        accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = value
 
     def tickSnapshotEnd(self, reqId: int) -> None:
         """End signal for market data snapshot - resolve Future with accumulated ticks.
@@ -467,7 +581,9 @@ class TWSCallback(EWrapper):
         Called ~11 seconds after reqMktData with snapshot=True.
         Resolves Future with dict containing "prices" and "sizes" mappings.
         """
-        ticks = self._accumulators.pop(reqId, {"prices": {}, "sizes": {}})
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        ticks = self._accumulators.pop(reqId, {})
         self._resolve_future(reqId, ticks)
 
     # === error handling ===
@@ -559,22 +675,26 @@ class TWSClient:
         self.__ibsocket = IBSocket()
 
     @property
-    def _ibsocket(self) -> IBSocket:
+    def ibsocket(self) -> IBSocket:
         if not self.__ibsocket.running:
             if not self.__ibsocket.ready:
                 self.__ibsocket.disconnect()
                 self.__ibsocket = IBSocket()
+            self._cb_wrapper._ready_event.clear()  # Reset before new connection
             self.__ibsocket.connect(
                 host=self._host,
                 port=self._port,
                 client_id=self._client_id,
                 cb_wrapper=self._cb_wrapper,
             )
+            # Wait for nextValidId signal (connection fully ready)
+            if not self._cb_wrapper._ready_event.wait(timeout=self._timeout):
+                raise TimeoutError("Timeout waiting for TWS connection ready signal")
         return self.__ibsocket
 
     @property
     def next_req_id(self) -> int:
-        return self._ibsocket.next_req_id
+        return self.ibsocket.next_req_id
 
     async def reqMatchingSymbols(self, pattern: str) -> list[ContractDescription]:
         reqId = self.next_req_id
@@ -582,10 +702,8 @@ class TWSClient:
         coroutine: Awaitable[
             list[ContractDescription]
         ] = self._cb_wrapper.create_future_coroutine(reqId)
-        self.__ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
-        logger.debug(
-            f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'"
-        )
+        self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
+        debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
 
         return await coroutine
 
@@ -627,8 +745,8 @@ class TWSClient:
             contract.issuerId,
         ]
 
-        self.__ibsocket.send_message(OUT.REQ_CONTRACT_DATA, fields)
-        logger.debug(
+        self.ibsocket.send_message(OUT.REQ_CONTRACT_DATA, fields)
+        debug_log(
             f"awaiting contractDetails for reqId {reqId} and symbol '{contract.symbol}'"
         )
         return await coroutine
@@ -688,8 +806,8 @@ class TWSClient:
             [],  # chartOptions (empty list)
         ]
 
-        self.__ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, fields)
-        logger.debug(
+        self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, fields)
+        debug_log(
             f"awaiting historicalData for reqId {reqId}, "
             f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{bar_size_setting}'"
         )
@@ -697,7 +815,7 @@ class TWSClient:
 
     async def reqMktDataSnapshot(
         self, contract: Contract, generic_tick_list: str = ""
-    ) -> dict[str, dict[int, float | int]]:
+    ) -> dict[str, float | int]:
         """Request market data snapshot (single quote update).
 
         Args:
@@ -710,7 +828,7 @@ class TWSClient:
         """
         reqId = self.next_req_id
         coroutine: Awaitable[
-            dict[str, dict[int, float | int]]
+            dict[str, float | int]
         ] = self._cb_wrapper.create_future_coroutine(reqId, self._timeout)
 
         VERSION = 11
@@ -731,14 +849,15 @@ class TWSClient:
             contract.currency,
             contract.localSymbol,
             contract.tradingClass,
-            generic_tick_list,
-            True,  # snapshot=True (single update)
+            False,  # ← ADD: deltaNeutralContract (False = no delta neutral)
+            generic_tick_list,  # Now correctly positioned
+            True,  # snapshot
             False,  # regulatorySnapshot
             [],  # mktDataOptions (empty list)
         ]
 
-        self.__ibsocket.send_message(OUT.REQ_MKT_DATA, fields)
-        logger.debug(
+        self.ibsocket.send_message(OUT.REQ_MKT_DATA, fields)
+        debug_log(
             f"awaiting tickSnapshotEnd for reqId {reqId}, symbol='{contract.symbol}'"
         )
         return await coroutine

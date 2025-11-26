@@ -3,6 +3,7 @@
 from decimal import Decimal
 from typing import Any
 
+from ibapi.contract import Contract
 from ibapi.object_implem import Object
 from ibapi.softdollartier import SoftDollarTier
 
@@ -29,6 +30,9 @@ class Order(Object):
     orderId: int
     clientId: int
     permId: int
+
+    # Contract details
+    contract: Contract
 
     # Main order fields
     action: str

@@ -4,6 +4,7 @@ Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is su
 """
 
 from ibapi.const import DOUBLE_INFINITY, UNSET_DECIMAL, UNSET_DOUBLE, UNSET_INTEGER
+from ibapi.contract import Contract
 from ibapi.object_implem import Object
 from ibapi.softdollartier import SoftDollarTier
 from ibapi.utils import decimalMaxString, floatMaxString, intMaxString, longMaxString
@@ -32,6 +33,8 @@ class Order(Object):
         self.orderId = 0
         self.clientId = 0
         self.permId = 0
+
+        self.contract: Contract | None = None  # Contract details
 
         # main order fields
         self.action = ""
@@ -257,4 +260,5 @@ class Order(Object):
                 s += str(cond) + ","
             s += ")"
 
+        return s
         return s

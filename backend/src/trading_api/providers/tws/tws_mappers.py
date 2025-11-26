@@ -47,6 +47,18 @@ DEFAULT_SUPPORTED_RESOLUTIONS: list[str] = [
     "1M",
 ]
 
+get_tick_type_name_ = TickTypeEnum.idx2name.get
+
+
+def get_tick_type_name(tick_type: int) -> str:
+    """Get the string name for a TickTypeEnum value.
+    Args:
+        tick_type: TickTypeEnum value
+    Returns:
+        String name of the tick type
+    """
+    return get_tick_type_name_(tick_type, f"UNKNOWN_{tick_type}")
+
 
 def contract_description_to_search_result(
     desc: ContractDescription,
@@ -149,7 +161,7 @@ def tws_bar_to_domain_bar(tws_bar: BarData, symbol: str) -> Bar:
 
 def tws_ticks_to_quote_data(
     symbol: str,
-    ticks: dict[str, dict[int, float | int]],
+    ticks: dict[str, float | int],
 ) -> QuoteData:
     """Convert TWS tick data → domain QuoteData.
 
@@ -161,21 +173,19 @@ def tws_ticks_to_quote_data(
     Returns:
         QuoteData with status="ok" and QuoteValues populated from ticks
     """
-    prices = ticks.get("prices", {})
-    sizes = ticks.get("sizes", {})
 
     # Extract tick values (None if not present)
-    bid = prices.get(TickTypeEnum.BID)
-    ask = prices.get(TickTypeEnum.ASK)
-    last = prices.get(TickTypeEnum.LAST)
-    open_price = prices.get(TickTypeEnum.OPEN)
-    high_price = prices.get(TickTypeEnum.HIGH)
-    low_price = prices.get(TickTypeEnum.LOW)
-    close_price = prices.get(TickTypeEnum.CLOSE)
+    bid = ticks.get(get_tick_type_name(TickTypeEnum.BID))
+    ask = ticks.get(get_tick_type_name(TickTypeEnum.ASK))
+    last = ticks.get(get_tick_type_name(TickTypeEnum.LAST))
+    open_price = ticks.get(get_tick_type_name(TickTypeEnum.OPEN))
+    high_price = ticks.get(get_tick_type_name(TickTypeEnum.HIGH))
+    low_price = ticks.get(get_tick_type_name(TickTypeEnum.LOW))
+    close_price = ticks.get(get_tick_type_name(TickTypeEnum.CLOSE))
 
-    sizes.get(TickTypeEnum.BID_SIZE)
-    sizes.get(TickTypeEnum.ASK_SIZE)
-    volume = sizes.get(TickTypeEnum.VOLUME)
+    ticks.get(get_tick_type_name(TickTypeEnum.BID_SIZE))
+    ticks.get(get_tick_type_name(TickTypeEnum.ASK_SIZE))
+    volume = ticks.get(get_tick_type_name(TickTypeEnum.VOLUME))
 
     # Calculate spread (if both bid and ask available)
     spread = (ask - bid) if (ask is not None and bid is not None) else 0.0

@@ -6,6 +6,7 @@ Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is su
 import datetime
 import inspect
 import logging
+import os
 import sys
 import time
 from decimal import Decimal
@@ -25,6 +26,7 @@ Collection of misc tools
 """
 
 logger = logging.getLogger(__name__)
+DEBUG_TWS_UTILS = os.environ.get("DEBUG_TWS_UTILS") == "true"
 
 
 # I use this just to visually emphasize it's a wrapper overridden method
@@ -138,7 +140,8 @@ def decode(the_type, fields, show_unset=False, use_unicode=False):
     except StopIteration:
         raise BadMessage("no more fields")
 
-    logger.debug("decode %s %s", the_type, s)
+    if DEBUG_TWS_UTILS:
+        logger.debug("decode %s %s", the_type, s)
 
     if the_type is Decimal:
         if (
