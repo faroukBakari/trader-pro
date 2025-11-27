@@ -376,3 +376,108 @@ class TestTWSClientErrorHandling:
             # Don't resolve the future - let it timeout
             with pytest.raises(asyncio.TimeoutError):
                 await client.reqMatchingSymbols("AAPL")
+
+
+class TestTWSClientRealtimeBarSubscription:
+    """Test real-time bar subscription methods."""
+
+    def test_subscribe_realtime_bars_returns_queue(self) -> None:
+        """Test subscribe_realtime_bars returns reqId and queue."""
+        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
+            mock_ibsocket = MagicMock()
+            mock_ibsocket.running = True
+            mock_ibsocket.next_req_id = 1
+            MockIBSocket.return_value = mock_ibsocket
+
+            client = TWSClient("127.0.0.1", 7497, 1)
+            client._cb_wrapper._ready_event.set()
+
+            contract = Contract()
+            contract.symbol = "AAPL"
+            contract.secType = "STK"
+            contract.exchange = "SMART"
+            contract.currency = "USD"
+
+            req_id, queue = client.subscribe_realtime_bars(contract)
+
+            assert req_id == 1
+            assert isinstance(queue, asyncio.Queue)
+            # Queue should be registered in _sub_queues
+            assert req_id in client._cb_wrapper._sub_queues
+            assert client._cb_wrapper._sub_queues[req_id] is queue
+
+    def test_subscribe_realtime_bars_sends_correct_message(self) -> None:
+        """Test subscribe_realtime_bars sends correct TWS message."""
+        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
+            mock_ibsocket = MagicMock()
+            mock_ibsocket.running = True
+            mock_ibsocket.next_req_id = 1
+            MockIBSocket.return_value = mock_ibsocket
+
+            client = TWSClient("127.0.0.1", 7497, 1)
+            client._cb_wrapper._ready_event.set()
+
+            contract = Contract()
+            contract.symbol = "AAPL"
+            contract.secType = "STK"
+            contract.exchange = "SMART"
+            contract.currency = "USD"
+
+            client.subscribe_realtime_bars(
+                contract, bar_size=5, what_to_show="TRADES", use_rth=False
+            )
+
+            # Verify send_message was called with REQ_REAL_TIME_BARS
+            from ibapi.message import OUT
+
+            mock_ibsocket.send_message.assert_called_once()
+            call_args = mock_ibsocket.send_message.call_args
+            assert call_args[0][0] == OUT.REQ_REAL_TIME_BARS
+
+    def test_cancel_realtime_bars_removes_queue(self) -> None:
+        """Test cancel_realtime_bars removes queue from registry."""
+        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
+            mock_ibsocket = MagicMock()
+            mock_ibsocket.running = True
+            mock_ibsocket.next_req_id = 1
+            MockIBSocket.return_value = mock_ibsocket
+
+            client = TWSClient("127.0.0.1", 7497, 1)
+            client._cb_wrapper._ready_event.set()
+
+            contract = Contract()
+            contract.symbol = "AAPL"
+
+            req_id, queue = client.subscribe_realtime_bars(contract)
+            assert req_id in client._cb_wrapper._sub_queues
+
+            client.cancel_realtime_bars(req_id)
+
+            # Queue should be removed
+            assert req_id not in client._cb_wrapper._sub_queues
+
+    def test_cancel_realtime_bars_sends_cancel_message(self) -> None:
+        """Test cancel_realtime_bars sends CANCEL_REAL_TIME_BARS message."""
+        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
+            mock_ibsocket = MagicMock()
+            mock_ibsocket.running = True
+            mock_ibsocket.next_req_id = 1
+            MockIBSocket.return_value = mock_ibsocket
+
+            client = TWSClient("127.0.0.1", 7497, 1)
+            client._cb_wrapper._ready_event.set()
+
+            contract = Contract()
+            contract.symbol = "AAPL"
+
+            req_id, _ = client.subscribe_realtime_bars(contract)
+            mock_ibsocket.send_message.reset_mock()
+
+            client.cancel_realtime_bars(req_id)
+
+            from ibapi.message import OUT
+
+            mock_ibsocket.send_message.assert_called_once()
+            call_args = mock_ibsocket.send_message.call_args
+            assert call_args[0][0] == OUT.CANCEL_REAL_TIME_BARS
+            assert call_args[0][1] == [1, req_id]  # VERSION=1, reqId

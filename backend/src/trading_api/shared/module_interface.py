@@ -16,6 +16,7 @@ from fastapi import Depends, FastAPI
 
 from external_packages.fastws import Client
 from trading_api.models.auth import UserData
+from trading_api.shared import ws
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.client_generation_service import ClientGenerationService
 from trading_api.shared.middleware.auth import get_current_user_ws
@@ -475,9 +476,7 @@ class Module(ABC):
                                     f"✅ No changes in AsyncAPI spec for '{self.name}'"
                                 )
                     except Exception as e:
-                        logger.warning(
-                            f"⚠️  Could not read existing AsyncAPI spec: {e}"
-                        )
+                        logger.warning(f"⚠️  Could not read existing AsyncAPI spec: {e}")
                 else:
                     logger.info(f"📝 Creating new AsyncAPI spec for '{self.name}'")
 
@@ -491,6 +490,11 @@ class Module(ABC):
                 logger.error(
                     f"⚠️  Failed to process AsyncAPI spec for '{self.name}': {e}"
                 )
+
+    def shutdown(self) -> None:
+        """Stop the module (placeholder for actual server shutdown)."""
+        logger.info(f"🛑 Stopping module '{self.name}'...")
+        self.service.shutdown()
 
 
 class ModuleApp:
@@ -721,3 +725,13 @@ class ModuleApp:
         for api_app, ws_app in self.versions.values():
             if ws_app is not None:
                 ws_app.setup(api_app)
+
+    def shutdown(self) -> None:
+        """Start the WebSocket app if available."""
+        for _, ws_app in self.versions.values():
+            if ws_app is not None:
+                ws_app.shutdown()
+        self.module.shutdown()
+
+    def __del__(self) -> None:
+        self.shutdown()

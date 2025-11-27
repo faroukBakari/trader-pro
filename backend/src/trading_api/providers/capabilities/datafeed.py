@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Callable
+from typing import Any, Callable
 
 from trading_api.models.market import (
     Bar,
@@ -31,7 +31,7 @@ class DatafeedCapability(ABC):
     async def search_symbols(
         self,
         pattern: str,
-        timeout: float = 5.0,
+        **kwargs: Any,
     ) -> list[SearchSymbolResultItem]:
         """Search for symbols matching pattern.
 
@@ -52,8 +52,7 @@ class DatafeedCapability(ABC):
     async def get_symbol_info(
         self,
         symbol: str,
-        exchange: str | None = None,
-        timeout: float = 5.0,
+        **kwargs: Any,
     ) -> SymbolInfo:
         """Get detailed symbol information.
 
@@ -78,8 +77,7 @@ class DatafeedCapability(ABC):
         start_time: datetime,
         end_time: datetime,
         resolution: TimeFrame,
-        exchange: str | None = None,
-        timeout: float = 30.0,
+        **kwargs: Any,
     ) -> list[Bar]:
         """Get historical OHLCV bars.
 
@@ -104,8 +102,7 @@ class DatafeedCapability(ABC):
     async def get_quotes_snapshot(
         self,
         symbols: list[str],
-        exchange: str | None = None,
-        timeout: float = 15.0,
+        **kwargs: Any,
     ) -> list[QuoteData]:
         """Get current market quotes for multiple symbols (snapshot).
 
@@ -128,8 +125,7 @@ class DatafeedCapability(ABC):
         self,
         symbol: str,
         callback: Callable[[Bar], None],
-        exchange: str | None = None,
-        resolution: TimeFrame = TimeFrame.SEC_5,
+        **kwargs: Any,
     ) -> int:
         """Subscribe to real-time bars.
 
@@ -153,10 +149,10 @@ class DatafeedCapability(ABC):
     @abstractmethod
     def subscribe_market_data(
         self,
-        symbol: str,
+        symbols: list[str],
         callback: Callable[[QuoteData], None],
-        exchange: str | None = None,
-    ) -> int:
+        **kwargs: Any,
+    ) -> list[int]:
         """Subscribe to real-time market data (ticks/quotes).
 
         Args:
@@ -188,7 +184,7 @@ class DatafeedCapability(ABC):
         ...
 
     @abstractmethod
-    def unsubscribe_market_data(self, subscription_id: int) -> None:
+    def unsubscribe_market_data(self, subscription_ids: list[int]) -> None:
         """Unsubscribe from market data.
 
         Args:

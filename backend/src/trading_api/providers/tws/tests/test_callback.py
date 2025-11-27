@@ -536,3 +536,123 @@ class TestTickStringGeneric:
         assert "HALTED" in callback._accumulators[req_id]
 
         loop.close()
+
+
+class TestRealtimeBarCallback:
+    """Test realtimeBar callback - continuous subscription pattern."""
+
+    @pytest.mark.asyncio
+    async def test_realtime_bar_puts_data_in_queue(self) -> None:
+        """Test realtimeBar puts bar data in subscription queue."""
+        from decimal import Decimal
+
+        loop = asyncio.get_running_loop()
+        callback = TWSCallback(loop=loop)
+
+        req_id = 1
+        queue: asyncio.Queue[tuple] = asyncio.Queue()
+        callback._sub_queues[req_id] = queue
+
+        # Simulate realtimeBar callback
+        callback.realtimeBar(
+            reqId=req_id,
+            time=1702656000,
+            open_=150.25,
+            high=150.50,
+            low=150.10,
+            close=150.40,
+            volume=Decimal("10000"),
+            wap=Decimal("150.30"),
+            count=50,
+        )
+
+        # Allow event loop to process the call_soon_threadsafe
+        await asyncio.sleep(0.01)
+
+        # Check queue received data
+        assert not queue.empty()
+        bar_data = queue.get_nowait()
+
+        assert bar_data[0] == 1702656000  # time
+        assert bar_data[1] == 150.25  # open
+        assert bar_data[2] == 150.50  # high
+        assert bar_data[3] == 150.10  # low
+        assert bar_data[4] == 150.40  # close
+        assert bar_data[5] == 10000  # volume (converted to int)
+        assert bar_data[6] == 150.30  # wap (converted to float)
+        assert bar_data[7] == 50  # count
+
+    @pytest.mark.asyncio
+    async def test_realtime_bar_multiple_bars(self) -> None:
+        """Test realtimeBar queues multiple bars correctly."""
+        from decimal import Decimal
+
+        loop = asyncio.get_running_loop()
+        callback = TWSCallback(loop=loop)
+
+        req_id = 1
+        queue: asyncio.Queue[tuple] = asyncio.Queue()
+        callback._sub_queues[req_id] = queue
+
+        # Simulate multiple bar callbacks
+        for i in range(3):
+            callback.realtimeBar(
+                reqId=req_id,
+                time=1702656000 + (i * 5),
+                open_=150.0 + i,
+                high=151.0 + i,
+                low=149.0 + i,
+                close=150.5 + i,
+                volume=Decimal(str(1000 * (i + 1))),
+                wap=Decimal("150.0"),
+                count=10 * (i + 1),
+            )
+
+        await asyncio.sleep(0.01)
+
+        # Should have 3 bars in queue
+        assert queue.qsize() == 3
+
+        # Verify order
+        bar1 = queue.get_nowait()
+        bar2 = queue.get_nowait()
+        bar3 = queue.get_nowait()
+
+        assert bar1[0] == 1702656000
+        assert bar2[0] == 1702656005
+        assert bar3[0] == 1702656010
+
+    def test_realtime_bar_no_queue_logs_warning(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test realtimeBar logs warning when no queue registered."""
+        from decimal import Decimal
+
+        loop = asyncio.new_event_loop()
+        callback = TWSCallback(loop=loop)
+
+        # No queue registered for this reqId
+        callback.realtimeBar(
+            reqId=999,
+            time=1702656000,
+            open_=150.0,
+            high=151.0,
+            low=149.0,
+            close=150.5,
+            volume=Decimal("1000"),
+            wap=Decimal("150.0"),
+            count=10,
+        )
+
+        assert "No subscription queue for realtime bar reqId 999" in caplog.text
+
+        loop.close()
+
+    @pytest.mark.asyncio
+    async def test_subscription_queue_initialization(self) -> None:
+        """Test _sub_queues is initialized empty."""
+        loop = asyncio.get_running_loop()
+        callback = TWSCallback(loop=loop)
+
+        assert callback._sub_queues == {}
+        assert isinstance(callback._sub_queues, dict)

@@ -61,3 +61,7 @@ class Provider(ABC):
             ProviderConfig: Configuration instance
         """
         ...
+
+    def shutdown(self) -> None:
+        """Perform any necessary cleanup on provider shutdown."""
+        pass
