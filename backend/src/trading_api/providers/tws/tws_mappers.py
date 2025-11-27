@@ -81,6 +81,39 @@ def contract_description_to_search_result(
     )
 
 
+def _convert_tws_trading_hours_to_session(trading_hours: str) -> str:
+    """Convert TWS tradingHours to TradingView session format.
+
+    TWS format: "20251128:0400-20251128:1700;20251129:CLOSED;..."
+    TradingView format: "0400-1700" (simple time range, no dates)
+
+    Strategy: Extract first valid non-CLOSED session's time portion.
+
+    Args:
+        trading_hours: TWS tradingHours string
+
+    Returns:
+        TradingView-compatible session string (e.g., "0930-1600")
+    """
+    if not trading_hours:
+        return "0930-1600"  # Default US equity hours
+
+    for segment in trading_hours.split(";"):
+        if "CLOSED" in segment:
+            continue
+        # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" → "HHMM-HHMM"
+        if ":" in segment:
+            _, times = segment.split(":", 1)
+            if "-" in times:
+                start_datetime, end_datetime = times.split("-", 1)
+                # Extract just HHMM from YYYYMMDDHHMM (last 4 chars after date prefix)
+                start_time = start_datetime[-4:]
+                end_time = end_datetime[-4:] if len(end_datetime) >= 4 else end_datetime
+                return f"{start_time}-{end_time}"
+
+    return "0930-1600"  # Fallback
+
+
 def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     """Map TWS ContractDetails → domain SymbolInfo.
 
@@ -104,7 +137,7 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
         name=contract.symbol,
         description=details.longName or contract.symbol,
         type=symbol_type,
-        session=details.tradingHours or "0930-1600",
+        session=_convert_tws_trading_hours_to_session(details.tradingHours),
         timezone=details.timeZoneId or "America/New_York",
         ticker=contract.localSymbol or contract.symbol,
         exchange=contract.primaryExchange or contract.exchange,
@@ -120,12 +153,11 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     )
 
 
-def tws_bar_to_domain_bar(tws_bar: BarData, symbol: str) -> Bar:
+def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
     """Map TWS BarData → domain Bar.
 
     Args:
         tws_bar: TWS BarData object
-        symbol: Symbol name (TWS doesn't include in BarData - unused)
 
     Returns:
         Domain Bar model
@@ -156,6 +188,47 @@ def tws_bar_to_domain_bar(tws_bar: BarData, symbol: str) -> Bar:
             if isinstance(tws_bar.volume, Decimal)
             else tws_bar.volume
         ),
+        count=tws_bar.barCount,
+    )
+
+
+def tws_rt_bar_to_domain_bar(
+    time: int = 0,
+    open_: float = 0.0,
+    high: float = 0.0,
+    low: float = 0.0,
+    close: float = 0.0,
+    volume: Decimal = Decimal(0),
+    _: Decimal = Decimal(0),
+    count: int = 0,
+) -> Bar:
+    """Map TWS BarData → domain Bar.
+
+    Args:
+        bar.time  - start of bar in unix (or 'epoch') time
+        bar.endTime - for synthetic bars, the end time (requires TWS v964). Otherwise -1.
+        bar.open_  - the bar's open value
+        bar.high  - the bar's high value
+        bar.low   - the bar's low value
+        bar.close - the bar's closing value
+        bar.volume - the bar's traded volume if available
+        bar.WAP   - the bar's Weighted Average Price
+        bar.count - the number of trades during the bar's timespan (only available
+
+    Returns:
+        Domain Bar model
+    """
+    # Parse TWS date format: "yyyyMMdd  HH:mm:ss" or epoch
+    # TWS returns string dates like "20231215  16:00:00" (note: two spaces)
+    time = int(time) * 1000
+    return Bar(
+        time=time,
+        open=float(open_),
+        high=float(high),
+        low=float(low),
+        close=float(close),
+        volume=(int(volume) if isinstance(volume, Decimal) else volume),
+        count=count,
     )
 
 

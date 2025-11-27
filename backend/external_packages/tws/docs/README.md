@@ -32,6 +32,7 @@ Complete offline reference documentation for developing applications with the In
 | **Ref-05**   | [Data Types](./05-API-REFERENCE-DATA-TYPES.md)               | Helper classes                   | [§1.1](#11-api-reference-classes--methods) |
 | **Guide-06** | [Setup Guide](./06-SETUP-GUIDE.md)                           | [CRITICAL] Installation & config | [§1.2](#12-implementation-guides)          |
 | **Guide-07** | [Connectivity Guide](./07-CONNECTIVITY-GUIDE.md)             | [CRITICAL] Connection management | [§1.2](#12-implementation-guides)          |
+| **Ref-Tick** | [Generic Tick List](./TWS-GENERIC-TICK-LIST.md)              | genericTickList parameter ref    | [§1.1](#11-api-reference-classes--methods) |
 
 ---
 
@@ -50,6 +51,7 @@ Complete technical reference for all TWS API classes, methods, attributes, and d
 | **[03-API-REFERENCE-EXECUTIONS.md](./03-API-REFERENCE-EXECUTIONS.md)**             | Trade data structures: `CommissionAndFeesReport`, `Liquidity`, Historical ticks, Tick attributes                                          |
 | **[04-API-REFERENCE-CONDITIONS.md](./04-API-REFERENCE-CONDITIONS.md)**             | Order conditions: `PriceCondition`, `TimeCondition`, `MarginCondition`, `ExecutionCondition`, `VolumeCondition`, `PercentChangeCondition` |
 | **[05-API-REFERENCE-DATA-TYPES.md](./05-API-REFERENCE-DATA-TYPES.md)**             | Helper classes: `DepthMktDataDescription`, `NewsProvider`, `PriceIncrement`, `SmartComponent`, `WshEventData`                             |
+| **[TWS-GENERIC-TICK-LIST.md](./TWS-GENERIC-TICK-LIST.md)**                         | Complete reference for `genericTickList` parameter: tick types, `mdoff` prefix, news sources                                              |
 
 ### 2. Implementation Guides
 
@@ -90,6 +92,7 @@ This documentation is organized into three main sections:
 | **Ref-03** | **[03-API-REFERENCE-EXECUTIONS.md](./03-API-REFERENCE-EXECUTIONS.md)**             | Trade data structures      | `CommissionAndFeesReport`, `Liquidity`, Historical ticks, Tick attributes                                               |
 | **Ref-04** | **[04-API-REFERENCE-CONDITIONS.md](./04-API-REFERENCE-CONDITIONS.md)**             | Order conditions           | `PriceCondition`, `TimeCondition`, `MarginCondition`, `ExecutionCondition`, `VolumeCondition`, `PercentChangeCondition` |
 | **Ref-05** | **[05-API-REFERENCE-DATA-TYPES.md](./05-API-REFERENCE-DATA-TYPES.md)**             | Helper classes             | `DepthMktDataDescription`, `NewsProvider`, `PriceIncrement`, `SmartComponent`, `WshEventData`                           |
+| **Ref-TL** | **[TWS-GENERIC-TICK-LIST.md](./TWS-GENERIC-TICK-LIST.md)**                         | Generic Tick List          | `genericTickList` param, tick type codes (100-623), `mdoff` prefix, news sources (BZ, FLY, DJNL, etc.)                  |
 
 ### 1.2 Implementation Guides
 
@@ -304,12 +307,14 @@ app.disconnect()
 
 ### Market Data
 
-| Task                       | See                                                            |
-| -------------------------- | -------------------------------------------------------------- |
-| Get real-time stock quotes | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_ |
-| Request historical bars    | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_ |
-| Subscribe to market depth  | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_ |
-| Understand tick types      | [Executions Reference](./03-API-REFERENCE-EXECUTIONS.md)       |
+| Task                       | See                                                                        |
+| -------------------------- | -------------------------------------------------------------------------- |
+| Get real-time stock quotes | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_             |
+| Request historical bars    | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_             |
+| Subscribe to market depth  | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_             |
+| Understand tick types      | [Executions Reference](./03-API-REFERENCE-EXECUTIONS.md)                   |
+| Generic tick list param    | [Generic Tick List](./TWS-GENERIC-TICK-LIST.md)                            |
+| Request news headlines     | [Generic Tick List](./TWS-GENERIC-TICK-LIST.md#news-source-postfix-syntax) |
 
 ### Orders
 
@@ -354,12 +359,14 @@ app.disconnect()
 
 **[TASK-ORIENTED]** Quick links to market data operations:
 
-| Task                       | See                                                            |
-| -------------------------- | -------------------------------------------------------------- |
-| Get real-time stock quotes | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_ |
-| Request historical bars    | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_ |
-| Subscribe to market depth  | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_ |
-| Understand tick types      | [Executions Reference](./03-API-REFERENCE-EXECUTIONS.md)       |
+| Task                       | See                                                                        |
+| -------------------------- | -------------------------------------------------------------------------- |
+| Get real-time stock quotes | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_             |
+| Request historical bars    | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_             |
+| Subscribe to market depth  | [Market Data Guide](./08-MARKET-DATA-GUIDE.md) _(Coming Soon)_             |
+| Understand tick types      | [Executions Reference](./03-API-REFERENCE-EXECUTIONS.md)                   |
+| Generic tick list param    | [Generic Tick List](./TWS-GENERIC-TICK-LIST.md)                            |
+| Request news headlines     | [Generic Tick List](./TWS-GENERIC-TICK-LIST.md#news-source-postfix-syntax) |
 
 ### 4.2 Orders
 

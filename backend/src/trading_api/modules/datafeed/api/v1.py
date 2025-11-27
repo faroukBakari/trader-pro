@@ -104,7 +104,7 @@ class DatafeedApi(APIRouterInterface):
             - **symbol**: Symbol name or ticker to resolve
             """
             try:
-                symbol_info = self.service.resolve_symbol(symbol)
+                symbol_info = await self.service.resolve_symbol(symbol)
                 if not symbol_info:
                     raise HTTPException(status_code=404, detail="Symbol not found")
                 return symbol_info

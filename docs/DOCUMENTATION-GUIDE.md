@@ -2,8 +2,8 @@
 document_type: documentation_index
 primary_purpose: discovery_and_navigation
 target_audience: ai_agents
-last_updated: 2025-11-26
-total_documents: 45
+last_updated: 2025-11-27
+total_documents: 46
 coverage_areas:
   [
     architecture,
@@ -195,6 +195,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 | **backend/external_packages/tws/docs/05-API-REFERENCE-DATA-TYPES.md**       | Helper classes: Market depth, News providers, Price increments, Smart components                            |
 | **backend/external_packages/tws/docs/06-SETUP-GUIDE.md**                    | Installation, TWS/Gateway configuration, Python setup, verification, troubleshooting                        |
 | **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md**             | Connection patterns, threading models, error handling, auto-reconnect strategies                            |
+| **backend/external_packages/tws/docs/TWS-GENERIC-TICK-LIST.md**             | Complete `genericTickList` reference: tick types (100-623), `mdoff` prefix, news sources (BZ, FLY, DJNL)    |
 
 > **Note**: TWS API documentation created November 19, 2025 from [TWS API Campus](https://ibkrcampus.com/campus/ibkr-api-page/) for complete offline development capability. Additional guides (market data, order management, account/portfolio) coming soon.
 
@@ -513,7 +514,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TWS API Integration
 
-**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSProvider, TWSClient, IBSocket
+**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources
 
 **Scope**: Interactive Brokers TWS API integration  
 **Out of Scope**: Other broker APIs, custom trading protocols
@@ -528,6 +529,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **backend/external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md** - Order placement and execution
 - **backend/external_packages/tws/docs/04-API-REFERENCE-CONDITIONS.md** - Advanced conditional orders
 - **Type Stubs**: 15 `.pyi` files in `backend/external_packages/tws/source/pythonclient/ibapi/` for Pylance/Pyright support
+- **backend/external_packages/tws/docs/TWS-GENERIC-TICK-LIST.md** - `genericTickList` parameter complete reference
 
 ---
 

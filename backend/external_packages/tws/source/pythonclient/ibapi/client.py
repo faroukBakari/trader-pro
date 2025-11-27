@@ -26,7 +26,7 @@ from ibapi.comm import make_field, make_field_handle_empty
 from ibapi.common import *  # @UnusedWildImport
 from ibapi.common import PROTOBUF_MSG_ID
 from ibapi.connection import Connection
-from ibapi.const import MAX_MSG_LEN, NO_VALID_ID, UNSET_DOUBLE
+from ibapi.const import MAX_MSG_LEN, NO_VALID_ID, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.contract import Contract
 from ibapi.errors import (
     BAD_LENGTH,
@@ -364,7 +364,7 @@ class EClient(object):
                 if len(buf) > 0:
                     (size, msg, rest) = comm.read_msg(buf)
                     logger.debug("size:%d msg:%s rest:%s|", size, msg, rest)
-                    fields = comm.read_fields(msg)
+                    fields = list(comm.read_fields(msg))
                     logger.debug("fields %s", fields)
                 else:
                     fields = []
@@ -477,7 +477,7 @@ class EClient(object):
                             fields = comm.read_fields(text)
                             logger.debug("msgId: %d, fields: %s", msgId, fields)
                             assert self.decoder is not None, "Decoder not initialized"
-                            self.decoder.interpret(fields, msgId)
+                            self.decoder.interpret(list(fields), msgId)
 
                         self.msgLoopRec()
                 except (KeyboardInterrupt, SystemExit):

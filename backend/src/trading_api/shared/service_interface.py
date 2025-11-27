@@ -175,3 +175,7 @@ class ServiceInterface(ABC):
         """
 
         return self.api_metadata.available_versions[current_version]
+
+    def shutdown(self) -> None:
+        """Perform any necessary cleanup on service shutdown."""
+        pass

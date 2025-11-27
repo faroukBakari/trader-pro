@@ -101,6 +101,14 @@ class ModularApp(FastAPI):
             logger.info(f"🔹 Module started: {module_app.module.name}")
         logger.info("✅ ModularApp started.")
 
+    def shutdown(self) -> None:
+        """Stop the FastAPI application (placeholder for actual server shutdown)."""
+        logger.info("🛑 Stopping ModularApp...")
+        for module_app in self._modules_apps:
+            module_app.shutdown()
+            logger.info(f"🔹 Module shutdown: {module_app.module.name}")
+        logger.info("✅ ModularApp shutdown.")
+
     def openapi(self) -> Dict[str, Any]:
         """Generate merged OpenAPI schema including all mounted modules."""
 
@@ -351,6 +359,10 @@ class AppFactory:
             app.start()
 
             yield
+
+            app.shutdown()
+            for provider in required_providers:
+                provider.shutdown()
 
             # Shutdown: Cleanup is handled by FastAPIAdapter
             print("🛑 FastAPI application shutdown complete")

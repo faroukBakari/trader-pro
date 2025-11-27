@@ -77,11 +77,6 @@ class DatafeedService(WsRouteService):
         self.symbols_file_path = symbols_file_path
         self._symbols: List[SymbolInfo] = []
         self._sample_bars: List[Bar] = []
-        self._load_symbols()
-        self._generate_sample_bars()
-
-        # temporarly broadcast mocked data / should be replaced with real datafeed logic
-        self._topic_generators: dict[str, asyncio.Task] = {}
         # Track provider subscription IDs for each topic (for cleanup)
         self._topic_to_subscription_id: dict[str, int | list[int]] = {}
 
@@ -149,67 +144,6 @@ class DatafeedService(WsRouteService):
 
         return resolution_map[resolution]
 
-    # temporarly broadcast mocked data / should be replaced with real datafeed logic
-    def _subscribe_to_realtime_bars(
-        self, symbol: str, exchange: str, topic_update: Callable[[Bar], None]
-    ) -> int:
-        """Subscribe to real-time bars via provider.
-
-        Args:
-            symbol: Symbol name (e.g., 'AAPL')
-            exchange: Exchange name (e.g., 'NASDAQ', 'SMART')
-            topic_update: Callback for bar updates
-
-        Returns:
-            Subscription ID for cleanup
-        """
-        logger.info(f"Subscribing to real-time bars for {symbol}:{exchange}")
-
-        # Subscribe via provider - callback will be invoked in TWS reader thread
-        subscription_id = self.datafeed_provider.subscribe_realtime_bars(
-            symbol=symbol,
-            callback=topic_update,  # Pass callback directly
-            exchange=exchange,
-            resolution=TimeFrame.SEC_5,  # TWS only supports 5-second bars
-        )
-
-        logger.info(f"Subscribed to bars for {symbol} with ID {subscription_id}")
-        return subscription_id
-
-    def _subscribe_to_market_data(
-        self, symbols: list[str], topic_update: Callable[[QuoteData], None]
-    ) -> list[int]:
-        """Subscribe to real-time market data (quotes) for multiple symbols via provider.
-
-        Args:
-            symbols: List of symbol names (e.g., ['AAPL', 'GOOGL'])
-            topic_update: Callback for quote updates
-
-        Returns:
-            List of subscription IDs (one per symbol) for cleanup
-        """
-        logger.info(f"Subscribing to market data for {len(symbols)} symbols: {symbols}")
-
-        subscription_ids: list[int] = []
-
-        for symbol in symbols:
-            # Parse ticker to get symbol and exchange
-            parsed_symbol, exchange = self._parse_ticker(symbol)
-
-            # Subscribe via provider - callback will be invoked in TWS reader thread
-            subscription_id = self.datafeed_provider.subscribe_market_data(
-                symbol=parsed_symbol,
-                callback=topic_update,  # Pass callback directly
-                exchange=exchange,
-            )
-
-            subscription_ids.append(subscription_id)
-            logger.info(
-                f"Subscribed to quotes for {parsed_symbol} with ID {subscription_id}"
-            )
-
-        return subscription_ids
-
     async def create_topic(self, topic: str, topic_update: Callable) -> None:
         """Parse topic and create appropriate subscription task.
 
@@ -222,13 +156,15 @@ class DatafeedService(WsRouteService):
             json.JSONDecodeError: If JSON params cannot be parsed
         """
 
-        if topic not in self._topic_generators:
+        if topic not in self._topic_to_subscription_id:
             logger.info(f"New topic in DatafeedService : {topic}")
             # Parse topic format: "topic_type:{json_params}"
             if ":" not in topic:
                 raise ValueError(f"Invalid topic format: {topic}")
 
             topic_type, params_json = topic.split(":", 1)
+
+            # TODO: need to validate create_topic params/types against provider capabilities at runtime
 
             if topic_type == "bars":
                 # Parse the JSON params part / Validate model
@@ -237,12 +173,8 @@ class DatafeedService(WsRouteService):
                     params_dict
                 )
 
-                # Parse ticker to get symbol and exchange
-                symbol, exchange = self._parse_ticker(subscription_request.symbol)
-
-                # Subscribe to real-time bars via provider (sync method, returns subscription ID)
-                subscription_id = self._subscribe_to_realtime_bars(
-                    symbol=symbol, exchange=exchange, topic_update=topic_update
+                subscription_id = self.datafeed_provider.subscribe_realtime_bars(
+                    symbol=subscription_request.symbol, callback=topic_update
                 )
 
                 # Track subscription ID for cleanup
@@ -266,8 +198,8 @@ class DatafeedService(WsRouteService):
                     raise ValueError("No symbols provided for quote subscription")
 
                 # Subscribe to market data for all symbols via provider (returns list of subscription IDs)
-                subscription_ids = self._subscribe_to_market_data(
-                    symbols=all_symbols, topic_update=topic_update
+                subscription_ids = self.datafeed_provider.subscribe_market_data(
+                    symbols=all_symbols, callback=topic_update
                 )
 
                 # Track subscription IDs for cleanup (list for quotes, int for bars)
@@ -281,12 +213,6 @@ class DatafeedService(WsRouteService):
         Handles both legacy asyncio tasks and provider subscriptions.
         """
         logger.info(f"Deleting topic queue for: {topic}")
-
-        # Cancel legacy asyncio task if exists
-        task = self._topic_generators.get(topic)
-        if task:
-            task.cancel()
-            self._topic_generators.pop(topic, None)
 
         # Unsubscribe from provider if subscription exists
         subscription_id = self._topic_to_subscription_id.get(topic)
@@ -310,138 +236,16 @@ class DatafeedService(WsRouteService):
                         logger.info(
                             f"Unsubscribing from quotes: subscription IDs {subscription_id}"
                         )
-                        for sub_id in subscription_id:
-                            self.datafeed_provider.unsubscribe_market_data(sub_id)
+                        self.datafeed_provider.unsubscribe_market_data(subscription_id)
                     else:
                         logger.info(
                             f"Unsubscribing from quotes: subscription ID {subscription_id}"
                         )
-                        self.datafeed_provider.unsubscribe_market_data(subscription_id)
+                        self.datafeed_provider.unsubscribe_market_data(
+                            [subscription_id]
+                        )
 
             self._topic_to_subscription_id.pop(topic, None)
-
-    def _load_symbols(self) -> None:
-        """Load symbols from JSON file or use default symbols"""
-        if self.symbols_file_path and Path(self.symbols_file_path).exists():
-            try:
-                with open(self.symbols_file_path, "r") as f:
-                    symbols_data = json.load(f)
-                self._symbols = [
-                    SymbolInfo.model_validate(symbol) for symbol in symbols_data
-                ]
-            except Exception as e:
-                print(
-                    f"Warning: Unable to load symbols from {self.symbols_file_path}: {e}"
-                )
-                self._load_default_symbols()
-        else:
-            self._load_default_symbols()
-
-    def _load_default_symbols(self) -> None:
-        """Load default symbols if file is not available"""
-        default_symbols = [
-            {
-                "name": "AAPL",
-                "description": "Apple Inc.",
-                "type": "stock",
-                "session": "0930-1600",
-                "timezone": "America/New_York",
-                "ticker": "AAPL",
-                "exchange": "NASDAQ",
-                "listed_exchange": "NASDAQ",
-                "format": "price",
-                "pricescale": 100,
-                "minmov": 1,
-                "has_intraday": True,
-                "has_daily": True,
-                "supported_resolutions": ["1D"],
-                "volume_precision": 0,
-                "data_status": "streaming",
-            },
-            {
-                "name": "GOOGL",
-                "description": "Alphabet Inc. Class A",
-                "type": "stock",
-                "session": "0930-1600",
-                "timezone": "America/New_York",
-                "ticker": "GOOGL",
-                "exchange": "NASDAQ",
-                "listed_exchange": "NASDAQ",
-                "format": "price",
-                "pricescale": 100,
-                "minmov": 1,
-                "has_intraday": True,
-                "has_daily": True,
-                "supported_resolutions": ["1D"],
-                "volume_precision": 0,
-                "data_status": "streaming",
-            },
-            {
-                "name": "MSFT",
-                "description": "Microsoft Corporation",
-                "type": "stock",
-                "session": "0930-1600",
-                "timezone": "America/New_York",
-                "ticker": "MSFT",
-                "exchange": "NASDAQ",
-                "listed_exchange": "NASDAQ",
-                "format": "price",
-                "pricescale": 100,
-                "minmov": 1,
-                "has_intraday": True,
-                "has_daily": True,
-                "supported_resolutions": ["1D"],
-                "volume_precision": 0,
-                "data_status": "streaming",
-            },
-        ]
-        self._symbols = [
-            SymbolInfo.model_validate(symbol) for symbol in default_symbols
-        ]
-
-    def _generate_sample_bars(self) -> None:
-        """Generate 400 bars for the last 400 days until today"""
-        bars: List[Bar] = []
-        today = datetime.now()
-        current_price = 100.0  # Starting price
-
-        # Generate bars for the last 400 days
-        for i in range(400, -1, -1):
-            date = today - timedelta(days=i)
-            date = date.replace(hour=0, minute=0, second=0, microsecond=0)
-            timestamp = int(date.timestamp() * 1000)  # Convert to milliseconds
-
-            # Use date as seed for deterministic random generation
-            seed = int(date.timestamp())
-
-            def seeded_random(offset: int) -> float:
-                x = math.sin(seed + offset) * 10000
-                return x - math.floor(x)
-
-            # Generate realistic OHLC data
-            volatility = 2.0
-            open_price = current_price
-            change = (seeded_random(1) - 0.5) * volatility
-            close_price = open_price + change
-            high_price = max(open_price, close_price) + seeded_random(2) * volatility
-            low_price = min(open_price, close_price) - seeded_random(3) * volatility
-            volume = int(seeded_random(4) * 1000000) + 500000
-
-            bar = Bar(
-                time=timestamp,
-                open=round(open_price, 2),
-                high=round(high_price, 2),
-                low=round(low_price, 2),
-                close=round(close_price, 2),
-                volume=volume,
-            )
-
-            bars.append(bar)
-
-            # Update price for next bar (trend simulation)
-            current_price = close_price + (seeded_random(5) - 0.48) * 0.5
-
-        self._sample_bars = bars
 
     def get_configuration(self) -> DatafeedConfiguration:
         """Get datafeed configuration"""
@@ -495,17 +299,18 @@ class DatafeedService(WsRouteService):
         # Limit results
         return filtered_results[:max_results]
 
-    def resolve_symbol(self, symbol_name: str) -> Optional[SymbolInfo]:
-        """Resolve symbol information by name or ticker"""
-        for symbol in self._symbols:
-            if (
-                symbol.name == symbol_name
-                or symbol.ticker == symbol_name
-                or symbol.name.lower() == symbol_name.lower()
-                or (symbol.ticker and symbol.ticker.lower() == symbol_name.lower())
-            ):
-                return symbol
-        return None
+    async def resolve_symbol(self, symbol_name: str) -> Optional[SymbolInfo]:
+        """Resolve symbol information via datafeed provider."""
+        parsed_symbol, exchange = self._parse_ticker(symbol_name)
+        try:
+            return await self.datafeed_provider.get_symbol_info(
+                symbol=parsed_symbol,
+                exchange=exchange,
+                timeout=5.0,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to resolve symbol '{symbol_name}': {e}")
+            return None
 
     async def get_bars(
         self,
@@ -625,46 +430,3 @@ class DatafeedService(WsRouteService):
             quote_data.append(QuoteData(s="ok", n=symbol, v=quote_values))
 
         return quote_data
-
-    def mock_last_bar(self, symbol: str) -> Optional[Bar]:
-        """Create a mock bar by modifying the last bar to simulate real-time updates"""
-        if not self._sample_bars:
-            return None
-
-        # Check if symbol exists
-        symbol_info = self.resolve_symbol(symbol)
-        if not symbol_info:
-            return None
-
-        last_bar = self._sample_bars[-1]
-
-        # Create a variation within the high-low range
-        range_size = last_bar.high - last_bar.low
-        import random
-
-        random_factor = random.random()  # 0 to 1
-        new_close = last_bar.low + range_size * random_factor
-
-        # Ensure the new close doesn't exceed the original high/low bounds
-        adjusted_close = max(last_bar.low, min(last_bar.high, new_close))
-
-        # Update high/low if the new close exceeds them
-        new_high = max(last_bar.high, adjusted_close)
-        new_low = min(last_bar.low, adjusted_close)
-
-        return Bar(
-            time=last_bar.time,  # Same time to update existing bar
-            open=last_bar.open,  # Keep original open
-            high=round(new_high, 2),
-            low=round(new_low, 2),
-            close=round(adjusted_close, 2),
-            volume=(last_bar.volume or 0)
-            + int(random.random() * 10000),  # Add some volume
-        )
-
-    def __del__(self) -> None:
-        """Cleanup generator tasks on instance deletion"""
-        for task in self._topic_generators.values():
-            if not task.done():
-                task.cancel()
-                logger.info(f"Cancelled broadcasting task: {task.get_name()}")

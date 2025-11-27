@@ -35,7 +35,8 @@ from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
-from typing import Any
+from tkinter import NO
+from typing import Any, Callable
 
 from ibapi.common import BarData, TickAttrib
 from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
@@ -46,6 +47,7 @@ from ibapi.message import OUT
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
+from numpy import isin
 
 logger = logging.getLogger(__name__)
 DEBUG_TWS_SEND = os.environ.get("DEBUG_TWS_SEND") == "true"
@@ -299,11 +301,10 @@ class IBSocket:
                 try:
                     data = self._socket.recv(4096)
                     break
-                except Exception as e:
+                except socketTimeout:
                     nb_retries -= 1
-                    assert (
-                        nb_retries > 0
-                    ), f"Error while waiting for handshake response: {e}"
+                    assert nb_retries > 0, f"Error while waiting for handshake response"
+                    time.sleep(0.1)
             buf_size = len(data)
             msg_size = HEADER_STRUCT.unpack_from(data, 0)[0]
             if DEBUG_TWS_RECEIVE:
@@ -334,7 +335,7 @@ class IBSocket:
         self._reader_thread = threading.Thread(
             target=self._reader_loop,
             args=(cb_wrapper,),
-            daemon=True,
+            daemon=False,
         )
         self._reader_thread.start()
         return self._reader_thread
@@ -344,10 +345,14 @@ class IBSocket:
             with self._lock:
                 self._socket.close()
         finally:
-            while self._reader_thread and self._reader_thread.is_alive():
+            logger.info("IBSocket Socket closed.")
+            if self._reader_thread and self._reader_thread.is_alive():
                 logger.info("Waiting for IBSocket reader thread to finish...")
-                self._reader_thread.join(timeout=2)
-            logger.info("IBSocket Socket disconnected.")
+                try:
+                    self._reader_thread.join(timeout=2)
+                    logger.info("IBSocket reader thread finished gracefully.")
+                except Exception:
+                    logger.error("Failed to join IBSocket reader thread.")
 
     def send_message(self, msgId: int, values: list[object]) -> None:
         text = make_fields(values)
@@ -409,18 +414,20 @@ class TWSCallback(EWrapper):
     Inherits EWrapper for callback methods.
     Manages asyncio.Future registry for request/response patterns.
     Uses _accumulators for streaming accumulation pattern (multiple callbacks → single result).
+    Uses _sub_queues for continuous subscription pattern (realtime bars, market data).
     """
 
     def __init__(
         self,
         loop: asyncio.AbstractEventLoop | None = None,
     ) -> None:
-        """Initialize IBSocket (pure callback handler).
+        """Initialize TWSCallback (pure callback handler).
 
         Note: No EClient instance - caller must provide via composition.
         """
         self._loop = loop or asyncio.get_event_loop()
-        self._futures: dict[int, asyncio.Future[Any]] = {}
+        self._futures: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Future]] = {}
+        self._callbacks: dict[int, Callable] = {}
         self._accumulators: dict[int, Any] = {}
         self._nxt_order_id: int | None = None
         self._accounts: list[str] = []
@@ -434,31 +441,41 @@ class TWSCallback(EWrapper):
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
-        return self._loop
+        return asyncio.get_event_loop()
 
     # === Future / Coroutine management ===
 
-    def create_future_coroutine(self, reqId: int, timeout: float = 5) -> Awaitable[Any]:
+    def create_future_coroutine(
+        self, reqId: int, timeout: float | None = 5
+    ) -> Awaitable[Any]:
         """Create a new Future attached to the current event loop."""
         future: asyncio.Future[Any] = self.loop.create_future()
-        self._futures[reqId] = future
+        self._futures[reqId] = (self.loop, future)
         return asyncio.wait_for(future, timeout)
 
     def _resolve_future(self, reqId: int, result: object) -> None:
         """Helper to resolve a future in the asyncio loop."""
-        future = self._futures.pop(reqId, None)
-        if future is not None and not future.done():
-            self.loop.call_soon_threadsafe(future.set_result, result)
+        loop, future = self._futures.pop(reqId, (None, None))
+        if loop is not None and future is not None and not future.done():
+            loop.call_soon_threadsafe(future.set_result, result)
         else:
             logger.error(f"Unknown reqId {reqId} in _resolve_future.")
 
     def _reject_future(self, reqId: int, exception: Exception) -> None:
         """Helper to reject a future with an exception in the asyncio loop."""
-        future = self._futures.pop(reqId, None)
-        if future is not None and not future.done():
-            self.loop.call_soon_threadsafe(future.set_exception, exception)
+        loop, future = self._futures.pop(reqId, (None, None))
+        if loop is not None and future is not None and not future.done():
+            loop.call_soon_threadsafe(future.set_exception, exception)
         else:
             logger.error(f"Unknown reqId {reqId} in _reject_future.")
+
+    def register_callback(self, reqId: int, callback: Callable) -> None:
+        """Register a callback for a specific request ID."""
+        self._callbacks[reqId] = callback
+
+    def unregister_callback(self, reqId: int) -> None:
+        """Unregister a callback for a specific request ID."""
+        self._callbacks.pop(reqId, None)
 
     # === Trading / account management ===
 
@@ -519,6 +536,14 @@ class TWSCallback(EWrapper):
         if isinstance(accumulator, list):
             accumulator.append(bar)
 
+    def historicalDataUpdate(self, reqId: int, bar: BarData) -> None:
+        """returns updates in real time when keepUpToDate is set to True"""
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        accumulator = self._accumulators.setdefault(reqId, [])
+        if isinstance(accumulator, list):
+            accumulator.append(bar)
+
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
         """End signal for historical data - resolve Future with accumulated results."""
         if DEBUG_TWS_CALLBACK:
@@ -540,6 +565,9 @@ class TWSCallback(EWrapper):
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         accumulator = self._accumulators.setdefault(reqId, {})
         accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = price
+        callback = self._callbacks.get(reqId, None)
+        if callback is not None:
+            callback(accumulator)
 
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
         """Accumulate size ticks for market data snapshot.
@@ -551,6 +579,9 @@ class TWSCallback(EWrapper):
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         accumulator = self._accumulators.setdefault(reqId, {})
         accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = int(size)
+        callback = self._callbacks.get(reqId, None)
+        if callback is not None:
+            callback(accumulator)
 
     def marketDataType(self, reqId: int, marketDataType: int) -> None:
         """Set market data type for the request."""
@@ -558,6 +589,9 @@ class TWSCallback(EWrapper):
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         accumulator = self._accumulators.setdefault(reqId, {})
         accumulator["marketDataType"] = marketDataType
+        callback = self._callbacks.get(reqId, None)
+        if callback is not None:
+            callback(accumulator)
 
     def tickReqParams(
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
@@ -569,6 +603,9 @@ class TWSCallback(EWrapper):
         accumulator["minTick"] = minTick
         accumulator["bboExchange"] = bboExchange
         accumulator["snapshotPermissions"] = snapshotPermissions
+        callback = self._callbacks.get(tickerId)
+        if callback is not None:
+            callback(accumulator)
 
     def tickString(self, reqId: int, tickType: int, value: str) -> None:
         """Generic string tick for market data snapshot."""
@@ -576,6 +613,9 @@ class TWSCallback(EWrapper):
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         accumulator = self._accumulators.setdefault(reqId, {})
         accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = value
+        callback = self._callbacks.get(reqId, None)
+        if callback is not None:
+            callback(accumulator)
 
     def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
         """Generic float tick for market data snapshot."""
@@ -583,6 +623,9 @@ class TWSCallback(EWrapper):
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         accumulator = self._accumulators.setdefault(reqId, {})
         accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = value
+        callback = self._callbacks.get(reqId, None)
+        if callback is not None:
+            callback(accumulator)
 
     def tickSnapshotEnd(self, reqId: int) -> None:
         """End signal for market data snapshot - resolve Future with accumulated ticks.
@@ -593,7 +636,40 @@ class TWSCallback(EWrapper):
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         ticks = self._accumulators.pop(reqId, {})
-        self._resolve_future(reqId, ticks)
+        callback = self._callbacks.get(reqId, None)
+        if callback is not None:
+            self._callbacks.pop(reqId)
+        else:
+            self._resolve_future(reqId, ticks)
+
+    # === Real-time bars (continuous subscription pattern) ===
+
+    def realtimeBar(
+        self,
+        reqId: int,
+        time: int,
+        open_: float,
+        high: float,
+        low: float,
+        close: float,
+        volume: Decimal,
+        wap: Decimal,
+        count: int,
+    ) -> None:
+        """Real-time 5-second bar callback - continuous subscription pattern.
+
+        Uses queue.put_nowait via call_soon_threadsafe to pass data to main thread.
+        Unlike Future-based callbacks, this is called repeatedly for each bar.
+        """
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
+        callback = self._callbacks.get(reqId, None)
+        if callback is not None:
+            # Pack bar data as tuple (domain conversion happens in main thread)
+            callback(time, open_, high, low, close, int(volume), float(wap), count)
+        else:
+            logger.warning(f"No subscription queue for realtime bar reqId {reqId}")
 
     # === error handling ===
 
@@ -705,18 +781,24 @@ class TWSClient:
     def next_req_id(self) -> int:
         return self.ibsocket.next_req_id
 
-    async def reqMatchingSymbols(self, pattern: str) -> list[ContractDescription]:
+    async def reqMatchingSymbols(
+        self, pattern: str, timeout: float | None = None
+    ) -> list[ContractDescription]:
         reqId = self.next_req_id
 
-        coroutine: Awaitable[
-            list[ContractDescription]
-        ] = self._cb_wrapper.create_future_coroutine(reqId)
+        coroutine: Awaitable[list[ContractDescription]] = (
+            self._cb_wrapper.create_future_coroutine(
+                reqId, timeout=timeout or self._timeout
+            )
+        )
         self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
         debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
 
         return await coroutine
 
-    async def reqContractDetails(self, contract: Contract) -> list[ContractDetails]:
+    async def reqContractDetails(
+        self, contract: Contract, timeout: float | None = None
+    ) -> list[ContractDetails]:
         """Request contract details for a symbol.
 
         Args:
@@ -727,14 +809,16 @@ class TWSClient:
             May return multiple results for ambiguous queries.
         """
         reqId = self.next_req_id
-        coroutine: Awaitable[
-            list[ContractDetails]
-        ] = self._cb_wrapper.create_future_coroutine(reqId)
+        coroutine: Awaitable[list[ContractDetails]] = (
+            self._cb_wrapper.create_future_coroutine(
+                reqId, timeout=timeout or self._timeout
+            )
+        )
 
         # Build message fields (VERSION=8 per ibapi/client.py)
-        version = 8
+        VERSION = 8
         fields: list[object] = [
-            version,
+            VERSION,
             reqId,
             contract.conId,
             contract.symbol,
@@ -765,10 +849,11 @@ class TWSClient:
         contract: Contract,
         end_date_time: str,
         duration_str: str,
-        bar_size_setting: str,
-        what_to_show: str = "TRADES",
-        use_rth: int = 1,
+        barSize_setting: str,
+        whatToShow: str = "TRADES",
+        useRTH: int = 1,
         format_date: int = 1,
+        timeout: float | None = None,
     ) -> list[BarData]:
         """Request historical bars from TWS.
 
@@ -776,9 +861,9 @@ class TWSClient:
             contract: TWS Contract object
             end_date_time: End datetime ("20231215 16:00:00" or "" for now)
             duration_str: Time range ("1 D", "2 W", "1 M", etc.)
-            bar_size_setting: Bar size ("1 min", "5 mins", "1 hour", "1 day")
-            what_to_show: Data type (default: "TRADES")
-            use_rth: 1=regular hours only, 0=all hours (default: 1)
+            barSize_setting: Bar size ("1 min", "5 mins", "1 hour", "1 day")
+            whatToShow: Data type (default: "TRADES")
+            useRTH: 1=regular hours only, 0=all hours (default: 1)
             format_date: 1=string format, 2=epoch (default: 1)
 
         Returns:
@@ -786,7 +871,8 @@ class TWSClient:
         """
         reqId = self.next_req_id
         coroutine: Awaitable[list[BarData]] = self._cb_wrapper.create_future_coroutine(
-            reqId
+            reqId,
+            timeout=timeout or self._timeout,
         )
 
         # Build message fields (VERSION=6 per ibapi/client.py)
@@ -806,10 +892,10 @@ class TWSClient:
             contract.tradingClass,
             contract.includeExpired,
             end_date_time,
-            bar_size_setting,
+            barSize_setting,
             duration_str,
-            use_rth,
-            what_to_show,
+            useRTH,
+            whatToShow,
             format_date,
             False,  # keepUpToDate (always False for historical)
             [],  # chartOptions (empty list)
@@ -818,27 +904,32 @@ class TWSClient:
         self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, fields)
         debug_log(
             f"awaiting historicalData for reqId {reqId}, "
-            f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{bar_size_setting}'"
+            f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{barSize_setting}'"
         )
         return await coroutine
 
     async def reqMktDataSnapshot(
-        self, contract: Contract, generic_tick_list: str = ""
+        self,
+        contract: Contract,
+        genericTickList: str = "",
+        timeout: float | None = None,
     ) -> dict[str, float | int]:
         """Request market data snapshot (single quote update).
 
         Args:
             contract: TWS Contract object
-            generic_tick_list: Additional tick types (e.g., "233" for RTVolume)
+            genericTickList: Additional tick types (e.g., "233" for RTVolume)
 
         Returns:
             Dictionary with "prices" and "sizes" mappings (tickType → value)
             Example: {"prices": {1: 150.25, 2: 150.30}, "sizes": {0: 100, 3: 200}}
         """
         reqId = self.next_req_id
-        coroutine: Awaitable[
-            dict[str, float | int]
-        ] = self._cb_wrapper.create_future_coroutine(reqId, self._timeout)
+        coroutine: Awaitable[dict[str, float | int]] = (
+            self._cb_wrapper.create_future_coroutine(
+                reqId, timeout=timeout or self._timeout
+            )
+        )
 
         VERSION = 11
 
@@ -859,7 +950,7 @@ class TWSClient:
             contract.localSymbol,
             contract.tradingClass,
             False,  # ← ADD: deltaNeutralContract (False = no delta neutral)
-            generic_tick_list,  # Now correctly positioned
+            genericTickList,  # Now correctly positioned
             True,  # snapshot
             False,  # regulatorySnapshot
             [],  # mktDataOptions (empty list)
@@ -870,3 +961,158 @@ class TWSClient:
             f"awaiting tickSnapshotEnd for reqId {reqId}, symbol='{contract.symbol}'"
         )
         return await coroutine
+
+    # === Real-time bar subscriptions (continuous pattern) ===
+
+    def reqRealTimeBars(
+        self,
+        contract: Contract,
+        callback: Callable[
+            [
+                int,
+                float,
+                float,
+                float,
+                float,
+                Decimal,
+                Decimal,
+                int,
+            ],
+            None,
+        ],
+        barSize: int = 5,
+        whatToShow: str = "TRADES",
+        useRTH: bool = False,
+        realTimeBarsOptions: list = [],
+    ) -> int:
+        """Subscribe to real-time 5-second bars.
+
+        Unlike async methods, this returns immediately with a queue.
+        Caller consumes queue to receive bar data tuples:
+        (time, open, high, low, close, volume, wap, count)
+
+        Args:
+            contract: TWS Contract object
+            barSize: Bar size in seconds (only 5 supported by TWS)
+            whatToShow: Data type ("TRADES", "BID", "ASK", "MIDPOINT")
+            useRTH: True for regular trading hours only
+
+        Returns:
+            Tuple of (reqId, queue) - queue receives bar data tuples
+        """
+        reqId = self.next_req_id
+        self._cb_wrapper.register_callback(
+            reqId,
+            callback=callback,
+        )
+
+        # Build and send request (VERSION=3)
+        VERSION = 3
+        fields: list[object] = [
+            VERSION,
+            reqId,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            (
+                contract.strike if contract.strike else ""
+            ),  # TODO: check "" swap vs raw UNSET_DOUBLE
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            barSize,
+            whatToShow,
+            useRTH,
+            realTimeBarsOptions,  # realTimeBarsOptions
+        ]
+
+        self.ibsocket.send_message(OUT.REQ_REAL_TIME_BARS, fields)
+        debug_log(
+            f"subscribed to realtime bars with reqId {reqId}, symbol='{contract.symbol}'"
+        )
+        return reqId
+
+    def reqMktData(
+        self,
+        contract: Contract,
+        callback: Callable[[dict[str, float | int]], None],
+        genericTickList: str = "",
+    ) -> int:
+        """Request market data snapshot (single quote update).
+
+        Args:
+            contract: TWS Contract object
+            genericTickList: Additional tick types (e.g., "233" for RTVolume)
+
+        Returns:
+            Dictionary with "prices" and "sizes" mappings (tickType → value)
+            Example: {"prices": {1: 150.25, 2: 150.30}, "sizes": {0: 100, 3: 200}}
+        """
+        reqId = self.next_req_id
+        self._cb_wrapper.register_callback(
+            reqId,
+            callback=callback,
+        )
+
+        VERSION = 11
+
+        # Build message fields for REQ_MKT_DATA
+        fields: list[object] = [
+            VERSION,
+            reqId,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            False,  # ← ADD: deltaNeutralContract (False = no delta neutral)
+            genericTickList,
+            False,  # snapshot
+            False,  # regulatorySnapshot
+            [],  # mktDataOptions (empty list)
+        ]
+
+        self.ibsocket.send_message(OUT.REQ_MKT_DATA, fields)
+        debug_log(
+            f"subscribed to realtime reqMktData with reqId {reqId}, symbol='{contract.symbol}'"
+        )
+        return reqId
+
+    def cancelRealTimeBars(self, reqId: int) -> None:
+        """Cancel real-time bars subscription.
+
+        Args:
+            reqId: Request ID from subscribe_realtime_bars
+        """
+        self._cb_wrapper.unregister_callback(reqId)
+
+        VERSION = 1
+        self.ibsocket.send_message(OUT.CANCEL_REAL_TIME_BARS, [VERSION, reqId])
+        debug_log(f"cancelled realtime bars for reqId {reqId}")
+
+    def cancelMktData(self, reqId: int):
+        """Cancel tick-by-tick data subscription."""
+
+        self._cb_wrapper.unregister_callback(reqId)
+
+        VERSION = 2
+        self.ibsocket.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
+        debug_log(f"cancelled realtime bars for reqId {reqId}")
+
+    def disconnect(self) -> None:
+        self.ibsocket.disconnect()
+
+    def __del__(self) -> None:
+        self.disconnect()
