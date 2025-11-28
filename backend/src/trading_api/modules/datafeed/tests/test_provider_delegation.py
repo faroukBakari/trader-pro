@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -79,7 +79,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     def subscribe_realtime_bars(
         self,
         symbol: str,
-        callback: Callable[[Bar], None],
+        callback: Callable[[Bar], Awaitable[None]],
         **kwargs: Any,
     ) -> int:
         return self._subscribe_realtime_bars_mock(  # type: ignore[no-any-return]
@@ -89,7 +89,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     def subscribe_market_data(
         self,
         symbols: list[str],
-        callback: Callable[[QuoteData], None],
+        callback: Callable[[QuoteData], Awaitable[None]],
         **kwargs: Any,
     ) -> list[int]:
         return self._subscribe_market_data_mock(  # type: ignore[no-any-return]

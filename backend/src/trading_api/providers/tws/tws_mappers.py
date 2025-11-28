@@ -243,7 +243,7 @@ def tws_rt_bar_to_domain_bar(
 
 def tws_ticks_to_quote_data(
     symbol: str,
-    ticks: dict[str, float | int],
+    ticks: dict[str, float],
 ) -> QuoteData:
     """Convert TWS tick data → domain QuoteData.
 

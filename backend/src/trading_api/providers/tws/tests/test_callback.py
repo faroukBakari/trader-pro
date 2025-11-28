@@ -591,7 +591,7 @@ class TestRealtimeBarCallback:
         received_data: list[tuple] = []
 
         # Register callback to capture bar data
-        def bar_callback(
+        async def bar_callback(
             time: int,
             open_: float,
             high: float,
@@ -603,7 +603,7 @@ class TestRealtimeBarCallback:
         ) -> None:
             received_data.append((time, open_, high, low, close, volume, wap, count))
 
-        callback._callbacks[req_id] = bar_callback
+        callback._callbacks[req_id] = (loop, bar_callback)
 
         # Simulate realtimeBar callback
         callback.realtimeBar(
@@ -643,7 +643,7 @@ class TestRealtimeBarCallback:
         received_data: list[tuple] = []
 
         # Register callback to capture bar data
-        def bar_callback(
+        async def bar_callback(
             time: int,
             open_: float,
             high: float,
@@ -655,7 +655,7 @@ class TestRealtimeBarCallback:
         ) -> None:
             received_data.append((time, open_, high, low, close, volume, wap, count))
 
-        callback._callbacks[req_id] = bar_callback
+        callback._callbacks[req_id] = (loop, bar_callback)
 
         # Simulate multiple bar callbacks
         for i in range(3):

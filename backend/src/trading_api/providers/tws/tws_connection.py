@@ -22,6 +22,7 @@ Architecture:
 
 import asyncio
 import logging
+import math
 import os
 import select
 import struct
@@ -388,19 +389,18 @@ class IBSocket:
         try:
             with self._lock:
                 self._socket.close()
+                self._state = IBSocketState.CLOSED
+                logger.info("IBSocket Socket closed.")
         except Exception as e:
             logger.error(f"Error while closing IBSocket: {e}")
 
-        self._state = IBSocketState.CLOSED
-        logger.info("IBSocket Socket closed.")
-
-        if self._reader_thread and self._reader_thread.is_alive():
-            logger.info("Waiting for IBSocket reader thread to finish...")
-            try:
-                self._reader_thread.join(timeout=2)
-                logger.info("IBSocket reader thread finished gracefully.")
-            except Exception as e:
-                logger.error(f"Failed to join IBSocket reader thread: {e}")
+        # if False and self._reader_thread and self._reader_thread.is_alive():
+        #     logger.info("Waiting for IBSocket reader thread to finish...")
+        #     try:
+        #         self._reader_thread.join(timeout=2)
+        #         logger.info("IBSocket reader thread finished gracefully.")
+        #     except Exception as e:
+        #         logger.error(f"Failed to join IBSocket reader thread: {e}")
 
     def send_message(self, msgId: int, values: list[object]) -> None:
         text = make_fields(values)
@@ -410,6 +410,12 @@ class IBSocket:
         assert self._state == IBSocketState.RUNNING, "Socket is not connected."
         with self._lock:
             self._socket.sendall(msg2)
+
+    def __del__(self) -> None:
+        try:
+            self.disconnect()
+        except Exception:
+            pass
 
 
 @dataclass
@@ -445,7 +451,9 @@ class TWSCallback(EWrapper):
         """
         self._loop = loop or asyncio.get_event_loop()
         self._futures: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Future]] = {}
-        self._callbacks: dict[int, Callable] = {}
+        self._callbacks: dict[
+            int, tuple[asyncio.AbstractEventLoop, Callable[..., Awaitable[None]]]
+        ] = {}
         self._accumulators: dict[int, Any] = {}
         self._nxt_order_id: int | None = None
         self._accounts: list[str] = []
@@ -496,9 +504,11 @@ class TWSCallback(EWrapper):
         else:
             logger.error(f"Unknown reqId {reqId} in _reject_future.")
 
-    def register_callback(self, reqId: int, callback: Callable) -> None:
+    def register_callback(
+        self, reqId: int, callback: Callable[..., Awaitable[None]]
+    ) -> None:
         """Register a callback for a specific request ID."""
-        self._callbacks[reqId] = callback
+        self._callbacks[reqId] = (self.loop, callback)
 
     def unregister_callback(self, reqId: int) -> None:
         """Unregister a callback for a specific request ID."""
@@ -590,11 +600,17 @@ class TWSCallback(EWrapper):
         """
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._accumulators.setdefault(reqId, {})
-        accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = price
-        callback = self._callbacks.get(reqId, None)
-        if callback is not None:
-            callback(accumulator)
+        accumulator: dict[str, Any] = self._accumulators.setdefault(reqId, {})
+        current_val: float | None = accumulator.get(
+            get_tick_type_name(tickType, f"UNKNOWN_{tickType}"), None
+        )
+        if current_val is None or not math.isclose(current_val, price, abs_tol=1e-3):
+            accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = price
+            loop, callback = self._callbacks.get(reqId, (None, None))
+            if loop is not None and callback is not None:
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(callback(accumulator), loop=loop)
+                )
 
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
         """Accumulate size ticks for market data snapshot.
@@ -605,20 +621,30 @@ class TWSCallback(EWrapper):
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         accumulator = self._accumulators.setdefault(reqId, {})
-        accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = int(size)
-        callback = self._callbacks.get(reqId, None)
-        if callback is not None:
-            callback(accumulator)
+        current_val: Decimal | None = accumulator.get(
+            get_tick_type_name(tickType, f"UNKNOWN_{tickType}"), None
+        )
+        if current_val is None or current_val != size:
+            accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = int(size)
+            loop, callback = self._callbacks.get(reqId, (None, None))
+            if loop is not None and callback is not None:
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(callback(accumulator), loop=loop)
+                )
 
     def marketDataType(self, reqId: int, marketDataType: int) -> None:
         """Set market data type for the request."""
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._accumulators.setdefault(reqId, {})
-        accumulator["marketDataType"] = marketDataType
-        callback = self._callbacks.get(reqId, None)
-        if callback is not None:
-            callback(accumulator)
+        accumulator: dict[str, Any] = self._accumulators.setdefault(reqId, {})
+        current_val: int | None = accumulator.get("marketDataType", None)
+        if current_val is None or current_val != marketDataType:
+            accumulator["marketDataType"] = marketDataType
+            loop, callback = self._callbacks.get(reqId, (None, None))
+            if loop is not None and callback is not None:
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(callback(accumulator), loop=loop)
+                )
 
     def tickReqParams(
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
@@ -626,33 +652,62 @@ class TWSCallback(EWrapper):
         """returns exchange map of a particular contract"""
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._accumulators.setdefault(tickerId, {})
-        accumulator["minTick"] = minTick
-        accumulator["bboExchange"] = bboExchange
-        accumulator["snapshotPermissions"] = snapshotPermissions
-        callback = self._callbacks.get(tickerId)
-        if callback is not None:
-            callback(accumulator)
+        accumulator: dict[str, Any] = self._accumulators.setdefault(tickerId, {})
+        current_minTick: float | None = accumulator.get("minTick", None)
+        current_bboExchange: str | None = accumulator.get("bboExchange", None)
+        current_snapshotPermissions: int | None = accumulator.get(
+            "snapshotPermissions", None
+        )
+        if (
+            current_minTick is None
+            or math.isclose(current_minTick, minTick, abs_tol=1e-6)
+            or current_bboExchange is None
+            or current_bboExchange != bboExchange
+            or current_snapshotPermissions is None
+            or current_snapshotPermissions == snapshotPermissions
+        ):
+            accumulator["minTick"] = minTick
+            accumulator["bboExchange"] = bboExchange
+            accumulator["snapshotPermissions"] = snapshotPermissions
+            loop, callback = self._callbacks.get(tickerId, (None, None))
+            if loop is not None and callback is not None:
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(callback(accumulator), loop=loop)
+                )
 
     def tickString(self, reqId: int, tickType: int, value: str) -> None:
         """Generic string tick for market data snapshot."""
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._accumulators.setdefault(reqId, {})
-        accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = value
-        callback = self._callbacks.get(reqId, None)
-        if callback is not None:
-            callback(accumulator)
+        accumulator: dict[str, Any] = self._accumulators.setdefault(reqId, {})
+        current_value: str | None = accumulator.get(
+            get_tick_type_name(tickType, f"UNKNOWN_{tickType}"), None
+        )
+        if current_value is None or current_value != value:
+            accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = value
+            loop, callback = self._callbacks.get(reqId, (None, None))
+            if loop is not None and callback is not None:
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(callback(accumulator), loop=loop)
+                )
 
     def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
         """Generic float tick for market data snapshot."""
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._accumulators.setdefault(reqId, {})
-        accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = value
-        callback = self._callbacks.get(reqId, None)
-        if callback is not None:
-            callback(accumulator)
+        accumulator: dict[str, Any] = self._accumulators.setdefault(reqId, {})
+        current_value: float | None = accumulator.get(
+            get_tick_type_name(tickType, f"UNKNOWN_{tickType}"), None
+        )
+        if current_value is None or not math.isclose(
+            current_value, value, abs_tol=1e-3
+        ):
+            accumulator[get_tick_type_name(tickType, f"UNKNOWN_{tickType}")] = value
+            loop, callback = self._callbacks.get(reqId, (None, None))
+            if loop is not None and callback is not None:
+                loop.call_soon_threadsafe(
+                    lambda: asyncio.ensure_future(callback(accumulator), loop=loop)
+                )
 
     def tickSnapshotEnd(self, reqId: int) -> None:
         """End signal for market data snapshot - resolve Future with accumulated ticks.
@@ -663,7 +718,7 @@ class TWSCallback(EWrapper):
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         ticks = self._accumulators.pop(reqId, {})
-        callback = self._callbacks.get(reqId, None)
+        _, callback = self._callbacks.get(reqId, (None, None))
         if callback is not None:
             self._callbacks.pop(reqId)
         else:
@@ -691,12 +746,16 @@ class TWSCallback(EWrapper):
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-        callback = self._callbacks.get(reqId, None)
-        if callback is not None:
-            # Pack bar data as tuple (domain conversion happens in main thread)
-            callback(time, open_, high, low, close, int(volume), float(wap), count)
-        else:
-            logger.warning(f"No subscription queue for realtime bar reqId {reqId}")
+        loop, callback = self._callbacks.get(reqId, (None, None))
+        if loop is not None and callback is not None:
+            loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(
+                    callback(
+                        time, open_, high, low, close, int(volume), float(wap), count
+                    ),
+                    loop=loop,
+                )
+            )
 
     # === error handling ===
 
@@ -1004,7 +1063,7 @@ class TWSClient:
                 Decimal,
                 int,
             ],
-            None,
+            Awaitable[None],
         ],
         barSize: int = 5,
         whatToShow: str = "TRADES",
@@ -1066,7 +1125,7 @@ class TWSClient:
     def reqMktData(
         self,
         contract: Contract,
-        callback: Callable[[dict[str, float | int]], None],
+        callback: Callable[[dict[str, float | int]], Awaitable[None]],
         genericTickList: str = "",
     ) -> int:
         """Request market data snapshot (single quote update).
@@ -1136,3 +1195,7 @@ class TWSClient:
         VERSION = 2
         self.ibsocket.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
         debug_log(f"cancelled realtime bars for reqId {reqId}")
+
+    def shutdown(self) -> None:
+        """Shutdown the TWSClient and underlying IBSocket."""
+        self.__ibsocket.disconnect()
