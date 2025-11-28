@@ -8,7 +8,7 @@ import asyncio
 from collections.abc import Generator
 from itertools import count
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 import pytest
 from fastapi import FastAPI
@@ -36,7 +36,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     def __init__(self) -> None:
         self._subscription_counter = count(start=1)
-        self._subscriptions: dict[int, Callable] = {}
+        self._subscriptions: dict[int, Callable[..., Awaitable[None]]] = {}
 
     @classmethod
     def provider_dir(cls) -> Path:
@@ -130,7 +130,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     def subscribe_realtime_bars(
         self,
         symbol: str,
-        callback: Callable[[Bar], None],
+        callback: Callable[[Bar], Awaitable[None]],
         exchange: str | None = None,
         **kwargs: Any,
     ) -> int:
@@ -142,7 +142,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     def subscribe_market_data(
         self,
         symbols: list[str],
-        callback: Callable[[QuoteData], None],
+        callback: Callable[[QuoteData], Awaitable[None]],
         exchange: str | None = None,
         **kwargs: Any,
     ) -> list[int]:

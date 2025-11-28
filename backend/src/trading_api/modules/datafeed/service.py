@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Any, Awaitable, Callable, List, Optional
 
 from trading_api.models import (
     Bar,
@@ -141,7 +141,9 @@ class DatafeedService(WsRouteService):
 
         return resolution_map[resolution]
 
-    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+    async def create_topic(
+        self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
+    ) -> None:
         """Parse topic and create appropriate subscription task.
 
         Topic formats:
@@ -271,7 +273,7 @@ class DatafeedService(WsRouteService):
         # Delegate to provider for raw search results
         provider_results = await self.datafeed_provider.search_symbols(
             pattern=user_input if user_input.strip() else "*",
-            timeout=15.0,
+            timeout=10.0,
         )
 
         # Apply business logic filters on provider results
@@ -303,7 +305,7 @@ class DatafeedService(WsRouteService):
             return await self.datafeed_provider.get_symbol_info(
                 symbol=parsed_symbol,
                 exchange=exchange,
-                timeout=15.0,
+                timeout=2.0,
             )
         except Exception as e:
             logger.warning(f"Failed to resolve symbol '{symbol_name}': {e}")
@@ -375,7 +377,7 @@ class DatafeedService(WsRouteService):
             # Delegate to provider for real quote snapshots
             return await self.datafeed_provider.get_quotes_snapshot(
                 symbols=parsed_symbols,
-                timeout=15.0,
+                timeout=12.0,
             )
         except Exception as e:
             logger.error(f"Failed to get quotes for {symbols}: {e}")

@@ -4,11 +4,9 @@ Generic FastWS adapter with built-in WebSocket endpoint
 
 import asyncio
 import logging
-from typing import Any, Callable
-
-from fastapi import FastAPI
 
 from external_packages.fastws import FastWS, Message, OperationRouter
+from trading_api.models.common import SubscriptionUpdate
 from trading_api.shared.ws.ws_route_interface import WsRouteInterface
 
 logger = logging.getLogger(__name__)
@@ -26,11 +24,6 @@ class FastWSAdapter(FastWS):
     Type parameter T: The business model type (e.g., Bar)
     """
 
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
-        self._pending_routers: list[Callable] = []
-        self._broadcast_tasks: list[asyncio.Task] = []
-
     def include_router(
         self,
         router: OperationRouter,
@@ -45,76 +38,31 @@ class FastWSAdapter(FastWS):
             )
             return
 
-        async def broadcast_router_messages() -> None:
-            logger.info(f"Started broadcasting task for router: {router.route}")
-            while True:
-                try:
-                    # Get message from queue (non-blocking)
-                    update = await router.updates_queue.get()
+        setattr(router, "broadcast_update", self.broadcast_update)
 
-                    # Get all clients subscribed to this topic
-                    topics = set().union(
-                        *[client.topics for client in self.connections.values()]
-                    )
+    async def broadcast_update(self, route: str, update: SubscriptionUpdate) -> None:
+        topics = set().union(*[client.topics for client in self.connections.values()])
 
-                    if not topics:
-                        logger.info("No topic subscriptions found, continuing")
-                        await asyncio.sleep(1)
-                        continue
+        if not topics:
+            logger.info("No topic subscriptions found, continuing")
+            await asyncio.sleep(1)
+            return
 
-                    # Skip broadcast if no clients are subscribed
-                    if update.topic not in topics:
-                        logger.info(f"No clients subscribed to topic: {update.topic}")
-                        await asyncio.sleep(1)
-                        continue
+        if update.topic not in topics:
+            logger.info(f"No clients subscribed to topic: {update.topic}")
+            await asyncio.sleep(1)
+            return
 
-                    try:
-                        # Send message to all subscribed clients
-                        await self.server_send(
-                            Message(
-                                type=f"{router.route}.update",
-                                payload=update.model_dump(),
-                            ),
-                            topic=update.topic,
-                        )
-
-                        logger.info(
-                            f"Broadcasted message from router: {update.topic}: {update}"
-                        )
-                    except* Exception:
-                        # Handle ExceptionGroup from TaskGroup (e.g., closed connections)
-                        logger.warning(
-                            f"Some clients disconnected during {router.route}.update broadcast, continuing"
-                        )
-                        await asyncio.sleep(1)
-
-                except asyncio.QueueEmpty:
-                    logger.warning("No messages in router queue, continuing")
-                    await asyncio.sleep(1)
-                except Exception as e:
-                    logger.error(f"Error broadcasting {router.route}.update: {e}")
-                    await asyncio.sleep(1)
-
-        self._pending_routers.append(broadcast_router_messages)
-
-    def setup(self, app: FastAPI) -> None:
-        """Setup FastWS with FastAPI app and start broadcasting tasks"""
-        super().setup(app)
-
-        for broadcast_coro in self._pending_routers:
-            task = asyncio.create_task(
-                broadcast_coro(), name=f"broadcast_{broadcast_coro.__name__}"
+        try:
+            await self.server_send(
+                Message(type=f"{route}.update", payload=update.model_dump()),
+                topic=update.topic,
             )
-            self._broadcast_tasks.append(task)
 
-        self._pending_routers.clear()
+            logger.info(f"Broadcasted message from router: {update.topic}: {update}")
+        except Exception as e:
+            logger.warning(f"Error during FastWS {route}.update broadcast, {e}")
+            await asyncio.sleep(1)
 
     def shutdown(self) -> None:
-        """Cleanup broadcasting tasks on instance shutdown"""
-        for task in self._broadcast_tasks:
-            if not task.done():
-                task.cancel()
-                logger.info(f"Cancelled broadcasting task: {task.get_name()}")
-
-    def __del__(self) -> None:
-        self.shutdown()
+        pass

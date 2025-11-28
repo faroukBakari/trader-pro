@@ -666,7 +666,10 @@ class TestSubscriptionMethods:
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
 
-            req_id = provider.subscribe_realtime_bars("AAPL", lambda bar: None)
+            async def bar_callback(bar: object) -> None:
+                pass
+
+            req_id = provider.subscribe_realtime_bars("AAPL", bar_callback)
 
             assert req_id == 42
             mock_client.reqRealTimeBars.assert_called_once()
@@ -679,8 +682,11 @@ class TestSubscriptionMethods:
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
 
+            async def quote_callback(quote: object) -> None:
+                pass
+
             req_ids = provider.subscribe_market_data(
-                ["AAPL", "MSFT", "GOOGL"], lambda quote: None
+                ["AAPL", "MSFT", "GOOGL"], quote_callback
             )
 
             assert req_ids == [1, 2, 3]

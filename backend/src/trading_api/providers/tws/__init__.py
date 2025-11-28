@@ -14,10 +14,10 @@ Architecture:
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from itertools import count
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
 from ibapi.contract import Contract
@@ -409,7 +409,7 @@ class TWSProvider(Provider, DatafeedCapability):
     def subscribe_realtime_bars(
         self,
         symbol: str,
-        callback: Callable[[Bar], None],
+        callback: Callable[[Bar], Awaitable[None]],
         exchange: str | None = None,
         **kwargs: Any,
     ) -> int:
@@ -432,16 +432,20 @@ class TWSProvider(Provider, DatafeedCapability):
         """
 
         contract = self._build_contract(symbol, exchange=exchange or "SMART")
+
+        async def maped_callback(*args: Any) -> None:
+            await callback(tws_rt_bar_to_domain_bar(*args))
+
         return self._tws_client.reqRealTimeBars(
             contract,
-            lambda *args: callback(tws_rt_bar_to_domain_bar(*args)),
+            maped_callback,
             **kwargs,
         )
 
     def subscribe_market_data(
         self,
         symbols: list[str],
-        callback: Callable[[QuoteData], None],
+        callback: Callable[[QuoteData], Awaitable[None]],
         exchange: str | None = None,
         **kwargs: Any,
     ) -> list[int]:
@@ -460,10 +464,19 @@ class TWSProvider(Provider, DatafeedCapability):
         Raises:
             DatafeedError: Not yet implemented
         """
+
+        def mapped_callback_factory(
+            symbol: str,
+        ) -> Callable[[dict[str, float]], Awaitable[None]]:
+            async def mapped_callback(ticks: dict[str, float]) -> None:
+                await callback(tws_ticks_to_quote_data(symbol, ticks))
+
+            return mapped_callback
+
         reqIds = [
             self._tws_client.reqMktData(
                 self._build_contract(symbol, exchange=exchange or "SMART"),
-                lambda ticks: callback(tws_ticks_to_quote_data(symbol, ticks)),
+                mapped_callback_factory(symbol),
                 **kwargs,
             )
             for symbol in symbols
@@ -505,7 +518,7 @@ class TWSProvider(Provider, DatafeedCapability):
             return  # Already shutdown
 
         logger.info("Shutting down TWSProvider...")
-        del self._tws_client
+        self._tws_client.shutdown()
         logger.info("TWSProvider shutdown complete.")
 
 

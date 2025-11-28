@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from trading_api.models.market import (
     Bar,
@@ -124,7 +124,7 @@ class DatafeedCapability(ABC):
     def subscribe_realtime_bars(
         self,
         symbol: str,
-        callback: Callable[[Bar], None],
+        callback: Callable[[Bar], Awaitable[None]],
         **kwargs: Any,
     ) -> int:
         """Subscribe to real-time bars.
@@ -150,7 +150,7 @@ class DatafeedCapability(ABC):
     def subscribe_market_data(
         self,
         symbols: list[str],
-        callback: Callable[[QuoteData], None],
+        callback: Callable[[QuoteData], Awaitable[None]],
         **kwargs: Any,
     ) -> list[int]:
         """Subscribe to real-time market data (ticks/quotes).

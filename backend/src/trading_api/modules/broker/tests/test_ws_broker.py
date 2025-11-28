@@ -324,8 +324,12 @@ class TestBrokerConnectionWebSocket:
             }
             websocket.send_json(subscribe_msg)
 
-            # Receive response
+            # Receive messages - initial update may arrive before subscribe response
+            # due to create_topic() broadcasting immediately
             response = websocket.receive_json()
+            if response["type"] == "broker-connection.update":
+                # Initial status update arrived first, get the actual response
+                response = websocket.receive_json()
 
             # Verify response structure
             assert response["type"] == "broker-connection.subscribe.response"
@@ -351,6 +355,9 @@ class TestBrokerConnectionWebSocket:
                 }
             )
             subscribe_response = websocket.receive_json()
+            # Handle initial update arriving before response
+            if subscribe_response["type"] == "broker-connection.update":
+                subscribe_response = websocket.receive_json()
             assert subscribe_response["payload"]["status"] == "ok"
 
             # Then unsubscribe

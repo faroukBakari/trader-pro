@@ -11,6 +11,7 @@ Note: All tests mock IBSocket to avoid real TWS connections.
 """
 
 import asyncio
+from decimal import Decimal
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -408,8 +409,19 @@ class TestTWSClientRealtimeBarSubscription:
             # Use callback instead of queue
             received_bars: list[tuple[object, ...]] = []
 
-            def bar_callback(*args: object) -> None:
-                received_bars.append(args)
+            async def bar_callback(
+                time: int,
+                open_: float,
+                high: float,
+                low: float,
+                close: float,
+                volume: Decimal,
+                wap: Decimal,
+                count: int,
+            ) -> None:
+                received_bars.append(
+                    (time, open_, high, low, close, volume, wap, count)
+                )
 
             req_id = client.reqRealTimeBars(contract, bar_callback)
 
@@ -434,9 +446,21 @@ class TestTWSClientRealtimeBarSubscription:
             contract.exchange = "SMART"
             contract.currency = "USD"
 
+            async def noop_callback(
+                time: int,
+                open_: float,
+                high: float,
+                low: float,
+                close: float,
+                volume: Decimal,
+                wap: Decimal,
+                count: int,
+            ) -> None:
+                pass
+
             client.reqRealTimeBars(
                 contract,
-                lambda *args: None,
+                noop_callback,
                 barSize=5,
                 whatToShow="TRADES",
                 useRTH=False,
@@ -463,7 +487,19 @@ class TestTWSClientRealtimeBarSubscription:
             contract = Contract()
             contract.symbol = "AAPL"
 
-            req_id = client.reqRealTimeBars(contract, lambda *args: None)
+            async def noop_callback(
+                time: int,
+                open_: float,
+                high: float,
+                low: float,
+                close: float,
+                volume: Decimal,
+                wap: Decimal,
+                count: int,
+            ) -> None:
+                pass
+
+            req_id = client.reqRealTimeBars(contract, noop_callback)
             assert req_id in client._cb_wrapper._callbacks
 
             client.cancelRealTimeBars(req_id)
@@ -485,7 +521,19 @@ class TestTWSClientRealtimeBarSubscription:
             contract = Contract()
             contract.symbol = "AAPL"
 
-            req_id = client.reqRealTimeBars(contract, lambda *args: None)
+            async def noop_callback(
+                time: int,
+                open_: float,
+                high: float,
+                low: float,
+                close: float,
+                volume: Decimal,
+                wap: Decimal,
+                count: int,
+            ) -> None:
+                pass
+
+            req_id = client.reqRealTimeBars(contract, noop_callback)
             mock_ibsocket.send_message.reset_mock()
 
             client.cancelRealTimeBars(req_id)
