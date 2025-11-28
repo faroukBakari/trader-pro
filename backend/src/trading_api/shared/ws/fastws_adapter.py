@@ -77,14 +77,8 @@ class FastWSAdapter(FastWS):
                             ),
                             topic=update.topic,
                         )
-                        if router.route == "executions":
-                            logger.info(
-                                f"Broadcasted execution update on topic: {update.topic}"
-                            )
-                        else:
-                            logger.debug(
-                                f"Broadcasted message from router: {update.topic}"
-                            )
+
+                        logger.debug(f"Broadcasted message from router: {update.topic}")
                     except* Exception:
                         # Handle ExceptionGroup from TaskGroup (e.g., closed connections)
                         logger.warning(

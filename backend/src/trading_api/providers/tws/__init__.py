@@ -205,14 +205,15 @@ class TWSProvider(Provider, DatafeedCapability):
             if days <= 365:
                 return f"{days} D"
             # Use years for very long ranges
-            years = days // 365 + 1
-            return f"{years} Y"
+            weeks = days // 365 + 1
+            return f"{weeks} Y"
 
         # Daily and above
         else:
             days = delta.days + 1
             if days <= 365:
                 return f"{days} D"
+            # TWS: durations > 52 weeks must use years
             years = days // 365 + 1
             return f"{years} Y"
 
@@ -325,12 +326,14 @@ class TWSProvider(Provider, DatafeedCapability):
         # Format datetime with timezone (TWS requires explicit timezone)
         # Convert to UTC if naive, otherwise use existing timezone
         if end_time.tzinfo is None:
-            end_time_tz = end_time.replace(tzinfo=timezone.utc)
-
+            end_time_tz = end_time.astimezone()
         end_time_tz = end_time.astimezone(ZoneInfo("US/Eastern"))
 
         # Format: yyyymmdd-hh:mm:ss UTC (note hyphen separator and timezone suffix)
-        end_dt_str = end_time_tz.strftime("%Y%m%d %H:%M:%S US/Eastern")
+        if end_time_tz > datetime.now().astimezone(ZoneInfo("US/Eastern")):
+            end_dt_str = ""
+        else:
+            end_dt_str = end_time_tz.strftime("%Y%m%d %H:%M:%S US/Eastern")
 
         try:
             # Request historical data via TWSClient (returns list[BarData])

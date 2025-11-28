@@ -172,7 +172,7 @@ class DatafeedApi(APIRouterInterface):
             - **symbols**: Array of symbol names to get quotes for
             """
             try:
-                quotes = self.service.get_quotes(body.symbols)
+                quotes = await self.service.get_quotes(body.symbols)
                 return quotes
             except Exception as e:
                 raise HTTPException(
