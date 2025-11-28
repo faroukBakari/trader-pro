@@ -162,20 +162,29 @@ def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
     Returns:
         Domain Bar model
     """
-    # Parse TWS date format: "yyyyMMdd  HH:mm:ss" or epoch
+    # Parse TWS date format: "yyyyMMdd  HH:mm:ss", "yyyyMMdd", or epoch
     # TWS returns string dates like "20231215  16:00:00" (note: two spaces)
+    # Daily bars return just "20231215" without time component
+    date_str = tws_bar.date.strip()
+    time_ms: int = 0
+
+    # Try datetime with timezone (two spaces)
     try:
-        # Try parsing as datetime string first
-        dt = datetime.strptime(tws_bar.date.strip(), "%Y%m%d  %H:%M:%S US/Eastern")
+        dt = datetime.strptime(date_str, "%Y%m%d  %H:%M:%S US/Eastern")
         time_ms = int(dt.timestamp() * 1000)
     except ValueError:
+        # Try single space UTC format
         try:
-            # Try single space format
-            dt = datetime.strptime(tws_bar.date.strip(), "%Y%m%d %H:%M:%S UTC")
+            dt = datetime.strptime(date_str, "%Y%m%d %H:%M:%S UTC")
             time_ms = int(dt.timestamp() * 1000)
         except ValueError:
-            # Fall back to epoch format (if formatDate=2 was used)
-            time_ms = int(tws_bar.date) * 1000
+            # Try daily bar format (date only, no time)
+            try:
+                dt = datetime.strptime(date_str, "%Y%m%d")
+                time_ms = int(dt.timestamp() * 1000)
+            except ValueError:
+                # Fall back to epoch format (if formatDate=2 was used)
+                time_ms = int(date_str) * 1000
 
     return Bar(
         time=time_ms,

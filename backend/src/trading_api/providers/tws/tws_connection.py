@@ -31,6 +31,7 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from decimal import Decimal
 from itertools import count
+from multiprocessing.pool import CLOSE
 from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
@@ -38,6 +39,7 @@ from socket import timeout as socketTimeout
 from tkinter import NO
 from typing import Any, Callable
 
+from h11 import ERROR
 from ibapi.common import BarData, TickAttrib
 from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.contract import Contract, ContractDescription, ContractDetails
@@ -130,6 +132,16 @@ get_tick_type_name = TickTypeEnum.idx2name.get
 debug_log = logger.debug
 
 
+class IBSocketState:
+    READY = 0
+    CONNECTING = 1
+    CONNECTED = 2
+    RUNNING = 3
+    ERROR = 4
+    CLOSED = 5
+
+
+# TODO REDESIGN SOCKET STATE MANAGEMENT!!! NEED TO USE FLAG INSTEAD OS SOCKET METHODS
 class IBSocket:
     def __init__(
         self, soc: socket | None = None, loc: "threading.Lock | None" = None
@@ -139,6 +151,7 @@ class IBSocket:
         self._req_id_counter = count()
         self._lock = loc or threading.Lock()
         self._reader_thread: threading.Thread | None = None
+        self._state = IBSocketState.READY
         try:
             self._socket = soc or socket()
         except socketError:
@@ -162,213 +175,41 @@ class IBSocket:
 
     @property
     def ready(self) -> bool:
-        if self._socket.fileno() == -1:
-            return False
-        try:
-            return self._socket.getpeername() is None
-        except OSError:
-            return True
+        return self._state == IBSocketState.READY
 
     @property
     def running(self) -> bool:
-        if self._socket.fileno() == -1:
-            return False
-        try:
-            r, _, _ = select.select([self._socket], [], [], 0)
-            if r:
-                data = self._socket.recv(1, MSG_PEEK)
-                return data != b""
-            return True
-        except OSError:
-            return False
+        return self._state == IBSocketState.RUNNING
 
     @property
     def closed(self) -> bool:
+        return self._state == IBSocketState.CLOSED
+
+    def _remotely_closed(self) -> bool:
+        """Check if the remote side has closed the connection."""
         if self._socket.fileno() == -1:
+            return True  # Socket already closed locally
+        try:
+            self._socket.getpeername()
+        except OSError:
             return True
         try:
-            r, _, _ = select.select([self._socket], [], [], 0)
-            if r:
+            ready_to_read, _, _ = select.select([self._socket], [], [], 0)
+            if ready_to_read:
                 data = self._socket.recv(1, MSG_PEEK)
-                return data == b""
-            return False
-        except OSError:
-            return False
+                if len(data) == 0:
+                    return True  # Remote side has closed the connection
+            return False  # Connection is still open
+        except socketError as e:
+            logger.error(f"Socket error while checking remote closure: {e}")
+            return True  # Assume closed on error
 
-    def _reader_loop(self, cb_wrapper: EWrapper) -> None:
-        """TWS reader loop - to be run in a separate thread.
-
-        Note:
-            This method should be called in a dedicated thread to continuously
-            read messages from the IBSocket connection and dispatch them to
-            the appropriate EWrapper callback methods.
-        """
-        decoder = Decoder(cb_wrapper, self.server_version)
-        logger.info("IBSocket reader loop started.")
-
-        # Cache method references for hot path (avoid attribute lookup per iteration)
-        recv = self.receive_data
-        process_proto = decoder.processProtoBuf
-        interpret = decoder.interpret
-
-        buf = bytearray()
-        buf_siz = 0
-        running = self.running
-        while running:
-            try:
-                msgId, data, buf, buf_siz = recv(buf, buf_siz)
-                if msgId == -1:
-                    # Incomplete message - only log if debugging enabled
-                    if buf_siz > 0 and logger.isEnabledFor(logging.WARNING):
-                        logger.warning(
-                            "Incomplete message in buffer, waiting for more data. "
-                            "Buffer size: %d",
-                            buf_siz,
-                        )
-                    continue
-
-                if msgId > PROTOBUF_MSG_ID:
-                    msgId -= PROTOBUF_MSG_ID
-                    if DEBUG_TWS_DISPATCH:
-                        debug_log("msgId: %d, protobuf: %s", msgId, data)
-                    process_proto(data, msgId)
-                else:
-                    # Direct split - no list comprehension wrapper needed
-                    fields = data.split(NULL)[:-1]  # Remove trailing empty field
-                    if DEBUG_TWS_DISPATCH:
-                        debug_log("msgId: %d, interpret: %s", msgId, fields)
-                    # Remove trailing empty field (split always produces one)
-                    interpret(fields, msgId)
-            except (socketError, socketTimeout) as e:
-                running = self.running
-                logger.exception("Socket exception in reader loop: %s", e)
-                time.sleep(0.5)
-            except Exception as e:
-                running = self.running
-                logger.exception(
-                    "Unexpected exception in IBSocket reader loop (running: %d): %s",
-                    running,
-                    e,
-                )
-                time.sleep(0.5)
-
-        logger.info("IBSocket reader loop finished.")
-
-    def connect(
-        self,
-        host: str,
-        port: int,
-        client_id: int,
-        cb_wrapper: EWrapper,
-        block_interval: float = 0.01,
-    ) -> threading.Thread:
-        assert self.ready, "Socket already used!"
-
-        with self._lock:
-            while True:
-                try:
-                    self._socket.connect((host, port))
-                    self._socket.settimeout(block_interval)
-                    break
-                except socketError:
-                    cb_wrapper.error(
-                        NO_VALID_ID,
-                        round(time.time() * 1000),
-                        CONNECT_FAIL.code(),
-                        CONNECT_FAIL.msg(),
-                    )
-                except Exception as e:
-                    cb_wrapper.error(
-                        reqId=-1,
-                        errorTime=int(time.time() * 1000),
-                        errorCode=getattr(e, "errno", -1),
-                        errorString=str(e),
-                    )
-                time.sleep(1)
-            connected = self.running
-            assert connected, "Socket connection failed."
-            logger.info(f"Socket connected: {connected}: {self._socket.getpeername()}")
-
-            # Send initial handshake message
-            v100version = "v%d..%d" % (MIN_CLIENT_VER, MAX_CLIENT_VER)
-            msg_content = len(v100version).to_bytes(4, "big") + v100version.encode()
-            message = str.encode("API\0", "ascii") + msg_content
-            self._socket.sendall(message)
-            if DEBUG_TWS_SEND:
-                debug_log(f"Sent initial message: {str(message)}")
-            nb_retries = 3
-            while True:
-                try:
-                    data = self._socket.recv(4096)
-                    break
-                except socketTimeout:
-                    nb_retries -= 1
-                    assert nb_retries > 0, f"Error while waiting for handshake response"
-                    time.sleep(0.1)
-            buf_size = len(data)
-            msg_size = HEADER_STRUCT.unpack_from(data, 0)[0]
-            if DEBUG_TWS_RECEIVE:
-                debug_log(f"Received handshake data: {str(data)}")
-            assert (
-                msg_size <= buf_size - 4
-            ), f"Initial read buffer size exceeds message size: {buf_size}"
-            fields = [chunk for chunk in data[4 : 4 + msg_size].split(NULL) if chunk]
-            assert len(fields) == 2, "Expected at two fields in handshake message."
-            server_version, self.connection_time = [
-                msg.decode("ascii") for msg in fields
-            ]
-            self._server_version = int(server_version)
-            debug_log(
-                f"Server version: {self.server_version}, Connection time: {self.connection_time}"
-            )
-            text = make_fields([VERSION, client_id, ""])
-            msg2 = (
-                (len(text) + 4).to_bytes(4, "big")
-                + OUT.START_API.to_bytes(4, "big")
-                + text
-            )
-            self._socket.sendall(msg2)
-            connected = self.running
-            assert connected, "Socket connection failed."
-            logger.info("IBSocket connection successfully.")
-
-        self._reader_thread = threading.Thread(
-            target=self._reader_loop,
-            args=(cb_wrapper,),
-            daemon=False,
-        )
-        self._reader_thread.start()
-        return self._reader_thread
-
-    def disconnect(self) -> None:
-        try:
-            with self._lock:
-                self._socket.close()
-        finally:
-            logger.info("IBSocket Socket closed.")
-            if self._reader_thread and self._reader_thread.is_alive():
-                logger.info("Waiting for IBSocket reader thread to finish...")
-                try:
-                    self._reader_thread.join(timeout=2)
-                    logger.info("IBSocket reader thread finished gracefully.")
-                except Exception:
-                    logger.error("Failed to join IBSocket reader thread.")
-
-    def send_message(self, msgId: int, values: list[object]) -> None:
-        text = make_fields(values)
-        msg2 = (len(text) + 4).to_bytes(4, "big") + msgId.to_bytes(4, "big") + text
-        if DEBUG_TWS_SEND:
-            debug_log(f"Sending message: {str(msg2)}")
-        assert self.running, "Socket is not connected."
-        with self._lock:
-            self._socket.sendall(msg2)
-
-    def receive_data(
+    def _receive_data(
         self, read_buf: bytearray, buf_siz: int = 0
     ) -> tuple[int, bytes, bytearray, int]:
         """Optimized receive - called in hot path from _reader_loop."""
         new_data_received = False
-        assert self.running, "Socket is not connected."
+        assert self._state == IBSocketState.RUNNING, "Socket is not connected."
         sock_recv = self._socket.recv  # Cache method lookup
         while True:
             try:
@@ -392,6 +233,189 @@ class IBSocket:
                     read_buf.decode("ascii", errors="ignore"),
                 )
         return decode_data(read_buf, buf_siz)
+
+    def _reader_loop(self, cb_wrapper: EWrapper) -> None:
+        """TWS reader loop - to be run in a separate thread.
+
+        Note:
+            This method should be called in a dedicated thread to continuously
+            read messages from the IBSocket connection and dispatch them to
+            the appropriate EWrapper callback methods.
+        """
+
+        if self._state != IBSocketState.CONNECTED:
+            self._state = IBSocketState.ERROR
+            raise RuntimeError("_reader_loop Startup error : Socket not connected.")
+
+        decoder = Decoder(cb_wrapper, self.server_version)
+        logger.info("IBSocket reader loop started.")
+
+        # Cache method references for hot path (avoid attribute lookup per iteration)
+        recv = self._receive_data
+        process_proto = decoder.processProtoBuf
+        interpret = decoder.interpret
+
+        buf = bytearray()
+        buf_siz = 0
+        self._state = IBSocketState.RUNNING
+        running = True
+        while running:
+            try:
+                msgId, data, buf, buf_siz = recv(buf, buf_siz)
+
+                if msgId == -1:
+                    # Incomplete message - only log if debugging enabled
+                    if buf_siz > 0:
+                        logger.warning(
+                            "Incomplete message in buffer, waiting for more data. "
+                            "Buffer size: %d",
+                            buf_siz,
+                        )
+                    continue
+
+                if msgId > PROTOBUF_MSG_ID:
+                    msgId -= PROTOBUF_MSG_ID
+                    if DEBUG_TWS_DISPATCH:
+                        debug_log("msgId: %d, protobuf: %s", msgId, data)
+                    process_proto(data, msgId)
+                else:
+                    # Direct split - no list comprehension wrapper needed
+                    fields = data.split(NULL)[:-1]  # Remove trailing empty field
+                    if DEBUG_TWS_DISPATCH:
+                        debug_log("msgId: %d, interpret: %s", msgId, fields)
+                    # Remove trailing empty field (split always produces one)
+                    interpret(fields, msgId)
+
+            except Exception as e:
+                running = self._state == IBSocketState.RUNNING
+                if not running or self._remotely_closed():
+                    logger.info("IBSocket connection closed remotely.")
+                    self._state = IBSocketState.ERROR
+                    break
+                logger.exception(
+                    "Unexpected exception in IBSocket reader loop (running: %d): %s",
+                    running,
+                    e,
+                )
+                time.sleep(0.5)
+
+        logger.info("IBSocket reader loop finished.")
+
+    def connect(
+        self,
+        host: str,
+        port: int,
+        client_id: int,
+        cb_wrapper: EWrapper,
+        block_interval: float = 0.01,
+    ) -> threading.Thread:
+        assert self.ready, "Socket already used!"
+
+        self._state = IBSocketState.CONNECTING
+        nb_retries = 3
+        while nb_retries > 0:
+            try:
+                with self._lock:
+                    self._socket.connect((host, port))
+                    self._socket.settimeout(block_interval)
+                break
+            except Exception as e:
+                nb_retries -= 1
+                time.sleep(0.1)
+
+        if nb_retries == 0:
+            self._state = IBSocketState.ERROR
+            raise ConnectionError(f"Failed to connect to TWS at {host}:{port}")
+
+        logger.info(f"Socket connected: {self._socket.getpeername()}")
+
+        # Send initial handshake message
+        v100version = "v%d..%d" % (MIN_CLIENT_VER, MAX_CLIENT_VER)
+        msg_content = len(v100version).to_bytes(4, "big") + v100version.encode()
+        message = str.encode("API\0", "ascii") + msg_content
+        with self._lock:
+            self._socket.sendall(message)
+        if DEBUG_TWS_SEND:
+            debug_log(f"Sent initial message: {str(message)}")
+        nb_retries = 10
+        while nb_retries > 0:
+            try:
+                data = self._socket.recv(4096)
+                break
+            except socketTimeout:
+                nb_retries -= 1
+                time.sleep(0.1)
+
+        if nb_retries == 0:
+            self._state = IBSocketState.ERROR
+            raise ConnectionError(f"Error while waiting for handshake response")
+
+        buf_size = len(data)
+        msg_size = HEADER_STRUCT.unpack_from(data, 0)[0]
+        if DEBUG_TWS_RECEIVE:
+            debug_log(f"Received handshake data: {str(data)}")
+
+        if buf_size < msg_size + 4:
+            self._state = IBSocketState.ERROR
+            raise ConnectionError(
+                f"Handshake response incomplete: expected {msg_size + 4} bytes, got {buf_size} bytes"
+            )
+
+        fields = [chunk for chunk in data[4 : 4 + msg_size].split(NULL) if chunk]
+        if len(fields) != 2:
+            self._state = IBSocketState.ERROR
+            raise ConnectionError(
+                f"Invalid handshake response: expected 2 fields, got {len(fields)}"
+            )
+
+        server_version, self.connection_time = [msg.decode("ascii") for msg in fields]
+        self._server_version = int(server_version)
+        debug_log(
+            f"Server version: {self.server_version}, Connection time: {self.connection_time}"
+        )
+        text = make_fields([VERSION, client_id, ""])
+        msg2 = (
+            (len(text) + 4).to_bytes(4, "big") + OUT.START_API.to_bytes(4, "big") + text
+        )
+        with self._lock:
+            self._socket.sendall(msg2)
+        logger.info("IBSocket connection successfully.")
+
+        self._state = IBSocketState.CONNECTED
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop,
+            args=(cb_wrapper,),
+            daemon=False,
+        )
+        self._reader_thread.start()
+        return self._reader_thread
+
+    def disconnect(self) -> None:
+        try:
+            with self._lock:
+                self._socket.close()
+        except Exception as e:
+            logger.error(f"Error while closing IBSocket: {e}")
+
+        self._state = IBSocketState.CLOSED
+        logger.info("IBSocket Socket closed.")
+
+        if self._reader_thread and self._reader_thread.is_alive():
+            logger.info("Waiting for IBSocket reader thread to finish...")
+            try:
+                self._reader_thread.join(timeout=2)
+                logger.info("IBSocket reader thread finished gracefully.")
+            except Exception as e:
+                logger.error(f"Failed to join IBSocket reader thread: {e}")
+
+    def send_message(self, msgId: int, values: list[object]) -> None:
+        text = make_fields(values)
+        msg2 = (len(text) + 4).to_bytes(4, "big") + msgId.to_bytes(4, "big") + text
+        if DEBUG_TWS_SEND:
+            debug_log(f"Sending message: {str(msg2)}")
+        assert self._state == IBSocketState.RUNNING, "Socket is not connected."
+        with self._lock:
+            self._socket.sendall(msg2)
 
 
 @dataclass
@@ -444,6 +468,15 @@ class TWSCallback(EWrapper):
         return asyncio.get_event_loop()
 
     # === Future / Coroutine management ===
+
+    def reset(self) -> None:
+        """Reset internal state - clear futures, accumulators, callbacks."""
+        self._futures.clear()
+        self._accumulators.clear()
+        self._callbacks.clear()
+        self._nxt_order_id = None
+        self._accounts.clear()
+        self._ready_event.clear()
 
     def create_future_coroutine(
         self, reqId: int, timeout: float | None = 5
@@ -762,10 +795,9 @@ class TWSClient:
     @property
     def ibsocket(self) -> IBSocket:
         if not self.__ibsocket.running:
-            if not self.__ibsocket.ready:
-                self.__ibsocket.disconnect()
-                self.__ibsocket = IBSocket()
-            self._cb_wrapper._ready_event.clear()  # Reset before new connection
+            self.__ibsocket.disconnect()
+            self.__ibsocket = IBSocket()
+            self._cb_wrapper.reset()  # Reset before new connection
             self.__ibsocket.connect(
                 host=self._host,
                 port=self._port,

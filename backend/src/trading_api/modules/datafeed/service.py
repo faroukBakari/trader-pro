@@ -274,7 +274,7 @@ class DatafeedService(WsRouteService):
         # Delegate to provider for raw search results
         provider_results = await self.datafeed_provider.search_symbols(
             pattern=user_input if user_input.strip() else "*",
-            timeout=5.0,
+            timeout=15.0,
         )
 
         # Apply business logic filters on provider results
@@ -306,7 +306,7 @@ class DatafeedService(WsRouteService):
             return await self.datafeed_provider.get_symbol_info(
                 symbol=parsed_symbol,
                 exchange=exchange,
-                timeout=5.0,
+                timeout=15.0,
             )
         except Exception as e:
             logger.warning(f"Failed to resolve symbol '{symbol_name}': {e}")
@@ -369,64 +369,21 @@ class DatafeedService(WsRouteService):
             logger.error(f"Failed to get bars for {symbol}: {e}")
             return []
 
-    def get_quotes(self, symbols: List[str]) -> List[QuoteData]:
+    async def get_quotes(self, symbols: List[str]) -> List[QuoteData]:
         """Get quotes for multiple symbols"""
-        quote_data: List[QuoteData] = []
 
-        for symbol in symbols:
-            # Check if symbol exists
-            symbol_info = self.resolve_symbol(symbol)
-            if not symbol_info:
-                quote_data.append(
-                    QuoteData(s="error", n=symbol, v={"error": "Symbol not found"})
-                )
-                continue
+        parsed_symbols = [self._parse_ticker(s)[0] for s in symbols]
 
-            # Get the last bar for quote generation
-            if not self._sample_bars:
-                quote_data.append(
-                    QuoteData(s="error", n=symbol, v={"error": "No data available"})
-                )
-                continue
-
-            last_bar = self._sample_bars[-1]
-
-            # Generate realistic quote values based on the last bar
-            base_price = max(last_bar.close, 0.01)  # Ensure positive price
-            spread = max(base_price * 0.001, 0.01)  # 0.1% spread, minimum 0.01
-
-            # Generate some variation for real-time feel
-            import random
-
-            variation = (
-                (random.random() - 0.5) * base_price * 0.005
-            )  # 0.5% max variation
-            current_price = max(base_price + variation, 0.01)  # Ensure positive
-
-            bid = max(current_price - spread / 2, 0.01)  # Ensure positive bid
-            ask = max(current_price + spread / 2, bid + 0.01)  # Ensure ask > bid
-
-            change = current_price - last_bar.open
-            change_percent = (change / last_bar.open) * 100 if last_bar.open > 0 else 0
-
-            quote_values = QuoteValues(
-                lp=round(current_price, 2),
-                ask=round(ask, 2),
-                bid=round(bid, 2),
-                spread=round(ask - bid, 2),
-                open_price=round(max(last_bar.open, 0.01), 2),
-                high_price=round(max(last_bar.high, current_price, 0.01), 2),
-                low_price=round(max(min(last_bar.low, current_price), 0.01), 2),
-                prev_close_price=round(max(last_bar.close * 0.995, 0.01), 2),
-                volume=max(last_bar.volume or 0, 0),
-                ch=round(change, 2),
-                chp=round(change_percent, 2),
-                short_name=symbol,
-                exchange="DEMO",
-                description=f"Demo quotes for {symbol}",
-                original_name=symbol,
+        try:
+            # Delegate to provider for real quote snapshots
+            return await self.datafeed_provider.get_quotes_snapshot(
+                symbols=parsed_symbols,
+                timeout=15.0,
             )
-
-            quote_data.append(QuoteData(s="ok", n=symbol, v=quote_values))
-
-        return quote_data
+        except Exception as e:
+            logger.error(f"Failed to get quotes for {symbols}: {e}")
+            # Return error responses for all symbols
+            return [
+                QuoteData(s="error", n=symbol, v={"error": str(e)})
+                for symbol in symbols
+            ]
