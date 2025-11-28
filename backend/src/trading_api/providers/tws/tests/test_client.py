@@ -25,33 +25,37 @@ class TestTWSClientInitialization:
 
     def test_client_stores_config(self) -> None:
         """Test TWSClient stores connection config."""
-        client = TWSClient(
-            host="192.168.1.1",
-            port=4002,
-            client_id=5,
-        )
+        with patch("trading_api.providers.tws.tws_connection.IBSocket"):
+            client = TWSClient(
+                host="192.168.1.1",
+                port=4002,
+                client_id=5,
+            )
 
-        assert client._host == "192.168.1.1"
-        assert client._port == 4002
-        assert client._client_id == 5
+            assert client._host == "192.168.1.1"
+            assert client._port == 4002
+            assert client._client_id == 5
 
     def test_client_creates_callback_wrapper(self) -> None:
         """Test TWSClient creates TWSCallback instance."""
-        client = TWSClient("127.0.0.1", 7497, 1)
+        with patch("trading_api.providers.tws.tws_connection.IBSocket"):
+            client = TWSClient("127.0.0.1", 7497, 1)
 
-        assert isinstance(client._cb_wrapper, TWSCallback)
+            assert isinstance(client._cb_wrapper, TWSCallback)
 
     def test_client_default_timeout(self) -> None:
         """Test TWSClient uses default timeout."""
-        client = TWSClient("127.0.0.1", 7497, 1)
+        with patch("trading_api.providers.tws.tws_connection.IBSocket"):
+            client = TWSClient("127.0.0.1", 7497, 1)
 
-        assert client._timeout == 10.0
+            assert client._timeout == 10.0
 
     def test_client_custom_timeout(self) -> None:
         """Test TWSClient accepts custom timeout."""
-        client = TWSClient("127.0.0.1", 7497, 1, timeout=30.0)
+        with patch("trading_api.providers.tws.tws_connection.IBSocket"):
+            client = TWSClient("127.0.0.1", 7497, 1, timeout=30.0)
 
-        assert client._timeout == 30.0
+            assert client._timeout == 30.0
 
 
 class TestTWSClientConnection:
@@ -59,27 +63,30 @@ class TestTWSClientConnection:
 
     def test_ibsocket_property_triggers_connect_when_not_running(self) -> None:
         """Test ibsocket property triggers connection when socket not running."""
-        client = TWSClient("127.0.0.1", 7497, 1, timeout=0.5)
+        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
+            # First call returns non-running socket, second returns running socket after connect
+            mock_ibsocket_initial = MagicMock()
+            mock_ibsocket_initial.running = False
 
-        # Replace the internal IBSocket with a mock
-        mock_ibsocket = MagicMock()
-        mock_ibsocket.running = False
-        mock_ibsocket.ready = True  # Ready = socket unused, can connect
+            mock_ibsocket_new = MagicMock()
+            mock_ibsocket_new.running = True
 
-        # Make connect() set the ready event (simulates successful connection)
-        def mock_connect(**kwargs: object) -> MagicMock:
-            client._cb_wrapper._ready_event.set()
-            return MagicMock()
+            # First instantiation returns initial, second returns new
+            MockIBSocket.side_effect = [mock_ibsocket_initial, mock_ibsocket_new]
 
-        mock_ibsocket.connect.side_effect = mock_connect
+            client = TWSClient("127.0.0.1", 7497, 1, timeout=0.5)
 
-        # Inject mock (bypass private attribute via name mangling)
-        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+            # Make connect() set the ready event (simulates successful connection)
+            def mock_connect(**kwargs: object) -> MagicMock:
+                client._cb_wrapper._ready_event.set()
+                return MagicMock()
 
-        _ = client.ibsocket
+            mock_ibsocket_new.connect.side_effect = mock_connect
 
-        # Connect should be called because running=False
-        mock_ibsocket.connect.assert_called_once()
+            _ = client.ibsocket
+
+            # Connect should be called on the new socket because running=False on initial
+            mock_ibsocket_new.connect.assert_called_once()
 
     def test_ibsocket_property_reuses_running_connection(self) -> None:
         """Test ibsocket property reuses existing running connection."""
@@ -254,7 +261,7 @@ class TestTWSClientReqHistoricalData:
                 contract=contract,
                 end_date_time="20231215 16:00:00",
                 duration_str="1 D",
-                bar_size_setting="1 min",
+                barSize_setting="1 min",
             )
 
             assert len(result) == 2
@@ -381,8 +388,8 @@ class TestTWSClientErrorHandling:
 class TestTWSClientRealtimeBarSubscription:
     """Test real-time bar subscription methods."""
 
-    def test_subscribe_realtime_bars_returns_queue(self) -> None:
-        """Test subscribe_realtime_bars returns reqId and queue."""
+    def test_req_realtime_bars_returns_req_id(self) -> None:
+        """Test reqRealTimeBars returns reqId and registers callback."""
         with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
             mock_ibsocket = MagicMock()
             mock_ibsocket.running = True
@@ -398,16 +405,20 @@ class TestTWSClientRealtimeBarSubscription:
             contract.exchange = "SMART"
             contract.currency = "USD"
 
-            req_id, queue = client.subscribe_realtime_bars(contract)
+            # Use callback instead of queue
+            received_bars: list[tuple[object, ...]] = []
+
+            def bar_callback(*args: object) -> None:
+                received_bars.append(args)
+
+            req_id = client.reqRealTimeBars(contract, bar_callback)
 
             assert req_id == 1
-            assert isinstance(queue, asyncio.Queue)
-            # Queue should be registered in _sub_queues
-            assert req_id in client._cb_wrapper._sub_queues
-            assert client._cb_wrapper._sub_queues[req_id] is queue
+            # Callback should be registered in _callbacks
+            assert req_id in client._cb_wrapper._callbacks
 
-    def test_subscribe_realtime_bars_sends_correct_message(self) -> None:
-        """Test subscribe_realtime_bars sends correct TWS message."""
+    def test_req_realtime_bars_sends_correct_message(self) -> None:
+        """Test reqRealTimeBars sends correct TWS message."""
         with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
             mock_ibsocket = MagicMock()
             mock_ibsocket.running = True
@@ -423,8 +434,12 @@ class TestTWSClientRealtimeBarSubscription:
             contract.exchange = "SMART"
             contract.currency = "USD"
 
-            client.subscribe_realtime_bars(
-                contract, bar_size=5, what_to_show="TRADES", use_rth=False
+            client.reqRealTimeBars(
+                contract,
+                lambda *args: None,
+                barSize=5,
+                whatToShow="TRADES",
+                useRTH=False,
             )
 
             # Verify send_message was called with REQ_REAL_TIME_BARS
@@ -434,8 +449,8 @@ class TestTWSClientRealtimeBarSubscription:
             call_args = mock_ibsocket.send_message.call_args
             assert call_args[0][0] == OUT.REQ_REAL_TIME_BARS
 
-    def test_cancel_realtime_bars_removes_queue(self) -> None:
-        """Test cancel_realtime_bars removes queue from registry."""
+    def test_cancel_realtime_bars_removes_callback(self) -> None:
+        """Test cancelRealTimeBars removes callback from registry."""
         with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
             mock_ibsocket = MagicMock()
             mock_ibsocket.running = True
@@ -448,16 +463,16 @@ class TestTWSClientRealtimeBarSubscription:
             contract = Contract()
             contract.symbol = "AAPL"
 
-            req_id, queue = client.subscribe_realtime_bars(contract)
-            assert req_id in client._cb_wrapper._sub_queues
+            req_id = client.reqRealTimeBars(contract, lambda *args: None)
+            assert req_id in client._cb_wrapper._callbacks
 
-            client.cancel_realtime_bars(req_id)
+            client.cancelRealTimeBars(req_id)
 
-            # Queue should be removed
-            assert req_id not in client._cb_wrapper._sub_queues
+            # Callback should be removed
+            assert req_id not in client._cb_wrapper._callbacks
 
     def test_cancel_realtime_bars_sends_cancel_message(self) -> None:
-        """Test cancel_realtime_bars sends CANCEL_REAL_TIME_BARS message."""
+        """Test cancelRealTimeBars sends CANCEL_REAL_TIME_BARS message."""
         with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
             mock_ibsocket = MagicMock()
             mock_ibsocket.running = True
@@ -470,10 +485,10 @@ class TestTWSClientRealtimeBarSubscription:
             contract = Contract()
             contract.symbol = "AAPL"
 
-            req_id, _ = client.subscribe_realtime_bars(contract)
+            req_id = client.reqRealTimeBars(contract, lambda *args: None)
             mock_ibsocket.send_message.reset_mock()
 
-            client.cancel_realtime_bars(req_id)
+            client.cancelRealTimeBars(req_id)
 
             from ibapi.message import OUT
 

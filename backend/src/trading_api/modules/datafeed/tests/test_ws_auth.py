@@ -5,6 +5,7 @@ Tests WebSocket authentication success scenarios:
 - Connection established and operational
 
 Note: WebSocket authentication uses cookie-only approach for security.
+Uses fixtures from conftest.py which provide mock provider.
 """
 
 import time
@@ -14,21 +15,15 @@ import pytest
 from fastapi.testclient import TestClient
 from jose import jwt
 
-from trading_api.app_factory import AppFactory, ModularApp
+from trading_api.app_factory import ModularApp
 from trading_api.shared.config import Settings
 
 
+# Use apps fixture from conftest.py (provides MockDatafeedProvider)
 @pytest.fixture
-async def datafeed_app() -> ModularApp:
-    """Create app with datafeed module enabled"""
-    factory = AppFactory()
-    return await factory.create_app(enabled_module_names=["datafeed"])
-
-
-@pytest.fixture
-def client(datafeed_app: ModularApp) -> Generator[TestClient, None, None]:
-    """Test client for datafeed API"""
-    with TestClient(datafeed_app) as c:
+def ws_auth_client(apps: ModularApp) -> Generator[TestClient, None, None]:
+    """Test client for datafeed API using mock provider from conftest."""
+    with TestClient(apps) as c:
         yield c
 
 
@@ -53,12 +48,12 @@ class TestWebSocketAuthSuccess:
     """Test WebSocket authentication success scenarios"""
 
     def test_connection_with_valid_token_in_cookie(
-        self, client: TestClient, valid_jwt_token: str
+        self, ws_auth_client: TestClient, valid_jwt_token: str
     ) -> None:
         """WebSocket connection with valid token in cookie should be accepted"""
-        client.cookies.set("access_token", valid_jwt_token)
+        ws_auth_client.cookies.set("access_token", valid_jwt_token)
 
-        with client.websocket_connect("/api/v1/datafeed/ws") as ws:
+        with ws_auth_client.websocket_connect("/api/v1/datafeed/ws") as ws:
             # Connection established successfully
             # Send a test subscription request to verify connection is operational
             ws.send_json(
@@ -74,22 +69,22 @@ class TestWebSocketAuthSuccess:
             assert ws is not None
 
     def test_token_extracted_from_cookie(
-        self, client: TestClient, valid_jwt_token: str
+        self, ws_auth_client: TestClient, valid_jwt_token: str
     ) -> None:
         """Token should be correctly extracted from cookie"""
-        client.cookies.set("access_token", valid_jwt_token)
+        ws_auth_client.cookies.set("access_token", valid_jwt_token)
 
-        with client.websocket_connect("/api/v1/datafeed/ws") as ws:
+        with ws_auth_client.websocket_connect("/api/v1/datafeed/ws") as ws:
             # If we get here, token was successfully extracted and validated
             assert ws is not None
 
     def test_connection_operational_after_auth(
-        self, client: TestClient, valid_jwt_token: str
+        self, ws_auth_client: TestClient, valid_jwt_token: str
     ) -> None:
         """WebSocket connection should be fully operational after successful auth"""
-        client.cookies.set("access_token", valid_jwt_token)
+        ws_auth_client.cookies.set("access_token", valid_jwt_token)
 
-        with client.websocket_connect("/api/v1/datafeed/ws") as ws:
+        with ws_auth_client.websocket_connect("/api/v1/datafeed/ws") as ws:
             # Verify bidirectional communication works
             ws.send_json(
                 {

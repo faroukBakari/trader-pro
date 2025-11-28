@@ -2,11 +2,9 @@
 Datafeed service for handling market data operations
 """
 
-import asyncio
 import json
 import logging
-import math
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -16,7 +14,6 @@ from trading_api.models import (
     DatafeedConfiguration,
     QuoteData,
     QuoteDataSubscriptionRequest,
-    QuoteValues,
     SearchSymbolResultItem,
     SymbolInfo,
 )

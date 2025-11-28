@@ -2,18 +2,92 @@
 
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable
 
 import pytest
 
 # Add src to path for module imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from trading_api.models.common import CapabilityNotFoundError  # noqa: E402
+from trading_api.models.common import (  # noqa: E402
+    CapabilityNotFoundError,
+    CapabilitySpec,
+    ProviderConfig,
+)
+from trading_api.models.market import (  # noqa: E402
+    Bar,
+    QuoteData,
+    SearchSymbolResultItem,
+    SymbolInfo,
+    TimeFrame,
+)
 from trading_api.modules.auth import AuthModule  # noqa: E402
 from trading_api.modules.broker import BrokerModule  # noqa: E402
 from trading_api.modules.datafeed import DatafeedModule  # noqa: E402
+from trading_api.providers.base import Provider  # noqa: E402
+from trading_api.providers.capabilities.datafeed import DatafeedCapability  # noqa: E402
 from trading_api.shared.module_interface import ModuleApp  # noqa: E402
+
+
+class MockDatafeedProvider(Provider, DatafeedCapability):
+    """Mock provider for testing datafeed module loading."""
+
+    @classmethod
+    def provider_dir(cls) -> Path:
+        return Path(__file__).parent
+
+    @property
+    def name(self) -> str:
+        return "mock_datafeed"
+
+    @property
+    def config(self) -> ProviderConfig:
+        return ProviderConfig()
+
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="datafeed")]
+
+    async def search_symbols(
+        self, pattern: str, **kwargs: Any
+    ) -> list[SearchSymbolResultItem]:
+        return []
+
+    async def get_symbol_info(self, symbol: str, **kwargs: Any) -> SymbolInfo:
+        raise NotImplementedError("Mock provider")
+
+    async def get_historical_bars(
+        self,
+        symbol: str,
+        start_time: datetime,
+        end_time: datetime,
+        resolution: TimeFrame,
+        **kwargs: Any,
+    ) -> list[Bar]:
+        return []
+
+    async def get_quotes_snapshot(
+        self, symbols: list[str], **kwargs: Any
+    ) -> list[QuoteData]:
+        return []
+
+    def subscribe_realtime_bars(
+        self, symbol: str, callback: Callable[[Bar], None], **kwargs: Any
+    ) -> int:
+        return 0
+
+    def subscribe_market_data(
+        self, symbols: list[str], callback: Callable[[QuoteData], None], **kwargs: Any
+    ) -> list[int]:
+        return []
+
+    def unsubscribe_realtime_bars(self, subscription_id: int) -> None:
+        pass
+
+    def unsubscribe_market_data(self, subscription_ids: list[int]) -> None:
+        pass
 
 
 class TestModuleCodegen:
@@ -25,8 +99,11 @@ class TestModuleCodegen:
         This test reproduces the bug: 'DatafeedModule' object has no attribute 'create_app'
         The correct pattern is to use ModuleApp(module) wrapper, not module.create_app()
         """
-        # Instantiate module
-        module = DatafeedModule()
+        # Provide mock provider for datafeed capability
+        mock_provider = MockDatafeedProvider()
+
+        # Instantiate module with provider
+        module = DatafeedModule(providers=[mock_provider])
 
         # Create apps using ModuleApp wrapper (correct pattern)
         module_app = ModuleApp(module)
@@ -49,8 +126,11 @@ class TestModuleCodegen:
 
     def test_module_app_generates_specs_and_clients(self):
         """Test that ModuleApp can generate specs and clients."""
-        # Instantiate module
-        module = DatafeedModule()
+        # Provide mock provider for datafeed capability
+        mock_provider = MockDatafeedProvider()
+
+        # Instantiate module with provider
+        module = DatafeedModule(providers=[mock_provider])
 
         # Create apps using ModuleApp wrapper
         module_app = ModuleApp(module)

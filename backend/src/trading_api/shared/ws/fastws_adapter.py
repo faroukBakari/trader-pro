@@ -78,7 +78,9 @@ class FastWSAdapter(FastWS):
                             topic=update.topic,
                         )
 
-                        logger.debug(f"Broadcasted message from router: {update.topic}")
+                        logger.info(
+                            f"Broadcasted message from router: {update.topic}: {update}"
+                        )
                     except* Exception:
                         # Handle ExceptionGroup from TaskGroup (e.g., closed connections)
                         logger.warning(
