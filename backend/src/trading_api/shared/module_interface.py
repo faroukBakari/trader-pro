@@ -16,7 +16,6 @@ from fastapi import Depends, FastAPI
 
 from external_packages.fastws import Client
 from trading_api.models.auth import UserData
-from trading_api.shared import ws
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.client_generation_service import ClientGenerationService
 from trading_api.shared.middleware.auth import get_current_user_ws
@@ -476,7 +475,9 @@ class Module(ABC):
                                     f"✅ No changes in AsyncAPI spec for '{self.name}'"
                                 )
                     except Exception as e:
-                        logger.warning(f"⚠️  Could not read existing AsyncAPI spec: {e}")
+                        logger.warning(
+                            f"⚠️  Could not read existing AsyncAPI spec: {e}"
+                        )
                 else:
                     logger.info(f"📝 Creating new AsyncAPI spec for '{self.name}'")
 
@@ -732,6 +733,3 @@ class ModuleApp:
             if ws_app is not None:
                 ws_app.shutdown()
         self.module.shutdown()
-
-    def __del__(self) -> None:
-        self.shutdown()

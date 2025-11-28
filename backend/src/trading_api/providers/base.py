@@ -64,4 +64,3 @@ class Provider(ABC):
 
     def shutdown(self) -> None:
         """Perform any necessary cleanup on provider shutdown."""
-        pass

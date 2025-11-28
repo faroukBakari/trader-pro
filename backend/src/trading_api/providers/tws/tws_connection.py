@@ -31,25 +31,21 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from decimal import Decimal
 from itertools import count
-from multiprocessing.pool import CLOSE
 from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
-from tkinter import NO
 from typing import Any, Callable
 
-from h11 import ERROR
 from ibapi.common import BarData, TickAttrib
 from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.decoder import Decoder
-from ibapi.errors import CONNECT_FAIL, FAIL_CREATE_SOCK
+from ibapi.errors import FAIL_CREATE_SOCK
 from ibapi.message import OUT
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
-from numpy import isin
 
 logger = logging.getLogger(__name__)
 DEBUG_TWS_SEND = os.environ.get("DEBUG_TWS_SEND") == "true"
@@ -161,9 +157,6 @@ class IBSocket:
                 FAIL_CREATE_SOCK.code(),
                 FAIL_CREATE_SOCK.msg(),
             )
-
-    def __del__(self) -> None:
-        self.disconnect()
 
     @property
     def server_version(self) -> int:
@@ -319,7 +312,7 @@ class IBSocket:
                     self._socket.connect((host, port))
                     self._socket.settimeout(block_interval)
                 break
-            except Exception as e:
+            except Exception:
                 nb_retries -= 1
                 time.sleep(0.1)
 
@@ -338,6 +331,7 @@ class IBSocket:
         if DEBUG_TWS_SEND:
             debug_log(f"Sent initial message: {str(message)}")
         nb_retries = 10
+        data: bytes = b""
         while nb_retries > 0:
             try:
                 data = self._socket.recv(4096)
@@ -348,7 +342,7 @@ class IBSocket:
 
         if nb_retries == 0:
             self._state = IBSocketState.ERROR
-            raise ConnectionError(f"Error while waiting for handshake response")
+            raise ConnectionError("Error while waiting for handshake response")
 
         buf_size = len(data)
         msg_size = HEADER_STRUCT.unpack_from(data, 0)[0]
@@ -818,10 +812,10 @@ class TWSClient:
     ) -> list[ContractDescription]:
         reqId = self.next_req_id
 
-        coroutine: Awaitable[list[ContractDescription]] = (
-            self._cb_wrapper.create_future_coroutine(
-                reqId, timeout=timeout or self._timeout
-            )
+        coroutine: Awaitable[
+            list[ContractDescription]
+        ] = self._cb_wrapper.create_future_coroutine(
+            reqId, timeout=timeout or self._timeout
         )
         self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
         debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
@@ -841,10 +835,10 @@ class TWSClient:
             May return multiple results for ambiguous queries.
         """
         reqId = self.next_req_id
-        coroutine: Awaitable[list[ContractDetails]] = (
-            self._cb_wrapper.create_future_coroutine(
-                reqId, timeout=timeout or self._timeout
-            )
+        coroutine: Awaitable[
+            list[ContractDetails]
+        ] = self._cb_wrapper.create_future_coroutine(
+            reqId, timeout=timeout or self._timeout
         )
 
         # Build message fields (VERSION=8 per ibapi/client.py)
@@ -957,10 +951,10 @@ class TWSClient:
             Example: {"prices": {1: 150.25, 2: 150.30}, "sizes": {0: 100, 3: 200}}
         """
         reqId = self.next_req_id
-        coroutine: Awaitable[dict[str, float | int]] = (
-            self._cb_wrapper.create_future_coroutine(
-                reqId, timeout=timeout or self._timeout
-            )
+        coroutine: Awaitable[
+            dict[str, float | int]
+        ] = self._cb_wrapper.create_future_coroutine(
+            reqId, timeout=timeout or self._timeout
         )
 
         VERSION = 11
@@ -1134,7 +1128,7 @@ class TWSClient:
         self.ibsocket.send_message(OUT.CANCEL_REAL_TIME_BARS, [VERSION, reqId])
         debug_log(f"cancelled realtime bars for reqId {reqId}")
 
-    def cancelMktData(self, reqId: int):
+    def cancelMktData(self, reqId: int) -> None:
         """Cancel tick-by-tick data subscription."""
 
         self._cb_wrapper.unregister_callback(reqId)
@@ -1142,9 +1136,3 @@ class TWSClient:
         VERSION = 2
         self.ibsocket.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
         debug_log(f"cancelled realtime bars for reqId {reqId}")
-
-    def disconnect(self) -> None:
-        self.ibsocket.disconnect()
-
-    def __del__(self) -> None:
-        self.disconnect()

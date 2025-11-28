@@ -178,4 +178,3 @@ class ServiceInterface(ABC):
 
     def shutdown(self) -> None:
         """Perform any necessary cleanup on service shutdown."""
-        pass

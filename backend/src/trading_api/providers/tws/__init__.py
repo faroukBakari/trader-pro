@@ -402,7 +402,7 @@ class TWSProvider(Provider, DatafeedCapability):
             return results
 
         except asyncio.TimeoutError:
-            raise DatafeedError(f"Quote snapshot timed out")
+            raise DatafeedError("Quote snapshot timed out")
         except Exception as e:
             raise DatafeedError(f"Failed to get quote snapshot: {e}") from e
 
@@ -497,9 +497,15 @@ class TWSProvider(Provider, DatafeedCapability):
             self._tws_client.cancelMktData(reqId)
 
     def shutdown(self) -> None:
-        """Perform any necessary cleanup on provider shutdown."""
+        """Perform any necessary cleanup on provider shutdown.
+
+        Idempotent: safe to call multiple times.
+        """
+        if not hasattr(self, "_tws_client"):
+            return  # Already shutdown
+
         logger.info("Shutting down TWSProvider...")
-        self._tws_client.disconnect()
+        del self._tws_client
         logger.info("TWSProvider shutdown complete.")
 
 

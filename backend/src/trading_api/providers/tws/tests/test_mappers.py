@@ -260,7 +260,7 @@ class TestTwsBarMapper:
         tws_bar.close = 150.80
         tws_bar.volume = Decimal("1000000")
 
-        result = tws_bar_to_domain_bar(tws_bar, "AAPL")
+        result = tws_bar_to_domain_bar(tws_bar)
 
         assert result.open == 150.25
         assert result.high == 151.50
@@ -283,7 +283,7 @@ class TestTwsBarMapper:
         tws_bar.close = 100.5
         tws_bar.volume = Decimal("500")
 
-        result = tws_bar_to_domain_bar(tws_bar, "MSFT")
+        result = tws_bar_to_domain_bar(tws_bar)
 
         assert result.open == 100.0
         assert result.close == 100.5
@@ -303,7 +303,7 @@ class TestTwsBarMapper:
         tws_bar.close = 205.0
         tws_bar.volume = Decimal("2500")
 
-        result = tws_bar_to_domain_bar(tws_bar, "GOOGL")
+        result = tws_bar_to_domain_bar(tws_bar)
 
         assert result.time == 1702656000000  # Converted to milliseconds
         assert result.open == 200.0
@@ -322,7 +322,7 @@ class TestTwsBarMapper:
         tws_bar.close = 100.0
         tws_bar.volume = Decimal("12345678")
 
-        result = tws_bar_to_domain_bar(tws_bar, "TEST")
+        result = tws_bar_to_domain_bar(tws_bar)
 
         assert isinstance(result.volume, int)
         assert result.volume == 12345678

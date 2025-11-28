@@ -530,9 +530,11 @@ class TestGetHistoricalBars:
                 resolution=TimeFrame.MIN_5,
             )
 
-        # Verify bar_size_setting was passed correctly
-        call_kwargs = mock_client.reqHistoricalData.call_args.kwargs
-        assert call_kwargs["bar_size_setting"] == "5 mins"
+        # Verify bar_size (4th positional arg) was passed correctly
+        call_args = mock_client.reqHistoricalData.call_args
+        # args: (contract, end_dt_str, duration_str, bar_size, ...)
+        bar_size = call_args[0][3]
+        assert bar_size == "5 mins"
 
     @pytest.mark.asyncio
     async def test_get_historical_bars_with_exchange(self) -> None:
@@ -554,9 +556,10 @@ class TestGetHistoricalBars:
                 exchange="NASDAQ",
             )
 
-        # Verify contract has correct exchange
-        call_kwargs = mock_client.reqHistoricalData.call_args.kwargs
-        assert call_kwargs["contract"].exchange == "NASDAQ"
+        # Verify contract has correct exchange (1st positional arg)
+        call_args = mock_client.reqHistoricalData.call_args
+        contract = call_args[0][0]
+        assert contract.exchange == "NASDAQ"
 
     @pytest.mark.asyncio
     async def test_get_historical_bars_wraps_exceptions(self) -> None:
@@ -630,7 +633,7 @@ class TestGetQuotesSnapshot:
         """Test get_quotes_snapshot makes concurrent requests."""
         call_times: list[float] = []
 
-        async def mock_req_mkt_data(_: Contract, generic_tick_list: str) -> dict:
+        async def mock_req_mkt_data(contract: Contract, **kwargs: object) -> dict:
             import asyncio
             import time
 
@@ -653,36 +656,57 @@ class TestGetQuotesSnapshot:
 
 
 class TestSubscriptionMethods:
-    """Test subscription methods (not yet implemented)."""
+    """Test subscription methods."""
 
-    def test_subscribe_realtime_bars_raises_not_implemented(self) -> None:
-        """Test subscribe_realtime_bars raises DatafeedError."""
-        with patch("trading_api.providers.tws.TWSClient"):
+    def test_subscribe_realtime_bars_returns_req_id(self) -> None:
+        """Test subscribe_realtime_bars returns a request ID."""
+        mock_client = Mock()
+        mock_client.reqRealTimeBars = Mock(return_value=42)
+
+        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
 
-            with pytest.raises(DatafeedError, match="not yet implemented"):
-                provider.subscribe_realtime_bars("AAPL", lambda bar: None)
+            req_id = provider.subscribe_realtime_bars("AAPL", lambda bar: None)
 
-    def test_subscribe_market_data_raises_not_implemented(self) -> None:
-        """Test subscribe_market_data raises DatafeedError."""
-        with patch("trading_api.providers.tws.TWSClient"):
+            assert req_id == 42
+            mock_client.reqRealTimeBars.assert_called_once()
+
+    def test_subscribe_market_data_returns_req_ids(self) -> None:
+        """Test subscribe_market_data returns list of request IDs."""
+        mock_client = Mock()
+        mock_client.reqMktData = Mock(side_effect=[1, 2, 3])
+
+        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
 
-            with pytest.raises(DatafeedError, match="not yet implemented"):
-                provider.subscribe_market_data("AAPL", lambda quote: None)
+            req_ids = provider.subscribe_market_data(
+                ["AAPL", "MSFT", "GOOGL"], lambda quote: None
+            )
 
-    def test_unsubscribe_realtime_bars_raises_not_implemented(self) -> None:
-        """Test unsubscribe_realtime_bars raises DatafeedError."""
-        with patch("trading_api.providers.tws.TWSClient"):
+            assert req_ids == [1, 2, 3]
+            assert mock_client.reqMktData.call_count == 3
+
+    def test_unsubscribe_realtime_bars_calls_cancel(self) -> None:
+        """Test unsubscribe_realtime_bars calls cancelRealTimeBars."""
+        mock_client = Mock()
+
+        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
 
-            with pytest.raises(DatafeedError, match="not yet implemented"):
-                provider.unsubscribe_realtime_bars(1)
+            provider.unsubscribe_realtime_bars(42)
 
-    def test_unsubscribe_market_data_raises_not_implemented(self) -> None:
-        """Test unsubscribe_market_data raises DatafeedError."""
-        with patch("trading_api.providers.tws.TWSClient"):
+            mock_client.cancelRealTimeBars.assert_called_once_with(42)
+
+    def test_unsubscribe_market_data_calls_cancel(self) -> None:
+        """Test unsubscribe_market_data calls cancelMktData for each ID."""
+        mock_client = Mock()
+
+        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
 
-            with pytest.raises(DatafeedError, match="not yet implemented"):
-                provider.unsubscribe_market_data(1)
+            provider.unsubscribe_market_data([1, 2, 3])
+
+            assert mock_client.cancelMktData.call_count == 3
+            mock_client.cancelMktData.assert_any_call(1)
+            mock_client.cancelMktData.assert_any_call(2)
+            mock_client.cancelMktData.assert_any_call(3)

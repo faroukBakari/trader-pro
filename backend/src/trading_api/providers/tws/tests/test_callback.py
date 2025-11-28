@@ -72,12 +72,16 @@ class TestFutureManagement:
 
         req_id = 1
         future: asyncio.Future[str] = loop.create_future()
-        callback._futures[req_id] = future
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
 
         callback._resolve_future(req_id, "result")
 
         # Future should be removed from registry
         assert req_id not in callback._futures
+
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
 
         result = await future
         assert result == "result"
@@ -90,13 +94,17 @@ class TestFutureManagement:
 
         req_id = 1
         future: asyncio.Future[Any] = loop.create_future()
-        callback._futures[req_id] = future
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
 
         test_error = ValueError("test error")
         callback._reject_future(req_id, test_error)
 
         # Future should be removed
         assert req_id not in callback._futures
+
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
 
         with pytest.raises(ValueError, match="test error"):
             await future
@@ -128,7 +136,8 @@ class TestSymbolSamplesCallback:
 
         req_id = 1
         future: asyncio.Future[list[ContractDescription]] = loop.create_future()
-        callback._futures[req_id] = future
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
 
         # Create test data
         contract = Contract()
@@ -140,6 +149,9 @@ class TestSymbolSamplesCallback:
 
         # Simulate callback
         callback.symbolSamples(req_id, [desc])
+
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
 
         result = await future
         assert len(result) == 1
@@ -154,9 +166,13 @@ class TestSymbolSamplesCallback:
 
         req_id = 1
         future: asyncio.Future[list[ContractDescription]] = loop.create_future()
-        callback._futures[req_id] = future
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
 
         callback.symbolSamples(req_id, [])
+
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
 
         result = await future
         assert result == []
@@ -173,9 +189,9 @@ class TestContractDetailsCallback:
 
         req_id = 1
         future: asyncio.Future[list[ContractDetails]] = loop.create_future()
-        callback._futures[req_id] = future
-        # Accumulator must be pre-initialized for accumulation pattern
-        callback._accumulators[req_id] = []
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
+        # Accumulator auto-created by contractDetails via setdefault
 
         # Create test data
         contract1 = Contract()
@@ -202,6 +218,9 @@ class TestContractDetailsCallback:
         # End signal
         callback.contractDetailsEnd(req_id)
 
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
+
         result = await future
         assert len(result) == 2
         assert result[0].longName == "Apple Inc"
@@ -217,8 +236,8 @@ class TestContractDetailsCallback:
 
         req_id = 1
         future: asyncio.Future[list[ContractDetails]] = loop.create_future()
-        callback._futures[req_id] = future
-        callback._accumulators[req_id] = []
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
 
         contract = Contract()
         contract.symbol = "MSFT"
@@ -228,6 +247,9 @@ class TestContractDetailsCallback:
 
         callback.contractDetails(req_id, details)
         callback.contractDetailsEnd(req_id)
+
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
 
         result = await future
         assert len(result) == 1
@@ -241,11 +263,14 @@ class TestContractDetailsCallback:
 
         req_id = 1
         future: asyncio.Future[list[ContractDetails]] = loop.create_future()
-        callback._futures[req_id] = future
-        callback._accumulators[req_id] = []
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
 
         # End signal without any contractDetails calls
         callback.contractDetailsEnd(req_id)
+
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
 
         result = await future
         assert result == []
@@ -262,8 +287,8 @@ class TestHistoricalDataCallback:
 
         req_id = 1
         future: asyncio.Future[list[BarData]] = loop.create_future()
-        callback._futures[req_id] = future
-        callback._accumulators[req_id] = []
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
 
         # Create test bars
         bar1 = BarData()
@@ -285,6 +310,9 @@ class TestHistoricalDataCallback:
         # End signal
         callback.historicalDataEnd(req_id, "20231215 09:30:00", "20231215 09:31:00")
 
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
+
         result = await future
         assert len(result) == 2
         assert result[0].open == 150.0
@@ -301,8 +329,6 @@ class TestMarketDataSnapshotCallback:
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        future: asyncio.Future[dict[str, Any]] = loop.create_future()
-        callback._futures[req_id] = future
         # Accumulator auto-created by tickPrice
 
         tick_attrib = TickAttrib()
@@ -341,10 +367,14 @@ class TestMarketDataSnapshotCallback:
 
         req_id = 1
         future: asyncio.Future[dict[str, Any]] = loop.create_future()
-        callback._futures[req_id] = future
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
         callback._accumulators[req_id] = {"BID": 100.0, "ASK": 100.05}
 
         callback.tickSnapshotEnd(req_id)
+
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
 
         result = await future
         assert result["BID"] == 100.0
@@ -377,9 +407,13 @@ class TestErrorHandling:
 
         req_id = 1
         future: asyncio.Future[Any] = loop.create_future()
-        callback._futures[req_id] = future
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
 
         callback.error(req_id, 1234567890, 200, "No security definition")
+
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
 
         with pytest.raises(TWSError) as exc_info:
             await future
@@ -410,12 +444,16 @@ class TestErrorHandling:
 
         req_id = 1
         future: asyncio.Future[Any] = loop.create_future()
-        callback._futures[req_id] = future
+        # _futures stores (loop, future) tuple
+        callback._futures[req_id] = (loop, future)
         callback._accumulators[req_id] = [{"partial": "data"}]
 
         callback.error(
             req_id, 1234567890, 162, "Historical data request pacing violation"
         )
+
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
 
         # Future should be rejected
         with pytest.raises(TWSError):
@@ -539,19 +577,33 @@ class TestTickStringGeneric:
 
 
 class TestRealtimeBarCallback:
-    """Test realtimeBar callback - continuous subscription pattern."""
+    """Test realtimeBar callback - continuous subscription pattern using callbacks."""
 
     @pytest.mark.asyncio
-    async def test_realtime_bar_puts_data_in_queue(self) -> None:
-        """Test realtimeBar puts bar data in subscription queue."""
+    async def test_realtime_bar_calls_callback(self) -> None:
+        """Test realtimeBar calls registered callback with bar data."""
         from decimal import Decimal
 
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        queue: asyncio.Queue[tuple] = asyncio.Queue()
-        callback._sub_queues[req_id] = queue
+        received_data: list[tuple] = []
+
+        # Register callback to capture bar data
+        def bar_callback(
+            time: int,
+            open_: float,
+            high: float,
+            low: float,
+            close: float,
+            volume: int,
+            wap: float,
+            count: int,
+        ) -> None:
+            received_data.append((time, open_, high, low, close, volume, wap, count))
+
+        callback._callbacks[req_id] = bar_callback
 
         # Simulate realtimeBar callback
         callback.realtimeBar(
@@ -566,12 +618,9 @@ class TestRealtimeBarCallback:
             count=50,
         )
 
-        # Allow event loop to process the call_soon_threadsafe
-        await asyncio.sleep(0.01)
-
-        # Check queue received data
-        assert not queue.empty()
-        bar_data = queue.get_nowait()
+        # Callback is called synchronously
+        assert len(received_data) == 1
+        bar_data = received_data[0]
 
         assert bar_data[0] == 1702656000  # time
         assert bar_data[1] == 150.25  # open
@@ -584,15 +633,29 @@ class TestRealtimeBarCallback:
 
     @pytest.mark.asyncio
     async def test_realtime_bar_multiple_bars(self) -> None:
-        """Test realtimeBar queues multiple bars correctly."""
+        """Test realtimeBar calls callback for multiple bars correctly."""
         from decimal import Decimal
 
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        queue: asyncio.Queue[tuple] = asyncio.Queue()
-        callback._sub_queues[req_id] = queue
+        received_data: list[tuple] = []
+
+        # Register callback to capture bar data
+        def bar_callback(
+            time: int,
+            open_: float,
+            high: float,
+            low: float,
+            close: float,
+            volume: int,
+            wap: float,
+            count: int,
+        ) -> None:
+            received_data.append((time, open_, high, low, close, volume, wap, count))
+
+        callback._callbacks[req_id] = bar_callback
 
         # Simulate multiple bar callbacks
         for i in range(3):
@@ -608,15 +671,13 @@ class TestRealtimeBarCallback:
                 count=10 * (i + 1),
             )
 
-        await asyncio.sleep(0.01)
-
-        # Should have 3 bars in queue
-        assert queue.qsize() == 3
+        # Should have 3 bars received
+        assert len(received_data) == 3
 
         # Verify order
-        bar1 = queue.get_nowait()
-        bar2 = queue.get_nowait()
-        bar3 = queue.get_nowait()
+        bar1 = received_data[0]
+        bar2 = received_data[1]
+        bar3 = received_data[2]
 
         assert bar1[0] == 1702656000
         assert bar2[0] == 1702656005
@@ -649,10 +710,10 @@ class TestRealtimeBarCallback:
         loop.close()
 
     @pytest.mark.asyncio
-    async def test_subscription_queue_initialization(self) -> None:
-        """Test _sub_queues is initialized empty."""
+    async def test_callbacks_initialization(self) -> None:
+        """Test _callbacks is initialized empty."""
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
-        assert callback._sub_queues == {}
-        assert isinstance(callback._sub_queues, dict)
+        assert callback._callbacks == {}
+        assert isinstance(callback._callbacks, dict)
