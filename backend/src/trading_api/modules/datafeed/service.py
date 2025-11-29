@@ -305,7 +305,7 @@ class DatafeedService(WsRouteService):
             return await self.datafeed_provider.get_symbol_info(
                 symbol=parsed_symbol,
                 exchange=exchange,
-                timeout=2.0,
+                timeout=5.0,
             )
         except Exception as e:
             logger.warning(f"Failed to resolve symbol '{symbol_name}': {e}")
