@@ -90,6 +90,10 @@ list-modules:
 		echo "  - $$module"; \
 	done
 
+# List modules as JSON array (for CI dynamic matrix)
+list-modules-json:
+	@echo '$(DISCOVERED_MODULES)' | tr ' ' '\n' | grep -v '^$$' | jq -R -s -c 'split("\n") | map(select(. != ""))'
+
 # Unified generation command
 # Usage: make generate [modules=mod1,mod2] [output_dir=/path/to/output]
 generate:
