@@ -1,12 +1,14 @@
 ---
-agent: "Plan"
+agent: "agent"
 name: "tdd-plan-v3"
-description: "Generate a step-by-step TDD action plan, save it to docs/tmp/, and report the file path."
+model: "Claude Opus 4.5 (Preview)"
+description: "Generate a step-by-step TDD action plan ONLY. Do not implement or modify code. Save plan to docs/tmp/, and report the file path."
 ---
 
 ## TDD Feature Planner
 
 Generate a detailed, actionable TDD implementation plan designed for a follow-up "Executor" agent. Your **final action** must be to save this plan to a file and output the path.
+Reminder: This agent must not implement or modify code. Output is limited to the saved plan path.
 
 ## Inputs
 
@@ -19,12 +21,12 @@ Generate a detailed, actionable TDD implementation plan designed for a follow-up
 
 1.  **Read project architecture**: `docs/DOCUMENTATION-GUIDE.md`
 2.  **Read and internalize** the **Feature Description** and any **User Materials** from the inputs to understand requirements and constraints.
-3.  **Review testing strategy**: `docs/TESTING.md` for test organization and patterns.
+3.  **Review testing strategy**: `docs/TESTING.md` / `backend/docs/BACKEND_TESTING.md` for test organization and patterns.
 4.  **Select methodology** based on feature type:
+    * PROVIDER IMPLEMENTATION → Follow `backend/docs/PROVIDER-SYSTEM.md` (6-phase)
     * MODULE IMPLEMENTATION → Follow `backend/docs/MODULAR_BACKEND_ARCHITECTURE.md` (6-phase)
     * REST API → `API-METHODOLOGY.md` (6-phase)
     * WebSocket → `WEBSOCKET-METHODOLOGY.md` (6-phase)
-    * Other → Red-Green-Refactor
 5.  **Find similar implementations**: Search `@workspace` for existing patterns.
 6.  **Identify locations**: Module paths, test files, and dependencies to modify.
 
@@ -32,12 +34,11 @@ Generate a detailed, actionable TDD implementation plan designed for a follow-up
 
 ### Step 2: Generate Plan Content
 
-Adapt the chosen methodology to this specific feature.
+Adapt the chosen methodology to this specific feature and wrap it into a clear, step-by-step TDD plan with red/green phases.
 
-**Guiding Principle**: Deconstruct the feature into a logical sequence. For APIs, this is typically **outside-in**: 1. API route/spec, 2. Controller/Handler, 3. Service logic, 4. Data model/adapter.
-For each task in the sequence, identify the most appropriate **subagent** to perform the action (e.g., `@workspace` for search/read, `@codeWriter` for implementation, `@tester` for verification).
+**Guiding Principle**: Deconstruct the feature into a logical phases. each phase should have clear TDD checkpoints.
 
-For each phase:
+For each phase, you must specify:
 
 * **Agent** - The specific subagent best suited for the task.
 * **File paths** - Exact locations following project patterns.
@@ -104,3 +105,6 @@ This is the final step. You will package the plan from Step 2 into the required 
 -   [ ] **Agent**: `[@tester]`
     * **Action**: Run type checks
     * **Verify**: `npm run type-check` → Expected: ✅ pass
+````
+
+⚠️ **IMPORTANT**: Do not write or modify any source code. Only generate the plan document.

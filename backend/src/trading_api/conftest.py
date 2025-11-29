@@ -9,6 +9,7 @@ Fixtures defined here are automatically available to all test files
 in trading_api and its subdirectories.
 """
 
+import asyncio
 from collections.abc import AsyncGenerator, Generator
 
 import pytest
@@ -20,35 +21,63 @@ from trading_api.app_factory import AppFactory, ModularApp
 from trading_api.shared import FastWSAdapter
 
 # ============================================================================
-# Application Fixtures (Session-Scoped for Performance)
+# Event Loop Fixture (Module-Scoped for Async Fixtures)
 # ============================================================================
-# Note: event_loop fixture is inherited from tests/conftest.py
-# to avoid overlapping session-scoped event loops
 
 
-@pytest.fixture(scope="session")
-def apps() -> ModularApp:
-    """Full application with all modules enabled (shared across session).
+@pytest.fixture(scope="module")
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Create event loop for module-scoped async fixtures.
+
+    Required for pytest-asyncio with module-scoped async fixtures.
+    Must properly shutdown async generators and close the loop.
+    """
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield loop
+
+    # Proper cleanup sequence
+    try:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.run_until_complete(loop.shutdown_default_executor())
+    except AttributeError:
+        # shutdown_default_executor added in Python 3.9
+        pass
+    finally:
+        loop.close()
+
+
+# ============================================================================
+# Application Fixtures (Module-Scoped for Compatibility)
+# ============================================================================
+# Note: Module scope avoids event_loop scope conflicts with pytest-asyncio
+# and matches the pattern used in tests/integration/conftest.py
+
+
+@pytest.fixture(scope="module")
+async def apps() -> ModularApp:
+    """Full application with all modules enabled (shared per test module).
 
     This fixture is the source for all other app-related fixtures.
     It creates a ModularApp with all discovered modules enabled.
     """
     factory = AppFactory()
-    return factory.create_app()
+    return await factory.create_app()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def app(apps: ModularApp) -> FastAPI:
-    """FastAPI application instance (shared across session).
+    """FastAPI application instance (shared per test module).
 
     ModularApp extends FastAPI, so we can use it directly.
     """
     return apps  # ModularApp IS a FastAPI
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def ws_apps(apps: ModularApp) -> list[FastWSAdapter]:
-    """FastWSAdapter application instances (shared across session).
+    """FastWSAdapter application instances (shared per test module).
 
     Extracts WebSocket apps from all modules.
     """
@@ -57,9 +86,9 @@ def ws_apps(apps: ModularApp) -> list[FastWSAdapter]:
     ]
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def ws_app(ws_apps: list[FastWSAdapter]) -> FastWSAdapter | None:
-    """First FastWSAdapter application instance (shared across session)."""
+    """First FastWSAdapter application instance (shared per test module)."""
     return ws_apps[0] if ws_apps else None
 
 

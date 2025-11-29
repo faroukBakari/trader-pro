@@ -10,7 +10,9 @@ import os
 import sys
 import time
 from collections.abc import AsyncGenerator
+from datetime import datetime
 from pathlib import Path
+from typing import Any, Callable
 
 import httpx
 import pytest
@@ -20,6 +22,18 @@ from httpx import AsyncClient
 from jose import jwt
 
 from trading_api.app_factory import ModularApp
+from trading_api.models.common import CapabilitySpec, ProviderConfig
+from trading_api.models.market import (
+    Bar,
+    QuoteData,
+    QuoteValues,
+    SearchSymbolResultItem,
+    SymbolInfo,
+    TimeFrame,
+)
+from trading_api.providers.base import Provider
+from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.shared import FastWSAdapter
 from trading_api.shared.config import Settings
 
@@ -27,6 +41,180 @@ from trading_api.shared.config import Settings
 backend_scripts_dir = Path(__file__).parent.parent.parent / "scripts"
 if str(backend_scripts_dir) not in sys.path:
     sys.path.insert(0, str(backend_scripts_dir))
+
+
+# ============================================================================
+# Mock Providers (for integration tests)
+# ============================================================================
+
+
+class MockAuthProvider(Provider, AuthCapability):
+    """Mock provider for integration tests - simulates auth capability."""
+
+    @classmethod
+    def provider_dir(cls) -> Path:
+        return Path(__file__).parent
+
+    @property
+    def name(self) -> str:
+        return "mock_auth"
+
+    @property
+    def config(self) -> ProviderConfig:
+        return ProviderConfig()
+
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="auth")]
+
+    async def verify_token(self, token: str) -> dict[str, Any]:
+        """Mock token verification - always succeeds for testing."""
+        return {
+            "sub": "test-user-id",
+            "email": "test@example.com",
+            "name": "Test User",
+            "picture": "https://example.com/avatar.jpg",
+            "email_verified": True,
+        }
+
+
+class MockDatafeedProvider(Provider, DatafeedCapability):
+    """Mock provider for integration tests - simulates datafeed capability."""
+
+    def __init__(self) -> None:
+        self._subscriptions: dict[int, str] = {}
+        self._next_sub_id = 1
+
+    @classmethod
+    def provider_dir(cls) -> Path:
+        return Path(__file__).parent
+
+    @property
+    def name(self) -> str:
+        return "mock_datafeed"
+
+    @property
+    def config(self) -> ProviderConfig:
+        return ProviderConfig()
+
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="datafeed")]
+
+    async def search_symbols(
+        self, pattern: str, **kwargs: Any
+    ) -> list[SearchSymbolResultItem]:
+        """Return mock search results."""
+        return [
+            SearchSymbolResultItem(
+                symbol=pattern.upper(),
+                description=f"Mock {pattern} stock",
+                exchange="MOCK",
+                ticker=pattern.upper(),
+                type="stock",
+            )
+        ]
+
+    async def get_symbol_info(self, symbol: str, **kwargs: Any) -> SymbolInfo:
+        """Return mock symbol info."""
+        return SymbolInfo(
+            name=symbol,
+            description=f"Mock {symbol} stock",
+            exchange="MOCK",
+            listed_exchange="MOCK",
+            ticker=symbol,
+            type="stock",
+            session="0930-1600",
+            timezone="America/New_York",
+            minmov=1,
+            pricescale=100,
+            format="price",
+            has_intraday=True,
+            has_daily=True,
+            supported_resolutions=["1", "5", "15", "60", "D"],
+            volume_precision=0,
+            data_status="streaming",
+        )
+
+    async def get_historical_bars(
+        self,
+        symbol: str,
+        start_time: datetime,
+        end_time: datetime,
+        resolution: TimeFrame,
+        **kwargs: Any,
+    ) -> list[Bar]:
+        """Return mock historical bars."""
+        return [
+            Bar(
+                time=int(start_time.timestamp()),
+                open=100.0,
+                high=105.0,
+                low=99.0,
+                close=103.0,
+                volume=10000,
+                count=1,
+            )
+        ]
+
+    async def get_quotes_snapshot(
+        self, symbols: list[str], **kwargs: Any
+    ) -> list[QuoteData]:
+        """Return mock quotes snapshot."""
+        return [
+            QuoteData(
+                s="ok",
+                n=symbol,
+                v=QuoteValues(
+                    lp=100.02,
+                    ask=100.05,
+                    bid=100.0,
+                    spread=0.05,
+                    open_price=99.5,
+                    high_price=101.0,
+                    low_price=99.0,
+                    prev_close_price=99.8,
+                    volume=10000,
+                    ch=0.22,
+                    chp=0.22,
+                    short_name=symbol,
+                    exchange="MOCK",
+                    description=f"Mock {symbol}",
+                    original_name=symbol,
+                ),
+            )
+            for symbol in symbols
+        ]
+
+    def subscribe_realtime_bars(
+        self, symbol: str, callback: Callable[[Bar], None], **kwargs: Any
+    ) -> int:
+        """Subscribe to realtime bars (mock - no actual streaming)."""
+        sub_id = self._next_sub_id
+        self._next_sub_id += 1
+        self._subscriptions[sub_id] = symbol
+        return sub_id
+
+    def subscribe_market_data(
+        self, symbols: list[str], callback: Callable[[QuoteData], None], **kwargs: Any
+    ) -> list[int]:
+        """Subscribe to market data (mock - no actual streaming)."""
+        sub_ids = []
+        for symbol in symbols:
+            sub_id = self._next_sub_id
+            self._next_sub_id += 1
+            self._subscriptions[sub_id] = symbol
+            sub_ids.append(sub_id)
+        return sub_ids
+
+    def unsubscribe_realtime_bars(self, subscription_id: int) -> None:
+        """Unsubscribe from realtime bars."""
+        self._subscriptions.pop(subscription_id, None)
+
+    def unsubscribe_market_data(self, subscription_ids: list[int]) -> None:
+        """Unsubscribe from market data."""
+        for sub_id in subscription_ids:
+            self._subscriptions.pop(sub_id, None)
 
 
 # ============================================================================
@@ -63,39 +251,39 @@ def auth_cookies(valid_jwt_token: str) -> dict[str, str]:
 
 
 @pytest.fixture(scope="session")
-def datafeed_only_app() -> ModularApp:
+async def datafeed_only_app() -> ModularApp:
     """Session-scoped datafeed-only app for isolation tests."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=["datafeed"])
+    return await factory.create_app(enabled_module_names=["datafeed"])
 
 
 @pytest.fixture(scope="session")
-def broker_only_app() -> ModularApp:
+async def broker_only_app() -> ModularApp:
     """Session-scoped broker-only app for isolation tests."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=["broker"])
+    return await factory.create_app(enabled_module_names=["broker"])
 
 
 @pytest.fixture(scope="session")
-def all_modules_app() -> ModularApp:
+async def all_modules_app() -> ModularApp:
     """Session-scoped app with all modules for isolation tests."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=None)
+    return await factory.create_app(enabled_module_names=None)
 
 
 @pytest.fixture(scope="session")
-def no_modules_app() -> ModularApp:
+async def no_modules_app() -> ModularApp:
     """Session-scoped app with no modules (shared infrastructure only)."""
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=[])
+    return await factory.create_app(enabled_module_names=[])
 
 
 # ============================================================================
@@ -148,12 +336,62 @@ def wait_for_service_sync(base_url: str, max_attempts: int = 30) -> bool:
 
 
 @pytest.fixture(scope="module")
-def apps() -> ModularApp:
-    """Full application with all modules enabled (shared per test module)."""
+async def apps() -> ModularApp:
+    """Full application with all modules enabled (shared per test module).
+
+    Uses MockDatafeedProvider instead of real TWS provider to avoid
+    external dependencies in integration tests.
+    """
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=None)  # None = all modules
+
+    # Clear and re-discover modules only (not providers)
+    factory.module_registry.clear()
+    factory.module_registry.auto_discover()
+
+    # Register mock providers instead of auto-discovering real providers
+    factory.provider_registry.clear()
+    factory.provider_registry.register(MockDatafeedProvider, "mock_datafeed")
+    factory.provider_registry.register(MockAuthProvider, "mock_auth")
+
+    # Resolve required capabilities
+    required_capabilities = factory._resolve_capabilities(None)
+
+    # Get provider instances (will use our mock)
+    required_providers = await factory.provider_registry.get_providers(
+        required_capabilities
+    )
+
+    # Instantiate modules with mock providers
+    enabled_modules = factory.module_registry.get_modules(
+        module_names=None, providers=required_providers
+    )
+
+    # Create base URL
+    base_url = "/api"
+
+    # Create ModularApp without lifespan (tests handle their own lifecycle)
+    modular_app = ModularApp(
+        modules=enabled_modules,
+        base_url=base_url,
+        title="Trading API (Test)",
+        description="Test instance with mock providers",
+        version="1.0.0",
+    )
+
+    # Add CORS middleware (same as production)
+    from fastapi.middleware.cors import CORSMiddleware
+
+    modular_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    return modular_app
 
 
 @pytest.fixture(scope="module")

@@ -1,0 +1,144 @@
+"""Test ProviderRegistry auto-discovery and lazy-loading."""
+
+from pathlib import Path
+
+import pytest
+
+from trading_api.models.common import (
+    CapabilityNotFoundError,
+    CapabilitySpec,
+    ProviderConfig,
+    ProviderNotFoundError,
+)
+from trading_api.providers.base import Provider
+from trading_api.providers.registry import ProviderRegistry
+
+
+class MockProviderConfig(ProviderConfig):
+    """Mock provider configuration."""
+
+    test_value: str = "default"
+
+
+class MockProvider(Provider):
+    """Mock provider for testing."""
+
+    _startup_called = False
+    _shutdown_called = False
+
+    @classmethod
+    def provider_dir(cls) -> Path:
+        return Path(__file__).parent
+
+    @property
+    def name(self) -> str:
+        return "mock"
+
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="auth")]
+
+    @property
+    def config(self) -> ProviderConfig:
+        return MockProviderConfig()
+
+
+@pytest.fixture
+def registry() -> ProviderRegistry:
+    """Create fresh registry for testing."""
+    return ProviderRegistry()
+
+
+def test_register_provider(registry: ProviderRegistry) -> None:
+    """Test manual provider registration."""
+    registry.register(MockProvider, "mock")
+
+    assert "mock" in registry.list_providers()
+    assert len(registry.list_providers()) == 1
+
+
+def test_register_duplicate_provider_raises_error(registry: ProviderRegistry) -> None:
+    """Cannot register same provider twice."""
+    registry.register(MockProvider, "mock")
+
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register(MockProvider, "mock")
+
+
+@pytest.mark.asyncio
+async def test_get_providers_by_capability(registry: ProviderRegistry) -> None:
+    """Get providers matching capability requirements."""
+    registry.register(MockProvider, "mock")
+
+    providers = await registry.get_providers([CapabilitySpec(name="auth")])
+
+    assert len(providers) == 1
+    assert isinstance(providers[0], MockProvider)
+
+
+@pytest.mark.asyncio
+async def test_get_providers_capability_not_found(registry: ProviderRegistry) -> None:
+    """Raise error when no provider satisfies capability."""
+    registry.register(MockProvider, "mock")
+
+    # MockProvider only provides "auth", not "broker"
+    with pytest.raises(CapabilityNotFoundError, match="No provider found"):
+        await registry.get_providers([CapabilitySpec(name="broker")])  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_lazy_loading(registry: ProviderRegistry) -> None:
+    """Providers are lazy-loaded on first request."""
+    registry.register(MockProvider, "mock")
+
+    # No instances yet
+    assert len(registry._instances) == 0
+
+    # First request creates instance
+    providers = await registry.get_providers([CapabilitySpec(name="auth")])
+    assert len(providers) == 1
+    assert len(registry._instances) == 1
+
+    # Second request reuses instance
+    providers2 = await registry.get_providers([CapabilitySpec(name="auth")])
+    assert providers[0] is providers2[0]  # Same instance
+
+
+@pytest.mark.asyncio
+async def test_get_provider_by_name(registry: ProviderRegistry) -> None:
+    """Get specific provider by name."""
+    registry.register(MockProvider, "mock")
+
+    provider = await registry.get_provider("mock")
+
+    assert isinstance(provider, MockProvider)
+
+
+@pytest.mark.asyncio
+async def test_get_provider_not_found(registry: ProviderRegistry) -> None:
+    """Raise error when provider not registered."""
+    with pytest.raises(ProviderNotFoundError, match="not registered"):
+        await registry.get_provider("nonexistent")
+
+
+def test_clear_registry(registry: ProviderRegistry) -> None:
+    """Clear all registered providers."""
+    registry.register(MockProvider, "mock")
+    assert len(registry.list_providers()) == 1
+
+    registry.clear()
+    assert len(registry.list_providers()) == 0
+
+
+@pytest.mark.asyncio
+async def test_deduplication(registry: ProviderRegistry) -> None:
+    """Same provider not instantiated multiple times for different capabilities."""
+    registry.register(MockProvider, "mock")
+
+    # Request same provider via same capability multiple times
+    providers = await registry.get_providers(
+        [CapabilitySpec(name="auth"), CapabilitySpec(name="auth")]
+    )
+
+    # Should only have one instance (deduplicated)
+    assert len(providers) == 1

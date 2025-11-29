@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Generic, TypeVar
+from typing import Any, Awaitable, Callable, Generic, TypeVar
 
 from pydantic import BaseModel
 
@@ -16,6 +16,12 @@ _TData = TypeVar("_TData", bound=BaseModel)
 
 # TODO : implement secure route that encapsulates authentication/authorization per client
 # TODO : implement server side subscription cancelation
+
+
+async def unset_broadcast_update(route: str, _: SubscriptionUpdate) -> None:
+    raise NotImplementedError(f"Broadcast update function not set for route {route}.")
+
+
 class WsRouter(WsRouteInterface, Generic[_TRequest, _TData]):
     def __init__(self, service: WsRouteService, *args: Any, **kwargs: Any) -> None:
         # Validate service implements WsRouteService protocol BEFORE initialization
@@ -33,6 +39,9 @@ class WsRouter(WsRouteInterface, Generic[_TRequest, _TData]):
         super().__init__(*args, **kwargs)
         self.service = service
         self.topic_trackers: dict[str, int] = {}
+        self.broadcast_update: Callable[
+            [str, SubscriptionUpdate], Awaitable[None]
+        ] = unset_broadcast_update
 
         @self.recv("update")  # type: ignore[misc]
         def update(
@@ -52,12 +61,13 @@ class WsRouter(WsRouteInterface, Generic[_TRequest, _TData]):
 
             if topic not in self.topic_trackers:
                 # nested function to avoid binding issue in closure
-                def topic_update(data: _TData) -> None:
-                    self.updates_queue.put_nowait(
+                async def topic_update(data: _TData) -> None:
+                    await self.broadcast_update(
+                        self.route,
                         SubscriptionUpdate(
                             topic=topic,
                             payload=data,
-                        )
+                        ),
                     )
 
                 await self.service.create_topic(topic, topic_update)

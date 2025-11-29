@@ -10,7 +10,7 @@ Tests the complete authentication flow including:
 """
 
 import time
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -46,9 +46,10 @@ async def test_login_refresh_logout_flow(async_client_no_auth: AsyncClient) -> N
     }
 
     with patch(
-        "trading_api.modules.auth.service.AuthService.verify_google_id_token"
+        "trading_api.providers.google.GoogleProvider.verify_token",
+        new_callable=AsyncMock,
     ) as mock_verify:
-        # Mock the verification method to return claims
+        # Mock the provider's verification method to return claims
         mock_verify.return_value = mock_google_claims
 
         # Step 1: Login with Google ID token
@@ -138,9 +139,10 @@ async def test_concurrent_refresh_requests(async_client_no_auth: AsyncClient) ->
     }
 
     with patch(
-        "trading_api.modules.auth.service.AuthService.verify_google_id_token"
+        "trading_api.providers.google.GoogleProvider.verify_token",
+        new_callable=AsyncMock,
     ) as mock_verify:
-        # Mock the verification method to return claims
+        # Mock the provider's verification method to return claims
         mock_verify.return_value = mock_google_claims
 
         # Login to get refresh token
@@ -208,9 +210,10 @@ async def test_device_fingerprint_mismatch(async_client_no_auth: AsyncClient) ->
     }
 
     with patch(
-        "trading_api.modules.auth.service.AuthService.verify_google_id_token"
+        "trading_api.providers.google.GoogleProvider.verify_token",
+        new_callable=AsyncMock,
     ) as mock_verify:
-        # Mock the verification method to return claims
+        # Mock the provider's verification method to return claims
         mock_verify.return_value = mock_google_claims
 
         # Login with original device fingerprint (default headers)
@@ -257,9 +260,10 @@ async def test_token_tampering_detection(async_client_no_auth: AsyncClient) -> N
     }
 
     with patch(
-        "trading_api.modules.auth.service.AuthService.verify_google_id_token"
+        "trading_api.providers.google.GoogleProvider.verify_token",
+        new_callable=AsyncMock,
     ) as mock_verify:
-        # Mock the verification method to return claims
+        # Mock the provider's verification method to return claims
         mock_verify.return_value = mock_google_claims
 
         # Login to get access token

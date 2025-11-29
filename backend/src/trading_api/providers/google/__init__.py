@@ -1,0 +1,79 @@
+"""Google OAuth authentication provider."""
+
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+from trading_api.models.common import AuthenticationError, CapabilitySpec
+from trading_api.models.providers.google_oauth_configs import GoogleProviderConfig
+from trading_api.providers.base import Provider
+from trading_api.providers.capabilities.auth import AuthCapability
+
+
+class GoogleProvider(Provider, AuthCapability):
+    """Google OAuth authentication provider.
+
+    Implements AuthCapability using Google's tokeninfo endpoint.
+    """
+
+    def __init__(self, config: GoogleProviderConfig | None = None) -> None:
+        """Initialize Google provider.
+
+        Args:
+            config: Optional config for testing (None = load from env)
+        """
+        # BaseSettings auto-loads from environment when instantiated without args
+        self._config = (
+            config
+            or GoogleProviderConfig()  # type: ignore[call-arg, unused-ignore] # pyright: ignore[reportCallIssue]
+        )
+
+    @classmethod
+    def provider_dir(cls) -> Path:
+        """Return provider directory."""
+        return Path(__file__).parent
+
+    @property
+    def name(self) -> str:
+        """Provider name."""
+        return "google"
+
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        """Capabilities provided."""
+        return [CapabilitySpec(name="auth")]
+
+    @property
+    def config(self) -> GoogleProviderConfig:  # type: ignore[override]
+        """Provider configuration."""
+        return self._config
+
+    async def verify_token(self, token: str) -> dict[str, Any]:
+        """Verify Google ID token.
+
+        [SECURITY]: Validates audience and email verification.
+        """
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://www.googleapis.com/oauth2/v3/tokeninfo",
+                params={"id_token": token},
+            )
+
+            if resp.status_code != 200:
+                raise AuthenticationError(f"Invalid Google token: {resp.text}")
+
+            claims: dict[str, Any] = resp.json()
+
+            # Validate audience
+            if claims.get("aud") != self.config.client_id:
+                raise AuthenticationError("Invalid token audience")
+
+            # Validate email verified
+            if claims.get("email_verified") not in (True, "true"):
+                raise AuthenticationError("Email not verified")
+
+            return claims
+
+
+__all__ = ["GoogleProvider", "GoogleProviderConfig"]

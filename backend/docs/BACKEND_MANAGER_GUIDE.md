@@ -70,14 +70,16 @@ servers:
     port: 8001
     instances: 1
     modules:
-      - broker
+      - broker # Loads all versions
+      # - broker:v1 # Optionally load specific version only
     reload: true # Enable uvicorn auto-reload
 
   datafeed:
     port: 8002
     instances: 1
     modules:
-      - datafeed
+      - datafeed # Loads all versions
+      # - datafeed:v2 # Optionally load specific version only
     reload: true
 
 # WebSocket routing
@@ -98,8 +100,27 @@ websocket_routes:
 - `servers.{name}.port`: Starting port for server instances
 - `servers.{name}.instances`: Number of uvicorn processes (for load balancing)
 - `servers.{name}.modules`: List of modules to load (core auto-included)
+  - Format: `module_name` (all versions) or `module_name:version` (specific version)
+  - Examples: `broker` (all versions), `broker:v1` (v1 only)
 - `servers.{name}.reload`: Enable uvicorn auto-reload for development
 - `websocket.routing_strategy`: `"path"` for `/api/v1/{module}/ws` or `"query_param"` for `/api/v1/ws?type={route}`
+
+### Environment Variables
+
+The `ENABLED_MODULES` environment variable can override or filter the modules list from the configuration file:
+
+```bash
+# Load specific versions only
+ENABLED_MODULES=broker:v1,datafeed:v2 make backend-manager-start
+
+# Load all versions of specific modules
+ENABLED_MODULES=broker,datafeed make backend-manager-start
+
+# Mix of specific and all versions
+ENABLED_MODULES=broker:v1,datafeed make backend-manager-start
+```
+
+**Note**: When `ENABLED_MODULES` is set, it takes precedence over the config file's `modules` lists.
 
 ---
 

@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -15,9 +15,19 @@ from trading_api.shared.config import settings
 
 
 @pytest.fixture
-def auth_service() -> AuthService:
-    """Fixture providing auth service"""
-    return AuthService(module_dir=Path(__file__).parent.parent)
+async def auth_service() -> AuthService:
+    """Fixture providing auth service with provider injection"""
+    from trading_api.models.providers.google_oauth_configs import GoogleProviderConfig
+    from trading_api.providers.google import GoogleProvider
+
+    # Create Google provider with test config
+    google_config = GoogleProviderConfig(client_id=settings.GOOGLE_CLIENT_ID)
+    google_provider = GoogleProvider(config=google_config)
+
+    # Create auth service with provider
+    return AuthService(
+        module_dir=Path(__file__).parent.parent, providers=[google_provider]
+    )
 
 
 @pytest.fixture
@@ -43,15 +53,10 @@ class TestAuthServiceGoogleTokenVerification:
     async def test_verify_valid_google_token(
         self, auth_service: AuthService, mock_google_claims: dict[str, Any]
     ) -> None:
-        """Test verifying valid Google ID token"""
-        with patch("trading_api.modules.auth.service.httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                return_value=mock_response
-            )
-
+        """Test verifying valid Google ID token (uses provider pattern)"""
+        with patch.object(
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
+        ):
             claims = await auth_service.verify_google_id_token("valid_id_token")
 
             assert claims["sub"] == "google-user-123"
@@ -61,14 +66,13 @@ class TestAuthServiceGoogleTokenVerification:
     @pytest.mark.asyncio
     async def test_verify_invalid_google_token(self, auth_service: AuthService) -> None:
         """Test verifying invalid Google ID token raises HTTPException"""
-        with patch("trading_api.modules.auth.service.httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 400
-            mock_response.text = "Invalid token"
-            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                return_value=mock_response
-            )
+        from trading_api.models.common import AuthenticationError
 
+        with patch.object(
+            auth_service.auth_provider,
+            "verify_token",
+            side_effect=AuthenticationError("Invalid Google token"),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await auth_service.verify_google_id_token("invalid_token")
 
@@ -79,15 +83,13 @@ class TestAuthServiceGoogleTokenVerification:
         self, auth_service: AuthService, mock_google_claims: dict[str, Any]
     ) -> None:
         """Test that unverified email is rejected"""
-        with patch("trading_api.modules.auth.service.httpx.AsyncClient") as mock_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            unverified_claims = {**mock_google_claims, "email_verified": False}
-            mock_response.json.return_value = unverified_claims
-            mock_client.return_value.__aenter__.return_value.get = AsyncMock(
-                return_value=mock_response
-            )
+        from trading_api.models.common import AuthenticationError
 
+        with patch.object(
+            auth_service.auth_provider,
+            "verify_token",
+            side_effect=AuthenticationError("Email not verified"),
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await auth_service.verify_google_id_token("token_with_unverified_email")
 
@@ -108,7 +110,7 @@ class TestAuthServiceAuthentication:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -140,7 +142,7 @@ class TestAuthServiceAuthentication:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -162,7 +164,7 @@ class TestAuthServiceAuthentication:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -190,7 +192,7 @@ class TestAuthServiceAuthentication:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -213,7 +215,7 @@ class TestAuthServiceTokenRefresh:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             initial_response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -252,7 +254,7 @@ class TestAuthServiceTokenRefresh:
         device_info2 = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             initial_response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info1
@@ -273,7 +275,7 @@ class TestAuthServiceTokenRefresh:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             initial_response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -302,7 +304,7 @@ class TestAuthServiceLogout:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -334,7 +336,7 @@ class TestAuthServiceTokenExpiration:
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
-            auth_service, "verify_google_id_token", return_value=mock_google_claims
+            auth_service.auth_provider, "verify_token", return_value=mock_google_claims
         ):
             response = await auth_service.authenticate_google_user(
                 "valid_id_token", device_info
@@ -351,5 +353,7 @@ class TestAuthServiceTokenExpiration:
         exp_time = datetime.fromtimestamp(decoded["exp"], tz=timezone.utc)
         now = datetime.now(timezone.utc)
         time_diff = (exp_time - now).total_seconds()
+
+        assert 290 <= time_diff <= 310
 
         assert 290 <= time_diff <= 310

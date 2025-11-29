@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from pydantic import BaseModel
 
@@ -35,7 +35,9 @@ def buildTopicParams(obj: Any) -> str:
 
 
 class WsRouteService(ServiceInterface):
-    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+    async def create_topic(
+        self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
+    ) -> None:
         ...
 
     def remove_topic(self, topic: str) -> None:
