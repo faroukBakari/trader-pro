@@ -129,6 +129,7 @@ export class WebSocketBase {
 
           this.ws.onopen = () => {
             this.logger.log('WS Connected')
+            this.ws!.binaryType = 'arraybuffer'
 
             this.ws!.onmessage = (event) => {
               this.handleMessage(event)
@@ -188,7 +189,11 @@ export class WebSocketBase {
 
   private handleMessage(event: MessageEvent): void {
     try {
-      const message: WebSocketMessage = JSON.parse(event.data)
+      // Handle both text and binary (ArrayBuffer) messages
+      const text = typeof event.data === 'string'
+        ? event.data
+        : new TextDecoder().decode(event.data as ArrayBuffer)
+      const message: WebSocketMessage = JSON.parse(text)
       const { type, payload } = message
 
       if (type.endsWith('.update')) {

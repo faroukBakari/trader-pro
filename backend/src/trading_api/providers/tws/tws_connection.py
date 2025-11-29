@@ -390,7 +390,7 @@ class IBSocket:
             with self._lock:
                 self._socket.close()
                 self._state = IBSocketState.CLOSED
-                logger.info("IBSocket Socket closed.")
+                # logger.info("IBSocket Socket closed.")
         except Exception as e:
             logger.error(f"Error while closing IBSocket: {e}")
 

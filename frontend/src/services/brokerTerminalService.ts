@@ -951,7 +951,16 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async formatter(symbol: string, alignToMinMove: boolean): Promise<INumberFormatter> {
-    return this._hostAdapter.defaultFormatter(symbol, alignToMinMove)
+    try {
+      const timeoutMs = 5000;
+      return await Promise.race([
+        this._hostAdapter.defaultFormatter(symbol, alignToMinMove),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
+      ]);
+    } catch (error) {
+      console.warn(`[BrokerTerminalService] defaultFormatter failed for ${symbol}, using fallback`, error);
+      return this._hostAdapter.numericFormatter(2);
+    }
   }
 
   currentAccount(): AccountId {

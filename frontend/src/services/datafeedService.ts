@@ -369,6 +369,11 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
 
   debug_datafeed: boolean = false
 
+  private pendingRequests = new Map<string, {
+    promise: Promise<unknown>
+    nextCall: (() => Promise<unknown>) | null
+  }>()
+
   constructor(datafeedMocker?: DatafeedMock) {
     this.apiAdapter = new ApiAdapter()
     this.wsAdapter = new WsAdapter()
@@ -377,6 +382,38 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       this.apiFallback = new ApiFallback(datafeedMocker)
       this.wsFallback = new WsFallback(datafeedMocker)
     }
+  }
+
+  private async coalesce<T>(key: string, currentCall: () => Promise<T>): Promise<T> {
+    const pending = this.pendingRequests.get(key)
+
+    if (pending) {
+      // Request in-flight: queue this as the next call (overwrites previous next)
+      pending.nextCall = currentCall
+      return pending.promise as Promise<T>
+    }
+
+    // No pending request: execute immediately
+    const execute = async (call: () => Promise<unknown>): Promise<T> => {
+      const result = await call()
+
+      // Check if a next call was queued while we were executing
+      const current = this.pendingRequests.get(key)
+      if (current?.nextCall) {
+        const nextCall = current.nextCall
+        current.nextCall = null  // Clear before executing
+        current.promise = execute(nextCall)  // Chain the next call (reuse execute for recursion)
+        return current.promise as Promise<T>
+      }
+
+      // No queued call: cleanup
+      this.pendingRequests.delete(key)
+      return result as Promise<T>
+    }
+
+    const promise = execute(currentCall)
+    this.pendingRequests.set(key, { promise, nextCall: null })
+    return promise
   }
 
   _getWsAdapter(): WsAdapterType | Partial<WsAdapterType> {
@@ -400,7 +437,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     symbolType: string,
     onResult: SearchSymbolsCallback,
   ): void {
-    this._getApiAdapter().searchSymbols(userInput, exchange, symbolType, 30).then((response) => {
+    this.coalesce(`searchSymbols`, () =>
+      this._getApiAdapter().searchSymbols(userInput, exchange, symbolType, 30)
+    ).then((response) => {
       if (this.debug_datafeed) console.log(
         `[Datafeed] searchSymbols found ${response.data.length} symbols for input "${userInput}"`,
       )
@@ -412,7 +451,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onResolve: ResolveCallback,
     onError: DatafeedErrorCallback,
   ): void {
-    this._getApiAdapter().resolveSymbol(symbolName).then((response) => {
+    this.coalesce(`resolveSymbol`, () =>
+      this._getApiAdapter().resolveSymbol(symbolName)
+    ).then((response) => {
       if (this.debug_datafeed) console.log(
         `[Datafeed] resolveSymbol found ${response.data ? 'a' : 'no'} symbol for input "${symbolName}"`,
       )
@@ -482,8 +523,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onDataCallback: QuotesCallback,
     onErrorCallback: QuotesErrorCallback,
   ): void {
-    this._getApiAdapter()
-      .getQuotes({ symbols })
+    this.coalesce(`getQuotes`, () =>
+      this._getApiAdapter()
+        .getQuotes({ symbols }))
       .then((response) => {
         if (this.debug_datafeed) console.debug(
           `[Datafeed] getQuotes returned ${response.data.length} quotes for ${symbols.length} requested symbols`,

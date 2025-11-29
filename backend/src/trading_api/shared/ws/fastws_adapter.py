@@ -5,7 +5,7 @@ Generic FastWS adapter with built-in WebSocket endpoint
 import asyncio
 import logging
 
-from external_packages.fastws import FastWS, Message, OperationRouter
+from external_packages.fastws import FastWS, OperationRouter
 from trading_api.models.common import SubscriptionUpdate
 from trading_api.shared.ws.ws_route_interface import WsRouteInterface
 
@@ -41,23 +41,22 @@ class FastWSAdapter(FastWS):
         setattr(router, "broadcast_update", self.broadcast_update)
 
     async def broadcast_update(self, route: str, update: SubscriptionUpdate) -> None:
-        topics = set().union(*[client.topics for client in self.connections.values()])
+        topic = update.topic
+        clients = [
+            client for client in self.connections.values() if topic in client.topics
+        ]
 
-        if not topics:
-            logger.info("No topic subscriptions found, continuing")
-            await asyncio.sleep(1)
-            return
-
-        if update.topic not in topics:
+        if not clients:
             logger.info(f"No clients subscribed to topic: {update.topic}")
             await asyncio.sleep(1)
             return
 
         try:
-            await self.server_send(
-                Message(type=f"{route}.update", payload=update.model_dump()),
-                topic=update.topic,
-            )
+            # Build message with pre-serialized payload to avoid model_dump overhead
+            # update.model_dump_json() uses orjson internally when configured
+            msg = f'{{"type":"{route}.update","payload":{update.model_dump_json()}}}'
+
+            await asyncio.gather(*(client.ws.send_text(msg) for client in clients))
 
             logger.info(f"Broadcasted message from router: {update.topic}: {update}")
         except Exception as e:
