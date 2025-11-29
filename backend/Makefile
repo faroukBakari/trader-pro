@@ -290,7 +290,10 @@ install:
 		poetry install; \
 	fi
 	@echo ""
-	@echo "[3/3] Checking nginx (required for multi-process mode)..."
+	@echo "[3/4] Regenerating TWS protobufs..."
+	@bash ./scripts/regenerate_tws_protobufs.sh
+	@echo ""
+	@echo "[4/4] Checking nginx (required for multi-process mode)..."
 	@if [ -f ".local/bin/nginx" ]; then \
 		echo "✅ Local nginx available: $$(.local/bin/nginx -v 2>&1)"; \
 	elif command -v nginx >/dev/null 2>&1; then \
@@ -379,6 +382,9 @@ install-ci:
 	@echo ""
 	@echo "Installing dependencies..."
 	@poetry install --no-interaction
+	@echo ""
+	@echo "Regenerating TWS protobufs..."
+	@bash ./scripts/regenerate_tws_protobufs.sh
 	@echo "✅ CI installation complete!"
 
 test-boundaries: check-generate-keypair
