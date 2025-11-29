@@ -39,8 +39,10 @@ jobs:
       id: cached-poetry-dependencies
       uses: actions/cache@v3
       with:
-        path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+        path: |
+          backend/.venv
+          backend/external_packages/tws/source/pythonclient/ibapi/protobuf
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
 
     - name: Install backend dependencies
       if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
@@ -90,8 +92,10 @@ jobs:
     - name: Restore cached venv
       uses: actions/cache@v3
       with:
-        path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+        path: |
+          backend/.venv
+          backend/external_packages/tws/source/pythonclient/ibapi/protobuf
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
         fail-on-cache-miss: false
 
     - name: Generate JWT key pair for tests
@@ -129,8 +133,10 @@ jobs:
     - name: Restore cached venv
       uses: actions/cache@v3
       with:
-        path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+        path: |
+          backend/.venv
+          backend/external_packages/tws/source/pythonclient/ibapi/protobuf
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
         fail-on-cache-miss: false
 
     - name: Generate JWT key pair for tests
@@ -170,8 +176,10 @@ jobs:
     - name: Restore cached venv
       uses: actions/cache@v3
       with:
-        path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+        path: |
+          backend/.venv
+          backend/external_packages/tws/source/pythonclient/ibapi/protobuf
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
         fail-on-cache-miss: false
 
     - name: Generate JWT key pair for tests
@@ -209,8 +217,10 @@ jobs:
     - name: Restore cached venv
       uses: actions/cache@v3
       with:
-        path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+        path: |
+          backend/.venv
+          backend/external_packages/tws/source/pythonclient/ibapi/protobuf
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
         fail-on-cache-miss: false
 
     - name: Generate JWT key pair for tests
@@ -388,8 +398,10 @@ jobs:
     - name: Restore cached venv
       uses: actions/cache@v3
       with:
-        path: backend/.venv
-        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v2
+        path: |
+          backend/.venv
+          backend/external_packages/tws/source/pythonclient/ibapi/protobuf
+        key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
         fail-on-cache-miss: false
 
     - name: Generate all specs and clients
