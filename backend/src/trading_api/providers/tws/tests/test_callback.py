@@ -618,7 +618,9 @@ class TestRealtimeBarCallback:
             count=50,
         )
 
-        # Callback is called synchronously
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
+
         assert len(received_data) == 1
         bar_data = received_data[0]
 
@@ -670,6 +672,9 @@ class TestRealtimeBarCallback:
                 wap=Decimal("150.0"),
                 count=10 * (i + 1),
             )
+
+        # Allow event loop to process call_soon_threadsafe
+        await asyncio.sleep(0.01)
 
         # Should have 3 bars received
         assert len(received_data) == 3

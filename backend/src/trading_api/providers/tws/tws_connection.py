@@ -756,6 +756,8 @@ class TWSCallback(EWrapper):
                     loop=loop,
                 )
             )
+        else:
+            logger.warning(f"No subscription queue for realtime bar reqId {reqId}")
 
     # === error handling ===
 
