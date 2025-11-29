@@ -119,43 +119,31 @@ class Module(ABC):
     Abstract base class defining the interface for pluggable modules.
     """
 
-    def __init__(self, versions: list[str] | None = None) -> None:
-        self._enabled: bool = False
+    @classmethod
+    @abstractmethod
+    def module_dir(cls) -> Path:
+        """Return the directory path for this module.
 
-        # Auto-discover available versions if not specified
-        if versions is None:
-            versions = self._discover_versions()
+        Returns:
+            Path: Module directory path
+        """
+        ...
 
-        self._versions = versions
-
-        # Import shared service (version-agnostic)
-        self._service = self._import_service()
-
-        # Import version-specific API and WS routers
-        # Structure: {"v1": [router1, router2], "v2": [router1, router2]}
-        self._api_routers: dict[str, APIRouterInterface] = {}
-        self._ws_routers: dict[str, WsRouterInterface] = {}
-
-        for version in versions:
-            self._api_routers[version] = self._import_api_routers_for_version(version)
-            ws_router = self._import_ws_routers_for_version(version)
-            if ws_router is not None:
-                self._ws_routers[version] = ws_router
-
-    def _discover_versions(self) -> list[str]:
+    @classmethod
+    def _discover_versions(cls) -> list[str]:
         """Auto-discover available versions from api/ and ws/ directories."""
 
         versions: set[str] = set()
 
         # Check api/ directory
-        api_router = self.module_dir / "api"
+        api_router = cls.module_dir() / "api"
         if api_router.exists():
             versions.update(
                 d.stem for d in api_router.iterdir() if d.stem.startswith("v")
             )
 
         # Check ws/ directory
-        ws_dir = self.module_dir / "ws"
+        ws_dir = cls.module_dir() / "ws"
         if ws_dir.exists():
             ws_versions = {
                 d.stem
@@ -166,27 +154,29 @@ class Module(ABC):
             versions |= ws_versions
 
         if not versions:
-            raise ValueError(f"No versions found for module {self.name}")
+            raise ValueError(f"No versions found for module {cls.module_dir().name}")
 
         return sorted(versions)  # ["v1", "v2", ...]
 
-    def _get_import_path(self, name: str | list[str]) -> str:
+    @classmethod
+    def _get_import_path(cls, name: str | list[str]) -> str:
         """Get the import path for this module."""
         if isinstance(name, list):
             name = ".".join(name)
         return (
-            str(self.module_dir)
+            str(cls.module_dir())
             .replace(str(Path.cwd() / "src"), "")
             .lstrip("/")
             .replace("/", ".")
             + f".{name}"
         )
 
-    def _import_service(self) -> ServiceInterface:
+    @classmethod
+    def _service_class(cls) -> Type[ServiceInterface]:
         """Import version-agnostic service."""
         try:
             service_module = importlib.import_module(
-                self._get_import_path("service"), package=__package__
+                cls._get_import_path("service"), package=__package__
             )
             # Get first exported class from module (convention: single service class)
             for attr_name in dir(service_module):
@@ -199,12 +189,14 @@ class Module(ABC):
                     and attr.__module__ == service_module.__name__
                 ):
                     service_class: Type[ServiceInterface] = attr
-                    return service_class(self.module_dir)
+                    return service_class
 
-            raise ValueError(f"No service class found in {self.name}.service module")
+            raise ValueError(
+                f"No service class found in {cls.module_dir().name}.service module"
+            )
 
         except ImportError as e:
-            raise ValueError(f"Unable to load service for {self.name}: {e}")
+            raise ValueError(f"Unable to load service for {cls.module_dir().name}: {e}")
 
     def _import_api_routers_for_version(self, version: str) -> APIRouterInterface:
         """Import API routers for a specific version."""
@@ -264,33 +256,40 @@ class Module(ABC):
             # WebSocket support is optional
             return None
 
-    @property
-    def api_routers(self) -> dict[str, APIRouterInterface]:
-        """API routers organized by version."""
-        return self._api_routers
+    def __init__(
+        self,
+        *,  # Force keyword-only arguments
+        versions: list[str] | None = None,
+        providers: list[Any] | None = None,
+    ) -> None:
+        """Initialize module.
 
-    @property
-    def ws_routers(self) -> dict[str, WsRouterInterface]:
-        """WebSocket routers organized by version."""
-        return self._ws_routers
+        Args:
+            versions: API versions to load (None = all discovered versions)
+            providers: Provider instances for capabilities (None = no providers)
 
-    @property
-    def versions(self) -> list[str]:
-        """Available versions for this module."""
-        return self._versions
-
-    def enable(self) -> None:
-        """Enable the module for loading."""
-        self._enabled = True
-
-    @property
-    def enabled(self) -> bool:
-        """Check if the module is enabled.
-
-        Returns:
-            bool: True if the module is enabled, False otherwise
+        [BACKWARD-COMPATIBLE]: Keyword-only ensures existing code works.
         """
-        return self._enabled
+        # Auto-discover available versions if not specified
+        if versions is None:
+            versions = self._discover_versions()
+
+        self._versions = versions
+
+        # Import shared service (version-agnostic)
+        service_class = self._service_class()
+        self._service = service_class(self.module_dir(), providers=providers)
+
+        # Import version-specific API and WS routers
+        # Structure: {"v1": [router1, router2], "v2": [router1, router2]}
+        self._api_routers: dict[str, APIRouterInterface] = {}
+        self._ws_routers: dict[str, WsRouterInterface] = {}
+
+        for version in versions:
+            self._api_routers[version] = self._import_api_routers_for_version(version)
+            ws_router = self._import_ws_routers_for_version(version)
+            if ws_router is not None:
+                self._ws_routers[version] = ws_router
 
     @property
     def name(self) -> str:
@@ -299,7 +298,22 @@ class Module(ABC):
         Returns:
             str: "broker"
         """
-        return self.module_dir.name
+        return self.module_dir().name
+
+    @property
+    @abstractmethod
+    def tags(self) -> list[dict[str, str]]:
+        """Get OpenAPI tags for this module.
+
+        Returns:
+            list[dict[str, str]]: List of OpenAPI tag dictionaries with 'name'
+        """
+        ...
+
+    @property
+    def versions(self) -> list[str]:
+        """Available versions for this module."""
+        return self._versions
 
     @property
     def service(self) -> ServiceInterface:
@@ -313,24 +327,14 @@ class Module(ABC):
         return self._service
 
     @property
-    @abstractmethod
-    def module_dir(self) -> Path:
-        """Return the directory path for this module.
-
-        Returns:
-            Path: Module directory path
-        """
-        ...
+    def api_routers(self) -> dict[str, APIRouterInterface]:
+        """API routers organized by version."""
+        return self._api_routers
 
     @property
-    @abstractmethod
-    def tags(self) -> list[dict[str, str]]:
-        """Get OpenAPI tags for this module.
-
-        Returns:
-            list[dict[str, str]]: List of OpenAPI tag dictionaries with 'name'
-        """
-        ...
+    def ws_routers(self) -> dict[str, WsRouterInterface]:
+        """WebSocket routers organized by version."""
+        return self._ws_routers
 
     def gen_specs_and_clients(
         self,
@@ -363,12 +367,11 @@ class Module(ABC):
 
         # Use module_dir if output_dir not provided
         if output_dir is None:
-            output_dir = self.module_dir
+            output_dir = self.module_dir()
 
         specs_dir = output_dir / "specs_generated"
         clients_dir = output_dir / "client_generated"
-        templates_dir = self.module_dir.parent.parent / "shared" / "templates"
-
+        templates_dir = self.module_dir().parent.parent / "shared" / "templates"
         # Clean existing files if requested
         if clean_first:
             if specs_dir.exists():
@@ -489,6 +492,11 @@ class Module(ABC):
                     f"⚠️  Failed to process AsyncAPI spec for '{self.name}': {e}"
                 )
 
+    def shutdown(self) -> None:
+        """Stop the module (placeholder for actual server shutdown)."""
+        logger.info(f"🛑 Stopping module '{self.name}'...")
+        self.service.shutdown()
+
 
 class ModuleApp:
     """Encapsulates FastAPI and FastWSAdapter apps for a module."""
@@ -585,11 +593,11 @@ class ModuleApp:
         moduleName: str = self.module.name
         # Use module_dir if output_dir not provided
         if output_dir is None:
-            output_dir = self.module.module_dir
+            output_dir = self.module.module_dir()
 
         specs_dir = output_dir / "specs_generated"
         clients_dir = output_dir / "client_generated"
-        templates_dir = self.module.module_dir.parent.parent / "shared" / "templates"
+        templates_dir = self.module.module_dir().parent.parent / "shared" / "templates"
 
         # Clean existing files if requested
         if clean_first:
@@ -718,3 +726,10 @@ class ModuleApp:
         for api_app, ws_app in self.versions.values():
             if ws_app is not None:
                 ws_app.setup(api_app)
+
+    def shutdown(self) -> None:
+        """Start the WebSocket app if available."""
+        for _, ws_app in self.versions.values():
+            if ws_app is not None:
+                ws_app.shutdown()
+        self.module.shutdown()

@@ -11,7 +11,7 @@ import time
 from collections.abc import Generator
 from http.cookies import SimpleCookie
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -22,10 +22,10 @@ from trading_api.app_factory import AppFactory, ModularApp
 
 
 @pytest.fixture
-def auth_app() -> ModularApp:
+async def auth_app() -> ModularApp:
     """Create app with only auth module enabled (function-scoped for test isolation)"""
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=["auth"])
+    return await factory.create_app(enabled_module_names=["auth"])
 
 
 @pytest.fixture
@@ -72,21 +72,11 @@ class TestLoginEndpoint:
         self, client: TestClient, mock_google_claims: dict[str, Any]
     ) -> None:
         """Test successful login with valid Google ID token"""
-        # Mock the httpx client used for Google token verification in the service module
+        # Mock the GoogleProvider's verify_token method
         with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
-            )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.return_value = mock_google_claims
 
             response = client.post(
                 "/api/v1/auth/login",
@@ -116,21 +106,15 @@ class TestLoginEndpoint:
 
     def test_login_with_invalid_google_token(self, client: TestClient) -> None:
         """Test login fails with invalid Google ID token"""
-        # Mock httpx to return 400 error
-        with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 400
-            mock_response.text = '{"error": "invalid_token"}'
+        # Mock GoogleProvider to raise authentication error
+        from trading_api.models.common import AuthenticationError
 
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
+        with patch(
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.side_effect = AuthenticationError(
+                'Invalid Google token: {"error": "invalid_token"}'
             )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
 
             response = client.post(
                 "/api/v1/auth/login",
@@ -144,23 +128,13 @@ class TestLoginEndpoint:
         self, client: TestClient, mock_google_claims: dict[str, Any]
     ) -> None:
         """Test login fails when Google email is not verified"""
-        mock_google_claims["email_verified"] = False
+        # Mock GoogleProvider to raise error for unverified email
+        from trading_api.models.common import AuthenticationError
 
-        # Mock httpx to return claims with unverified email
         with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
-            )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.side_effect = AuthenticationError("Email not verified")
 
             response = client.post(
                 "/api/v1/auth/login",
@@ -186,19 +160,9 @@ class TestRefreshTokenEndpoint:
         """Test token refresh with valid refresh token"""
         # First, login to get tokens
         with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
-            )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.return_value = mock_google_claims
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -250,19 +214,9 @@ class TestRefreshTokenEndpoint:
         """Test refresh fails after token is revoked (logout)"""
         # Login
         with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
-            )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.return_value = mock_google_claims
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -303,19 +257,9 @@ class TestLogoutEndpoint:
         """Test successful logout with valid refresh token"""
         # Login first
         with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
-            )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.return_value = mock_google_claims
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -365,19 +309,9 @@ class TestGetMeEndpoint:
         """Test getting current user info with valid JWT token"""
         # Login first
         with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
-            )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.return_value = mock_google_claims
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -460,19 +394,9 @@ class TestTokenRotation:
         """Test old refresh token cannot be reused after rotation"""
         # Login
         with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
-            )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.return_value = mock_google_claims
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -506,19 +430,9 @@ class TestAccessTokenStructure:
         """Test access token is a valid JWT with correct structure"""
         # Login
         with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
-            )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.return_value = mock_google_claims
 
             login_response = client.post(
                 "/api/v1/auth/login",
@@ -546,19 +460,9 @@ class TestAccessTokenStructure:
 
         # Login
         with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
-            )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.return_value = mock_google_claims
 
             before_login = datetime.now(timezone.utc)
             login_response = client.post(
@@ -589,19 +493,9 @@ class TestIntrospectEndpoint:
         """Test introspect returns valid status for valid token"""
         # First, login to get a valid token
         with patch(
-            "trading_api.modules.auth.service.httpx.AsyncClient"
-        ) as mock_async_client:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = mock_google_claims
-
-            mock_client_instance = MagicMock()
-            mock_client_instance.get = AsyncMock(return_value=mock_response)
-            mock_client_instance.__aenter__ = AsyncMock(
-                return_value=mock_client_instance
-            )
-            mock_client_instance.__aexit__ = AsyncMock(return_value=None)
-            mock_async_client.return_value = mock_client_instance
+            "trading_api.providers.google.GoogleProvider.verify_token"
+        ) as mock_verify:
+            mock_verify.return_value = mock_google_claims
 
             login_response = client.post(
                 "/api/v1/auth/login",

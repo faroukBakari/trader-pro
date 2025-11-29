@@ -1,6 +1,53 @@
+---
+document_type: documentation_index
+primary_purpose: discovery_and_navigation
+target_audience: ai_agents
+last_updated: 2025-11-27
+total_documents: 46
+coverage_areas:
+  [
+    architecture,
+    setup,
+    testing,
+    api,
+    websockets,
+    authentication,
+    tradingview,
+    tws_api,
+    devops,
+  ]
+---
+
 # Trader Pro - Documentation Guide
 
 Complete index of all project documentation with descriptions and reading paths.
+
+---
+
+## AI Agent Discovery Rules
+
+### When to Consult This Guide
+
+1. User asks about project structure → [Structure & Organization](#structure--organization)
+2. User mentions a technology/topic → [Quick Reference by Topic](#quick-reference-by-topic)
+3. User specifies their role → [Reading Paths by Role](#reading-paths-by-role)
+4. User asks "where is X documented" → Search [Quick Reference by Topic](#quick-reference-by-topic), then file listings
+5. User needs implementation guidance → [Document Dependencies](#document-dependencies) + relevant methodology
+
+### Document Loading Priority
+
+1. **Foundation (load first)**: `ARCHITECTURE.md`, `backend/docs/MODULAR_BACKEND_ARCHITECTURE.md`
+2. **Context (load for understanding)**: Topic-specific docs from [Quick Reference](#quick-reference-by-topic)
+3. **Implementation (load for work)**: Module/component READMEs, methodology docs
+4. **Reference (load as needed)**: API docs, testing guides, troubleshooting
+
+### Delegation Strategy
+
+- **Specific file questions**: Load 1-2 most relevant docs directly
+- **System/feature questions**: Load 3-5 related docs from topic index
+- **Getting started**: Load complete reading path for specified role
+- **Implementation tasks**: Load methodology + architecture + module docs in sequence
+- **Troubleshooting**: Load relevant architecture + CI-TROUBLESHOOTING.md
 
 ---
 
@@ -109,15 +156,16 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### backend/docs/ (Current Backend Documentation)
 
-| File                                             | Purpose                                            |
-| ------------------------------------------------ | -------------------------------------------------- |
-| **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture and module system     |
-| **backend/docs/MODULAR_VERSIONNING.md**          | Module-level API versioning strategy               |
-| **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx        |
-| **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules     |
-| **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation        |
-| **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide                  |
-| **backend/docs/BACKEND_TESTING.md**              | Backend testing strategy and overhead optimization |
+| File                                             | Purpose                                                                                                |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture, functional `ModuleRegistry.get_modules(...)` workflow, and module system |
+| **backend/docs/PROVIDER-SYSTEM.md**              | Provider/capability system developer guide                                                             |
+| **backend/docs/MODULAR_VERSIONNING.md**          | Module-level API versioning strategy                                                                   |
+| **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx                                                            |
+| **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules                                                         |
+| **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation                                                            |
+| **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide                                                                      |
+| **backend/docs/BACKEND_TESTING.md**              | Backend testing strategy and overhead optimization                                                     |
 
 > **Note**: Historical documentation from previous refactors has been cleaned up. All current backend documentation listed above is accurate and actively maintained.
 
@@ -126,6 +174,30 @@ When updating documentation for large-scale changes, follow this three-phase app
 | File                                           | Purpose                      |
 | ---------------------------------------------- | ---------------------------- |
 | **backend/external_packages/fastws/README.md** | FastWS package documentation |
+
+### backend/src/trading_api/providers/tws/ (TWS Provider Implementation)
+
+| File                                                | Purpose                                                                                                                                              |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **backend/src/trading_api/providers/tws/README.md** | ⭐ **TWS Datafeed Provider implementation guide** - Three-layer architecture (TWSProvider → TWSClient → IBSocket), threading model, testing patterns |
+
+### backend/external_packages/tws/docs/ (TWS API Documentation)
+
+Complete offline documentation for Interactive Brokers TWS API for Python.
+
+| File                                                                        | Purpose                                                                                                     |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| **backend/external_packages/tws/docs/README.md**                            | ⭐ **TWS API documentation index (start here)** - Complete navigation, quick start, learning paths          |
+| **backend/external_packages/tws/docs/01-API-REFERENCE-CLASSES.md**          | Core API classes: `EClient` (50+ methods), `EWrapper` (70+ callbacks), `Contract`, `ContractDetails`, `Bar` |
+| **backend/external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md** | Order & contract classes: `Order` (100+ parameters), `Execution`, `OrderState`, `ScannerSubscription`       |
+| **backend/external_packages/tws/docs/03-API-REFERENCE-EXECUTIONS.md**       | Trade data: `CommissionAndFeesReport`, `Liquidity`, Historical ticks, Tick attributes                       |
+| **backend/external_packages/tws/docs/04-API-REFERENCE-CONDITIONS.md**       | Order conditions: Price, Time, Margin, Execution, Volume, PercentChange (with examples)                     |
+| **backend/external_packages/tws/docs/05-API-REFERENCE-DATA-TYPES.md**       | Helper classes: Market depth, News providers, Price increments, Smart components                            |
+| **backend/external_packages/tws/docs/06-SETUP-GUIDE.md**                    | Installation, TWS/Gateway configuration, Python setup, verification, troubleshooting                        |
+| **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md**             | Connection patterns, threading models, error handling, auto-reconnect strategies                            |
+| **backend/external_packages/tws/docs/TWS-GENERIC-TICK-LIST.md**             | Complete `genericTickList` reference: tick types (100-623), `mdoff` prefix, news sources (BZ, FLY, DJNL)    |
+
+> **Note**: TWS API documentation created November 19, 2025 from [TWS API Campus](https://ibkrcampus.com/campus/ibkr-api-page/) for complete offline development capability. Additional guides (market data, order management, account/portfolio) coming soon.
 
 ---
 
@@ -217,16 +289,19 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### Backend Developers
 
-1. **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** - Modular architecture and module system
+1. **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** - Modular architecture, functional `ModuleRegistry.get_modules(...)` lifecycle, and module system
 2. **backend/docs/MODULAR_VERSIONNING.md** - Module-level API versioning strategy
-3. **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process deployment with nginx
-4. **backend/docs/BACKEND_WEBSOCKETS.md** - FastWS integration and creating WebSocket modules
-5. **backend/docs/SPECS_AND_CLIENT_GEN.md** - Spec and client generation flow
-6. **docs/methodologies/API-METHODOLOGY.md** - TDD implementation workflow
-7. **docs/methodologies/WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
-8. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
-9. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
-10. **docs/TESTING.md** - General testing strategies
+3. **backend/docs/PROVIDER-SYSTEM.md** - Provider/capability system for external integrations
+4. **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process deployment with nginx
+5. **backend/docs/BACKEND_WEBSOCKETS.md** - FastWS integration and creating WebSocket modules
+6. **backend/docs/SPECS_AND_CLIENT_GEN.md** - Spec and client generation flow
+7. **docs/methodologies/API-METHODOLOGY.md** - TDD implementation workflow
+8. **docs/methodologies/WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
+9. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
+10. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
+11. **docs/TESTING.md** - General testing strategies
+12. **backend/src/trading_api/providers/tws/README.md** - TWS Datafeed Provider implementation guide
+13. **backend/external_packages/tws/docs/README.md** - TWS API documentation (for broker integration)
 
 ### Frontend Developers
 
@@ -257,81 +332,204 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ---
 
+## Query Pattern Mapping
+
+| User Query Pattern             | Relevant Documents                                                                 | Load Order            |
+| ------------------------------ | ---------------------------------------------------------------------------------- | --------------------- |
+| "How do I set up..."           | `GETTING-STARTED.md` → `DEVELOPMENT.md`                                            | Sequential            |
+| "How does [feature] work"      | `ARCHITECTURE.md` → topic-specific docs                                            | Architecture first    |
+| "Implement [backend feature]"  | `MODULAR_BACKEND_ARCHITECTURE.md` → `API-METHODOLOGY.md` → module docs             | Sequential            |
+| "Implement [frontend feature]" | `frontend/README.md` → component docs                                              | Sequential            |
+| "WebSocket [anything]"         | `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `WEBSOCKET-METHODOLOGY.md` | All three             |
+| "Authentication/auth/login"    | `AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`             | Auth doc first        |
+| "Testing [component]"          | `TESTING.md` → component-specific testing docs                                     | General first         |
+| "Error/CI/build issue"         | `CI-TROUBLESHOOTING.md` + relevant architecture docs                               | Troubleshooting first |
+| "TWS API/broker integration"   | `providers/tws/README.md` → `tws/docs/README.md` → specific API docs               | Provider then API     |
+| "TradingView [anything]"       | `BROKER-INTEGRATION.md` → `tradingview/` docs                                      | Integration first     |
+| "Client generation"            | `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`                                 | Backend then frontend |
+| "Module/versioning"            | `MODULAR_BACKEND_ARCHITECTURE.md` → `MODULAR_VERSIONNING.md`                       | Architecture first    |
+
+---
+
+## Document Dependencies
+
+### Core Foundation (load together)
+
+- `ARCHITECTURE.md` ← `backend/docs/MODULAR_BACKEND_ARCHITECTURE.md`
+- `ARCHITECTURE.md` ← `frontend/README.md`
+- `GETTING-STARTED.md` ← `DEVELOPMENT.md`
+
+### Feature Implementation Chains
+
+- **REST API Development**: `API-METHODOLOGY.md` → `MODULAR_BACKEND_ARCHITECTURE.md` → `SPECS_AND_CLIENT_GEN.md`
+- **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md`
+- **Authentication**: `AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
+- **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BROKER-CONNECTION-ADAPTER.md`
+- **TWS Provider Integration**: `PROVIDER-SYSTEM.md` → `providers/tws/README.md` → `tws/docs/README.md` → specific API reference docs
+- **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md` → `WS_ROUTERS_GEN.md`
+
+### Testing Chains
+
+- `TESTING.md` → `BACKEND_TESTING.md` (backend testing)
+- `TESTING.md` → `frontend/src/services/tests/README.md` (frontend testing)
+- `TESTING.md` → `smoke-tests/README.md` (E2E testing)
+
+### Deployment Chains
+
+- `FULLSTACK-DEV-MODE.md` → `BACKEND_MANAGER_GUIDE.md`
+- `MAKEFILE-GUIDE.md` → component-specific Makefiles
+
+---
+
 ## 🔍 Quick Reference by Topic
 
 ### Architecture & Design
 
-- **ARCHITECTURE.md** - System architecture
+**Keywords**: system design, component architecture, design patterns, module structure, provider system, broker integration, modular architecture
+
+**Scope**: System-level design, architectural patterns, module organization  
+**Out of Scope**: Implementation details, code examples
+
+- **ARCHITECTURE.md** - System architecture, technology stack, design patterns
   - Component architecture with detailed backend/frontend structure
-  - **Backend Models Architecture** - Topic-based organization principles (business concepts over technical layers)
+  - Backend Models Architecture: Topic-based organization principles
+- **backend/docs/PROVIDER-SYSTEM.md** - ⭐ Provider/capability system for pluggable integrations
+  - Keywords: integration patterns, capability system, service abstraction, external services
 - **docs/BROKER-ARCHITECTURE.md** - Broker service execution simulator architecture
+  - Keywords: order execution, trade simulation, broker proxy
 - **AUTHENTICATION.md** - JWT-based authentication with Google OAuth
-- **docs/methodologies/API-METHODOLOGY.md** - TDD methodology
-- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket architecture diagrams
+  - Keywords: JWT, OAuth, Google login, cookies, security, stateless auth
+- **docs/methodologies/API-METHODOLOGY.md** - TDD methodology for API development
+  - Keywords: test-driven development, API design, implementation workflow
+- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket architecture diagrams and patterns
+  - Keywords: real-time, client patterns, connection management
 
 ### Setup & Configuration
 
+**Keywords**: installation, environment setup, workspace configuration, git hooks, development environment
+
+**Scope**: Initial project setup, development environment configuration  
+**Out of Scope**: Production deployment, infrastructure provisioning
+
 - **docs/GETTING-STARTED.md** - Complete setup guide (workspace, hooks, environment)
-- **docs/DEVELOPMENT.md** - Development workflows
-- **docs/FULLSTACK-DEV-MODE.md** - Full-stack dev mode and watch system
+- **docs/DEVELOPMENT.md** - Development workflows and tooling
+- **docs/FULLSTACK-DEV-MODE.md** - Full-stack dev mode with auto-regeneration and watch system
 
 ### API & Client Generation
 
-- **backend/docs/SPECS_AND_CLIENT_GEN.md** - ⭐ **Complete generation guide (OpenAPI/AsyncAPI/Python clients)**
-- **docs/CLIENT-GENERATION.md** - Client auto-generation overview
+**Keywords**: OpenAPI, AsyncAPI, code generation, client generation, REST clients, WebSocket types, auto-generation
+
+**Scope**: Automated client and type generation from specs  
+**Out of Scope**: Manual API implementation, custom client code
+
+- **backend/docs/SPECS_AND_CLIENT_GEN.md** - ⭐ Complete generation guide (OpenAPI/AsyncAPI/Python clients)
+- **docs/CLIENT-GENERATION.md** - Client auto-generation overview and frontend integration
 - **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation guide
 - **frontend/src/clients_generated/** - Per-module generated clients (REST + WebSocket types)
 
 ### API Versioning
 
-- **backend/docs/MODULAR_VERSIONNING.md** - ⭐ **Module-level versioning (start here for independent module versions)**
+**Keywords**: versioning strategy, module versions, API versioning, independent versioning, semantic versioning
+
+**Scope**: Module-level API versioning strategy  
+**Out of Scope**: Database migrations, data versioning
+
+- **backend/docs/MODULAR_VERSIONNING.md** - ⭐ Module-level versioning (independent module versions)
 - **docs/methodologies/API-METHODOLOGY.md** - TDD methodology for API implementation
 
 ### WebSocket & Real-Time
 
-- **backend/docs/BACKEND_WEBSOCKETS.md** - ⭐ **FastWS integration guide (start here for WebSocket modules)**
+**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming
+
+**Scope**: WebSocket implementation (backend + frontend)  
+**Out of Scope**: HTTP polling, SSE, long-polling alternatives
+
+- **backend/docs/BACKEND_WEBSOCKETS.md** - ⭐ FastWS integration guide (WebSocket modules)
 - **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation details
-- **docs/WEBSOCKET-CLIENTS.md** - WebSocket overview
+- **docs/WEBSOCKET-CLIENTS.md** - WebSocket implementation overview
 - **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - Frontend WebSocket architecture patterns
 
 ### Testing
 
-- **docs/TESTING.md** - General testing strategies
+**Keywords**: testing strategy, unit tests, integration tests, E2E tests, test automation, Playwright, pytest, vitest
+
+**Scope**: All testing strategies (unit, integration, E2E)  
+**Out of Scope**: Production monitoring, observability
+
+- **docs/TESTING.md** - General testing strategies and patterns
 - **backend/docs/BACKEND_TESTING.md** - Backend integration testing and overhead optimization
-- **smoke-tests/README.md** - E2E smoke tests
-- **frontend/src/services/**tests**/README.md** - Service testing
+- **smoke-tests/README.md** - E2E smoke tests with Playwright
+- **frontend/src/services/tests/README.md** - Service layer testing
 
 ### TradingView Integration
+
+**Keywords**: TradingView, broker API, Trading Host, charting library, order execution, broker adapter, UDF
+
+**Scope**: TradingView Trading Terminal integration  
+**Out of Scope**: Custom charting solutions, alternative charting libraries
 
 - **frontend/docs/BROKER-INTEGRATION.md** - Complete broker integration implementation guide
 - **frontend/docs/tradingview/BROKER-CONNECTION-ADAPTER.md** - Trading Host API reference
 - **frontend/docs/tradingview/UI-USAGE-GUIDE.md** - UI testing with Playwright
-- **frontend/docs/tradingview/TYPE-DEFINITIONS.md** - TradingView types
-- **frontend/public/datafeeds/README.md** - Datafeeds library documentation
-- **frontend/public/datafeeds/udf/README.md** - UDF documentation
+- **frontend/docs/tradingview/TYPE-DEFINITIONS.md** - TradingView TypeScript type definitions
+- **frontend/public/README.md** - TradingView public assets and datafeeds reference
 
 ### Authentication & Security
 
-- **AUTHENTICATION.md** - ⭐ **Complete authentication system documentation (Google OAuth, JWT, cookies, security)**
-- **backend/src/trading_api/modules/auth/README.md** - Auth module implementation (repository, service, API, middleware)
-- **backend/src/trading_api/shared/middleware/auth.py** - Stateless middleware implementation (public key validation)
-- **frontend/src/services/README.md** - Auth service architecture (service-based, no Pinia store)
-- **frontend/src/router/README.md** - Router authentication guards (stateless, API introspection)
+**Keywords**: authentication, authorization, JWT, OAuth, Google login, cookies, security, stateless auth, middleware
+
+**Scope**: Complete authentication system (backend + frontend)  
+**Out of Scope**: User management, permissions/roles system
+
+- **AUTHENTICATION.md** - ⭐ Complete authentication system (Google OAuth, JWT, cookies, security)
+- **backend/src/trading_api/modules/auth/README.md** - Auth module implementation
+- **backend/src/trading_api/shared/middleware/auth.py** - Stateless middleware (public key validation)
+- **frontend/src/services/README.md** - Auth service architecture
+- **frontend/src/router/README.md** - Router authentication guards
 - **frontend/src/views/LoginView.vue** - Google OAuth login UI
-- **docs/TESTING.md** - Authentication testing strategies (92 backend tests, frontend unit/integration)
+- **docs/TESTING.md** - Authentication testing strategies
 
 ### Build & DevOps
 
-- **MAKEFILE-GUIDE.md** - Makefile commands
-- **docs/FULLSTACK-DEV-MODE.md** - Development mode orchestration
-- **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process backend management
-- **docs/CI-TROUBLESHOOTING.md** - CI/CD issues
+**Keywords**: build system, deployment, CI/CD, nginx, multi-process, development mode, make commands
+
+**Scope**: Build automation, deployment, CI/CD  
+**Out of Scope**: Cloud infrastructure, Kubernetes, Docker
+
+- **MAKEFILE-GUIDE.md** - Makefile commands reference
+- **docs/FULLSTACK-DEV-MODE.md** - Development mode orchestration and watch system
+- **backend/docs/BACKEND_MANAGER_GUIDE.md** - Multi-process backend management with nginx
+- **docs/CI-TROUBLESHOOTING.md** - CI/CD troubleshooting guide
 
 ### Code Quality
 
+**Keywords**: code quality, linting, type checking, git hooks, coding standards, pre-commit hooks
+
+**Scope**: Code quality tools and standards  
+**Out of Scope**: Code reviews, pull request processes
+
 - **docs/GETTING-STARTED.md** - Git hooks setup (section 5)
-- **.github/copilot-instructions.md** - Coding guidelines
-- **frontend/docs/FRONTEND-EXCLUSIONS.md** - Exclusion patterns
+- **.github/copilot-instructions.md** - Coding guidelines and AI assistant rules
+- **frontend/docs/FRONTEND-EXCLUSIONS.md** - Exclusion patterns for linting/testing
+
+### TWS API Integration
+
+**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources
+
+**Scope**: Interactive Brokers TWS API integration  
+**Out of Scope**: Other broker APIs, custom trading protocols
+
+- **backend/src/trading_api/providers/tws/README.md** - ⭐ TWS Datafeed Provider implementation guide (start here for integration)
+  - Three-layer architecture: TWSProvider → TWSClient → IBSocket
+  - Threading model, domain mappers, testing patterns
+- **backend/external_packages/tws/docs/README.md** - TWS API documentation index (includes local modifications)
+- **backend/external_packages/tws/docs/06-SETUP-GUIDE.md** - TWS/Gateway installation and configuration
+- **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md** - Connection management, threading, error handling
+- **backend/external_packages/tws/docs/01-API-REFERENCE-CLASSES.md** - Core API classes (EClient, EWrapper, Contract)
+- **backend/external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md** - Order placement and execution
+- **backend/external_packages/tws/docs/04-API-REFERENCE-CONDITIONS.md** - Advanced conditional orders
+- **Type Stubs**: 15 `.pyi` files in `backend/external_packages/tws/source/pythonclient/ibapi/` for Pylance/Pyright support
+- **backend/external_packages/tws/docs/TWS-GENERIC-TICK-LIST.md** - `genericTickList` parameter complete reference
 
 ---
 
@@ -341,7 +539,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 - **Root Documentation**: 10 essential project-wide guides
 - **docs/ Folder**: 9 core cross-cutting documentation files
-- **Backend Documentation**: 7 current backend guides + 1 third-party doc
+- **Backend Documentation**: 8 current backend guides + 8 TWS API guides + 1 third-party doc
 - **Frontend Documentation**: 10 frontend-specific guides + 2 third-party docs
 - **Auto-Generated Docs**: Per-module generated clients and type definitions
 - **DevOps & Git**: 2 setup and operations guides
@@ -349,58 +547,30 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### Total Documentation Files
 
-- **User-Maintained**: ~36 actively maintained documentation files
+- **User-Maintained**: ~45 actively maintained documentation files
   - Files consolidated: 5 → 2 (Nov 12, 2025 documentation refactoring)
   - Files archived: 5 old files preserved in `frontend/docs/archive/`
   - New organization: TradingView docs in dedicated `frontend/docs/tradingview/` subdirectory
+  - TWS API docs added: 8 files (Nov 19, 2025)
 - **Auto-Generated**: Per-module client documentation (regenerated on API changes)
 - **Third-Party**: 3 external package documentation files
 
 ### Maintenance
 
-- All user-maintained documentation is actively kept up-to-date
-- Auto-generated docs are regenerated on API changes
-- Obsolete/historical docs have been archived
-- Focus on essential, actionable information
-- Regular reviews ensure accuracy and relevance
-- **Note:** Files in `**/tmp/` directories are excluded from documentation updates (temporary/scratch files)
+**Status**: All user-maintained documentation actively maintained and accurate (A+ grade, 95% accuracy)  
+**Policy**: Auto-generated docs regenerated on API changes  
+**Exclusions**: Files in `**/tmp/` directories (temporary/scratch files)
 
-**Documentation Refactoring** (November 18, 2025):
+**Recent Changes Timeline**:
 
-- **Setup Documentation Consolidation**: 3 files → 1 comprehensive guide
-  - Created `docs/GETTING-STARTED.md` (merged WORKSPACE-SETUP, HOOKS-SETUP, ENVIRONMENT-CONFIG)
-  - Old files archived to `docs/archive/`
-- **Methodologies Organization**: Created `docs/methodologies/` subdirectory
-  - Moved API-METHODOLOGY.md and WEBSOCKET-METHODOLOGY.md
-  - Added `methodologies/README.md` navigation index
-  - Updated 13+ cross-references
-- **TradingView Public Documentation**: 2 nested files → 1 root file
-  - Created `frontend/public/README.md` (merged datafeeds/ and udf/ READMEs)
-  - Old files archived to `docs/archive/`
-- **Duplicate Removal**: Removed duplicate `frontend/FRONTEND-EXCLUSIONS.md`
-- **Result**: Improved organization, clearer structure, enhanced discoverability (see `docs/tmp/documentation-assessment-report.md`)
+- **2025-11-26**: TWS Provider documentation refresh (type stubs, local modifications, expanded chains)
+- **2025-11-21**: AI agent optimization (added metadata, discovery rules, query patterns, dependencies)
+- **2025-11-19**: TWS API docs added (8 files in `backend/external_packages/tws/docs/`)
+- **2025-11-18**: Setup consolidation (3→1), methodologies organization, TradingView public docs (2→1)
+- **2025-11-12**: WebSocket consolidation (3→1), broker integration consolidation (2→1), TradingView reorganization
+- **2025-11-11**: Documentation assessment (A+ grade, 95% accuracy, 43 files assessed)
 
-**Previous Refactoring** (November 12, 2025):
-
-- **WebSocket Documentation Consolidation**: 3 files → 1 comprehensive guide (`frontend/docs/WEBSOCKET-ARCHITECTURE.md`)
-- **Broker Integration Consolidation**: 2 files → 1 comprehensive guide (`frontend/docs/BROKER-INTEGRATION.md`)
-- **TradingView Organization**: Created `frontend/docs/tradingview/` subdirectory
-
-**Recent Assessment** (November 11, 2025):
-
-- **Comprehensive Assessment**: 43 documentation files assessed
-- **Overall Grade**: A+ (95% accuracy)
-- **Documents Verified**: 35 files confirmed accurate
-- **Documents Flagged**: 4 files (completed rewrite November 11, 2025)
-- **Critical Issues**: 0 (all core architecture docs verified)
-- See `docs/tmp/documentation-assessment-report.md` for complete details
-
-**Previous Assessment** (November 2025):
-
-- 36 documents assessed for accuracy
-- 24 documents updated, 12 verified as accurate
-- Overall accuracy: 90% (A- grade)
-- 4 documents flagged for future rewrite/removal
+**For detailed refactoring history**: See `docs/tmp/documentation-assessment-report.md`
 
 ### Link Format
 
@@ -408,7 +578,13 @@ When updating documentation for large-scale changes, follow this three-phase app
 - All file paths and cross-references are validated
 - Links are verified during documentation updates
 
+### Document Status Markers
+
+- ⭐ = Primary entry point for topic
+- ✅ = Recently updated/verified (< 30 days)
+- 🔧 = Technical deep-dive
+
 ---
 
-**Last Updated**: November 18, 2025
+**Last Updated**: November 26, 2025  
 **Maintained by**: Development Team

@@ -1,8 +1,8 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: November 11, 2025  
-**Version**: 5.1.0
+**Last Updated**: November 20, 2025  
+**Version**: 5.2.0
 
 ## Table of Contents
 
@@ -70,12 +70,8 @@ from pathlib import Path
 from trading_api.shared import Module
 
 class MyModuleModule(Module):
-    @property
-    def name(self) -> str:
-        return "my_module"
-
-    @property
-    def module_dir(self) -> Path:
+    @classmethod
+    def module_dir(cls) -> Path:
         return Path(__file__).parent
 
     @property
@@ -115,8 +111,11 @@ class MyModuleApi(APIRouterInterface):
 **6. Test in isolation**:
 
 ```bash
-# Start only your new module
+# Start only your new module (all versions)
 ENABLED_MODULES=my_module make dev
+
+# Start only specific version
+ENABLED_MODULES=my_module:v1 make dev
 
 # Access your endpoint
 curl http://localhost:8000/api/v1/my_module/data
@@ -137,13 +136,25 @@ Every module extends the `Module` abstract base class defined in `shared/module_
 class Module(ABC):
     """Abstract base class defining the interface for pluggable modules."""
 
+    @classmethod
+    @abstractmethod
+    def module_dir(cls) -> Path:
+        """Module's directory path.
+
+        Must be a class method because it's used during version discovery
+        and service class loading, which occur before instantiation.
+        """
+
     def __init__(self, versions: list[str] | None = None):
         # Auto-discover versions from api/ and ws/ directories
         if versions is None:
             versions = self._discover_versions()
 
         self._versions = versions
-        self._service = self._import_service()
+
+        # Import shared service (version-agnostic)
+        service_class = self._service_class()
+        self._service = service_class(self.module_dir())
 
         # Import version-specific routers
         self._api_routers: dict[str, APIRouterInterface] = {}
@@ -158,14 +169,9 @@ class Module(ABC):
                 self._ws_routers[version] = ws_router
 
     @property
-    @abstractmethod
     def name(self) -> str:
         """Unique module identifier (e.g., 'broker', 'datafeed')"""
-
-    @property
-    @abstractmethod
-    def module_dir(self) -> Path:
-        """Module's directory path"""
+        return self.module_dir().name
 
     @property
     def service(self) -> ServiceInterface:
@@ -198,6 +204,26 @@ class Module(ABC):
 
 - Uses **ABC-based design** with Python's `abc.ABC` and `@abstractmethod`
 - Subclasses must implement abstract methods at instantiation time
+
+#### Class Methods vs Instance Methods
+
+The Module ABC uses a hybrid approach with both class methods and instance methods:
+
+**Class Methods** (called before or during instantiation):
+
+- `module_dir()` - Returns module directory path, used by version discovery
+- `_discover_versions()` - Scans api/ and ws/ directories for available versions
+- `_get_import_path()` - Constructs import path for dynamic module loading
+- `_service_class()` - Imports and returns the service class (not instance)
+
+**Instance Methods** (require instantiated module):
+
+- `_import_api_routers_for_version()` - Imports API routers (needs service instance)
+- `_import_ws_routers_for_version()` - Imports WebSocket routers (needs service instance)
+
+**Rationale**: Version discovery and service class loading must occur before instance state is available. The `module_dir()` class method enables these operations to work with the class itself rather than requiring an instance. The service is then instantiated in `__init__()` and passed to router imports.
+
+**Reference**: See `backend/src/trading_api/shared/module_interface.py` for complete implementation.
 
 ### 2. APIRouterInterface Auto-Exposing Health and Version Endpoints
 
@@ -245,15 +271,35 @@ curl http://localhost:8000/api/v2/broker/health  # Different version
 - Version-aware - Each version has its own health endpoint
 - Module-scoped - Health checks specific to each module
 
-### 3. ServiceInterface Base Class with Version Discovery
+### 3. ServiceInterface Base Class with Version Discovery and Provider Resolution
 
-The `ServiceInterface` base class provides **automatic version discovery** and metadata:
+The `ServiceInterface` base class provides **automatic version discovery**, metadata, and **provider capability resolution**:
 
 ```python
 # shared/service_interface.py
 class ServiceInterface(ABC):
-    def __init__(self, module_dir: Path) -> None:
+    def __init__(
+        self,
+        module_dir: Path,
+        *,  # Force keyword-only
+        providers: list["Provider"] | None = None,
+    ) -> None:
+        """Initialize service.
+
+        Args:
+            module_dir: Module directory path
+            providers: Provider instances for required capabilities
+
+        Raises:
+            CapabilityNotFoundError: If required capability not satisfied
+        """
+        super().__init__()
         self.module_dir = module_dir
+        self._providers = providers or []
+
+        # Build capability map and fail-fast validate
+        self._capability_map: dict[str, "Provider"] = {}
+        self._resolve_capabilities()
 
         # Auto-discover versions from api/ directory structure
         api_dir = self.module_dir / "api"
@@ -279,6 +325,74 @@ class ServiceInterface(ABC):
             current_version=version_dirs[-1] if version_dirs else "v1",
             available_versions=available_versions,
         )
+
+    @classmethod
+    @abstractmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        """Return required capabilities for this service.
+
+        [CLASSMETHOD]: Static declaration for app startup analysis.
+
+        Returns:
+            List of capability requirements
+
+        Examples:
+            >>> AuthService.capabilities()
+            [CapabilitySpec(name="auth")]
+        """
+        ...
+
+    def _resolve_capabilities(self) -> None:
+        """Resolve and cache capability → provider mapping.
+
+        [FAIL-FAST]: Validates at initialization, not at request time.
+
+        Raises:
+            CapabilityNotFoundError: If required capability not found
+        """
+        from trading_api.models.common import CapabilityNotFoundError
+
+        required_capabilities = self.capabilities()
+
+        for req_cap in required_capabilities:
+            matched = False
+
+            for provider in self._providers:
+                # Check if provider offers matching capability
+                for prov_cap in provider.capabilities():
+                    if req_cap.matches(prov_cap):
+                        self._capability_map[req_cap.name] = provider
+                        matched = True
+                        break
+
+                if matched:
+                    break
+
+            if not matched:
+                raise CapabilityNotFoundError(
+                    f"Service '{self.module_name}' requires capability "
+                    f"'{req_cap}' but no provider found. "
+                    f"Available providers: {[p.name for p in self._providers]}"
+                )
+
+    def _get_capability_provider(self, capability_name: str) -> "Provider":
+        """Get provider for specific capability (cached lookup).
+
+        Args:
+            capability_name: Name of capability to get
+
+        Returns:
+            Provider instance
+
+        [PERFORMANCE]: O(1) lookup after initialization.
+        """
+        provider = self._capability_map.get(capability_name)
+        if provider is None:
+            raise RuntimeError(
+                f"Capability '{capability_name}' not initialized. "
+                "This should never happen - validation should occur at init."
+            )
+        return provider
 ```
 
 **Benefits**:
@@ -286,6 +400,11 @@ class ServiceInterface(ABC):
 - Auto-discovery from directory structure
 - Convention-based versioning
 - Automatic API metadata generation
+- **Fail-fast provider validation** at service initialization
+- **O(1) provider lookup** via cached capability map
+- **Type-safe capability matching** with CapabilitySpec
+
+**Reference**: See `backend/src/trading_api/shared/service_interface.py` for complete implementation.
 
 ### 4. Version Discovery Patterns
 
@@ -530,6 +649,87 @@ Benefits:
   • Auto-discovered versions from directory structure
 ```
 
+### Provider System Integration
+
+The modular architecture integrates a **pluggable provider/capability system** for external integrations (authentication, broker APIs, data feeds). Providers are auto-discovered and injected into services that declare capability requirements.
+
+**Provider-Enabled Architecture:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      AppFactory                              │
+│  ┌────────────────────┐         ┌────────────────────┐     │
+│  │  ModuleRegistry    │         │ ProviderRegistry   │     │
+│  │  - auto_discover() │         │ - auto_discover()  │     │
+│  │  - get_modules()   │         │ - get_providers()  │     │
+│  └────────────────────┘         └────────────────────┘     │
+│           │                               │                 │
+│           │  1. Resolve capabilities      │                 │
+│           │  from service classes         │                 │
+│           │                               │                 │
+│           │  2. Request providers ────────┤                 │
+│           │                               │                 │
+│           │  3. Instantiate modules ◄─────┤                 │
+│           │     with providers            │                 │
+└───────────┼───────────────────────────────┼─────────────────┘
+            │                               │
+            ▼                               ▼
+    ┌──────────────┐              ┌─────────────────┐
+    │    Module    │              │    Provider     │
+    │  __init__(   │              │  - capabilities │
+    │   providers) │              │  - verify_token │
+    └──────┬───────┘              └─────────────────┘
+           │                               ▲
+           │  4. Inject providers          │
+           ▼                               │
+    ┌──────────────┐                      │
+    │   Service    │                      │
+    │  __init__(   │──────────────────────┘
+    │   providers) │   5. Cache capability map
+    │              │      (fail-fast validation)
+    └──────────────┘
+```
+
+**Two-Phase Loading Process:**
+
+The AppFactory uses a two-phase loading pattern to resolve provider dependencies:
+
+1. **Phase 1 - Discovery**: Auto-discover module and provider classes (no instantiation)
+2. **Phase 2 - Static Analysis**: Use `ServiceInterface.capabilities()` classmethod to determine required capabilities
+3. **Phase 3 - Provider Loading**: Get provider instances matching required capabilities (lazy-loading with lifecycle hooks)
+4. **Phase 4 - Module Instantiation**: Create modules with providers injected via `Module.__init__(providers=...)`
+
+**Key Integration Points:**
+
+- **`ServiceInterface.capabilities()`**: Classmethod declaring required capabilities (e.g., `[CapabilitySpec(name="auth")]`)
+- **`ServiceInterface.__init__(providers=...)`**: Receives provider instances, validates at initialization (fail-fast)
+- **`ServiceInterface._get_capability_provider(name)`**: O(1) cached lookup for provider access
+- **`Module.__init__(providers=...)`**: Keyword-only parameter passes providers to service initialization
+
+**Example - AuthService with Provider:**
+
+```python
+class AuthService(ServiceInterface):
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="auth")]  # Requires auth capability
+
+    @property
+    def auth_provider(self) -> AuthCapability:
+        """Get auth capability provider (cached lookup)."""
+        provider = self._get_capability_provider("auth")
+        if not isinstance(provider, AuthCapability):
+            raise TypeError(f"Expected AuthCapability, got {type(provider).__name__}")
+        return provider
+
+    async def authenticate_google_user(self, id_token: str) -> TokenResponse:
+        # Use injected provider instead of direct Google API call
+        claims = await self.auth_provider.verify_token(id_token)
+        # ... rest of authentication logic
+```
+
+**Reference**: See `backend/docs/PROVIDER-SYSTEM.md` for complete provider implementation guide.
+
 ### Directory Structure
 
 ```
@@ -616,13 +816,24 @@ backend/src/trading_api/
 ### Module Lifecycle
 
 ```
-1. Discovery    → registry.auto_discover(modules_dir)
-2. Registration → registry.register(ModuleClass, "module_name")
-3. Filtering    → registry.set_enabled_modules(["broker", "datafeed"])
-4. Loading      → registry.get_enabled_modules()  # Lazy instantiation
-5. App Wrapping → ModuleApp(module)  # Creates FastAPI apps per version
-6. Mounting     → main_app.mount(f"/api/{version}/{module.name}", api_app)
+1. Discovery              → registry.auto_discover(modules_dir)
+2. Registration           → registry.register(ModuleClass, "module_name")
+3. Capability Resolution  → factory._resolve_capabilities(enabled_modules)  # Static analysis
+4. Provider Discovery     → provider_registry.auto_discover()
+5. Provider Instantiation → provider_registry.get_providers(capabilities)  # Lazy-loading with lifecycle hooks
+6. Module Loading         → registry.get_modules(module_names, providers)  # Filtering + lazy instantiation with providers
+7. Service Validation     → service._resolve_capabilities()  # Fail-fast validation in each service
+8. App Wrapping           → ModuleApp(module)  # Creates FastAPI apps per version
+9. Mounting               → main_app.mount(f"/api/{version}/{module.name}", api_app)
 ```
+
+**Key Points:**
+
+- **Two-Phase Loading**: Classes discovered before instances created (prevents circular dependencies)
+- **Fail-Fast Validation**: Services validate capabilities at initialization, not request time
+- **Lazy Provider Loading**: Providers instantiated only when first needed, with thread-safe locking
+
+**Reference**: See `backend/src/trading_api/app_factory.py` lines 139-191 for complete implementation.
 
 ### Module Implementation Example
 
@@ -819,9 +1030,9 @@ class AppFactory:
         """Create app with selective module loading."""
         self.registry.clear()
         self.registry.auto_discover(self.modules_dir)
-        self.registry.set_enabled_modules(enabled_module_names)
 
-        enabled_modules = self.registry.get_enabled_modules()
+        # Get modules to enable (None = all modules, list = specific modules)
+        enabled_modules = self.registry.get_modules(enabled_module_names)
 
         app = ModularApp(
             modules=enabled_modules,
@@ -842,6 +1053,312 @@ app = factory.create_app()  # Load all modules
 app = factory.create_app(enabled_module_names=["broker", "datafeed"])  # Specific modules
 app = factory.create_app(enabled_module_names=["broker"])  # Single module
 ```
+
+#### Registry API Simplification
+
+The module registry uses a **functional API** for module filtering:
+
+- **Single method**: `get_modules(enabled_modules)` replaces three methods
+- **Stateless**: No internal state to manage
+- **Easier testing**: Direct input/output, no setup required
+
+**Before (old API)**:
+
+```python
+registry.set_enabled_modules(["broker"])
+modules = registry.get_enabled_modules()
+```
+
+**After (current API)**:
+
+```python
+modules = registry.get_modules(["broker"])
+```
+
+**Benefits**:
+
+- Eliminates two-step workflow
+- Functional (no side effects)
+- Clearer intent at call site
+
+---
+
+## Module Registry
+
+The `ModuleRegistry` provides centralized, functional module management with lazy instantiation and version selection.
+
+### Version-Specific Module Loading
+
+**[PERFORMANCE]** Modules can be loaded with specific versions to optimize memory and startup time:
+
+```python
+# Load specific versions
+registry.get_modules(["broker:v1", "datafeed:v2"])
+
+# Mix versioned and all-versions
+registry.get_modules(["broker:v1", "datafeed"])  # datafeed loads all versions
+
+# Load all versions (default)
+registry.get_modules(["broker"])  # loads all available versions
+```
+
+### Module Spec Format
+
+Module specifications use the format `module_name:version`:
+
+- `broker` → Loads all versions (v1, v2, etc.)
+- `broker:v1` → Loads only v1
+- `broker:v2` → Loads only v2
+
+**[DECISION]**: Version is optional. Omitting version loads all available versions for backward compatibility [performance-vs-convenience tradeoff] [rejected: requiring version - breaks existing configs] [2025-11-20]
+
+### Cache Isolation
+
+The registry maintains separate instances for different version combinations:
+
+```python
+broker_v1 = registry.get_modules(["broker:v1"])[0]
+broker_v2 = registry.get_modules(["broker:v2"])[0]
+broker_all = registry.get_modules(["broker"])[0]
+
+# broker_v1, broker_v2, and broker_all are different instances
+# Cache keys: "broker:v1", "broker:v2", "broker"
+```
+
+**Reference:** See `backend/src/trading_api/shared/module_registry.py` for implementation details.
+
+---
+
+## Provider/Capability System
+
+The backend implements a **pluggable provider/capability system** for external integrations, enabling services to declare required capabilities (authentication, broker APIs, data feeds) and have matching provider implementations automatically injected at runtime.
+
+### Overview
+
+The provider system decouples service logic from external implementation details through:
+
+- **Capability Declarations**: Services use `capabilities()` classmethod to declare requirements
+- **Provider Auto-Discovery**: Providers discovered automatically from `providers/` directory
+- **Type-Safe Matching**: `CapabilitySpec` dataclass ensures capability matching correctness
+- **Dependency Injection**: AppFactory resolves and injects providers into modules/services
+- **Fail-Fast Validation**: Capability requirements validated at app startup, not request time
+
+**Reference**: See `backend/docs/PROVIDER-SYSTEM.md` for complete developer guide including step-by-step provider creation.
+
+### Core Concepts
+
+#### CapabilitySpec - Type-Safe Capability Declaration
+
+```python
+from trading_api.models.common import CapabilitySpec
+
+# Service declares: "I need any auth provider"
+req = CapabilitySpec(name="auth")
+
+# Provider declares: "I provide auth v1"
+prov = CapabilitySpec(name="auth", version="v1")
+
+# Matching: Does provider satisfy service requirement?
+req.matches(prov)  # True - version matches or not specified
+```
+
+**File**: `backend/src/trading_api/models/common.py`
+
+#### Provider ABC - Base Class for All Providers
+
+```python
+from trading_api.providers.base import Provider
+
+class MyProvider(Provider):
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        """What this provider offers"""
+        return [CapabilitySpec(name="auth")]
+
+    @property
+    def name(self) -> str:
+        """Provider identifier"""
+        return "myprovider"
+
+    # ... implement abstract methods (config, provider_dir)
+```
+
+**Convention**: `providers/{name}/__init__.py` exports `{Name}Provider` class (e.g., `GoogleProvider`)
+
+**File**: `backend/src/trading_api/providers/base.py`
+
+#### AuthCapability - Authentication Contract Interface
+
+```python
+from trading_api.providers.capabilities.auth import AuthCapability
+
+class MyProvider(Provider, AuthCapability):
+    async def verify_token(self, token: str) -> dict[str, Any]:
+        """Implement the auth capability"""
+        # Your verification logic
+        return {"sub": "user_id", "email": "user@example.com"}
+```
+
+**File**: `backend/src/trading_api/providers/capabilities/auth.py`
+
+### Integration Points
+
+#### AppFactory.\_resolve_capabilities() - Static Analysis
+
+```python
+def _resolve_capabilities(self, module_names: list[str] | None) -> list[CapabilitySpec]:
+    """Resolve required capabilities from module service classes.
+
+    [STATIC ANALYSIS]: No instances created, uses classmethods.
+    """
+    capabilities: set[CapabilitySpec] = set()
+
+    for module_name in module_names:
+        # Get service class (not instance)
+        service_class = module_class._service_class()
+
+        # Get capabilities (classmethod, no instance)
+        if hasattr(service_class, 'capabilities'):
+            capabilities.update(service_class.capabilities())
+
+    return list(capabilities)
+```
+
+**File**: `backend/src/trading_api/app_factory.py` lines 139-172
+
+#### ServiceInterface Methods
+
+**capabilities() - Classmethod Declaration**
+
+```python
+@classmethod
+@abstractmethod
+def capabilities(cls) -> list[CapabilitySpec]:
+    """Return required capabilities for this service.
+
+    Examples:
+        >>> AuthService.capabilities()
+        [CapabilitySpec(name="auth")]
+    """
+    ...
+```
+
+**\_get_capability_provider() - Cached Lookup**
+
+```python
+def _get_capability_provider(self, capability_name: str) -> "Provider":
+    """Get provider for specific capability (O(1) cached lookup).
+
+    [PERFORMANCE]: O(1) lookup after initialization.
+    """
+    provider = self._capability_map.get(capability_name)
+    if provider is None:
+        raise RuntimeError(f"Capability '{capability_name}' not initialized.")
+    return provider
+```
+
+**File**: `backend/src/trading_api/shared/service_interface.py` lines 15-110
+
+### Example - AuthService Using GoogleProvider
+
+**Service Declaration:**
+
+```python
+# modules/auth/service.py
+from trading_api.models.common import CapabilitySpec
+from trading_api.providers.capabilities.auth import AuthCapability
+
+class AuthService(ServiceInterface):
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="auth")]  # Requires auth capability
+
+    @property
+    def auth_provider(self) -> AuthCapability:
+        """Get auth capability provider (cached, type-safe lookup)."""
+        provider = self._get_capability_provider("auth")
+
+        # Type narrowing
+        if not isinstance(provider, AuthCapability):
+            raise TypeError(f"Expected AuthCapability, got {type(provider).__name__}")
+
+        return provider
+
+    async def authenticate_google_user(self, id_token: str) -> TokenResponse:
+        # Use injected provider instead of direct Google API call
+        claims = await self.auth_provider.verify_token(id_token)
+
+        # Extract user info from claims
+        google_id = claims["sub"]
+        email = claims["email"]
+        # ... rest of authentication logic
+```
+
+**Provider Implementation:**
+
+```python
+# providers/google/__init__.py
+from trading_api.providers.base import Provider
+from trading_api.providers.capabilities.auth import AuthCapability
+
+class GoogleProvider(Provider, AuthCapability):
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="auth")]
+
+    async def verify_token(self, token: str) -> dict[str, Any]:
+        # Verify Google ID token via tokeninfo endpoint
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://www.googleapis.com/oauth2/v3/tokeninfo",
+                params={"id_token": token}
+            )
+
+            if resp.status_code != 200:
+                raise AuthenticationError(f"Invalid Google token: {resp.text}")
+
+            claims = resp.json()
+
+            # Validate audience and email
+            if claims.get("aud") != self.config.client_id:
+                raise AuthenticationError("Invalid token audience")
+
+            return claims
+```
+
+### File Locations
+
+**Provider Infrastructure:**
+
+- **Provider Base**: `backend/src/trading_api/providers/base.py`
+- **Provider Registry**: `backend/src/trading_api/providers/registry.py`
+- **Auth Capability**: `backend/src/trading_api/providers/capabilities/auth.py`
+
+**Provider Implementations:**
+
+- **GoogleProvider**: `backend/src/trading_api/providers/google/__init__.py`
+- **Future Providers**: `providers/local/`, `providers/ibkr/`, etc.
+
+**Models & Configuration:**
+
+- **Shared Models**: `backend/src/trading_api/models/common.py` (CapabilitySpec, ProviderConfig, exceptions)
+- **Provider Configs**: `backend/src/trading_api/models/providers/google_oauth_configs.py` (GoogleProviderConfig, etc.)
+
+**Integration:**
+
+- **AppFactory**: `backend/src/trading_api/app_factory.py` (two-phase loading, capability resolution)
+- **ServiceInterface**: `backend/src/trading_api/shared/service_interface.py` (provider resolution, cached lookup)
+- **Module Interface**: `backend/src/trading_api/shared/module_interface.py` (providers parameter)
+
+### Benefits
+
+- ✅ **Easy Provider Addition**: Follow naming convention, auto-discovered
+- ✅ **Test with Mocks**: Inject mock providers in tests (no external API calls)
+- ✅ **Clean Separation**: Service logic vs provider implementation decoupled
+- ✅ **Type-Safe**: Strict MyPy validation, compile-time error detection
+- ✅ **Fail-Fast**: Capability mismatches caught at app startup
+- ✅ **Performance**: O(1) provider lookup via cached capability map
+- ✅ **Future-Ready**: Architecture supports broker/datafeed providers
 
 ---
 
@@ -1220,10 +1737,27 @@ See [auth module documentation](../src/trading_api/modules/auth/README.md) for c
 Run all modules in one process:
 
 ```bash
-make dev  # Starts with all modules
+# All modules with all versions
+python -m trading_api.main
 
-# Or selective loading
+# Specific modules with all versions
+ENABLED_MODULES=broker,datafeed python -m trading_api.main
+
+# Specific modules with specific versions
+ENABLED_MODULES=broker:v1,datafeed:v2 python -m trading_api.main
+
+# Mix of versioned and all-versions
+ENABLED_MODULES=broker:v1,datafeed python -m trading_api.main
+```
+
+Or using make:
+
+```bash
+make dev  # Starts with all modules (all versions)
+
+# Selective loading
 ENABLED_MODULES=broker,datafeed make dev
+ENABLED_MODULES=broker:v1 make dev  # Load only v1
 ```
 
 ### 2. Multi-Process Mode (Production)
@@ -1482,8 +2016,8 @@ from pathlib import Path
 from trading_api.shared.module_interface import Module
 
 class MymoduleModule(Module):
-    @property
-    def module_dir(self) -> Path:
+    @classmethod
+    def module_dir(cls) -> Path:
         return Path(__file__).parent
 
     @property

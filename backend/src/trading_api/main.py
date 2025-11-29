@@ -2,18 +2,19 @@
 
 Uses the application factory pattern to create a modular, configurable application.
 Supports selective module loading via the ENABLED_MODULES environment variable.
+
+The app is created at module import time. Since AppFactory.create_app() is async
+(for provider lifecycle hooks), we need to run it in an event loop. When uvicorn
+imports this module, it may already have an event loop running, so we handle both
+cases: running loop (use existing) and no loop (create temporary one).
 """
 
+import asyncio
 import os
 
 from trading_api.app_factory import AppFactory
 
 # Parse ENABLED_MODULES environment variable
-# Examples:
-#   ENABLED_MODULES=all (default) - loads all modules
-#   ENABLED_MODULES=datafeed - loads only datafeed module
-#   ENABLED_MODULES=broker - loads only broker module
-#   ENABLED_MODULES=datafeed,broker - loads specific modules
 enabled_modules_str = os.getenv("ENABLED_MODULES", "all")
 
 enabled_modules: list[str] | None
@@ -22,6 +23,31 @@ if enabled_modules_str != "all":
 else:
     enabled_modules = None  # None = all modules
 
-# Create application using factory
+# Create application using async factory
 factory = AppFactory()
-app = factory.create_app(enabled_module_names=enabled_modules)
+
+# Handle both cases: running event loop (uvicorn) and no loop (direct import)
+try:
+    # Try to get existing event loop
+    loop = asyncio.get_event_loop()
+    if loop.is_running():
+        # We're being imported by uvicorn which has a running loop
+        # We need to create the app in a way that doesn't block the current loop
+        # Use a new thread with its own event loop
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(
+                lambda: asyncio.run(
+                    factory.create_app(enabled_module_names=enabled_modules)
+                )
+            )
+            app = future.result()
+    else:
+        # No running loop - use the existing loop
+        app = loop.run_until_complete(
+            factory.create_app(enabled_module_names=enabled_modules)
+        )
+except RuntimeError:
+    # No event loop exists - create one
+    app = asyncio.run(factory.create_app(enabled_module_names=enabled_modules))

@@ -12,7 +12,7 @@ import pytest
 from trading_api.app_factory import AppFactory, ModularApp
 
 
-def create_test_app(
+async def create_test_app(
     enabled_modules: list[str] | None = None,
 ) -> ModularApp:
     """Create a test application with specified modules.
@@ -26,19 +26,19 @@ def create_test_app(
 
     Example:
         # Test with all modules
-        app = create_test_app()
+        app = await create_test_app()
 
         # Test with only broker module
-        app = create_test_app(enabled_modules=["broker"])
+        app = await create_test_app(enabled_modules=["broker"])
 
         # Test with only shared infrastructure (no modules)
-        app = create_test_app(enabled_modules=[])
+        app = await create_test_app(enabled_modules=[])
     """
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=enabled_modules)
+    return await factory.create_app(enabled_module_names=enabled_modules)
 
 
 @pytest.fixture(scope="session")
-def apps() -> ModularApp:
+async def apps() -> ModularApp:
     """Full application with all modules enabled (shared across session)."""
-    return create_test_app()
+    return await create_test_app()

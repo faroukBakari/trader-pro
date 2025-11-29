@@ -79,7 +79,7 @@ export class WebSocketBase {
       reconnect: true,
       maxReconnectAttempts: 5,
       reconnectDelay: 1000,
-      debug: false,
+      debug: true,
       wsUrl,
     }
     this.logger = this.config.debug ? console : { log: () => { }, error: () => { } } as Console
@@ -129,6 +129,7 @@ export class WebSocketBase {
 
           this.ws.onopen = () => {
             this.logger.log('WS Connected')
+            this.ws!.binaryType = 'arraybuffer'
 
             this.ws!.onmessage = (event) => {
               this.handleMessage(event)
@@ -188,7 +189,11 @@ export class WebSocketBase {
 
   private handleMessage(event: MessageEvent): void {
     try {
-      const message: WebSocketMessage = JSON.parse(event.data)
+      // Handle both text and binary (ArrayBuffer) messages
+      const text = typeof event.data === 'string'
+        ? event.data
+        : new TextDecoder().decode(event.data as ArrayBuffer)
+      const message: WebSocketMessage = JSON.parse(text)
       const { type, payload } = message
 
       if (type.endsWith('.update')) {
@@ -219,7 +224,7 @@ export class WebSocketBase {
 
   private routeUpdateMessage(data: SubscriptionUpdate): void {
     if (!(data.topic.startsWith('quotes:') || data.topic.startsWith('bars:'))) {
-      console.log(`${data.topic} message received:`, data)
+      this.logger.debug(`${data.topic} message received:`, data)
     }
     for (const subscription of Array.from(this.subscriptions.values())) {
       if (subscription.confirmed && subscription.topic === data.topic) {

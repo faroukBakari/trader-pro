@@ -73,16 +73,22 @@ make test     # Run tests
 **Module-Specific Backend Development**:
 
 ```bash
-# Start only specific modules
+# Start specific modules (all versions)
 ENABLED_MODULES=broker make dev
 ENABLED_MODULES=datafeed make dev
 ENABLED_MODULES=broker,datafeed make dev
+
+# Start specific module versions only
+ENABLED_MODULES=broker:v1 make dev
+ENABLED_MODULES=broker:v1,datafeed:v2 make dev
 
 # Multi-process mode (production-like with nginx)
 make backend-dev-multi
 make backend-status  # Check process status
 make backend-stop    # Stop all processes
 ```
+
+Note: The backend uses a functional registry API — modules listed in `ENABLED_MODULES` are lazily instantiated at startup via `ModuleRegistry.get_modules(enabled_module_names)`. Module specs can optionally include version filters (e.g., `broker:v1`) to load only specific versions. Module instances no longer expose a per-module `enable()` method or an `enabled` property; the registry returns instances only when requested.
 
 See [backend/docs/BACKEND_MANAGER_GUIDE.md](../backend/docs/BACKEND_MANAGER_GUIDE.md) for multi-process deployment details.
 

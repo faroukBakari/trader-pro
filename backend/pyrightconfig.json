@@ -1,21 +1,24 @@
 {
   "include": ["src", "scripts"],
-  "exclude": [
-    "**/node_modules",
-    "**/__pycache__",
-    ".venv",
-    "venv",
-    "external_packages"
-  ],
+  "exclude": ["**/node_modules", "**/__pycache__", ".venv", "venv"],
+  "stubPath": "stubs",
   "pythonVersion": "3.11",
   "pythonPlatform": "Linux",
   "typeCheckingMode": "standard",
   "reportMissingImports": "error",
   "reportMissingTypeStubs": false,
+  "reportMissingModuleSource": "none",
   "reportAttributeAccessIssue": "error",
   "reportUnknownMemberType": "none",
   "reportUnknownParameterType": "none",
   "reportUnknownVariableType": "none",
   "reportUnknownArgumentType": "none",
-  "extraPaths": [".", "src", "scripts", "external_packages"]
+  "extraPaths": [
+    ".",
+    "src",
+    "scripts",
+    "external_packages",
+    "external_packages/tws/source/pythonclient",
+    "stubs"
+  ]
 }

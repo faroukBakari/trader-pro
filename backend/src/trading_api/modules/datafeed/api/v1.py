@@ -74,7 +74,7 @@ class DatafeedApi(APIRouterInterface):
             """
 
             try:
-                results = self.service.search_symbols(
+                results = await self.service.search_symbols(
                     user_input=user_input,
                     exchange=exchange,
                     symbol_type=symbol_type,
@@ -104,7 +104,7 @@ class DatafeedApi(APIRouterInterface):
             - **symbol**: Symbol name or ticker to resolve
             """
             try:
-                symbol_info = self.service.resolve_symbol(symbol)
+                symbol_info = await self.service.resolve_symbol(symbol)
                 if not symbol_info:
                     raise HTTPException(status_code=404, detail="Symbol not found")
                 return symbol_info
@@ -141,7 +141,7 @@ class DatafeedApi(APIRouterInterface):
             - **count_back**: Number of bars to count back (optional)
             """
             try:
-                bars = self.service.get_bars(
+                bars = await self.service.get_bars(
                     symbol=symbol,
                     resolution=resolution,
                     from_time=from_time,
@@ -172,7 +172,7 @@ class DatafeedApi(APIRouterInterface):
             - **symbols**: Array of symbol names to get quotes for
             """
             try:
-                quotes = self.service.get_quotes(body.symbols)
+                quotes = await self.service.get_quotes(body.symbols)
                 return quotes
             except Exception as e:
                 raise HTTPException(

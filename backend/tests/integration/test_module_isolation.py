@@ -48,7 +48,8 @@ def test_broker_only_isolation(broker_only_app) -> None:
 
 
 @pytest.mark.integration
-def test_module_registry_state(all_modules_app, datafeed_only_app) -> None:
+@pytest.mark.asyncio
+async def test_module_registry_state(all_modules_app, datafeed_only_app) -> None:
     """Verify registry state matches the app configuration.
 
     This test verifies that all modules are discovered but only enabled
@@ -66,7 +67,7 @@ def test_module_registry_state(all_modules_app, datafeed_only_app) -> None:
 
     # Verify module discovery by creating an app which triggers discovery
     factory = AppFactory()
-    test_app = factory.create_app()  # This triggers auto-discovery
+    test_app = await factory.create_app()  # This triggers auto-discovery
     # Get enabled modules from the created app
     assert len(test_app.modules_apps) >= 2  # Should have broker + datafeed at minimum
 

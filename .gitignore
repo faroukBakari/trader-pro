@@ -182,6 +182,10 @@ frontend/src/clients_generated/
 # Auto-generated WebSocket clients
 *generated/
 
+# TWS API protobuf generated files
+*_pb2.py
+*_pb2.pyi
+
 # Node.js dependencies
 node_modules/
 npm-debug.log*
@@ -210,3 +214,6 @@ Thumbs.db
 .playwright-mcp*
 tmp/
 **/archive/
+.cursor
+
+*.tar.gz

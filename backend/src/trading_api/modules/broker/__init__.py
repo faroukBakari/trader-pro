@@ -21,8 +21,8 @@ class BrokerModule(Module):
         _ws_routers: List of WebSocket routers
     """
 
-    @property
-    def module_dir(self) -> Path:
+    @classmethod
+    def module_dir(cls) -> Path:
         """Return the directory path for this module.
 
         Returns:

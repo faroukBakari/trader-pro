@@ -14,9 +14,21 @@ ifdef modules
 else
 	SELECTED_MODULES = $(DISCOVERED_MODULES)
 endif
+
+# Dynamic provider discovery
+PROVIDERS_DIR = src/trading_api/providers
+DISCOVERED_PROVIDERS = $(shell find $(PROVIDERS_DIR) -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -vE '__pycache__|tests|capabilities' || echo "")
+
+# Provider selection (can be overridden: make test-providers providers=google,tws)
+ifdef providers
+	SELECTED_PROVIDERS = $(subst $(comma), ,$(providers))
+else
+	SELECTED_PROVIDERS = $(DISCOVERED_PROVIDERS)
+endif
+
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean $(addprefix test-module-, $(DISCOVERED_MODULES))
+.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-core list-providers list-providers-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS))
 
 # Default target
 help:
@@ -25,8 +37,10 @@ help:
 	@echo "  install-ci        Install backend dependencies for CI (non-interactive)"
 	@echo ""
 	@echo "Testing targets:"
-	@echo "  test              Run all tests (boundaries + modules + integration)"
+	@echo "  test              Run all tests (boundaries + providers + modules + integration)"
 	@echo "  test-boundaries   Validate import boundaries between modules"
+	@echo "  test-providers    Run all provider tests (core + all discovered providers)"
+	@echo "  test-providers-core  Run provider registry/capability tests only"
 	@echo "  test-modules      Run all module tests (use modules=mod1,mod2 to select specific)"
 	@echo "  test-integration  Run integration tests"
 	@echo "  test-cov          Run all tests with coverage"
@@ -34,6 +48,11 @@ help:
 	@echo "Module-specific test targets (auto-discovered):"
 	@for module in $(DISCOVERED_MODULES); do \
 		echo "  test-module-$$module"; \
+	done
+	@echo ""
+	@echo "Provider-specific test targets (auto-discovered):"
+	@for provider in $(DISCOVERED_PROVIDERS); do \
+		echo "  test-provider-$$provider"; \
 	done
 	@echo ""
 	@echo "Code quality targets:"
@@ -46,6 +65,9 @@ help:
 	@echo "  clean-cache       Remove Python caches (__pycache__, .pytest_cache, etc.)"
 	@echo "  clean-coverage    Remove coverage files (.coverage, coverage.xml, htmlcov/)"
 	@echo "  clean-generated   Remove all generated files (*_generated*)"
+	@echo ""
+	@echo "TWS API targets:"
+	@echo "  install-tws-api   Install TWS API with protobuf regeneration and validation"
 	@echo ""
 	@echo "Development targets:"
 	@echo "  dev               Start backend development server with debugpy"
@@ -78,6 +100,7 @@ help:
 	@echo "  logs-clean        Clean all backend log files"
 	@echo ""
 	@echo "Discovered modules: $(DISCOVERED_MODULES)"
+	@echo "Discovered providers: $(DISCOVERED_PROVIDERS)"
 
 # List all discovered modules
 list-modules:
@@ -85,6 +108,21 @@ list-modules:
 	@for module in $(DISCOVERED_MODULES); do \
 		echo "  - $$module"; \
 	done
+
+# List modules as JSON array (for CI dynamic matrix)
+list-modules-json:
+	@echo '$(DISCOVERED_MODULES)' | tr ' ' '\n' | grep -v '^$$' | jq -R -s -c 'split("\n") | map(select(. != ""))'
+
+# List all discovered providers
+list-providers:
+	@echo "📦 Discovered providers:"
+	@for provider in $(DISCOVERED_PROVIDERS); do \
+		echo "  - $$provider"; \
+	done
+
+# List providers as JSON array (for CI dynamic matrix)
+list-providers-json:
+	@echo '$(DISCOVERED_PROVIDERS)' | tr ' ' '\n' | grep -v '^$$' | jq -R -s -c 'split("\n") | map(select(. != ""))'
 
 # Unified generation command
 # Usage: make generate [modules=mod1,mod2] [output_dir=/path/to/output]
@@ -286,7 +324,10 @@ install:
 		poetry install; \
 	fi
 	@echo ""
-	@echo "[3/3] Checking nginx (required for multi-process mode)..."
+	@echo "[3/4] Regenerating TWS protobufs..."
+	@bash ./scripts/regenerate_tws_protobufs.sh
+	@echo ""
+	@echo "[4/4] Checking nginx (required for multi-process mode)..."
 	@if [ -f ".local/bin/nginx" ]; then \
 		echo "✅ Local nginx available: $$(.local/bin/nginx -v 2>&1)"; \
 	elif command -v nginx >/dev/null 2>&1; then \
@@ -375,11 +416,42 @@ install-ci:
 	@echo ""
 	@echo "Installing dependencies..."
 	@poetry install --no-interaction
+	@echo ""
+	@echo "Regenerating TWS protobufs..."
+	@bash ./scripts/regenerate_tws_protobufs.sh
 	@echo "✅ CI installation complete!"
 
 test-boundaries: check-generate-keypair
 	@echo "Running root-level tests..."
-	poetry run pytest tests/ -v --ignore=tests/integration/
+	poetry run pytest tests/ -v --ignore=tests/integration/ $(ARGS)
+
+# Provider core tests (registry, capability spec)
+test-providers-core: check-generate-keypair
+	@echo "Running provider core tests..."
+	poetry run pytest src/trading_api/providers/tests/ -v $(ARGS)
+
+# All provider tests (core + all discovered providers)
+test-providers: test-providers-core
+	@echo "Running all provider tests..."
+	@if [ -z "$(SELECTED_PROVIDERS)" ]; then \
+		echo "⚠️  No providers selected or found"; \
+	else \
+		echo "Testing providers: $(SELECTED_PROVIDERS)"; \
+		for provider in $(SELECTED_PROVIDERS); do \
+			if [ -d "$(PROVIDERS_DIR)/$$provider/tests" ]; then \
+				echo "Testing provider: $$provider"; \
+				poetry run pytest $(PROVIDERS_DIR)/$$provider/tests/ -v -x $(ARGS); \
+				EXIT_CODE=$$?; \
+				if [ $$EXIT_CODE -eq 5 ]; then \
+					echo "⚠️  No tests collected for provider: $$provider (skipping)"; \
+				elif [ $$EXIT_CODE -ne 0 ]; then \
+					exit 1; \
+				fi; \
+			else \
+				echo "⚠️  No tests found for provider: $$provider"; \
+			fi; \
+		done; \
+	fi
 
 test-modules: check-generate-keypair
 	@echo "Running module tests..."
@@ -390,7 +462,7 @@ test-modules: check-generate-keypair
 		for module in $(SELECTED_MODULES); do \
 			if [ -d "$(MODULES_DIR)/$$module/tests" ]; then \
 				echo "Testing module: $$module"; \
-				poetry run pytest $(MODULES_DIR)/$$module/tests/ -v -x; \
+				poetry run pytest $(MODULES_DIR)/$$module/tests/ -v -x $(ARGS); \
 				EXIT_CODE=$$?; \
 				if [ $$EXIT_CODE -eq 5 ]; then \
 					echo "⚠️  No tests collected for module: $$module (skipping)"; \
@@ -407,7 +479,7 @@ test-modules: check-generate-keypair
 $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
 	@echo "Running tests for module: $*..."
 	@if [ -d "$(MODULES_DIR)/$*/tests" ]; then \
-		poetry run pytest $(MODULES_DIR)/$*/tests/ -v -x; \
+		poetry run pytest $(MODULES_DIR)/$*/tests/ -v -x $(ARGS); \
 		EXIT_CODE=$$?; \
 		if [ $$EXIT_CODE -eq 5 ]; then \
 			echo "⚠️  No tests collected for module: $* (skipping)"; \
@@ -418,12 +490,27 @@ $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
 		echo "⚠️  No tests found for module: $*"; \
 	fi
 
+# Individual provider tests (auto-generated targets)
+$(addprefix test-provider-, $(DISCOVERED_PROVIDERS)): test-provider-%:
+	@echo "Running tests for provider: $*..."
+	@if [ -d "$(PROVIDERS_DIR)/$*/tests" ]; then \
+		poetry run pytest $(PROVIDERS_DIR)/$*/tests/ -v -x $(ARGS); \
+		EXIT_CODE=$$?; \
+		if [ $$EXIT_CODE -eq 5 ]; then \
+			echo "⚠️  No tests collected for provider: $* (skipping)"; \
+		elif [ $$EXIT_CODE -ne 0 ]; then \
+			exit 1; \
+		fi; \
+	else \
+		echo "⚠️  No tests found for provider: $*"; \
+	fi
+
 test-integration: check-generate-keypair
 	@echo "Running integration tests..."
-	poetry run pytest tests/integration/ -v -x -m integration
+	poetry run pytest tests/integration/ -v -x -m integration $(ARGS)
 
-test: test-boundaries test-modules test-integration
-	@echo "✅ All tests passed (boundaries + modules + integration)"
+test: test-boundaries test-providers test-modules test-integration
+	@echo "✅ All tests passed (boundaries + providers + modules + integration)"
 
 # Coverage targets
 test-cov: check-generate-keypair test-boundaries
@@ -716,6 +803,38 @@ logs-clean:
 	else \
 		echo "✅ No log directory found (nothing to clean)"; \
 	fi
+
+# TWS API Installation & Validation
+.PHONY: install-tws-api
+
+install-tws-api: ## Install TWS API with protobuf regeneration and validation
+	@echo "========================================"
+	@echo "Installing TWS API"
+	@echo "========================================"
+	@echo ""
+	@echo "[1/3] Checking dependencies..."
+	@if ! poetry run python -c "import grpc_tools.protoc" 2>/dev/null; then \
+		echo "Installing grpcio-tools..."; \
+		poetry add --group dev grpcio-tools; \
+	else \
+		echo "✓ grpcio-tools already installed"; \
+	fi
+	@if ! poetry run python -c "import mypy_protobuf" 2>/dev/null; then \
+		echo "Installing mypy-protobuf..."; \
+		poetry add --group dev mypy-protobuf; \
+	else \
+		echo "✓ mypy-protobuf already installed"; \
+	fi
+	@echo ""
+	@echo "[2/3] Regenerating protobuf files..."
+	@bash ./scripts/regenerate_tws_protobufs.sh
+	@echo ""
+	@echo "[3/3] Validating installation..."
+	@poetry run python scripts/validate_tws_install.py
+	@echo ""
+	@echo "========================================"
+	@echo "✅ TWS API installation complete!"
+	@echo "========================================"
 
 # JWT Key Pair Management
 SECRETS_DIR := .local/secrets

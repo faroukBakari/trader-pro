@@ -24,6 +24,7 @@ from trading_api.models.auth import (
     User,
     UserData,
 )
+from trading_api.models.common import AuthenticationError
 from trading_api.shared import settings
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.middleware.auth import get_current_user
@@ -89,6 +90,8 @@ class AuthApi(APIRouterInterface):
                 return tokens
             except HTTPException:
                 raise
+            except AuthenticationError as e:
+                raise HTTPException(status_code=401, detail=str(e))
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
 

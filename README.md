@@ -130,12 +130,25 @@ See [ENVIRONMENT-CONFIG.md](./docs/ENVIRONMENT-CONFIG.md) for environment variab
 **Module-Specific Development** (Backend):
 
 ```bash
-# Start only specific modules
+# Start specific modules (all versions)
 ENABLED_MODULES=broker make -f project.mk dev-backend
+
+# Start specific module version only
+ENABLED_MODULES=broker:v1 make -f project.mk dev-backend
+
+# Start multiple modules with specific versions
+ENABLED_MODULES=broker:v1,datafeed:v2 make -f project.mk dev-backend
 
 # Multi-process mode (production-like)
 make -C backend backend-dev-multi
 ```
+
+- The backend uses a functional registry API: module names listed in `ENABLED_MODULES`
+  are passed to `ModuleRegistry.get_modules(...)`, which lazily instantiates only the
+  requested modules at startup. Module specs can optionally include versions (e.g.,
+  `broker:v1`) to load only specific versions. Individual `Module` classes no longer
+  expose `enable()` methods or `enabled` flags—selection happens entirely through the
+  registry call.
 
 See [docs/FULLSTACK-DEV-MODE.md](docs/FULLSTACK-DEV-MODE.md) for watch system and [backend/docs/BACKEND_MANAGER_GUIDE.md](backend/docs/BACKEND_MANAGER_GUIDE.md) for multi-process deployment.
 

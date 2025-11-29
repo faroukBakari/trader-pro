@@ -31,7 +31,7 @@ import random
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from trading_api.models.broker import (
     AccountMetainfo,
@@ -55,6 +55,7 @@ from trading_api.models.broker import (
     PreOrder,
     Side,
 )
+from trading_api.models.common import CapabilitySpec
 from trading_api.shared.ws.ws_route_interface import WsRouteService
 
 logger = logging.getLogger(__name__)
@@ -125,18 +126,32 @@ class BrokerService(WsRouteService):
 
     """
 
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        """Return required capabilities for broker service.
+
+        Broker service doesn't require any capabilities (no auth/external providers).
+
+        Returns:
+            Empty list - no capabilities required
+        """
+        return []
+
     def __init__(
         self,
         module_dir: Path,
+        *,  # Force keyword-only arguments
         execution_delay: float | None = None,
+        providers: list | None = None,
     ) -> None:
         """Initialize broker service.
 
         Args:
             module_dir: Path to the module directory
             execution_delay: Delay between executions in seconds (default: None)
+            providers: Provider instances for capabilities (unused, for interface compatibility)
         """
-        super().__init__(module_dir)
+        super().__init__(module_dir, providers=providers)
         self._orders: Dict[str, PlacedOrder] = {}
         self._positions: Dict[str, Position] = {}
         self._executions: List[Execution] = []
@@ -153,7 +168,7 @@ class BrokerService(WsRouteService):
         )
 
         # WebSocket callback registry (one per topic type)
-        self._update_callbacks: dict[str, Callable[[Any], None]] = {}
+        self._update_callbacks: dict[str, Callable[[Any], Awaitable[None]]] = {}
 
         # Single execution simulation task
         self._execution_simulator_task: Optional[asyncio.Task] = None
@@ -714,7 +729,9 @@ class BrokerService(WsRouteService):
 
     # ========================== WEBSOCKET STREAMING ==========================#
 
-    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+    async def create_topic(
+        self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
+    ) -> None:
         """Register callback for topic type and start execution simulator if needed.
 
         Topic formats:
@@ -740,7 +757,7 @@ class BrokerService(WsRouteService):
         # this topic update callback would have no listener due to topic filtering on FastWS side.
         # Register callback for this topic type (single callback per type for now)
 
-        # anti-pattern: should define topic types more formally
+        # Temperary glut - will be fixed with broker provider / broker capabilities
         if topic_type not in self._update_callbacks:
             logger.info(f"Registering callback for topic type: {topic_type}")
             self._update_callbacks[topic_type] = topic_update
@@ -753,7 +770,7 @@ class BrokerService(WsRouteService):
                     disconnectType=None,
                     timestamp=int(time.time() * 1000),
                 )
-                topic_update(status)
+                await topic_update(status)
 
         # Start execution simulator if not already running and we have orders topic
         if self._execution_simulator_task is None and len(self._update_callbacks) > 0:
@@ -774,9 +791,8 @@ class BrokerService(WsRouteService):
         topic_type, _ = topic.split(":", 1)
 
         # Remove callback for this topic type
-        if topic_type in self._update_callbacks:
-            logger.info(f"Removing callback for topic type: {topic_type}")
-            del self._update_callbacks[topic_type]
+        logger.info(f"Removing callback for topic type: {topic_type}")
+        self._update_callbacks.pop(topic_type, None)
 
         # Stop execution simulator if no more subscribers
         if len(self._update_callbacks) == 0 and self._execution_simulator_task:
@@ -885,7 +901,7 @@ class BrokerService(WsRouteService):
         # 1. Broadcast execution update
         if "executions" in self._update_callbacks:
             logger.info(f"Broadcasting execution: {execution.symbol}")
-            self._update_callbacks["executions"](execution)
+            await self._update_callbacks["executions"](execution)
 
         # Update order status
         order.status = OrderStatus.FILLED
@@ -896,12 +912,12 @@ class BrokerService(WsRouteService):
         # 2. Broadcast order update
         if "orders" in self._update_callbacks:
             logger.info(f"Broadcasting order update: {order.id}")
-            self._update_callbacks["orders"](order)
+            await self._update_callbacks["orders"](order)
 
         # 3. Trigger equity update (which broadcasts)
-        self._update_equity(execution)
+        await self._update_equity(execution)
 
-    def _update_equity(self, execution: Execution) -> None:
+    async def _update_equity(self, execution: Execution) -> None:
         """
         Update equity after execution and broadcast changes.
 
@@ -946,12 +962,12 @@ class BrokerService(WsRouteService):
         # Broadcast equity update
         if "equity" in self._update_callbacks:
             logger.info(f"Broadcasting equity update: {self.accounting}")
-            self._update_callbacks["equity"](self.accounting)
+            await self._update_callbacks["equity"](self.accounting)
 
         # Trigger position update (which broadcasts and recalculates unrealized P/L)
-        self._update_position(execution)
+        await self._update_position(execution)
 
-    def _update_position(self, execution: Execution) -> None:
+    async def _update_position(self, execution: Execution) -> None:
         """
         Update position from execution and broadcast changes.
 
@@ -993,7 +1009,7 @@ class BrokerService(WsRouteService):
                 # Broadcast position update
                 if "positions" in self._update_callbacks:
                     logger.info(f"Broadcasting position update: {existing.symbol}")
-                    self._update_callbacks["positions"](existing)
+                    await self._update_callbacks["positions"](existing)
             else:
                 # Opposite side - closing or reversing
                 if execution.qty < existing.qty:
@@ -1020,7 +1036,7 @@ class BrokerService(WsRouteService):
                     # Broadcast position update
                     if "positions" in self._update_callbacks:
                         logger.info(f"Broadcasting position update: {existing.symbol}")
-                        self._update_callbacks["positions"](existing)
+                        await self._update_callbacks["positions"](existing)
 
                 elif execution.qty == existing.qty:
                     # Full close - position eliminated
@@ -1037,7 +1053,7 @@ class BrokerService(WsRouteService):
                     # Broadcast position closure
                     if "positions" in self._update_callbacks:
                         logger.info(f"Broadcasting position closure: {existing.symbol}")
-                        self._update_callbacks["positions"](existing)
+                        await self._update_callbacks["positions"](existing)
 
                     del self._positions[execution.symbol]
 
@@ -1059,7 +1075,7 @@ class BrokerService(WsRouteService):
                     # Broadcast position update
                     if "positions" in self._update_callbacks:
                         logger.info(f"Broadcasting position update: {existing.symbol}")
-                        self._update_callbacks["positions"](existing)
+                        await self._update_callbacks["positions"](existing)
         else:
             # New position created
             new_position = Position(
@@ -1081,4 +1097,4 @@ class BrokerService(WsRouteService):
             # Broadcast new position
             if "positions" in self._update_callbacks:
                 logger.info(f"Broadcasting new position: {new_position.symbol}")
-                self._update_callbacks["positions"](new_position)
+                await self._update_callbacks["positions"](new_position)

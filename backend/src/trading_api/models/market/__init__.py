@@ -5,7 +5,13 @@ This package contains models related to market data, instruments,
 quotes, bars, and datafeed configuration.
 """
 
-from .bars import Bar, BarsSubscriptionRequest, GetBarsRequest, GetBarsResponse
+from .bars import (
+    Bar,
+    BarsSubscriptionRequest,
+    GetBarsRequest,
+    GetBarsResponse,
+    TimeFrame,
+)
 from .configuration import DatafeedConfiguration
 from .instruments import (
     DatafeedSymbolType,
@@ -28,6 +34,7 @@ __all__: list[str] = [
     "Exchange",
     "DatafeedSymbolType",
     # Bars and historical data
+    "TimeFrame",
     "Bar",
     "BarsSubscriptionRequest",
     "GetBarsRequest",

@@ -398,17 +398,15 @@ async def customAction(
 
 **Location Pattern**: `backend/src/trading_api/app_factory.py`
 
-**Note**: In the modular architecture, modules are registered via the factory pattern, not directly in main.py.
+**Note**: In the modular architecture, modules are auto-discovered and registered via the factory pattern.
 
 ```python
-# Modules register themselves via Module Protocol
-from trading_api.modules.{module} import {Module}Module
-
+# Modules are auto-discovered from modules/ directory
 # In app_factory.py create_app() function:
-registry.register({Module}Module())
+registry.auto_discover()  # Discovers and registers all modules
 
-# Module's get_api_routers() returns routers to include
-for module in registry.get_enabled_modules():
+# Get modules to enable (enabled_module_names parameter filters modules, None = all modules)
+for module in registry.get_modules(enabled_module_names):
     for router in module.get_api_routers():
         api_app.include_router(router, prefix="/api/v1")
 ```
