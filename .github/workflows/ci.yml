@@ -16,6 +16,8 @@ jobs:
   # Backend setup and linting (runs once)
   backend-setup:
     runs-on: ubuntu-latest
+    outputs:
+      modules: ${{ steps.discover-modules.outputs.modules }}
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -48,6 +50,11 @@ jobs:
       if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
       working-directory: backend
       run: make install-ci
+
+    - name: Discover modules
+      id: discover-modules
+      working-directory: backend
+      run: echo "modules=$(make list-modules-json)" >> $GITHUB_OUTPUT
 
     - name: Generate all specs and clients
       working-directory: backend
@@ -156,7 +163,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.11"]
-        module: ["broker", "datafeed"]
+        module: ${{ fromJson(needs.backend-setup.outputs.modules) }}
 
     steps:
     - uses: actions/checkout@v4
