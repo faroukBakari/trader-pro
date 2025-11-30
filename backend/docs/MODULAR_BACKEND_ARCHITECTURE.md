@@ -1,8 +1,8 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: November 20, 2025  
-**Version**: 5.2.0
+**Last Updated**: November 30, 2025  
+**Version**: 5.3.0
 
 ## Table of Contents
 
@@ -1501,6 +1501,41 @@ class WsRouterBase(list[WsRouteFeature]):
         super().__init__(*args, **kwargs)
         self._service = service
 ```
+
+### Dynamic Type Resolution
+
+WebSocket routers use **runtime type introspection** instead of code generation:
+
+```python
+# In WsRouter (shared/ws/generic_route.py)
+def _resolve_generic_types(self):
+    """
+    Introspects the class to find the Generic type arguments.
+    Uses __orig_bases__ to extract [TRequest, TData] at runtime.
+    """
+    types = next(iter(getattr(self.__class__, "__orig_bases__", [])), None)
+    return get_args(types)  # Returns (RequestType, DataType)
+```
+
+**Usage Pattern** (class inheritance required):
+
+```python
+# Step 1: Define concrete router class
+class OrderRouter(WsRouter[OrderSubscriptionRequest, PlacedOrder]):
+    pass
+
+# Step 2: Instantiate in router factory
+order_router = OrderRouter(route="orders", tags=[module_name], service=service)
+```
+
+**Why Class Inheritance?** The `_resolve_generic_types()` method introspects `__orig_bases__` which only exists on concrete subclasses. Direct generic instantiation (`WsRouter[T, D](...)`) would not preserve type information.
+
+**What This Enables**:
+
+- ✅ Type parameters resolved at runtime (no code generation)
+- ✅ Annotations set dynamically for AsyncAPI spec generation
+- ✅ Type-safe subscribe/unsubscribe handlers
+- ✅ Proper IDE autocomplete via generic type hints
 
 **WsRouteService Protocol** for topic lifecycle:
 

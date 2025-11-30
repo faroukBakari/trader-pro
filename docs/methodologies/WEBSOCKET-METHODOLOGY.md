@@ -1,10 +1,10 @@
 # WebSocket Integration Methodology
 
-**Version**: 4.0.0  
-**Date**: October 30, 2025  
+**Version**: 4.1.0  
+**Date**: January 8, 2025  
 **Status**: ✅ Production Methodology (Modular Architecture)  
 **Related**: `docs/WEBSOCKET-CLIENTS.md`, `ARCHITECTURE.md`  
-**Architecture**: Modular backend with factory-based pattern
+**Architecture**: Modular backend with dynamic type resolution
 
 ---
 
@@ -92,7 +92,7 @@ class Bar(BaseModel):
 
 **Note**: Each module has its own `ws/v{N}/` directory with router factory classes using direct generic types.
 
-Use the router factory pattern with direct generics:
+Use class inheritance with generic types for dynamic type resolution:
 
 ```python
 # backend/src/trading_api/modules/datafeed/ws/v1/__init__.py
@@ -101,14 +101,19 @@ from trading_api.models.market import Bar, BarsSubscriptionRequest
 from trading_api.shared.ws.generic_route import WsRouter
 from trading_api.shared.ws.ws_router import WsRouterBase, WsRouteService
 
+# Concrete router class - types resolved at runtime via __orig_bases__
+class BarRouter(WsRouter[BarsSubscriptionRequest, Bar]):
+    """Bars subscription router with dynamic type resolution"""
+    pass
+
 class DatafeedWsRouters(WsRouterBase):
     """Factory creating all datafeed WebSocket routers"""
 
     def __init__(self, datafeed_service: WsRouteService):
         module_name = Path(__file__).parent.parent.parent.name
 
-        # Direct generic instantiation - no code generation needed
-        bar_router = WsRouter[BarsSubscriptionRequest, Bar](
+        # Class inheritance pattern - runtime introspects __orig_bases__
+        bar_router = BarRouter(
             route="bars", tags=[module_name], service=datafeed_service
         )
         # Add more routers as needed
@@ -120,7 +125,8 @@ class DatafeedWsRouters(WsRouterBase):
 
 - One router per business concept (bars, orders, positions, etc.)
 - Group related routers in a factory class extending `WsRouterBase`
-- Use `WsRouter[Request, Data]` pattern directly - no code generation
+- Use class inheritance `class XRouter(WsRouter[Request, Data]): pass` for dynamic type resolution
+- Types are resolved at runtime via `__orig_bases__` introspection - no code generation needed
 - Pass service implementing `WsRouteService` Protocol
 
 ### Step 1.3: Register Routers
@@ -701,7 +707,7 @@ Use this checklist when implementing new WebSocket features:
 
 ---
 
-**Version**: 4.0.0 (Modular Architecture)  
-**Last Updated**: November 11, 2025  
+**Version**: 4.1.0 (Dynamic Type Resolution)  
+**Last Updated**: January 8, 2025  
 **Maintained by**: Development Team  
-**Migration**: Updated for modular backend architecture with factory pattern
+**Migration**: Updated for dynamic type resolution via class inheritance pattern

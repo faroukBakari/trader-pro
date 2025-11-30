@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, Generic, Type, TypeVar, get_args
+from typing import Any, Generic, TypeVar, get_args
 
 from pydantic import BaseModel
 
@@ -24,7 +24,6 @@ async def unset_broadcast_update(route: str, _: SubscriptionUpdate) -> None:
 
 
 class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
-
     def __init__(self, service: WsRouteService, *args: Any, **kwargs: Any) -> None:
         # Validate service implements WsRouteService protocol BEFORE initialization
         if not hasattr(service, "create_topic"):
@@ -42,44 +41,18 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
 
         super().__init__(*args, **kwargs)
         self.service = service
-        self.topic_trackers: dict[str, int] = {}
+        self._active_topics: dict[str, int] = {}
         self._active_clients: set[Client] = set()
-
-        def update(
-            payload: SubscriptionUpdate[_TData],
-        ) -> SubscriptionUpdate[_TData]:
-            """Broadcast data updates to subscribed clients"""
-            return payload
-
-        update.__annotations__["payload"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
-        update.__annotations__["return"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
-        self.recv("update")(update)
 
         async def send_subscribe(
             payload: _TRequest,
             client: Client,
         ) -> SubscriptionResponse:
             """Subscribe to real-time data updates"""
-            self._active_clients.add(client)
-            topic = self.topic_builder(payload)
+            topic = await self._register_topic(payload)
+            self._register_client(client)
+
             client.subscribe(topic)
-
-            if topic not in self.topic_trackers:
-                # nested function to avoid binding issue in closure
-                async def topic_update(data: _TData) -> None:
-                    await self.broadcast_update(
-                        self.route,
-                        SubscriptionUpdate(
-                            topic=topic,
-                            payload=data,
-                        ),
-                    )
-
-                await self.service.create_topic(topic, topic_update)
-                self.topic_trackers[topic] = 1
-            else:
-                self.topic_trackers[topic] = self.topic_trackers[topic] + 1
-
             logger.info(f"Client {client.uid} subscribed to topic: {topic}")
 
             return SubscriptionResponse(
@@ -88,8 +61,11 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 topic=topic,
             )
 
-        send_subscribe.__annotations__["payload"] = request_type
-        self.send("subscribe", reply="subscribe.response")(send_subscribe)
+        def update(
+            payload: SubscriptionUpdate[_TData],
+        ) -> SubscriptionUpdate[_TData]:
+            """Broadcast data updates to subscribed clients"""
+            return payload
 
         def send_unsubscribe(
             payload: _TRequest,
@@ -99,10 +75,13 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             topic = self.topic_builder(payload)
             client.unsubscribe(topic)
 
-            self.topic_trackers[topic] = self.topic_trackers[topic] - 1
-            if self.topic_trackers[topic] <= 0:
+            self._active_topics[topic] = self._active_topics[topic] - 1
+            if self._active_topics[topic] <= 0:
                 self.service.remove_topic(topic)
-                self.topic_trackers.pop(topic, None)
+                self._active_topics.pop(topic, None)
+
+            if not any(topic in self._active_topics for topic in client.topics):
+                self._active_clients.discard(client)
 
             logger.info(f"Client {client.uid} unsubscribed from topic: {topic}")
 
@@ -112,10 +91,15 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 topic=topic,
             )
 
+        update.__annotations__["payload"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
+        update.__annotations__["return"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
+        self.recv("update")(update)
+        send_subscribe.__annotations__["payload"] = request_type
+        self.send("subscribe", reply="subscribe.response")(send_subscribe)
         send_unsubscribe.__annotations__["payload"] = request_type
         self.send("unsubscribe", reply="unsubscribe.response")(send_unsubscribe)
 
-    def _resolve_generic_types(self):
+    def _resolve_generic_types(self) -> tuple[type[_TRequest], type[_TData]]:
         """
         Introspects the class to find the Generic type arguments.
         """
@@ -149,3 +133,28 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         except Exception as e:
             logger.warning(f"Error during FastWS {route}.update broadcast, {e}")
             await asyncio.sleep(1)
+
+    async def _register_topic(self, payload: _TRequest) -> str:
+        topic = self.topic_builder(payload)
+        # Register topic if not already active
+        if topic not in self._active_topics:
+
+            async def topic_update(data: _TData) -> None:
+                await self.broadcast_update(
+                    self.route,
+                    SubscriptionUpdate(
+                        topic=topic,
+                        payload=data,
+                    ),
+                )
+
+            await self.service.create_topic(topic, topic_update)
+            self._active_topics[topic] = 1
+        else:
+            self._active_topics[topic] = self._active_topics[topic] + 1
+        return topic
+
+    def _register_client(self, client: Client) -> None:
+        # Register client disconnect handler once
+        if client not in self._active_clients:
+            self._active_clients.add(client)

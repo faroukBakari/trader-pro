@@ -1,7 +1,7 @@
 # Trading Pro - Architecture Documentation
 
-**Version**: 4.0.0 (Modular Architecture)
-**Last Updated**: November 11, 2025
+**Version**: 4.1.0 (Modular Architecture)
+**Last Updated**: November 30, 2025
 **Status**: ✅ Production Ready
 
 ## Overview
@@ -1522,28 +1522,27 @@ Unsubscribe Request
 
 **Adapter Responsibilities**:
 
-| Component            | Purpose                     | Details                                                   |
-| -------------------- | --------------------------- | --------------------------------------------------------- |
-| Background Tasks     | Broadcasting workers        | `_broadcast_tasks: list[asyncio.Task]`                    |
-| Router Registration  | `include_router()` override | Registers router, stores broadcast coroutine              |
-| Setup Method         | `setup()` override          | Starts all pending broadcast tasks                        |
-| Message Broadcasting | Background task per router  | Polls router.updates_queue, sends via FastWS              |
-| Queue Management     | Per-router message queues   | `router.updates_queue: asyncio.Queue` (in WsRouteFeature) |
+| Component            | Purpose                     | Details                                             |
+| -------------------- | --------------------------- | --------------------------------------------------- |
+| Connection Lifecycle | Manages client connections  | `manage()` context manager for client lifecycle     |
+| Router Registration  | `include_router()` override | Registers router, validates WsRouteFeature type     |
+| Client Tracking      | Per-router active clients   | `router._active_clients: set[Client]` (in WsRouter) |
+| Message Broadcasting | Direct client iteration     | Router's `broadcast_update()` filters by topic      |
 
-**Broadcasting Flow**:
+**Broadcasting Flow** (Direct Pattern):
 
 ```
 Service generator calls topic_update(data)
     ↓
-  topic_update enqueues SubscriptionUpdate(topic, data)
+  topic_update wraps in SubscriptionUpdate(topic, data)
     ↓
-  router.updates_queue.put_nowait(update)
+  WsRouter.broadcast_update(route, update) called
     ↓
-  Background task polls router.updates_queue
+  Filters _active_clients by topic subscription
     ↓
-  Create Message(type="{route}.update", payload=update.model_dump())
+  Create Message(type="{route}.update", payload=update.model_dump_json())
     ↓
-  server_send(message, topic=update.topic) → Only to subscribed clients
+  asyncio.gather sends to all matching clients
 ```
 
 #### Data Flow Architecture
@@ -1558,17 +1557,16 @@ Service generator calls topic_update(data)
 │     └─> create_topic(topic, topic_update) stores callback      │
 │     └─> Service generates data and calls topic_update(data)    │
 │                                                                 │
-│  2. WsRouter (Subscription Management)                         │
-│     └─> topic_update callback enqueues to updates_queue        │
-│     └─> updates_queue: asyncio.Queue in WsRouteFeature       │
+│  2. WsRouter (Subscription Management + Broadcasting)          │
+│     └─> topic_update callback calls broadcast_update()         │
+│     └─> _active_clients: set[Client] tracks subscribed clients │
+│     └─> broadcast_update() filters clients by topic            │
 │                                                                 │
-│  3. FastWSAdapter (Broadcasting Layer)                         │
-│     └─> include_router() override registers routers            │
-│     └─> setup() starts background tasks per router             │
-│     └─> Background task polls router.updates_queue             │
-│         await server_send(message, topic=update.topic)         │
+│  3. FastWSAdapter (Connection Lifecycle)                       │
+│     └─> manage() context manager for client connections        │
+│     └─> include_router() registers WsRouteFeature routers      │
 │                                                                 │
-│  4. WsRouter (Subscription Management)                         │
+│  4. WsRouter (Subscription Tracking)                           │
 │     └─> Subscribe: Increments topic_trackers[topic]            │
 │     └─> First subscriber → service.create_topic()              │
 │     └─> Unsubscribe: Decrements topic_trackers[topic]          │
@@ -1871,16 +1869,16 @@ scripts/
          │
          ▼
 ┌─────────────────┐
-│ WsRouter        │  topic_update(data) → Enqueue to updates_queue
-│ (Generic)       │  • updates_queue.put_nowait(SubscriptionUpdate)
-│                 │  • SubscriptionUpdate(topic=topic, payload=data)
+│ WsRouter        │  topic_update(data) → broadcast_update()
+│ (Generic)       │  • Wraps in SubscriptionUpdate(topic, data)
+│                 │  • Filters _active_clients by topic
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ FastWSAdapter   │  Background task polling updates_queue
-│ Broadcasting    │  • Runs per-router broadcast coroutine
-│ Task            │  • await router.updates_queue.get()
+│ WsRouter        │  Direct broadcasting to subscribed clients
+│ Broadcasting    │  • asyncio.gather sends to all matching clients
+│                 │  • Message type: "{route}.update"
 └────────┬────────┘
          │
          ▼
@@ -2325,9 +2323,9 @@ Key Features:
 │                                                                         │
 │ Backend: Order fills, BrokerService updates state                       │
 │     ↓                                                                   │
-│ Calls topic_update(updatedOrder) → Enqueues to router.updates_queue    │
+│ Calls topic_update(updatedOrder) → Triggers broadcast_update()         │
 │     ↓                                                                   │
-│ FastWSAdapter broadcast task polls queue                                │
+│ WsRouter filters _active_clients by topic, sends to all                 │
 │     ↓                                                                   │
 │ WebSocket SEND {type: "orders.update", payload: {topic, payload}}      │
 │     ↓                                                                   │

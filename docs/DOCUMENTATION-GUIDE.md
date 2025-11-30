@@ -559,6 +559,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2025-01-08**: WS router generation decommissioned (dynamic type resolution via `__orig_bases__` introspection)
 - **2025-11-26**: TWS Provider documentation refresh (type stubs, local modifications, expanded chains)
 - **2025-11-21**: AI agent optimization (added metadata, discovery rules, query patterns, dependencies)
 - **2025-11-19**: TWS API docs added (8 files in `backend/external_packages/tws/docs/`)
@@ -582,5 +583,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: November 26, 2025  
+**Last Updated**: January 8, 2025  
 **Maintained by**: Development Team
