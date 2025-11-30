@@ -5,7 +5,7 @@ from pathlib import Path
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.health import HealthResponse
 from trading_api.models.versioning import APIMetadata, VersionInfo
-from trading_api.providers.base import Provider
+from trading_api.shared.provider_interface import Provider
 
 
 class ServiceInterface(ABC):

@@ -445,7 +445,7 @@ class Module(ABC):
                         f"⚠️  Python client for '{self.name}' missing routes: {missing}"
                     )
             except Exception as e:
-                logger.error(
+                logger.exception(
                     f"⚠️  Failed to generate Python client for '{self.name}': {e}"
                 )
                 raise
@@ -490,7 +490,7 @@ class Module(ABC):
                     logger.info(f"✅ Updated AsyncAPI spec: {asyncapi_file}")
 
             except Exception as e:
-                logger.error(
+                logger.exception(
                     f"⚠️  Failed to process AsyncAPI spec for '{self.name}': {e}"
                 )
 
@@ -548,7 +548,7 @@ class ModuleApp:
                     try:
                         await _ws_app.serve(client)
                     except Exception as e:
-                        logger.error(f"WebSocket connection error: {e}")
+                        logger.exception(f"WebSocket connection error: {e}")
                         await client.ws.close(
                             code=1011, reason=f"Server connection error: {e}"
                         )
@@ -676,7 +676,7 @@ class ModuleApp:
                             f"⚠️  Python client for '{moduleName} {version}' missing routes: {missing}"
                         )
                 except Exception as e:
-                    logger.error(
+                    logger.exception(
                         f"⚠️  Failed to generate Python client for '{moduleName} {version}': {e}"
                     )
                     raise
@@ -721,7 +721,7 @@ class ModuleApp:
                         logger.info(f"✅ Updated AsyncAPI spec: {asyncapi_file}")
 
                 except Exception as e:
-                    logger.error(
+                    logger.exception(
                         f"⚠️  Failed to process AsyncAPI spec for '{moduleName}': {e}"
                     )
 

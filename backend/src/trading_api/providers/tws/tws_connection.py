@@ -195,7 +195,7 @@ class IBSocket:
                     return True  # Remote side has closed the connection
             return False  # Connection is still open
         except socketError as e:
-            logger.error(f"Socket error while checking remote closure: {e}")
+            logger.exception(f"Socket error while checking remote closure: {e}")
             return True  # Assume closed on error
 
     def _receive_data(
@@ -392,7 +392,7 @@ class IBSocket:
                 self._state = IBSocketState.CLOSED
                 # logger.info("IBSocket Socket closed.")
         except Exception as e:
-            logger.error(f"Error while closing IBSocket: {e}")
+            logger.exception(f"Error while closing IBSocket: {e}")
 
         # if False and self._reader_thread and self._reader_thread.is_alive():
         #     logger.info("Waiting for IBSocket reader thread to finish...")

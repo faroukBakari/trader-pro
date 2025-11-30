@@ -16,8 +16,8 @@ from trading_api.models.market import (
     TimeFrame,
 )
 from trading_api.modules.datafeed.service import DatafeedService
-from trading_api.providers.base import Provider
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
+from trading_api.shared import Provider
 
 
 class MockDatafeedProvider(Provider, DatafeedCapability):

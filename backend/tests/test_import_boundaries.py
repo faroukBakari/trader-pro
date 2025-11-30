@@ -17,7 +17,7 @@ BOUNDARY_RULES = {
     "providers/*": {
         "allowed_patterns": [
             "trading_api.models.*",
-            "trading_api.shared.config",
+            "trading_api.shared.*",
             "trading_api.providers.*",  # Providers can import other providers
         ],
         "forbidden_patterns": ["trading_api.modules.*"],

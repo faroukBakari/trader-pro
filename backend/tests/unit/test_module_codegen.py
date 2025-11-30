@@ -26,8 +26,8 @@ from trading_api.models.market import (  # noqa: E402
 from trading_api.modules.auth import AuthModule  # noqa: E402
 from trading_api.modules.broker import BrokerModule  # noqa: E402
 from trading_api.modules.datafeed import DatafeedModule  # noqa: E402
-from trading_api.providers.base import Provider  # noqa: E402
 from trading_api.providers.capabilities.datafeed import DatafeedCapability  # noqa: E402
+from trading_api.shared import Provider  # noqa: E402
 from trading_api.shared.module_interface import ModuleApp  # noqa: E402
 
 
