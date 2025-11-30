@@ -88,55 +88,42 @@ class Bar(BaseModel):
 
 ### Step 1.2: Create Router Factory
 
-**Location**: `backend/src/trading_api/modules/{module}/ws.py`
+**Location**: `backend/src/trading_api/modules/{module}/ws/v{N}/__init__.py`
 
-**Note**: Each module has its own `ws.py` file with TypeAlias declarations. Routers are generated into `modules/{module}/ws_generated/`.
+**Note**: Each module has its own `ws/v{N}/` directory with router factory classes using direct generic types.
 
-Use the router factory pattern with TYPE_CHECKING:
+Use the router factory pattern with direct generics:
 
 ```python
-# backend/src/trading_api/modules/datafeed/ws.py
-from typing import TYPE_CHECKING, TypeAlias
+# backend/src/trading_api/modules/datafeed/ws/v1/__init__.py
+from pathlib import Path
 from trading_api.models.market import Bar, BarsSubscriptionRequest
-from trading_api.shared.ws.ws_route_interface import WsRouteInterface, WsRouteService
 from trading_api.shared.ws.generic_route import WsRouter
+from trading_api.shared.ws.ws_router import WsRouterBase, WsRouteService
 
-if TYPE_CHECKING:
-    # Type alias for type checkers
-    BarWsRouter: TypeAlias = WsRouter[BarsSubscriptionRequest, Bar]
-else:
-    # Runtime: use generated concrete class from module-local ws_generated
-    from .ws_generated import BarWsRouter
-
-class DatafeedWsRouters(list[WsRouteInterface]):
+class DatafeedWsRouters(WsRouterBase):
     """Factory creating all datafeed WebSocket routers"""
 
     def __init__(self, datafeed_service: WsRouteService):
-        bar_router = BarWsRouter(route="bars", tags=["datafeed"], service=datafeed_service)
+        module_name = Path(__file__).parent.parent.parent.name
+
+        # Direct generic instantiation - no code generation needed
+        bar_router = WsRouter[BarsSubscriptionRequest, Bar](
+            route="bars", tags=[module_name], service=datafeed_service
+        )
         # Add more routers as needed
-        super().__init__([bar_router])
+
+        super().__init__([bar_router], service=datafeed_service)
 ```
 
 **Key Points**:
 
 - One router per business concept (bars, orders, positions, etc.)
-- Group related routers in a factory class
+- Group related routers in a factory class extending `WsRouterBase`
+- Use `WsRouter[Request, Data]` pattern directly - no code generation
 - Pass service implementing `WsRouteService` Protocol
 
-### Step 1.3: Start the App (Automatic Generation)
-
-**No manual generation needed!** Routers automatically generate when you start the app:
-
-```bash
-cd backend
-make dev
-```
-
-This triggers automatic router generation when each module's router factory is instantiated. The generator scans all `modules/*/ws.py` files for `TypeAlias = WsRouter[...]` patterns and generates concrete classes in `modules/{module}/ws_generated/` **before** they are imported.
-
-**See**: `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` for complete generation guide and troubleshooting
-
-### Step 1.4: Register Routers
+### Step 1.3: Register Routers
 
 **Location**: Module's `__init__.py` implements Module Protocol
 
@@ -146,10 +133,10 @@ This triggers automatic router generation when each module's router factory is i
 # backend/src/trading_api/modules/datafeed/__init__.py
 from typing import List
 from fastapi import APIRouter
-from trading_api.shared.ws.ws_route_interface import WsRouteInterface
+from trading_api.shared.ws.ws_router import WsRouteFeature
 from .service import DatafeedService
 from .api import DatafeedApi
-from .ws import DatafeedWsRouters
+from .ws.v1 import DatafeedWsRouters
 
 class DatafeedModule:
     def __init__(self):
@@ -169,7 +156,7 @@ class DatafeedModule:
     def get_api_routers(self) -> List[APIRouter]:
         return [DatafeedApi(service=self.service, prefix=f"/{self.name}", tags=[self.name])]
 
-    def get_ws_routers(self) -> List[WsRouteInterface]:
+    def get_ws_routers(self) -> List[WsRouteFeature]:
         return DatafeedWsRouters(self.service)
 
     def configure_app(self, api_app, ws_app) -> None:
@@ -179,7 +166,7 @@ class DatafeedModule:
 
 The application factory (`app_factory.py`) automatically registers all enabled modules' routers.
 
-### Step 1.5: Write Backend Tests
+### Step 1.4: Write Backend Tests
 
 **Location**: `backend/src/trading_api/modules/{module}/tests/test_ws.py`
 
@@ -440,7 +427,7 @@ The `WsRouter` passes a `topic_update` callback to your service's `create_topic(
 
 **Location**: `backend/src/trading_api/modules/{module}/service.py`
 
-**Note**: Service implements `WsRouteService` Protocol from `shared.ws.ws_route_interface`.
+**Note**: Service implements `WsRouteService` Protocol from `shared.ws.ws_router`.
 
 **Example (DatafeedService)**:
 
@@ -450,7 +437,7 @@ import asyncio
 import json
 from typing import Callable
 from trading_api.models.market import Bar, BarsSubscriptionRequest
-from trading_api.shared.ws.ws_route_interface import WsRouteService
+from trading_api.shared.ws.ws_router import WsRouteService
 
 class DatafeedService(WsRouteService):
     """Datafeed service implementing WsRouteService Protocol"""
@@ -656,8 +643,7 @@ Use this checklist when implementing new WebSocket features:
 #### Datafeed Module (Market Data)
 
 - **Location**: `backend/src/trading_api/modules/datafeed/`
-- **Routers**: `ws.py` - bars, quotes TypeAlias declarations
-- **Generated**: `ws_generated/` - BarWsRouter, QuoteWsRouter concrete classes
+- **Routers**: `ws/v1/__init__.py` - DatafeedWsRouters with WsRouter[Request, Data] pattern
 - **Service**: `service.py` - DatafeedService implements WsRouteService
 - **Tests**: `tests/test_ws.py` - Module-specific WebSocket tests
 - **Status**: ✅ Production ready
@@ -665,17 +651,15 @@ Use this checklist when implementing new WebSocket features:
 #### Broker Module (Trading Operations)
 
 - **Location**: `backend/src/trading_api/modules/broker/`
-- **Routers**: `ws.py` - orders, positions, executions, equity, connection TypeAlias declarations
-- **Generated**: `ws_generated/` - OrderWsRouter, PositionWsRouter, etc. concrete classes
+- **Routers**: `ws/v1/__init__.py` - BrokerWsRouters with orders, positions, executions, equity, connection
 - **Service**: `service.py` - BrokerService (routing complete, broadcasting pending)
 - **Tests**: `tests/test_ws.py` - Module-specific WebSocket tests
 - **Status**: 🔄 Phase 4 complete, Phase 5 pending
 
 ### Key Files
 
-- **Modular Router Generation**: `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md`
-- **Frontend Client Pattern**: `frontend/WEBSOCKET-CLIENT-PATTERN.md`
-- **Frontend Client Base**: `frontend/WEBSOCKET-CLIENT-BASE.md`
+- **Backend WebSockets Guide**: `backend/docs/BACKEND_WEBSOCKETS.md`
+- **Frontend Client Pattern**: `frontend/docs/WEBSOCKET-ARCHITECTURE.md`
 - **System Architecture**: `ARCHITECTURE.md`
 - **Module Protocol**: `backend/src/trading_api/shared/module_interface.py`
 - **Application Factory**: `backend/src/trading_api/app_factory.py`
@@ -692,12 +676,10 @@ Use this checklist when implementing new WebSocket features:
 - Check strict naming conventions in mappers
 - Verify AsyncAPI spec is up to date
 
-**Routers not generated**
+**Service protocol not implemented**
 
-- Routers auto-generate on app startup via `make dev`
-- Check `modules/{module}/ws.py` has valid `TypeAlias` declarations
-- Verify generation output for errors
-- Review `backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md` for details
+- Verify service inherits from `WsRouteService` (which extends `ServiceInterface`)
+- Ensure `create_topic` and `remove_topic` methods are implemented
 
 **No updates received**
 

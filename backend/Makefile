@@ -525,13 +525,13 @@ test-cov: check-generate-keypair test-boundaries
 # Linting and formatting
 lint:
 	@echo "Running backend linting..."
-	poetry run flake8 src/ tests/ --exclude='ws_generated,rest_generated'
+	poetry run flake8 src/ tests/
 
 type-check:
 	@echo "Running backend linting with full checks..."
 	poetry run black --check --extend-exclude='/_generated/' src/ tests/
-	poetry run isort --check-only --extend-skip='ws_generated' --extend-skip='rest_generated' src/ tests/
-	poetry run flake8 src/ tests/ --exclude='ws_generated,rest_generated'
+	poetry run isort --check-only src/ tests/
+	poetry run flake8 src/ tests/
 	poetry run mypy src/ --exclude='.*_generated'
 	@echo "Running pyright type checking..."
 	poetry run pyright src/
@@ -539,7 +539,7 @@ type-check:
 format:
 	@echo "Formatting backend code..."
 	poetry run autoflake --remove-all-unused-imports --remove-unused-variables --in-place --recursive --exclude='*_generated' src/ tests/
-	poetry run isort --extend-skip='ws_generated' --extend-skip='rest_generated' src/ tests/
+	poetry run isort src/ tests/
 	poetry run black --extend-exclude='/_generated/' src/ tests/
 	@echo "Removing trailing whitespace..."
 	@find src/ tests/ -name "*.py" -type f -not -path '*_generated/*' -exec sed -i 's/[[:space:]]*$$//' {} +
@@ -563,7 +563,7 @@ dev:
 	@echo "Debug server listening on port 5678 (attach debugger to localhost:5678)"
 	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" \
 		--reload \
-		--reload-exclude '**/ws_generated/*' \
+		--reload-exclude '**/*__generated/*' \
 		--reload-exclude '**/.local/*' \
 		--reload-exclude '**/.pids/*' \
 		--reload-exclude '**/scripts/*' \

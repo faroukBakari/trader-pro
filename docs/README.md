@@ -78,7 +78,7 @@ Located in `backend/docs/`:
 
 - **MODULAR_BACKEND_ARCHITECTURE.md** - Module system and architecture
 - **SPECS_AND_CLIENT_GEN.md** - Spec and client generation guide
-- **WS_ROUTERS_GEN.md** - WebSocket router generation
+- **BACKEND_WEBSOCKETS.md** - WebSocket implementation guide
 
 ### Frontend Documentation
 

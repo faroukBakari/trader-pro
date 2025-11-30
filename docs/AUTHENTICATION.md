@@ -598,10 +598,14 @@ async def create_order(
 
 ```python
 from trading_api.shared.middleware.auth import get_current_user_ws
+from trading_api.shared.ws.ws_router import WsRouterBase, WsRouteService
+from trading_api.shared.ws.generic_route import WsRouter
 
-class BrokerWsRouters(WsRouterInterface):
+class BrokerWsRouters(WsRouterBase):
     def __init__(self, service: WsRouteService):
-        order_router = OrderWsRouter(route="orders", service=service)
+        order_router = WsRouter[OrderSubscriptionRequest, PlacedOrder](
+            route="orders", tags=["broker"], service=service
+        )
 
         @order_router.on_connect
         async def authenticate(
@@ -617,6 +621,8 @@ class BrokerWsRouters(WsRouterInterface):
             user_data = client.state.get("user_data")
             # Only subscribe to user's own orders
             await service.subscribe_user_orders(user_data.user_id, topic)
+
+        super().__init__([order_router], service=service)
 ```
 
 ### Auth Module Endpoints

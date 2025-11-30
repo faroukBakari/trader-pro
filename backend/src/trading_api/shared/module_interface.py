@@ -9,6 +9,7 @@ import json
 import logging
 import shutil
 from abc import ABC, abstractmethod
+from inspect import isclass
 from pathlib import Path
 from typing import Annotated, Any, Type
 
@@ -21,7 +22,7 @@ from trading_api.shared.client_generation_service import ClientGenerationService
 from trading_api.shared.middleware.auth import get_current_user_ws
 from trading_api.shared.service_interface import ServiceInterface
 from trading_api.shared.ws.fastws_adapter import FastWSAdapter
-from trading_api.shared.ws.ws_route_interface import WsRouterInterface
+from trading_api.shared.ws.ws_router import WsRouterBase
 
 # Module logger for app_factory
 logger = logging.getLogger(__name__)
@@ -183,6 +184,7 @@ class Module(ABC):
                 attr = getattr(service_module, attr_name)
                 if (
                     isinstance(attr, type)
+                    and isclass(attr)
                     and issubclass(attr, ServiceInterface)
                     and attr is not ServiceInterface
                     and not attr_name.startswith("_")
@@ -232,21 +234,21 @@ class Module(ABC):
                 f"Module 'api.{version}' not found. Error: {e}"
             )
 
-    def _import_ws_routers_for_version(self, version: str) -> WsRouterInterface | None:
+    def _import_ws_routers_for_version(self, version: str) -> WsRouterBase | None:
         """Import WebSocket routers for a specific version."""
         try:
             ws_module_path = self._get_import_path(["ws", version])
             ws_module = importlib.import_module(ws_module_path, package=__package__)
 
-            # Get the WS class (convention: first WsRouteInterface implementation)
+            # Get the WS class (convention: first WsRouterBase subclass)
             for attr_name in dir(ws_module):
                 if attr_name.startswith("_"):
                     continue
                 attr = getattr(ws_module, attr_name)
                 if (
                     isinstance(attr, type)
-                    and issubclass(attr, WsRouterInterface)
-                    and attr is not WsRouterInterface
+                    and issubclass(attr, WsRouterBase)
+                    and attr is not WsRouterBase
                 ):
                     ws_class = attr
                     return ws_class(service=self._service)
@@ -283,7 +285,7 @@ class Module(ABC):
         # Import version-specific API and WS routers
         # Structure: {"v1": [router1, router2], "v2": [router1, router2]}
         self._api_routers: dict[str, APIRouterInterface] = {}
-        self._ws_routers: dict[str, WsRouterInterface] = {}
+        self._ws_routers: dict[str, WsRouterBase] = {}
 
         for version in versions:
             self._api_routers[version] = self._import_api_routers_for_version(version)
@@ -332,7 +334,7 @@ class Module(ABC):
         return self._api_routers
 
     @property
-    def ws_routers(self) -> dict[str, WsRouterInterface]:
+    def ws_routers(self) -> dict[str, WsRouterBase]:
         """WebSocket routers organized by version."""
         return self._ws_routers
 
@@ -475,9 +477,7 @@ class Module(ABC):
                                     f"✅ No changes in AsyncAPI spec for '{self.name}'"
                                 )
                     except Exception as e:
-                        logger.warning(
-                            f"⚠️  Could not read existing AsyncAPI spec: {e}"
-                        )
+                        logger.warning(f"⚠️  Could not read existing AsyncAPI spec: {e}")
                 else:
                     logger.info(f"📝 Creating new AsyncAPI spec for '{self.name}'")
 
@@ -526,7 +526,9 @@ class ModuleApp:
                     version=version,
                     asyncapi_url="/ws/asyncapi.json",
                     asyncapi_docs_url="/ws/asyncapi",
-                    heartbeat_interval=30.0,
+                    # FastWS heartbeat_interval is mainly to detect dead connections,
+                    # Uvicorn's built-in mechanism already handles this
+                    # heartbeat_interval=30.0,
                     max_connection_lifespan=3600.0,
                 )
 

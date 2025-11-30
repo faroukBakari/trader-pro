@@ -56,7 +56,7 @@ from trading_api.models.broker import (
     Side,
 )
 from trading_api.models.common import CapabilitySpec
-from trading_api.shared.ws.ws_route_interface import WsRouteService
+from trading_api.shared.ws.ws_router import WsRouteService
 
 logger = logging.getLogger(__name__)
 

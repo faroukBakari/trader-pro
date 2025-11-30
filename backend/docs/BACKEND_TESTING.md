@@ -2166,7 +2166,7 @@ async def test_custom_error_handling(tmp_path: Path) -> None:
 ### Code Generation
 
 - [Backend Specs & Client Generation](SPECS_AND_CLIENT_GEN.md) - OpenAPI/AsyncAPI spec and client generation
-- [WebSocket Router Generation](WS_ROUTERS_GEN.md) - WebSocket router generation guide
+- [Backend WebSockets](BACKEND_WEBSOCKETS.md) - WebSocket router and broadcasting guide
 
 ### Development
 

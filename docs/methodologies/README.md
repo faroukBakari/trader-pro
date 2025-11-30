@@ -50,7 +50,7 @@ Our implementation methodologies provide step-by-step templates for adding new f
 
 **Key Features**:
 
-- Backend WebSocket operations (routers, code generation)
+- Backend WebSocket operations using direct generic types
 - AsyncAPI type generation and frontend mappers
 - WsAdapter client integration
 - Service integration with TDD red-green phases
@@ -179,7 +179,6 @@ Each methodology document follows this structure:
 
 - [Client Generation](../CLIENT-GENERATION.md) - Auto-generation overview
 - [Specs and Client Gen](../../backend/docs/SPECS_AND_CLIENT_GEN.md) - Detailed generation guide
-- [WebSocket Router Gen](../../backend/docs/WS_ROUTERS_GEN.md) - Router generation
 
 ---
 
