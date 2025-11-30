@@ -164,7 +164,6 @@ When updating documentation for large-scale changes, follow this three-phase app
 | **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx                                                            |
 | **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules                                                         |
 | **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation                                                            |
-| **backend/docs/WS_ROUTERS_GEN.md**               | WebSocket router generation guide                                                                      |
 | **backend/docs/BACKEND_TESTING.md**              | Backend testing strategy and overhead optimization                                                     |
 
 > **Note**: Historical documentation from previous refactors has been cleaned up. All current backend documentation listed above is accurate and actively maintained.
@@ -297,11 +296,10 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 6. **backend/docs/SPECS_AND_CLIENT_GEN.md** - Spec and client generation flow
 7. **docs/methodologies/API-METHODOLOGY.md** - TDD implementation workflow
 8. **docs/methodologies/WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
-9. **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation
-10. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
-11. **docs/TESTING.md** - General testing strategies
-12. **backend/src/trading_api/providers/tws/README.md** - TWS Datafeed Provider implementation guide
-13. **backend/external_packages/tws/docs/README.md** - TWS API documentation (for broker integration)
+9. **backend/docs/BACKEND_TESTING.md** - Testing strategy and overhead optimization
+10. **docs/TESTING.md** - General testing strategies
+11. **backend/src/trading_api/providers/tws/README.md** - TWS Datafeed Provider implementation guide
+12. **backend/external_packages/tws/docs/README.md** - TWS API documentation (for broker integration)
 
 ### Frontend Developers
 
@@ -366,7 +364,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **Authentication**: `AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
 - **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BROKER-CONNECTION-ADAPTER.md`
 - **TWS Provider Integration**: `PROVIDER-SYSTEM.md` → `providers/tws/README.md` → `tws/docs/README.md` → specific API reference docs
-- **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md` → `WS_ROUTERS_GEN.md`
+- **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`
 
 ### Testing Chains
 
@@ -424,7 +422,6 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 - **backend/docs/SPECS_AND_CLIENT_GEN.md** - ⭐ Complete generation guide (OpenAPI/AsyncAPI/Python clients)
 - **docs/CLIENT-GENERATION.md** - Client auto-generation overview and frontend integration
-- **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation guide
 - **frontend/src/clients_generated/** - Per-module generated clients (REST + WebSocket types)
 
 ### API Versioning
@@ -445,7 +442,6 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 **Out of Scope**: HTTP polling, SSE, long-polling alternatives
 
 - **backend/docs/BACKEND_WEBSOCKETS.md** - ⭐ FastWS integration guide (WebSocket modules)
-- **backend/docs/WS_ROUTERS_GEN.md** - WebSocket router generation details
 - **docs/WEBSOCKET-CLIENTS.md** - WebSocket implementation overview
 - **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - Frontend WebSocket architecture patterns
 

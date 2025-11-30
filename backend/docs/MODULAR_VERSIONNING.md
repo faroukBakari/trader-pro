@@ -69,7 +69,7 @@ modules/broker/
 │   └── v1.py          # APIRouterInterface subclass for v1
 └── ws/
     ├── __init__.py
-    └── v1.py          # WsRouterInterface subclass for v1
+    └── v1.py          # WsRouterBase subclass for v1
 ```
 
 **Module Loading Process**:
@@ -277,7 +277,7 @@ modules/{module_name}/
 │   └── v{N}.py       # APIRouterInterface subclass (health/version auto-exposed)
 └── ws/                # Optional
     ├── __init__.py
-    └── v{N}.py       # WsRouterInterface subclass
+    └── v{N}.py       # WsRouterBase subclass
 ```
 
 ---

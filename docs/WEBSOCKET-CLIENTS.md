@@ -41,7 +41,7 @@ The topic builder algorithm is the **critical contract** between backend and fro
 #### Backend (Python)
 
 ```python
-# backend/src/trading_api/ws/ws_route_interface.py
+# backend/src/trading_api/shared/ws/ws_router.py
 
 def buildTopicParams(obj: Any) -> str:
     """
@@ -61,7 +61,7 @@ def buildTopicParams(obj: Any) -> str:
     sorted_obj = sort_recursive(obj)
     return json.dumps(sorted_obj, separators=(",", ":"))
 
-class WsRouteInterface(OperationRouter):
+class WsRouteFeature(OperationRouter):
     def topic_builder(self, params: BaseModel) -> str:
         return f"{self.route}:{buildTopicParams(params.model_dump())}"
 ```
@@ -795,9 +795,7 @@ cd frontend && make generate
 
 ## Related Documentation
 
-- **Backend Router Generation**: See `backend/docs/WS_ROUTERS_GEN.md` ⚠️ **CRITICAL for new WebSocket features**
+- **Backend WebSocket Guide**: See `backend/docs/BACKEND_WEBSOCKETS.md`
 - **Client Generation**: See `docs/CLIENT-GENERATION.md`
-- **WebSocket Client Pattern**: See `frontend/docs/WEBSOCKET-CLIENT-PATTERN.md` (v2.0.0)
-- **WebSocket Client Base**: See `frontend/docs/WEBSOCKET-CLIENT-BASE.md` (v2.0.0)
-- **WebSocket Architecture Diagrams**: See `frontend/docs/WEBSOCKET-ARCHITECTURE-DIAGRAMS.md` (v2.0.0)
+- **WebSocket Architecture**: See `frontend/docs/WEBSOCKET-ARCHITECTURE.md`
 - **Service Layer**: See `frontend/src/services/README.md`

@@ -236,34 +236,7 @@ cd frontend
 npm run generate-asyncapi-types
 ```
 
-### 10. WebSocket Router Generation Failures
-
-**Error**: `make generate` fails in backend
-
-**Common causes**:
-
-- Router type aliases not following pattern
-- Python script errors
-- Generated directory not writable
-
-**Solutions**:
-
-```bash
-# Check router type aliases
-grep "TypeAlias = WsRouter" backend/src/trading_api/modules/*/ws.py
-
-# Run generation (uses unified generation command)
-cd backend
-make generate
-
-# Verify generated routers
-ls -la src/trading_api/modules/*/ws_generated/
-
-# Check for syntax errors in generated files
-cd backend && make lint
-```
-
-### 11. WebSocket Client Fallback Issues
+### 10. WebSocket Client Fallback Issues
 
 **Error**: Frontend WebSocket clients not using correct mode (mock vs real)
 
@@ -457,9 +430,8 @@ git commit -m "fix: urgent fix [skip ci]"
 
 1. Check if backend WebSocket endpoint is accessible
 2. Verify AsyncAPI spec generation works
-3. Test WebSocket router generation
-4. Check frontend type generation
-5. Verify Phase 5 TDD status (tests should be skipped, not failing)
+3. Check frontend type generation
+4. Verify Phase 5 TDD status (tests should be skipped, not failing)
 
 ### Rollback problematic changes
 

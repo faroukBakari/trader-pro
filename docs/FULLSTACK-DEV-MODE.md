@@ -138,7 +138,6 @@ make -C backend clean-generated
      - backend/openapi.json
      - backend/asyncapi.json
      - backend/src/trading_api/modules/*/specs_generated/
-     - backend/src/trading_api/modules/*/ws_generated/
 
 # Clean frontend generated files
 make -C frontend clean-generated
@@ -164,7 +163,6 @@ make -C backend dev
 poetry run python -m debugpy --listen 0.0.0.0:5678 \
   -m uvicorn "trading_api.main:app" \
   --reload \
-  --reload-exclude '**/ws_generated/*' \
   --reload-exclude '**/.local/*' \
   --reload-exclude '**/scripts/*' \
   --host 0.0.0.0 \
@@ -528,7 +526,6 @@ make generate-asyncapi-types
 # Terminal should show: "Detected file change, reloading..."
 
 # Verify excluded paths (these WON'T trigger reload):
-# - backend/src/trading_api/modules/*/ws_generated/*
 # - backend/.local/*
 # - backend/scripts/*
 ```
@@ -573,7 +570,6 @@ frontend/
 
 **Backend (`--reload-exclude`):**
 
-- `**/ws_generated/*` - Generated WebSocket routers
 - `**/.local/*` - Local nginx/logs
 - `**/.pids/*` - Process ID files
 - `**/scripts/*` - Python scripts
