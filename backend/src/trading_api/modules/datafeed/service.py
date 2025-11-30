@@ -377,7 +377,7 @@ class DatafeedService(WsRouteService):
             # Delegate to provider for real quote snapshots
             return await self.datafeed_provider.get_quotes_snapshot(
                 symbols=parsed_symbols,
-                timeout=12.0,
+                timeout=4.0,
             )
         except Exception as e:
             logger.error(f"Failed to get quotes for {symbols}: {e}")

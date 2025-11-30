@@ -1,7 +1,7 @@
 # Specs and Client Generation Guide
 
-**Version**: 1.0.0  
-**Date**: November 11, 2025  
+**Version**: 1.1.0  
+**Date**: November 30, 2025  
 **Status**: ✅ Current Reference
 
 ---
@@ -34,8 +34,9 @@ This unified command handles:
 - ✅ OpenAPI specification generation
 - ✅ AsyncAPI specification generation
 - ✅ Python HTTP client generation
-- ✅ WebSocket router generation (automatic)
 - ✅ Client index updates
+
+**Note**: WebSocket routers are now **direct code** using class inheritance pattern (`class MyRouter(WsRouter[Request, Data]): pass`). No code generation is needed for WS routers.
 
 **See the [Manual Generation](#manual-generation---make-generate) section for complete usage details.**
 
@@ -1446,6 +1447,6 @@ ClientGenerationService.update_clients_index()
 
 ---
 
-**Last Updated**: November 2, 2025  
+**Last Updated**: November 30, 2025  
 **Maintainer**: Backend Team  
 **Status**: ✅ Production-ready

@@ -1,7 +1,7 @@
 # Backend WebSockets - FastWS Integration Guide
 
-**Version**: 1.0.0  
-**Last Updated**: November 11, 2025  
+**Version**: 2.0.0  
+**Last Updated**: November 30, 2025  
 **Status**: ✅ Production Ready
 
 ---
@@ -53,18 +53,18 @@ class FastWSAdapter(FastWS):
     def include_router(self, router: OperationRouter, *, prefix: str = "") -> None:
         super().include_router(router, prefix=prefix)
 
-        # Only WsRouteFeature routers get automatic broadcasting
+        # Only WsRouteFeature routers get broadcasting setup
         if isinstance(router, WsRouteFeature):
-            # Creates background task that reads from router.updates_queue
-            # and broadcasts to subscribed clients
+            # Router manages its own _active_clients set for broadcasting
+            pass
 ```
 
-**Broadcasting Pattern**:
+**Broadcasting Pattern** (Direct Client Management):
 
 1. Service pushes data to router via `topic_update()` callback
-2. Router enqueues update in `updates_queue`
-3. FastWSAdapter background task consumes queue
-4. Broadcasts to clients subscribed to the topic
+2. Router's `broadcast_update()` method iterates over `_active_clients`
+3. Filters clients by topic subscription
+4. Broadcasts directly to subscribed clients via WebSocket
 
 ### 2. Module-Scoped WebSocket Apps
 
@@ -119,7 +119,6 @@ class WsRouteFeature(OperationRouter):
     def __init__(self, route: str, *args: Any, **kwargs: Any):
         super().__init__(prefix=f"{route}.", *args, **kwargs)
         self.route: str = route
-        self.updates_queue = asyncio.Queue[SubscriptionUpdate[BaseModel]](maxsize=1000)
 
     def topic_builder(self, params: BaseModel) -> str:
         """Build unique topic from subscription parameters"""
@@ -128,9 +127,9 @@ class WsRouteFeature(OperationRouter):
 
 **Key Features**:
 
-- **Updates Queue**: Routers expose queue for service to push data
 - **Topic Builder**: Generates consistent topic names from subscription params
 - **Route Namespace**: Each router has a unique route prefix (e.g., `orders.`, `positions.`)
+- **Active Clients**: `WsRouter` subclass manages `_active_clients` set for broadcasting
 
 #### WsRouterBase (Router Container)
 
@@ -355,7 +354,7 @@ ws.onmessage = (event) => {
 ### Checklist
 
 - [ ] Service implements `WsRouteService` protocol
-- [ ] Create `ws/v{N}/__init__.py` with TypeAlias declarations
+- [ ] Create `ws/v{N}/__init__.py` with router class definitions
 - [ ] Module exposes `ws_routers` property
 - [ ] Define subscription request and data models
 
@@ -380,9 +379,11 @@ class Bar(BaseModel):
     volume: Decimal
 ```
 
-### Step 2: Declare Router TypeAlias
+### Step 2: Define Router Classes
 
 **Location**: `modules/{module}/ws/v{N}/__init__.py`
+
+Use class inheritance pattern for type resolution:
 
 ```python
 from pathlib import Path
@@ -390,12 +391,16 @@ from trading_api.shared.ws.generic_route import WsRouter
 from trading_api.shared.ws.ws_router import WsRouterBase, WsRouteService
 from trading_api.models import BarSubscriptionRequest, Bar
 
+# Define concrete router class (enables dynamic type resolution)
+class BarRouter(WsRouter[BarSubscriptionRequest, Bar]):
+    pass
+
 class DatafeedWsRouters(WsRouterBase):
     def __init__(self, service: WsRouteService):
         module_name = Path(__file__).parent.parent.parent.name
 
-        # Use direct generic types - no code generation needed
-        bar_router = WsRouter[BarSubscriptionRequest, Bar](
+        # Instantiate concrete router class
+        bar_router = BarRouter(
             route="bars", tags=[module_name], service=service
         )
 
@@ -403,7 +408,9 @@ class DatafeedWsRouters(WsRouterBase):
         super().__init__([bar_router], service=service)
 ```
 
-**Pattern**: `WsRouter[SubscriptionRequestType, DataType]` - direct generic instantiation
+**Pattern**: Class inheritance `class MyRouter(WsRouter[Request, Data]): pass`
+
+**Why Class Inheritance?** The `WsRouter` base class uses `_resolve_generic_types()` which introspects `__orig_bases__` to extract type parameters at runtime. This requires a concrete class definition, not inline generic instantiation.
 
 **Architecture Note**:
 
@@ -539,32 +546,51 @@ class DatafeedModule(Module):
 
 ## WebSocket Router Pattern
 
-### Direct Generic Types
+### Class Inheritance with Dynamic Type Resolution
 
-WebSocket routers use Python's generic types directly:
+WebSocket routers use class inheritance for dynamic type resolution:
 
 ```python
 from trading_api.shared.ws.generic_route import WsRouter
 from trading_api.shared.ws.ws_router import WsRouterBase, WsRouteService
 
+# Step 1: Define concrete router classes (required for type resolution)
+class OrderRouter(WsRouter[OrderSubscriptionRequest, PlacedOrder]):
+    pass
+
+class PositionRouter(WsRouter[PositionSubscriptionRequest, Position]):
+    pass
+
+# Step 2: Create router factory
 class BrokerWsRouters(WsRouterBase):
     def __init__(self, service: WsRouteService):
         module_name = Path(__file__).parent.parent.parent.name
 
-        # Direct generic instantiation - type safe at compile time
-        order_router = WsRouter[OrderSubscriptionRequest, PlacedOrder](
-            route="orders", tags=[module_name], service=service
-        )
+        # Instantiate concrete router classes
+        order_router = OrderRouter(route="orders", tags=[module_name], service=service)
+        position_router = PositionRouter(route="positions", tags=[module_name], service=service)
 
-        super().__init__([order_router], service=service)
+        super().__init__([order_router, position_router], service=service)
+```
+
+**How Type Resolution Works**:
+
+The `WsRouter` base class uses `_resolve_generic_types()` to introspect type parameters at runtime:
+
+```python
+def _resolve_generic_types(self):
+    """Introspects __orig_bases__ to find Generic type arguments."""
+    types = next(iter(getattr(self.__class__, "__orig_bases__", [])), None)
+    return get_args(types)  # Returns (RequestType, DataType)
 ```
 
 **Benefits**:
 
 - ✅ No code generation overhead
-- ✅ Type safety via Python generics
+- ✅ Type safety via Python generics and runtime resolution
 - ✅ Better IDE support (direct type inspection)
 - ✅ Simpler codebase (no generated files to manage)
+- ✅ Annotations set dynamically for AsyncAPI spec generation
 
 ### Router Structure
 
@@ -621,8 +647,8 @@ Client Subscribe Request
 
 Service Pushes Data
 ├─ 1. Service calls: callback(order_data)
-├─ 2. Router enqueues: updates_queue.put(SubscriptionUpdate(topic, data))
-├─ 3. FastWSAdapter background task reads queue
+├─ 2. Router wraps in SubscriptionUpdate(topic, data)
+├─ 3. Router.broadcast_update() filters _active_clients by topic
 ├─ 4. Broadcasts: Message(type="orders.update", payload={topic, data})
 └─ 5. Client receives update on subscribed topic
 
