@@ -365,7 +365,7 @@ class DatafeedService(WsRouteService):
             return bars
 
         except Exception as e:
-            logger.error(f"Failed to get bars for {symbol}: {e}")
+            logger.exception(f"Failed to get bars for {symbol}: {e}")
             return []
 
     async def get_quotes(self, symbols: List[str]) -> List[QuoteData]:
@@ -380,7 +380,7 @@ class DatafeedService(WsRouteService):
                 timeout=4.0,
             )
         except Exception as e:
-            logger.error(f"Failed to get quotes for {symbols}: {e}")
+            logger.exception(f"Failed to get quotes for {symbols}: {e}")
             # Return error responses for all symbols
             return [
                 QuoteData(s="error", n=symbol, v={"error": str(e)})

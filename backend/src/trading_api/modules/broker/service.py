@@ -840,7 +840,7 @@ class BrokerService(WsRouteService):
                 logger.info("Execution simulator cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in execution simulator: {e}", exc_info=True)
+                logger.exception(f"Error in execution simulator: {e}")
                 # Continue running despite errors
 
     def _get_execution_price(self, order: PlacedOrder) -> float:

@@ -31,9 +31,9 @@ from trading_api.models.market import (
     TimeFrame,
 )
 from trading_api.models.providers.tws.tws_configs import TWSProviderConfig
-from trading_api.providers.base import Provider
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.providers.tws.tws_connection import TWSClient
+from trading_api.shared import Provider
 
 from .tws_mappers import (
     contract_description_to_search_result,

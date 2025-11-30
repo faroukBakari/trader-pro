@@ -23,9 +23,8 @@ from trading_api.models.market import (
     SymbolInfo,
     TimeFrame,
 )
-from trading_api.providers.base import Provider
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
-from trading_api.shared import FastWSAdapter
+from trading_api.shared import FastWSAdapter, Provider
 
 
 class MockDatafeedProvider(Provider, DatafeedCapability):

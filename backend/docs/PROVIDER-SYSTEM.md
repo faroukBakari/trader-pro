@@ -75,7 +75,7 @@ class LocalProviderConfig(ProviderConfig):
 from pathlib import Path
 from typing import Any
 from trading_api.models.common import CapabilitySpec, AuthenticationError
-from trading_api.providers.base import Provider
+from trading_api.shared import Provider
 from trading_api.providers.capabilities.auth import AuthCapability
 
 class LocalProvider(Provider, AuthCapability):
@@ -164,7 +164,7 @@ req.matches(prov)  # True - version matches or not specified
 Base class for all provider implementations.
 
 ```python
-from trading_api.providers.base import Provider
+from trading_api.shared import Provider
 
 class MyProvider(Provider):
     @classmethod
@@ -194,7 +194,7 @@ class MyProvider(Provider, AuthCapability):
 Auto-discovers and manages provider instances.
 
 ```python
-from trading_api.providers.registry import ProviderRegistry
+from trading_api.shared import ProviderRegistry
 
 registry = ProviderRegistry()
 registry.auto_discover()  # Finds all providers in providers/
@@ -323,7 +323,7 @@ from trading_api.models.common import (
     AuthenticationError,
     CapabilitySpec,
 )
-from trading_api.providers.base import Provider
+from trading_api.shared import Provider
 from trading_api.providers.capabilities.auth import AuthCapability
 
 
@@ -905,7 +905,7 @@ logger.setLevel(logging.DEBUG)
 
 ```python
 from pathlib import Path
-from trading_api.providers.registry import ProviderRegistry
+from trading_api.shared import ProviderRegistry
 
 registry = ProviderRegistry(providers_dir=Path("src/trading_api/providers"))
 registry.auto_discover()
@@ -1234,7 +1234,7 @@ See **[TWS Provider Implementation Guide](../src/trading_api/providers/tws/READM
 # providers/myprovider/__init__.py
 from pathlib import Path
 from trading_api.models.common import CapabilitySpec
-from trading_api.providers.base import Provider
+from trading_api.shared import Provider
 from trading_api.providers.capabilities.auth import AuthCapability
 
 class MyproviderProvider(Provider, AuthCapability):

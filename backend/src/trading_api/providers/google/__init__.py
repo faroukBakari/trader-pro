@@ -7,8 +7,8 @@ import httpx
 
 from trading_api.models.common import AuthenticationError, CapabilitySpec
 from trading_api.models.providers.google_oauth_configs import GoogleProviderConfig
-from trading_api.providers.base import Provider
 from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.shared import Provider
 
 
 class GoogleProvider(Provider, AuthCapability):

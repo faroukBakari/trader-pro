@@ -739,7 +739,9 @@ backend/src/trading_api/
 ├── shared/                     # Shared infrastructure (always loaded)
 │   ├── module_interface.py    # Module ABC definition
 │   ├── module_registry.py     # Module discovery and registration
-│   ├── service.py             # Base Service class (health, versions)
+│   ├── provider_interface.py  # Provider ABC definition
+│   ├── provider_registry.py   # Provider discovery and lazy-loading
+│   ├── service_interface.py   # ServiceInterface (version discovery, capability resolution)
 │   ├── client_generation_service.py  # Python client generation
 │   ├── api/                   # Shared API utilities
 │   │   └── api_router_interface.py  # APIRouterInterface (auto health/version)
@@ -1172,7 +1174,7 @@ req.matches(prov)  # True - version matches or not specified
 #### Provider ABC - Base Class for All Providers
 
 ```python
-from trading_api.providers.base import Provider
+from trading_api.shared import Provider
 
 class MyProvider(Provider):
     @classmethod
@@ -1190,7 +1192,7 @@ class MyProvider(Provider):
 
 **Convention**: `providers/{name}/__init__.py` exports `{Name}Provider` class (e.g., `GoogleProvider`)
 
-**File**: `backend/src/trading_api/providers/base.py`
+**File**: `backend/src/trading_api/shared/provider_interface.py`
 
 #### AuthCapability - Authentication Contract Interface
 
@@ -1303,7 +1305,7 @@ class AuthService(ServiceInterface):
 
 ```python
 # providers/google/__init__.py
-from trading_api.providers.base import Provider
+from trading_api.shared import Provider
 from trading_api.providers.capabilities.auth import AuthCapability
 
 class GoogleProvider(Provider, AuthCapability):
@@ -1335,8 +1337,8 @@ class GoogleProvider(Provider, AuthCapability):
 
 **Provider Infrastructure:**
 
-- **Provider Base**: `backend/src/trading_api/providers/base.py`
-- **Provider Registry**: `backend/src/trading_api/providers/registry.py`
+- **Provider ABC**: `backend/src/trading_api/shared/provider_interface.py`
+- **Provider Registry**: `backend/src/trading_api/shared/provider_registry.py`
 - **Auth Capability**: `backend/src/trading_api/providers/capabilities/auth.py`
 
 **Provider Implementations:**
