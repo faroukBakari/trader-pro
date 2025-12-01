@@ -656,18 +656,16 @@ async def wait_for_health(base_url: str) -> bool:
 
 - [Modular Backend Architecture](MODULAR_BACKEND_ARCHITECTURE.md) - Module system overview
 - [Architecture Guide](../../docs/ARCHITECTURE.md) - Overall system architecture
-- [Nginx Routing Implementation](tmp/nginx-routing-implementation-summary.md) - Nginx config generation design
 
 ### Testing & Development
 
 - [Backend Testing Guide](BACKEND_TESTING.md) - Testing strategy
-- [Backend Manager Test Guide](tmp/backend-manager-test-redesign.md) - Test implementation guide
 - [Development Guide](../../docs/DEVELOPMENT.md) - Development workflows
 
 ### Configuration & Setup
 
 - [Deployment Config Schema](../src/trading_api/shared/deployment/config_schema.py) - Config models
-- [Makefile Guide](../../MAKEFILE-GUIDE.md) - All Makefile commands
+- [Makefile Guide](../../docs/MAKEFILE-GUIDE.md) - All Makefile commands
 
 ---
 
@@ -704,6 +702,6 @@ async def wait_for_health(base_url: str) -> bool:
 
 ---
 
-**Last Updated**: November 11, 2025
+**Last Updated**: November 30, 2025
 **Version**: 1.0.0
 **Status**: ✅ Current Reference

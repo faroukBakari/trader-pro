@@ -2,8 +2,8 @@
 document_type: documentation_index
 primary_purpose: discovery_and_navigation
 target_audience: ai_agents
-last_updated: 2025-11-27
-total_documents: 46
+last_updated: 2025-11-30
+total_documents: 45
 coverage_areas:
   [
     architecture,
@@ -77,7 +77,7 @@ trader-pro/
 └── frontend/
     ├── README.md          # Frontend overview
     ├── docs/              # Frontend-specific architecture
-    │   ├── WEBSOCKET-CLIENT-PATTERN.md
+    │   ├── WEBSOCKET-ARCHITECTURE.md
     │   ├── tmp/           # Store for temporary documents
     │   │   ├── workings.md
     │   │   └── ...
@@ -118,12 +118,11 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ## 🎯 Root Level Documentation (Project-Wide)
 
-| File                  | Purpose                                                   |
-| --------------------- | --------------------------------------------------------- |
-| **README.md**         | Project overview, quick start, and basic setup            |
-| **ARCHITECTURE.md**   | System architecture, technology stack, design patterns    |
-| **AUTHENTICATION.md** | JWT-based authentication with Google OAuth implementation |
-| **MAKEFILE-GUIDE.md** | Makefile commands reference for all components            |
+| File                  | Purpose                                                |
+| --------------------- | ------------------------------------------------------ |
+| **README.md**         | Project overview, quick start, and basic setup         |
+| **ARCHITECTURE.md**   | System architecture, technology stack, design patterns |
+| **MAKEFILE-GUIDE.md** | Makefile commands reference for all components         |
 
 ---
 
@@ -136,7 +135,6 @@ When updating documentation for large-scale changes, follow this three-phase app
 | **docs/GETTING-STARTED.md**     | Complete setup guide (workspace, hooks, env)    |
 | **docs/BROKER-ARCHITECTURE.md** | Broker service execution simulator architecture |
 | **docs/CLIENT-GENERATION.md**   | REST and WebSocket client auto-generation       |
-| **docs/WEBSOCKET-CLIENTS.md**   | WebSocket implementation overview               |
 | **docs/DEVELOPMENT.md**         | Development workflows and setup                 |
 | **docs/TESTING.md**             | Testing strategy and best practices             |
 | **docs/FULLSTACK-DEV-MODE.md**  | Full-stack dev mode with auto-regeneration      |
@@ -159,6 +157,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 | File                                             | Purpose                                                                                                |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture, functional `ModuleRegistry.get_modules(...)` workflow, and module system |
+| **backend/docs/AUTHENTICATION.md**               | JWT-based authentication with Google OAuth, cookies, security                                          |
 | **backend/docs/PROVIDER-SYSTEM.md**              | Provider/capability system developer guide                                                             |
 | **backend/docs/MODULAR_VERSIONNING.md**          | Module-level API versioning strategy                                                                   |
 | **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx                                                            |
@@ -325,27 +324,27 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 3. **docs/methodologies/API-METHODOLOGY.md** - Backend service implementation
 4. **docs/methodologies/WEBSOCKET-METHODOLOGY.md** - WebSocket integration methodology
 5. **docs/CLIENT-GENERATION.md** - Client generation workflow
-6. **docs/WEBSOCKET-CLIENTS.md** - Real-time communication
+6. **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - Real-time communication
 7. **docs/DEVELOPMENT.md** - Full-stack workflows
 
 ---
 
 ## Query Pattern Mapping
 
-| User Query Pattern             | Relevant Documents                                                                 | Load Order            |
-| ------------------------------ | ---------------------------------------------------------------------------------- | --------------------- |
-| "How do I set up..."           | `GETTING-STARTED.md` → `DEVELOPMENT.md`                                            | Sequential            |
-| "How does [feature] work"      | `ARCHITECTURE.md` → topic-specific docs                                            | Architecture first    |
-| "Implement [backend feature]"  | `MODULAR_BACKEND_ARCHITECTURE.md` → `API-METHODOLOGY.md` → module docs             | Sequential            |
-| "Implement [frontend feature]" | `frontend/README.md` → component docs                                              | Sequential            |
-| "WebSocket [anything]"         | `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `WEBSOCKET-METHODOLOGY.md` | All three             |
-| "Authentication/auth/login"    | `AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`             | Auth doc first        |
-| "Testing [component]"          | `TESTING.md` → component-specific testing docs                                     | General first         |
-| "Error/CI/build issue"         | `CI-TROUBLESHOOTING.md` + relevant architecture docs                               | Troubleshooting first |
-| "TWS API/broker integration"   | `providers/tws/README.md` → `tws/docs/README.md` → specific API docs               | Provider then API     |
-| "TradingView [anything]"       | `BROKER-INTEGRATION.md` → `tradingview/` docs                                      | Integration first     |
-| "Client generation"            | `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`                                 | Backend then frontend |
-| "Module/versioning"            | `MODULAR_BACKEND_ARCHITECTURE.md` → `MODULAR_VERSIONNING.md`                       | Architecture first    |
+| User Query Pattern             | Relevant Documents                                                                  | Load Order            |
+| ------------------------------ | ----------------------------------------------------------------------------------- | --------------------- |
+| "How do I set up..."           | `GETTING-STARTED.md` → `DEVELOPMENT.md`                                             | Sequential            |
+| "How does [feature] work"      | `ARCHITECTURE.md` → topic-specific docs                                             | Architecture first    |
+| "Implement [backend feature]"  | `MODULAR_BACKEND_ARCHITECTURE.md` → `API-METHODOLOGY.md` → module docs              | Sequential            |
+| "Implement [frontend feature]" | `frontend/README.md` → component docs                                               | Sequential            |
+| "WebSocket [anything]"         | `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `WEBSOCKET-METHODOLOGY.md`  | All three             |
+| "Authentication/auth/login"    | `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md` | Auth doc first        |
+| "Testing [component]"          | `TESTING.md` → component-specific testing docs                                      | General first         |
+| "Error/CI/build issue"         | `CI-TROUBLESHOOTING.md` + relevant architecture docs                                | Troubleshooting first |
+| "TWS API/broker integration"   | `providers/tws/README.md` → `tws/docs/README.md` → specific API docs                | Provider then API     |
+| "TradingView [anything]"       | `BROKER-INTEGRATION.md` → `tradingview/` docs                                       | Integration first     |
+| "Client generation"            | `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`                                  | Backend then frontend |
+| "Module/versioning"            | `MODULAR_BACKEND_ARCHITECTURE.md` → `MODULAR_VERSIONNING.md`                        | Architecture first    |
 
 ---
 
@@ -361,7 +360,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 - **REST API Development**: `API-METHODOLOGY.md` → `MODULAR_BACKEND_ARCHITECTURE.md` → `SPECS_AND_CLIENT_GEN.md`
 - **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md`
-- **Authentication**: `AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
+- **Authentication**: `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
 - **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BROKER-CONNECTION-ADAPTER.md`
 - **TWS Provider Integration**: `PROVIDER-SYSTEM.md` → `providers/tws/README.md` → `tws/docs/README.md` → specific API reference docs
 - **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`
@@ -395,7 +394,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
   - Keywords: integration patterns, capability system, service abstraction, external services
 - **docs/BROKER-ARCHITECTURE.md** - Broker service execution simulator architecture
   - Keywords: order execution, trade simulation, broker proxy
-- **AUTHENTICATION.md** - JWT-based authentication with Google OAuth
+- **backend/docs/AUTHENTICATION.md** - JWT-based authentication with Google OAuth
   - Keywords: JWT, OAuth, Google login, cookies, security, stateless auth
 - **docs/methodologies/API-METHODOLOGY.md** - TDD methodology for API development
   - Keywords: test-driven development, API design, implementation workflow
@@ -442,8 +441,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 **Out of Scope**: HTTP polling, SSE, long-polling alternatives
 
 - **backend/docs/BACKEND_WEBSOCKETS.md** - ⭐ FastWS integration guide (WebSocket modules)
-- **docs/WEBSOCKET-CLIENTS.md** - WebSocket implementation overview
-- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - Frontend WebSocket architecture patterns
+- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - Frontend WebSocket architecture patterns (comprehensive)
 
 ### Testing
 
@@ -477,7 +475,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 **Scope**: Complete authentication system (backend + frontend)  
 **Out of Scope**: User management, permissions/roles system
 
-- **AUTHENTICATION.md** - ⭐ Complete authentication system (Google OAuth, JWT, cookies, security)
+- **backend/docs/AUTHENTICATION.md** - ⭐ Complete authentication system (Google OAuth, JWT, cookies, security)
 - **backend/src/trading_api/modules/auth/README.md** - Auth module implementation
 - **backend/src/trading_api/shared/middleware/auth.py** - Stateless middleware (public key validation)
 - **frontend/src/services/README.md** - Auth service architecture
@@ -559,7 +557,9 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
-- **2025-01-08**: WS router generation decommissioned (dynamic type resolution via `__orig_bases__` introspection)
+- **2025-11-30**: Wave 4 final validation - Verified all internal links, fixed remaining broken refs (ENVIRONMENT-CONFIG.md, WORKSPACE-SETUP.md → GETTING-STARTED.md), updated docs/README.md, validated cross-references and section anchors
+- **2025-11-30**: Wave 3 documentation assessment - Fixed ARCHITECTURE.md links, BROKER-ARCHITECTURE.md links, CLIENT-GENERATION.md refs, methodologies updates, root README.md links. RE-GROUP operations deferred (low ROI)
+- **2025-11-30**: Wave 2 documentation assessment - WEBSOCKET-CLIENTS.md archived (merged into WEBSOCKET-ARCHITECTURE.md), fixed broken links across backend/frontend docs, AUTHENTICATION.md consolidated in backend/docs/
 - **2025-11-26**: TWS Provider documentation refresh (type stubs, local modifications, expanded chains)
 - **2025-11-21**: AI agent optimization (added metadata, discovery rules, query patterns, dependencies)
 - **2025-11-19**: TWS API docs added (8 files in `backend/external_packages/tws/docs/`)
@@ -583,5 +583,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: January 8, 2025  
+**Last Updated**: November 30, 2025  
 **Maintained by**: Development Team

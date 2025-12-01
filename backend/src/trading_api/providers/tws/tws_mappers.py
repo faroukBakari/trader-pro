@@ -243,7 +243,7 @@ def tws_rt_bar_to_domain_bar(
 
 def tws_ticks_to_quote_data(
     symbol: str,
-    ticks: dict[str, float],
+    ticks: dict[str, float | int | str],
 ) -> QuoteData:
     """Convert TWS tick data → domain QuoteData.
 
@@ -256,40 +256,43 @@ def tws_ticks_to_quote_data(
         QuoteData with status="ok" and QuoteValues populated from ticks
     """
 
-    # Extract tick values (None if not present)
-    bid = ticks.get(get_tick_type_name(TickTypeEnum.BID))
-    ask = ticks.get(get_tick_type_name(TickTypeEnum.ASK))
-    last = ticks.get(get_tick_type_name(TickTypeEnum.LAST))
-    open_price = ticks.get(get_tick_type_name(TickTypeEnum.OPEN))
-    high_price = ticks.get(get_tick_type_name(TickTypeEnum.HIGH))
-    low_price = ticks.get(get_tick_type_name(TickTypeEnum.LOW))
-    close_price = ticks.get(get_tick_type_name(TickTypeEnum.CLOSE))
+    # Extract tick values (use sentinel for missing, convert to 0.0 for output)
+    def get_price(tick_type: int) -> float:
+        val = ticks.get(get_tick_type_name(tick_type))
+        return float(val) if val is not None else 0.0
 
+    bid = get_price(TickTypeEnum.BID)
+    ask = get_price(TickTypeEnum.ASK)
+    last = get_price(TickTypeEnum.LAST)
+    open_price = get_price(TickTypeEnum.OPEN)
+    high_price = get_price(TickTypeEnum.HIGH)
+    low_price = get_price(TickTypeEnum.LOW)
+    close_price = get_price(TickTypeEnum.CLOSE)
     ticks.get(get_tick_type_name(TickTypeEnum.BID_SIZE))
     ticks.get(get_tick_type_name(TickTypeEnum.ASK_SIZE))
     volume = ticks.get(get_tick_type_name(TickTypeEnum.VOLUME))
 
     # Calculate spread (if both bid and ask available)
-    spread = (ask - bid) if (ask is not None and bid is not None) else 0.0
+    spread = (ask - bid) if (ask > 0 and bid > 0) else 0.0
 
     # Calculate change and change percent (if last and close available)
-    if last is not None and close_price is not None and close_price != 0:
+    if last > 0 and close_price > 0:
         change = last - close_price
         change_percent = (change / close_price) * 100
     else:
         change = 0.0
         change_percent = 0.0
 
-    # Build QuoteValues with available data (use 0.0 for missing prices)
+    # Build QuoteValues with available data
     quote_values = QuoteValues(
-        lp=last or 0.0,
-        ask=ask or 0.0,
-        bid=bid or 0.0,
+        lp=last,
+        ask=ask,
+        bid=bid,
         spread=spread,
-        open_price=open_price or 0.0,
-        high_price=high_price or 0.0,
-        low_price=low_price or 0.0,
-        prev_close_price=close_price or 0.0,
+        open_price=open_price,
+        high_price=high_price,
+        low_price=low_price,
+        prev_close_price=close_price,
         volume=int(volume) if volume is not None else 0,
         ch=change,
         chp=change_percent,

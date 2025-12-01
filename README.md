@@ -81,7 +81,7 @@ code trader-pro.code-workspace
 - ✅ No `import.meta` errors
 - ✅ Better IntelliSense and debugging
 
-See [WORKSPACE-SETUP.md](./docs/WORKSPACE-SETUP.md) for details.
+See [GETTING-STARTED.md](./docs/GETTING-STARTED.md) for setup details.
 
 ### Development
 
@@ -106,7 +106,7 @@ The platform uses JWT-based authentication with Google OAuth:
 
 **Documentation:**
 
-- **Complete Guide**: [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md)
+- **Complete Guide**: [backend/docs/AUTHENTICATION.md](backend/docs/AUTHENTICATION.md)
 - **Backend Auth Module**: [backend/src/trading_api/modules/auth/README.md](backend/src/trading_api/modules/auth/README.md)
 - **Frontend Auth Service**: [frontend/src/services/README.md](frontend/src/services/README.md)
 - **Router Guards**: [frontend/src/router/README.md](frontend/src/router/README.md)
@@ -125,7 +125,7 @@ make -f project.mk dev-frontend
 - Frontend: http://localhost:${FRONTEND_PORT:-5173}
 - API Docs: http://localhost:${BACKEND_PORT:-8000}/docs
 
-See [ENVIRONMENT-CONFIG.md](./docs/ENVIRONMENT-CONFIG.md) for environment variable configuration.
+See [GETTING-STARTED.md](./docs/GETTING-STARTED.md) for environment variable configuration.
 
 **Module-Specific Development** (Backend):
 
@@ -204,11 +204,11 @@ make -C backend format
 ### Core Documentation
 
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture and design
-- **[Authentication](docs/AUTHENTICATION.md)** - JWT-based authentication with Google OAuth
+- **[Authentication](backend/docs/AUTHENTICATION.md)** - JWT-based authentication with Google OAuth
 - **[Development Guide](docs/DEVELOPMENT.md)** - Development workflows and setup
 - **[Testing Strategy](docs/TESTING.md)** - Testing approach and best practices
 - **[Client Generation](docs/CLIENT-GENERATION.md)** - API client auto-generation
-- **[WebSocket Clients](docs/WEBSOCKET-CLIENTS.md)** - Real-time WebSocket implementation
+- **[WebSocket Architecture](frontend/docs/WEBSOCKET-ARCHITECTURE.md)** - Real-time WebSocket implementation
 
 ### API Documentation
 

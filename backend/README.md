@@ -58,7 +58,7 @@ The system includes a JWT-based authentication module providing secure, stateles
 **Documentation:**
 
 - **Module Details**: [Auth Module README](src/trading_api/modules/auth/README.md)
-- **Implementation Guide**: [Authentication System Documentation](../docs/AUTHENTICATION.md)
+- **Implementation Guide**: [Authentication System Documentation](docs/AUTHENTICATION.md)
 - **Middleware**: Shared middleware in `shared/middleware/auth.py`
 - **Models**: JWT and user models in `models/auth/`
 
@@ -116,7 +116,7 @@ async def authenticate(
 - ✅ Same middleware for REST and WebSocket
 - ✅ 401/403 errors handled automatically
 
-See [Authentication Documentation](../docs/AUTHENTICATION.md) for complete implementation details.
+See [Authentication Documentation](docs/AUTHENTICATION.md) for complete implementation details.
 
 ## Quick Start
 

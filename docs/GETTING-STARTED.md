@@ -544,7 +544,7 @@ Now that your environment is set up, here's what to do next:
 
 - [Full-Stack Dev Mode](FULLSTACK-DEV-MODE.md)
 - [Client Generation](CLIENT-GENERATION.md)
-- [WebSocket Clients](WEBSOCKET-CLIENTS.md)
+- [WebSocket Architecture](frontend/docs/WEBSOCKET-ARCHITECTURE.md)
 
 ### 7.3 Start Coding
 

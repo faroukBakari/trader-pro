@@ -95,7 +95,7 @@ Protected Routes (automatic cookie auth)
 
 - **Auth Service**: See `src/services/README.md` for service layer details
 - **Router Guards**: See `src/router/README.md` for authentication guards
-- **Authentication Guide**: See `../docs/AUTHENTICATION.md` for complete system documentation
+- **Authentication Guide**: See `../backend/docs/AUTHENTICATION.md` for complete system documentation
 - **Backend Auth Module**: See `../backend/src/trading_api/modules/auth/README.md`
 
 **Troubleshooting:**
@@ -107,7 +107,7 @@ Common issues and solutions:
 - **Google OAuth fails**: Verify `VITE_GOOGLE_CLIENT_ID` is set and matches Google Console
 - **WebSocket connection fails**: Access token cookie expired, login again
 
-See [Authentication Documentation](../docs/AUTHENTICATION.md#troubleshooting) for complete troubleshooting guide.
+See [Authentication Documentation](../backend/docs/AUTHENTICATION.md#troubleshooting) for complete troubleshooting guide.
 
 ## Quick Start
 
@@ -174,12 +174,12 @@ make generate
 
 - **Development Guide**: See `../docs/DEVELOPMENT.md`
 - **Client Generation**: See `../docs/CLIENT-GENERATION.md`
-- **WebSocket Clients**: See `../docs/WEBSOCKET-CLIENTS.md`
+- **WebSocket Architecture**: See `docs/WEBSOCKET-ARCHITECTURE.md`
 - **Testing**: See `../docs/TESTING.md`
 
 ### Frontend-Specific Docs
 
-- **WebSocket Pattern**: See `WEBSOCKET-CLIENT-PATTERN.md`
+- **WebSocket Pattern**: See `docs/WEBSOCKET-ARCHITECTURE.md`
 - **Plugin Usage**: See `src/plugins/ws-plugin-usage.md`
 
 ### Generated Files
@@ -322,8 +322,8 @@ The frontend includes real-time WebSocket clients for streaming market data.
 
 ### Documentation
 
-- **WebSocket Clients**: See `../docs/WEBSOCKET-CLIENTS.md` for overview
-- **WebSocket Pattern**: See `WEBSOCKET-CLIENT-PATTERN.md` for implementation details
+- **WebSocket Architecture**: See `docs/WEBSOCKET-ARCHITECTURE.md` for overview
+- **WebSocket Pattern**: See `docs/WEBSOCKET-ARCHITECTURE.md` for implementation details
 - **Plugin Usage**: See `src/plugins/ws-plugin-usage.md` for integration patterns
 
 ### Basic Usage

@@ -1,7 +1,7 @@
 # Provider/Capability System Developer Guide
 
 **Version**: 1.0  
-**Last Updated**: November 20, 2025  
+**Last Updated**: November 30, 2025  
 **Status**: Production-Ready
 
 ---

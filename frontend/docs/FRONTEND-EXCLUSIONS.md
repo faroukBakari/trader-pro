@@ -1,7 +1,7 @@
 # Frontend Generated Code and External Library Exclusions
 
-**Version**: 1.2.0  
-**Last Updated**: November 11, 2025  
+**Version**: 1.2.1  
+**Last Updated**: November 30, 2025  
 **Status**: ✅ Current
 
 This document outlines all the configurations that exclude frontend generated code and external libraries from linting, testing, and other development checks.
@@ -316,7 +316,7 @@ Previous issues have been resolved:
 ## Related Documentation
 
 - **Client Generation**: `../../docs/CLIENT-GENERATION.md`
-- **WebSocket Clients**: `../../docs/WEBSOCKET-CLIENTS.md`
+- **WebSocket Architecture**: `./WEBSOCKET-ARCHITECTURE.md`
 - **Frontend README**: `../README.md`
 - **Makefile Guide**: `../../docs/MAKEFILE-GUIDE.md`
 - **Modular Backend**: `../../backend/docs/MODULAR_BACKEND_ARCHITECTURE.md`
@@ -325,4 +325,4 @@ Previous issues have been resolved:
 
 **Maintained by**: Development Team  
 **Review Schedule**: Update when new generated code directories are added  
-**Last Review**: November 11, 2025
+**Last Review**: November 30, 2025

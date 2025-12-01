@@ -2,6 +2,7 @@ import asyncio
 import logging
 from typing import Any, Generic, TypeVar, get_args
 
+from fastapi.websockets import WebSocketState
 from pydantic import BaseModel
 
 from external_packages.fastws import Client
@@ -42,7 +43,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         super().__init__(*args, **kwargs)
         self.service = service
         self._active_topics: dict[str, int] = {}
-        self._active_clients: set[Client] = set()
+        self._clients: set[Client] = set()
 
         async def send_subscribe(
             payload: _TRequest,
@@ -50,7 +51,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         ) -> SubscriptionResponse:
             """Subscribe to real-time data updates"""
             topic = await self._register_topic(payload)
-            self._register_client(client)
+            self._clients.add(client)
 
             client.subscribe(topic)
             logger.info(f"Client {client.uid} subscribed to topic: {topic}")
@@ -75,13 +76,21 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             topic = self.topic_builder(payload)
             client.unsubscribe(topic)
 
-            self._active_topics[topic] = self._active_topics[topic] - 1
-            if self._active_topics[topic] <= 0:
-                self.service.remove_topic(topic)
-                self._active_topics.pop(topic, None)
+            topic_clients = [
+                clt
+                for clt in self._clients
+                if (
+                    clt.ws.client_state == WebSocketState.CONNECTED
+                    and clt.ws.application_state == WebSocketState.CONNECTED
+                    and topic in clt.topics
+                )
+            ]
 
-            if not any(topic in self._active_topics for topic in client.topics):
-                self._active_clients.discard(client)
+            if not topic_clients:
+                self.service.remove_topic(topic)
+
+            if not client.topics:
+                self._clients.discard(client)
 
             logger.info(f"Client {client.uid} unsubscribed from topic: {topic}")
 
@@ -115,10 +124,19 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
 
     async def broadcast_update(self, route: str, update: SubscriptionUpdate) -> None:
         topic = update.topic
-        clients = [client for client in self._active_clients if topic in client.topics]
+        clients = [
+            client
+            for client in self._clients
+            if (
+                client.ws.client_state == WebSocketState.CONNECTED
+                and client.ws.application_state == WebSocketState.CONNECTED
+                and topic in client.topics
+            )
+        ]
 
         if not clients:
             logger.info(f"No clients subscribed to topic: {update.topic}")
+            self.service.remove_topic(topic)
             await asyncio.sleep(1)
             return
 
@@ -136,8 +154,18 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
 
     async def _register_topic(self, payload: _TRequest) -> str:
         topic = self.topic_builder(payload)
-        # Register topic if not already active
-        if topic not in self._active_topics:
+        all_topics = set().union(
+            *(
+                client.topics
+                for client in self._clients
+                if (
+                    client.ws.client_state == WebSocketState.CONNECTED
+                    and client.ws.application_state == WebSocketState.CONNECTED
+                )
+            )
+        )
+
+        if topic not in all_topics:
 
             async def topic_update(data: _TData) -> None:
                 await self.broadcast_update(
@@ -150,11 +178,5 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
 
             await self.service.create_topic(topic, topic_update)
             self._active_topics[topic] = 1
-        else:
-            self._active_topics[topic] = self._active_topics[topic] + 1
-        return topic
 
-    def _register_client(self, client: Client) -> None:
-        # Register client disconnect handler once
-        if client not in self._active_clients:
-            self._active_clients.add(client)
+        return topic

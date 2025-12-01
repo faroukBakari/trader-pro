@@ -88,7 +88,7 @@ This directory contains documentation specific to TradingView Trading Terminal i
 - **[BROKER-INTEGRATION.md](../BROKER-INTEGRATION.md)**: Complete broker integration implementation guide
 - **[WEBSOCKET-ARCHITECTURE.md](../WEBSOCKET-ARCHITECTURE.md)**: WebSocket integration patterns
 - **[Frontend README](../../README.md)**: Frontend overview and setup
-- **[Architecture](../../../ARCHITECTURE.md)**: System architecture overview
+- **[Architecture](../../../docs/ARCHITECTURE.md)**: System architecture overview
 
 ---
 
@@ -100,5 +100,5 @@ This directory contains documentation specific to TradingView Trading Terminal i
 
 ---
 
-**Last Updated**: November 12, 2025  
+**Last Updated**: November 30, 2025  
 **Maintained by**: Development Team

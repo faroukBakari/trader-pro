@@ -1,7 +1,7 @@
 # Broker Service Architecture
 
 **Status**: Implemented
-**Last Updated**: October 27, 2025
+**Last Updated**: November 30, 2025
 **Related Files**:
 
 - `backend/src/trading_api/core/broker_service.py`
@@ -717,7 +717,7 @@ class BrokerService:
 
 - **[docs/methodologies/WEBSOCKET-METHODOLOGY.md](methodologies/WEBSOCKET-METHODOLOGY.md)** - TDD workflow for WebSocket features
 - **[docs/methodologies/API-METHODOLOGY.md](methodologies/API-METHODOLOGY.md)** - TDD workflow for REST API features
-- **[ARCHITECTURE.md](../ARCHITECTURE.md)** - Overall system architecture
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Overall system architecture
 
 ---
 
@@ -771,5 +771,5 @@ print(len(service._executions))  # Should not grow unbounded
 
 ---
 
-**Last Updated**: October 27, 2025
+**Last Updated**: November 30, 2025
 **Maintained by**: Development Team

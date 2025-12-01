@@ -467,8 +467,8 @@ class TWSProvider(Provider, DatafeedCapability):
 
         def mapped_callback_factory(
             symbol: str,
-        ) -> Callable[[dict[str, float]], Awaitable[None]]:
-            async def mapped_callback(ticks: dict[str, float]) -> None:
+        ) -> Callable[[dict[str, float | int | str]], Awaitable[None]]:
+            async def mapped_callback(ticks: dict[str, float | int | str]) -> None:
                 await callback(tws_ticks_to_quote_data(symbol, ticks))
 
             return mapped_callback

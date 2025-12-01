@@ -36,7 +36,7 @@ Module-Scoped WebSocket Pattern
 
 ### 1. FastWSAdapter Wrapper
 
-**Location**: `shared/plugins/fastws_adapter.py`
+**Location**: `shared/ws/fastws_adapter.py`
 
 A custom wrapper around FastWS that adds:
 
