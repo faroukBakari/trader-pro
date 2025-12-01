@@ -1,7 +1,7 @@
 # Smoke Tests
 
-**Version**: 1.0.0  
-**Last Updated**: November 11, 2025
+**Version**: 1.1.0  
+**Last Updated**: November 30, 2025
 
 This directory contains Playwright smoke tests for the Trader Pro application.
 
@@ -20,10 +20,14 @@ These smoke tests validate that the basic functionality of the full-stack applic
 ```
 smoke-tests/
 ├── package.json          # Test dependencies
+├── package-lock.json     # Dependency lock file
 ├── playwright.config.ts  # Playwright configuration
-├── run-tests.sh          # Test runner script
+├── tsconfig.json         # TypeScript configuration
+├── run-tests.sh          # Test runner script (installs chromium only)
 ├── tests/
-│   └── status-page.spec.ts  # Status page smoke tests
+│   └── status-page.spec.ts  # Status page smoke tests (6 tests)
+├── playwright-report/    # HTML test reports (generated)
+├── test-results/         # Test artifacts (generated)
 └── README.md             # This file
 ```
 
@@ -62,13 +66,13 @@ npm run test:report
 
 The tests are configured to:
 
-- Use `make -f ../project.mk dev-fullstack` to start the full-stack environment
+- Use `./scripts/dev-fullstack.sh` to start the full-stack environment
 - Wait up to 2 minutes for the backend and frontend to be ready
-- Run against `http://localhost:5173` (frontend) and `http://localhost:8000` (backend)
-- Test against multiple browsers (Chrome, Firefox, Safari)
+- Run against `http://localhost:5173` (frontend via `baseURL`)
+- Test against multiple browsers (Chromium, Firefox, WebKit) - local runs use Chromium only
 - Generate HTML reports for test results
 
-**Environment Startup Sequence:**
+**Environment Startup Sequence** (via `dev-fullstack.sh`):
 
 1. Port availability check (ports 8000 and 5173)
 2. Backend starts with Uvicorn --reload

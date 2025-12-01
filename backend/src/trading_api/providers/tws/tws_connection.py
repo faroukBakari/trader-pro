@@ -938,7 +938,7 @@ class TWSClient:
         duration_str: str,
         barSize_setting: str,
         whatToShow: str = "TRADES",
-        useRTH: int = 1,
+        useRTH: int = 0,
         format_date: int = 1,
         timeout: float | None = None,
     ) -> list[BarData]:
@@ -1000,27 +1000,43 @@ class TWSClient:
         contract: Contract,
         genericTickList: str = "",
         timeout: float | None = None,
-    ) -> dict[str, float | int]:
-        """Request market data snapshot (single quote update).
+        required_fields: set[str] | None = None,
+    ) -> dict[str, float | int | str]:
+        """Request market data snapshot via subscription with auto-cancel.
+
+        Subscribes to market data, accumulates ticks until required fields
+        are received, then cancels subscription and returns result.
 
         Args:
             contract: TWS Contract object
             genericTickList: Additional tick types (e.g., "233" for RTVolume)
+            timeout: Max time to wait for required fields
+            required_fields: Fields to wait for (default: BID, ASK, BID_SIZE, ASK_SIZE)
 
         Returns:
-            Dictionary with "prices" and "sizes" mappings (tickType → value)
-            Example: {"prices": {1: 150.25, 2: 150.30}, "sizes": {0: 100, 3: 200}}
+            Dictionary mapping tick type names to values
+            Example: {"BID": 150.25, "ASK": 150.30, "BID_SIZE": 100, "ASK_SIZE": 200}
         """
+        if required_fields is None:
+            required_fields = {"BID", "ASK", "BID_SIZE", "ASK_SIZE"}
+
         reqId = self.next_req_id
-        coroutine: Awaitable[
-            dict[str, float | int]
-        ] = self._cb_wrapper.create_future_coroutine(
-            reqId, timeout=timeout or self._timeout
-        )
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[dict[str, float | int | str]] = loop.create_future()
+
+        # Local callback: accumulates ticks, resolves future when complete
+        def _snapshot_collector(data: dict[str, float | int | str]) -> Awaitable[None]:
+            async def _check_complete() -> None:
+                if not future.done() and required_fields.issubset(data.keys()):
+                    self.cancelMktData(reqId)
+                    future.set_result(dict(data))  # Copy to avoid mutation
+
+            return _check_complete()
+
+        # Register callback and send request
+        self._cb_wrapper.register_callback(reqId, _snapshot_collector)
 
         VERSION = 11
-
-        # Build message fields for REQ_MKT_DATA
         fields: list[object] = [
             VERSION,
             reqId,
@@ -1036,18 +1052,30 @@ class TWSClient:
             contract.currency,
             contract.localSymbol,
             contract.tradingClass,
-            False,  # ← ADD: deltaNeutralContract (False = no delta neutral)
-            genericTickList,  # Now correctly positioned
-            True,  # snapshot
+            False,  # deltaNeutralContract
+            genericTickList,
+            False,  # snapshot=False (streaming mode)
             False,  # regulatorySnapshot
-            [],  # mktDataOptions (empty list)
+            [],  # mktDataOptions
         ]
 
         self.ibsocket.send_message(OUT.REQ_MKT_DATA, fields)
         debug_log(
-            f"awaiting tickSnapshotEnd for reqId {reqId}, symbol='{contract.symbol}'"
+            f"awaiting snapshot fields {required_fields} for reqId {reqId}, symbol='{contract.symbol}'"
         )
-        return await coroutine
+
+        try:
+            return await asyncio.wait_for(future, timeout=timeout or self._timeout)
+        except asyncio.TimeoutError:
+            # Cleanup on timeout
+            self.cancelMktData(reqId)
+            # Return partial data if any
+            partial: dict[str, float | int | str] = self._cb_wrapper._accumulators.pop(
+                reqId, {}
+            )
+            if partial:
+                return partial
+            raise
 
     # === Real-time bar subscriptions (continuous pattern) ===
 
@@ -1127,18 +1155,18 @@ class TWSClient:
     def reqMktData(
         self,
         contract: Contract,
-        callback: Callable[[dict[str, float | int]], Awaitable[None]],
+        callback: Callable[[dict[str, float | int | str]], Awaitable[None]],
         genericTickList: str = "",
     ) -> int:
-        """Request market data snapshot (single quote update).
+        """Subscribe to streaming market data.
 
         Args:
             contract: TWS Contract object
+            callback: Async callback receiving tick data dict
             genericTickList: Additional tick types (e.g., "233" for RTVolume)
 
         Returns:
-            Dictionary with "prices" and "sizes" mappings (tickType → value)
-            Example: {"prices": {1: 150.25, 2: 150.30}, "sizes": {0: 100, 3: 200}}
+            Request ID (for cancellation via cancelMktData)
         """
         reqId = self.next_req_id
         self._cb_wrapper.register_callback(
@@ -1196,7 +1224,7 @@ class TWSClient:
 
         VERSION = 2
         self.ibsocket.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
-        debug_log(f"cancelled realtime bars for reqId {reqId}")
+        logger.info(f"cancelled realtime bars for reqId {reqId}")
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""

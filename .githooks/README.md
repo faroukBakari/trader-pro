@@ -1,6 +1,6 @@
 # Git Hooks Setup
 
-**Last Updated:** November 11, 2025
+**Last Updated:** November 30, 2025
 
 This directory contains centralized Git hooks for the trading-api project.
 
@@ -30,28 +30,27 @@ git config --get core.hooksPath
 
 Automatically runs when you commit code. It will:
 
-**Important**: The hook automatically stashes any unstaged changes before running checks and **always** restores them afterward (even if checks fail), ensuring your work is never lost.
+**Important**: The hook automatically stashes any unstaged/untracked changes before running checks and **always** restores them afterward (even if checks fail), ensuring your work is never lost.
 
 #### For Backend (Python) Files:
 
-- **Black**: Code formatting
-- **isort**: Import sorting
-- **Flake8**: Code linting
-- **MyPy**: Type checking
-- **Tests**: Run pytest (local only, skipped in CI)
+- **Formatting** (`make format`): Black + isort
+- **Type checking** (`make type-check`): MyPy + Flake8
+- **Tests** (`make test`): pytest (skipped in CI)
+- **Spec generation** (`make generate`): OpenAPI/AsyncAPI specs + Python client validation
+- **Frontend client regeneration**: Triggers frontend TypeScript client generation from updated specs
 
 #### For Frontend (TypeScript/Vue) Files:
 
-- **ESLint**: Code linting and fixing
-- **Prettier**: Code formatting
-- **TypeScript**: Type checking
-- **Tests**: Run unit tests (local only, skipped in CI)
+- **Client generation** (`make generate`): TypeScript clients from backend specs
+- **Linting** (`make lint`): ESLint with auto-fix
+- **Type checking** (`make type-check`): TypeScript compiler
+- **Tests** (`make test`): Vitest unit tests (skipped in CI)
 
-#### For All Files:
+#### For All Staged Files:
 
-- Check for trailing whitespace
+- Check for trailing whitespace (excludes `frontend/public/`)
 - Check for merge conflict markers
-- Validate JSON/YAML syntax
 
 ## Bypassing Hooks
 
@@ -138,13 +137,21 @@ npm run test:unit run
 
 ## CI Integration
 
-The hooks work seamlessly with CI:
+The hooks detect CI environments (`CI`, `GITHUB_ACTIONS`, `GITLAB_CI`) and skip tests for faster pipeline runs:
 
-- Set `git config core.hooksPath .githooks` in CI setup
-- Tests and slower checks can be run separately in CI
+- Format and type-check steps always run
+- Tests (`make test`) are skipped in CI
 - Use `SKIP_HOOKS=true` or `--no-verify` for automated commits
 
 ## Customization
 
 Edit `.githooks/pre-commit` to modify which checks run or add new ones.
-The `shared-lib.sh` contains utility functions for adding new checks.
+The `shared-lib.sh` contains utility functions (`run_check`, `log_*`, `is_ci`, etc.).
+
+## Files in This Directory
+
+| File            | Purpose                             |
+| --------------- | ----------------------------------- |
+| `pre-commit`    | Main hook script dispatching checks |
+| `shared-lib.sh` | Utility functions for hooks         |
+| `README.md`     | This documentation                  |

@@ -335,7 +335,7 @@ class TestTwsTicksToQuoteDataMapper:
         """Test mapping tick data to QuoteData."""
         from trading_api.models.market import QuoteValues
 
-        ticks = {
+        ticks: dict[str, float | int | str] = {
             "BID": 150.25,
             "ASK": 150.30,
             "LAST": 150.28,
@@ -364,7 +364,7 @@ class TestTwsTicksToQuoteDataMapper:
         """Test spread is calculated from bid/ask."""
         from trading_api.models.market import QuoteValues
 
-        ticks = {
+        ticks: dict[str, float | int | str] = {
             "BID": 100.00,
             "ASK": 100.10,
         }
@@ -378,7 +378,7 @@ class TestTwsTicksToQuoteDataMapper:
         """Test change and change percent are calculated."""
         from trading_api.models.market import QuoteValues
 
-        ticks = {
+        ticks: dict[str, float | int | str] = {
             "LAST": 105.00,
             "CLOSE": 100.00,
         }
@@ -393,7 +393,7 @@ class TestTwsTicksToQuoteDataMapper:
         """Test missing tick values default to zero."""
         from trading_api.models.market import QuoteValues
 
-        ticks: dict[str, float | int] = {}
+        ticks: dict[str, float | int | str] = {}
 
         result = tws_ticks_to_quote_data("EMPTY", ticks)
 
@@ -409,7 +409,7 @@ class TestTwsTicksToQuoteDataMapper:
         """Test handling of partial tick data."""
         from trading_api.models.market import QuoteValues
 
-        ticks = {
+        ticks: dict[str, float | int | str] = {
             "LAST": 150.00,
             "VOLUME": 500000,
         }

@@ -1,9 +1,9 @@
 # WebSocket Integration Methodology
 
-**Version**: 4.1.0  
-**Date**: January 8, 2025  
+**Version**: 4.1.1  
+**Date**: November 30, 2025  
 **Status**: ✅ Production Methodology (Modular Architecture)  
-**Related**: `docs/WEBSOCKET-CLIENTS.md`, `ARCHITECTURE.md`  
+**Related**: `frontend/docs/WEBSOCKET-ARCHITECTURE.md`, `ARCHITECTURE.md`  
 **Architecture**: Modular backend with dynamic type resolution
 
 ---
@@ -707,7 +707,7 @@ Use this checklist when implementing new WebSocket features:
 
 ---
 
-**Version**: 4.1.0 (Dynamic Type Resolution)  
-**Last Updated**: January 8, 2025  
+**Version**: 4.1.1 (Dynamic Type Resolution)  
+**Last Updated**: November 30, 2025  
 **Maintained by**: Development Team  
 **Migration**: Updated for dynamic type resolution via class inheritance pattern

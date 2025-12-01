@@ -166,7 +166,7 @@ Protected REST/WebSocket endpoints validate cookie
 - ✅ Comprehensive test coverage (100% passing)
 - ✅ Production-ready security (device fingerprinting, token rotation)
 
-See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete implementation details.
+See [AUTHENTICATION.md](../backend/docs/AUTHENTICATION.md) for complete implementation details.
 
 ### 8. Provider/Capability System (Pluggable External Integrations)
 
@@ -2679,7 +2679,7 @@ Services Layer
 
 - Backend: `backend/src/trading_api/shared/ws/ws_router.py` - `buildTopicParams()`
 - Frontend: `frontend/src/plugins/wsClientBase.ts` - `buildTopicParams()`
-- Documentation: `docs/WEBSOCKET-CLIENTS.md`
+- Documentation: `frontend/docs/WEBSOCKET-ARCHITECTURE.md`
 
 **Features**:
 
@@ -2798,7 +2798,7 @@ Services Layer
 - Enhanced device fingerprinting (more entropy)
 - Rate limiting on login endpoints
 
-See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete details.
+See [AUTHENTICATION.md](../backend/docs/AUTHENTICATION.md) for complete details.
 
 ### Current Measures
 
@@ -2843,14 +2843,12 @@ See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete details.
 - **docs/DEVELOPMENT.md** - Development workflows
 - **docs/TESTING.md** - Testing strategies
 - **docs/CLIENT-GENERATION.md** - API client generation
-- **docs/WEBSOCKET-CLIENTS.md** - WebSocket implementation
+- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket implementation
 
 ### Configuration
 
-- **WORKSPACE-SETUP.md** - VS Code workspace
-- **ENVIRONMENT-CONFIG.md** - Environment variables
+- **docs/GETTING-STARTED.md** - Complete setup guide (workspace, hooks, environment)
 - **MAKEFILE-GUIDE.md** - Make commands reference
-- **HOOKS-SETUP.md** - Git hooks
 
 ### Component Documentation
 
@@ -2940,7 +2938,7 @@ VITE_TRADER_API_BASE_PATH=/api
 npm run build
 ```
 
-See `ENVIRONMENT-CONFIG.md` for complete environment variable documentation.
+See [GETTING-STARTED.md](GETTING-STARTED.md) for complete environment variable documentation.
 
 ## Deployment
 

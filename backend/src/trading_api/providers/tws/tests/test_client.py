@@ -274,7 +274,7 @@ class TestTWSClientReqMktDataSnapshot:
 
     @pytest.mark.asyncio
     async def test_req_mkt_data_snapshot_returns_ticks(self) -> None:
-        """Test reqMktDataSnapshot returns tick dictionary."""
+        """Test reqMktDataSnapshot returns tick dictionary when required fields present."""
         with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
             mock_ibsocket = MagicMock()
             mock_ibsocket.running = True
@@ -285,29 +285,39 @@ class TestTWSClientReqMktDataSnapshot:
             client._cb_wrapper._ready_event.set()
             client._cb_wrapper._loop = asyncio.get_running_loop()
 
-            # Create test tick data
-            ticks = {
+            # Tick data with all required fields (BID, ASK, BID_SIZE, ASK_SIZE)
+            ticks: dict[str, float | int | str] = {
                 "BID": 150.25,
                 "ASK": 150.30,
+                "BID_SIZE": 100,
+                "ASK_SIZE": 200,
                 "LAST": 150.28,
                 "VOLUME": 1000000,
             }
 
-            async def resolve_after_send() -> None:
+            async def simulate_tick_callbacks() -> None:
+                """Simulate TWS sending tick data via registered callback."""
                 await asyncio.sleep(0.01)
-                client._cb_wrapper._resolve_future(1, ticks)
+                # Get the registered callback and invoke it with accumulated ticks
+                reqId = 1
+                loop, callback = client._cb_wrapper._callbacks.get(reqId, (None, None))
+                if callback is not None:
+                    # Simulate accumulator being populated
+                    client._cb_wrapper._accumulators[reqId] = dict(ticks)
+                    await callback(ticks)
 
-            asyncio.create_task(resolve_after_send())
+            asyncio.create_task(simulate_tick_callbacks())
 
             contract = Contract()
             contract.symbol = "AAPL"
             contract.secType = "STK"
 
-            result = await client.reqMktDataSnapshot(contract)
+            result = await client.reqMktDataSnapshot(contract, timeout=5.0)
 
             assert result["BID"] == 150.25
             assert result["ASK"] == 150.30
-            assert result["VOLUME"] == 1000000
+            assert result["BID_SIZE"] == 100
+            assert result["ASK_SIZE"] == 200
 
 
 class TestTWSClientNextReqId:

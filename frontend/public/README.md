@@ -189,7 +189,7 @@ ENV=prod npm run build
 ### Project-Wide Documentation
 
 - **[Client Generation](../../docs/CLIENT-GENERATION.md)** - API client generation
-- **[WebSocket Clients](../../docs/WEBSOCKET-CLIENTS.md)** - WebSocket implementation overview
+- **[WebSocket Architecture](../docs/WEBSOCKET-ARCHITECTURE.md)** - WebSocket implementation overview
 - **[Makefile Guide](../../docs/MAKEFILE-GUIDE.md)** - Build commands
 
 ---

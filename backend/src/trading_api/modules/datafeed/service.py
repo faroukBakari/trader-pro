@@ -211,7 +211,7 @@ class DatafeedService(WsRouteService):
 
         Handles both legacy asyncio tasks and provider subscriptions.
         """
-        logger.info(f"Deleting topic queue for: {topic}")
+        logger.info(f"remove_topic: {topic}")
 
         # Unsubscribe from provider if subscription exists
         subscription_id = self._topic_to_subscription_id.get(topic)

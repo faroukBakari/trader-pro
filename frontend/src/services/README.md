@@ -1,6 +1,6 @@
 # API Services
 
-**Last Updated**: November 14, 2025
+**Last Updated**: November 30, 2025
 
 This directory contains the service layer for the frontend application, including API communication, authentication, and trading platform integration.
 
@@ -14,16 +14,14 @@ src/services/
 ├── brokerTerminalService.ts # Broker terminal integration
 ├── ihmControllerService.ts # IHM Controller service (component tool registration)
 ├── testIntegration.ts      # Integration test utility
-├── generated/              # Auto-generated API client (gitignored)
-│   ├── api/               # Generated API classes
-│   ├── models/            # Generated TypeScript types
-│   ├── client-config.ts   # Pre-configured client instance
-│   └── ...
 └── __tests__/
-    ├── apiService.spec.ts          # Unit tests with mocking examples
-    ├── authService.spec.ts         # Auth service unit tests
+    ├── README.md                     # Testing guide
+    ├── apiService.spec.ts            # Unit tests with mocking examples
+    ├── authService.spec.ts           # Auth service unit tests
     ├── authService.integration.spec.ts  # Auth integration tests
-    └── ihmControllerService.spec.ts    # IHM Controller unit tests
+    ├── brokerTerminalService.spec.ts # Broker terminal tests
+    ├── datafeedService.spec.ts       # Datafeed service tests
+    └── ihmControllerService.spec.ts  # IHM Controller unit tests
 ```
 
 ## AuthService
@@ -257,7 +255,7 @@ Tests:
 
 - [Router Guards](../router/README.md) - Stateless authentication guards
 - [Auth Module](../../../backend/src/trading_api/modules/auth/README.md) - Backend implementation
-- [Authentication Guide](../../../docs/AUTHENTICATION.md) - Comprehensive cross-cutting guide
+- [Authentication Guide](../../../backend/docs/AUTHENTICATION.md) - Comprehensive cross-cutting guide
 
 ---
 
@@ -561,6 +559,7 @@ Tests verify:
 
 - [IHM Controller Types](../types/ihmController.ts) - Type definitions
 - [WebSocket Architecture](../../docs/WEBSOCKET-ARCHITECTURE.md) - WebSocket patterns
+- [IHM Controller Guide](../../docs/IHM-CONTROLLER.md) - Design and usage guide
 - [WsAdapter](../plugins/wsAdapter.ts) - WebSocket client wrapper
 
 ---
@@ -1266,6 +1265,5 @@ describe('mapQuoteData', () => {
 
 - [TradingView Datafeed API](https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IDatafeedChartApi)
 - [TradingView Tutorials](https://www.tradingview.com/charting-library-docs/latest/tutorials/)
-- [WebSocket Client Pattern](../../docs/WEBSOCKET-CLIENT-PATTERN.md)
-- [WebSocket Client Base](../../docs/WEBSOCKET-CLIENT-BASE.md)
+- [WebSocket Architecture](../../docs/WEBSOCKET-ARCHITECTURE.md) - Frontend WebSocket patterns
 - [Client Generation Guide](../../../docs/CLIENT-GENERATION.md)

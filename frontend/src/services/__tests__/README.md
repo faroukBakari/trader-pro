@@ -1,7 +1,7 @@
 # Services Testing Guide
 
-**Version**: 2.0.1  
-**Last Updated**: November 11, 2025  
+**Version**: 2.1.0  
+**Last Updated**: November 30, 2025  
 **Status**: ✅ Current - Includes WebSocket Integration Tests
 
 ## Overview
@@ -370,10 +370,11 @@ npm run test:unit -- --coverage
 
 ### ApiService Tests
 
-- ✅ All 28 tests passing
+- ✅ All 53 tests passing
 - ✅ No mocking dependencies
 - ✅ Realistic test scenarios using fallback mechanism
-- ✅ Fast execution (under 3 seconds for full suite)
+- ✅ Fast execution (under 10 seconds for full suite)
+- ✅ Per-module and multi-module query tests included
 
 ### WebSocket Integration Tests
 
@@ -411,14 +412,13 @@ npm run test:unit -- --coverage
 
 ## References
 
-- **WebSocket Integration**: See `../../../docs/BROKER-WEBSOCKET-INTEGRATION.md`
-- **Trading Host API**: See `../../../docs/IBROKERCONNECTIONADAPTERHOST.md`
-- **Broker Service**: See `../../../docs/BROKER-TERMINAL-SERVICE.md`
-- **WebSocket Clients**: See `../../../../docs/WEBSOCKET-CLIENTS.md`
-- **Testing Strategy**: See `../../../../docs/TESTING.md`
+- **Broker Integration**: See [frontend/docs/BROKER-INTEGRATION.md](../../../docs/BROKER-INTEGRATION.md)
+- **WebSocket Architecture**: See [frontend/docs/WEBSOCKET-ARCHITECTURE.md](../../../docs/WEBSOCKET-ARCHITECTURE.md)
+- **Testing Strategy**: See [docs/TESTING.md](../../../../docs/TESTING.md)
+- **TradingView Type Definitions**: See [frontend/docs/tradingview/TYPE-DEFINITIONS.md](../../../docs/tradingview/TYPE-DEFINITIONS.md)
 
 ---
 
-**Version**: 2.0.1  
-**Last Updated**: November 11, 2025  
+**Version**: 2.1.0  
+**Last Updated**: November 30, 2025  
 **Maintained by**: Frontend Team
