@@ -436,6 +436,9 @@ class TWSProvider(Provider, DatafeedCapability):
         async def maped_callback(*args: Any) -> None:
             await callback(tws_rt_bar_to_domain_bar(*args))
 
+        logger.info(
+            f"Subscribing to real-time bars for {symbol} on exchange {exchange or 'SMART'}"
+        )
         return self._tws_client.reqRealTimeBars(
             contract,
             maped_callback,
@@ -473,6 +476,9 @@ class TWSProvider(Provider, DatafeedCapability):
 
             return mapped_callback
 
+        logger.info(
+            f"Subscribing to market data for symbols: {symbols} on exchange {exchange or 'SMART'}"
+        )
         reqIds = [
             self._tws_client.reqMktData(
                 self._build_contract(symbol, exchange=exchange or "SMART"),
@@ -493,6 +499,9 @@ class TWSProvider(Provider, DatafeedCapability):
         Raises:
             DatafeedError: If subscription ID not found
         """
+        logger.info(
+            f"Unsubscribing from real-time bars with subscription ID: {subscription_id}"
+        )
         self._tws_client.cancelRealTimeBars(subscription_id)
 
     def unsubscribe_market_data(self, subscription_ids: list[int]) -> None:
@@ -507,6 +516,7 @@ class TWSProvider(Provider, DatafeedCapability):
             DatafeedError: Not yet implemented
         """
         for reqId in subscription_ids:
+            logger.info(f"Unsubscribing from market data with reqId: {reqId}")
             self._tws_client.cancelMktData(reqId)
 
     def shutdown(self) -> None:

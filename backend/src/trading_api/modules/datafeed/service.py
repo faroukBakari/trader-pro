@@ -155,63 +155,67 @@ class DatafeedService(WsRouteService):
             json.JSONDecodeError: If JSON params cannot be parsed
         """
 
-        if topic not in self._topic_to_subscription_id:
-            logger.info(f"New topic in DatafeedService : {topic}")
-            # Parse topic format: "topic_type:{json_params}"
-            if ":" not in topic:
-                raise ValueError(f"Invalid topic format: {topic}")
+        if topic in self._topic_to_subscription_id:
+            logger.warning(f"Topic already exists in DatafeedService: {topic}")
+            return
 
-            topic_type, params_json = topic.split(":", 1)
+        # Parse topic format: "topic_type:{json_params}"
+        if ":" not in topic:
+            raise ValueError(f"Invalid topic format: {topic}")
 
-            # TODO: need to validate create_topic params/types against provider capabilities at runtime
+        topic_type, params_json = topic.split(":", 1)
 
-            if topic_type == "bars":
-                # Parse the JSON params part / Validate model
-                params_dict = json.loads(params_json)
-                subscription_request = BarsSubscriptionRequest.model_validate(
-                    params_dict
+        # TODO: need to validate create_topic params/types against provider capabilities at runtime
+
+        if topic_type == "bars":
+            # Parse the JSON params part / Validate model
+            params_dict = json.loads(params_json)
+            subscription_request = BarsSubscriptionRequest.model_validate(params_dict)
+
+            logger.info(f"creating new topic : {topic}")
+
+            subscription_id = self.datafeed_provider.subscribe_realtime_bars(
+                symbol=subscription_request.symbol, callback=topic_update
+            )
+
+            # Track subscription ID for cleanup
+            self._topic_to_subscription_id[topic] = subscription_id
+        elif topic_type == "quotes":
+            # Parse the JSON params part / Validate model
+            params_dict = json.loads(params_json)
+            quote_subscription_request = QuoteDataSubscriptionRequest.model_validate(
+                params_dict
+            )
+
+            # Combine all symbols (both slow and fast)
+            all_symbols = list(
+                set(
+                    quote_subscription_request.symbols
+                    + quote_subscription_request.fast_symbols
                 )
+            )
 
-                subscription_id = self.datafeed_provider.subscribe_realtime_bars(
-                    symbol=subscription_request.symbol, callback=topic_update
-                )
+            if not all_symbols:
+                raise ValueError("No symbols provided for quote subscription")
 
-                # Track subscription ID for cleanup
-                self._topic_to_subscription_id[topic] = subscription_id
-            elif topic_type == "quotes":
-                # Parse the JSON params part / Validate model
-                params_dict = json.loads(params_json)
-                quote_subscription_request = (
-                    QuoteDataSubscriptionRequest.model_validate(params_dict)
-                )
+            logger.info(f"creating new topic : {topic}")
 
-                # Combine all symbols (both slow and fast)
-                all_symbols = list(
-                    set(
-                        quote_subscription_request.symbols
-                        + quote_subscription_request.fast_symbols
-                    )
-                )
+            # Subscribe to market data for all symbols via provider (returns list of subscription IDs)
+            subscription_ids = self.datafeed_provider.subscribe_market_data(
+                symbols=all_symbols, callback=topic_update
+            )
 
-                if not all_symbols:
-                    raise ValueError("No symbols provided for quote subscription")
-
-                # Subscribe to market data for all symbols via provider (returns list of subscription IDs)
-                subscription_ids = self.datafeed_provider.subscribe_market_data(
-                    symbols=all_symbols, callback=topic_update
-                )
-
-                # Track subscription IDs for cleanup (list for quotes, int for bars)
-                self._topic_to_subscription_id[topic] = subscription_ids
-            else:
-                raise ValueError(f"Unknown topic type: {topic_type}")
+            # Track subscription IDs for cleanup (list for quotes, int for bars)
+            self._topic_to_subscription_id[topic] = subscription_ids
+        else:
+            raise ValueError(f"Unknown topic type: {topic_type}")
 
     def remove_topic(self, topic: str) -> None:
         """Remove topic and cleanup subscriptions.
 
         Handles both legacy asyncio tasks and provider subscriptions.
         """
-        logger.info(f"remove_topic: {topic}")
+        logger.info(f"removing topic: {topic}")
 
         # Unsubscribe from provider if subscription exists
         subscription_id = self._topic_to_subscription_id.get(topic)
@@ -243,6 +247,8 @@ class DatafeedService(WsRouteService):
                         self.datafeed_provider.unsubscribe_market_data(
                             [subscription_id]
                         )
+        else:
+            logger.warning(f"No subscription_id found for topic: {topic}")
 
             self._topic_to_subscription_id.pop(topic, None)
 
