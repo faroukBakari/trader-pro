@@ -873,10 +873,10 @@ class TWSClient:
     ) -> list[ContractDescription]:
         reqId = self.next_req_id
 
-        coroutine: Awaitable[
-            list[ContractDescription]
-        ] = self._cb_wrapper.create_future_coroutine(
-            reqId, timeout=timeout or self._timeout
+        coroutine: Awaitable[list[ContractDescription]] = (
+            self._cb_wrapper.create_future_coroutine(
+                reqId, timeout=timeout or self._timeout
+            )
         )
         self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
         debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
@@ -896,10 +896,10 @@ class TWSClient:
             May return multiple results for ambiguous queries.
         """
         reqId = self.next_req_id
-        coroutine: Awaitable[
-            list[ContractDetails]
-        ] = self._cb_wrapper.create_future_coroutine(
-            reqId, timeout=timeout or self._timeout
+        coroutine: Awaitable[list[ContractDetails]] = (
+            self._cb_wrapper.create_future_coroutine(
+                reqId, timeout=timeout or self._timeout
+            )
         )
 
         # Build message fields (VERSION=8 per ibapi/client.py)
@@ -1060,7 +1060,7 @@ class TWSClient:
         ]
 
         self.ibsocket.send_message(OUT.REQ_MKT_DATA, fields)
-        debug_log(
+        logger.info(
             f"awaiting snapshot fields {required_fields} for reqId {reqId}, symbol='{contract.symbol}'"
         )
 
@@ -1146,8 +1146,11 @@ class TWSClient:
             realTimeBarsOptions,  # realTimeBarsOptions
         ]
 
+        logger.info(
+            f"subscribing to realtime bars for symbol '{contract.symbol}' reqId {reqId}"
+        )
         self.ibsocket.send_message(OUT.REQ_REAL_TIME_BARS, fields)
-        debug_log(
+        logger.info(
             f"subscribed to realtime bars with reqId {reqId}, symbol='{contract.symbol}'"
         )
         return reqId
@@ -1200,7 +1203,7 @@ class TWSClient:
         ]
 
         self.ibsocket.send_message(OUT.REQ_MKT_DATA, fields)
-        debug_log(
+        logger.info(
             f"subscribed to realtime reqMktData with reqId {reqId}, symbol='{contract.symbol}'"
         )
         return reqId
@@ -1215,7 +1218,7 @@ class TWSClient:
 
         VERSION = 1
         self.ibsocket.send_message(OUT.CANCEL_REAL_TIME_BARS, [VERSION, reqId])
-        debug_log(f"cancelled realtime bars for reqId {reqId}")
+        logger.info(f"cancelled realtime bars for reqId {reqId}")
 
     def cancelMktData(self, reqId: int) -> None:
         """Cancel tick-by-tick data subscription."""
@@ -1224,7 +1227,7 @@ class TWSClient:
 
         VERSION = 2
         self.ibsocket.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
-        logger.info(f"cancelled realtime bars for reqId {reqId}")
+        logger.info(f"cancelled market data for reqId {reqId}")
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""
