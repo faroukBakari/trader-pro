@@ -84,11 +84,13 @@ export function mapQuoteData(quote: QuoteData_Api_Backend | QuoteData_Ws_Backend
         lp: quote.v.lp,
         ask: quote.v.ask,
         bid: quote.v.bid,
+        spread: quote.v.spread,
         open_price: quote.v.open_price,
         high_price: quote.v.high_price,
         low_price: quote.v.low_price,
         prev_close_price: quote.v.prev_close_price,
         volume: quote.v.volume,
+        original_name: quote.v.original_name,
       },
     }
   }

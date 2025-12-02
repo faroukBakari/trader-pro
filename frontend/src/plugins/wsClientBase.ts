@@ -223,9 +223,7 @@ export class WebSocketBase {
   }
 
   private routeUpdateMessage(data: SubscriptionUpdate): void {
-    if (!(data.topic.startsWith('quotes:') || data.topic.startsWith('bars:'))) {
-      this.logger.debug(`${data.topic} message received:`, data)
-    }
+    this.logger.debug(`${data.topic} message received:`, data)
     for (const subscription of Array.from(this.subscriptions.values())) {
       if (subscription.confirmed && subscription.topic === data.topic) {
         try {
