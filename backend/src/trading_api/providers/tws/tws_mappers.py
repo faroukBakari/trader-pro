@@ -259,26 +259,26 @@ def tws_ticks_to_quote_data(
     # Extract tick values (use sentinel for missing, convert to 0.0 for output)
     def get_price(tick_type: int) -> float:
         val = ticks.get(get_tick_type_name(tick_type))
-        return float(val) if val is not None else 0.0
+        return round(float(val), 2) if val is not None else 0.0
 
     bid = get_price(TickTypeEnum.BID)
     ask = get_price(TickTypeEnum.ASK)
     last = get_price(TickTypeEnum.LAST)
-    open_price = get_price(TickTypeEnum.OPEN)
-    high_price = get_price(TickTypeEnum.HIGH)
-    low_price = get_price(TickTypeEnum.LOW)
-    close_price = get_price(TickTypeEnum.CLOSE)
+    open_price = get_price(TickTypeEnum.OPEN) or last
+    high_price = get_price(TickTypeEnum.HIGH) or last
+    low_price = get_price(TickTypeEnum.LOW) or last
+    close_price = get_price(TickTypeEnum.CLOSE) or last
     ticks.get(get_tick_type_name(TickTypeEnum.BID_SIZE))
     ticks.get(get_tick_type_name(TickTypeEnum.ASK_SIZE))
     volume = ticks.get(get_tick_type_name(TickTypeEnum.VOLUME))
 
     # Calculate spread (if both bid and ask available)
-    spread = (ask - bid) if (ask > 0 and bid > 0) else 0.0
+    spread = round(ask - bid, 2) if (ask > 0 and bid > 0) else 0.0
 
     # Calculate change and change percent (if last and close available)
     if last > 0 and close_price > 0:
-        change = last - close_price
-        change_percent = (change / close_price) * 100
+        change = round(last - close_price, 2)
+        change_percent = round((change / close_price) * 100, 2)
     else:
         change = 0.0
         change_percent = 0.0
