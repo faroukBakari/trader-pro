@@ -873,10 +873,10 @@ class TWSClient:
     ) -> list[ContractDescription]:
         reqId = self.next_req_id
 
-        coroutine: Awaitable[list[ContractDescription]] = (
-            self._cb_wrapper.create_future_coroutine(
-                reqId, timeout=timeout or self._timeout
-            )
+        coroutine: Awaitable[
+            list[ContractDescription]
+        ] = self._cb_wrapper.create_future_coroutine(
+            reqId, timeout=timeout or self._timeout
         )
         self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
         debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
@@ -896,10 +896,10 @@ class TWSClient:
             May return multiple results for ambiguous queries.
         """
         reqId = self.next_req_id
-        coroutine: Awaitable[list[ContractDetails]] = (
-            self._cb_wrapper.create_future_coroutine(
-                reqId, timeout=timeout or self._timeout
-            )
+        coroutine: Awaitable[
+            list[ContractDetails]
+        ] = self._cb_wrapper.create_future_coroutine(
+            reqId, timeout=timeout or self._timeout
         )
 
         # Build message fields (VERSION=8 per ibapi/client.py)

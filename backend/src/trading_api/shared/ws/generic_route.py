@@ -71,6 +71,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             client: Client,
         ) -> SubscriptionResponse:
             """Unsubscribe from data updates"""
+            topic = self.topic_builder(payload)
             try:
                 self._clients = set(
                     [
@@ -83,7 +84,6 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                     ]
                 )
 
-                topic = self.topic_builder(payload)
                 if client in self._clients:
                     client.unsubscribe(topic)
                     logger.info(f"Client {client.uid} unsubscribed from topic: {topic}")
@@ -109,7 +109,8 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
 
                 else:
                     logger.warning(
-                        f"Client {client.uid} tried to unsubscribe from topic {topic} but was not found in clients list."
+                        f"Client {client.uid} tried to unsubscribe from topic"
+                        f" {topic} but was not found in clients list."
                     )
 
                 return SubscriptionResponse(

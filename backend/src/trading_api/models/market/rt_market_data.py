@@ -5,12 +5,12 @@ Handles all TickTypeEnum values with proper typing.
 """
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 
 @dataclass(slots=True)
-class TwsRTData:
+class RTMarketData:
     """Unified real-time market data from TWS.
 
     Consolidates:
@@ -24,16 +24,16 @@ class TwsRTData:
     tick_name: str = ""  # Symbol:Exchange identifier
     rt_bars_reqId: int | None = None  # Whether real-time bars are active
     market_data_reqId: int | None = None  # Whether market data subscription is active
-    reqId_callback_map: dict[
-        int,
+    reqId_callback_map: (
         tuple[
             asyncio.AbstractEventLoop,
             Callable[
-                ["TwsRTData", list[str] | None],
+                ["RTMarketData", list[str] | None],
                 Awaitable[None],
             ],
-        ],
-    ] = field(default_factory=dict)
+        ]
+        | None
+    ) = None
 
     # === Real-time bar fields (from realtimeBar callback) ===
     bar_time: int | None = None  # Unix timestamp of bar
