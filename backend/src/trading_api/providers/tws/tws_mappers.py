@@ -102,16 +102,27 @@ def _convert_tws_trading_hours_to_session(trading_hours: str) -> str:
         if "CLOSED" in segment:
             continue
         # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" → "HHMM-HHMM"
-        if ":" in segment:
-            _, times = segment.split(":", 1)
-            if "-" in times:
-                start_datetime, end_datetime = times.split("-", 1)
-                # Extract just HHMM from YYYYMMDDHHMM (last 4 chars after date prefix)
-                start_time = start_datetime[-4:]
-                end_time = end_datetime[-4:] if len(end_datetime) >= 4 else end_datetime
-                return f"{start_time}-{end_time}"
+        if "-" in segment:
+            start, end = segment.split("-", 1)
+            start_time = start.split(":", 1)[1] if ":" in start else start
+            end_time = end.split(":", 1)[1] if ":" in end else end
+            return start_time + "-" + end_time
 
     return "0930-1600"  # Fallback
+
+
+TWS_TIMEZONE_MAP: dict[str, str] = {
+    "US/Eastern": "America/New_York",
+    "US/Central": "America/Chicago",
+    "US/Mountain": "US/Mountain",  # TradingView supports this one
+    "US/Pacific": "America/Los_Angeles",
+    # Add more as encountered
+}
+
+
+def _normalize_timezone(tws_timezone: str) -> str:
+    """Convert TWS timeZoneId to TradingView-compatible timezone."""
+    return TWS_TIMEZONE_MAP.get(tws_timezone, tws_timezone) or "America/New_York"
 
 
 def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
@@ -138,7 +149,7 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
         description=details.longName or contract.symbol,
         type=symbol_type,
         session=_convert_tws_trading_hours_to_session(details.tradingHours),
-        timezone=details.timeZoneId or "America/New_York",
+        timezone=_normalize_timezone(details.timeZoneId),
         ticker=contract.localSymbol or contract.symbol,
         exchange=contract.primaryExchange or contract.exchange,
         listed_exchange=contract.exchange,
