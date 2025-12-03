@@ -451,7 +451,7 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
         const data = mockData()
         if (data) onUpdate(data)
       })
-    }, 100)
+    }, 1000)
   }
 
   async subscribe(

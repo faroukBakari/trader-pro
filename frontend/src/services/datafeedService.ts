@@ -539,12 +539,12 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   }
   subscribeQuotes(
     symbols: string[],
-    fastSymbols: string[],
+    fast_symbols: string[],
     onRealtimeCallback: QuotesCallback,
     listenerGUID: string,
   ): void {
     // Combine all symbols for subscription
-    const allSymbols = [...new Set([...symbols, ...fastSymbols])]
+    const allSymbols = [...new Set([...symbols, ...fast_symbols])]
 
     if (allSymbols.length === 0) {
       if (this.debug_datafeed) console.log('[Datafeed] No symbols to subscribe to for quotes')
@@ -554,12 +554,14 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     this._getWsAdapter().quotes
       ?.subscribe(
         listenerGUID,
-        { symbols, fast_symbols: fastSymbols },
+        { symbols, fast_symbols },
         (quoteData) => {
           if (this.debug_datafeed) console.log('[Datafeed] Quote data received from WebSocket:', {
             listenerGUID,
             quoteData,
           })
+          const v = quoteData.v as { bid?: number; ask?: number }
+          console.warn(`Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask}`)
           onRealtimeCallback([quoteData])
         }
       ).then(() => {

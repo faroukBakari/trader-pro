@@ -5,8 +5,24 @@ Handles all TickTypeEnum values with proper typing.
 """
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field, fields
 from typing import Awaitable, Callable
+
+from ibapi.contract import Contract
+
+
+@dataclass
+class TWSError(Exception):
+    """TWS API Error with structured error details."""
+
+    reqId: int
+    errorCode: int
+    errorString: str
+    errorTime: int
+    advancedOrderRejectJson: str = ""
+
+    def __str__(self) -> str:
+        return f"TWS error {self.errorCode} (reqId={self.reqId}): {self.errorString}"
 
 
 @dataclass(slots=True)
@@ -21,19 +37,22 @@ class RTMarketData:
     """
 
     # tracking flags
-    tick_name: str = ""  # Symbol:Exchange identifier
-    rt_bars_reqId: int | None = None  # Whether real-time bars are active
-    market_data_reqId: int | None = None  # Whether market data subscription is active
-    reqId_callback_map: (
+    contract: Contract | None = None  # Symbol:Exchange identifier
+    bar_data_reqId: int | None = None
+    mkt_data_reqId: int | None = None
+    reqId_callback_map: dict[
+        int,
         tuple[
             asyncio.AbstractEventLoop,
             Callable[
                 ["RTMarketData", list[str] | None],
                 Awaitable[None],
             ],
-        ]
-        | None
-    ) = None
+        ],
+    ] = field(default_factory=dict)
+    barSize_setting: str | None = None
+    format_date: int | None = None
+    whatToShow: str | None = None
 
     # === Real-time bar fields (from realtimeBar callback) ===
     bar_time: int | None = None  # Unix timestamp of bar
@@ -200,6 +219,28 @@ class RTMarketData:
     min_tick: float | None = None
     bbo_exchange: str | None = None
     snapshot_permissions: int | None = None
+
+    # === Error tracking ===
+    error_messages: list[TWSError] = field(default_factory=list)
+
+    # Fields to preserve during reset
+    _PRESERVE_ON_RESET: frozenset[str] = field(
+        default=frozenset(
+            {
+                "contract",
+                "reqId_callback_map",
+                "_PRESERVE_ON_RESET",
+            }
+        ),
+        init=False,
+        repr=False,
+    )
+
+    def reset(self) -> None:
+        """Reset all data fields to None (for reuse)."""
+        for f in fields(self):
+            if f.name not in self._PRESERVE_ON_RESET:
+                setattr(self, f.name, None)
 
 
 # Mapping from TickTypeEnum name → TwsRTData attribute name

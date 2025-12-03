@@ -18,6 +18,7 @@ class TWSProviderConfig(BaseSettings):
         TWS_CONNECTION_TIMEOUT: float = 10.0
         TWS_REALTIME_BAR_SIZE: int = 5 (5 or 10 seconds only)
         TWS_MARKET_DATA_TYPE: int = 1 (1=real-time, 2=frozen, 3=delayed, 4=delayed-frozen)
+        TWS_MAX_CONCURRENT_RT_SUBSCRIPTIONS: int = 100
     """
 
     enabled: bool = True
@@ -49,6 +50,12 @@ class TWSProviderConfig(BaseSettings):
         ge=1,
         le=4,
         description="Market data type (1=real-time, 2=frozen, 3=delayed, 4=delayed-frozen)",
+    )
+    max_concurrent_rt_subscriptions: int = Field(
+        default=100,
+        ge=1,
+        le=500,
+        description="Maximum concurrent real-time subscriptions (TWS limit varies by account)",
     )
 
     model_config = SettingsConfigDict(
