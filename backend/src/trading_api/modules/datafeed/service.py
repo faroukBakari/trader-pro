@@ -7,6 +7,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, List, Optional
+from zoneinfo import ZoneInfo
 
 from trading_api.models import (
     Bar,
@@ -23,6 +24,8 @@ from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.shared.ws.ws_router import WsRouteService
 
 logger = logging.getLogger(__name__)
+
+us_eastern = ZoneInfo("US/Eastern")
 
 
 class DatafeedService(WsRouteService):
@@ -99,6 +102,7 @@ class DatafeedService(WsRouteService):
         if ":" in ticker:
             symbol, exchange = ticker.split(":", 1)
             return symbol.strip(), exchange.strip()
+
         return ticker.strip(), "SMART"
 
     def _convert_resolution_to_timeframe(self, resolution: str) -> TimeFrame:
