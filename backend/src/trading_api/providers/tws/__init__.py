@@ -21,6 +21,7 @@ from tkinter import N
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
+from ibapi.common import BarData
 from ibapi.contract import Contract
 
 from trading_api.models.common import CapabilitySpec, DatafeedError
@@ -40,12 +41,14 @@ from trading_api.shared import Provider
 from .tws_mappers import (
     contract_description_to_search_result,
     contract_details_to_symbol_info,
-    rt_market_data_to_bar,
-    rt_market_data_to_quote_data,
     tws_bar_to_domain_bar,
+    tws_ticks_to_bar,
+    tws_ticks_to_quote_data,
 )
 
 logger = logging.getLogger(__name__)
+
+us_eastern = ZoneInfo("US/Eastern")
 
 
 class TWSProvider(Provider, DatafeedCapability):
@@ -246,7 +249,7 @@ class TWSProvider(Provider, DatafeedCapability):
     async def get_symbol_info(
         self,
         symbol: str,
-        exchange: str | None = None,
+        exchange: str = "SMART",
         **kwargs: Any,
     ) -> SymbolInfo:
         """Get detailed symbol information.
@@ -265,8 +268,26 @@ class TWSProvider(Provider, DatafeedCapability):
         Raises:
             DatafeedError: If symbol not found or request fails
         """
+        if exchange == "SMART":
+            now_us_eastern = datetime.now(us_eastern)
+            smart_exchange = (
+                "OVERNIGHT"
+                if (
+                    now_us_eastern.weekday() < 5
+                    and (
+                        now_us_eastern.time()
+                        >= datetime.strptime("20:00:00", "%H:%M:%S").time()
+                        or now_us_eastern.time()
+                        < datetime.strptime("4:00:00", "%H:%M:%S").time()
+                    )
+                )
+                else "SMART"
+            )
+        else:
+            smart_exchange = exchange
+
         # Build TWS Contract for the request
-        contract = self._build_contract(symbol, exchange=exchange or "SMART")
+        contract = self._build_contract(symbol, exchange=smart_exchange)
 
         try:
             # Get contract details via TWSClient (returns list)
@@ -315,9 +336,6 @@ class TWSProvider(Provider, DatafeedCapability):
             DatafeedError: If request fails or symbol invalid
             TimeoutError: If request exceeds timeout
         """
-        # Build TWS contract
-        contract = self._build_contract(symbol, exchange=exchange or "SMART")
-
         # Map domain parameters to TWS format
         bar_size = self._map_timeframe_to_tws_bar_size(resolution)
         duration_str = self._calculate_tws_duration(start_time, end_time, resolution)
@@ -334,18 +352,29 @@ class TWSProvider(Provider, DatafeedCapability):
         else:
             end_dt_str = end_time_tz.strftime("%Y%m%d %H:%M:%S US/Eastern")
 
+        tws_bars: list[BarData] = []
+        exchanges = [exchange]
+        if exchange == "SMART" and resolution > TimeFrame.HOUR_1:
+            exchanges.append("OVERNIGHT")  # Add ISLAND for NASDAQ stocks
         try:
-            # Request historical data via TWSClient (returns list[BarData])
-            tws_bars = await self._tws_client.reqHistoricalData(
-                contract,
-                end_dt_str,
-                duration_str,
-                bar_size,
-                **kwargs,
-            )
+            for exch in exchanges:
+                # Build TWS contract
+                contract = self._build_contract(symbol, exchange=exch)
+                # Request historical data via TWSClient (returns list[BarData])
+                bars = await self._tws_client.reqHistoricalData(
+                    contract,
+                    end_dt_str,
+                    duration_str,
+                    bar_size,
+                    **kwargs,
+                )
+                tws_bars.extend(bars)
 
             # Convert TWS BarData → domain Bar
             domain_bars = [tws_bar_to_domain_bar(bar) for bar in tws_bars]
+
+            # Sort bars by time (ascending order)
+            domain_bars.sort(key=lambda bar: bar.time)
 
             return domain_bars
 
@@ -385,7 +414,7 @@ class TWSProvider(Provider, DatafeedCapability):
                 ticker = self._get_or_create_rt_ticker(symbol, exchange)
                 if existing:
                     await asyncio.sleep(0.2)  # Give time for existing ticker to update
-                results.append(rt_market_data_to_quote_data(ticker))
+                results.append(tws_ticks_to_quote_data(ticker))
 
             return results
 
@@ -426,7 +455,7 @@ class TWSProvider(Provider, DatafeedCapability):
 
         async def bar_callback(rt_data: RTMarketData, fields: list[str] | None) -> None:
             if fields is None or any(f.startswith("bar_") for f in fields):
-                await callback(rt_market_data_to_bar(rt_data))
+                await callback(tws_ticks_to_bar(rt_data))
 
         # Get or create unified ticker via helper
         ticker = self._get_or_create_rt_ticker(symbol, exchange, resolution, **kwargs)
@@ -473,7 +502,7 @@ class TWSProvider(Provider, DatafeedCapability):
             async def quote_callback(
                 rt_data: RTMarketData, fields: list[str] | None
             ) -> None:
-                await callback(rt_market_data_to_quote_data(rt_data))
+                await callback(tws_ticks_to_quote_data(rt_data))
 
             ticker = self._get_or_create_rt_ticker(symbol, exchange, TimeFrame.MIN_5)
 
@@ -568,8 +597,26 @@ class TWSProvider(Provider, DatafeedCapability):
             self._tws_client.cancel_rt_ticker(t_unsub)
             logger.debug(f"Cancelled RT subscription for {k_unsub}")
 
+        if exchange == "SMART" and resolution > TimeFrame.HOUR_1:
+            now_us_eastern = datetime.now(us_eastern)
+            smart_exchange = (
+                "OVERNIGHT"
+                if (
+                    now_us_eastern.weekday() < 5
+                    and (
+                        now_us_eastern.time()
+                        >= datetime.strptime("20:00:00", "%H:%M:%S").time()
+                        or now_us_eastern.time()
+                        < datetime.strptime("4:00:00", "%H:%M:%S").time()
+                    )
+                )
+                else "SMART"
+            )
+        else:
+            smart_exchange = exchange
+
         ticker = self._tws_client.create_rt_ticker(
-            self._build_contract(symbol, exchange=exchange),
+            self._build_contract(symbol, exchange=smart_exchange),
             self._map_timeframe_to_tws_bar_size(resolution),
         )
 

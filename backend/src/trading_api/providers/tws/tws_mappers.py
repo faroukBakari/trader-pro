@@ -102,19 +102,28 @@ def _convert_tws_trading_hours_to_session(trading_hours: str) -> str:
         TradingView-compatible session string (e.g., "0930-1600")
     """
     if not trading_hours:
-        return "0930-1600"  # Default US equity hours
+        return "0000-2359"  # Default US equity hours
 
-    for segment in trading_hours.split(";"):
-        if "CLOSED" in segment:
-            continue
-        # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" → "HHMM-HHMM"
-        if "-" in segment:
-            start, end = segment.split("-", 1)
-            start_time = start.split(":", 1)[1] if ":" in start else start
-            end_time = end.split(":", 1)[1] if ":" in end else end
-            return start_time + "-" + end_time
+    # for segment in trading_hours.split(";"):
+    #     if "CLOSED" in segment:
+    #         continue
+    #     # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" → "HHMM-HHMM"
+    #     if "-" in segment:
+    #         start, end = segment.split("-", 1)
+    #         start_time = start.split(":", 1)[1] if ":" in start else start
+    #         end_time = end.split(":", 1)[1] if ":" in end else end
+    #         if int(end_time) < int(start_time):
+    #             current_hour = (
+    #                 datetime.now().astimezone(ZoneInfo("US/Eastern")).time().hour
+    #             )
+    #             if int(end_time) / 100 < current_hour:
+    #                 end_time = "2359"
+    #             else:
+    #                 start_time = "0000"
 
-    return "0930-1600"  # Fallback
+    #         return start_time + "-" + end_time
+
+    return "0000-2359"  # Fallback
 
 
 TWS_TIMEZONE_MAP: dict[str, str] = {
@@ -170,19 +179,22 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     )
 
 
-def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
-    """Map TWS BarData → domain Bar.
+def parse_tws_bar_date(date_str: str) -> int:
+    """Parse TWS bar date string to milliseconds timestamp.
+
+    Handles multiple TWS date formats:
+    - "yyyyMMdd  HH:mm:ss US/Eastern" (two spaces, timezone)
+    - "yyyyMMdd HH:mm:ss UTC" (single space, UTC)
+    - "yyyyMMdd" (daily bars, date only)
+    - epoch string (if formatDate=2 was used)
 
     Args:
-        tws_bar: TWS BarData object
+        date_str: TWS date string
 
     Returns:
-        Domain Bar model
+        Timestamp in milliseconds
     """
-    # Parse TWS date format: "yyyyMMdd  HH:mm:ss", "yyyyMMdd", or epoch
-    # TWS returns string dates like "20231215  16:00:00" (note: two spaces)
-    # Daily bars return just "20231215" without time component
-    date_str = tws_bar.date.strip()
+    date_str = date_str.strip()
     time_ms: int = 0
 
     # Try datetime with timezone (two spaces)
@@ -203,8 +215,20 @@ def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
                 # Fall back to epoch format (if formatDate=2 was used)
                 time_ms = int(date_str) * 1000
 
+    return time_ms
+
+
+def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
+    """Map TWS BarData → domain Bar.
+
+    Args:
+        tws_bar: TWS BarData object
+
+    Returns:
+        Domain Bar model
+    """
     return Bar(
-        time=time_ms,
+        time=parse_tws_bar_date(tws_bar.date),
         open=float(tws_bar.open),
         high=float(tws_bar.high),
         low=float(tws_bar.low),
@@ -258,7 +282,7 @@ def tws_rt_bar_to_domain_bar(
     )
 
 
-def rt_market_data_to_bar(rt_data: "RTMarketData") -> Bar:
+def tws_ticks_to_bar(rt_data: "RTMarketData") -> Bar:
     """Convert RTMarketData bar fields → domain Bar.
 
     Args:
@@ -267,8 +291,15 @@ def rt_market_data_to_bar(rt_data: "RTMarketData") -> Bar:
     Returns:
         Domain Bar model
     """
+    # Prefer bar_date (string) over bar_time (legacy int)
+    if rt_data.bar_date:
+        time_ms = parse_tws_bar_date(rt_data.bar_date)
+    elif rt_data.bar_time:
+        time_ms = rt_data.bar_time * 1000
+    else:
+        time_ms = 0
     return Bar(
-        time=(rt_data.bar_time or 0) * 1000,
+        time=time_ms,
         open=float(rt_data.bar_open or 0.0),
         high=float(rt_data.bar_high or 0.0),
         low=float(rt_data.bar_low or 0.0),
@@ -278,71 +309,7 @@ def rt_market_data_to_bar(rt_data: "RTMarketData") -> Bar:
     )
 
 
-def tws_ticks_to_quote_data(
-    symbol: str,
-    ticks: dict[str, float | int | str],
-) -> QuoteData:
-    """Convert TWS tick data → domain QuoteData.
-
-    Args:
-        symbol: Symbol name
-        ticks: Dictionary with "prices" and "sizes" from TWS callbacks
-               Example: {"prices": {1: 150.25, 2: 150.30}, "sizes": {0: 100}}
-
-    Returns:
-        QuoteData with status="ok" and QuoteValues populated from ticks
-    """
-
-    # Extract tick values (use sentinel for missing, convert to 0.0 for output)
-    def get_price(tick_type: int) -> float:
-        val = ticks.get(get_tick_type_name(tick_type))
-        return round(float(val), 2) if val is not None else 0.0
-
-    bid = get_price(TickTypeEnum.BID)
-    ask = get_price(TickTypeEnum.ASK)
-    last = get_price(TickTypeEnum.LAST)
-    open_price = get_price(TickTypeEnum.OPEN) or last
-    high_price = get_price(TickTypeEnum.HIGH) or last
-    low_price = get_price(TickTypeEnum.LOW) or last
-    close_price = get_price(TickTypeEnum.CLOSE) or last
-    ticks.get(get_tick_type_name(TickTypeEnum.BID_SIZE))
-    ticks.get(get_tick_type_name(TickTypeEnum.ASK_SIZE))
-    volume = ticks.get(get_tick_type_name(TickTypeEnum.VOLUME))
-
-    # Calculate spread (if both bid and ask available)
-    spread = round(ask - bid, 2) if (ask > 0 and bid > 0) else 0.0
-
-    # Calculate change and change percent (if last and close available)
-    if last > 0 and close_price > 0:
-        change = round(last - close_price, 2)
-        change_percent = round((change / close_price) * 100, 2)
-    else:
-        change = 0.0
-        change_percent = 0.0
-
-    # Build QuoteValues with available data
-    quote_values = QuoteValues(
-        lp=last,
-        ask=ask,
-        bid=bid,
-        spread=spread,
-        open_price=open_price,
-        high_price=high_price,
-        low_price=low_price,
-        prev_close_price=close_price,
-        volume=int(volume) if volume is not None else 0,
-        ch=change,
-        chp=change_percent,
-        short_name=symbol,
-        exchange="",  # Not provided in tick data
-        description=f"Quote for {symbol}",
-        original_name=symbol,
-    )
-
-    return QuoteData(s="ok", n=symbol, v=quote_values)
-
-
-def rt_market_data_to_quote_data(rt_data: "RTMarketData") -> QuoteData:
+def tws_ticks_to_quote_data(rt_data: "RTMarketData") -> QuoteData:
     """Convert RTMarketData tick fields → domain QuoteData.
 
     Args:
@@ -402,11 +369,11 @@ def rt_market_data_to_quote_data(rt_data: "RTMarketData") -> QuoteData:
 __all__ = [
     "SEC_TYPE_MAP",
     "DEFAULT_SUPPORTED_RESOLUTIONS",
+    "parse_tws_bar_date",
     "contract_description_to_search_result",
     "contract_details_to_symbol_info",
     "tws_bar_to_domain_bar",
     "tws_rt_bar_to_domain_bar",
-    "rt_market_data_to_bar",
+    "tws_ticks_to_bar",
     "tws_ticks_to_quote_data",
-    "rt_market_data_to_quote_data",
 ]

@@ -29,7 +29,6 @@ import struct
 import threading
 import time
 from collections.abc import Awaitable
-from dataclasses import dataclass
 from decimal import Decimal
 from itertools import count
 from socket import MSG_PEEK
@@ -635,8 +634,8 @@ class TWSCallback(EWrapper):
         ticker = self._req_id_to_ticker_map.get(reqId)
         updated_fields: list[str] | None = None
         if ticker is not None:
-            # TODO: detect fields changes to populate updated_fields
-            ticker.bar_time = int(bar.date) if bar.date.isdigit() else None
+            # Store raw TWS date string - conversion handled by mapper
+            ticker.bar_date = bar.date
             ticker.bar_open = bar.open
             ticker.bar_high = bar.high
             ticker.bar_low = bar.low
@@ -645,7 +644,7 @@ class TWSCallback(EWrapper):
             ticker.bar_wap = float(bar.wap)
             ticker.bar_count = bar.barCount
             updated_fields = [
-                "bar_time",
+                "bar_date",
                 "bar_open",
                 "bar_high",
                 "bar_low",
@@ -936,10 +935,10 @@ class TWSClient:
     ) -> list[ContractDescription]:
         reqId = self.next_req_id
 
-        coroutine: Awaitable[list[ContractDescription]] = (
-            self._cb_wrapper.create_future_coroutine(
-                reqId, timeout=timeout or self._timeout
-            )
+        coroutine: Awaitable[
+            list[ContractDescription]
+        ] = self._cb_wrapper.create_future_coroutine(
+            reqId, timeout=timeout or self._timeout
         )
         self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
         debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
@@ -959,10 +958,10 @@ class TWSClient:
             May return multiple results for ambiguous queries.
         """
         reqId = self.next_req_id
-        coroutine: Awaitable[list[ContractDetails]] = (
-            self._cb_wrapper.create_future_coroutine(
-                reqId, timeout=timeout or self._timeout
-            )
+        coroutine: Awaitable[
+            list[ContractDetails]
+        ] = self._cb_wrapper.create_future_coroutine(
+            reqId, timeout=timeout or self._timeout
         )
 
         # Build message fields (VERSION=8 per ibapi/client.py)
@@ -1163,7 +1162,7 @@ class TWSClient:
 
         return ticker
 
-    def cancel_rt_ticker(self, ticker: RTMarketData) -> None:
+    def cancel_rt_ticker(self, ticker: RTMarketData) -> RTMarketData:
         """Cancel a real-time data subscription."""
 
         VERSION = 1
@@ -1180,6 +1179,8 @@ class TWSClient:
 
         self._cb_wrapper.remove_ticker_slot(ticker)
         ticker.reset()
+
+        return ticker
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""

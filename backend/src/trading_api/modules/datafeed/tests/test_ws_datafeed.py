@@ -97,13 +97,13 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.subscribe",
-                    "payload": {"symbol": "AAPL", "resolution": "D"},
+                    "payload": {"symbol": "AAPL", "resolution": "1D"},
                 }
             )
             response2 = websocket.receive_json()
             assert (
                 response2["payload"]["topic"]
-                == 'bars:{"resolution":"D","symbol":"AAPL"}'
+                == 'bars:{"resolution":"1D","symbol":"AAPL"}'
             )
 
     def test_unsubscribe_from_bars(

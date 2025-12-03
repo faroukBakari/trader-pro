@@ -17,7 +17,8 @@ import pytest
 from ibapi.common import BarData, TickAttrib
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
-from trading_api.providers.tws.tws_connection import TWSCallback, TWSError
+from trading_api.providers.tws.tws_connection import TWSCallback
+from trading_api.providers.tws.tws_models import TWSError
 
 
 class TestTWSCallbackInitialization:
@@ -320,16 +321,17 @@ class TestHistoricalDataCallback:
 
 
 class TestMarketDataSnapshotCallback:
-    """Test market data snapshot callbacks - accumulation pattern."""
+    """Test market data snapshot callbacks - RTMarketData ticker pattern."""
 
     @pytest.mark.asyncio
-    async def test_tick_price_accumulates(self) -> None:
-        """Test tickPrice accumulates price ticks."""
+    async def test_tick_price_updates_ticker(self) -> None:
+        """Test tickPrice updates RTMarketData ticker fields."""
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        # Accumulator auto-created by tickPrice
+        # Create ticker slot first (required by new implementation)
+        ticker = callback.create_ticker_slot([req_id])
 
         tick_attrib = TickAttrib()
 
@@ -337,49 +339,46 @@ class TestMarketDataSnapshotCallback:
         callback.tickPrice(req_id, 1, 150.25, tick_attrib)  # BID
         callback.tickPrice(req_id, 2, 150.30, tick_attrib)  # ASK
 
-        # Check accumulator has prices
-        assert "BID" in callback._accumulators[req_id]
-        assert callback._accumulators[req_id]["BID"] == 150.25
+        # Check ticker has prices
+        assert ticker.bid == 150.25
+        assert ticker.ask == 150.30
 
     @pytest.mark.asyncio
-    async def test_tick_size_accumulates(self) -> None:
-        """Test tickSize accumulates size ticks."""
+    async def test_tick_size_updates_ticker(self) -> None:
+        """Test tickSize updates RTMarketData ticker fields."""
         from decimal import Decimal
 
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        callback._accumulators[req_id] = {}
+        # Create ticker slot first
+        ticker = callback.create_ticker_slot([req_id])
 
         # BID_SIZE=0, ASK_SIZE=3, VOLUME=8
         callback.tickSize(req_id, 0, Decimal("1000"))  # BID_SIZE
         callback.tickSize(req_id, 8, Decimal("500000"))  # VOLUME
 
-        assert callback._accumulators[req_id]["BID_SIZE"] == 1000
-        assert callback._accumulators[req_id]["VOLUME"] == 500000
+        assert ticker.bid_size == 1000
+        assert ticker.volume == 500000
 
     @pytest.mark.asyncio
-    async def test_tick_snapshot_end_resolves(self) -> None:
-        """Test tickSnapshotEnd resolves future with accumulated ticks."""
+    async def test_tick_snapshot_end_resets_ticker(self) -> None:
+        """Test tickSnapshotEnd resets ticker data."""
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        future: asyncio.Future[dict[str, Any]] = loop.create_future()
-        # _futures stores (loop, future) tuple
-        callback._futures[req_id] = (loop, future)
-        callback._accumulators[req_id] = {"BID": 100.0, "ASK": 100.05}
+        # Create ticker slot and set some data
+        ticker = callback.create_ticker_slot([req_id])
+        ticker.bid = 100.0
+        ticker.ask = 100.05
 
         callback.tickSnapshotEnd(req_id)
 
-        # Allow event loop to process call_soon_threadsafe
-        await asyncio.sleep(0.01)
-
-        result = await future
-        assert result["BID"] == 100.0
-        assert result["ASK"] == 100.05
-        assert req_id not in callback._accumulators
+        # Ticker should be reset
+        assert ticker.bid is None
+        assert ticker.ask is None  # type: ignore[unreachable]
 
 
 class TestErrorHandling:
@@ -507,19 +506,20 @@ class TestConnectionSignals:
 class TestTickReqParams:
     """Test tickReqParams callback."""
 
-    def test_tick_req_params_accumulates(self) -> None:
-        """Test tickReqParams adds data to accumulator."""
+    def test_tick_req_params_updates_ticker(self) -> None:
+        """Test tickReqParams updates RTMarketData ticker fields."""
         loop = asyncio.new_event_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        callback._accumulators[req_id] = {}
+        # Create ticker slot first
+        ticker = callback.create_ticker_slot([req_id])
 
         callback.tickReqParams(req_id, 0.01, "ISLAND", 3)
 
-        assert callback._accumulators[req_id]["minTick"] == 0.01
-        assert callback._accumulators[req_id]["bboExchange"] == "ISLAND"
-        assert callback._accumulators[req_id]["snapshotPermissions"] == 3
+        assert ticker.min_tick == 0.01
+        assert ticker.bbo_exchange == "ISLAND"
+        assert ticker.snapshot_permissions == 3
 
         loop.close()
 
@@ -527,17 +527,18 @@ class TestTickReqParams:
 class TestMarketDataType:
     """Test marketDataType callback."""
 
-    def test_market_data_type_accumulates(self) -> None:
-        """Test marketDataType adds type to accumulator."""
+    def test_market_data_type_updates_ticker(self) -> None:
+        """Test marketDataType updates RTMarketData ticker field."""
         loop = asyncio.new_event_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        callback._accumulators[req_id] = {}
+        # Create ticker slot first
+        ticker = callback.create_ticker_slot([req_id])
 
         callback.marketDataType(req_id, 2)  # 2 = Frozen
 
-        assert callback._accumulators[req_id]["marketDataType"] == 2
+        assert ticker.market_data_type == 2
 
         loop.close()
 
@@ -545,174 +546,121 @@ class TestMarketDataType:
 class TestTickStringGeneric:
     """Test tickString and tickGeneric callbacks."""
 
-    def test_tick_string_accumulates(self) -> None:
-        """Test tickString adds string value to accumulator."""
+    def test_tick_string_updates_ticker(self) -> None:
+        """Test tickString updates RTMarketData ticker field."""
         loop = asyncio.new_event_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        callback._accumulators[req_id] = {}
+        # Create ticker slot first
+        ticker = callback.create_ticker_slot([req_id])
 
         # LAST_TIMESTAMP=45
         callback.tickString(req_id, 45, "1702656000")
 
-        assert "LAST_TIMESTAMP" in callback._accumulators[req_id]
+        assert ticker.last_timestamp == "1702656000"
 
         loop.close()
 
-    def test_tick_generic_accumulates(self) -> None:
-        """Test tickGeneric adds float value to accumulator."""
+    def test_tick_generic_updates_ticker(self) -> None:
+        """Test tickGeneric updates RTMarketData ticker field."""
         loop = asyncio.new_event_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        callback._accumulators[req_id] = {}
+        # Create ticker slot first
+        ticker = callback.create_ticker_slot([req_id])
 
         # HALTED=49
         callback.tickGeneric(req_id, 49, 0.0)
 
-        assert "HALTED" in callback._accumulators[req_id]
+        assert ticker.halted == 0.0
 
         loop.close()
 
 
 class TestRealtimeBarCallback:
-    """Test realtimeBar callback - continuous subscription pattern using callbacks."""
+    """Test real-time bar updates via historicalDataUpdate callback.
+
+    Note: With the new unified RT data design, real-time bars come through
+    historicalDataUpdate (with keepUpToDate=True), not realtimeBar.
+    The realtimeBar callback is not implemented.
+    """
 
     @pytest.mark.asyncio
-    async def test_realtime_bar_calls_callback(self) -> None:
-        """Test realtimeBar calls registered callback with bar data."""
+    async def test_historical_data_update_updates_ticker(self) -> None:
+        """Test historicalDataUpdate updates RTMarketData ticker bar fields."""
         from decimal import Decimal
 
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        received_data: list[tuple] = []
+        # Create ticker slot first
+        ticker = callback.create_ticker_slot([req_id])
 
-        # Register callback to capture bar data
-        async def bar_callback(
-            time: int,
-            open_: float,
-            high: float,
-            low: float,
-            close: float,
-            volume: int,
-            wap: float,
-            count: int,
-        ) -> None:
-            received_data.append((time, open_, high, low, close, volume, wap, count))
+        # Create a bar update
+        bar = BarData()
+        bar.date = "1702656000"  # Epoch timestamp
+        bar.open = 150.25
+        bar.high = 150.50
+        bar.low = 150.10
+        bar.close = 150.40
+        bar.volume = Decimal("10000")
+        bar.wap = Decimal("150.30")
+        bar.barCount = 50
 
-        callback._callbacks[req_id] = (loop, bar_callback)
+        callback.historicalDataUpdate(req_id, bar)
 
-        # Simulate realtimeBar callback
-        callback.realtimeBar(
-            reqId=req_id,
-            time=1702656000,
-            open_=150.25,
-            high=150.50,
-            low=150.10,
-            close=150.40,
-            volume=Decimal("10000"),
-            wap=Decimal("150.30"),
-            count=50,
-        )
-
-        # Allow event loop to process call_soon_threadsafe
-        await asyncio.sleep(0.01)
-
-        assert len(received_data) == 1
-        bar_data = received_data[0]
-
-        assert bar_data[0] == 1702656000  # time
-        assert bar_data[1] == 150.25  # open
-        assert bar_data[2] == 150.50  # high
-        assert bar_data[3] == 150.10  # low
-        assert bar_data[4] == 150.40  # close
-        assert bar_data[5] == 10000  # volume (converted to int)
-        assert bar_data[6] == 150.30  # wap (converted to float)
-        assert bar_data[7] == 50  # count
+        # Verify ticker was updated - bar_date stores raw TWS date string
+        assert ticker.bar_date == "1702656000"
+        assert ticker.bar_open == 150.25
+        assert ticker.bar_high == 150.50
+        assert ticker.bar_low == 150.10
+        assert ticker.bar_close == 150.40
+        assert ticker.bar_volume == 10000
+        assert ticker.bar_wap == 150.30
+        assert ticker.bar_count == 50
 
     @pytest.mark.asyncio
-    async def test_realtime_bar_multiple_bars(self) -> None:
-        """Test realtimeBar calls callback for multiple bars correctly."""
+    async def test_historical_data_update_triggers_callbacks(self) -> None:
+        """Test historicalDataUpdate triggers registered ticker callbacks."""
         from decimal import Decimal
 
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        received_data: list[tuple] = []
+        ticker = callback.create_ticker_slot([req_id])
 
-        # Register callback to capture bar data
-        async def bar_callback(
-            time: int,
-            open_: float,
-            high: float,
-            low: float,
-            close: float,
-            volume: int,
-            wap: float,
-            count: int,
+        # Track callback invocations
+        callback_called: list[tuple[Any, list[str] | None]] = []
+
+        async def ticker_callback(
+            rt_data: Any, updated_fields: list[str] | None
         ) -> None:
-            received_data.append((time, open_, high, low, close, volume, wap, count))
+            callback_called.append((rt_data, updated_fields))
 
-        callback._callbacks[req_id] = (loop, bar_callback)
+        # Register callback on ticker
+        ticker.reqId_callback_map[123] = (loop, ticker_callback)
 
-        # Simulate multiple bar callbacks
-        for i in range(3):
-            callback.realtimeBar(
-                reqId=req_id,
-                time=1702656000 + (i * 5),
-                open_=150.0 + i,
-                high=151.0 + i,
-                low=149.0 + i,
-                close=150.5 + i,
-                volume=Decimal(str(1000 * (i + 1))),
-                wap=Decimal("150.0"),
-                count=10 * (i + 1),
-            )
+        bar = BarData()
+        bar.date = "1702656000"
+        bar.open = 150.0
+        bar.high = 151.0
+        bar.low = 149.0
+        bar.close = 150.5
+        bar.volume = Decimal("1000")
+        bar.wap = Decimal("150.0")
+        bar.barCount = 10
+
+        callback.historicalDataUpdate(req_id, bar)
 
         # Allow event loop to process call_soon_threadsafe
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)
 
-        # Should have 3 bars received
-        assert len(received_data) == 3
-
-        # Verify order
-        bar1 = received_data[0]
-        bar2 = received_data[1]
-        bar3 = received_data[2]
-
-        assert bar1[0] == 1702656000
-        assert bar2[0] == 1702656005
-        assert bar3[0] == 1702656010
-
-    def test_realtime_bar_no_queue_logs_warning(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """Test realtimeBar logs warning when no queue registered."""
-        from decimal import Decimal
-
-        loop = asyncio.new_event_loop()
-        callback = TWSCallback(loop=loop)
-
-        # No queue registered for this reqId
-        callback.realtimeBar(
-            reqId=999,
-            time=1702656000,
-            open_=150.0,
-            high=151.0,
-            low=149.0,
-            close=150.5,
-            volume=Decimal("1000"),
-            wap=Decimal("150.0"),
-            count=10,
-        )
-
-        assert "No subscription queue for realtime bar reqId 999" in caplog.text
-
-        loop.close()
+        assert len(callback_called) == 1
+        assert callback_called[0][0] is ticker
 
     @pytest.mark.asyncio
     async def test_callbacks_initialization(self) -> None:

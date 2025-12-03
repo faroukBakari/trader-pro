@@ -182,6 +182,23 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             logger.warning(f"Error during FastWS {route}.update broadcast, {e}")
             await asyncio.sleep(1)
 
+    # TODO: need to fix topic registration / unregistration to avoidt this mess!:
+    # client.topics
+    # {'quotes:{"fast_symbols":["TSLA"],"symbols":["TSLA"]}', 'bars:{"resolution":"5","symbol":"TSLA"}'}
+    # 137948550225840 =
+    # 'quotes:{"fast_symbols":["TSLA"],"symbols":["TSLA"]}'
+    # 137948550193840 =
+    # 'bars:{"resolution":"5","symbol":"TSLA"}'
+    # topic
+    # 'quotes:{"fast_symbols":["AAPL","TSLA"],"symbols":["TSLA"]}'
+    # self._topics
+    # {'quotes:{"fast_symbols":["TSLA"],"symbols":["TSLA"]}', 'quotes:{"fast_symbols":["GOOGL"],"symbols":["GOOGL"]}'}
+    # 137948550225840 =
+    # 'quotes:{"fast_symbols":["TSLA"],"symbols":["TSLA"]}'
+    # 137948550848656 =
+    # 'quotes:{"fast_symbols":["GOOGL"],"symbols":["GOOGL"]}'
+    # len() =
+    # 2
     async def _register_topic(self, payload: _TRequest) -> str:
         topic = self.topic_builder(payload)
 
