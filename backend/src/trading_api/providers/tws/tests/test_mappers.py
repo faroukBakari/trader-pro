@@ -183,7 +183,7 @@ class TestContractDetailsMapper:
         assert result.description == "TEST"  # Falls back to symbol
         assert result.exchange == "SMART"  # Falls back to exchange
         assert result.ticker == "TEST"  # Falls back to symbol
-        assert result.session == "0930-1600"  # Default session
+        assert result.session == "0000-2359"  # Default session (24h fallback)
         assert result.timezone == "America/New_York"  # Default timezone
 
     def test_supported_resolutions(self) -> None:
@@ -332,21 +332,29 @@ class TestTwsTicksToQuoteDataMapper:
     """Test tws_ticks_to_quote_data mapper."""
 
     def test_basic_quote_mapping(self) -> None:
-        """Test mapping tick data to QuoteData."""
+        """Test mapping RTMarketData to QuoteData."""
+        from ibapi.contract import Contract
+
         from trading_api.models.market import QuoteValues
+        from trading_api.providers.tws.tws_models import RTMarketData
 
-        ticks: dict[str, float | int | str] = {
-            "BID": 150.25,
-            "ASK": 150.30,
-            "LAST": 150.28,
-            "OPEN": 149.00,
-            "HIGH": 151.00,
-            "LOW": 148.50,
-            "CLOSE": 149.50,
-            "VOLUME": 1000000,
-        }
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.primaryExchange = "NASDAQ"
 
-        result = tws_ticks_to_quote_data("AAPL", ticks)
+        rt_data = RTMarketData(
+            contract=contract,
+            bid=150.25,
+            ask=150.30,
+            last=150.28,
+            bar_open=149.00,
+            bar_high=151.00,
+            bar_low=148.50,
+            bar_close=149.50,
+            bar_volume=1000000,
+        )
+
+        result = tws_ticks_to_quote_data(rt_data)
 
         assert result.s == "ok"
         assert result.n == "AAPL"
@@ -363,13 +371,14 @@ class TestTwsTicksToQuoteDataMapper:
     def test_spread_calculation(self) -> None:
         """Test spread is calculated from bid/ask."""
         from trading_api.models.market import QuoteValues
+        from trading_api.providers.tws.tws_models import RTMarketData
 
-        ticks: dict[str, float | int | str] = {
-            "BID": 100.00,
-            "ASK": 100.10,
-        }
+        rt_data = RTMarketData(
+            bid=100.00,
+            ask=100.10,
+        )
 
-        result = tws_ticks_to_quote_data("TEST", ticks)
+        result = tws_ticks_to_quote_data(rt_data)
 
         assert isinstance(result.v, QuoteValues)
         assert result.v.spread == pytest.approx(0.10)
@@ -377,13 +386,14 @@ class TestTwsTicksToQuoteDataMapper:
     def test_change_calculation(self) -> None:
         """Test change and change percent are calculated."""
         from trading_api.models.market import QuoteValues
+        from trading_api.providers.tws.tws_models import RTMarketData
 
-        ticks: dict[str, float | int | str] = {
-            "LAST": 105.00,
-            "CLOSE": 100.00,
-        }
+        rt_data = RTMarketData(
+            last=105.00,
+            bar_close=100.00,
+        )
 
-        result = tws_ticks_to_quote_data("TEST", ticks)
+        result = tws_ticks_to_quote_data(rt_data)
 
         assert isinstance(result.v, QuoteValues)
         assert result.v.ch == 5.0
@@ -392,10 +402,11 @@ class TestTwsTicksToQuoteDataMapper:
     def test_missing_values_default_to_zero(self) -> None:
         """Test missing tick values default to zero."""
         from trading_api.models.market import QuoteValues
+        from trading_api.providers.tws.tws_models import RTMarketData
 
-        ticks: dict[str, float | int | str] = {}
+        rt_data = RTMarketData()
 
-        result = tws_ticks_to_quote_data("EMPTY", ticks)
+        result = tws_ticks_to_quote_data(rt_data)
 
         assert result.s == "ok"
         assert isinstance(result.v, QuoteValues)
@@ -408,13 +419,14 @@ class TestTwsTicksToQuoteDataMapper:
     def test_partial_tick_data(self) -> None:
         """Test handling of partial tick data."""
         from trading_api.models.market import QuoteValues
+        from trading_api.providers.tws.tws_models import RTMarketData
 
-        ticks: dict[str, float | int | str] = {
-            "LAST": 150.00,
-            "VOLUME": 500000,
-        }
+        rt_data = RTMarketData(
+            last=150.00,
+            bar_volume=500000,
+        )
 
-        result = tws_ticks_to_quote_data("PARTIAL", ticks)
+        result = tws_ticks_to_quote_data(rt_data)
 
         assert isinstance(result.v, QuoteValues)
         assert result.v.lp == 150.00

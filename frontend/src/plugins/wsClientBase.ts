@@ -445,13 +445,13 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
   private intervalId: NodeJS.Timeout
 
   constructor(mockData: () => TData | undefined) {
-    // Mock data updates every 3 seconds
+    // Mock data updates every 100ms for fast test execution
     this.intervalId = setInterval(() => {
       this.subscriptions.forEach(({ onUpdate }) => {
         const data = mockData()
         if (data) onUpdate(data)
       })
-    }, 1000)
+    }, 100)
   }
 
   async subscribe(

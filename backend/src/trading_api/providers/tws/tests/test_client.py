@@ -11,14 +11,14 @@ Note: All tests mock IBSocket to avoid real TWS connections.
 """
 
 import asyncio
-from decimal import Decimal
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
-from trading_api.providers.tws.tws_connection import TWSCallback, TWSClient, TWSError
+from trading_api.providers.tws.tws_connection import TWSCallback, TWSClient
+from trading_api.providers.tws.tws_models import TWSError
 
 
 class TestTWSClientInitialization:
@@ -269,12 +269,11 @@ class TestTWSClientReqHistoricalData:
             assert result[0].open == 150.0
 
 
-class TestTWSClientReqMktDataSnapshot:
-    """Test reqMktDataSnapshot async method."""
+class TestTWSClientCreateRTTicker:
+    """Test create_rt_ticker method for unified real-time data subscriptions."""
 
-    @pytest.mark.asyncio
-    async def test_req_mkt_data_snapshot_returns_ticks(self) -> None:
-        """Test reqMktDataSnapshot returns tick dictionary when required fields present."""
+    def test_create_rt_ticker_returns_rtmarketdata(self) -> None:
+        """Test create_rt_ticker returns RTMarketData instance."""
         with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
             mock_ibsocket = MagicMock()
             mock_ibsocket.running = True
@@ -283,41 +282,49 @@ class TestTWSClientReqMktDataSnapshot:
 
             client = TWSClient("127.0.0.1", 7497, 1)
             client._cb_wrapper._ready_event.set()
-            client._cb_wrapper._loop = asyncio.get_running_loop()
 
-            # Tick data with all required fields (BID, ASK, BID_SIZE, ASK_SIZE)
-            ticks: dict[str, float | int | str] = {
-                "BID": 150.25,
-                "ASK": 150.30,
-                "BID_SIZE": 100,
-                "ASK_SIZE": 200,
-                "LAST": 150.28,
-                "VOLUME": 1000000,
-            }
+            contract = Contract()
+            contract.symbol = "AAPL"
+            contract.secType = "STK"
+            contract.exchange = "SMART"
+            contract.currency = "USD"
 
-            async def simulate_tick_callbacks() -> None:
-                """Simulate TWS sending tick data via registered callback."""
-                await asyncio.sleep(0.01)
-                # Get the registered callback and invoke it with accumulated ticks
-                reqId = 1
-                loop, callback = client._cb_wrapper._callbacks.get(reqId, (None, None))
-                if callback is not None:
-                    # Simulate accumulator being populated
-                    client._cb_wrapper._accumulators[reqId] = dict(ticks)
-                    await callback(ticks)
+            from trading_api.providers.tws.tws_models import RTMarketData
 
-            asyncio.create_task(simulate_tick_callbacks())
+            ticker = client.create_rt_ticker(contract, "5 mins")
+
+            assert isinstance(ticker, RTMarketData)
+            assert ticker.contract == contract
+            assert ticker.barSize_setting == "5 mins"
+            assert ticker.bar_data_reqId is not None
+            assert ticker.mkt_data_reqId is not None
+
+    def test_create_rt_ticker_sends_historical_and_mkt_data_messages(self) -> None:
+        """Test create_rt_ticker sends both REQ_HISTORICAL_DATA and REQ_MKT_DATA."""
+        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
+            mock_ibsocket = MagicMock()
+            mock_ibsocket.running = True
+            mock_ibsocket.next_req_id = 1
+            MockIBSocket.return_value = mock_ibsocket
+
+            client = TWSClient("127.0.0.1", 7497, 1)
+            client._cb_wrapper._ready_event.set()
 
             contract = Contract()
             contract.symbol = "AAPL"
             contract.secType = "STK"
 
-            result = await client.reqMktDataSnapshot(contract, timeout=5.0)
+            client.create_rt_ticker(contract, "1 min")
 
-            assert result["BID"] == 150.25
-            assert result["ASK"] == 150.30
-            assert result["BID_SIZE"] == 100
-            assert result["ASK_SIZE"] == 200
+            # Verify both messages were sent
+            from ibapi.message import OUT
+
+            assert mock_ibsocket.send_message.call_count == 2
+            calls = mock_ibsocket.send_message.call_args_list
+            # First call: REQ_HISTORICAL_DATA
+            assert calls[0][0][0] == OUT.REQ_HISTORICAL_DATA
+            # Second call: REQ_MKT_DATA
+            assert calls[1][0][0] == OUT.REQ_MKT_DATA
 
 
 class TestTWSClientNextReqId:
@@ -396,11 +403,11 @@ class TestTWSClientErrorHandling:
                 await client.reqMatchingSymbols("AAPL")
 
 
-class TestTWSClientRealtimeBarSubscription:
-    """Test real-time bar subscription methods."""
+class TestTWSClientCancelRTTicker:
+    """Test cancel_rt_ticker method."""
 
-    def test_req_realtime_bars_returns_req_id(self) -> None:
-        """Test reqRealTimeBars returns reqId and registers callback."""
+    def test_cancel_rt_ticker_sends_cancel_messages(self) -> None:
+        """Test cancel_rt_ticker sends CANCEL_REAL_TIME_BARS and CANCEL_MKT_DATA."""
         with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
             mock_ibsocket = MagicMock()
             mock_ibsocket.running = True
@@ -413,144 +420,71 @@ class TestTWSClientRealtimeBarSubscription:
             contract = Contract()
             contract.symbol = "AAPL"
             contract.secType = "STK"
-            contract.exchange = "SMART"
-            contract.currency = "USD"
 
-            # Use callback instead of queue
-            received_bars: list[tuple[object, ...]] = []
-
-            async def bar_callback(
-                time: int,
-                open_: float,
-                high: float,
-                low: float,
-                close: float,
-                volume: Decimal,
-                wap: Decimal,
-                count: int,
-            ) -> None:
-                received_bars.append(
-                    (time, open_, high, low, close, volume, wap, count)
-                )
-
-            req_id = client.reqRealTimeBars(contract, bar_callback)
-
-            assert req_id == 1
-            # Callback should be registered in _callbacks
-            assert req_id in client._cb_wrapper._callbacks
-
-    def test_req_realtime_bars_sends_correct_message(self) -> None:
-        """Test reqRealTimeBars sends correct TWS message."""
-        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
-            mock_ibsocket = MagicMock()
-            mock_ibsocket.running = True
-            mock_ibsocket.next_req_id = 1
-            MockIBSocket.return_value = mock_ibsocket
-
-            client = TWSClient("127.0.0.1", 7497, 1)
-            client._cb_wrapper._ready_event.set()
-
-            contract = Contract()
-            contract.symbol = "AAPL"
-            contract.secType = "STK"
-            contract.exchange = "SMART"
-            contract.currency = "USD"
-
-            async def noop_callback(
-                time: int,
-                open_: float,
-                high: float,
-                low: float,
-                close: float,
-                volume: Decimal,
-                wap: Decimal,
-                count: int,
-            ) -> None:
-                pass
-
-            client.reqRealTimeBars(
-                contract,
-                noop_callback,
-                barSize=5,
-                whatToShow="TRADES",
-                useRTH=False,
-            )
-
-            # Verify send_message was called with REQ_REAL_TIME_BARS
-            from ibapi.message import OUT
-
-            mock_ibsocket.send_message.assert_called_once()
-            call_args = mock_ibsocket.send_message.call_args
-            assert call_args[0][0] == OUT.REQ_REAL_TIME_BARS
-
-    def test_cancel_realtime_bars_removes_callback(self) -> None:
-        """Test cancelRealTimeBars removes callback from registry."""
-        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
-            mock_ibsocket = MagicMock()
-            mock_ibsocket.running = True
-            mock_ibsocket.next_req_id = 1
-            MockIBSocket.return_value = mock_ibsocket
-
-            client = TWSClient("127.0.0.1", 7497, 1)
-            client._cb_wrapper._ready_event.set()
-
-            contract = Contract()
-            contract.symbol = "AAPL"
-
-            async def noop_callback(
-                time: int,
-                open_: float,
-                high: float,
-                low: float,
-                close: float,
-                volume: Decimal,
-                wap: Decimal,
-                count: int,
-            ) -> None:
-                pass
-
-            req_id = client.reqRealTimeBars(contract, noop_callback)
-            assert req_id in client._cb_wrapper._callbacks
-
-            client.cancelRealTimeBars(req_id)
-
-            # Callback should be removed
-            assert req_id not in client._cb_wrapper._callbacks
-
-    def test_cancel_realtime_bars_sends_cancel_message(self) -> None:
-        """Test cancelRealTimeBars sends CANCEL_REAL_TIME_BARS message."""
-        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
-            mock_ibsocket = MagicMock()
-            mock_ibsocket.running = True
-            mock_ibsocket.next_req_id = 1
-            MockIBSocket.return_value = mock_ibsocket
-
-            client = TWSClient("127.0.0.1", 7497, 1)
-            client._cb_wrapper._ready_event.set()
-
-            contract = Contract()
-            contract.symbol = "AAPL"
-
-            async def noop_callback(
-                time: int,
-                open_: float,
-                high: float,
-                low: float,
-                close: float,
-                volume: Decimal,
-                wap: Decimal,
-                count: int,
-            ) -> None:
-                pass
-
-            req_id = client.reqRealTimeBars(contract, noop_callback)
+            ticker = client.create_rt_ticker(contract, "5 mins")
             mock_ibsocket.send_message.reset_mock()
 
-            client.cancelRealTimeBars(req_id)
+            client.cancel_rt_ticker(ticker)
 
+            # Verify both cancel messages were sent
             from ibapi.message import OUT
 
-            mock_ibsocket.send_message.assert_called_once()
-            call_args = mock_ibsocket.send_message.call_args
-            assert call_args[0][0] == OUT.CANCEL_REAL_TIME_BARS
-            assert call_args[0][1] == [1, req_id]  # VERSION=1, reqId
+            assert mock_ibsocket.send_message.call_count == 2
+            calls = mock_ibsocket.send_message.call_args_list
+            # First call: CANCEL_REAL_TIME_BARS
+            assert calls[0][0][0] == OUT.CANCEL_REAL_TIME_BARS
+            # Second call: CANCEL_MKT_DATA
+            assert calls[1][0][0] == OUT.CANCEL_MKT_DATA
+
+    def test_cancel_rt_ticker_removes_ticker_slot(self) -> None:
+        """Test cancel_rt_ticker removes ticker from callback wrapper."""
+        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
+            mock_ibsocket = MagicMock()
+            mock_ibsocket.running = True
+            mock_ibsocket.next_req_id = 1
+            MockIBSocket.return_value = mock_ibsocket
+
+            client = TWSClient("127.0.0.1", 7497, 1)
+            client._cb_wrapper._ready_event.set()
+
+            contract = Contract()
+            contract.symbol = "AAPL"
+
+            ticker = client.create_rt_ticker(contract, "1 min")
+            bar_req_id = ticker.bar_data_reqId
+            mkt_req_id = ticker.mkt_data_reqId
+
+            # Verify ticker is registered
+            assert bar_req_id in client._cb_wrapper._req_id_to_ticker_map
+            assert mkt_req_id in client._cb_wrapper._req_id_to_ticker_map
+
+            client.cancel_rt_ticker(ticker)
+
+            # Verify ticker is removed
+            assert bar_req_id not in client._cb_wrapper._req_id_to_ticker_map
+            assert mkt_req_id not in client._cb_wrapper._req_id_to_ticker_map
+
+    def test_cancel_rt_ticker_resets_ticker_state(self) -> None:
+        """Test cancel_rt_ticker resets the RTMarketData instance."""
+        with patch("trading_api.providers.tws.tws_connection.IBSocket") as MockIBSocket:
+            mock_ibsocket = MagicMock()
+            mock_ibsocket.running = True
+            mock_ibsocket.next_req_id = 1
+            MockIBSocket.return_value = mock_ibsocket
+
+            client = TWSClient("127.0.0.1", 7497, 1)
+            client._cb_wrapper._ready_event.set()
+
+            contract = Contract()
+            contract.symbol = "AAPL"
+
+            ticker = client.create_rt_ticker(contract, "1 min")
+            # Simulate some data
+            ticker.bid = 150.0
+            ticker.ask = 150.05
+
+            ticker = client.cancel_rt_ticker(ticker)
+
+            # Verify ticker is reset - bar_data_reqId should be None
+            assert ticker.bid is None
+            assert ticker.ask is None

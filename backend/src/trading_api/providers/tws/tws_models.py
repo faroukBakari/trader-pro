@@ -55,6 +55,7 @@ class RTMarketData:
     whatToShow: str | None = None
 
     # === Real-time bar fields (from realtimeBar callback) ===
+    bar_date: str | None = None  # Raw TWS date string (yyyyMMdd HH:mm:ss or epoch)
     bar_time: int | None = None  # Unix timestamp of bar
     bar_open: float | None = None
     bar_high: float | None = None

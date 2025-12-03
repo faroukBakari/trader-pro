@@ -79,11 +79,12 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     def subscribe_realtime_bars(
         self,
         symbol: str,
+        resolution: TimeFrame,
         callback: Callable[[Bar], Awaitable[None]],
         **kwargs: Any,
     ) -> int:
         return self._subscribe_realtime_bars_mock(  # type: ignore[no-any-return]
-            symbol=symbol, callback=callback, **kwargs
+            symbol=symbol, resolution=resolution, callback=callback, **kwargs
         )
 
     def subscribe_market_data(
