@@ -362,12 +362,11 @@ def rt_market_data_to_quote_data(rt_data: "RTMarketData") -> QuoteData:
     bid = round(rt_data.bid or 0.0, 2)
     ask = round(rt_data.ask or 0.0, 2)
     last = round(rt_data.last or 0.0, 2)
-    open_price = round(rt_data.open or last, 2)
-    high_price = round(rt_data.high or last, 2)
-    low_price = round(rt_data.low or last, 2)
-    close_price = round(rt_data.close or last, 2)
-    volume = rt_data.volume or 0
-
+    open_price = round(rt_data.bar_open or last, 2)
+    high_price = round(rt_data.bar_high or last, 2)
+    low_price = round(rt_data.bar_low or last, 2)
+    close_price = round(rt_data.bar_close or last, 2)
+    volume = rt_data.bar_volume or 0
     # Calculate spread
     spread = round(ask - bid, 2) if (ask > 0 and bid > 0) else 0.0
 
