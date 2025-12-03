@@ -3,8 +3,11 @@
 Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar, QuoteData, etc.).
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from ibapi.common import BarData
 from ibapi.contract import ContractDescription, ContractDetails
@@ -17,6 +20,9 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
+
+if TYPE_CHECKING:
+    from trading_api.providers.tws.tws_models import RTMarketData
 
 # TWS secType → TradingView-style symbol type
 SEC_TYPE_MAP: dict[str, str] = {
@@ -252,6 +258,26 @@ def tws_rt_bar_to_domain_bar(
     )
 
 
+def rt_market_data_to_bar(rt_data: "RTMarketData") -> Bar:
+    """Convert RTMarketData bar fields → domain Bar.
+
+    Args:
+        rt_data: RTMarketData instance with bar fields populated
+
+    Returns:
+        Domain Bar model
+    """
+    return Bar(
+        time=(rt_data.bar_time or 0) * 1000,
+        open=float(rt_data.bar_open or 0.0),
+        high=float(rt_data.bar_high or 0.0),
+        low=float(rt_data.bar_low or 0.0),
+        close=float(rt_data.bar_close or 0.0),
+        volume=rt_data.bar_volume or 0,
+        count=rt_data.bar_count or 0,
+    )
+
+
 def tws_ticks_to_quote_data(
     symbol: str,
     ticks: dict[str, float | int | str],
@@ -316,11 +342,72 @@ def tws_ticks_to_quote_data(
     return QuoteData(s="ok", n=symbol, v=quote_values)
 
 
+def rt_market_data_to_quote_data(rt_data: "RTMarketData") -> QuoteData:
+    """Convert RTMarketData tick fields → domain QuoteData.
+
+    Args:
+        rt_data: RTMarketData instance with tick fields populated
+
+    Returns:
+        QuoteData with status="ok" and QuoteValues populated from rt_data
+    """
+    symbol = rt_data.contract.symbol if rt_data.contract else "UNKNOWN"
+    exchange = (
+        rt_data.contract.primaryExchange or rt_data.contract.exchange
+        if rt_data.contract
+        else ""
+    )
+
+    # Extract values with defaults
+    bid = round(rt_data.bid or 0.0, 2)
+    ask = round(rt_data.ask or 0.0, 2)
+    last = round(rt_data.last or 0.0, 2)
+    open_price = round(rt_data.open or last, 2)
+    high_price = round(rt_data.high or last, 2)
+    low_price = round(rt_data.low or last, 2)
+    close_price = round(rt_data.close or last, 2)
+    volume = rt_data.volume or 0
+
+    # Calculate spread
+    spread = round(ask - bid, 2) if (ask > 0 and bid > 0) else 0.0
+
+    # Calculate change and change percent
+    if last > 0 and close_price > 0:
+        change = round(last - close_price, 2)
+        change_percent = round((change / close_price) * 100, 2)
+    else:
+        change = 0.0
+        change_percent = 0.0
+
+    quote_values = QuoteValues(
+        lp=last,
+        ask=ask,
+        bid=bid,
+        spread=spread,
+        open_price=open_price,
+        high_price=high_price,
+        low_price=low_price,
+        prev_close_price=close_price,
+        volume=volume,
+        ch=change,
+        chp=change_percent,
+        short_name=symbol,
+        exchange=exchange,
+        description=f"Quote for {symbol}",
+        original_name=symbol,
+    )
+
+    return QuoteData(s="ok", n=symbol, v=quote_values)
+
+
 __all__ = [
     "SEC_TYPE_MAP",
     "DEFAULT_SUPPORTED_RESOLUTIONS",
     "contract_description_to_search_result",
     "contract_details_to_symbol_info",
     "tws_bar_to_domain_bar",
+    "tws_rt_bar_to_domain_bar",
+    "rt_market_data_to_bar",
     "tws_ticks_to_quote_data",
+    "rt_market_data_to_quote_data",
 ]

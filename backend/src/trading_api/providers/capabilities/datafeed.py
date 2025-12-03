@@ -124,6 +124,7 @@ class DatafeedCapability(ABC):
     def subscribe_realtime_bars(
         self,
         symbol: str,
+        resolution: TimeFrame,
         callback: Callable[[Bar], Awaitable[None]],
         **kwargs: Any,
     ) -> int:

@@ -175,7 +175,11 @@ class DatafeedService(WsRouteService):
             logger.info(f"creating new topic : {topic}")
 
             subscription_id = self.datafeed_provider.subscribe_realtime_bars(
-                symbol=subscription_request.symbol, callback=topic_update
+                symbol=subscription_request.symbol,
+                resolution=self._convert_resolution_to_timeframe(
+                    subscription_request.resolution
+                ),
+                callback=topic_update,
             )
 
             # Track subscription ID for cleanup
