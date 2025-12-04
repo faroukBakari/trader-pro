@@ -7,6 +7,25 @@
 // }
 
 
+function serialize_params(obj: unknown): string {
+  if (obj === null || obj === undefined) {
+    return ''
+  }
+
+  if (typeof obj !== 'object') {
+    return JSON.stringify(obj)
+  }
+
+  if (Array.isArray(obj)) {
+    return `[${obj.map(serialize_params).join(',')}]`
+  }
+
+  const objRecord = obj as Record<string, unknown>
+  const sortedKeys = Object.keys(objRecord).sort()
+  const pairs = sortedKeys.map(key => `${JSON.stringify(key)}:${serialize_params(objRecord[key])}`)
+  return `{${pairs.join(',')}}`
+}
+
 interface SubscriptionRequest<TParams extends object = object> {
   sub_id: string
   sub_params: TParams
@@ -167,9 +186,9 @@ export class WebSocketBase {
 
   private async sendRequest(type: string, payload: SubscriptionRequest): Promise<void> {
     await this.connect()
-    const message = JSON.stringify({ type, payload })
+    const message = JSON.stringify({ type, payload }, null, 2)
     this.ws!.send(message)
-    this.logger.log('Sent:', type, payload)
+    this.logger.log('Sent:', type, message)
   }
 
   private handleMessage(event: MessageEvent): void {
@@ -385,8 +404,9 @@ export interface WebSocketInterface<TParams extends object, TData extends object
 
 export class WebSocketClient<TParams extends object, TBackendData extends object, TData extends object> implements WebSocketInterface<TParams, TData> {
   protected baseSocket: WebSocketBase
-  protected topics: Map<TParams, string>
-  protected listeners: Map<TParams, Map<string, (data: TData) => void>>
+  protected topics: Map<string, Promise<string>>
+  protected listeners: Map<string, Map<string, (data: TData) => void>>
+  protected debouncedUnsub: Map<string, NodeJS.Timeout>
 
   private wsRoute: string = ''
   private debounceMs?: number
@@ -398,8 +418,9 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     this.debounceMs = debounceMs
     this.dataMapper = dataMapper
     this.baseSocket = WebSocketBase.getInstance(wsUrl)
-    this.topics = new Map<TParams, string>()
+    this.topics = new Map()
     this.listeners = new Map()
+    this.debouncedUnsub = new Map()
   }
 
   async subscribe(
@@ -408,36 +429,58 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     onUpdate: (data: TData) => void,
   ): Promise<string> {
 
-    if (this.topics.has(subscriptionParams)) {
-      this.listeners.get(subscriptionParams)!.set(listenerId, onUpdate)
-      return this.topics.get(subscriptionParams)!
+    const paramsKey = serialize_params(subscriptionParams)
+
+    const unsubTimeout = this.debouncedUnsub.get(paramsKey)
+    if (unsubTimeout) {
+      clearTimeout(unsubTimeout)
+      this.debouncedUnsub.delete(paramsKey)
+    }
+
+    if (this.listeners.has(paramsKey)) {
+      if (!this.listeners.get(paramsKey)?.has(listenerId)) {
+        console.warn(`listener ${listenerId} spamming for the same subscription`, paramsKey)
+      }
+      this.listeners.get(paramsKey)?.set(listenerId, onUpdate)
     } else {
-      this.listeners.set(subscriptionParams, new Map([[listenerId, onUpdate]]))
-      const topic = await this.baseSocket.subscribe(
+      console.log(`Subscribing to new params:`, paramsKey)
+      this.listeners.set(paramsKey, new Map([[listenerId, onUpdate]]))
+      const topicPromise = this.baseSocket.subscribe(
         this.wsRoute + '.subscribe',
         subscriptionParams,
         (backendData: object) =>
-          this.listeners.get(subscriptionParams)!.forEach(
+          this.listeners.get(paramsKey)?.forEach(
             (onUpdate) => onUpdate(this.dataMapper(backendData as TBackendData))
           )
       )
-      this.topics.set(subscriptionParams, topic)
-      return topic
+      this.topics.set(paramsKey, topicPromise)
     }
+    return await this.topics.get(paramsKey)!
   }
 
   async unsubscribe(listenerId: string): Promise<void> {
     for (const [params, listenersMap] of this.listeners.entries()) {
-      if (listenersMap.has(listenerId)) {
-        listenersMap.delete(listenerId)
-        if (listenersMap.size === 0) {
-          const topicToUnsub = this.topics.get(params)!
-          await this.baseSocket.unsubscribe(topicToUnsub)
-          this.topics.delete(params)
-          this.listeners.delete(params)
+      for (const id of listenersMap.keys())
+        if (id.startsWith(listenerId)) {
+          listenersMap.delete(id)
+          if (listenersMap.size === 0) {
+            const topic = await this.topics.get(params)
+            if (topic) {
+              this.debouncedUnsub.set(
+                params,
+                setTimeout(async () => {
+                  const topic = await this.topics.get(params)
+                  if (topic) {
+                    await this.baseSocket.unsubscribe(topic)
+                    this.topics.delete(params)
+                    this.listeners.delete(params)
+                    this.debouncedUnsub.delete(params)
+                  }
+                }, this.debounceMs || 0)
+              )
+            }
+          }
         }
-        break
-      }
     }
   }
 }
