@@ -6,7 +6,11 @@ from fastapi.websockets import WebSocketState
 from pydantic import BaseModel
 
 from external_packages.fastws import Client
-from trading_api.models import SubscriptionResponse, SubscriptionUpdate
+from trading_api.models import (
+    SubscriptionRequest,
+    SubscriptionResponse,
+    SubscriptionUpdate,
+)
 from trading_api.shared.ws.ws_router import WsRouteFeature, WsRouteService
 
 logger = logging.getLogger(__name__)
@@ -46,19 +50,16 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         self._topics: set[str] = set()
 
         async def send_subscribe(
-            payload: _TRequest,
+            payload: SubscriptionRequest[_TRequest],
             client: Client,
         ) -> SubscriptionResponse:
             """Subscribe to real-time data updates"""
-            topic = await self._register_topic(payload)
+
+            topic = await self._register_topic(payload.sub_params)
             self._clients.add(client)
             client.subscribe(topic)
             logger.info(f"Client {client.uid} subscribed to topic: {topic}")
-            return SubscriptionResponse(
-                status="ok",
-                message="Subscribed",
-                topic=topic,
-            )
+            return SubscriptionResponse(status="ok", sub_id=payload.sub_id, topic=topic)
 
         def update(
             payload: SubscriptionUpdate[_TData],
@@ -67,11 +68,11 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             return payload
 
         def send_unsubscribe(
-            payload: _TRequest,
+            payload: SubscriptionRequest[_TRequest],
             client: Client,
         ) -> SubscriptionResponse:
             """Unsubscribe from data updates"""
-            topic = self.topic_builder(payload)
+            topic = self.topic_builder(payload.sub_params)
             try:
                 self._clients = set(
                     [
@@ -115,23 +116,24 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
 
                 return SubscriptionResponse(
                     status="ok",
-                    message="Unsubscribed",
+                    sub_id=payload.sub_id,
                     topic=topic,
                 )
             except Exception as e:
                 logger.warning(f"Error during unsubscribe for topic {topic}: {e}")
                 return SubscriptionResponse(
                     status="error",
-                    message=f"Unsubscribe failed: {e}",
-                    topic="",
+                    sub_id=payload.sub_id,
+                    topic=f"Unsubscribe failed: {e}",
                 )
 
         update.__annotations__["payload"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
         update.__annotations__["return"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
         self.recv("update")(update)
-        send_subscribe.__annotations__["payload"] = request_type
+        # Use correct parameter names and wrap request_type in SubscriptionRequest
+        send_subscribe.__annotations__["payload"] = SubscriptionRequest[request_type]  # type: ignore[valid-type]
         self.send("subscribe", reply="subscribe.response")(send_subscribe)
-        send_unsubscribe.__annotations__["payload"] = request_type
+        send_unsubscribe.__annotations__["payload"] = SubscriptionRequest[request_type]  # type: ignore[valid-type]
         self.send("unsubscribe", reply="unsubscribe.response")(send_unsubscribe)
 
     def _resolve_generic_types(self) -> tuple[type[_TRequest], type[_TData]]:

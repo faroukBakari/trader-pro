@@ -33,11 +33,19 @@ class SubscriptionResponse(BaseModel):
     """Generic subscription response"""
 
     status: Literal["ok", "error"] = Field(..., description="Status")
-    message: str = Field(..., description="Status message")
+    sub_id: str = Field(..., description="Request identifier")
     topic: str = Field(..., description="Subscription topic")
+    error: Optional[str] = Field(default=None, description="Error details")
 
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class SubscriptionRequest(BaseModel, Generic[T]):
+    """Generic subscription update with typed payload"""
+
+    sub_id: str = Field(..., description="Request identifier")
+    sub_params: T = Field(..., description="Update payload")
 
 
 class SubscriptionUpdate(BaseModel, Generic[T]):

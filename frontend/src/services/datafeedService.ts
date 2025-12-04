@@ -511,6 +511,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         bar,
       })
       onTick(bar)
+    }).then((topic) => {
+      if (this.debug_datafeed)
+        console.log(`[Datafeed] Bar subscription started : ${topic}`)
     })
   }
   unsubscribeBars(listenerGuid: string): void {
@@ -564,9 +567,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
           console.warn(`Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask}`)
           onRealtimeCallback([quoteData])
         }
-      ).then(() => {
+      ).then((topic) => {
         if (this.debug_datafeed) console.log(
-          `[Datafeed] Quote subscription started for ${allSymbols.length} symbols (${listenerGUID})`,
+          `[Datafeed] Quote subscription started : ${topic}`,
         )
       })
   }

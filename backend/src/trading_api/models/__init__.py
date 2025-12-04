@@ -61,6 +61,7 @@ from .broker import (
 from .common import (
     BaseApiResponse,
     ErrorApiResponse,
+    SubscriptionRequest,
     SubscriptionResponse,
     SubscriptionUpdate,
 )
@@ -92,6 +93,7 @@ __all__ = [
     "BaseApiResponse",
     "BarsSubscriptionRequest",
     "ErrorApiResponse",
+    "SubscriptionRequest",
     "SubscriptionResponse",
     "SubscriptionUpdate",
     # Auth models
