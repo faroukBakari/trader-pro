@@ -554,24 +554,27 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       return
     }
 
-    this._getWsAdapter().quotes
-      ?.subscribe(
-        listenerGUID,
-        { symbols, fast_symbols },
-        (quoteData) => {
-          if (this.debug_datafeed) console.log('[Datafeed] Quote data received from WebSocket:', {
-            listenerGUID,
-            quoteData,
-          })
-          const v = quoteData.v as { bid?: number; ask?: number }
-          console.warn(`Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask}`)
-          onRealtimeCallback([quoteData])
-        }
-      ).then((topic) => {
-        if (this.debug_datafeed) console.log(
-          `[Datafeed] Quote subscription started : ${topic}`,
-        )
-      })
+    for (const symbol of allSymbols) {
+      const symbolSubId = listenerGUID + '_' + symbol
+      this._getWsAdapter().quotes
+        ?.subscribe(
+          symbolSubId,
+          { symbols: [], fast_symbols: [symbol] },
+          (quoteData) => {
+            if (this.debug_datafeed) console.log('[Datafeed] Quote data received from WebSocket:', {
+              symbolSubId,
+              quoteData,
+            })
+            const v = quoteData.v as { bid?: number; ask?: number }
+            console.warn(`Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask}`)
+            onRealtimeCallback([quoteData])
+          }
+        ).then((topic) => {
+          if (this.debug_datafeed) console.log(
+            `[Datafeed] Quote subscription started : ${topic}`,
+          )
+        })
+    }
   }
   unsubscribeQuotes(listenerGUID: string): void {
     this._getWsAdapter().quotes?.unsubscribe(listenerGUID).then(() => {
