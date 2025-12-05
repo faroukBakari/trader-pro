@@ -566,7 +566,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
               quoteData,
             })
             const v = quoteData.v as { bid?: number; ask?: number }
-            console.warn(`Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask}`)
+            console.warn(`[${listenerGUID}] Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask}`)
             onRealtimeCallback([quoteData])
           }
         ).then((topic) => {
