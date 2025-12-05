@@ -127,7 +127,7 @@ class DatafeedCapability(ABC):
         resolution: TimeFrame,
         callback: Callable[[Bar], Awaitable[None]],
         **kwargs: Any,
-    ) -> int:
+    ) -> str:
         """Subscribe to real-time bars.
 
         Args:
@@ -153,7 +153,7 @@ class DatafeedCapability(ABC):
         symbols: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
         **kwargs: Any,
-    ) -> list[int]:
+    ) -> list[str]:
         """Subscribe to real-time market data (ticks/quotes).
 
         Args:
@@ -173,7 +173,7 @@ class DatafeedCapability(ABC):
         ...
 
     @abstractmethod
-    def unsubscribe_realtime_bars(self, subscription_id: int) -> None:
+    def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         """Unsubscribe from real-time bars.
 
         Args:
@@ -185,7 +185,7 @@ class DatafeedCapability(ABC):
         ...
 
     @abstractmethod
-    def unsubscribe_market_data(self, subscription_ids: list[int]) -> None:
+    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
         """Unsubscribe from market data.
 
         Args:

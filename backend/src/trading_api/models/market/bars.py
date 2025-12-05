@@ -12,15 +12,19 @@ from pydantic import BaseModel, Field
 
 
 class TimeFrame(str, Enum):
-    """Timeframe enum for bars and historical data."""
+    """Timeframe enum for bars and historical data.
 
-    SEC_5 = "5"
-    SEC_10 = "10"
-    MIN_1 = "1"
-    MIN_5 = "5"
-    MIN_15 = "15"
-    MIN_30 = "30"
-    HOUR_1 = "60"
+    Values use format: <count><unit> where unit is S(econds), m(inutes), H(ours), D(ays), W(eeks), M(onths)
+    This ensures unique values to avoid Python enum aliasing.
+    """
+
+    SEC_5 = "5S"
+    SEC_10 = "10S"
+    MIN_1 = "1m"
+    MIN_5 = "5m"
+    MIN_15 = "15m"
+    MIN_30 = "30m"
+    HOUR_1 = "1H"
     DAY_1 = "1D"
     WEEK_1 = "1W"
     MONTH_1 = "1M"

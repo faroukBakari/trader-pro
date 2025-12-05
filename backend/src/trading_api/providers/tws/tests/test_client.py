@@ -291,7 +291,7 @@ class TestTWSClientCreateRTTicker:
 
             from trading_api.providers.tws.tws_models import RTMarketData
 
-            ticker = client.create_rt_ticker(contract, "5 mins")
+            ticker = client.create_ticker(contract, "5 mins")
 
             assert isinstance(ticker, RTMarketData)
             assert ticker.contract == contract
@@ -314,7 +314,7 @@ class TestTWSClientCreateRTTicker:
             contract.symbol = "AAPL"
             contract.secType = "STK"
 
-            client.create_rt_ticker(contract, "1 min")
+            client.create_ticker(contract, "1 min")
 
             # Verify both messages were sent
             from ibapi.message import OUT
@@ -421,10 +421,10 @@ class TestTWSClientCancelRTTicker:
             contract.symbol = "AAPL"
             contract.secType = "STK"
 
-            ticker = client.create_rt_ticker(contract, "5 mins")
+            ticker = client.create_ticker(contract, "5 mins")
             mock_ibsocket.send_message.reset_mock()
 
-            client.cancel_rt_ticker(ticker)
+            client.remove_ticker(ticker)
 
             # Verify both cancel messages were sent
             from ibapi.message import OUT
@@ -450,7 +450,7 @@ class TestTWSClientCancelRTTicker:
             contract = Contract()
             contract.symbol = "AAPL"
 
-            ticker = client.create_rt_ticker(contract, "1 min")
+            ticker = client.create_ticker(contract, "1 min")
             bar_req_id = ticker.bar_data_reqId
             mkt_req_id = ticker.mkt_data_reqId
 
@@ -458,7 +458,7 @@ class TestTWSClientCancelRTTicker:
             assert bar_req_id in client._cb_wrapper._req_id_to_ticker_map
             assert mkt_req_id in client._cb_wrapper._req_id_to_ticker_map
 
-            client.cancel_rt_ticker(ticker)
+            client.remove_ticker(ticker)
 
             # Verify ticker is removed
             assert bar_req_id not in client._cb_wrapper._req_id_to_ticker_map
@@ -478,12 +478,12 @@ class TestTWSClientCancelRTTicker:
             contract = Contract()
             contract.symbol = "AAPL"
 
-            ticker = client.create_rt_ticker(contract, "1 min")
+            ticker = client.create_ticker(contract, "1 min")
             # Simulate some data
             ticker.bid = 150.0
             ticker.ask = 150.05
 
-            ticker = client.cancel_rt_ticker(ticker)
+            ticker = client.remove_ticker(ticker)
 
             # Verify ticker is reset - bar_data_reqId should be None
             assert ticker.bid is None

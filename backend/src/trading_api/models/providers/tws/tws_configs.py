@@ -52,9 +52,9 @@ class TWSProviderConfig(BaseSettings):
         description="Market data type (1=real-time, 2=frozen, 3=delayed, 4=delayed-frozen)",
     )
     max_concurrent_rt_subscriptions: int = Field(
-        default=100,
+        default=5,
         ge=1,
-        le=500,
+        le=10,
         description="Maximum concurrent real-time subscriptions (TWS limit varies by account)",
     )
 

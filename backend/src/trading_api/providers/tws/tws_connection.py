@@ -167,7 +167,7 @@ def get_duration_for_bars(barSize_setting: str, num_bars: int = 2) -> str:
 
 
 get_tick_type_name = TickTypeEnum.idx2name.get
-debug_log = logger.debug
+debug_log = logger.info
 
 
 class IBSocketState:
@@ -478,9 +478,6 @@ class TWSCallback(EWrapper):
         """
         self._loop = loop or asyncio.get_event_loop()
         self._futures: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Future]] = {}
-        self._callbacks: dict[
-            int, tuple[asyncio.AbstractEventLoop, Callable[..., Awaitable[None]]]
-        ] = {}
         self._accumulators: dict[int, Any] = {}
         self._req_id_to_ticker_map: dict[int, RTMarketData] = {}
         self._nxt_order_id: int | None = None
@@ -503,23 +500,9 @@ class TWSCallback(EWrapper):
         """Reset internal state - clear futures, accumulators, callbacks."""
         self._futures.clear()
         self._accumulators.clear()
-        self._callbacks.clear()
         self._nxt_order_id = None
         self._accounts.clear()
         self._ready_event.clear()
-
-    def create_ticker_slot(self, reqIds: list[int]) -> RTMarketData:
-        """Create and register a new RTMarketData slot for a reqId."""
-        rt_data = RTMarketData()
-        for reqId in reqIds:
-            self._req_id_to_ticker_map[reqId] = rt_data
-        return rt_data
-
-    def remove_ticker_slot(self, ticker: RTMarketData) -> None:
-        """Remove RTMarketData slot and associated reqIds."""
-        for reqId in [ticker.bar_data_reqId, ticker.mkt_data_reqId]:
-            if reqId is not None:
-                self._req_id_to_ticker_map.pop(reqId, None)
 
     def create_future_coroutine(
         self, reqId: int, timeout: float | None = 5
@@ -545,26 +528,25 @@ class TWSCallback(EWrapper):
         else:
             logger.error(f"Unknown reqId {reqId} in _reject_future.")
 
-    def register_callback(
-        self, reqId: int, callback: Callable[..., Awaitable[None]]
-    ) -> None:
-        """Register a callback for a specific request ID."""
-        self._callbacks[reqId] = (self.loop, callback)
+    def register_ticker(self, rt_data: RTMarketData) -> RTMarketData:
+        """Create and register a new RTMarketData slot for a reqId."""
+        for reqId in [rt_data.bar_data_reqId, rt_data.mkt_data_reqId]:
+            if reqId is not None:
+                self._req_id_to_ticker_map[reqId] = rt_data
+        return rt_data
 
-    def unregister_callback(self, reqId: int) -> None:
-        """Unregister a callback for a specific request ID."""
-        self._callbacks.pop(reqId, None)
+    def unregister_ticker(self, ticker: RTMarketData) -> None:
+        """Remove RTMarketData slot and associated reqIds."""
+        for reqId in [ticker.bar_data_reqId, ticker.mkt_data_reqId]:
+            if reqId is not None:
+                self._req_id_to_ticker_map.pop(reqId, None)
 
     def _notify_ticker_callbacks(
         self, ticker: RTMarketData, updated_fields: list[str] | None = None
     ) -> None:
         """Trigger ticker callbacks if registered."""
         for loop, callback in ticker.reqId_callback_map.values():
-            loop.call_soon_threadsafe(
-                lambda: asyncio.ensure_future(
-                    callback(ticker, updated_fields), loop=loop
-                )
-            )
+            loop.call_soon_threadsafe(loop.create_task, callback(ticker, updated_fields))  # type: ignore
 
     # === Trading / account management ===
 
@@ -626,35 +608,40 @@ class TWSCallback(EWrapper):
             accumulator.append(bar)
 
     def historicalDataUpdate(self, reqId: int, bar: BarData) -> None:
-        """returns updates in real time when keepUpToDate is set to True"""
+        """Returns updates in real time when keepUpToDate is set to True.
+
+        Only updates fields if current value is None or different from new value.
+        Only notifies callbacks if at least one field actually changed.
+        """
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         # 1. Update RTMarketData ticker bar fields if tracked
         ticker = self._req_id_to_ticker_map.get(reqId)
-        updated_fields: list[str] | None = None
         if ticker is not None:
-            # Store raw TWS date string - conversion handled by mapper
-            ticker.bar_date = bar.date
-            ticker.bar_open = bar.open
-            ticker.bar_high = bar.high
-            ticker.bar_low = bar.low
-            ticker.bar_close = bar.close
-            ticker.bar_volume = int(bar.volume)
-            ticker.bar_wap = float(bar.wap)
-            ticker.bar_count = bar.barCount
-            updated_fields = [
-                "bar_date",
-                "bar_open",
-                "bar_high",
-                "bar_low",
-                "bar_close",
-                "bar_volume",
-                "bar_wap",
-                "bar_count",
+            updated_fields: list[str] = []
+
+            # Field mapping: (ticker_attr, bar_attr, transform)
+            field_mappings: list[tuple[str, object]] = [
+                ("bar_date", bar.date),
+                ("bar_open", bar.open),
+                ("bar_high", bar.high),
+                ("bar_low", bar.low),
+                ("bar_close", bar.close),
+                ("bar_volume", int(bar.volume)),
+                ("bar_wap", float(bar.wap)),
+                ("bar_count", bar.barCount),
             ]
-            # Notify ticker callbacks
-            self._notify_ticker_callbacks(ticker, updated_fields)
+
+            for field_name, new_value in field_mappings:
+                current_value = getattr(ticker, field_name)
+                if current_value is None or current_value != new_value:
+                    setattr(ticker, field_name, new_value)
+                    updated_fields.append(field_name)
+
+            # Only notify if at least one field changed
+            if updated_fields:
+                self._notify_ticker_callbacks(ticker, updated_fields)
         else:
             # 2. Update accumulator (existing behavior)
             accumulator = self._accumulators.setdefault(reqId, [])
@@ -668,7 +655,7 @@ class TWSCallback(EWrapper):
         results = self._accumulators.pop(reqId, [])
         self._resolve_future(reqId, results)
 
-    # === Market data snapshot (accumulation pattern) ===
+    # === Market data (accumulation pattern) ===
 
     def tickPrice(
         self, reqId: int, tickType: int, price: float, attrib: TickAttrib
@@ -692,6 +679,8 @@ class TWSCallback(EWrapper):
             current_value, price, abs_tol=1e-3
         ):
             setattr(ticker, field_name, price)
+            if field_name == "last":
+                ticker.close = price
             self._notify_ticker_callbacks(ticker, [field_name])
 
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
@@ -935,10 +924,10 @@ class TWSClient:
     ) -> list[ContractDescription]:
         reqId = self.next_req_id
 
-        coroutine: Awaitable[
-            list[ContractDescription]
-        ] = self._cb_wrapper.create_future_coroutine(
-            reqId, timeout=timeout or self._timeout
+        coroutine: Awaitable[list[ContractDescription]] = (
+            self._cb_wrapper.create_future_coroutine(
+                reqId, timeout=timeout or self._timeout
+            )
         )
         self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
         debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
@@ -958,10 +947,10 @@ class TWSClient:
             May return multiple results for ambiguous queries.
         """
         reqId = self.next_req_id
-        coroutine: Awaitable[
-            list[ContractDetails]
-        ] = self._cb_wrapper.create_future_coroutine(
-            reqId, timeout=timeout or self._timeout
+        coroutine: Awaitable[list[ContractDetails]] = (
+            self._cb_wrapper.create_future_coroutine(
+                reqId, timeout=timeout or self._timeout
+            )
         )
 
         # Build message fields (VERSION=8 per ibapi/client.py)
@@ -1060,7 +1049,7 @@ class TWSClient:
 
     # === Real-time bar subscriptions (continuous pattern) ===
 
-    def create_rt_ticker(
+    def create_ticker(
         self,
         contract: Contract,
         barSize_setting: str,
@@ -1071,12 +1060,15 @@ class TWSClient:
         bar_data_reqId = self.next_req_id
         mkt_data_reqId = self.next_req_id
 
-        ticker = self._cb_wrapper.create_ticker_slot([bar_data_reqId, mkt_data_reqId])
+        ticker = RTMarketData()
+
         ticker.bar_data_reqId = bar_data_reqId
         ticker.mkt_data_reqId = mkt_data_reqId
         ticker.contract = contract
         ticker.barSize_setting = barSize_setting
         ticker.format_date = 1
+
+        ticker = self._cb_wrapper.register_ticker(ticker)
 
         end_date_time: str = ""
         duration_str: str = get_duration_for_bars(barSize_setting)
@@ -1111,7 +1103,7 @@ class TWSClient:
         ]
 
         self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, bar_data_fields)
-        debug_log(
+        logger.info(
             f"awaiting historicalData for reqId {bar_data_reqId}, "
             f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{barSize_setting}'"
         )
@@ -1162,7 +1154,71 @@ class TWSClient:
 
         return ticker
 
-    def cancel_rt_ticker(self, ticker: RTMarketData) -> RTMarketData:
+    def switch_ticker(
+        self,
+        ticker: RTMarketData,
+        barSize_setting: str,
+        **kwargs: Any,
+    ) -> RTMarketData:
+        """Create a real-time data subscription (stub for future use)."""
+
+        VERSION = 1
+        self.ibsocket.send_message(
+            OUT.CANCEL_REAL_TIME_BARS, [VERSION, ticker.bar_data_reqId]
+        )
+        logger.info(f"cancelled realtime bars for reqId {ticker.bar_data_reqId}")
+
+        self._cb_wrapper.unregister_ticker(ticker)
+
+        ticker.bar_data_reqId = self.next_req_id
+        ticker.barSize_setting = barSize_setting
+
+        self._cb_wrapper.register_ticker(ticker)
+
+        end_date_time: str = ""
+        duration_str: str = get_duration_for_bars(barSize_setting)
+        whatToShow: str = "TRADES"
+        format_date: int = 1
+        useRTH: int = 0
+        keepUpToDate: bool = True
+
+        contract = ticker.contract
+        assert contract is not None, "Ticker contract must be set to switch resolution."
+
+        bar_data_fields: list[object] = [
+            ticker.bar_data_reqId,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            contract.includeExpired,
+            end_date_time,
+            barSize_setting,
+            duration_str,
+            useRTH,
+            whatToShow,
+            format_date,
+            keepUpToDate,  # keepUpToDate (always False for historical)
+            [],  # chartOptions (empty list)
+        ]
+
+        self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, bar_data_fields)
+        logger.info(
+            f"awaiting historicalData for reqId {ticker.bar_data_reqId}, "
+            f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{barSize_setting}'"
+        )
+
+        return ticker
+
+    def remove_ticker(self, ticker: RTMarketData) -> RTMarketData:
         """Cancel a real-time data subscription."""
 
         VERSION = 1
@@ -1177,7 +1233,7 @@ class TWSClient:
         )
         logger.info(f"cancelled market data for reqId {ticker.mkt_data_reqId}")
 
-        self._cb_wrapper.remove_ticker_slot(ticker)
+        self._cb_wrapper.unregister_ticker(ticker)
         ticker.reset()
 
         return ticker

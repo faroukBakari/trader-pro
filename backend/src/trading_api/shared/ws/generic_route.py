@@ -20,14 +20,6 @@ _TRequest = TypeVar("_TRequest", bound=BaseModel)
 _TData = TypeVar("_TData", bound=BaseModel)
 
 
-# TODO : implement secure route that encapsulates authentication/authorization per client
-# TODO : implement server side subscription cancelation
-
-
-async def unset_broadcast_update(route: str, _: SubscriptionUpdate) -> None:
-    raise NotImplementedError(f"Broadcast update function not set for route {route}.")
-
-
 class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
     def __init__(self, service: WsRouteService, *args: Any, **kwargs: Any) -> None:
         # Validate service implements WsRouteService protocol BEFORE initialization
@@ -54,9 +46,10 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             client: Client,
         ) -> SubscriptionResponse:
             """Subscribe to real-time data updates"""
-
-            topic = await self._register_topic(payload.sub_params)
             self._clients.add(client)
+            topic = self.topic_builder(payload.sub_params)
+            if topic not in self._topics:
+                await self._create_topic(topic)
             client.subscribe(topic)
             logger.info(f"Client {client.uid} subscribed to topic: {topic}")
             return SubscriptionResponse(status="ok", sub_id=payload.sub_id, topic=topic)
@@ -73,46 +66,28 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         ) -> SubscriptionResponse:
             """Unsubscribe from data updates"""
             topic = self.topic_builder(payload.sub_params)
+            client.unsubscribe(topic)
+            logger.info(f"Client {client.uid} unsubscribed from topic: {topic}")
             try:
-                self._clients = set(
-                    [
-                        client
-                        for client in self._clients
-                        if (
-                            client.ws.client_state == WebSocketState.CONNECTED
-                            and client.ws.application_state == WebSocketState.CONNECTED
-                        )
-                    ]
-                )
+                self._clients = self._refresh_active_clients()
 
-                if client in self._clients:
-                    client.unsubscribe(topic)
-                    logger.info(f"Client {client.uid} unsubscribed from topic: {topic}")
-
-                    remaining_topic_clients = [
-                        clt
-                        for clt in self._clients
-                        if (
-                            clt.ws.client_state == WebSocketState.CONNECTED
-                            and clt.ws.application_state == WebSocketState.CONNECTED
-                            and topic in clt.topics
-                        )
-                    ]
-
-                    if not remaining_topic_clients:
-                        logger.info(f"No more clients for topic : {topic}")
-                        self._unregister_topic(topic)
-
-                    if not client.topics:
-                        self._clients.discard(client)
-
-                    logger.info(f"Client {client.uid} unsubscribed from topic: {topic}")
-
-                else:
-                    logger.warning(
-                        f"Client {client.uid} tried to unsubscribe from topic"
-                        f" {topic} but was not found in clients list."
+                remaining_topic_clients = [
+                    clt for clt in self._clients if topic in clt.topics
+                ]
+                if not remaining_topic_clients:
+                    logger.info(
+                        f"No more clients for topic : {topic} in router {self.route}"
                     )
+                    self._remove_topic(topic)
+
+                remaining_client_topics = [
+                    tpc for tpc in client.topics if tpc in self._topics
+                ]
+                if not remaining_client_topics:
+                    logger.info(
+                        f"No more topics for client: {client.uid} in router {self.route}"
+                    )
+                    self._clients.discard(client)
 
                 return SubscriptionResponse(
                     status="ok",
@@ -120,7 +95,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                     topic=topic,
                 )
             except Exception as e:
-                logger.warning(f"Error during unsubscribe for topic {topic}: {e}")
+                logger.exception(f"Error during unsubscribe for topic {topic}: {e}")
                 return SubscriptionResponse(
                     status="error",
                     sub_id=payload.sub_id,
@@ -150,9 +125,57 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 "Ensure you inherit like: class MyRouter(WsRouter[Req, Res]): ..."
             )
 
-    async def broadcast_update(self, route: str, update: SubscriptionUpdate) -> None:
+    async def _broadcast_update(self, update: SubscriptionUpdate) -> None:
         topic = update.topic
-        self._clients = set(
+        self._clients = self._refresh_active_clients()
+
+        topic_clients = [client for client in self._clients if topic in client.topics]
+
+        if not topic_clients:
+            logger.info(
+                f"No more clients for topic : {update.topic} in router {self.route}"
+            )
+            self._remove_topic(topic)
+            await asyncio.sleep(1)
+            return
+
+        try:
+            # Build message with pre-serialized payload to avoid model_dump overhead
+            # update.model_dump_json() uses orjson internally when configured
+            msg = (
+                f'{{"type":"{self.route}.update","payload":{update.model_dump_json()}}}'
+            )
+
+            await asyncio.gather(
+                *(client.ws.send_text(msg) for client in topic_clients)
+            )
+
+            logger.info(f"Broadcasted message from router:: {update}")
+        except Exception as e:
+            logger.warning(f"Error during FastWS {self.route}.update broadcast, {e}")
+            await asyncio.sleep(1)
+
+    async def _create_topic(self, topic: str) -> None:
+
+        async def topic_update(data: _TData) -> None:
+            await self._broadcast_update(
+                SubscriptionUpdate(
+                    topic=topic,
+                    payload=data,
+                ),
+            )
+
+        logger.info(f"Creating new topic in {self.route} service: {topic}")
+        await self.service.create_topic(topic, topic_update)
+        self._topics.add(topic)
+
+    def _remove_topic(self, topic: str) -> None:
+        logger.info(f"Removing topic : {topic}")
+        self._topics.discard(topic)
+        self.service.remove_topic(topic)
+
+    def _refresh_active_clients(self) -> set[Client]:
+        return set(
             [
                 client
                 for client in self._clients
@@ -162,66 +185,3 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 )
             ]
         )
-        topic_clients = [client for client in self._clients if topic in client.topics]
-
-        if not topic_clients:
-            logger.info(f"No more client for topic : {update.topic}")
-            self._unregister_topic(topic)
-            await asyncio.sleep(1)
-            return
-
-        try:
-            # Build message with pre-serialized payload to avoid model_dump overhead
-            # update.model_dump_json() uses orjson internally when configured
-            msg = f'{{"type":"{route}.update","payload":{update.model_dump_json()}}}'
-
-            await asyncio.gather(
-                *(client.ws.send_text(msg) for client in topic_clients)
-            )
-
-            logger.info(f"Broadcasted message from router: {update.topic}: {update}")
-        except Exception as e:
-            logger.warning(f"Error during FastWS {route}.update broadcast, {e}")
-            await asyncio.sleep(1)
-
-    # TODO: need to fix topic registration / unregistration to avoidt this mess!:
-    # client.topics
-    # {'quotes:{"fast_symbols":["TSLA"],"symbols":["TSLA"]}', 'bars:{"resolution":"5","symbol":"TSLA"}'}
-    # 137948550225840 =
-    # 'quotes:{"fast_symbols":["TSLA"],"symbols":["TSLA"]}'
-    # 137948550193840 =
-    # 'bars:{"resolution":"5","symbol":"TSLA"}'
-    # topic
-    # 'quotes:{"fast_symbols":["AAPL","TSLA"],"symbols":["TSLA"]}'
-    # self._topics
-    # {'quotes:{"fast_symbols":["TSLA"],"symbols":["TSLA"]}', 'quotes:{"fast_symbols":["GOOGL"],"symbols":["GOOGL"]}'}
-    # 137948550225840 =
-    # 'quotes:{"fast_symbols":["TSLA"],"symbols":["TSLA"]}'
-    # 137948550848656 =
-    # 'quotes:{"fast_symbols":["GOOGL"],"symbols":["GOOGL"]}'
-    # len() =
-    # 2
-    async def _register_topic(self, payload: _TRequest) -> str:
-        topic = self.topic_builder(payload)
-
-        if topic not in self._topics:
-
-            async def topic_update(data: _TData) -> None:
-                await self.broadcast_update(
-                    self.route,
-                    SubscriptionUpdate(
-                        topic=topic,
-                        payload=data,
-                    ),
-                )
-
-            logger.info(f"Registering new topic in router: {topic}")
-            await self.service.create_topic(topic, topic_update)
-            self._topics.add(topic)
-
-        return topic
-
-    def _unregister_topic(self, topic: str) -> None:
-        logger.info(f"Unregistering topic : {topic}")
-        self._topics.discard(topic)
-        self.service.remove_topic(topic)
