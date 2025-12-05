@@ -545,6 +545,9 @@ class TWSCallback(EWrapper):
         self, ticker: RTMarketData, updated_fields: list[str] | None = None
     ) -> None:
         """Trigger ticker callbacks if registered."""
+        # TODO: this is very unsafe!!
+        # asyncio loop is acting as a queue here, need to redesign this part
+        # need to sync callbacks with the main thread ability to handle messages!!
         for loop, callback in ticker.reqId_callback_map.values():
             loop.call_soon_threadsafe(loop.create_task, callback(ticker, updated_fields))  # type: ignore
 
@@ -644,6 +647,7 @@ class TWSCallback(EWrapper):
                 self._notify_ticker_callbacks(ticker, updated_fields)
         else:
             # 2. Update accumulator (existing behavior)
+            # TODO: no set default here !! need to set on request init and throw error when missing!!!
             accumulator = self._accumulators.setdefault(reqId, [])
             if isinstance(accumulator, list):
                 accumulator.append(bar)
@@ -1164,7 +1168,7 @@ class TWSClient:
 
         VERSION = 1
         self.ibsocket.send_message(
-            OUT.CANCEL_REAL_TIME_BARS, [VERSION, ticker.bar_data_reqId]
+            OUT.CANCEL_HISTORICAL_DATA, [VERSION, ticker.bar_data_reqId]
         )
         logger.info(f"cancelled realtime bars for reqId {ticker.bar_data_reqId}")
 
@@ -1223,7 +1227,7 @@ class TWSClient:
 
         VERSION = 1
         self.ibsocket.send_message(
-            OUT.CANCEL_REAL_TIME_BARS, [VERSION, ticker.bar_data_reqId]
+            OUT.CANCEL_HISTORICAL_DATA, [VERSION, ticker.bar_data_reqId]
         )
         logger.info(f"cancelled realtime bars for reqId {ticker.bar_data_reqId}")
 
