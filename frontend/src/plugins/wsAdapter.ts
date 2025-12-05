@@ -90,7 +90,7 @@ export class WsAdapter implements WsAdapterType {
     const datafeedWsUrl = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + '/v1/datafeed/ws'
     this.bars = new WebSocketClient<BarsSubscriptionRequest, Bar_Ws_Backend, Bar>(datafeedWsUrl, 'bars', data => data)
     this.quotes = new WebSocketClient<QuoteDataSubscriptionRequest, QuoteData_Ws_Backend, QuoteData>(
-      datafeedWsUrl, 'quotes', mapQuoteData, 100
+      datafeedWsUrl, 'quotes', mapQuoteData
     )
 
     const brokerWsUrl = (import.meta.env.VITE_TRADER_API_BASE_PATH || '') + '/v1/broker/ws'

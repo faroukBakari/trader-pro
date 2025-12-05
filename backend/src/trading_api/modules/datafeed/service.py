@@ -61,24 +61,26 @@ class DatafeedService(WsRouteService):
         self,
         module_dir: Path,
         *,  # Force keyword-only arguments
-        symbols_file_path: Optional[str] = None,
         providers: list | None = None,
     ):
         """Initialize the datafeed service
 
         Args:
             module_dir: Path to the module directory
-            symbols_file_path: Path to symbols JSON file. If None, uses
-                default embedded symbols.
             providers: Provider instances for capabilities (unused, for interface compatibility)
         """
         super().__init__(module_dir, providers=providers)
         self.configuration = DatafeedConfiguration()
-        self.symbols_file_path = symbols_file_path
-        self._symbols: List[SymbolInfo] = []
-        self._sample_bars: List[Bar] = []
         # Track provider subscription IDs for each topic (for cleanup)
-        self._topic_to_subscription_id: dict[str, int | list[int]] = {}
+        self._topic_to_subscription_id: dict[str, str | list[str]] = {}
+
+    def get_configuration(self) -> DatafeedConfiguration:
+        """Get datafeed configuration.
+
+        Returns:
+            DatafeedConfiguration with supported resolutions, exchanges, etc.
+        """
+        return self.configuration
 
     # === Helper Methods ===
 
@@ -126,14 +128,20 @@ class DatafeedService(WsRouteService):
             TimeFrame.DAY_1
         """
         # Map TradingView resolution strings to TimeFrame enum
+        # TradingView uses: "1", "5", "15", "30", "60" for minutes, "D"/"1D", "W"/"1W", "M"/"1M" for larger
         resolution_map: dict[str, TimeFrame] = {
+            # Minutes (TradingView sends just the number)
             "1": TimeFrame.MIN_1,
             "5": TimeFrame.MIN_5,
             "15": TimeFrame.MIN_15,
             "30": TimeFrame.MIN_30,
             "60": TimeFrame.HOUR_1,
+            # Daily/Weekly/Monthly (TradingView may send with or without "1" prefix)
+            "D": TimeFrame.DAY_1,
             "1D": TimeFrame.DAY_1,
+            "W": TimeFrame.WEEK_1,
             "1W": TimeFrame.WEEK_1,
+            "M": TimeFrame.MONTH_1,
             "1M": TimeFrame.MONTH_1,
         }
 
@@ -160,7 +168,7 @@ class DatafeedService(WsRouteService):
         """
 
         if topic in self._topic_to_subscription_id:
-            logger.warning(f"Topic already exists in DatafeedService: {topic}")
+            logger.error(f"Topic already exists in DatafeedService: {topic}")
             return
 
         # Parse topic format: "topic_type:{json_params}"
@@ -226,7 +234,7 @@ class DatafeedService(WsRouteService):
         logger.info(f"removing topic: {topic}")
 
         # Unsubscribe from provider if subscription exists
-        subscription_id = self._topic_to_subscription_id.get(topic)
+        subscription_id = self._topic_to_subscription_id.pop(topic, None)
         if subscription_id is not None:
             # Determine topic type from topic string
             if ":" in topic:
@@ -234,35 +242,24 @@ class DatafeedService(WsRouteService):
 
                 if topic_type == "bars":
                     # Single subscription ID for bars (always int)
-                    if isinstance(subscription_id, int):
-                        logger.info(
-                            f"Unsubscribing from bars: subscription ID {subscription_id}"
-                        )
-                        self.datafeed_provider.unsubscribe_realtime_bars(
-                            subscription_id
-                        )
+                    assert isinstance(
+                        subscription_id, str
+                    ), "Expected str subscription ID for bars"
+                    logger.info(
+                        f"Unsubscribing from bars: subscription ID {subscription_id}"
+                    )
+                    self.datafeed_provider.unsubscribe_realtime_bars(subscription_id)
                 elif topic_type == "quotes":
                     # Multiple subscription IDs for quotes (one per symbol)
-                    if isinstance(subscription_id, list):
-                        logger.info(
-                            f"Unsubscribing from quotes: subscription IDs {subscription_id}"
-                        )
-                        self.datafeed_provider.unsubscribe_market_data(subscription_id)
-                    else:
-                        logger.info(
-                            f"Unsubscribing from quotes: subscription ID {subscription_id}"
-                        )
-                        self.datafeed_provider.unsubscribe_market_data(
-                            [subscription_id]
-                        )
+                    assert isinstance(
+                        subscription_id, list
+                    ), "Expected list[str] subscription ID for quotes"
+                    logger.info(
+                        f"Unsubscribing from quotes: subscription IDs {subscription_id}"
+                    )
+                    self.datafeed_provider.unsubscribe_market_data(subscription_id)
         else:
-            logger.warning(f"No subscription_id found for topic: {topic}")
-
-            self._topic_to_subscription_id.pop(topic, None)
-
-    def get_configuration(self) -> DatafeedConfiguration:
-        """Get datafeed configuration"""
-        return self.configuration
+            logger.error(f"No subscription_id found for topic: {topic}")
 
     async def search_symbols(
         self,

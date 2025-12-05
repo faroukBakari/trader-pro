@@ -213,7 +213,7 @@ export class WebSocketBase {
               this.pendingRequests.delete(subResponse.sub_id)
               pendingRequest.resolve(subResponse)
             } else {
-              this.logger.error('Cannot find request Id:', subResponse.sub_id)
+              this.logger.error(`Cannot find sub_id ${subResponse.sub_id} for response :`, payload)
             }
           }
         } else {
@@ -235,7 +235,7 @@ export class WebSocketBase {
     try {
       subscription.on_update(data.payload)
     } catch (error) {
-      this.logger.error(`Error in subscription onUpdate for topic ${data.topic}:`, error)
+      this.logger.error(`Error in subscription onUpdate for sub_id ${subscription.sub_id} / topic ${data.topic}:`, error)
     }
   }
 
@@ -275,7 +275,7 @@ export class WebSocketBase {
 
           // Send request after registering the handler
           this.sendRequest(
-            sub_type,
+            sub_type + '.subscribe',
             { sub_id, sub_params }
           ).catch((error) => {
             this.pendingRequests.delete(sub_id)
@@ -323,7 +323,7 @@ export class WebSocketBase {
       this.pendingRequests.clear()
     }
 
-    for (const subscription of this.subscriptions.values()) {
+    for (const [topic, subscription] of this.subscriptions.entries()) {
 
       try {
         const response: SubscriptionResponse = await new Promise((resolve, reject) => {
@@ -349,7 +349,7 @@ export class WebSocketBase {
 
           // Send request after registering the handler
           this.sendRequest(
-            subscription.sub_type,
+            subscription.sub_type + '.subscribe',
             { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
           ).catch((error) => {
             this.pendingRequests.delete(subscription.sub_id)
@@ -359,12 +359,13 @@ export class WebSocketBase {
         })
 
         if (response.status === 'ok') {
-          this.logger.log(`Resubscription confirmed:`, response)
+          this.logger.log(`Resubscription confirmed sub_id ${subscription.sub_id} / topic: ${topic}`)
         } else {
-          this.logger.error(`Resubscription failed:`, response)
+          this.logger.log(`Resubscription failed sub_id ${subscription.sub_id} / topic: ${topic}`)
         }
       }
       catch (error) {
+        this.logger.log(`Resubscription error sub_id ${subscription.sub_id} / topic: ${topic}:`, error)
         this.logger.error('Resubscription error:', error)
       }
     }
@@ -378,10 +379,10 @@ export class WebSocketBase {
     }
     try {
       const response = await this.sendRequest(
-        subscription.sub_type,
+        subscription.sub_type + '.unsubscribe',
         { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
       )
-      this.logger.log(`Unsubscribed from topic: ${topic}`, response)
+      this.logger.log(`Unsubscribed sub_id ${subscription.sub_id} / topic: ${topic}`, response)
     } finally {
       this.subscriptions.delete(topic)
       if (this.subscriptions.size === 0) {
@@ -433,20 +434,22 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
 
     const unsubTimeout = this.debouncedUnsub.get(paramsKey)
     if (unsubTimeout) {
+      console.log(`Clearing debounced unsubscribe for topic ${paramsKey}`)
       clearTimeout(unsubTimeout)
       this.debouncedUnsub.delete(paramsKey)
     }
 
     if (this.listeners.has(paramsKey)) {
-      if (!this.listeners.get(paramsKey)?.has(listenerId)) {
+      const topicListeners = this.listeners.get(paramsKey)!
+      if (topicListeners?.has(listenerId)) {
         console.warn(`listener ${listenerId} spamming for the same subscription`, paramsKey)
       }
-      this.listeners.get(paramsKey)?.set(listenerId, onUpdate)
+      topicListeners.set(listenerId, onUpdate)
     } else {
-      console.log(`Subscribing to new params:`, paramsKey)
+      console.log(`listener ${listenerId} subscribing to new params:`, paramsKey)
       this.listeners.set(paramsKey, new Map([[listenerId, onUpdate]]))
       const topicPromise = this.baseSocket.subscribe(
-        this.wsRoute + '.subscribe',
+        this.wsRoute,
         subscriptionParams,
         (backendData: object) =>
           this.listeners.get(paramsKey)?.forEach(
@@ -458,27 +461,28 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     return await this.topics.get(paramsKey)!
   }
 
+  // TODO: unsub and debounce not working as expected. need to fiabilize that!
   async unsubscribe(listenerId: string): Promise<void> {
-    for (const [params, listenersMap] of this.listeners.entries()) {
+    for (const [paramsKey, listenersMap] of this.listeners.entries()) {
       for (const id of listenersMap.keys())
         if (id.startsWith(listenerId)) {
           listenersMap.delete(id)
-          if (listenersMap.size === 0) {
-            const topic = await this.topics.get(params)
-            if (topic) {
-              this.debouncedUnsub.set(
-                params,
-                setTimeout(async () => {
-                  const topic = await this.topics.get(params)
-                  if (topic) {
-                    await this.baseSocket.unsubscribe(topic)
-                    this.topics.delete(params)
-                    this.listeners.delete(params)
-                    this.debouncedUnsub.delete(params)
-                  }
-                }, this.debounceMs || 0)
-              )
-            }
+          const topic = await this.topics.get(paramsKey)
+          console.log(`listener ${listenerId} unsubscribed from topic ${paramsKey}`)
+          if (topic && !listenersMap.size) {
+            console.log(`No more listeners for topic ${paramsKey}. Debouncing Unsub in ${this.debounceMs}ms...`)
+            this.debouncedUnsub.set(
+              paramsKey,
+              setTimeout(async () => {
+                if (this.debouncedUnsub.get(paramsKey)) {
+                  console.log(`Unsubscribing from topic ${paramsKey}...`)
+                  this.topics.delete(paramsKey)
+                  this.listeners.delete(paramsKey)
+                  this.debouncedUnsub.delete(paramsKey)
+                  await this.baseSocket.unsubscribe(topic)
+                }
+              }, this.debounceMs || 0)
+            )
           }
         }
     }
@@ -512,7 +516,12 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
   }
 
   async unsubscribe(subscriptionId: string): Promise<void> {
-    this.subscriptions.delete(subscriptionId)
+    // Match prefix to support bulk unsubscribe (same as WebSocketClient)
+    for (const id of this.subscriptions.keys()) {
+      if (id.startsWith(subscriptionId)) {
+        this.subscriptions.delete(id)
+      }
+    }
   }
 
   destroy(): void {

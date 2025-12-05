@@ -331,7 +331,7 @@ class TestMarketDataSnapshotCallback:
 
         req_id = 1
         # Create ticker slot first (required by new implementation)
-        ticker = callback.create_ticker_slot([req_id])
+        ticker = callback.register_ticker([req_id])
 
         tick_attrib = TickAttrib()
 
@@ -353,7 +353,7 @@ class TestMarketDataSnapshotCallback:
 
         req_id = 1
         # Create ticker slot first
-        ticker = callback.create_ticker_slot([req_id])
+        ticker = callback.register_ticker([req_id])
 
         # BID_SIZE=0, ASK_SIZE=3, VOLUME=8
         callback.tickSize(req_id, 0, Decimal("1000"))  # BID_SIZE
@@ -370,7 +370,7 @@ class TestMarketDataSnapshotCallback:
 
         req_id = 1
         # Create ticker slot and set some data
-        ticker = callback.create_ticker_slot([req_id])
+        ticker = callback.register_ticker([req_id])
         ticker.bid = 100.0
         ticker.ask = 100.05
 
@@ -513,7 +513,7 @@ class TestTickReqParams:
 
         req_id = 1
         # Create ticker slot first
-        ticker = callback.create_ticker_slot([req_id])
+        ticker = callback.register_ticker([req_id])
 
         callback.tickReqParams(req_id, 0.01, "ISLAND", 3)
 
@@ -534,7 +534,7 @@ class TestMarketDataType:
 
         req_id = 1
         # Create ticker slot first
-        ticker = callback.create_ticker_slot([req_id])
+        ticker = callback.register_ticker([req_id])
 
         callback.marketDataType(req_id, 2)  # 2 = Frozen
 
@@ -553,7 +553,7 @@ class TestTickStringGeneric:
 
         req_id = 1
         # Create ticker slot first
-        ticker = callback.create_ticker_slot([req_id])
+        ticker = callback.register_ticker([req_id])
 
         # LAST_TIMESTAMP=45
         callback.tickString(req_id, 45, "1702656000")
@@ -569,7 +569,7 @@ class TestTickStringGeneric:
 
         req_id = 1
         # Create ticker slot first
-        ticker = callback.create_ticker_slot([req_id])
+        ticker = callback.register_ticker([req_id])
 
         # HALTED=49
         callback.tickGeneric(req_id, 49, 0.0)
@@ -597,7 +597,7 @@ class TestRealtimeBarCallback:
 
         req_id = 1
         # Create ticker slot first
-        ticker = callback.create_ticker_slot([req_id])
+        ticker = callback.register_ticker([req_id])
 
         # Create a bar update
         bar = BarData()
@@ -631,7 +631,7 @@ class TestRealtimeBarCallback:
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        ticker = callback.create_ticker_slot([req_id])
+        ticker = callback.register_ticker([req_id])
 
         # Track callback invocations
         callback_called: list[tuple[Any, list[str] | None]] = []

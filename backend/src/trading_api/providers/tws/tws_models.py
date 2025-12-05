@@ -41,7 +41,7 @@ class RTMarketData:
     bar_data_reqId: int | None = None
     mkt_data_reqId: int | None = None
     reqId_callback_map: dict[
-        int,
+        str,
         tuple[
             asyncio.AbstractEventLoop,
             Callable[

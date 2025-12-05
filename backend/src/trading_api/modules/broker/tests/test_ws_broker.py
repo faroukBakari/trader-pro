@@ -48,10 +48,13 @@ class TestOrdersWebSocket:
 
         client.cookies.set("access_token", valid_jwt_token)
         with client.websocket_connect("/api/v1/broker/ws") as websocket:
-            # Send subscribe message
+            # Send subscribe message (SubscriptionRequest format: sub_id + sub_params)
             subscribe_msg = {
                 "type": "orders.subscribe",
-                "payload": {"accountId": "TEST-001"},
+                "payload": {
+                    "sub_id": "orders-sub-001",
+                    "sub_params": {"accountId": "TEST-001"},
+                },
             }
             websocket.send_json(subscribe_msg)
 
@@ -61,8 +64,8 @@ class TestOrdersWebSocket:
             # Verify response structure
             assert response["type"] == "orders.subscribe.response"
             assert response["payload"]["status"] == "ok"
+            assert response["payload"]["sub_id"] == "orders-sub-001"
             assert response["payload"]["topic"] == 'orders:{"accountId":"TEST-001"}'
-            assert "Subscribed" in response["payload"]["message"]
 
     def test_unsubscribe_from_orders(
         self, client: TestClient, valid_jwt_token: str
@@ -73,25 +76,37 @@ class TestOrdersWebSocket:
         with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # First subscribe
             websocket.send_json(
-                {"type": "orders.subscribe", "payload": {"accountId": "TEST-001"}}
+                {
+                    "type": "orders.subscribe",
+                    "payload": {
+                        "sub_id": "orders-unsub-001",
+                        "sub_params": {"accountId": "TEST-001"},
+                    },
+                }
             )
             subscribe_response = websocket.receive_json()
             assert subscribe_response["payload"]["status"] == "ok"
 
             # Then unsubscribe
             websocket.send_json(
-                {"type": "orders.unsubscribe", "payload": {"accountId": "TEST-001"}}
+                {
+                    "type": "orders.unsubscribe",
+                    "payload": {
+                        "sub_id": "orders-unsub-001",
+                        "sub_params": {"accountId": "TEST-001"},
+                    },
+                }
             )
             unsubscribe_response = websocket.receive_json()
 
             # Verify unsubscribe response
             assert unsubscribe_response["type"] == "orders.unsubscribe.response"
             assert unsubscribe_response["payload"]["status"] == "ok"
+            assert unsubscribe_response["payload"]["sub_id"] == "orders-unsub-001"
             assert (
                 unsubscribe_response["payload"]["topic"]
                 == 'orders:{"accountId":"TEST-001"}'
             )
-            assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
     def test_subscribe_multiple_accounts(
         self, client: TestClient, valid_jwt_token: str
@@ -102,9 +117,15 @@ class TestOrdersWebSocket:
         with client.websocket_connect("/api/v1/broker/ws") as websocket:
             accounts = ["DEMO-001", "DEMO-002", "DEMO-003"]
 
-            for account in accounts:
+            for i, account in enumerate(accounts):
                 websocket.send_json(
-                    {"type": "orders.subscribe", "payload": {"accountId": account}}
+                    {
+                        "type": "orders.subscribe",
+                        "payload": {
+                            "sub_id": f"orders-multi-{i}",
+                            "sub_params": {"accountId": account},
+                        },
+                    }
                 )
                 response = websocket.receive_json()
                 assert response["payload"]["status"] == "ok"
@@ -124,10 +145,13 @@ class TestPositionsWebSocket:
 
         client.cookies.set("access_token", valid_jwt_token)
         with client.websocket_connect("/api/v1/broker/ws") as websocket:
-            # Send subscribe message
+            # Send subscribe message (SubscriptionRequest format)
             subscribe_msg = {
                 "type": "positions.subscribe",
-                "payload": {"accountId": "TEST-001"},
+                "payload": {
+                    "sub_id": "positions-sub-001",
+                    "sub_params": {"accountId": "TEST-001"},
+                },
             }
             websocket.send_json(subscribe_msg)
 
@@ -137,8 +161,8 @@ class TestPositionsWebSocket:
             # Verify response structure
             assert response["type"] == "positions.subscribe.response"
             assert response["payload"]["status"] == "ok"
+            assert response["payload"]["sub_id"] == "positions-sub-001"
             assert response["payload"]["topic"] == 'positions:{"accountId":"TEST-001"}'
-            assert "Subscribed" in response["payload"]["message"]
 
     def test_unsubscribe_from_positions(
         self, client: TestClient, valid_jwt_token: str
@@ -149,25 +173,37 @@ class TestPositionsWebSocket:
         with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # First subscribe
             websocket.send_json(
-                {"type": "positions.subscribe", "payload": {"accountId": "TEST-001"}}
+                {
+                    "type": "positions.subscribe",
+                    "payload": {
+                        "sub_id": "positions-unsub-001",
+                        "sub_params": {"accountId": "TEST-001"},
+                    },
+                }
             )
             subscribe_response = websocket.receive_json()
             assert subscribe_response["payload"]["status"] == "ok"
 
             # Then unsubscribe
             websocket.send_json(
-                {"type": "positions.unsubscribe", "payload": {"accountId": "TEST-001"}}
+                {
+                    "type": "positions.unsubscribe",
+                    "payload": {
+                        "sub_id": "positions-unsub-001",
+                        "sub_params": {"accountId": "TEST-001"},
+                    },
+                }
             )
             unsubscribe_response = websocket.receive_json()
 
             # Verify unsubscribe response
             assert unsubscribe_response["type"] == "positions.unsubscribe.response"
             assert unsubscribe_response["payload"]["status"] == "ok"
+            assert unsubscribe_response["payload"]["sub_id"] == "positions-unsub-001"
             assert (
                 unsubscribe_response["payload"]["topic"]
                 == 'positions:{"accountId":"TEST-001"}'
             )
-            assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
 
 class TestExecutionsWebSocket:
@@ -180,10 +216,13 @@ class TestExecutionsWebSocket:
 
         client.cookies.set("access_token", valid_jwt_token)
         with client.websocket_connect("/api/v1/broker/ws") as websocket:
-            # Send subscribe message
+            # Send subscribe message (SubscriptionRequest format)
             subscribe_msg = {
                 "type": "executions.subscribe",
-                "payload": {"accountId": "TEST-001"},
+                "payload": {
+                    "sub_id": "executions-sub-001",
+                    "sub_params": {"accountId": "TEST-001"},
+                },
             }
             websocket.send_json(subscribe_msg)
 
@@ -193,9 +232,9 @@ class TestExecutionsWebSocket:
             # Verify response structure
             assert response["type"] == "executions.subscribe.response"
             assert response["payload"]["status"] == "ok"
+            assert response["payload"]["sub_id"] == "executions-sub-001"
             # Topic includes both accountId and symbol (empty string if not provided)
             assert '"accountId":"TEST-001"' in response["payload"]["topic"]
-            assert "Subscribed" in response["payload"]["message"]
 
     def test_subscribe_to_executions_with_symbol_filter(
         self, client: TestClient, valid_jwt_token: str
@@ -207,7 +246,10 @@ class TestExecutionsWebSocket:
             # Send subscribe message with symbol filter
             subscribe_msg = {
                 "type": "executions.subscribe",
-                "payload": {"accountId": "TEST-001", "symbol": "AAPL"},
+                "payload": {
+                    "sub_id": "executions-symbol-001",
+                    "sub_params": {"accountId": "TEST-001", "symbol": "AAPL"},
+                },
             }
             websocket.send_json(subscribe_msg)
 
@@ -229,7 +271,13 @@ class TestExecutionsWebSocket:
         with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # First subscribe
             websocket.send_json(
-                {"type": "executions.subscribe", "payload": {"accountId": "TEST-001"}}
+                {
+                    "type": "executions.subscribe",
+                    "payload": {
+                        "sub_id": "executions-unsub-001",
+                        "sub_params": {"accountId": "TEST-001"},
+                    },
+                }
             )
             subscribe_response = websocket.receive_json()
             assert subscribe_response["payload"]["status"] == "ok"
@@ -238,7 +286,10 @@ class TestExecutionsWebSocket:
             websocket.send_json(
                 {
                     "type": "executions.unsubscribe",
-                    "payload": {"accountId": "TEST-001"},
+                    "payload": {
+                        "sub_id": "executions-unsub-001",
+                        "sub_params": {"accountId": "TEST-001"},
+                    },
                 }
             )
             unsubscribe_response = websocket.receive_json()
@@ -246,9 +297,9 @@ class TestExecutionsWebSocket:
             # Verify unsubscribe response
             assert unsubscribe_response["type"] == "executions.unsubscribe.response"
             assert unsubscribe_response["payload"]["status"] == "ok"
+            assert unsubscribe_response["payload"]["sub_id"] == "executions-unsub-001"
             # Topic includes both accountId and symbol
             assert '"accountId":"TEST-001"' in unsubscribe_response["payload"]["topic"]
-            assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
 
 class TestEquityWebSocket:
@@ -261,10 +312,13 @@ class TestEquityWebSocket:
 
         client.cookies.set("access_token", valid_jwt_token)
         with client.websocket_connect("/api/v1/broker/ws") as websocket:
-            # Send subscribe message
+            # Send subscribe message (SubscriptionRequest format)
             subscribe_msg = {
                 "type": "equity.subscribe",
-                "payload": {"accountId": "TEST-001"},
+                "payload": {
+                    "sub_id": "equity-sub-001",
+                    "sub_params": {"accountId": "TEST-001"},
+                },
             }
             websocket.send_json(subscribe_msg)
 
@@ -274,8 +328,8 @@ class TestEquityWebSocket:
             # Verify response structure
             assert response["type"] == "equity.subscribe.response"
             assert response["payload"]["status"] == "ok"
+            assert response["payload"]["sub_id"] == "equity-sub-001"
             assert response["payload"]["topic"] == 'equity:{"accountId":"TEST-001"}'
-            assert "Subscribed" in response["payload"]["message"]
 
     def test_unsubscribe_from_equity(
         self, client: TestClient, valid_jwt_token: str
@@ -286,25 +340,37 @@ class TestEquityWebSocket:
         with client.websocket_connect("/api/v1/broker/ws") as websocket:
             # First subscribe
             websocket.send_json(
-                {"type": "equity.subscribe", "payload": {"accountId": "TEST-001"}}
+                {
+                    "type": "equity.subscribe",
+                    "payload": {
+                        "sub_id": "equity-unsub-001",
+                        "sub_params": {"accountId": "TEST-001"},
+                    },
+                }
             )
             subscribe_response = websocket.receive_json()
             assert subscribe_response["payload"]["status"] == "ok"
 
             # Then unsubscribe
             websocket.send_json(
-                {"type": "equity.unsubscribe", "payload": {"accountId": "TEST-001"}}
+                {
+                    "type": "equity.unsubscribe",
+                    "payload": {
+                        "sub_id": "equity-unsub-001",
+                        "sub_params": {"accountId": "TEST-001"},
+                    },
+                }
             )
             unsubscribe_response = websocket.receive_json()
 
             # Verify unsubscribe response
             assert unsubscribe_response["type"] == "equity.unsubscribe.response"
             assert unsubscribe_response["payload"]["status"] == "ok"
+            assert unsubscribe_response["payload"]["sub_id"] == "equity-unsub-001"
             assert (
                 unsubscribe_response["payload"]["topic"]
                 == 'equity:{"accountId":"TEST-001"}'
             )
-            assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
 
 class TestBrokerConnectionWebSocket:
@@ -317,10 +383,13 @@ class TestBrokerConnectionWebSocket:
 
         client.cookies.set("access_token", valid_jwt_token)
         with client.websocket_connect("/api/v1/broker/ws") as websocket:
-            # Send subscribe message
+            # Send subscribe message (SubscriptionRequest format)
             subscribe_msg = {
                 "type": "broker-connection.subscribe",
-                "payload": {"accountId": "TEST-001"},
+                "payload": {
+                    "sub_id": "broker-conn-sub-001",
+                    "sub_params": {"accountId": "TEST-001"},
+                },
             }
             websocket.send_json(subscribe_msg)
 
@@ -334,11 +403,11 @@ class TestBrokerConnectionWebSocket:
             # Verify response structure
             assert response["type"] == "broker-connection.subscribe.response"
             assert response["payload"]["status"] == "ok"
+            assert response["payload"]["sub_id"] == "broker-conn-sub-001"
             assert (
                 response["payload"]["topic"]
                 == 'broker-connection:{"accountId":"TEST-001"}'
             )
-            assert "Subscribed" in response["payload"]["message"]
 
     def test_unsubscribe_from_broker_connection(
         self, client: TestClient, valid_jwt_token: str
@@ -351,7 +420,10 @@ class TestBrokerConnectionWebSocket:
             websocket.send_json(
                 {
                     "type": "broker-connection.subscribe",
-                    "payload": {"accountId": "TEST-001"},
+                    "payload": {
+                        "sub_id": "broker-conn-unsub-001",
+                        "sub_params": {"accountId": "TEST-001"},
+                    },
                 }
             )
             subscribe_response = websocket.receive_json()
@@ -364,7 +436,10 @@ class TestBrokerConnectionWebSocket:
             websocket.send_json(
                 {
                     "type": "broker-connection.unsubscribe",
-                    "payload": {"accountId": "TEST-001"},
+                    "payload": {
+                        "sub_id": "broker-conn-unsub-001",
+                        "sub_params": {"accountId": "TEST-001"},
+                    },
                 }
             )
             unsubscribe_response = websocket.receive_json()
@@ -374,11 +449,11 @@ class TestBrokerConnectionWebSocket:
                 unsubscribe_response["type"] == "broker-connection.unsubscribe.response"
             )
             assert unsubscribe_response["payload"]["status"] == "ok"
+            assert unsubscribe_response["payload"]["sub_id"] == "broker-conn-unsub-001"
             assert (
                 unsubscribe_response["payload"]["topic"]
                 == 'broker-connection:{"accountId":"TEST-001"}'
             )
-            assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
 
 class TestBrokerWebSocketGeneral:
@@ -409,11 +484,14 @@ class TestBrokerWebSocketGeneral:
                 "broker-connection",
             ]
 
-            for endpoint in endpoints:
+            for i, endpoint in enumerate(endpoints):
                 websocket.send_json(
                     {
                         "type": f"{endpoint}.subscribe",
-                        "payload": {"accountId": "TEST-ALL"},
+                        "payload": {
+                            "sub_id": f"all-endpoints-{i}",
+                            "sub_params": {"accountId": "TEST-ALL"},
+                        },
                     }
                 )
                 response = websocket.receive_json()

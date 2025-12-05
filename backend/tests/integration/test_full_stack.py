@@ -96,11 +96,14 @@ def test_websocket_all_channels(client: TestClient, valid_jwt_token: str) -> Non
     with client.websocket_connect(
         f"/api/v1/datafeed/ws?token={valid_jwt_token}"
     ) as websocket:
-        # Test datafeed channels - bars
+        # Test datafeed channels - bars (SubscriptionRequest format: sub_id + sub_params)
         websocket.send_json(
             {
                 "type": "bars.subscribe",
-                "payload": {"symbol": "AAPL", "resolution": "1"},
+                "payload": {
+                    "sub_id": "fullstack-bars-001",
+                    "sub_params": {"symbol": "AAPL", "resolution": "1"},
+                },
             }
         )
         response = receive_message_by_type(websocket, "bars.subscribe.response")
@@ -111,7 +114,10 @@ def test_websocket_all_channels(client: TestClient, valid_jwt_token: str) -> Non
         websocket.send_json(
             {
                 "type": "quotes.subscribe",
-                "payload": {"symbols": ["AAPL"], "fast_symbols": []},
+                "payload": {
+                    "sub_id": "fullstack-quotes-001",
+                    "sub_params": {"symbols": ["AAPL"], "fast_symbols": []},
+                },
             }
         )
         response = receive_message_by_type(websocket, "quotes.subscribe.response")
@@ -124,7 +130,13 @@ def test_websocket_all_channels(client: TestClient, valid_jwt_token: str) -> Non
     ) as websocket:
         # Test broker channels - orders
         websocket.send_json(
-            {"type": "orders.subscribe", "payload": {"accountId": "test"}}
+            {
+                "type": "orders.subscribe",
+                "payload": {
+                    "sub_id": "fullstack-orders-001",
+                    "sub_params": {"accountId": "test"},
+                },
+            }
         )
         response = receive_message_by_type(websocket, "orders.subscribe.response")
         assert response["type"] == "orders.subscribe.response"
@@ -132,7 +144,13 @@ def test_websocket_all_channels(client: TestClient, valid_jwt_token: str) -> Non
 
         # Test broker channels - positions
         websocket.send_json(
-            {"type": "positions.subscribe", "payload": {"accountId": "test"}}
+            {
+                "type": "positions.subscribe",
+                "payload": {
+                    "sub_id": "fullstack-positions-001",
+                    "sub_params": {"accountId": "test"},
+                },
+            }
         )
         response = receive_message_by_type(websocket, "positions.subscribe.response")
         assert response["type"] == "positions.subscribe.response"
@@ -140,7 +158,13 @@ def test_websocket_all_channels(client: TestClient, valid_jwt_token: str) -> Non
 
         # Test broker channels - executions
         websocket.send_json(
-            {"type": "executions.subscribe", "payload": {"accountId": "test"}}
+            {
+                "type": "executions.subscribe",
+                "payload": {
+                    "sub_id": "fullstack-executions-001",
+                    "sub_params": {"accountId": "test"},
+                },
+            }
         )
         response = receive_message_by_type(websocket, "executions.subscribe.response")
         assert response["type"] == "executions.subscribe.response"
