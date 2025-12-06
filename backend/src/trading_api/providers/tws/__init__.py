@@ -27,9 +27,9 @@ from trading_api.models.common import CapabilitySpec, DatafeedError
 from trading_api.models.market import (
     Bar,
     QuoteData,
+    Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
-    TimeFrame,
 )
 from trading_api.models.providers.tws.tws_configs import TWSProviderConfig
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
@@ -38,8 +38,11 @@ from trading_api.providers.tws.tws_models import RTMarketData
 from trading_api.shared import Provider
 
 from .tws_mappers import (
+    build_contract,
+    calculate_tws_duration,
     contract_description_to_search_result,
     contract_details_to_symbol_info,
+    map_resolution_to_tws_bar_size,
     tws_bar_to_domain_bar,
     tws_ticks_to_bar,
     tws_ticks_to_quote_data,
@@ -81,53 +84,6 @@ def _parse_ticker(ticker: str) -> tuple[str, str, str, str]:
         if len(ticker_parts) > 1:
             contractId = ticker_parts[1].strip()
     return symbol_name, exchange, secType, contractId
-
-
-def _convert_resolution_to_timeframe(resolution: str) -> TimeFrame:
-    """Convert TradingView resolution string to TimeFrame enum.
-
-    Args:
-        resolution: TradingView resolution string
-            - Intraday: "1", "5", "15", "30", "60" (minutes)
-            - Daily+: "1D", "1W", "1M"
-
-    Returns:
-        TimeFrame enum value
-
-    Raises:
-        ValueError: If resolution is not supported
-
-    Examples:
-        >>> self._convert_resolution_to_timeframe('1')
-        TimeFrame.MIN_1
-        >>> self._convert_resolution_to_timeframe('1D')
-        TimeFrame.DAY_1
-    """
-    # Map TradingView resolution strings to TimeFrame enum
-    # TradingView uses: "1", "5", "15", "30", "60" for minutes, "D"/"1D", "W"/"1W", "M"/"1M" for larger
-    resolution_map: dict[str, TimeFrame] = {
-        # Minutes (TradingView sends just the number)
-        "1": TimeFrame.MIN_1,
-        "5": TimeFrame.MIN_5,
-        "15": TimeFrame.MIN_15,
-        "30": TimeFrame.MIN_30,
-        "60": TimeFrame.HOUR_1,
-        # Daily/Weekly/Monthly (TradingView may send with or without "1" prefix)
-        "D": TimeFrame.DAY_1,
-        "1D": TimeFrame.DAY_1,
-        "W": TimeFrame.WEEK_1,
-        "1W": TimeFrame.WEEK_1,
-        "M": TimeFrame.MONTH_1,
-        "1M": TimeFrame.MONTH_1,
-    }
-
-    if resolution not in resolution_map:
-        raise ValueError(
-            f"Unsupported resolution: {resolution}. "
-            f"Supported: {list(resolution_map.keys())}"
-        )
-
-    return resolution_map[resolution]
 
 
 class TWSProvider(Provider, DatafeedCapability):
@@ -180,121 +136,6 @@ class TWSProvider(Provider, DatafeedCapability):
         """
         return self._config
 
-    # === Helper Methods ===
-
-    def _build_contract(
-        self,
-        ticker: str,
-    ) -> Contract:
-        """Build TWS Contract object from domain parameters.
-
-        Args:
-            symbol: Symbol name (e.g., "AAPL")
-            exchange: Exchange name (default: "SMART" for smart routing)
-            sec_type: Security type (default: "STK" for stocks)
-            currency: Currency code (default: "USD")
-
-        Returns:
-            TWS Contract object ready for API calls
-        """
-        symbol, exchange, sec_type, conId = _parse_ticker(ticker)
-        contract = Contract()
-        contract.symbol = symbol
-        contract.secType = sec_type
-        contract.primaryExchange = exchange
-        contract.conId = int(conId)
-        return contract
-
-    def _map_timeframe_to_tws_bar_size(self, resolution: TimeFrame) -> str:
-        """Map domain TimeFrame → TWS barSizeSetting.
-
-        Args:
-            resolution: Domain TimeFrame enum
-
-        Returns:
-            TWS bar size string ("1 min", "5 mins", "1 hour", "1 day", etc.)
-
-        Raises:
-            DatafeedError: If resolution not supported
-        """
-        # Map TimeFrame enum members directly to TWS bar size strings
-        mapping: dict[TimeFrame, str] = {
-            TimeFrame.SEC_5: "5 secs",
-            TimeFrame.SEC_10: "10 secs",
-            TimeFrame.MIN_1: "1 min",
-            TimeFrame.MIN_5: "5 mins",
-            TimeFrame.MIN_15: "15 mins",
-            TimeFrame.MIN_30: "30 mins",
-            TimeFrame.HOUR_1: "1 hour",
-            TimeFrame.DAY_1: "1 day",
-            TimeFrame.WEEK_1: "1 week",
-            TimeFrame.MONTH_1: "1 month",
-        }
-
-        bar_size = mapping.get(resolution)
-        if not bar_size:
-            raise DatafeedError(
-                f"Unsupported resolution: {resolution}. "
-                f"Supported: {[tf.name for tf in mapping.keys()]}"
-            )
-        return bar_size
-
-    def _calculate_tws_duration(
-        self, start_time: datetime, end_time: datetime, resolution: TimeFrame
-    ) -> str:
-        """Calculate TWS duration string from time range.
-
-        TWS requires duration in format: "n S|D|W|M|Y"
-        Maximum durations depend on bar size (e.g., 1 sec bars max 2000 S)
-
-        Args:
-            start_time: Start datetime
-            end_time: End datetime
-            resolution: Bar timeframe (used to select appropriate unit)
-
-        Returns:
-            TWS duration string (e.g., "1 D", "2 W", "86400 S")
-        """
-        delta = end_time - start_time
-        total_seconds = int(delta.total_seconds())
-
-        # Select duration unit based on resolution and time range
-        # TWS limits: seconds (max 2000 S), days (max 365 D), weeks, months, years
-
-        # Sub-minute bars (5, 10 seconds)
-        if resolution in [TimeFrame.SEC_5, TimeFrame.SEC_10]:
-            # Use seconds for short durations
-            if total_seconds <= 2000:
-                return f"{total_seconds} S"
-            # Fall back to days for longer ranges
-            days = delta.days + 1
-            return f"{days} D"
-
-        # Intraday bars (1 min - 1 hour)
-        elif resolution in [
-            TimeFrame.MIN_1,
-            TimeFrame.MIN_5,
-            TimeFrame.MIN_15,
-            TimeFrame.MIN_30,
-            TimeFrame.HOUR_1,
-        ]:
-            # Use days for intraday bars
-            days = delta.days + 1
-            if days <= 365:
-                return f"{days} D"
-            # Use years for very long ranges
-            weeks = days // 365 + 1
-            return f"{weeks} Y"
-
-        # Daily and above
-        else:
-            days = delta.days + 1
-            if days <= 365:
-                return f"{days} D"
-            # TWS: durations > 52 weeks must use years
-            years = days // 365 + 1
-            return f"{years} Y"
-
     # === DatafeedCapability Implementation ===
 
     async def search_symbols(
@@ -345,7 +186,7 @@ class TWSProvider(Provider, DatafeedCapability):
         """
 
         # Build TWS Contract for the request
-        contract = self._build_contract(ticker)
+        contract = build_contract(ticker)
 
         if contract.primaryExchange in SMART_EXCHANGES:
             now_us_eastern = datetime.now(us_eastern)
@@ -389,7 +230,7 @@ class TWSProvider(Provider, DatafeedCapability):
         ticker: str,
         start_time: datetime,
         end_time: datetime,
-        resolution: TimeFrame,
+        resolution: Resolution,
         **kwargs: Any,
     ) -> list[Bar]:
         """Get historical OHLCV bars.
@@ -402,7 +243,7 @@ class TWSProvider(Provider, DatafeedCapability):
             symbol: Symbol name (e.g., "AAPL")
             start_time: Start of time range (inclusive)
             end_time: End of time range (inclusive)
-            resolution: Bar timeframe (TimeFrame enum)
+            resolution: Bar resolution (Resolution enum)
             exchange: Optional exchange filter (default: "SMART")
             timeout: Request timeout in seconds
 
@@ -414,8 +255,8 @@ class TWSProvider(Provider, DatafeedCapability):
             TimeoutError: If request exceeds timeout
         """
         # Map domain parameters to TWS format
-        bar_size = self._map_timeframe_to_tws_bar_size(resolution)
-        duration_str = self._calculate_tws_duration(start_time, end_time, resolution)
+        bar_size = map_resolution_to_tws_bar_size(resolution)
+        duration_str = calculate_tws_duration(start_time, end_time, resolution)
 
         # Format datetime with timezone (TWS requires explicit timezone)
         # Convert to UTC if naive, otherwise use existing timezone
@@ -431,12 +272,17 @@ class TWSProvider(Provider, DatafeedCapability):
 
         tws_bars: list[BarData] = []
         try:
-            contract = self._build_contract(ticker)
+            contract = build_contract(ticker)
             exchanges = [contract.primaryExchange]
-            if (
-                contract.primaryExchange in SMART_EXCHANGES
-                and resolution > TimeFrame.HOUR_1
-            ):
+            if contract.primaryExchange in SMART_EXCHANGES and resolution in [
+                Resolution.MIN_1,
+                Resolution.MIN_5,
+                Resolution.MIN_15,
+                Resolution.MIN_30,
+                Resolution.HOUR_1,
+                Resolution.HOUR_2,
+                Resolution.HOUR_4,
+            ]:
                 exchanges.append("OVERNIGHT")
             for exch in exchanges:
                 contract.exchange = exch
@@ -502,7 +348,7 @@ class TWSProvider(Provider, DatafeedCapability):
     def subscribe_realtime_bars(
         self,
         ticker: str,
-        resolution: TimeFrame,
+        resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
         **kwargs: Any,
     ) -> str:
@@ -513,7 +359,7 @@ class TWSProvider(Provider, DatafeedCapability):
 
         Args:
             symbol: Symbol name
-            resolution: Bar timeframe
+            resolution: Bar resolution
             callback: Callback for each new bar
             exchange: Optional exchange filter
 
@@ -606,15 +452,20 @@ class TWSProvider(Provider, DatafeedCapability):
             DatafeedError: If subscription ID not found
         """
         # Lookup symbol/exchange from reverse mapping
-        for key, ticker in self._ticks.items():
-            if subscription_id in ticker.reqId_callback_map:
-                ticker.reqId_callback_map.pop(subscription_id, None)
+        for key, tick in self._ticks.items():
+            if subscription_id in tick.reqId_callback_map:
+                tick.reqId_callback_map.pop(subscription_id, None)
                 if DEBUG_TWS_PROVIDER:
                     debug_log(
                         f"Unsubscribed from real-time bars with subscription ID: {subscription_id}"
                     )
-                if not ticker.reqId_callback_map:
+                if not tick.reqId_callback_map:
                     self._remove_ticker(key)
+                else:
+                    if DEBUG_TWS_PROVIDER:
+                        debug_log(
+                            f"Ticker {key} still has active subscriptions: {list(tick.reqId_callback_map.keys())}."
+                        )
                 return
 
     def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
@@ -627,21 +478,26 @@ class TWSProvider(Provider, DatafeedCapability):
             DatafeedError: If subscription ID not found
         """
         for subscription_id in subscription_ids:
-            for key, ticker in self._ticks.items():
-                if subscription_id in ticker.reqId_callback_map:
-                    ticker.reqId_callback_map.pop(subscription_id, None)
+            for key, tick in self._ticks.items():
+                if subscription_id in tick.reqId_callback_map:
+                    tick.reqId_callback_map.pop(subscription_id, None)
                     if DEBUG_TWS_PROVIDER:
                         debug_log(
                             f"Unsubscribed from market data with subscription ID: {subscription_id}"
                         )
-                    if not ticker.reqId_callback_map:
+                    if not tick.reqId_callback_map:
                         self._remove_ticker(key)
+                    else:
+                        if DEBUG_TWS_PROVIDER:
+                            debug_log(
+                                f"Ticker {key} still has active subscriptions: {list(tick.reqId_callback_map.keys())}."
+                            )
                     break
 
     def _get_or_create_ticker(
         self,
         ticker: str,
-        resolution: TimeFrame | None = None,
+        resolution: Resolution | None = None,
         **kwargs: Any,
     ) -> RTMarketData:
         """Get existing or create new real-time data subscription (sync version).
@@ -658,7 +514,7 @@ class TWSProvider(Provider, DatafeedCapability):
         if ticker in self._ticks:
             tick = self._ticks[ticker]
             if resolution is not None:
-                bar_size = self._map_timeframe_to_tws_bar_size(resolution)
+                bar_size = map_resolution_to_tws_bar_size(resolution)
                 if bar_size != tick.barSize_setting:
                     # switch resolution
                     if DEBUG_TWS_PROVIDER:
@@ -682,16 +538,21 @@ class TWSProvider(Provider, DatafeedCapability):
             if DEBUG_TWS_PROVIDER:
                 debug_log(f"remove_ticker {stale_ticker}")
 
-        # defautl resolution if not provided (quotes only)
-        contract = self._build_contract(ticker)
+        # default resolution if not provided (quotes only)
+        contract = build_contract(ticker)
 
         if resolution is None:
-            resolution = TimeFrame.DAY_1  # Default resolution for quotes
+            resolution = Resolution.MIN_5  # Default resolution for quotes
 
-        if (
-            contract.primaryExchange in SMART_EXCHANGES
-            and resolution <= TimeFrame.HOUR_1
-        ):
+        if contract.primaryExchange in SMART_EXCHANGES and resolution in [
+            Resolution.MIN_1,
+            Resolution.MIN_5,
+            Resolution.MIN_15,
+            Resolution.MIN_30,
+            Resolution.HOUR_1,
+            Resolution.HOUR_2,
+            Resolution.HOUR_4,
+        ]:
             now_us_eastern = datetime.now(us_eastern)
             contract.exchange = (
                 "OVERNIGHT"
@@ -711,7 +572,7 @@ class TWSProvider(Provider, DatafeedCapability):
 
         tick = self._tws_client.create_ticker(
             contract,
-            self._map_timeframe_to_tws_bar_size(resolution),
+            map_resolution_to_tws_bar_size(resolution),
             **kwargs,
         )
 
@@ -724,7 +585,6 @@ class TWSProvider(Provider, DatafeedCapability):
         return tick
 
     def _remove_ticker(self, ticker_key: str) -> None:
-        assert not self._ticks[ticker_key].reqId_callback_map
         if DEBUG_TWS_PROVIDER:
             debug_log(f"Removing ticker {ticker_key} due to no active subscriptions")
         stale_ticker = self._ticks.pop(ticker_key)

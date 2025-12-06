@@ -433,7 +433,7 @@ class IBSocket:
             with self._lock:
                 self._socket.close()
                 self._state = IBSocketState.CLOSED
-                debug_log("IBSocket Socket closed.")
+                # debug_log("IBSocket Socket closed.")
         except Exception as e:
             logger.exception(f"Error while closing IBSocket: {e}")
 
@@ -1279,18 +1279,20 @@ class TWSClient:
         """Cancel a real-time data subscription."""
 
         VERSION = 1
-        self.ibsocket.send_message(
-            OUT.CANCEL_HISTORICAL_DATA, [VERSION, ticker.bar_data_reqId]
-        )
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"cancelled realtime bars for reqId {ticker.bar_data_reqId}")
+        if ticker.bar_data_reqId is not None:
+            self.ibsocket.send_message(
+                OUT.CANCEL_HISTORICAL_DATA, [VERSION, ticker.bar_data_reqId]
+            )
+            if DEBUG_TWS_REQUEST:
+                debug_log(f"cancelled realtime bars for reqId {ticker.bar_data_reqId}")
 
         VERSION = 2
-        self.ibsocket.send_message(
-            OUT.CANCEL_MKT_DATA, [VERSION, ticker.mkt_data_reqId]
-        )
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"cancelled market data for reqId {ticker.mkt_data_reqId}")
+        if ticker.mkt_data_reqId is not None:
+            self.ibsocket.send_message(
+                OUT.CANCEL_MKT_DATA, [VERSION, ticker.mkt_data_reqId]
+            )
+            if DEBUG_TWS_REQUEST:
+                debug_log(f"cancelled market data for reqId {ticker.mkt_data_reqId}")
 
         self._cb_wrapper.unregister_ticker(ticker)
         ticker.reset()

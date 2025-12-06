@@ -11,9 +11,9 @@ from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.market import (
     Bar,
     QuoteData,
+    Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
-    TimeFrame,
 )
 from trading_api.modules.datafeed.service import DatafeedService
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
@@ -55,21 +55,21 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     ) -> list[SearchSymbolResultItem]:
         return await self._search_symbols_mock(pattern=pattern, **kwargs)  # type: ignore[no-any-return]
 
-    async def get_symbol_info(self, symbol: str, **kwargs: Any) -> SymbolInfo:
+    async def get_symbol_info(self, ticker: str, **kwargs: Any) -> SymbolInfo:
         return await self._get_symbol_info_mock(  # type: ignore[no-any-return]
-            symbol=symbol, **kwargs
+            ticker=ticker, **kwargs
         )
 
     async def get_historical_bars(
         self,
-        symbol: str,
+        ticker: str,
         start_time: datetime,
         end_time: datetime,
-        resolution: TimeFrame,
+        resolution: Resolution,
         **kwargs: Any,
     ) -> list[Bar]:
         return await self._get_historical_bars_mock(  # type: ignore[no-any-return]
-            symbol=symbol,
+            ticker=ticker,
             start_time=start_time,
             end_time=end_time,
             resolution=resolution,
@@ -78,38 +78,38 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     def subscribe_realtime_bars(
         self,
-        symbol: str,
-        resolution: TimeFrame,
+        ticker: str,
+        resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
         **kwargs: Any,
-    ) -> int:
+    ) -> str:
         return self._subscribe_realtime_bars_mock(  # type: ignore[no-any-return]
-            symbol=symbol, resolution=resolution, callback=callback, **kwargs
+            ticker=ticker, resolution=resolution, callback=callback, **kwargs
         )
 
     def subscribe_market_data(
         self,
-        symbols: list[str],
+        tickers: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
         **kwargs: Any,
-    ) -> list[int]:
+    ) -> list[str]:
         return self._subscribe_market_data_mock(  # type: ignore[no-any-return]
-            symbols=symbols, callback=callback, **kwargs
+            tickers=tickers, callback=callback, **kwargs
         )
 
-    def unsubscribe_realtime_bars(self, subscription_id: int) -> None:
+    def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         self._unsubscribe_realtime_bars_mock(subscription_id)
 
-    def unsubscribe_market_data(self, subscription_ids: list[int]) -> None:
+    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
         self._unsubscribe_market_data_mock(subscription_ids)
 
     async def get_quotes_snapshot(
         self,
-        symbols: list[str],
+        tickers: list[str],
         **kwargs: Any,
     ) -> list[QuoteData]:
         return await self._get_quotes_snapshot_mock(  # type: ignore[no-any-return]
-            symbols=symbols, **kwargs
+            tickers=tickers, **kwargs
         )
 
 
@@ -262,12 +262,12 @@ async def test_get_bars_delegates_to_provider() -> None:
     module_dir = Path(__file__).parent.parent
     service = DatafeedService(module_dir, providers=[mock_provider])
 
-    # Call get_bars with TradingView format
+    # Call get_bars with Resolution enum
     from_time = 1609459200000  # Unix milliseconds
     to_time = 1609632000000
     results = await service.get_bars(
         ticker="AAPL:NASDAQ",
-        resolution="1D",
+        resolution=Resolution.DAY_1,
         from_time=from_time,
         to_time=to_time,
         count_back=None,
@@ -277,12 +277,11 @@ async def test_get_bars_delegates_to_provider() -> None:
     mock_provider._get_historical_bars_mock.assert_called_once()
     call_kwargs = mock_provider._get_historical_bars_mock.call_args.kwargs
 
-    # Verify symbol/exchange parsing
-    assert call_kwargs["symbol"] == "AAPL"
-    assert call_kwargs["exchange"] == "NASDAQ"
+    # Verify ticker passed through
+    assert call_kwargs["ticker"] == "AAPL:NASDAQ"
 
-    # Verify resolution conversion
-    assert call_kwargs["resolution"] == TimeFrame.DAY_1
+    # Verify resolution passed through
+    assert call_kwargs["resolution"] == Resolution.DAY_1
 
     # Verify timestamp conversion (milliseconds → datetime)
     assert isinstance(call_kwargs["start_time"], datetime)
@@ -321,7 +320,7 @@ async def test_get_bars_applies_count_back_filter() -> None:
     # Request only last 3 bars
     results = await service.get_bars(
         ticker="AAPL",
-        resolution="1D",
+        resolution=Resolution.DAY_1,
         from_time=0,
         to_time=999999999999,
         count_back=3,
@@ -330,30 +329,6 @@ async def test_get_bars_applies_count_back_filter() -> None:
     # Should return only last 3 bars
     assert len(results) == 3
     assert results == mock_bars[-3:]
-
-
-@pytest.mark.asyncio
-async def test_get_bars_handles_unsupported_resolution() -> None:
-    """Test get_bars handles unsupported resolution gracefully."""
-    mock_provider = MockDatafeedProvider()
-
-    module_dir = Path(__file__).parent.parent
-    service = DatafeedService(module_dir, providers=[mock_provider])
-
-    # Call with unsupported resolution
-    results = await service.get_bars(
-        ticker="AAPL",
-        resolution="INVALID",
-        from_time=0,
-        to_time=999999999999,
-        count_back=None,
-    )
-
-    # Should return empty list
-    assert results == []
-
-    # Provider should NOT be called
-    mock_provider._get_historical_bars_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -368,7 +343,7 @@ async def test_get_bars_handles_provider_exception() -> None:
     # Call get_bars
     results = await service.get_bars(
         ticker="AAPL",
-        resolution="1D",
+        resolution=Resolution.DAY_1,
         from_time=0,
         to_time=999999999999,
         count_back=None,

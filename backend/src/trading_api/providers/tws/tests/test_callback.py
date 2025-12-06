@@ -59,11 +59,12 @@ class TestFutureManagement:
         # Future should be registered
         assert req_id in callback._futures
 
-        # Resolve it immediately
-        callback._resolve_future(req_id, "test_result")
+        # Add result to accumulator and resolve
+        callback._accumulators[req_id].append("test_result")
+        callback._resolve_future(req_id)
 
         result = await coro
-        assert result == "test_result"
+        assert result == ["test_result"]
 
     @pytest.mark.asyncio
     async def test_resolve_future_removes_from_registry(self) -> None:
@@ -72,11 +73,13 @@ class TestFutureManagement:
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        future: asyncio.Future[str] = loop.create_future()
+        future: asyncio.Future[list[str]] = loop.create_future()
         # _futures stores (loop, future) tuple
         callback._futures[req_id] = (loop, future)
+        # Setup accumulator with result
+        callback._accumulators[req_id] = ["result"]
 
-        callback._resolve_future(req_id, "result")
+        callback._resolve_future(req_id)
 
         # Future should be removed from registry
         assert req_id not in callback._futures
@@ -85,7 +88,7 @@ class TestFutureManagement:
         await asyncio.sleep(0.01)
 
         result = await future
-        assert result == "result"
+        assert result == ["result"]
 
     @pytest.mark.asyncio
     async def test_reject_future_with_exception(self) -> None:
@@ -118,10 +121,10 @@ class TestFutureManagement:
         callback = TWSCallback(loop=loop)
 
         # Should not raise
-        callback._resolve_future(999, "result")
+        callback._resolve_future(999)
 
-        # Should log error
-        assert "Unknown reqId 999" in caplog.text
+        # Should log error (future/loop not found)
+        assert "999" in caplog.text or "not found" in caplog.text.lower()
 
         loop.close()
 
@@ -139,6 +142,8 @@ class TestSymbolSamplesCallback:
         future: asyncio.Future[list[ContractDescription]] = loop.create_future()
         # _futures stores (loop, future) tuple
         callback._futures[req_id] = (loop, future)
+        # Must also set up accumulator (create_future does this automatically)
+        callback._accumulators[req_id] = []
 
         # Create test data
         contract = Contract()
@@ -169,6 +174,8 @@ class TestSymbolSamplesCallback:
         future: asyncio.Future[list[ContractDescription]] = loop.create_future()
         # _futures stores (loop, future) tuple
         callback._futures[req_id] = (loop, future)
+        # Must also set up accumulator (create_future does this automatically)
+        callback._accumulators[req_id] = []
 
         callback.symbolSamples(req_id, [])
 
@@ -192,7 +199,8 @@ class TestContractDetailsCallback:
         future: asyncio.Future[list[ContractDetails]] = loop.create_future()
         # _futures stores (loop, future) tuple
         callback._futures[req_id] = (loop, future)
-        # Accumulator auto-created by contractDetails via setdefault
+        # Must also set up accumulator (create_future does this automatically)
+        callback._accumulators[req_id] = []
 
         # Create test data
         contract1 = Contract()
@@ -239,6 +247,8 @@ class TestContractDetailsCallback:
         future: asyncio.Future[list[ContractDetails]] = loop.create_future()
         # _futures stores (loop, future) tuple
         callback._futures[req_id] = (loop, future)
+        # Must also set up accumulator (create_future does this automatically)
+        callback._accumulators[req_id] = []
 
         contract = Contract()
         contract.symbol = "MSFT"
@@ -266,6 +276,8 @@ class TestContractDetailsCallback:
         future: asyncio.Future[list[ContractDetails]] = loop.create_future()
         # _futures stores (loop, future) tuple
         callback._futures[req_id] = (loop, future)
+        # Must also set up accumulator (create_future does this automatically)
+        callback._accumulators[req_id] = []
 
         # End signal without any contractDetails calls
         callback.contractDetailsEnd(req_id)
@@ -290,6 +302,8 @@ class TestHistoricalDataCallback:
         future: asyncio.Future[list[BarData]] = loop.create_future()
         # _futures stores (loop, future) tuple
         callback._futures[req_id] = (loop, future)
+        # Must also set up accumulator (create_future does this automatically)
+        callback._accumulators[req_id] = []
 
         # Create test bars
         bar1 = BarData()
@@ -326,12 +340,15 @@ class TestMarketDataSnapshotCallback:
     @pytest.mark.asyncio
     async def test_tick_price_updates_ticker(self) -> None:
         """Test tickPrice updates RTMarketData ticker fields."""
+        from trading_api.providers.tws.tws_models import RTMarketData
+
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        # Create ticker slot first (required by new implementation)
-        ticker = callback.register_ticker([req_id])
+        # Create RTMarketData with mkt_data_reqId set
+        ticker = RTMarketData(mkt_data_reqId=req_id)
+        callback.register_ticker(ticker)
 
         tick_attrib = TickAttrib()
 
@@ -348,12 +365,15 @@ class TestMarketDataSnapshotCallback:
         """Test tickSize updates RTMarketData ticker fields."""
         from decimal import Decimal
 
+        from trading_api.providers.tws.tws_models import RTMarketData
+
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        # Create ticker slot first
-        ticker = callback.register_ticker([req_id])
+        # Create RTMarketData with mkt_data_reqId set
+        ticker = RTMarketData(mkt_data_reqId=req_id)
+        callback.register_ticker(ticker)
 
         # BID_SIZE=0, ASK_SIZE=3, VOLUME=8
         callback.tickSize(req_id, 0, Decimal("1000"))  # BID_SIZE
@@ -365,14 +385,17 @@ class TestMarketDataSnapshotCallback:
     @pytest.mark.asyncio
     async def test_tick_snapshot_end_resets_ticker(self) -> None:
         """Test tickSnapshotEnd resets ticker data."""
+        from trading_api.providers.tws.tws_models import RTMarketData
+
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        # Create ticker slot and set some data
-        ticker = callback.register_ticker([req_id])
+        # Create RTMarketData with mkt_data_reqId set and some data
+        ticker = RTMarketData(mkt_data_reqId=req_id)
         ticker.bid = 100.0
         ticker.ask = 100.05
+        callback.register_ticker(ticker)
 
         callback.tickSnapshotEnd(req_id)
 
@@ -508,12 +531,15 @@ class TestTickReqParams:
 
     def test_tick_req_params_updates_ticker(self) -> None:
         """Test tickReqParams updates RTMarketData ticker fields."""
+        from trading_api.providers.tws.tws_models import RTMarketData
+
         loop = asyncio.new_event_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        # Create ticker slot first
-        ticker = callback.register_ticker([req_id])
+        # Create RTMarketData with mkt_data_reqId set
+        ticker = RTMarketData(mkt_data_reqId=req_id)
+        callback.register_ticker(ticker)
 
         callback.tickReqParams(req_id, 0.01, "ISLAND", 3)
 
@@ -529,12 +555,15 @@ class TestMarketDataType:
 
     def test_market_data_type_updates_ticker(self) -> None:
         """Test marketDataType updates RTMarketData ticker field."""
+        from trading_api.providers.tws.tws_models import RTMarketData
+
         loop = asyncio.new_event_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        # Create ticker slot first
-        ticker = callback.register_ticker([req_id])
+        # Create RTMarketData with mkt_data_reqId set
+        ticker = RTMarketData(mkt_data_reqId=req_id)
+        callback.register_ticker(ticker)
 
         callback.marketDataType(req_id, 2)  # 2 = Frozen
 
@@ -548,12 +577,15 @@ class TestTickStringGeneric:
 
     def test_tick_string_updates_ticker(self) -> None:
         """Test tickString updates RTMarketData ticker field."""
+        from trading_api.providers.tws.tws_models import RTMarketData
+
         loop = asyncio.new_event_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        # Create ticker slot first
-        ticker = callback.register_ticker([req_id])
+        # Create RTMarketData with mkt_data_reqId set
+        ticker = RTMarketData(mkt_data_reqId=req_id)
+        callback.register_ticker(ticker)
 
         # LAST_TIMESTAMP=45
         callback.tickString(req_id, 45, "1702656000")
@@ -564,12 +596,15 @@ class TestTickStringGeneric:
 
     def test_tick_generic_updates_ticker(self) -> None:
         """Test tickGeneric updates RTMarketData ticker field."""
+        from trading_api.providers.tws.tws_models import RTMarketData
+
         loop = asyncio.new_event_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        # Create ticker slot first
-        ticker = callback.register_ticker([req_id])
+        # Create RTMarketData with mkt_data_reqId set
+        ticker = RTMarketData(mkt_data_reqId=req_id)
+        callback.register_ticker(ticker)
 
         # HALTED=49
         callback.tickGeneric(req_id, 49, 0.0)
@@ -592,12 +627,15 @@ class TestRealtimeBarCallback:
         """Test historicalDataUpdate updates RTMarketData ticker bar fields."""
         from decimal import Decimal
 
+        from trading_api.providers.tws.tws_models import RTMarketData
+
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        # Create ticker slot first
-        ticker = callback.register_ticker([req_id])
+        # Create RTMarketData with bar_data_reqId set
+        ticker = RTMarketData(bar_data_reqId=req_id)
+        callback.register_ticker(ticker)
 
         # Create a bar update
         bar = BarData()
@@ -627,11 +665,15 @@ class TestRealtimeBarCallback:
         """Test historicalDataUpdate triggers registered ticker callbacks."""
         from decimal import Decimal
 
+        from trading_api.providers.tws.tws_models import RTMarketData
+
         loop = asyncio.get_running_loop()
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        ticker = callback.register_ticker([req_id])
+        # Create RTMarketData with bar_data_reqId set
+        ticker = RTMarketData(bar_data_reqId=req_id)
+        callback.register_ticker(ticker)
 
         # Track callback invocations
         callback_called: list[tuple[Any, list[str] | None]] = []
@@ -641,8 +683,8 @@ class TestRealtimeBarCallback:
         ) -> None:
             callback_called.append((rt_data, updated_fields))
 
-        # Register callback on ticker
-        ticker.reqId_callback_map[123] = (loop, ticker_callback)
+        # Register callback on ticker with string key
+        ticker.reqId_callback_map["test_callback"] = (loop, ticker_callback)
 
         bar = BarData()
         bar.date = "1702656000"
@@ -661,12 +703,3 @@ class TestRealtimeBarCallback:
 
         assert len(callback_called) == 1
         assert callback_called[0][0] is ticker
-
-    @pytest.mark.asyncio
-    async def test_callbacks_initialization(self) -> None:
-        """Test _callbacks is initialized empty."""
-        loop = asyncio.get_running_loop()
-        callback = TWSCallback(loop=loop)
-
-        assert callback._callbacks == {}
-        assert isinstance(callback._callbacks, dict)

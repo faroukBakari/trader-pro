@@ -135,10 +135,11 @@ class TestTWSClientReqMatchingSymbols:
             # Schedule callback resolution
             async def resolve_after_send() -> None:
                 await asyncio.sleep(0.01)
-                # Find the registered future and resolve it
+                # Find the registered future and resolve it via accumulator
                 req_id = 1
                 if req_id in client._cb_wrapper._futures:
-                    client._cb_wrapper._resolve_future(req_id, [desc])
+                    client._cb_wrapper._accumulators[req_id].append(desc)
+                    client._cb_wrapper._resolve_future(req_id)
 
             asyncio.create_task(resolve_after_send())
 
@@ -164,7 +165,9 @@ class TestTWSClientReqMatchingSymbols:
             # Schedule callback
             async def resolve_after_send() -> None:
                 await asyncio.sleep(0.01)
-                client._cb_wrapper._resolve_future(42, [])
+                # Resolve via accumulator pattern (no items = empty result)
+                if 42 in client._cb_wrapper._futures:
+                    client._cb_wrapper._resolve_future(42)
 
             asyncio.create_task(resolve_after_send())
 
@@ -204,7 +207,10 @@ class TestTWSClientReqContractDetails:
 
             async def resolve_after_send() -> None:
                 await asyncio.sleep(0.01)
-                client._cb_wrapper._resolve_future(1, [details])
+                # Resolve via accumulator pattern
+                if 1 in client._cb_wrapper._futures:
+                    client._cb_wrapper._accumulators[1].append(details)
+                    client._cb_wrapper._resolve_future(1)
 
             asyncio.create_task(resolve_after_send())
 
@@ -250,7 +256,10 @@ class TestTWSClientReqHistoricalData:
 
             async def resolve_after_send() -> None:
                 await asyncio.sleep(0.01)
-                client._cb_wrapper._resolve_future(1, [bar1, bar2])
+                # Resolve via accumulator pattern
+                if 1 in client._cb_wrapper._futures:
+                    client._cb_wrapper._accumulators[1].extend([bar1, bar2])
+                    client._cb_wrapper._resolve_future(1)
 
             asyncio.create_task(resolve_after_send())
 
@@ -431,8 +440,8 @@ class TestTWSClientCancelRTTicker:
 
             assert mock_ibsocket.send_message.call_count == 2
             calls = mock_ibsocket.send_message.call_args_list
-            # First call: CANCEL_REAL_TIME_BARS
-            assert calls[0][0][0] == OUT.CANCEL_REAL_TIME_BARS
+            # First call: CANCEL_HISTORICAL_DATA (for real-time bars via keepUpToDate)
+            assert calls[0][0][0] == OUT.CANCEL_HISTORICAL_DATA
             # Second call: CANCEL_MKT_DATA
             assert calls[1][0][0] == OUT.CANCEL_MKT_DATA
 

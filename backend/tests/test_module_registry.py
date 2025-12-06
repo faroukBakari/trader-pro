@@ -8,7 +8,7 @@ Tests cover:
 4. Integration with existing registry functionality
 """
 
-from collections.abc import Generator
+from collections.abc import Awaitable, Generator
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -19,9 +19,9 @@ from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.market import (
     Bar,
     QuoteData,
+    Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
-    TimeFrame,
 )
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.shared import Provider
@@ -52,38 +52,45 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     ) -> list[SearchSymbolResultItem]:
         return []
 
-    async def get_symbol_info(self, symbol: str, **kwargs: Any) -> SymbolInfo:
+    async def get_symbol_info(self, ticker: str, **kwargs: Any) -> SymbolInfo:
         raise NotImplementedError("Mock provider")
 
     async def get_historical_bars(
         self,
-        symbol: str,
+        ticker: str,
         start_time: datetime,
         end_time: datetime,
-        resolution: TimeFrame,
+        resolution: Resolution,
         **kwargs: Any,
     ) -> list[Bar]:
         return []
 
     async def get_quotes_snapshot(
-        self, symbols: list[str], **kwargs: Any
+        self, tickers: list[str], **kwargs: Any
     ) -> list[QuoteData]:
         return []
 
     def subscribe_realtime_bars(
-        self, symbol: str, callback: Callable[[Bar], None], **kwargs: Any
-    ) -> int:
-        return 0
+        self,
+        ticker: str,
+        resolution: Resolution,
+        callback: Callable[[Bar], Awaitable[None]],
+        **kwargs: Any,
+    ) -> str:
+        return "sub_0"
 
     def subscribe_market_data(
-        self, symbols: list[str], callback: Callable[[QuoteData], None], **kwargs: Any
-    ) -> list[int]:
+        self,
+        tickers: list[str],
+        callback: Callable[[QuoteData], Awaitable[None]],
+        **kwargs: Any,
+    ) -> list[str]:
         return []
 
-    def unsubscribe_realtime_bars(self, subscription_id: int) -> None:
+    def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         pass
 
-    def unsubscribe_market_data(self, subscription_ids: list[int]) -> None:
+    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
         pass
 
 

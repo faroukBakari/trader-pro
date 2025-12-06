@@ -36,10 +36,6 @@ class RTMarketData:
     All fields are optional (None = not received yet).
     """
 
-    # tracking flags
-    contract: Contract | None = None  # Symbol:Exchange identifier
-    bar_data_reqId: int | None = None
-    mkt_data_reqId: int | None = None
     reqId_callback_map: dict[
         str,
         tuple[
@@ -50,6 +46,11 @@ class RTMarketData:
             ],
         ],
     ] = field(default_factory=dict)
+
+    # tracking flags
+    contract: Contract | None = None  # Symbol:Exchange identifier
+    bar_data_reqId: int | None = None
+    mkt_data_reqId: int | None = None
     barSize_setting: str | None = None
     format_date: int | None = None
     whatToShow: str | None = None

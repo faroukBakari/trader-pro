@@ -16,7 +16,8 @@ import {
 } from '@clients/trader-client-broker_v1';
 import {
   DatafeedApi,
-  Configuration as DatafeedConfigurationV1
+  Configuration as DatafeedConfigurationV1,
+  Resolution
 } from '@clients/trader-client-datafeed_v1';
 
 import type { ModuleInfo } from '@/types/apiStatus';
@@ -441,7 +442,8 @@ export class ApiAdapter {
     toTime: number,
     countBack?: number | null,
   ): ApiPromise<GetBarsResponse> {
-    return await this.datafeedApi.getBars(symbol, resolution, fromTime, toTime, countBack)
+    // Cast string resolution to Resolution enum (TradingView passes string, API expects enum)
+    return await this.datafeedApi.getBars(symbol, resolution as Resolution, fromTime, toTime, countBack)
   }
   @ApiErrorHandler('/quotes')
   async getQuotes(getQuotesRequest: GetQuotesRequest): ApiPromise<Array<QuoteData>> {
