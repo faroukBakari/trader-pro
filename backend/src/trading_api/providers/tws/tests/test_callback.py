@@ -54,7 +54,7 @@ class TestFutureManagement:
         callback = TWSCallback(loop=loop)
 
         req_id = 1
-        coro = callback.create_future_coroutine(req_id, timeout=5.0)
+        coro = callback.create_future(req_id, timeout=5.0)
 
         # Future should be registered
         assert req_id in callback._futures

@@ -499,7 +499,7 @@ class TestGetHistoricalBars:
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
 
             results = await provider.get_historical_bars(
-                symbol="AAPL",
+                ticker="AAPL",
                 start_time=start,
                 end_time=end,
                 resolution=TimeFrame.MIN_1,
@@ -524,7 +524,7 @@ class TestGetHistoricalBars:
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
 
             await provider.get_historical_bars(
-                symbol="AAPL",
+                ticker="AAPL",
                 start_time=start,
                 end_time=end,
                 resolution=TimeFrame.MIN_5,
@@ -549,7 +549,7 @@ class TestGetHistoricalBars:
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
 
             await provider.get_historical_bars(
-                symbol="AAPL",
+                ticker="AAPL",
                 start_time=start,
                 end_time=end,
                 resolution=TimeFrame.MIN_1,
@@ -575,7 +575,7 @@ class TestGetHistoricalBars:
 
             with pytest.raises(DatafeedError, match="Failed to get historical bars"):
                 await provider.get_historical_bars(
-                    symbol="AAPL",
+                    ticker="AAPL",
                     start_time=start,
                     end_time=end,
                     resolution=TimeFrame.MIN_1,
@@ -644,7 +644,7 @@ class TestGetQuotesSnapshot:
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
             # Pre-populate ticker cache
-            provider._tickers["AAPL:SMART"] = mock_ticker
+            provider._ticks["AAPL:SMART"] = mock_ticker
 
             results = await provider.get_quotes_snapshot(["AAPL"])
 

@@ -35,7 +35,7 @@ from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
-from typing import Any, Callable
+from typing import Any
 
 from ibapi.common import BarData, TickAttrib
 from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
@@ -47,9 +47,10 @@ from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
 
-from .tws_models import TICK_TYPE_TO_FIELD, RTMarketData, TWSError
+from .tws_models import TICK_TYPE_TO_FIELD, RTMarketData, TWSError, get_asset_config
 
 logger = logging.getLogger(__name__)
+DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
 DEBUG_TWS_SEND = os.environ.get("DEBUG_TWS_SEND") == "true"
 DEBUG_TWS_RECEIVE = os.environ.get("DEBUG_TWS_RECEIVE") == "true"
 DEBUG_TWS_DISPATCH = os.environ.get("DEBUG_TWS_DISPATCH") == "true"
@@ -283,7 +284,7 @@ class IBSocket:
             raise RuntimeError("_reader_loop Startup error : Socket not connected.")
 
         decoder = Decoder(cb_wrapper, self.server_version)
-        logger.info("IBSocket reader loop started.")
+        debug_log("IBSocket reader loop started.")
 
         # Cache method references for hot path (avoid attribute lookup per iteration)
         recv = self._receive_data
@@ -301,11 +302,12 @@ class IBSocket:
                 if msgId == -1:
                     # Incomplete message - only log if debugging enabled
                     if buf_siz > 0:
-                        logger.warning(
-                            "Incomplete message in buffer, waiting for more data. "
-                            "Buffer size: %d",
-                            buf_siz,
-                        )
+                        if DEBUG_TWS_RECEIVE:
+                            debug_log(
+                                "Incomplete message in buffer, waiting for more data. "
+                                "Buffer size: %d",
+                                buf_siz,
+                            )
                     continue
 
                 if msgId > PROTOBUF_MSG_ID:
@@ -324,7 +326,7 @@ class IBSocket:
             except Exception as e:
                 running = self._state == IBSocketState.RUNNING
                 if not running or self._remotely_closed():
-                    logger.info("IBSocket connection closed remotely.")
+                    logger.error("IBSocket connection closed remotely.")
                     self._state = IBSocketState.ERROR
                     break
                 logger.exception(
@@ -334,7 +336,7 @@ class IBSocket:
                 )
                 time.sleep(0.5)
 
-        logger.info("IBSocket reader loop finished.")
+        debug_log("IBSocket reader loop finished.")
 
     def connect(
         self,
@@ -362,7 +364,7 @@ class IBSocket:
             self._state = IBSocketState.ERROR
             raise ConnectionError(f"Failed to connect to TWS at {host}:{port}")
 
-        logger.info(f"Socket connected: {self._socket.getpeername()}")
+        debug_log(f"Socket connected: {self._socket.getpeername()}")
 
         # Send initial handshake message
         v100version = "v%d..%d" % (MIN_CLIENT_VER, MAX_CLIENT_VER)
@@ -415,7 +417,7 @@ class IBSocket:
         )
         with self._lock:
             self._socket.sendall(msg2)
-        logger.info("IBSocket connection successfully.")
+        debug_log("IBSocket connection successfully.")
 
         self._state = IBSocketState.CONNECTED
         self._reader_thread = threading.Thread(
@@ -431,17 +433,9 @@ class IBSocket:
             with self._lock:
                 self._socket.close()
                 self._state = IBSocketState.CLOSED
-                # logger.info("IBSocket Socket closed.")
+                debug_log("IBSocket Socket closed.")
         except Exception as e:
             logger.exception(f"Error while closing IBSocket: {e}")
-
-        # if False and self._reader_thread and self._reader_thread.is_alive():
-        #     logger.info("Waiting for IBSocket reader thread to finish...")
-        #     try:
-        #         self._reader_thread.join(timeout=2)
-        #         logger.info("IBSocket reader thread finished gracefully.")
-        #     except Exception as e:
-        #         logger.error(f"Failed to join IBSocket reader thread: {e}")
 
     def send_message(self, msgId: int, values: list[object]) -> None:
         text = make_fields(values)
@@ -485,10 +479,11 @@ class TWSCallback(EWrapper):
         self._ready_event = threading.Event()  # Signals when nextValidId received
 
     def dispatchMessage(self, fnName: str, fnParams: dict) -> None:
-        if "self" in fnParams:
-            fnParams = dict(fnParams)
-            del fnParams["self"]
-        logger.warning(f"!!!WARNING!!!: unimplemented {fnName} --> {fnParams}")
+        if DEBUG_TWS_DISPATCH:
+            if "self" in fnParams:
+                fnParams = dict(fnParams)
+                del fnParams["self"]
+            debug_log(f"!!!WARNING!!!: unimplemented {fnName} --> {fnParams}")
 
     @property
     def loop(self) -> asyncio.AbstractEventLoop:
@@ -504,29 +499,35 @@ class TWSCallback(EWrapper):
         self._accounts.clear()
         self._ready_event.clear()
 
-    def create_future_coroutine(
-        self, reqId: int, timeout: float | None = 5
-    ) -> Awaitable[Any]:
+    def create_future(self, reqId: int, timeout: float | None = 5) -> Awaitable[Any]:
         """Create a new Future attached to the current event loop."""
         future: asyncio.Future[Any] = self.loop.create_future()
         self._futures[reqId] = (self.loop, future)
+        self._accumulators[reqId] = []
         return asyncio.wait_for(future, timeout)
 
-    def _resolve_future(self, reqId: int, result: object) -> None:
+    def _resolve_future(self, reqId: int) -> None:
         """Helper to resolve a future in the asyncio loop."""
+        results = self._accumulators.pop(reqId, [])
+        if results is None:
+            logger.error(f"Accumulator not found for reqId {reqId}")
+            self._futures.pop(reqId, (None, None))
+            return
         loop, future = self._futures.pop(reqId, (None, None))
-        if loop is not None and future is not None and not future.done():
-            loop.call_soon_threadsafe(future.set_result, result)
-        else:
-            logger.error(f"Unknown reqId {reqId} in _resolve_future.")
+        if loop is None or future is None or future.done():
+            logger.error(f"future/loop not found or already done for reqId {reqId}.")
+            return
+        loop.call_soon_threadsafe(future.set_result, results)
 
     def _reject_future(self, reqId: int, exception: Exception) -> None:
         """Helper to reject a future with an exception in the asyncio loop."""
         loop, future = self._futures.pop(reqId, (None, None))
-        if loop is not None and future is not None and not future.done():
-            loop.call_soon_threadsafe(future.set_exception, exception)
-        else:
-            logger.error(f"Unknown reqId {reqId} in _reject_future.")
+        if loop is None or future is None or future.done():
+            logger.error(f"future/loop not found or already done for reqId {reqId}.")
+            return
+        loop.call_soon_threadsafe(future.set_exception, exception)
+
+    # === Ticker management ===
 
     def register_ticker(self, rt_data: RTMarketData) -> RTMarketData:
         """Create and register a new RTMarketData slot for a reqId."""
@@ -541,14 +542,19 @@ class TWSCallback(EWrapper):
             if reqId is not None:
                 self._req_id_to_ticker_map.pop(reqId, None)
 
-    def _notify_ticker_callbacks(
+    def _notify_ticker(
         self, ticker: RTMarketData, updated_fields: list[str] | None = None
     ) -> None:
         """Trigger ticker callbacks if registered."""
         # TODO: this is very unsafe!!
         # asyncio loop is acting as a queue here, need to redesign this part
         # need to sync callbacks with the main thread ability to handle messages!!
-        for loop, callback in ticker.reqId_callback_map.values():
+        for key, (loop, callback) in ticker.reqId_callback_map.items():
+            if DEBUG_TWS_CALLBACK:
+                assert ticker.contract is not None, "Ticker contract is None."
+                debug_log(
+                    f"_notify_ticker callback {key} with fields: {updated_fields}"
+                )
             loop.call_soon_threadsafe(loop.create_task, callback(ticker, updated_fields))  # type: ignore
 
     # === Trading / account management ===
@@ -573,7 +579,10 @@ class TWSCallback(EWrapper):
     ) -> None:
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        self._resolve_future(reqId, contractDescriptions)
+        accumulator = self._accumulators.get(reqId)
+        if isinstance(accumulator, list):
+            accumulator.extend(contractDescriptions)
+            self._resolve_future(reqId)
 
     # === contractDetails (streaming accumulation pattern) ===
 
@@ -585,7 +594,7 @@ class TWSCallback(EWrapper):
         """
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._accumulators.setdefault(reqId, [])
+        accumulator = self._accumulators.get(reqId)
         if isinstance(accumulator, list):
             accumulator.append(contractDetails)
 
@@ -593,8 +602,7 @@ class TWSCallback(EWrapper):
         """End signal for contract details - resolve Future with accumulated results."""
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        results = self._accumulators.pop(reqId, [])
-        self._resolve_future(reqId, results)
+        self._resolve_future(reqId)
 
     # === historicalData (streaming accumulation pattern) ===
 
@@ -606,9 +614,12 @@ class TWSCallback(EWrapper):
         """
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._accumulators.setdefault(reqId, [])
+        accumulator = self._accumulators.get(reqId)
         if isinstance(accumulator, list):
             accumulator.append(bar)
+        else:
+            debug_log(f"No accumulator found for reqId {reqId}")
+            self.historicalDataUpdate(reqId, bar)
 
     def historicalDataUpdate(self, reqId: int, bar: BarData) -> None:
         """Returns updates in real time when keepUpToDate is set to True.
@@ -638,26 +649,25 @@ class TWSCallback(EWrapper):
 
             for field_name, new_value in field_mappings:
                 current_value = getattr(ticker, field_name)
-                if current_value is None or current_value != new_value:
+                if current_value is None or not (
+                    math.isclose(current_value, new_value, abs_tol=1e-3)
+                    if isinstance(new_value, float)
+                    else current_value == new_value
+                ):
                     setattr(ticker, field_name, new_value)
                     updated_fields.append(field_name)
 
             # Only notify if at least one field changed
             if updated_fields:
-                self._notify_ticker_callbacks(ticker, updated_fields)
+                self._notify_ticker(ticker, updated_fields)
         else:
-            # 2. Update accumulator (existing behavior)
-            # TODO: no set default here !! need to set on request init and throw error when missing!!!
-            accumulator = self._accumulators.setdefault(reqId, [])
-            if isinstance(accumulator, list):
-                accumulator.append(bar)
+            debug_log(f"No ticker found for reqId {reqId}")
 
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
         """End signal for historical data - resolve Future with accumulated results."""
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        results = self._accumulators.pop(reqId, [])
-        self._resolve_future(reqId, results)
+        self._resolve_future(reqId)
 
     # === Market data (accumulation pattern) ===
 
@@ -669,9 +679,6 @@ class TWSCallback(EWrapper):
         Called multiple times per snapshot with different tick types.
         Results accumulated until tickSnapshotEnd is called.
         """
-        if DEBUG_TWS_CALLBACK:
-            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-
         ticker = self._req_id_to_ticker_map.get(reqId)
         assert ticker is not None, f"No RTMarketData found for tickerId {reqId}"
         tick_name = get_tick_type_name(tickType)
@@ -679,13 +686,21 @@ class TWSCallback(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)
         assert field_name is not None, "Field name must not be None"
         current_value: float | None = getattr(ticker, field_name, None)
+        if DEBUG_TWS_CALLBACK:
+            assert ticker.contract is not None, "Ticker contract is None."
+            debug_log(
+                f"tickPrice: reqId=[{reqId}], ticker=[{ticker.contract.symbol}:{ticker.contract.exchange}], "
+                f"field_name=[{field_name}], price=[{current_value} -> {price}]"
+            )
         if current_value is None or not math.isclose(
             current_value, price, abs_tol=1e-3
         ):
             setattr(ticker, field_name, price)
-            if field_name == "last":
-                ticker.close = price
-            self._notify_ticker_callbacks(ticker, [field_name])
+            fields = [field_name]
+            if field_name in ["last", "close"]:
+                ticker.bar_close = price
+                fields.append("bar_close")
+            self._notify_ticker(ticker, fields)
 
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
         """Accumulate size ticks for market data snapshot.
@@ -693,8 +708,6 @@ class TWSCallback(EWrapper):
         Called multiple times per snapshot with different tick types.
         Results accumulated until tickSnapshotEnd is called.
         """
-        if DEBUG_TWS_CALLBACK:
-            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         ticker = self._req_id_to_ticker_map.get(reqId)
         assert ticker is not None, f"No RTMarketData found for tickerId {reqId}"
@@ -703,9 +716,15 @@ class TWSCallback(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)
         assert field_name is not None, "Field name must not be None"
         current_value: float | None = getattr(ticker, field_name, None)
+        if DEBUG_TWS_CALLBACK:
+            assert ticker.contract is not None, "Ticker contract is None."
+            debug_log(
+                f"tickSize: reqId=[{reqId}], ticker=[{ticker.contract.symbol}:{ticker.contract.exchange}], "
+                f"field_name=[{field_name}], size=[{current_value} -> {size}]"
+            )
         if current_value is None or not math.isclose(current_value, size, abs_tol=1e-3):
             setattr(ticker, field_name, size)
-            self._notify_ticker_callbacks(ticker, [field_name])
+            self._notify_ticker(ticker, [field_name])
 
     def marketDataType(self, reqId: int, marketDataType: int) -> None:
         """Set market data type for the request."""
@@ -716,9 +735,16 @@ class TWSCallback(EWrapper):
         assert ticker is not None, f"No RTMarketData found for tickerId {reqId}"
 
         current_val: int | None = ticker.market_data_type
+
+        if DEBUG_TWS_CALLBACK:
+            assert ticker.contract is not None, "Ticker contract is None."
+            debug_log(
+                f"marketDataType: reqId=[{reqId}], ticker=[{ticker.contract.symbol}:{ticker.contract.exchange}], "
+                f"field_name=[market_data_type], value=[{current_val} -> {marketDataType}]"
+            )
         if current_val is None or current_val != marketDataType:
             ticker.market_data_type = marketDataType
-            self._notify_ticker_callbacks(ticker, ["market_data_type"])
+            self._notify_ticker(ticker, ["market_data_type"])
 
     def tickReqParams(
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
@@ -751,8 +777,17 @@ class TWSCallback(EWrapper):
             update_list.append("snapshot_permissions")
             ticker.snapshot_permissions = snapshotPermissions
 
+        if DEBUG_TWS_CALLBACK:
+            assert ticker.contract is not None, "Ticker contract is None."
+            debug_log(
+                f"tickReqParams: reqId=[{tickerId}], ticker=[{ticker.contract.symbol}:{ticker.contract.exchange}], "
+                f"field_name=[min_tick], size=[{current_minTick} -> {minTick}]"
+                f"field_name=[bbo_exchange], size=[{current_bboExchange} -> {bboExchange}]"
+                f"field_name=[snapshot_permissions], size=[{current_snapshotPermissions} -> {snapshotPermissions}]"
+            )
+
         if update_list:
-            self._notify_ticker_callbacks(ticker, update_list)
+            self._notify_ticker(ticker, update_list)
 
     def tickString(self, reqId: int, tickType: int, value: str) -> None:
         """Generic string tick for market data snapshot."""
@@ -766,9 +801,15 @@ class TWSCallback(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)
         assert field_name is not None, "Field name must not be None"
         current_value: str | None = getattr(ticker, field_name, None)
+        if DEBUG_TWS_CALLBACK:
+            assert ticker.contract is not None, "Ticker contract is None."
+            debug_log(
+                f"tickString: reqId=[{reqId}], ticker=[{ticker.contract.symbol}:{ticker.contract.exchange}], "
+                f"field_name=[{field_name}], value=[{current_value} -> {value}]"
+            )
         if current_value is None or current_value != value:
             setattr(ticker, field_name, value)
-            self._notify_ticker_callbacks(ticker, [field_name])
+            self._notify_ticker(ticker, [field_name])
 
     def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
         """Generic float tick for market data snapshot."""
@@ -782,11 +823,17 @@ class TWSCallback(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)
         assert field_name is not None, "Field name must not be None"
         current_value: float | None = getattr(ticker, field_name, None)
+        if DEBUG_TWS_CALLBACK:
+            assert ticker.contract is not None, "Ticker contract is None."
+            debug_log(
+                f"tickGeneric: reqId=[{reqId}], ticker=[{ticker.contract.symbol}:{ticker.contract.exchange}], "
+                f"field_name=[{field_name}], value=[{current_value} -> {value}]"
+            )
         if current_value is None or not math.isclose(
             current_value, value, abs_tol=1e-3
         ):
             setattr(ticker, field_name, value)
-            self._notify_ticker_callbacks(ticker, [field_name])
+            self._notify_ticker(ticker, [field_name])
 
     def tickSnapshotEnd(self, reqId: int) -> None:
         """End signal for market data snapshot - resolve Future with accumulated ticks.
@@ -799,7 +846,7 @@ class TWSCallback(EWrapper):
         ticker = self._req_id_to_ticker_map.get(reqId)
         if ticker is not None:
             ticker.reset()
-            self._notify_ticker_callbacks(ticker)
+            self._notify_ticker(ticker)
 
     # === error handling ===
 
@@ -846,8 +893,9 @@ class TWSCallback(EWrapper):
             logger.error(
                 f"TWS error [reqId={reqId}, time={errorTime}, code={errorCode}]: {errorString}"
             )
-        else:
-            self._reject_future(reqId, tws_error)
+            return
+
+        self._reject_future(reqId, tws_error)
 
     def errorProtoBuf(self, errorMessageProto: ErrorMessageProto) -> None:
         """Error callback using protobuf format (newer TWS API versions).
@@ -928,11 +976,9 @@ class TWSClient:
     ) -> list[ContractDescription]:
         reqId = self.next_req_id
 
-        coroutine: Awaitable[list[ContractDescription]] = (
-            self._cb_wrapper.create_future_coroutine(
-                reqId, timeout=timeout or self._timeout
-            )
-        )
+        coroutine: Awaitable[
+            list[ContractDescription]
+        ] = self._cb_wrapper.create_future(reqId, timeout=timeout or self._timeout)
         self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
         debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
 
@@ -951,10 +997,8 @@ class TWSClient:
             May return multiple results for ambiguous queries.
         """
         reqId = self.next_req_id
-        coroutine: Awaitable[list[ContractDetails]] = (
-            self._cb_wrapper.create_future_coroutine(
-                reqId, timeout=timeout or self._timeout
-            )
+        coroutine: Awaitable[list[ContractDetails]] = self._cb_wrapper.create_future(
+            reqId, timeout=timeout or self._timeout
         )
 
         # Build message fields (VERSION=8 per ibapi/client.py)
@@ -981,9 +1025,10 @@ class TWSClient:
         ]
 
         self.ibsocket.send_message(OUT.REQ_CONTRACT_DATA, fields)
-        debug_log(
-            f"awaiting contractDetails for reqId {reqId} and symbol '{contract.symbol}'"
-        )
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"awaiting contractDetails for reqId {reqId} and symbol '{contract.symbol}'"
+            )
         return await coroutine
 
     async def reqHistoricalData(
@@ -992,10 +1037,9 @@ class TWSClient:
         end_date_time: str,
         duration_str: str,
         barSize_setting: str,
-        whatToShow: str = "TRADES",
         useRTH: int = 0,
         format_date: int = 1,
-        keepUpToDate: bool = False,
+        keepUpToDate: int = 0,
         timeout: float | None = None,
     ) -> list[BarData]:
         """Request historical bars from TWS.
@@ -1013,9 +1057,20 @@ class TWSClient:
             List of BarData objects (one per bar, in ascending time order)
         """
         reqId = self.next_req_id
-        coroutine: Awaitable[list[BarData]] = self._cb_wrapper.create_future_coroutine(
+        coroutine: Awaitable[list[BarData]] = self._cb_wrapper.create_future(
             reqId,
             timeout=timeout or self._timeout,
+        )
+
+        asset_config = get_asset_config(contract.secType)
+
+        # Select whatToShow based on keepUpToDate:
+        # - keepUpToDate=True (live): Only TRADES, MIDPOINT, BID, ASK supported
+        # - keepUpToDate=False (historical): All types per product supported
+        whatToShow = (
+            asset_config.what_to_show_live
+            if keepUpToDate
+            else asset_config.what_to_show_hist
         )
 
         # Build message fields (VERSION=6 per ibapi/client.py)
@@ -1040,15 +1095,16 @@ class TWSClient:
             useRTH,
             whatToShow,
             format_date,
-            keepUpToDate,  # keepUpToDate (always False for historical)
+            keepUpToDate,
             [],  # chartOptions (empty list)
         ]
 
         self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, fields)
-        debug_log(
-            f"awaiting historicalData for reqId {reqId}, "
-            f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{barSize_setting}'"
-        )
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"awaiting historicalData for reqId {reqId}, "
+                f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{barSize_setting}'"
+            )
         return await coroutine
 
     # === Real-time bar subscriptions (continuous pattern) ===
@@ -1074,12 +1130,16 @@ class TWSClient:
 
         ticker = self._cb_wrapper.register_ticker(ticker)
 
+        # Get asset-type-specific configuration
+        asset_config = get_asset_config(contract.secType)
+
         end_date_time: str = ""
         duration_str: str = get_duration_for_bars(barSize_setting)
-        whatToShow: str = "TRADES"
+        # Use what_to_show_live since keepUpToDate=True (live data)
+        whatToShow: str = asset_config.what_to_show_live
         format_date: int = 1
         useRTH: int = 0
-        keepUpToDate: bool = True
+        keepUpToDate: int = 1
 
         bar_data_fields: list[object] = [
             bar_data_reqId,
@@ -1102,16 +1162,16 @@ class TWSClient:
             useRTH,
             whatToShow,
             format_date,
-            keepUpToDate,  # keepUpToDate (always False for historical)
+            keepUpToDate,  # True for live updates
             [],  # chartOptions (empty list)
         ]
 
         self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, bar_data_fields)
-        logger.info(
-            f"awaiting historicalData for reqId {bar_data_reqId}, "
-            f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{barSize_setting}'"
-        )
-
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"subscribed to bar data for reqId {bar_data_reqId}, "
+                f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{barSize_setting}'"
+            )
         VERSION = 11
 
         # Build message fields for REQ_MKT_DATA
@@ -1130,35 +1190,22 @@ class TWSClient:
             contract.currency,
             contract.localSymbol,
             contract.tradingClass,
-            False,  # ← ADD: deltaNeutralContract (False = no delta neutral)
-            [
-                "165",
-                "225",
-                "232",
-                "233",
-                "236",
-                "293",
-                "294",
-                "295",
-                "318",
-                "375",
-                "411",
-                "456",
-                "595",
-            ],  # genericTickList,
-            False,  # snapshot
-            False,  # regulatorySnapshot
+            0,  # deltaNeutralContract (False = no delta neutral)
+            asset_config.generic_tick_list_str,  # Asset-type-specific tick list
+            0,  # snapshot
+            0,  # regulatorySnapshot
             [],  # mktDataOptions (empty list)
         ]
 
         self.ibsocket.send_message(OUT.REQ_MKT_DATA, mkt_data_fields)
-        logger.info(
-            f"subscribed to realtime reqMktData with reqId {mkt_data_reqId}, symbol='{contract.symbol}'"
-        )
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"subscribed to realtime reqMktData with reqId {mkt_data_reqId}, symbol='{contract.symbol}'"
+            )
 
         return ticker
 
-    def switch_ticker(
+    def switch_ticker_resolution(
         self,
         ticker: RTMarketData,
         barSize_setting: str,
@@ -1170,7 +1217,8 @@ class TWSClient:
         self.ibsocket.send_message(
             OUT.CANCEL_HISTORICAL_DATA, [VERSION, ticker.bar_data_reqId]
         )
-        logger.info(f"cancelled realtime bars for reqId {ticker.bar_data_reqId}")
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"cancelled realtime bars for reqId {ticker.bar_data_reqId}")
 
         self._cb_wrapper.unregister_ticker(ticker)
 
@@ -1179,15 +1227,19 @@ class TWSClient:
 
         self._cb_wrapper.register_ticker(ticker)
 
-        end_date_time: str = ""
-        duration_str: str = get_duration_for_bars(barSize_setting)
-        whatToShow: str = "TRADES"
-        format_date: int = 1
-        useRTH: int = 0
-        keepUpToDate: bool = True
-
         contract = ticker.contract
         assert contract is not None, "Ticker contract must be set to switch resolution."
+
+        # Get asset-type-specific configuration
+        asset_config = get_asset_config(contract.secType)
+
+        end_date_time: str = ""
+        duration_str: str = get_duration_for_bars(barSize_setting)
+        # Use what_to_show_live since keepUpToDate=True (live data)
+        whatToShow: str = asset_config.what_to_show_live
+        format_date: int = 1
+        useRTH: int = 0
+        keepUpToDate: int = 1
 
         bar_data_fields: list[object] = [
             ticker.bar_data_reqId,
@@ -1210,15 +1262,16 @@ class TWSClient:
             useRTH,
             whatToShow,
             format_date,
-            keepUpToDate,  # keepUpToDate (always False for historical)
+            keepUpToDate,
             [],  # chartOptions (empty list)
         ]
 
         self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, bar_data_fields)
-        logger.info(
-            f"awaiting historicalData for reqId {ticker.bar_data_reqId}, "
-            f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{barSize_setting}'"
-        )
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"subscribed to bar data for reqId {ticker.bar_data_reqId}, "
+                f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{barSize_setting}'"
+            )
 
         return ticker
 
@@ -1229,13 +1282,15 @@ class TWSClient:
         self.ibsocket.send_message(
             OUT.CANCEL_HISTORICAL_DATA, [VERSION, ticker.bar_data_reqId]
         )
-        logger.info(f"cancelled realtime bars for reqId {ticker.bar_data_reqId}")
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"cancelled realtime bars for reqId {ticker.bar_data_reqId}")
 
         VERSION = 2
         self.ibsocket.send_message(
             OUT.CANCEL_MKT_DATA, [VERSION, ticker.mkt_data_reqId]
         )
-        logger.info(f"cancelled market data for reqId {ticker.mkt_data_reqId}")
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"cancelled market data for reqId {ticker.mkt_data_reqId}")
 
         self._cb_wrapper.unregister_ticker(ticker)
         ticker.reset()

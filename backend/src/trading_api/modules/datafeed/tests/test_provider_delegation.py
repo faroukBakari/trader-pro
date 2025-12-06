@@ -266,7 +266,7 @@ async def test_get_bars_delegates_to_provider() -> None:
     from_time = 1609459200000  # Unix milliseconds
     to_time = 1609632000000
     results = await service.get_bars(
-        symbol="AAPL:NASDAQ",
+        ticker="AAPL:NASDAQ",
         resolution="1D",
         from_time=from_time,
         to_time=to_time,
@@ -320,7 +320,7 @@ async def test_get_bars_applies_count_back_filter() -> None:
 
     # Request only last 3 bars
     results = await service.get_bars(
-        symbol="AAPL",
+        ticker="AAPL",
         resolution="1D",
         from_time=0,
         to_time=999999999999,
@@ -342,7 +342,7 @@ async def test_get_bars_handles_unsupported_resolution() -> None:
 
     # Call with unsupported resolution
     results = await service.get_bars(
-        symbol="AAPL",
+        ticker="AAPL",
         resolution="INVALID",
         from_time=0,
         to_time=999999999999,
@@ -367,7 +367,7 @@ async def test_get_bars_handles_provider_exception() -> None:
 
     # Call get_bars
     results = await service.get_bars(
-        symbol="AAPL",
+        ticker="AAPL",
         resolution="1D",
         from_time=0,
         to_time=999999999999,

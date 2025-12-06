@@ -84,29 +84,6 @@ class DatafeedService(WsRouteService):
 
     # === Helper Methods ===
 
-    def _parse_ticker(self, ticker: str) -> tuple[str, str]:
-        """Parse ticker format 'SYMBOL:EXCHANGE' into components.
-
-        Args:
-            ticker: Ticker in format 'SYMBOL:EXCHANGE' or just 'SYMBOL'
-
-        Returns:
-            Tuple of (symbol, exchange)
-                - If ticker contains ':', returns (SYMBOL, EXCHANGE)
-                - If ticker has no ':', returns (SYMBOL, 'SMART')
-
-        Examples:
-            >>> self._parse_ticker('AAPL:NASDAQ')
-            ('AAPL', 'NASDAQ')
-            >>> self._parse_ticker('GOOGL')
-            ('GOOGL', 'SMART')
-        """
-        if ":" in ticker:
-            symbol, exchange = ticker.split(":", 1)
-            return symbol.strip(), exchange.strip()
-
-        return ticker.strip(), "SMART"
-
     def _convert_resolution_to_timeframe(self, resolution: str) -> TimeFrame:
         """Convert TradingView resolution string to TimeFrame enum.
 
@@ -187,7 +164,7 @@ class DatafeedService(WsRouteService):
             logger.info(f"creating new topic : {topic}")
 
             subscription_id = self.datafeed_provider.subscribe_realtime_bars(
-                symbol=subscription_request.symbol,
+                ticker=subscription_request.symbol,
                 resolution=self._convert_resolution_to_timeframe(
                     subscription_request.resolution
                 ),
@@ -218,7 +195,7 @@ class DatafeedService(WsRouteService):
 
             # Subscribe to market data for all symbols via provider (returns list of subscription IDs)
             subscription_ids = self.datafeed_provider.subscribe_market_data(
-                symbols=all_symbols, callback=topic_update
+                tickers=all_symbols, callback=topic_update
             )
 
             # Track subscription IDs for cleanup (list for quotes, int for bars)
@@ -309,22 +286,20 @@ class DatafeedService(WsRouteService):
         # Limit results
         return filtered_results[:max_results]
 
-    async def resolve_symbol(self, symbol_name: str) -> Optional[SymbolInfo]:
+    async def resolve_ticker(self, ticker: str) -> Optional[SymbolInfo]:
         """Resolve symbol information via datafeed provider."""
-        parsed_symbol, exchange = self._parse_ticker(symbol_name)
         try:
             return await self.datafeed_provider.get_symbol_info(
-                symbol=parsed_symbol,
-                exchange=exchange,
+                ticker=ticker,
                 timeout=5.0,
             )
         except Exception as e:
-            logger.warning(f"Failed to resolve symbol '{symbol_name}': {e}")
+            logger.warning(f"Failed to resolve symbol '{ticker}': {e}")
             return None
 
     async def get_bars(
         self,
-        symbol: str,
+        ticker: str,
         resolution: str,
         from_time: int,
         to_time: int,
@@ -344,8 +319,6 @@ class DatafeedService(WsRouteService):
         Returns:
             List of bars in ascending time order
         """
-        # Parse ticker to extract symbol and exchange
-        parsed_symbol, exchange = self._parse_ticker(symbol)
 
         # Convert resolution to TimeFrame enum
         try:
@@ -361,11 +334,10 @@ class DatafeedService(WsRouteService):
         # Delegate to provider
         try:
             bars = await self.datafeed_provider.get_historical_bars(
-                symbol=parsed_symbol,
+                ticker=ticker,
                 start_time=start_time,
                 end_time=end_time,
                 resolution=timeframe,
-                exchange=exchange,
                 timeout=30.0,
             )
 
@@ -376,24 +348,22 @@ class DatafeedService(WsRouteService):
             return bars
 
         except Exception as e:
-            logger.exception(f"Failed to get bars for {symbol}: {e}")
+            logger.exception(f"Failed to get bars for {ticker}: {e}")
             return []
 
-    async def get_quotes(self, symbols: List[str]) -> List[QuoteData]:
+    async def get_quotes(self, tickers: List[str]) -> List[QuoteData]:
         """Get quotes for multiple symbols"""
-
-        parsed_symbols = [self._parse_ticker(s)[0] for s in symbols]
 
         try:
             # Delegate to provider for real quote snapshots
             return await self.datafeed_provider.get_quotes_snapshot(
-                symbols=parsed_symbols,
+                tickers=tickers,
                 timeout=4.0,
             )
         except Exception as e:
-            logger.exception(f"Failed to get quotes for {symbols}: {e}")
+            logger.exception(f"Failed to get quotes for {tickers}: {e}")
             # Return error responses for all symbols
             return [
                 QuoteData(s="error", n=symbol, v={"error": str(e)})
-                for symbol in symbols
+                for symbol in tickers
             ]

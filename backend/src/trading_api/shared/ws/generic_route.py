@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from typing import Any, Generic, TypeVar, get_args
 
 from fastapi.websockets import WebSocketState
@@ -14,6 +15,9 @@ from trading_api.models import (
 from trading_api.shared.ws.ws_router import WsRouteFeature, WsRouteService
 
 logger = logging.getLogger(__name__)
+
+DEBUG_WS_ROUTER = os.environ.get("DEBUG_WS_ROUTER") == "true"
+debug_log = logger.info
 
 
 _TRequest = TypeVar("_TRequest", bound=BaseModel)
@@ -51,7 +55,8 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             if topic not in self._topics:
                 await self._create_topic(topic)
             client.subscribe(topic)
-            logger.info(f"Client {client.uid} subscribed to topic: {topic}")
+            if DEBUG_WS_ROUTER:
+                debug_log(f"Client {client.uid} subscribed to topic: {topic}")
             return SubscriptionResponse(status="ok", sub_id=payload.sub_id, topic=topic)
 
         def update(
@@ -67,7 +72,8 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             """Unsubscribe from data updates"""
             topic = self.topic_builder(payload.sub_params)
             client.unsubscribe(topic)
-            logger.info(f"Client {client.uid} unsubscribed from topic: {topic}")
+            if DEBUG_WS_ROUTER:
+                debug_log(f"Client {client.uid} unsubscribed from topic: {topic}")
             try:
                 self._clients = self._refresh_active_clients()
 
@@ -75,18 +81,20 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                     clt for clt in self._clients if topic in clt.topics
                 ]
                 if not remaining_topic_clients:
-                    logger.info(
-                        f"No more clients for topic : {topic} in router {self.route}"
-                    )
+                    if DEBUG_WS_ROUTER:
+                        debug_log(
+                            f"No more clients for topic : {topic} in router {self.route}"
+                        )
                     self._remove_topic(topic)
 
                 remaining_client_topics = [
                     tpc for tpc in client.topics if tpc in self._topics
                 ]
                 if not remaining_client_topics:
-                    logger.info(
-                        f"No more topics for client: {client.uid} in router {self.route}"
-                    )
+                    if DEBUG_WS_ROUTER:
+                        debug_log(
+                            f"No more topics for client: {client.uid} in router {self.route}"
+                        )
                     self._clients.discard(client)
 
                 return SubscriptionResponse(
@@ -132,9 +140,10 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         topic_clients = [client for client in self._clients if topic in client.topics]
 
         if not topic_clients:
-            logger.info(
-                f"No more clients for topic : {update.topic} in router {self.route}"
-            )
+            if DEBUG_WS_ROUTER:
+                debug_log(
+                    f"No more clients for topic : {update.topic} in router {self.route}"
+                )
             self._remove_topic(topic)
             await asyncio.sleep(1)
             return
@@ -150,13 +159,13 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 *(client.ws.send_text(msg) for client in topic_clients)
             )
 
-            logger.info(f"Broadcasted message from router:: {update}")
+            if DEBUG_WS_ROUTER:
+                debug_log(f"Broadcasted message from router:: {update}")
         except Exception as e:
-            logger.warning(f"Error during FastWS {self.route}.update broadcast, {e}")
+            logger.exception(f"Error during FastWS {self.route}.update broadcast, {e}")
             await asyncio.sleep(1)
 
     async def _create_topic(self, topic: str) -> None:
-
         async def topic_update(data: _TData) -> None:
             await self._broadcast_update(
                 SubscriptionUpdate(
@@ -165,12 +174,14 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 ),
             )
 
-        logger.info(f"Creating new topic in {self.route} service: {topic}")
+        if DEBUG_WS_ROUTER:
+            debug_log(f"Creating new topic in {self.route} service: {topic}")
         await self.service.create_topic(topic, topic_update)
         self._topics.add(topic)
 
     def _remove_topic(self, topic: str) -> None:
-        logger.info(f"Removing topic : {topic}")
+        if DEBUG_WS_ROUTER:
+            debug_log(f"Removing topic : {topic}")
         self._topics.discard(topic)
         self.service.remove_topic(topic)
 
@@ -185,3 +196,6 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 )
             ]
         )
+
+
+# TODO !!!! need to debug bar unsubscribe / switch resolution more carefully !!!!

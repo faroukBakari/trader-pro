@@ -418,3 +418,303 @@ STRING_TICK_TYPES: frozenset[str] = frozenset(
         "SOCIAL_MARKET_ANALYTICS",
     }
 )
+
+
+# =============================================================================
+# TWS Asset Type Configuration
+# =============================================================================
+# Configuration for whatToShow and genericTickList per security type.
+# Based on TWS API documentation: https://interactivebrokers.github.io/tws-api/
+#
+# whatToShow: Historical data type parameter for reqHistoricalData
+# genericTickList: Comma-separated tick types for reqMktData
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class AssetTypeConfig:
+    """Configuration for TWS API parameters per security type.
+
+    TWS API has different whatToShow restrictions:
+    - Historical data (keepUpToDate=False): Supports all types per product
+    - Live updates (keepUpToDate=True): Only TRADES, MIDPOINT, BID, ASK
+
+    Reference: https://interactivebrokers.github.io/tws-api/historical_bars.html
+    """
+
+    what_to_show_hist: str
+    """Historical data type for reqHistoricalData with keepUpToDate=False.
+    Can be: TRADES, MIDPOINT, BID, ASK, BID_ASK, AGGTRADES, ADJUSTED_LAST, etc.
+    """
+
+    what_to_show_live: str
+    """Historical data type for reqHistoricalData with keepUpToDate=True.
+    Must be one of: TRADES, MIDPOINT, BID, ASK (TWS API restriction).
+    """
+
+    generic_tick_list: tuple[str, ...]
+    """Generic tick types for market data subscription."""
+
+    @property
+    def generic_tick_list_str(self) -> list[str]:
+        """Return generic tick list as a list for TWS API."""
+        return list(self.generic_tick_list)
+
+
+# Security type → API configuration mapping
+# Reference: https://interactivebrokers.github.io/tws-api/historical_bars.html
+#
+# keepUpToDate=True only supports: TRADES, MIDPOINT, BID, ASK
+# Historical data supports additional types per product (see Available Data per Product)
+ASSET_TYPE_CONFIG: dict[str, AssetTypeConfig] = {
+    # Cryptocurrency
+    # - Historical: AGGTRADES recommended (aggregated trades for crypto)
+    # - Live: TRADES (AGGTRADES not supported with keepUpToDate=True)
+    "CRYPTO": AssetTypeConfig(
+        what_to_show_hist="AGGTRADES",
+        what_to_show_live="MIDPOINT",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+            "595",  # Short-term volume
+        ),
+    ),
+    # Stocks - Full tick support
+    "STK": AssetTypeConfig(
+        what_to_show_hist="TRADES",
+        what_to_show_live="TRADES",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+            "456",  # Dividends
+            "595",  # Short-term volume
+        ),
+    ),
+    # Options
+    "OPT": AssetTypeConfig(
+        what_to_show_hist="TRADES",
+        what_to_show_live="TRADES",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+            "456",  # Dividends
+        ),
+    ),
+    # Futures - No dividends, has futures OI
+    "FUT": AssetTypeConfig(
+        what_to_show_hist="TRADES",
+        what_to_show_live="TRADES",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+            "588",  # Futures Open Interest
+        ),
+    ),
+    # Futures Options
+    "FOP": AssetTypeConfig(
+        what_to_show_hist="TRADES",
+        what_to_show_live="TRADES",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+        ),
+    ),
+    # Forex (CASH) - No TRADES support, use MIDPOINT
+    "CASH": AssetTypeConfig(
+        what_to_show_hist="MIDPOINT",
+        what_to_show_live="MIDPOINT",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+        ),
+    ),
+    # CFDs - No TRADES support, use MIDPOINT
+    "CFD": AssetTypeConfig(
+        what_to_show_hist="MIDPOINT",
+        what_to_show_live="MIDPOINT",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+        ),
+    ),
+    # Commodities - No TRADES support, use MIDPOINT
+    "CMDTY": AssetTypeConfig(
+        what_to_show_hist="MIDPOINT",
+        what_to_show_live="MIDPOINT",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+        ),
+    ),
+    # Mutual Funds - No TRADES support, use MIDPOINT
+    "FUND": AssetTypeConfig(
+        what_to_show_hist="MIDPOINT",
+        what_to_show_live="MIDPOINT",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+        ),
+    ),
+    # Index - Limited tick support, TRADES for historical only
+    "IND": AssetTypeConfig(
+        what_to_show_hist="TRADES",
+        what_to_show_live="TRADES",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "232",  # Mark price
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+        ),
+    ),
+    # Bonds - Has bond factor tick
+    "BOND": AssetTypeConfig(
+        what_to_show_hist="TRADES",
+        what_to_show_live="TRADES",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+            "460",  # Bond factor multiplier
+        ),
+    ),
+    # Warrants
+    "WAR": AssetTypeConfig(
+        what_to_show_hist="TRADES",
+        what_to_show_live="TRADES",
+        generic_tick_list=(
+            "165",  # 52-week data
+            "225",  # Auction
+            "232",  # Mark price
+            "233",  # RT Volume
+            "236",  # Shortable
+            "293",  # Trade count
+            "294",  # Trade rate
+            "295",  # Volume rate
+            "318",  # Last RTH trade
+            "375",  # RT Trade Volume
+            "411",  # RT Historical Vol
+        ),
+    ),
+}
+
+# Default configuration for unknown security types
+DEFAULT_ASSET_CONFIG = AssetTypeConfig(
+    what_to_show_hist="TRADES",
+    what_to_show_live="TRADES",
+    generic_tick_list=(
+        "165",  # 52-week data
+        "225",  # Auction
+        "232",  # Mark price
+        "233",  # RT Volume
+        "236",  # Shortable
+        "293",  # Trade count
+        "294",  # Trade rate
+        "295",  # Volume rate
+        "318",  # Last RTH trade
+        "375",  # RT Trade Volume
+        "411",  # RT Historical Vol
+    ),
+)
+
+
+def get_asset_config(sec_type: str) -> AssetTypeConfig:
+    """Get TWS API configuration for a security type.
+
+    Args:
+        sec_type: Security type string (STK, OPT, FUT, CRYPTO, etc.)
+
+    Returns:
+        AssetTypeConfig with whatToShow and genericTickList for the security type.
+        Falls back to DEFAULT_ASSET_CONFIG for unknown types.
+    """
+    return ASSET_TYPE_CONFIG.get(sec_type, DEFAULT_ASSET_CONFIG)
