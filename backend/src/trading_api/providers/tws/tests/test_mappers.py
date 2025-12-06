@@ -40,7 +40,7 @@ class TestContractDescriptionMapper:
         assert result.symbol == "AAPL"
         assert result.description == "Apple Inc"
         assert result.exchange == "NASDAQ"  # Uses primaryExchange
-        assert result.ticker == "AAPL"
+        assert result.ticker == "AAPL:NASDAQ:STK-0"  # New composite format
         assert result.type == "stock"
 
     def test_fallback_exchange(self) -> None:
@@ -58,7 +58,7 @@ class TestContractDescriptionMapper:
         result = contract_description_to_search_result(desc)
 
         assert result.exchange == "IDEALPRO"
-        assert result.ticker == "EUR.USD"
+        assert result.ticker == "EUR:IDEALPRO:CASH-0"  # New composite format
         assert result.type == "forex"
 
     def test_sec_type_mapping(self) -> None:
@@ -116,7 +116,7 @@ class TestContractDetailsMapper:
         assert result.type == "stock"
         assert result.exchange == "NASDAQ"
         assert result.listed_exchange == "SMART"
-        assert result.ticker == "MSFT"
+        assert result.ticker == "MSFT:NASDAQ:STK-0"  # New composite format
         assert result.pricescale == 100  # 1/0.01 = 100
         assert result.minmov == 1
         assert result.has_intraday is True
@@ -182,7 +182,7 @@ class TestContractDetailsMapper:
 
         assert result.description == "TEST"  # Falls back to symbol
         assert result.exchange == "SMART"  # Falls back to exchange
-        assert result.ticker == "TEST"  # Falls back to symbol
+        assert result.ticker == "TEST:SMART:STK-0"  # New composite format
         assert result.session == "0000-2359"  # Default session (24h fallback)
         assert result.timezone == "America/New_York"  # Default timezone
 
@@ -220,7 +220,7 @@ class TestContractDetailsMapper:
         assert result.name == "EUR"
         assert result.type == "forex"
         assert result.pricescale == 20000  # 1/0.00005
-        assert result.ticker == "EUR.USD"
+        assert result.ticker == "EUR:IDEALPRO:CASH-0"  # New composite format
 
     def test_futures_mapping(self) -> None:
         """Test mapping futures contract details."""
@@ -240,7 +240,7 @@ class TestContractDetailsMapper:
         assert result.name == "ES"
         assert result.type == "futures"
         assert result.pricescale == 4  # 1/0.25
-        assert result.ticker == "ESZ3"
+        assert result.ticker == "ES:CME:FUT-0"  # New composite format
 
 
 class TestTwsBarMapper:

@@ -2,6 +2,7 @@ import type { ApiPromise, GetBarsResponse, GetQuotesRequest } from '@/plugins/ap
 import { ApiAdapter } from '@/plugins/apiAdapter';
 import type { WsAdapterType } from '@/plugins/wsAdapter';
 import { WsAdapter, WsFallback } from '@/plugins/wsAdapter';
+import { Resolution } from '@clients/ws-types-datafeed_v1';
 import symbolsData from '@debug/symbols.json';
 import type {
   Bar,
@@ -512,7 +513,8 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     listenerGUID: string,
     // onResetCacheNeededCallback?: () => void,
   ): void {
-    this._getWsAdapter().bars?.subscribe(listenerGUID, { symbol: symbolInfo.ticker ?? symbolInfo.name, resolution }, (bar) => {
+    // Cast string resolution to Resolution enum (TradingView passes string, WS API expects enum)
+    this._getWsAdapter().bars?.subscribe(listenerGUID, { symbol: symbolInfo.ticker ?? symbolInfo.name, resolution: resolution as Resolution }, (bar) => {
       if (this.debug_datafeed) {
         console.warn(`[${listenerGUID}] bar data received close: ${bar.close}, high: ${bar.high} / low: ${bar.low}`)
       }

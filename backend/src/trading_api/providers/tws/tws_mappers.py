@@ -10,13 +10,14 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from ibapi.common import BarData
-from ibapi.contract import ContractDescription, ContractDetails
+from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.ticktype import TickTypeEnum
 
 from trading_api.models.market import (
     Bar,
     QuoteData,
     QuoteValues,
+    Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
 )
@@ -42,15 +43,15 @@ SEC_TYPE_MAP: dict[str, str] = {
 }
 
 # Default supported resolutions for TWS datafeed
-DEFAULT_SUPPORTED_RESOLUTIONS: list[str] = [
-    "1",
-    "5",
-    "15",
-    "30",
-    "60",
-    "1D",
-    "1W",
-    "1M",
+DEFAULT_SUPPORTED_RESOLUTIONS: list[Resolution] = [
+    Resolution.MIN_1,
+    Resolution.MIN_5,
+    Resolution.MIN_15,
+    Resolution.MIN_30,
+    Resolution.HOUR_1,
+    Resolution.DAY_1,
+    Resolution.WEEK_1,
+    Resolution.MONTH_1,
 ]
 
 get_tick_type_name_ = TickTypeEnum.idx2name.get
@@ -378,6 +379,139 @@ def tws_ticks_to_quote_data(rt_data: "RTMarketData") -> QuoteData:
     return QuoteData(s="ok", n=symbol, v=quote_values)
 
 
+def parse_ticker(ticker: str) -> tuple[str, str, str, str]:
+    """Parse ticker string into components.
+    Args:
+        ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE-CONTRACTID"
+    Returns:
+        Tuple of (symbol_name, exchange, secType, contractId)
+    Examples:
+        >>> self.parse_ticker('AAPL:NASDAQ:STK-12345')
+        ('AAPL', 'NASDAQ', 'STK', '12345')
+        >>> self.parse_ticker('GOOGL:NASDAQ')
+        ('GOOGL', 'NASDAQ', '', '')
+    """
+
+    ticker_parts = ticker.split(":")
+    symbol_name = ticker_parts[0].strip()
+    exchange = ""
+    if len(ticker_parts) > 1:
+        exchange = ticker_parts[1].strip()
+    secType = ""
+    contractId = ""
+    if len(ticker_parts) > 2:
+        ticker_parts = ticker_parts[2].split("-")
+        secType = ticker_parts[0].strip()
+        if len(ticker_parts) > 1:
+            contractId = ticker_parts[1].strip()
+    return symbol_name, exchange, secType, contractId
+
+
+def build_contract(
+    ticker: str,
+) -> Contract:
+    """Build TWS Contract object from domain parameters.
+
+    Args:
+        symbol: Symbol name (e.g., "AAPL")
+        exchange: Exchange name (default: "SMART" for smart routing)
+        sec_type: Security type (default: "STK" for stocks)
+        currency: Currency code (default: "USD")
+
+    Returns:
+        TWS Contract object ready for API calls
+    """
+    symbol, exchange, sec_type, conId = parse_ticker(ticker)
+    contract = Contract()
+    contract.symbol = symbol
+    contract.secType = sec_type
+    contract.primaryExchange = exchange
+    contract.conId = int(conId)
+    return contract
+
+
+def map_resolution_to_tws_bar_size(resolution: Resolution) -> str:
+    """Map domain Resolution → TWS barSizeSetting.
+
+    Args:
+        resolution: Domain Resolution enum (TradingView format)
+
+    Returns:
+        TWS bar size string ("1 min", "5 mins", "1 hour", "1 day", etc.)
+
+    Raises:
+        DatafeedError: If resolution not supported
+    """
+    # Map Resolution enum members directly to TWS bar size strings
+    # Resolution values are TradingView format: "1", "5", "60", "1D", "1W", "1M", "12M"
+    mapping: dict[Resolution, str] = {
+        Resolution.MIN_1: "1 min",
+        Resolution.MIN_5: "5 mins",
+        Resolution.MIN_15: "15 mins",
+        Resolution.MIN_30: "30 mins",
+        Resolution.HOUR_1: "1 hour",
+        Resolution.DAY_1: "1 day",
+        Resolution.WEEK_1: "1 week",
+        Resolution.MONTH_1: "1 month",
+        Resolution.YEAR_1: "1 month",  # TWS doesn't support year bars, use monthly
+    }
+
+    bar_size = mapping.get(resolution)
+    if not bar_size:
+        raise ValueError(
+            f"Unsupported resolution: {resolution}. "
+            f"Supported: {[r.name for r in mapping.keys()]}"
+        )
+    return bar_size
+
+
+def calculate_tws_duration(
+    start_time: datetime, end_time: datetime, resolution: Resolution
+) -> str:
+    """Calculate TWS duration string from time range.
+
+    TWS requires duration in format: "n S|D|W|M|Y"
+    Maximum durations depend on bar size (e.g., 1 sec bars max 2000 S)
+
+    Args:
+        start_time: Start datetime
+        end_time: End datetime
+        resolution: Bar resolution (used to select appropriate unit)
+
+    Returns:
+        TWS duration string (e.g., "1 D", "2 W", "86400 S")
+    """
+    delta = end_time - start_time
+
+    # Select duration unit based on resolution and time range
+    # TWS limits: seconds (max 2000 S), days (max 365 D), weeks, months, years
+
+    # Intraday bars (1 min - 1 hour)
+    if resolution in [
+        Resolution.MIN_1,
+        Resolution.MIN_5,
+        Resolution.MIN_15,
+        Resolution.MIN_30,
+        Resolution.HOUR_1,
+    ]:
+        # Use days for intraday bars
+        days = delta.days + 1
+        if days <= 365:
+            return f"{days} D"
+        # Use years for very long ranges
+        weeks = days // 365 + 1
+        return f"{weeks} Y"
+
+    # Daily and above
+    else:
+        days = delta.days + 1
+        if days <= 365:
+            return f"{days} D"
+        # TWS: durations > 52 weeks must use years
+        years = days // 365 + 1
+        return f"{years} Y"
+
+
 __all__ = [
     "SEC_TYPE_MAP",
     "DEFAULT_SUPPORTED_RESOLUTIONS",
@@ -388,4 +522,8 @@ __all__ = [
     "tws_rt_bar_to_domain_bar",
     "tws_ticks_to_bar",
     "tws_ticks_to_quote_data",
+    "parse_ticker",
+    "build_contract",
+    "map_resolution_to_tws_bar_size",
+    "calculate_tws_duration",
 ]

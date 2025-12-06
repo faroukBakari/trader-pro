@@ -7,9 +7,9 @@ from typing import Any, Awaitable, Callable
 from trading_api.models.market import (
     Bar,
     QuoteData,
+    Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
-    TimeFrame,
 )
 
 
@@ -76,7 +76,7 @@ class DatafeedCapability(ABC):
         ticker: str,
         start_time: datetime,
         end_time: datetime,
-        resolution: TimeFrame,
+        resolution: Resolution,
         **kwargs: Any,
     ) -> list[Bar]:
         """Get historical OHLCV bars.
@@ -124,7 +124,7 @@ class DatafeedCapability(ABC):
     def subscribe_realtime_bars(
         self,
         ticker: str,
-        resolution: TimeFrame,
+        resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
         **kwargs: Any,
     ) -> str:

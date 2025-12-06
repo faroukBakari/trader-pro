@@ -19,7 +19,7 @@ from trading_api.models import (
     SymbolInfo,
 )
 from trading_api.models.common import CapabilitySpec
-from trading_api.models.market import TimeFrame
+from trading_api.models.market import Resolution
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.shared.ws.ws_router import WsRouteService
 
@@ -82,54 +82,6 @@ class DatafeedService(WsRouteService):
         """
         return self.configuration
 
-    # === Helper Methods ===
-
-    def _convert_resolution_to_timeframe(self, resolution: str) -> TimeFrame:
-        """Convert TradingView resolution string to TimeFrame enum.
-
-        Args:
-            resolution: TradingView resolution string
-                - Intraday: "1", "5", "15", "30", "60" (minutes)
-                - Daily+: "1D", "1W", "1M"
-
-        Returns:
-            TimeFrame enum value
-
-        Raises:
-            ValueError: If resolution is not supported
-
-        Examples:
-            >>> self._convert_resolution_to_timeframe('1')
-            TimeFrame.MIN_1
-            >>> self._convert_resolution_to_timeframe('1D')
-            TimeFrame.DAY_1
-        """
-        # Map TradingView resolution strings to TimeFrame enum
-        # TradingView uses: "1", "5", "15", "30", "60" for minutes, "D"/"1D", "W"/"1W", "M"/"1M" for larger
-        resolution_map: dict[str, TimeFrame] = {
-            # Minutes (TradingView sends just the number)
-            "1": TimeFrame.MIN_1,
-            "5": TimeFrame.MIN_5,
-            "15": TimeFrame.MIN_15,
-            "30": TimeFrame.MIN_30,
-            "60": TimeFrame.HOUR_1,
-            # Daily/Weekly/Monthly (TradingView may send with or without "1" prefix)
-            "D": TimeFrame.DAY_1,
-            "1D": TimeFrame.DAY_1,
-            "W": TimeFrame.WEEK_1,
-            "1W": TimeFrame.WEEK_1,
-            "M": TimeFrame.MONTH_1,
-            "1M": TimeFrame.MONTH_1,
-        }
-
-        if resolution not in resolution_map:
-            raise ValueError(
-                f"Unsupported resolution: {resolution}. "
-                f"Supported: {list(resolution_map.keys())}"
-            )
-
-        return resolution_map[resolution]
-
     async def create_topic(
         self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
     ) -> None:
@@ -165,9 +117,7 @@ class DatafeedService(WsRouteService):
 
             subscription_id = self.datafeed_provider.subscribe_realtime_bars(
                 ticker=subscription_request.symbol,
-                resolution=self._convert_resolution_to_timeframe(
-                    subscription_request.resolution
-                ),
+                resolution=subscription_request.resolution,
                 callback=topic_update,
             )
 
@@ -300,7 +250,7 @@ class DatafeedService(WsRouteService):
     async def get_bars(
         self,
         ticker: str,
-        resolution: str,
+        resolution: Resolution,
         from_time: int,
         to_time: int,
         count_back: Optional[int] = None,
@@ -310,8 +260,8 @@ class DatafeedService(WsRouteService):
         Delegates to datafeed provider with proper parameter conversion.
 
         Args:
-            symbol: Symbol ticker (format: "SYMBOL" or "SYMBOL:EXCHANGE")
-            resolution: TradingView resolution string ("1", "5", "1D", etc.)
+            ticker: Symbol ticker (format: "SYMBOL" or "SYMBOL:EXCHANGE")
+            resolution: Resolution enum (type-safe TradingView resolution)
             from_time: Start time (Unix milliseconds)
             to_time: End time (Unix milliseconds)
             count_back: Optional limit on number of bars to return
@@ -319,14 +269,6 @@ class DatafeedService(WsRouteService):
         Returns:
             List of bars in ascending time order
         """
-
-        # Convert resolution to TimeFrame enum
-        try:
-            timeframe = self._convert_resolution_to_timeframe(resolution)
-        except ValueError as e:
-            logger.warning(f"Unsupported resolution '{resolution}': {e}")
-            return []
-
         # Convert timestamps from milliseconds to datetime
         start_time = datetime.fromtimestamp(from_time / 1000)
         end_time = datetime.fromtimestamp(to_time / 1000)
@@ -337,7 +279,7 @@ class DatafeedService(WsRouteService):
                 ticker=ticker,
                 start_time=start_time,
                 end_time=end_time,
-                resolution=timeframe,
+                resolution=resolution,
                 timeout=30.0,
             )
 

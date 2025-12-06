@@ -9,14 +9,16 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
+from .bars import Resolution
 from .instruments import DatafeedSymbolType, Exchange
 
 
 class DatafeedConfiguration(BaseModel):
     """Datafeed configuration model matching DatafeedConfiguration interface"""
 
-    supported_resolutions: List[str] = Field(
-        default_factory=lambda: ["5", "1D", "1W"], description="Supported resolutions"
+    supported_resolutions: List[Resolution] = Field(
+        default_factory=lambda: [Resolution.MIN_5, Resolution.DAY_1, Resolution.WEEK_1],
+        description="Supported resolutions",
     )
     supports_marks: bool = Field(default=False, description="Supports marks")
     supports_timescale_marks: bool = Field(

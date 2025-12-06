@@ -4,14 +4,15 @@ Tests cover:
 - Provider initialization and configuration
 - Provider capabilities declaration
 - Domain mappers (TWS → domain conversion)
-- Helper methods (_build_contract, _map_timeframe, _calculate_duration)
 - search_symbols async flow
 - get_symbol_info async flow
 - get_historical_bars async flow
 - get_quotes_snapshot async flow (concurrent requests)
-- Subscription methods (not yet implemented)
+- Subscription methods
 
 Note: All tests mock TWSClient to avoid real TWS connections.
+Note: Helper method tests (_build_contract, _map_timeframe, _calculate_duration)
+      have been moved to test_tws_mappers.py since they are now module functions.
 """
 
 from datetime import datetime, timezone
@@ -26,9 +27,9 @@ from trading_api.models.common import DatafeedError
 from trading_api.models.market import (
     Bar,
     QuoteData,
+    Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
-    TimeFrame,
 )
 from trading_api.models.providers.tws.tws_configs import TWSProviderConfig
 from trading_api.providers.tws import TWSProvider
@@ -79,137 +80,6 @@ class TestProviderInitialization:
             TWSProvider(config=config)
 
         MockClient.assert_called_once_with("10.0.0.1", 4001, 10)
-
-
-class TestBuildContract:
-    """Test _build_contract helper method."""
-
-    def test_build_contract_default_values(self) -> None:
-        """Test _build_contract with default values."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
-
-        contract = provider._build_contract("AAPL")
-
-        assert contract.symbol == "AAPL"
-        assert contract.exchange == "SMART"
-        assert contract.secType == "STK"
-        assert contract.currency == "USD"
-
-    def test_build_contract_custom_values(self) -> None:
-        """Test _build_contract with custom values."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
-
-        contract = provider._build_contract(
-            "EUR",
-            exchange="IDEALPRO",
-            sec_type="CASH",
-            currency="USD",
-        )
-
-        assert contract.symbol == "EUR"
-        assert contract.exchange == "IDEALPRO"
-        assert contract.secType == "CASH"
-        assert contract.currency == "USD"
-
-
-class TestMapTimeframe:
-    """Test _map_timeframe_to_tws_bar_size helper method."""
-
-    def test_map_second_timeframes(self) -> None:
-        """Test mapping second timeframes.
-
-        Note: SEC_5 and MIN_5 have same enum value ("5"), so SEC_5 maps to
-        MIN_5's bar size due to dict key collision. This is a known limitation.
-        SEC_10 works correctly since it has unique value ("10").
-        """
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
-
-        # SEC_5 collides with MIN_5 (both have value "5")
-        # This is expected behavior until TimeFrame enum is refactored
-        assert provider._map_timeframe_to_tws_bar_size(TimeFrame.SEC_5) == "5 mins"
-        assert provider._map_timeframe_to_tws_bar_size(TimeFrame.SEC_10) == "10 secs"
-
-    def test_map_minute_timeframes(self) -> None:
-        """Test mapping minute timeframes."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
-
-        assert provider._map_timeframe_to_tws_bar_size(TimeFrame.MIN_1) == "1 min"
-        assert provider._map_timeframe_to_tws_bar_size(TimeFrame.MIN_5) == "5 mins"
-        assert provider._map_timeframe_to_tws_bar_size(TimeFrame.MIN_15) == "15 mins"
-        assert provider._map_timeframe_to_tws_bar_size(TimeFrame.MIN_30) == "30 mins"
-
-    def test_map_hour_timeframe(self) -> None:
-        """Test mapping hour timeframe."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
-
-        assert provider._map_timeframe_to_tws_bar_size(TimeFrame.HOUR_1) == "1 hour"
-
-    def test_map_daily_and_above(self) -> None:
-        """Test mapping daily and higher timeframes."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
-
-        assert provider._map_timeframe_to_tws_bar_size(TimeFrame.DAY_1) == "1 day"
-        assert provider._map_timeframe_to_tws_bar_size(TimeFrame.WEEK_1) == "1 week"
-        assert provider._map_timeframe_to_tws_bar_size(TimeFrame.MONTH_1) == "1 month"
-
-
-class TestCalculateDuration:
-    """Test _calculate_tws_duration helper method."""
-
-    def test_short_duration_uses_seconds(self) -> None:
-        """Test short duration with second-level resolution uses seconds."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
-
-        start = datetime(2023, 12, 15, 9, 30, 0)
-        end = datetime(2023, 12, 15, 9, 35, 0)  # 5 minutes = 300 seconds
-
-        result = provider._calculate_tws_duration(start, end, TimeFrame.SEC_5)
-
-        assert result == "300 S"
-
-    def test_intraday_uses_days(self) -> None:
-        """Test intraday duration uses days."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
-
-        start = datetime(2023, 12, 14, 9, 30, 0)
-        end = datetime(2023, 12, 15, 16, 0, 0)  # ~1.5 days
-
-        result = provider._calculate_tws_duration(start, end, TimeFrame.MIN_1)
-
-        assert result == "2 D"
-
-    def test_long_duration_uses_years(self) -> None:
-        """Test long duration uses years."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
-
-        start = datetime(2021, 1, 1, 0, 0, 0)
-        end = datetime(2023, 12, 31, 23, 59, 59)  # ~3 years
-
-        result = provider._calculate_tws_duration(start, end, TimeFrame.DAY_1)
-
-        assert "Y" in result
-
-    def test_seconds_fallback_to_days(self) -> None:
-        """Test second resolution falls back to days for long durations."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
-
-        # > 2000 seconds
-        start = datetime(2023, 12, 15, 0, 0, 0)
-        end = datetime(2023, 12, 15, 12, 0, 0)  # 12 hours = 43200 seconds
-
-        result = provider._calculate_tws_duration(start, end, TimeFrame.SEC_5)
-
-        assert "D" in result
 
 
 class TestDomainMappers:
@@ -367,14 +237,14 @@ class TestGetSymbolInfo:
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
 
-            # Execute get_symbol_info
-            result = await provider.get_symbol_info("MSFT")
+            # Execute get_symbol_info with composite ticker format
+            result = await provider.get_symbol_info("MSFT:NASDAQ:STK-12345")
 
         # Verify async method was called with contract
         mock_client.reqContractDetails.assert_called_once()
         call_args = mock_client.reqContractDetails.call_args[0][0]
         assert call_args.symbol == "MSFT"
-        assert call_args.exchange == "SMART"
+        assert call_args.primaryExchange == "NASDAQ"
 
         # Verify domain model returned
         assert isinstance(result, SymbolInfo)
@@ -403,11 +273,12 @@ class TestGetSymbolInfo:
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
-            await provider.get_symbol_info("AAPL", exchange="NASDAQ")
+            # Use composite ticker format (exchange already in ticker)
+            await provider.get_symbol_info("AAPL:NASDAQ:STK-12345")
 
-        # Verify exchange was passed through
+        # Verify contract has correct exchange (from ticker)
         call_args = mock_client.reqContractDetails.call_args[0][0]
-        assert call_args.exchange == "NASDAQ"
+        assert call_args.primaryExchange == "NASDAQ"
 
     @pytest.mark.asyncio
     async def test_get_symbol_info_not_found_raises_error(self) -> None:
@@ -419,7 +290,8 @@ class TestGetSymbolInfo:
             provider = TWSProvider()
 
             with pytest.raises(DatafeedError, match="Symbol not found"):
-                await provider.get_symbol_info("NONEXISTENT")
+                # Use composite ticker format
+                await provider.get_symbol_info("NONEXISTENT:SMART:STK-0")
 
     @pytest.mark.asyncio
     async def test_get_symbol_info_uses_first_result(self) -> None:
@@ -446,7 +318,8 @@ class TestGetSymbolInfo:
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
-            result = await provider.get_symbol_info("AAPL")
+            # Use composite ticker format
+            result = await provider.get_symbol_info("AAPL:NASDAQ:STK-12345")
 
         # Should use first result
         assert result.description == "Apple Inc NASDAQ"
@@ -464,7 +337,8 @@ class TestGetSymbolInfo:
             provider = TWSProvider()
 
             with pytest.raises(DatafeedError, match="Failed to get symbol info"):
-                await provider.get_symbol_info("AAPL")
+                # Use composite ticker format
+                await provider.get_symbol_info("AAPL:NASDAQ:STK-12345")
 
 
 class TestGetHistoricalBars:
@@ -499,10 +373,10 @@ class TestGetHistoricalBars:
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
 
             results = await provider.get_historical_bars(
-                ticker="AAPL",
+                ticker="AAPL:ARCA:STK-12345",  # Use ARCA (not in SMART_EXCHANGES) to avoid duplicate queries
                 start_time=start,
                 end_time=end,
-                resolution=TimeFrame.MIN_1,
+                resolution=Resolution.MIN_1,
             )
 
         assert len(results) == 2
@@ -524,10 +398,10 @@ class TestGetHistoricalBars:
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
 
             await provider.get_historical_bars(
-                ticker="AAPL",
+                ticker="AAPL:NASDAQ:STK-12345",
                 start_time=start,
                 end_time=end,
-                resolution=TimeFrame.MIN_5,
+                resolution=Resolution.MIN_5,
             )
 
         # Verify bar_size (4th positional arg) was passed correctly
@@ -549,17 +423,16 @@ class TestGetHistoricalBars:
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
 
             await provider.get_historical_bars(
-                ticker="AAPL",
+                ticker="AAPL:NASDAQ:STK-12345",
                 start_time=start,
                 end_time=end,
-                resolution=TimeFrame.MIN_1,
-                exchange="NASDAQ",
+                resolution=Resolution.MIN_1,
             )
 
         # Verify contract has correct exchange (1st positional arg)
         call_args = mock_client.reqHistoricalData.call_args
         contract = call_args[0][0]
-        assert contract.exchange == "NASDAQ"
+        assert contract.primaryExchange == "NASDAQ"
 
     @pytest.mark.asyncio
     async def test_get_historical_bars_wraps_exceptions(self) -> None:
@@ -575,10 +448,10 @@ class TestGetHistoricalBars:
 
             with pytest.raises(DatafeedError, match="Failed to get historical bars"):
                 await provider.get_historical_bars(
-                    ticker="AAPL",
+                    ticker="AAPL:NASDAQ:STK-12345",
                     start_time=start,
                     end_time=end,
-                    resolution=TimeFrame.MIN_1,
+                    resolution=Resolution.MIN_1,
                 )
 
 
@@ -600,11 +473,14 @@ class TestGetQuotesSnapshot:
         mock_client = Mock()
         ticker1 = make_mock_ticker("AAPL", 150.25, 150.30)
         ticker2 = make_mock_ticker("MSFT", 140.00, 140.05)
-        mock_client.create_rt_ticker = Mock(side_effect=[ticker1, ticker2])
+        mock_client.create_ticker = Mock(side_effect=[ticker1, ticker2])
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
-            results = await provider.get_quotes_snapshot(["AAPL", "MSFT"])
+            # Use composite ticker format
+            results = await provider.get_quotes_snapshot(
+                ["AAPL:NASDAQ:STK-12345", "MSFT:NASDAQ:STK-67890"]
+            )
 
         assert len(results) == 2
         assert all(isinstance(r, QuoteData) for r in results)
@@ -620,11 +496,12 @@ class TestGetQuotesSnapshot:
         mock_ticker.reqId_callback_map = {}
 
         mock_client = Mock()
-        mock_client.create_rt_ticker = Mock(return_value=mock_ticker)
+        mock_client.create_ticker = Mock(return_value=mock_ticker)
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
-            results = await provider.get_quotes_snapshot(["AAPL"])
+            # Use composite ticker format
+            results = await provider.get_quotes_snapshot(["AAPL:NASDAQ:STK-12345"])
 
         assert len(results) == 1
 
@@ -639,17 +516,18 @@ class TestGetQuotesSnapshot:
         mock_ticker.reqId_callback_map = {}
 
         mock_client = Mock()
-        mock_client.create_rt_ticker = Mock(return_value=mock_ticker)
+        mock_client.create_ticker = Mock(return_value=mock_ticker)
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
-            # Pre-populate ticker cache
-            provider._ticks["AAPL:SMART"] = mock_ticker
+            # Pre-populate ticker cache with composite ticker key
+            provider._ticks["AAPL:NASDAQ:STK-12345"] = mock_ticker
 
-            results = await provider.get_quotes_snapshot(["AAPL"])
+            # Use composite ticker format
+            results = await provider.get_quotes_snapshot(["AAPL:NASDAQ:STK-12345"])
 
         # Should not create new ticker since one already exists
-        mock_client.create_rt_ticker.assert_not_called()
+        mock_client.create_ticker.assert_not_called()
         assert len(results) == 1
 
 
@@ -664,7 +542,7 @@ class TestSubscriptionMethods:
         mock_ticker.reqId_callback_map = {}
 
         mock_client = Mock()
-        mock_client.create_rt_ticker = Mock(return_value=mock_ticker)
+        mock_client.create_ticker = Mock(return_value=mock_ticker)
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
@@ -673,11 +551,11 @@ class TestSubscriptionMethods:
                 pass
 
             sub_id = provider.subscribe_realtime_bars(
-                "AAPL", TimeFrame.MIN_5, bar_callback
+                "AAPL:NASDAQ:STK-12345", Resolution.MIN_5, bar_callback
             )
 
-            assert isinstance(sub_id, int)
-            mock_client.create_rt_ticker.assert_called_once()
+            assert isinstance(sub_id, str)
+            mock_client.create_ticker.assert_called_once()
 
     def test_subscribe_market_data_returns_subscription_ids(self) -> None:
         """Test subscribe_market_data returns list of subscription IDs."""
@@ -689,7 +567,7 @@ class TestSubscriptionMethods:
             return ticker
 
         mock_client = Mock()
-        mock_client.create_rt_ticker = Mock(
+        mock_client.create_ticker = Mock(
             side_effect=[make_mock_ticker() for _ in range(3)]
         )
 
@@ -700,10 +578,15 @@ class TestSubscriptionMethods:
                 pass
 
             sub_ids = provider.subscribe_market_data(
-                ["AAPL", "MSFT", "GOOGL"], quote_callback
+                [
+                    "AAPL:NASDAQ:STK-12345",
+                    "MSFT:NASDAQ:STK-67890",
+                    "GOOGL:NASDAQ:STK-99999",
+                ],
+                quote_callback,
             )
 
-            # subscribe_market_data uses _get_or_create_rt_ticker internally
+            # subscribe_market_data uses _get_or_create_ticker internally
             assert isinstance(sub_ids, list)
 
     def test_unsubscribe_realtime_bars_removes_callback(self) -> None:
@@ -714,7 +597,7 @@ class TestSubscriptionMethods:
         mock_ticker.reqId_callback_map = {}
 
         mock_client = Mock()
-        mock_client.create_rt_ticker = Mock(return_value=mock_ticker)
+        mock_client.create_ticker = Mock(return_value=mock_ticker)
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
@@ -723,7 +606,7 @@ class TestSubscriptionMethods:
                 pass
 
             sub_id = provider.subscribe_realtime_bars(
-                "AAPL", TimeFrame.MIN_5, bar_callback
+                "AAPL:NASDAQ:STK-12345", Resolution.MIN_5, bar_callback
             )
 
             # Verify callback was registered
@@ -743,7 +626,7 @@ class TestSubscriptionMethods:
         mock_ticker.reqId_callback_map = {}
 
         mock_client = Mock()
-        mock_client.create_rt_ticker = Mock(return_value=mock_ticker)
+        mock_client.create_ticker = Mock(return_value=mock_ticker)
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
@@ -751,6 +634,8 @@ class TestSubscriptionMethods:
             async def quote_callback(quote: object) -> None:
                 pass
 
-            sub_ids = provider.subscribe_market_data(["AAPL"], quote_callback)
+            sub_ids = provider.subscribe_market_data(
+                ["AAPL:NASDAQ:STK-12345"], quote_callback
+            )
 
             provider.unsubscribe_market_data(sub_ids)

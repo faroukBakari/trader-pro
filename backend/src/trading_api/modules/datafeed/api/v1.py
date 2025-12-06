@@ -16,6 +16,7 @@ from trading_api.models import (
     SymbolInfo,
 )
 from trading_api.models.auth import UserData
+from trading_api.models.market import Resolution
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.middleware.auth import get_current_user
 
@@ -48,7 +49,7 @@ class DatafeedApi(APIRouterInterface):
             except (TimeoutError, asyncio.TimeoutError):
                 raise HTTPException(
                     status_code=504,
-                    detail=f"Request timeout",
+                    detail="Request timeout",
                 )
             except HTTPException:
                 raise
@@ -90,7 +91,7 @@ class DatafeedApi(APIRouterInterface):
             except (TimeoutError, asyncio.TimeoutError):
                 raise HTTPException(
                     status_code=504,
-                    detail=f"Request timeout",
+                    detail="Request timeout",
                 )
             except HTTPException:
                 raise
@@ -122,7 +123,7 @@ class DatafeedApi(APIRouterInterface):
             except (TimeoutError, asyncio.TimeoutError):
                 raise HTTPException(
                     status_code=504,
-                    detail=f"Request timeout",
+                    detail="Request timeout",
                 )
             except HTTPException:
                 raise
@@ -138,7 +139,7 @@ class DatafeedApi(APIRouterInterface):
         async def get_bars(
             _: Annotated[UserData, Depends(get_current_user)],
             symbol: str = Query(..., description="Symbol name"),
-            resolution: str = Query(..., description="Resolution (e.g., '1D')"),
+            resolution: Resolution = Query(..., description="Resolution (e.g., '1D')"),
             from_time: int = Query(..., description="From timestamp (seconds)"),
             to_time: int = Query(..., description="To timestamp (seconds)"),
             count_back: Optional[int] = Query(None, description="Count back"),
@@ -166,7 +167,7 @@ class DatafeedApi(APIRouterInterface):
             except (TimeoutError, asyncio.TimeoutError):
                 raise HTTPException(
                     status_code=504,
-                    detail=f"Request timeout",
+                    detail="Request timeout",
                 )
             except HTTPException:
                 raise
@@ -196,7 +197,7 @@ class DatafeedApi(APIRouterInterface):
             except (TimeoutError, asyncio.TimeoutError):
                 raise HTTPException(
                     status_code=504,
-                    detail=f"Request timeout",
+                    detail="Request timeout",
                 )
             except HTTPException:
                 raise
@@ -217,7 +218,7 @@ class DatafeedApi(APIRouterInterface):
         except (TimeoutError, asyncio.TimeoutError):
             raise HTTPException(
                 status_code=504,
-                detail=f"Request timeout",
+                detail="Request timeout",
             )
         except HTTPException:
             raise
