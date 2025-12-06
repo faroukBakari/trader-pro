@@ -78,12 +78,19 @@ def contract_description_to_search_result(
         Domain SearchSymbolResultItem for frontend consumption
     """
     contract = desc.contract
+    symbol = contract.symbol
+    description = contract.description or f"{contract.symbol} ({contract.secType})"
+    exchange = contract.primaryExchange or contract.exchange
+    type = SEC_TYPE_MAP.get(contract.secType, "stock")
+    ticker = (
+        symbol + ":" + exchange + ":" + contract.secType + "-" + str(contract.conId)
+    )
     return SearchSymbolResultItem(
         symbol=contract.symbol,
-        description=contract.description or f"{contract.symbol} ({contract.secType})",
-        exchange=contract.primaryExchange or contract.exchange,
-        ticker=contract.localSymbol or contract.symbol,
-        type=SEC_TYPE_MAP.get(contract.secType, "stock"),
+        description=description,
+        exchange=exchange,
+        ticker=ticker,
+        type=type,
     )
 
 
@@ -157,16 +164,21 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     )
 
     # Determine symbol type
+
+    symbol = contract.symbol
+    exchange = contract.primaryExchange or contract.exchange
     symbol_type = SEC_TYPE_MAP.get(contract.secType, "stock")
 
     return SymbolInfo(
-        name=contract.symbol,
-        description=details.longName or contract.symbol,
+        name=symbol,
+        description=details.longName or symbol,
         type=symbol_type,
         session=_convert_tws_trading_hours_to_session(details.tradingHours),
         timezone=_normalize_timezone(details.timeZoneId),
-        ticker=contract.localSymbol or contract.symbol,
-        exchange=contract.primaryExchange or contract.exchange,
+        ticker=(
+            symbol + ":" + exchange + ":" + contract.secType + "-" + str(contract.conId)
+        ),
+        exchange=exchange,
         listed_exchange=contract.exchange,
         format="price",
         pricescale=pricescale,

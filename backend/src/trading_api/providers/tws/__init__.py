@@ -14,10 +14,9 @@ Architecture:
 
 import asyncio
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
-from re import sub
-from tkinter import N
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
@@ -50,6 +49,86 @@ logger = logging.getLogger(__name__)
 
 us_eastern = ZoneInfo("US/Eastern")
 
+DEBUG_TWS_PROVIDER = os.environ.get("DEBUG_TWS_PROVIDER") == "true"
+debug_log = logger.info
+
+SMART_EXCHANGES = {"SMART", "NYSE", "NASDAQ"}
+
+
+def _parse_ticker(ticker: str) -> tuple[str, str, str, str]:
+    """Parse ticker string into components.
+    Args:
+        ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE-CONTRACTID"
+    Returns:
+        Tuple of (symbol_name, exchange, secType, contractId)
+    Examples:
+        >>> self._parse_ticker('AAPL:NASDAQ:STK-12345')
+        ('AAPL', 'NASDAQ', 'STK', '12345')
+        >>> self._parse_ticker('GOOGL:NASDAQ')
+        ('GOOGL', 'NASDAQ', '', '')
+    """
+
+    ticker_parts = ticker.split(":")
+    symbol_name = ticker_parts[0].strip()
+    exchange = ""
+    if len(ticker_parts) > 1:
+        exchange = ticker_parts[1].strip()
+    secType = ""
+    contractId = ""
+    if len(ticker_parts) > 2:
+        ticker_parts = ticker_parts[2].split("-")
+        secType = ticker_parts[0].strip()
+        if len(ticker_parts) > 1:
+            contractId = ticker_parts[1].strip()
+    return symbol_name, exchange, secType, contractId
+
+
+def _convert_resolution_to_timeframe(resolution: str) -> TimeFrame:
+    """Convert TradingView resolution string to TimeFrame enum.
+
+    Args:
+        resolution: TradingView resolution string
+            - Intraday: "1", "5", "15", "30", "60" (minutes)
+            - Daily+: "1D", "1W", "1M"
+
+    Returns:
+        TimeFrame enum value
+
+    Raises:
+        ValueError: If resolution is not supported
+
+    Examples:
+        >>> self._convert_resolution_to_timeframe('1')
+        TimeFrame.MIN_1
+        >>> self._convert_resolution_to_timeframe('1D')
+        TimeFrame.DAY_1
+    """
+    # Map TradingView resolution strings to TimeFrame enum
+    # TradingView uses: "1", "5", "15", "30", "60" for minutes, "D"/"1D", "W"/"1W", "M"/"1M" for larger
+    resolution_map: dict[str, TimeFrame] = {
+        # Minutes (TradingView sends just the number)
+        "1": TimeFrame.MIN_1,
+        "5": TimeFrame.MIN_5,
+        "15": TimeFrame.MIN_15,
+        "30": TimeFrame.MIN_30,
+        "60": TimeFrame.HOUR_1,
+        # Daily/Weekly/Monthly (TradingView may send with or without "1" prefix)
+        "D": TimeFrame.DAY_1,
+        "1D": TimeFrame.DAY_1,
+        "W": TimeFrame.WEEK_1,
+        "1W": TimeFrame.WEEK_1,
+        "M": TimeFrame.MONTH_1,
+        "1M": TimeFrame.MONTH_1,
+    }
+
+    if resolution not in resolution_map:
+        raise ValueError(
+            f"Unsupported resolution: {resolution}. "
+            f"Supported: {list(resolution_map.keys())}"
+        )
+
+    return resolution_map[resolution]
+
 
 class TWSProvider(Provider, DatafeedCapability):
     """TWS provider - implements DatafeedCapability with AsyncIO bridge.
@@ -74,7 +153,7 @@ class TWSProvider(Provider, DatafeedCapability):
         )
 
         # Unified ticker storage: key = "symbol:exchange" → RTMarketData
-        self._tickers: dict[str, RTMarketData] = {}
+        self._ticks: dict[str, RTMarketData] = {}
         # Reverse mapping: subscription_id → (symbol, exchange, callback_type)
         self._subscription_map: dict[str, tuple[str, str, str]] = {}
 
@@ -105,10 +184,7 @@ class TWSProvider(Provider, DatafeedCapability):
 
     def _build_contract(
         self,
-        symbol: str,
-        exchange: str = "SMART",
-        sec_type: str = "STK",
-        currency: str = "USD",
+        ticker: str,
     ) -> Contract:
         """Build TWS Contract object from domain parameters.
 
@@ -121,11 +197,12 @@ class TWSProvider(Provider, DatafeedCapability):
         Returns:
             TWS Contract object ready for API calls
         """
+        symbol, exchange, sec_type, conId = _parse_ticker(ticker)
         contract = Contract()
         contract.symbol = symbol
         contract.secType = sec_type
-        contract.exchange = exchange
-        contract.currency = currency
+        contract.primaryExchange = exchange
+        contract.conId = int(conId)
         return contract
 
     def _map_timeframe_to_tws_bar_size(self, resolution: TimeFrame) -> str:
@@ -247,8 +324,7 @@ class TWSProvider(Provider, DatafeedCapability):
 
     async def get_symbol_info(
         self,
-        symbol: str,
-        exchange: str = "SMART",
+        ticker: str,
         **kwargs: Any,
     ) -> SymbolInfo:
         """Get detailed symbol information.
@@ -267,7 +343,11 @@ class TWSProvider(Provider, DatafeedCapability):
         Raises:
             DatafeedError: If symbol not found or request fails
         """
-        if exchange == "SMART":
+
+        # Build TWS Contract for the request
+        contract = self._build_contract(ticker)
+
+        if contract.primaryExchange in SMART_EXCHANGES:
             now_us_eastern = datetime.now(us_eastern)
             smart_exchange = (
                 "OVERNIGHT"
@@ -283,10 +363,9 @@ class TWSProvider(Provider, DatafeedCapability):
                 else "SMART"
             )
         else:
-            smart_exchange = exchange
+            smart_exchange = contract.primaryExchange
 
-        # Build TWS Contract for the request
-        contract = self._build_contract(symbol, exchange=smart_exchange)
+        contract.exchange = smart_exchange
 
         try:
             # Get contract details via TWSClient (returns list)
@@ -295,7 +374,7 @@ class TWSProvider(Provider, DatafeedCapability):
             )
 
             if not contract_details_list:
-                raise DatafeedError(f"Symbol not found: {symbol}")
+                raise DatafeedError(f"Symbol not found: {ticker}")
 
             # Use first match (most common case is single result)
             return contract_details_to_symbol_info(contract_details_list[0])
@@ -303,15 +382,14 @@ class TWSProvider(Provider, DatafeedCapability):
         except DatafeedError:
             raise
         except Exception as e:
-            raise DatafeedError(f"Failed to get symbol info for {symbol}: {e}") from e
+            raise DatafeedError(f"Failed to get symbol info for {ticker}: {e}") from e
 
     async def get_historical_bars(
         self,
-        symbol: str,
+        ticker: str,
         start_time: datetime,
         end_time: datetime,
         resolution: TimeFrame,
-        exchange: str = "SMART",
         **kwargs: Any,
     ) -> list[Bar]:
         """Get historical OHLCV bars.
@@ -352,14 +430,16 @@ class TWSProvider(Provider, DatafeedCapability):
             end_dt_str = end_time_tz.strftime("%Y%m%d %H:%M:%S US/Eastern")
 
         tws_bars: list[BarData] = []
-        exchanges = [exchange]
-        if exchange == "SMART" and resolution > TimeFrame.HOUR_1:
-            exchanges.append("OVERNIGHT")  # Add ISLAND for NASDAQ stocks
         try:
+            contract = self._build_contract(ticker)
+            exchanges = [contract.primaryExchange]
+            if (
+                contract.primaryExchange in SMART_EXCHANGES
+                and resolution > TimeFrame.HOUR_1
+            ):
+                exchanges.append("OVERNIGHT")
             for exch in exchanges:
-                # Build TWS contract
-                contract = self._build_contract(symbol, exchange=exch)
-                # Request historical data via TWSClient (returns list[BarData])
+                contract.exchange = exch
                 bars = await self._tws_client.reqHistoricalData(
                     contract,
                     end_dt_str,
@@ -379,13 +459,12 @@ class TWSProvider(Provider, DatafeedCapability):
 
         except Exception as e:
             raise DatafeedError(
-                f"Failed to get historical bars for {symbol}: {e}"
+                f"Failed to get historical bars for {ticker}: {e}"
             ) from e
 
     async def get_quotes_snapshot(
         self,
-        symbols: list[str],
-        exchange: str = "SMART",
+        tickers: list[str],
         **kwargs: Any,
     ) -> list[QuoteData]:
         """Get current market quotes for multiple symbols (snapshot).
@@ -408,12 +487,12 @@ class TWSProvider(Provider, DatafeedCapability):
 
         try:
             # Create or reuse subscriptions for all symbols
-            for symbol in symbols:
-                existing = f"{symbol}:{exchange}" in self._tickers
-                ticker = self._get_or_create_ticker(symbol, exchange)
+            for ticker in tickers:
+                existing = ticker in self._ticks
+                tick = self._get_or_create_ticker(ticker)
                 if existing:
-                    await asyncio.sleep(0.2)  # Give time for existing ticker to update
-                results.append(tws_ticks_to_quote_data(ticker))
+                    await asyncio.sleep(0.5)  # Give time for existing ticker to update
+                results.append(tws_ticks_to_quote_data(tick))
 
             return results
 
@@ -422,10 +501,9 @@ class TWSProvider(Provider, DatafeedCapability):
 
     def subscribe_realtime_bars(
         self,
-        symbol: str,
+        ticker: str,
         resolution: TimeFrame,
         callback: Callable[[Bar], Awaitable[None]],
-        exchange: str = "SMART",
         **kwargs: Any,
     ) -> str:
         """Subscribe to real-time bars.
@@ -446,32 +524,31 @@ class TWSProvider(Provider, DatafeedCapability):
             DatafeedError: If subscription fails or resolution not supported
         """
 
-        subscription_id = "subscribe_realtime_bars" + "_" + symbol + "_" + exchange
+        subscription_id = "subscribe_realtime_bars" + "_" + ticker
 
         loop = asyncio.get_event_loop()
 
         async def bar_callback(rt_data: RTMarketData, fields: list[str] | None) -> None:
             if fields is None or any(f.startswith("bar_") for f in fields):
-                logger.info(
-                    f"Received real-time bar update for {symbol} with fields: {fields}"
-                )
+                if DEBUG_TWS_PROVIDER:
+                    debug_log(
+                        f"Received real-time bar update for {ticker} with fields: {fields}"
+                    )
                 await callback(tws_ticks_to_bar(rt_data))
 
         # Get or create unified ticker via helper
-        ticker = self._get_or_create_ticker(symbol, exchange, resolution, **kwargs)
+        tick = self._get_or_create_ticker(ticker, resolution, **kwargs)
 
-        ticker.reqId_callback_map[subscription_id] = (loop, bar_callback)
+        tick.reqId_callback_map[subscription_id] = (loop, bar_callback)
 
-        logger.info(
-            f"Subscribed to real-time bars for {symbol} on exchange {exchange or 'SMART'}"
-        )
+        if DEBUG_TWS_PROVIDER:
+            debug_log(f"Subscribed to real-time bars for {ticker}")
         return subscription_id
 
     def subscribe_market_data(
         self,
-        symbols: list[str],
+        tickers: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
-        exchange: str = "SMART",
         **kwargs: Any,
     ) -> list[str]:
         """Subscribe to real-time market data.
@@ -492,8 +569,8 @@ class TWSProvider(Provider, DatafeedCapability):
         """
         subscription_ids: list[str] = []
 
-        for symbol in symbols:
-            subscription_id = "subscribe_market_data" + "_" + symbol + "_" + exchange
+        for ticker in tickers:
+            subscription_id = "subscribe_market_data" + "_" + ticker
             loop = asyncio.get_event_loop()
 
             # Register quote callback on the ticker
@@ -503,20 +580,20 @@ class TWSProvider(Provider, DatafeedCapability):
                 if fields is not None and any(
                     f in {"bid", "ask", "last"} for f in fields
                 ):
-                    logger.info(
-                        f"Received market data update for {symbol} with fields: {fields}"
-                    )
+                    if DEBUG_TWS_PROVIDER:
+                        debug_log(
+                            f"Received market data update for {ticker} with fields: {fields}"
+                        )
                     await callback(tws_ticks_to_quote_data(rt_data))
 
-            ticker = self._get_or_create_ticker(symbol, exchange, **kwargs)
+            tick = self._get_or_create_ticker(ticker, **kwargs)
 
-            ticker.reqId_callback_map[subscription_id] = (loop, quote_callback)
+            tick.reqId_callback_map[subscription_id] = (loop, quote_callback)
 
             subscription_ids.append(subscription_id)
 
-        logger.info(
-            f"Subscribed to market data for symbols: {symbols} on exchange {exchange or 'SMART'}"
-        )
+        if DEBUG_TWS_PROVIDER:
+            debug_log(f"Subscribed to market data for symbols: {tickers}")
         return subscription_ids
 
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
@@ -529,12 +606,13 @@ class TWSProvider(Provider, DatafeedCapability):
             DatafeedError: If subscription ID not found
         """
         # Lookup symbol/exchange from reverse mapping
-        for key, ticker in self._tickers.items():
+        for key, ticker in self._ticks.items():
             if subscription_id in ticker.reqId_callback_map:
                 ticker.reqId_callback_map.pop(subscription_id, None)
-                logger.info(
-                    f"Unsubscribed from real-time bars with subscription ID: {subscription_id}"
-                )
+                if DEBUG_TWS_PROVIDER:
+                    debug_log(
+                        f"Unsubscribed from real-time bars with subscription ID: {subscription_id}"
+                    )
                 if not ticker.reqId_callback_map:
                     self._remove_ticker(key)
                 return
@@ -549,83 +627,73 @@ class TWSProvider(Provider, DatafeedCapability):
             DatafeedError: If subscription ID not found
         """
         for subscription_id in subscription_ids:
-            for key, ticker in self._tickers.items():
+            for key, ticker in self._ticks.items():
                 if subscription_id in ticker.reqId_callback_map:
                     ticker.reqId_callback_map.pop(subscription_id, None)
-                    logger.info(
-                        f"Unsubscribed from market data with subscription ID: {subscription_id}"
-                    )
+                    if DEBUG_TWS_PROVIDER:
+                        debug_log(
+                            f"Unsubscribed from market data with subscription ID: {subscription_id}"
+                        )
                     if not ticker.reqId_callback_map:
                         self._remove_ticker(key)
                     break
 
-    def _get_existing_ticker(
-        self,
-        symbol: str,
-        exchange: str = "SMART",
-    ) -> RTMarketData | None:
-        """Get existing real-time data subscription if it exists.
-
-        Args:
-            symbol: Symbol name
-            exchange: Exchange name (default: SMART)
-        """
-        key = f"{symbol}:{exchange}"
-        if key in self._tickers:
-            return self._tickers[key]
-        return None
-
     def _get_or_create_ticker(
         self,
-        symbol: str,
-        exchange: str = "SMART",
+        ticker: str,
         resolution: TimeFrame | None = None,
         **kwargs: Any,
     ) -> RTMarketData:
         """Get existing or create new real-time data subscription (sync version).
 
         Args:
-            symbol: Symbol name
+            ticker: Ticker name
             resolution: Time resolution
             exchange: Exchange name (default: SMART)
 
         Returns:
             RTMarketData ticker instance
         """
-        key = f"{symbol}:{exchange}"
-
         # no need to subscribe again
-        if key in self._tickers:
-            ticker = self._tickers[key]
+        if ticker in self._ticks:
+            tick = self._ticks[ticker]
             if resolution is not None:
                 bar_size = self._map_timeframe_to_tws_bar_size(resolution)
-                if bar_size != ticker.barSize_setting:
+                if bar_size != tick.barSize_setting:
                     # switch resolution
-                    logger.info(
-                        f"Switching resolution for {symbol} from {ticker.barSize_setting} to {bar_size}"
-                    )
-                    self._tws_client.switch_ticker(ticker, bar_size)
-            return ticker
+                    if DEBUG_TWS_PROVIDER:
+                        debug_log(
+                            f"Switching resolution for {ticker} from {tick.barSize_setting} to {bar_size}"
+                        )
+                    self._tws_client.switch_ticker_resolution(tick, bar_size)
+            return tick
 
         # check max concurrent subscriptions
-        while len(self._tickers) >= self._config.max_concurrent_rt_subscriptions:
-            stale_ticker_key = next(
-                iter([k for k, t in self._tickers.items() if not t.reqId_callback_map]),
+        while len(self._ticks) >= self._config.max_concurrent_rt_subscriptions:
+            stale_ticker = next(
+                iter([k for k, t in self._ticks.items() if not t.reqId_callback_map]),
                 None,
             )
             assert (
-                stale_ticker_key is not None
+                stale_ticker is not None
             ), "Max concurrent RT subscriptions reached, but no unsubscribable tickers found."
-            stale_ticker = self._tickers.pop(stale_ticker_key)
-            self._tws_client.remove_ticker(stale_ticker)
-            logger.info(f"remove_ticker {stale_ticker_key}")
+            stale_tick = self._ticks.pop(stale_ticker)
+            self._tws_client.remove_ticker(stale_tick)
+            if DEBUG_TWS_PROVIDER:
+                debug_log(f"remove_ticker {stale_ticker}")
 
         # defautl resolution if not provided (quotes only)
+        contract = self._build_contract(ticker)
+
         if resolution is None:
             resolution = TimeFrame.DAY_1  # Default resolution for quotes
-        if exchange == "SMART" and resolution <= TimeFrame.HOUR_1:
+
+        if (
+            contract.primaryExchange in SMART_EXCHANGES
+            and resolution <= TimeFrame.HOUR_1
+        ):
             now_us_eastern = datetime.now(us_eastern)
-            smart_exchange = (
+            contract.exchange = (
                 "OVERNIGHT"
                 if (
                     now_us_eastern.weekday() < 5
@@ -639,27 +707,30 @@ class TWSProvider(Provider, DatafeedCapability):
                 else "SMART"
             )
         else:
-            smart_exchange = exchange
+            contract.exchange = contract.primaryExchange
 
-        ticker = self._tws_client.create_ticker(
-            self._build_contract(symbol, exchange=smart_exchange),
+        tick = self._tws_client.create_ticker(
+            contract,
             self._map_timeframe_to_tws_bar_size(resolution),
             **kwargs,
         )
 
-        logger.info(
-            f"Created new ticker for {symbol} on exchange {exchange or 'SMART'} with resolution {ticker.barSize_setting}"
-        )
+        if DEBUG_TWS_PROVIDER:
+            debug_log(
+                f"Created new ticker for {ticker} with resolution {tick.barSize_setting}"
+            )
 
-        self._tickers[key] = ticker
-        return ticker
+        self._ticks[ticker] = tick
+        return tick
 
     def _remove_ticker(self, ticker_key: str) -> None:
-        assert not self._tickers[ticker_key].reqId_callback_map
-        logger.info(f"Removing ticker {ticker_key} due to no active subscriptions")
-        stale_ticker = self._tickers.pop(ticker_key)
+        assert not self._ticks[ticker_key].reqId_callback_map
+        if DEBUG_TWS_PROVIDER:
+            debug_log(f"Removing ticker {ticker_key} due to no active subscriptions")
+        stale_ticker = self._ticks.pop(ticker_key)
         self._tws_client.remove_ticker(stale_ticker)
-        logger.info(f"remove_ticker {ticker_key}")
+        if DEBUG_TWS_PROVIDER:
+            debug_log(f"remove_ticker {ticker_key}")
 
     def shutdown(self) -> None:
         """Perform any necessary cleanup on provider shutdown.
@@ -669,9 +740,11 @@ class TWSProvider(Provider, DatafeedCapability):
         if not hasattr(self, "_tws_client"):
             return  # Already shutdown
 
-        logger.info("Shutting down TWSProvider...")
+        if DEBUG_TWS_PROVIDER:
+            debug_log("Shutting down TWSProvider...")
         self._tws_client.shutdown()
-        logger.info("TWSProvider shutdown complete.")
+        if DEBUG_TWS_PROVIDER:
+            debug_log("TWSProvider shutdown complete.")
 
 
 # Alias for auto-discovery compatibility (provider registry expects TwsProvider)

@@ -33,11 +33,11 @@ function getLanguageFromURL() {
 
 const props = defineProps({
   symbol: {
-    default: 'AAPL',
+    default: 'BTC:PAXOS:CRYPTO-479624278',
     type: String,
   },
   interval: {
-    default: '1D',
+    default: '5',
     type: String,
   },
   // datafeedUrl: {
@@ -138,6 +138,7 @@ onMounted(() => {
   try {
     const datafeed = new DatafeedService()
     const widgetOptions: TradingTerminalWidgetOptions = {
+      load_last_chart: true,
       symbol: props.symbol,
       datafeed,
       interval: props.interval as ResolutionString,
