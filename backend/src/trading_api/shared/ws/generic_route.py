@@ -53,7 +53,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             self._clients.add(client)
             topic = self.topic_builder(payload.sub_params)
             if topic not in self._topics:
-                await self._create_topic(topic)
+                self._create_topic(topic)
             client.subscribe(topic)
             if DEBUG_WS_ROUTER:
                 debug_log(f"Client {client.uid} subscribed to topic: {topic}")
@@ -165,7 +165,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             logger.exception(f"Error during FastWS {self.route}.update broadcast, {e}")
             await asyncio.sleep(1)
 
-    async def _create_topic(self, topic: str) -> None:
+    def _create_topic(self, topic: str) -> None:
         async def topic_update(data: _TData) -> None:
             await self._broadcast_update(
                 SubscriptionUpdate(
@@ -176,7 +176,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
 
         if DEBUG_WS_ROUTER:
             debug_log(f"Creating new topic in {self.route} service: {topic}")
-        await self.service.create_topic(topic, topic_update)
+        self.service.create_topic(topic, topic_update)
         self._topics.add(topic)
 
     def _remove_topic(self, topic: str) -> None:

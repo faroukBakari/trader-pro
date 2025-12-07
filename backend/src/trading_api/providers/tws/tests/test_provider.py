@@ -460,20 +460,12 @@ class TestGetQuotesSnapshot:
 
     @pytest.mark.asyncio
     async def test_get_quotes_snapshot_returns_quotes(self) -> None:
-        """Test get_quotes_snapshot returns QuoteData list using RT ticker approach."""
-        from trading_api.providers.tws.tws_models import RTMarketData
+        """Test get_quotes_snapshot returns QuoteData list.
 
-        def make_mock_ticker(symbol: str, bid: float, ask: float) -> RTMarketData:
-            ticker = RTMarketData()
-            ticker.bid = bid
-            ticker.ask = ask
-            ticker.reqId_callback_map = {}
-            return ticker
-
+        Note: Current implementation returns basic quote data structures
+        based on ticker names without actual market data.
+        """
         mock_client = Mock()
-        ticker1 = make_mock_ticker("AAPL", 150.25, 150.30)
-        ticker2 = make_mock_ticker("MSFT", 140.00, 140.05)
-        mock_client.create_ticker = Mock(side_effect=[ticker1, ticker2])
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
@@ -488,15 +480,7 @@ class TestGetQuotesSnapshot:
     @pytest.mark.asyncio
     async def test_get_quotes_snapshot_single_symbol(self) -> None:
         """Test get_quotes_snapshot with single symbol."""
-        from trading_api.providers.tws.tws_models import RTMarketData
-
-        mock_ticker = RTMarketData()
-        mock_ticker.bid = 100.0
-        mock_ticker.ask = 100.05
-        mock_ticker.reqId_callback_map = {}
-
         mock_client = Mock()
-        mock_client.create_ticker = Mock(return_value=mock_ticker)
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
@@ -506,43 +490,25 @@ class TestGetQuotesSnapshot:
         assert len(results) == 1
 
     @pytest.mark.asyncio
-    async def test_get_quotes_snapshot_reuses_existing_ticker(self) -> None:
-        """Test get_quotes_snapshot reuses existing RT ticker if present."""
-        from trading_api.providers.tws.tws_models import RTMarketData
-
-        mock_ticker = RTMarketData()
-        mock_ticker.bid = 150.0
-        mock_ticker.ask = 150.05
-        mock_ticker.reqId_callback_map = {}
-
+    async def test_get_quotes_snapshot_extracts_symbol_name(self) -> None:
+        """Test get_quotes_snapshot extracts symbol name from ticker."""
         mock_client = Mock()
-        mock_client.create_ticker = Mock(return_value=mock_ticker)
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
-            # Pre-populate ticker cache with composite ticker key
-            provider._ticks["AAPL:NASDAQ:STK-12345"] = mock_ticker
-
-            # Use composite ticker format
             results = await provider.get_quotes_snapshot(["AAPL:NASDAQ:STK-12345"])
 
-        # Should not create new ticker since one already exists
-        mock_client.create_ticker.assert_not_called()
-        assert len(results) == 1
+        # Verify the symbol name was extracted correctly
+        assert results[0].n == "AAPL"
 
 
 class TestSubscriptionMethods:
-    """Test subscription methods using new unified RTMarketData flow."""
+    """Test subscription methods using TWSClient stream APIs."""
 
     def test_subscribe_realtime_bars_returns_subscription_id(self) -> None:
         """Test subscribe_realtime_bars returns a subscription ID."""
-        from trading_api.providers.tws.tws_models import RTMarketData
-
-        mock_ticker = RTMarketData()
-        mock_ticker.reqId_callback_map = {}
-
         mock_client = Mock()
-        mock_client.create_ticker = Mock(return_value=mock_ticker)
+        mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
@@ -555,20 +521,17 @@ class TestSubscriptionMethods:
             )
 
             assert isinstance(sub_id, str)
-            mock_client.create_ticker.assert_called_once()
+            mock_client.reqBarDataStream.assert_called_once()
 
     def test_subscribe_market_data_returns_subscription_ids(self) -> None:
         """Test subscribe_market_data returns list of subscription IDs."""
-        from trading_api.providers.tws.tws_models import RTMarketData
-
-        def make_mock_ticker() -> RTMarketData:
-            ticker = RTMarketData()
-            ticker.reqId_callback_map = {}
-            return ticker
-
         mock_client = Mock()
-        mock_client.create_ticker = Mock(
-            side_effect=[make_mock_ticker() for _ in range(3)]
+        mock_client.reqMktDataStream = Mock(
+            side_effect=[
+                "AAPL:NASDAQ:STK-12345",
+                "MSFT:NASDAQ:STK-67890",
+                "GOOGL:NASDAQ:STK-99999",
+            ]
         )
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
@@ -586,18 +549,15 @@ class TestSubscriptionMethods:
                 quote_callback,
             )
 
-            # subscribe_market_data uses _get_or_create_ticker internally
             assert isinstance(sub_ids, list)
+            assert len(sub_ids) == 3
+            assert mock_client.reqMktDataStream.call_count == 3
 
-    def test_unsubscribe_realtime_bars_removes_callback(self) -> None:
-        """Test unsubscribe_realtime_bars removes callback from ticker."""
-        from trading_api.providers.tws.tws_models import RTMarketData
-
-        mock_ticker = RTMarketData()
-        mock_ticker.reqId_callback_map = {}
-
+    def test_unsubscribe_realtime_bars_calls_cancel(self) -> None:
+        """Test unsubscribe_realtime_bars calls cancelBarDataStream."""
         mock_client = Mock()
-        mock_client.create_ticker = Mock(return_value=mock_ticker)
+        mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
+        mock_client.cancelBarDataStream = Mock()
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
@@ -609,24 +569,17 @@ class TestSubscriptionMethods:
                 "AAPL:NASDAQ:STK-12345", Resolution.MIN_5, bar_callback
             )
 
-            # Verify callback was registered
-            assert sub_id in mock_ticker.reqId_callback_map
-
             # Unsubscribe
             provider.unsubscribe_realtime_bars(sub_id)
 
-            # Verify callback was removed
-            assert sub_id not in mock_ticker.reqId_callback_map
+            # Verify cancel was called
+            mock_client.cancelBarDataStream.assert_called_once_with(sub_id)
 
-    def test_unsubscribe_market_data_removes_callbacks(self) -> None:
-        """Test unsubscribe_market_data removes callbacks from tickers."""
-        from trading_api.providers.tws.tws_models import RTMarketData
-
-        mock_ticker = RTMarketData()
-        mock_ticker.reqId_callback_map = {}
-
+    def test_unsubscribe_market_data_calls_cancel(self) -> None:
+        """Test unsubscribe_market_data calls cancelMktDataStream."""
         mock_client = Mock()
-        mock_client.create_ticker = Mock(return_value=mock_ticker)
+        mock_client.reqMktDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345")
+        mock_client.cancelMktDataStream = Mock()
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
@@ -639,3 +592,5 @@ class TestSubscriptionMethods:
             )
 
             provider.unsubscribe_market_data(sub_ids)
+
+            mock_client.cancelMktDataStream.assert_called_once_with(sub_ids[0])

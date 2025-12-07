@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import Any
 
 from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
@@ -21,9 +21,6 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-
-if TYPE_CHECKING:
-    from trading_api.providers.tws.tws_models import RTMarketData
 
 # TWS secType → TradingView-style symbol type
 SEC_TYPE_MAP: dict[str, str] = {
@@ -65,6 +62,21 @@ def get_tick_type_name(tick_type: int) -> str:
         String name of the tick type
     """
     return get_tick_type_name_(tick_type, f"UNKNOWN_{tick_type}")
+
+
+def ticker_name(contract: Contract, bar_size: str | None = None) -> str:
+    ticker = (
+        contract.symbol
+        + ":"
+        + (contract.primaryExchange or contract.exchange)
+        + ":"
+        + contract.secType
+        + "-"
+        + str(contract.conId)
+    )
+    if bar_size:
+        ticker += "@" + bar_size
+    return ticker
 
 
 def contract_description_to_search_result(
@@ -295,58 +307,37 @@ def tws_rt_bar_to_domain_bar(
     )
 
 
-def tws_ticks_to_bar(rt_data: "RTMarketData") -> Bar:
-    """Convert RTMarketData bar fields → domain Bar.
-
-    Args:
-        rt_data: RTMarketData instance with bar fields populated
-
-    Returns:
-        Domain Bar model
-    """
+def tws_ticks_to_bar(rt_data: dict[str, Any]) -> Bar:
     # Prefer bar_date (string) over bar_time (legacy int)
-    if rt_data.bar_date:
-        time_ms = parse_tws_bar_date(rt_data.bar_date)
-    elif rt_data.bar_time:
-        time_ms = rt_data.bar_time * 1000
+    if rt_data.get("bar_date"):
+        time_ms = parse_tws_bar_date(rt_data["bar_date"])
+    elif rt_data.get("bar_time"):
+        time_ms = rt_data["bar_time"] * 1000
     else:
         time_ms = 0
     return Bar(
         time=time_ms,
-        open=float(rt_data.bar_open or 0.0),
-        high=float(rt_data.bar_high or 0.0),
-        low=float(rt_data.bar_low or 0.0),
-        close=float(rt_data.bar_close or 0.0),
-        volume=rt_data.bar_volume or 0,
-        count=rt_data.bar_count or 0,
+        open=float(rt_data.get("bar_open", 0.0)),
+        high=float(rt_data.get("bar_high", 0.0)),
+        low=float(rt_data.get("bar_low", 0.0)),
+        close=float(rt_data.get("bar_close", 0.0)),
+        volume=rt_data.get("bar_volume", 0),
+        count=rt_data.get("bar_count", 0),
     )
 
 
-def tws_ticks_to_quote_data(rt_data: "RTMarketData") -> QuoteData:
-    """Convert RTMarketData tick fields → domain QuoteData.
-
-    Args:
-        rt_data: RTMarketData instance with tick fields populated
-
-    Returns:
-        QuoteData with status="ok" and QuoteValues populated from rt_data
-    """
-    symbol = rt_data.contract.symbol if rt_data.contract else "UNKNOWN"
-    exchange = (
-        rt_data.contract.primaryExchange or rt_data.contract.exchange
-        if rt_data.contract
-        else ""
-    )
+def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
+    symbol, exchange, _, _, _ = parse_ticker(rt_data.get("ticker_name", "UNKNOWN"))
 
     # Extract values with defaults
-    bid = round(rt_data.bid or 0.0, 2)
-    ask = round(rt_data.ask or 0.0, 2)
-    last = round(rt_data.last or 0.0, 2)
-    open_price = round(rt_data.bar_open or last, 2)
-    high_price = round(rt_data.bar_high or last, 2)
-    low_price = round(rt_data.bar_low or last, 2)
-    close_price = round(rt_data.bar_close or last, 2)
-    volume = rt_data.bar_volume or 0
+    bid = round(rt_data.get("bid", 0.0), 2)
+    ask = round(rt_data.get("ask", 0.0), 2)
+    last = round(rt_data.get("last", 0.0), 2)
+    open_price = round(rt_data.get("bar_open", last), 2)
+    high_price = round(rt_data.get("bar_high", last), 2)
+    low_price = round(rt_data.get("bar_low", last), 2)
+    close_price = round(rt_data.get("bar_close", last), 2)
+    volume = rt_data.get("bar_volume", 0)
     # Calculate spread
     spread = round(ask - bid, 2) if (ask > 0 and bid > 0) else 0.0
 
@@ -379,17 +370,17 @@ def tws_ticks_to_quote_data(rt_data: "RTMarketData") -> QuoteData:
     return QuoteData(s="ok", n=symbol, v=quote_values)
 
 
-def parse_ticker(ticker: str) -> tuple[str, str, str, str]:
+def parse_ticker(ticker: str) -> tuple[str, str, str, str, str]:
     """Parse ticker string into components.
     Args:
         ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE-CONTRACTID"
     Returns:
-        Tuple of (symbol_name, exchange, secType, contractId)
+        Tuple of (symbol_name, exchange, secType, contractId, bar_size)
     Examples:
-        >>> self.parse_ticker('AAPL:NASDAQ:STK-12345')
-        ('AAPL', 'NASDAQ', 'STK', '12345')
+        >>> self.parse_ticker('AAPL:NASDAQ:STK-12345@1D')
+        ('AAPL', 'NASDAQ', 'STK', '12345', '1D')
         >>> self.parse_ticker('GOOGL:NASDAQ')
-        ('GOOGL', 'NASDAQ', '', '')
+        ('GOOGL', 'NASDAQ', '', '', '')
     """
 
     ticker_parts = ticker.split(":")
@@ -399,12 +390,16 @@ def parse_ticker(ticker: str) -> tuple[str, str, str, str]:
         exchange = ticker_parts[1].strip()
     secType = ""
     contractId = ""
+    bar_size = ""
     if len(ticker_parts) > 2:
         ticker_parts = ticker_parts[2].split("-")
         secType = ticker_parts[0].strip()
         if len(ticker_parts) > 1:
-            contractId = ticker_parts[1].strip()
-    return symbol_name, exchange, secType, contractId
+            ticker_parts = ticker_parts[1].split("@")
+            contractId = ticker_parts[0].strip()
+            if len(ticker_parts) > 1:
+                bar_size = ticker_parts[1].strip()
+    return symbol_name, exchange, secType, contractId, bar_size
 
 
 def build_contract(
@@ -421,10 +416,11 @@ def build_contract(
     Returns:
         TWS Contract object ready for API calls
     """
-    symbol, exchange, sec_type, conId = parse_ticker(ticker)
+    symbol, exchange, sec_type, conId, _ = parse_ticker(ticker)
     contract = Contract()
     contract.symbol = symbol
     contract.secType = sec_type
+    contract.exchange = exchange if exchange else "SMART"
     contract.primaryExchange = exchange
     contract.conId = int(conId)
     return contract

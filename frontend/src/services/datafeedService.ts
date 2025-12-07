@@ -513,7 +513,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     listenerGUID: string,
     // onResetCacheNeededCallback?: () => void,
   ): void {
-    // Cast string resolution to Resolution enum (TradingView passes string, WS API expects enum)
+    console.log(`[Datafeed] Subscribing to rt bars for ${symbolInfo.ticker ?? symbolInfo.name} symbol`)
     this._getWsAdapter().bars?.subscribe(listenerGUID, { symbol: symbolInfo.ticker ?? symbolInfo.name, resolution: resolution as Resolution }, (bar) => {
       if (this.debug_datafeed) {
         console.warn(`[${listenerGUID}] bar data received close: ${bar.close}, high: ${bar.high} / low: ${bar.low}`)
@@ -564,6 +564,8 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       return
     }
 
+    console.log(`[Datafeed] Subscribing to quotes for ${allSymbols.length} symbols`)
+
     for (const symbol of allSymbols) {
       const symbolSubId = listenerGUID + '_' + symbol
       this._getWsAdapter().quotes
@@ -572,8 +574,8 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
           { symbols: [], fast_symbols: [symbol] },
           (quoteData) => {
             if (this.debug_datafeed) {
-              const v = quoteData.v as { bid?: number; ask?: number; last?: number }
-              console.warn(`[${listenerGUID}] Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask} / last: ${v?.last}`)
+              const v = quoteData.v as { bid?: number; ask?: number; lp?: number }
+              console.warn(`[${listenerGUID}] Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask} / last: ${v?.lp}`)
             }
             onRealtimeCallback([quoteData])
           }

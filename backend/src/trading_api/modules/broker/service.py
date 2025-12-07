@@ -729,7 +729,7 @@ class BrokerService(WsRouteService):
 
     # ========================== WEBSOCKET STREAMING ==========================#
 
-    async def create_topic(
+    def create_topic(
         self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
     ) -> None:
         """Register callback for topic type and start execution simulator if needed.
@@ -770,7 +770,7 @@ class BrokerService(WsRouteService):
                     disconnectType=None,
                     timestamp=int(time.time() * 1000),
                 )
-                await topic_update(status)
+                asyncio.create_task(topic_update(status))  # type: ignore[arg-type]
 
         # Start execution simulator if not already running and we have orders topic
         if self._execution_simulator_task is None and len(self._update_callbacks) > 0:

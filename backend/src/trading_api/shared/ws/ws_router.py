@@ -32,7 +32,7 @@ def buildTopicParams(obj: Any) -> str:
 
 
 class WsRouteService(ServiceInterface):
-    async def create_topic(
+    def create_topic(
         self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
     ) -> None:
         ...

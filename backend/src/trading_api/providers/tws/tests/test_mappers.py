@@ -332,27 +332,20 @@ class TestTwsTicksToQuoteDataMapper:
     """Test tws_ticks_to_quote_data mapper."""
 
     def test_basic_quote_mapping(self) -> None:
-        """Test mapping RTMarketData to QuoteData."""
-        from ibapi.contract import Contract
-
+        """Test mapping dict ticker data to QuoteData."""
         from trading_api.models.market import QuoteValues
-        from trading_api.providers.tws.tws_models import RTMarketData
 
-        contract = Contract()
-        contract.symbol = "AAPL"
-        contract.primaryExchange = "NASDAQ"
-
-        rt_data = RTMarketData(
-            contract=contract,
-            bid=150.25,
-            ask=150.30,
-            last=150.28,
-            bar_open=149.00,
-            bar_high=151.00,
-            bar_low=148.50,
-            bar_close=149.50,
-            bar_volume=1000000,
-        )
+        rt_data = {
+            "ticker_name": "AAPL:NASDAQ:STK-12345",
+            "bid": 150.25,
+            "ask": 150.30,
+            "last": 150.28,
+            "bar_open": 149.00,
+            "bar_high": 151.00,
+            "bar_low": 148.50,
+            "bar_close": 149.50,
+            "bar_volume": 1000000,
+        }
 
         result = tws_ticks_to_quote_data(rt_data)
 
@@ -371,12 +364,12 @@ class TestTwsTicksToQuoteDataMapper:
     def test_spread_calculation(self) -> None:
         """Test spread is calculated from bid/ask."""
         from trading_api.models.market import QuoteValues
-        from trading_api.providers.tws.tws_models import RTMarketData
 
-        rt_data = RTMarketData(
-            bid=100.00,
-            ask=100.10,
-        )
+        rt_data = {
+            "ticker_name": "TEST:SMART:STK-0",
+            "bid": 100.00,
+            "ask": 100.10,
+        }
 
         result = tws_ticks_to_quote_data(rt_data)
 
@@ -386,12 +379,12 @@ class TestTwsTicksToQuoteDataMapper:
     def test_change_calculation(self) -> None:
         """Test change and change percent are calculated."""
         from trading_api.models.market import QuoteValues
-        from trading_api.providers.tws.tws_models import RTMarketData
 
-        rt_data = RTMarketData(
-            last=105.00,
-            bar_close=100.00,
-        )
+        rt_data = {
+            "ticker_name": "TEST:SMART:STK-0",
+            "last": 105.00,
+            "bar_close": 100.00,
+        }
 
         result = tws_ticks_to_quote_data(rt_data)
 
@@ -402,9 +395,10 @@ class TestTwsTicksToQuoteDataMapper:
     def test_missing_values_default_to_zero(self) -> None:
         """Test missing tick values default to zero."""
         from trading_api.models.market import QuoteValues
-        from trading_api.providers.tws.tws_models import RTMarketData
 
-        rt_data = RTMarketData()
+        rt_data: dict[str, object] = {
+            "ticker_name": "TEST:SMART:STK-0",
+        }
 
         result = tws_ticks_to_quote_data(rt_data)
 
@@ -419,12 +413,12 @@ class TestTwsTicksToQuoteDataMapper:
     def test_partial_tick_data(self) -> None:
         """Test handling of partial tick data."""
         from trading_api.models.market import QuoteValues
-        from trading_api.providers.tws.tws_models import RTMarketData
 
-        rt_data = RTMarketData(
-            last=150.00,
-            bar_volume=500000,
-        )
+        rt_data = {
+            "ticker_name": "TEST:SMART:STK-0",
+            "last": 150.00,
+            "bar_volume": 500000,
+        }
 
         result = tws_ticks_to_quote_data(rt_data)
 
