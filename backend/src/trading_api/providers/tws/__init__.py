@@ -323,7 +323,52 @@ class TWSProvider(Provider, DatafeedCapability):
             TimeoutError: If snapshot exceeds timeout
         """
 
-        return [tws_ticks_to_quote_data({"ticker_name": ticker}) for ticker in tickers]
+        now_us_eastern = datetime.now(us_eastern)
+        smart_exchange = (
+            "OVERNIGHT"
+            if (
+                now_us_eastern.weekday() < 5
+                and (
+                    now_us_eastern.time()
+                    >= datetime.strptime("20:00:00", "%H:%M:%S").time()
+                    or now_us_eastern.time()
+                    < datetime.strptime("4:00:00", "%H:%M:%S").time()
+                )
+            )
+            else "SMART"
+        )
+
+        contracts: list[Contract] = []
+        for ticker in tickers:
+            contract = build_contract(ticker)
+            if contract.primaryExchange in SMART_EXCHANGES:
+                contract.exchange = smart_exchange
+            contracts.append(contract)
+            logger.info(
+                f"Getting quotes snapshot for tickers: {ticker} for exchange: {contract.exchange}"
+            )
+
+        nb_retreis = 3
+        while True:
+            try:
+                results_raw = await asyncio.gather(
+                    *[
+                        self._tws_client.reqQuoteSnapshot(
+                            contract,
+                            **kwargs,
+                        )
+                        for contract in contracts
+                    ]
+                )
+                return [tws_ticks_to_quote_data(result) for result in results_raw]
+            except TimeoutError:
+                nb_retreis -= 1
+                if nb_retreis == 0:
+                    raise
+                await asyncio.sleep(0.2)
+                logger.warning(
+                    f"TimeoutError when getting quotes snapshot. Retrying... ({nb_retreis} retries left)"
+                )
 
     def subscribe_realtime_bars(
         self,

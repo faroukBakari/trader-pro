@@ -484,13 +484,22 @@ class IBSocket(EWrapper):
         self._reader_accumulators[reqId] = []
         return asyncio.wait_for(future, timeout)
 
+    def create_tick_future(
+        self, reqId: int, ticker_name: str, timeout: float | None = 5
+    ) -> Awaitable[Any]:
+        """Create a new Future attached to the current event loop."""
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[Any] = loop.create_future()
+        self._reader_futures[reqId] = (loop, future)
+        self._reader_tickers[reqId] = {
+            "reqId": reqId,
+            "ticker_name": ticker_name,
+        }
+        return asyncio.wait_for(future, timeout)
+
     def _resolve_future(self, reqId: int) -> None:
         """Helper to resolve a future in the asyncio loop."""
         results = self._reader_accumulators.pop(reqId, [])
-        if results is None:
-            logger.error(f"Accumulator not found for reqId {reqId}")
-            self._reader_futures.pop(reqId, (None, None))
-            return
         loop, future = self._reader_futures.pop(reqId, (None, None))
         if loop is None or future is None or future.done():
             logger.error(f"future/loop not found or already done for reqId {reqId}.")
@@ -523,6 +532,7 @@ class IBSocket(EWrapper):
         """Create and register a new ticker slot slot for a reqId."""
         # reader thread ownership
         self._reader_tickers.pop(reqId, None)
+        self._reader_streams.pop(reqId, (None, None))
 
     def _notify_stream(
         self,
@@ -535,6 +545,17 @@ class IBSocket(EWrapper):
         if ticker is None:
             debug_log(f"No ticker slot found for tickerId {reqId}")
             return
+
+        # quote snapshot future resolution
+        if reqId in self._reader_futures and all(
+            att in ticker for att in ["bid", "ask", "last"]
+        ):
+            loop, future = self._reader_futures.pop(reqId, (None, None))
+            assert (
+                loop is not None and future is not None
+            ), "Loop and future must not be None"
+            loop.call_soon_threadsafe(future.set_result, ticker)
+
         loop, callback = self._reader_streams.get(reqId, (None, None))
         if loop is None or callback is None:
             debug_log(f"No stream registered for tickerId {reqId}")
@@ -790,15 +811,15 @@ class IBSocket(EWrapper):
             self._notify_stream(reqId, ["market_data_type"])
 
     def tickReqParams(
-        self, reqId: int, minTick: float, bboExchange: str, snapshotPermissions: int
+        self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
     ) -> None:
         """returns exchange map of a particular contract"""
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-        ticker = self._reader_tickers.get(reqId)
+        ticker = self._reader_tickers.get(tickerId)
         if ticker is None:
-            debug_log(f"No ticker slot found for tickerId {reqId}")
+            debug_log(f"No ticker slot found for tickerId {tickerId}")
             return
 
         current_minTick: float | None = ticker.get("min_tick")
@@ -825,14 +846,14 @@ class IBSocket(EWrapper):
             ticker_name: str = ticker["ticker_name"]
             assert ticker_name is not None, "ticker[ticker_name] is not a str instance."
             debug_log(
-                f"tickReqParams: reqId=[{reqId}], ticker=[{ticker_name}], "
+                f"tickReqParams: reqId=[{tickerId}], ticker=[{ticker_name}], "
                 f"field_name=[min_tick], size=[{current_minTick} -> {minTick}]"
                 f"field_name=[bbo_exchange], size=[{current_bboExchange} -> {bboExchange}]"
                 f"field_name=[snapshot_permissions], size=[{current_snapshotPermissions} -> {snapshotPermissions}]"
             )
 
         if update_list:
-            self._notify_stream(reqId, update_list)
+            self._notify_stream(tickerId, update_list)
 
     def tickString(self, reqId: int, tickType: int, value: str) -> None:
         """Generic string tick for market data snapshot."""
@@ -1142,6 +1163,61 @@ class TWSClient:
             debug_log(
                 f"awaiting historicalData for reqId {reqId}, "
                 f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{bar_size}'"
+            )
+        return await coroutine
+
+    async def reqQuoteSnapshot(
+        self,
+        contract: Contract,
+        timeout: float | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        stream_key = ticker_name(contract)
+        if stream_key in self._active_streams:
+            self._active_streams[stream_key]
+            if DEBUG_TWS_REQUEST:
+                debug_log(f"reusing active stream '{stream_key}' for reqQuoteSnapshot")
+            return await self.ibsocket.create_future(  # type: ignore[no-any-return]
+                self._active_streams[stream_key],
+                timeout=timeout or self._timeout,
+            )
+
+        reqId = self.next_req_id
+        coroutine: Awaitable[dict[str, Any]] = self.ibsocket.create_tick_future(
+            reqId,
+            stream_key,
+            timeout=timeout or self._timeout,
+        )
+
+        VERSION = 11
+        # Build message fields for REQ_MKT_DATA
+        mkt_data_fields: list[object] = [
+            VERSION,
+            reqId,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            0,  # deltaNeutralContract (False = no delta neutral)
+            [],  # Asset-type-specific tick list
+            1,  # snapshot
+            0,  # regulatorySnapshot
+            [],  # mktDataOptions (empty list)
+        ]
+
+        self.ibsocket.send_message(OUT.REQ_MKT_DATA, mkt_data_fields)
+
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"awaiting quote snapshot for reqId {reqId}, symbol='{contract.symbol}'"
             )
         return await coroutine
 
