@@ -17,6 +17,8 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
+from re import sub
+from turtle import rt
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
@@ -34,7 +36,6 @@ from trading_api.models.market import (
 from trading_api.models.providers.tws.tws_configs import TWSProviderConfig
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.providers.tws.tws_connection import TWSClient
-from trading_api.providers.tws.tws_models import RTMarketData
 from trading_api.shared import Provider
 
 from .tws_mappers import (
@@ -43,6 +44,7 @@ from .tws_mappers import (
     contract_description_to_search_result,
     contract_details_to_symbol_info,
     map_resolution_to_tws_bar_size,
+    ticker_name,
     tws_bar_to_domain_bar,
     tws_ticks_to_bar,
     tws_ticks_to_quote_data,
@@ -58,32 +60,18 @@ debug_log = logger.info
 SMART_EXCHANGES = {"SMART", "NYSE", "NASDAQ"}
 
 
-def _parse_ticker(ticker: str) -> tuple[str, str, str, str]:
-    """Parse ticker string into components.
-    Args:
-        ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE-CONTRACTID"
-    Returns:
-        Tuple of (symbol_name, exchange, secType, contractId)
-    Examples:
-        >>> self._parse_ticker('AAPL:NASDAQ:STK-12345')
-        ('AAPL', 'NASDAQ', 'STK', '12345')
-        >>> self._parse_ticker('GOOGL:NASDAQ')
-        ('GOOGL', 'NASDAQ', '', '')
-    """
-
-    ticker_parts = ticker.split(":")
-    symbol_name = ticker_parts[0].strip()
-    exchange = ""
-    if len(ticker_parts) > 1:
-        exchange = ticker_parts[1].strip()
-    secType = ""
-    contractId = ""
-    if len(ticker_parts) > 2:
-        ticker_parts = ticker_parts[2].split("-")
-        secType = ticker_parts[0].strip()
-        if len(ticker_parts) > 1:
-            contractId = ticker_parts[1].strip()
-    return symbol_name, exchange, secType, contractId
+class SubStream:
+    sub_id: str
+    reqIds: list[int]
+    callbacks: list[
+        tuple[
+            asyncio.AbstractEventLoop,
+            Callable[
+                [dict[str, Any], list[str] | None],
+                Awaitable[None],
+            ],
+        ]
+    ]
 
 
 class TWSProvider(Provider, DatafeedCapability):
@@ -108,10 +96,18 @@ class TWSProvider(Provider, DatafeedCapability):
             self._config.host, self._config.port, self._config.client_id
         )
 
-        # Unified ticker storage: key = "symbol:exchange" → RTMarketData
-        self._ticks: dict[str, RTMarketData] = {}
         # Reverse mapping: subscription_id → (symbol, exchange, callback_type)
-        self._subscription_map: dict[str, tuple[str, str, str]] = {}
+        self._subscriptions: dict[str, list[int]] = {}
+        self._callbacks: dict[
+            str,
+            tuple[
+                asyncio.AbstractEventLoop,
+                Callable[
+                    [dict[str, Any], list[str] | None],
+                    Awaitable[None],
+                ],
+            ],
+        ] = {}
 
     @classmethod
     def provider_dir(cls) -> Path:
@@ -315,9 +311,6 @@ class TWSProvider(Provider, DatafeedCapability):
     ) -> list[QuoteData]:
         """Get current market quotes for multiple symbols (snapshot).
 
-        [UNIFIED]: Uses RTMarketData subscription, waits for initial data, then converts.
-        [DOMAIN-ONLY]: Returns domain QuoteData models (no TWS types).
-
         Args:
             symbols: List of symbol names (e.g., ["AAPL", "GOOGL", "MSFT"])
             exchange: Optional exchange filter (default: "SMART")
@@ -329,21 +322,8 @@ class TWSProvider(Provider, DatafeedCapability):
             DatafeedError: If request fails
             TimeoutError: If snapshot exceeds timeout
         """
-        results: list[QuoteData] = []
 
-        try:
-            # Create or reuse subscriptions for all symbols
-            for ticker in tickers:
-                existing = ticker in self._ticks
-                tick = self._get_or_create_ticker(ticker)
-                if existing:
-                    await asyncio.sleep(0.5)  # Give time for existing ticker to update
-                results.append(tws_ticks_to_quote_data(tick))
-
-            return results
-
-        except Exception as e:
-            raise DatafeedError(f"Failed to get quote snapshot: {e}") from e
+        return [tws_ticks_to_quote_data({"ticker_name": ticker}) for ticker in tickers]
 
     def subscribe_realtime_bars(
         self,
@@ -353,9 +333,6 @@ class TWSProvider(Provider, DatafeedCapability):
         **kwargs: Any,
     ) -> str:
         """Subscribe to real-time bars.
-
-        [UNIFIED]: Uses RTMarketData subscription for bar data.
-        [ASYNC-CALLBACK]: Callback executes in asyncio event loop.
 
         Args:
             symbol: Symbol name
@@ -370,11 +347,11 @@ class TWSProvider(Provider, DatafeedCapability):
             DatafeedError: If subscription fails or resolution not supported
         """
 
-        subscription_id = "subscribe_realtime_bars" + "_" + ticker
+        bar_size = map_resolution_to_tws_bar_size(resolution)
 
-        loop = asyncio.get_event_loop()
-
-        async def bar_callback(rt_data: RTMarketData, fields: list[str] | None) -> None:
+        async def bar_callback(
+            rt_data: dict[str, Any], fields: list[str] | None
+        ) -> None:
             if fields is None or any(f.startswith("bar_") for f in fields):
                 if DEBUG_TWS_PROVIDER:
                     debug_log(
@@ -382,168 +359,7 @@ class TWSProvider(Provider, DatafeedCapability):
                     )
                 await callback(tws_ticks_to_bar(rt_data))
 
-        # Get or create unified ticker via helper
-        tick = self._get_or_create_ticker(ticker, resolution, **kwargs)
-
-        tick.reqId_callback_map[subscription_id] = (loop, bar_callback)
-
-        if DEBUG_TWS_PROVIDER:
-            debug_log(f"Subscribed to real-time bars for {ticker}")
-        return subscription_id
-
-    def subscribe_market_data(
-        self,
-        tickers: list[str],
-        callback: Callable[[QuoteData], Awaitable[None]],
-        **kwargs: Any,
-    ) -> list[str]:
-        """Subscribe to real-time market data.
-
-        [UNIFIED]: Uses RTMarketData subscription for quote data.
-        [ASYNC-CALLBACK]: Callback executes in asyncio event loop.
-
-        Args:
-            symbols: List of symbol names
-            callback: Callback for tick updates
-            exchange: Optional exchange filter
-
-        Returns:
-            List of subscription IDs (one per symbol)
-
-        Raises:
-            DatafeedError: If subscription fails
-        """
-        subscription_ids: list[str] = []
-
-        for ticker in tickers:
-            subscription_id = "subscribe_market_data" + "_" + ticker
-            loop = asyncio.get_event_loop()
-
-            # Register quote callback on the ticker
-            async def quote_callback(
-                rt_data: RTMarketData, fields: list[str] | None
-            ) -> None:
-                if fields is not None and any(
-                    f in {"bid", "ask", "last"} for f in fields
-                ):
-                    if DEBUG_TWS_PROVIDER:
-                        debug_log(
-                            f"Received market data update for {ticker} with fields: {fields}"
-                        )
-                    await callback(tws_ticks_to_quote_data(rt_data))
-
-            tick = self._get_or_create_ticker(ticker, **kwargs)
-
-            tick.reqId_callback_map[subscription_id] = (loop, quote_callback)
-
-            subscription_ids.append(subscription_id)
-
-        if DEBUG_TWS_PROVIDER:
-            debug_log(f"Subscribed to market data for symbols: {tickers}")
-        return subscription_ids
-
-    def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
-        """Unsubscribe from real-time bars.
-
-        Args:
-            subscription_id: ID from subscribe_realtime_bars
-
-        Raises:
-            DatafeedError: If subscription ID not found
-        """
-        # Lookup symbol/exchange from reverse mapping
-        for key, tick in self._ticks.items():
-            if subscription_id in tick.reqId_callback_map:
-                tick.reqId_callback_map.pop(subscription_id, None)
-                if DEBUG_TWS_PROVIDER:
-                    debug_log(
-                        f"Unsubscribed from real-time bars with subscription ID: {subscription_id}"
-                    )
-                if not tick.reqId_callback_map:
-                    self._remove_ticker(key)
-                else:
-                    if DEBUG_TWS_PROVIDER:
-                        debug_log(
-                            f"Ticker {key} still has active subscriptions: {list(tick.reqId_callback_map.keys())}."
-                        )
-                return
-
-    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
-        """Unsubscribe from market data.
-
-        Args:
-            subscription_ids: IDs from subscribe_market_data
-
-        Raises:
-            DatafeedError: If subscription ID not found
-        """
-        for subscription_id in subscription_ids:
-            for key, tick in self._ticks.items():
-                if subscription_id in tick.reqId_callback_map:
-                    tick.reqId_callback_map.pop(subscription_id, None)
-                    if DEBUG_TWS_PROVIDER:
-                        debug_log(
-                            f"Unsubscribed from market data with subscription ID: {subscription_id}"
-                        )
-                    if not tick.reqId_callback_map:
-                        self._remove_ticker(key)
-                    else:
-                        if DEBUG_TWS_PROVIDER:
-                            debug_log(
-                                f"Ticker {key} still has active subscriptions: {list(tick.reqId_callback_map.keys())}."
-                            )
-                    break
-
-    def _get_or_create_ticker(
-        self,
-        ticker: str,
-        resolution: Resolution | None = None,
-        **kwargs: Any,
-    ) -> RTMarketData:
-        """Get existing or create new real-time data subscription (sync version).
-
-        Args:
-            ticker: Ticker name
-            resolution: Time resolution
-            exchange: Exchange name (default: SMART)
-
-        Returns:
-            RTMarketData ticker instance
-        """
-        # no need to subscribe again
-        if ticker in self._ticks:
-            tick = self._ticks[ticker]
-            if resolution is not None:
-                bar_size = map_resolution_to_tws_bar_size(resolution)
-                if bar_size != tick.barSize_setting:
-                    # switch resolution
-                    if DEBUG_TWS_PROVIDER:
-                        debug_log(
-                            f"Switching resolution for {ticker} from {tick.barSize_setting} to {bar_size}"
-                        )
-                    self._tws_client.switch_ticker_resolution(tick, bar_size)
-            return tick
-
-        # check max concurrent subscriptions
-        while len(self._ticks) >= self._config.max_concurrent_rt_subscriptions:
-            stale_ticker = next(
-                iter([k for k, t in self._ticks.items() if not t.reqId_callback_map]),
-                None,
-            )
-            assert (
-                stale_ticker is not None
-            ), "Max concurrent RT subscriptions reached, but no unsubscribable tickers found."
-            stale_tick = self._ticks.pop(stale_ticker)
-            self._tws_client.remove_ticker(stale_tick)
-            if DEBUG_TWS_PROVIDER:
-                debug_log(f"remove_ticker {stale_ticker}")
-
-        # default resolution if not provided (quotes only)
         contract = build_contract(ticker)
-
-        if resolution is None:
-            resolution = Resolution.MIN_5  # Default resolution for quotes
-
         if contract.primaryExchange in SMART_EXCHANGES and resolution in [
             Resolution.MIN_1,
             Resolution.MIN_5,
@@ -567,30 +383,94 @@ class TWSProvider(Provider, DatafeedCapability):
                 )
                 else "SMART"
             )
-        else:
-            contract.exchange = contract.primaryExchange
-
-        tick = self._tws_client.create_ticker(
+        return self._tws_client.reqBarDataStream(
             contract,
-            map_resolution_to_tws_bar_size(resolution),
+            bar_size,
+            bar_callback,
             **kwargs,
         )
 
-        if DEBUG_TWS_PROVIDER:
-            debug_log(
-                f"Created new ticker for {ticker} with resolution {tick.barSize_setting}"
+    def subscribe_market_data(
+        self,
+        tickers: list[str],
+        callback: Callable[[QuoteData], Awaitable[None]],
+        **kwargs: Any,
+    ) -> list[str]:
+        """Subscribe to real-time market data.
+
+        Args:
+            symbols: List of symbol names
+            callback: Callback for tick updates
+            exchange: Optional exchange filter
+
+        Returns:
+            List of subscription IDs (one per symbol)
+
+        Raises:
+            DatafeedError: If subscription fails
+        """
+
+        # Register quote callback on the ticker
+        async def quote_callback(
+            rt_data: dict[str, Any], fields: list[str] | None
+        ) -> None:
+            if fields is not None and any(f in {"bid", "ask", "last"} for f in fields):
+                if DEBUG_TWS_PROVIDER:
+                    debug_log(
+                        f"Received market data update for {rt_data.get('ticker_name', 'UNKNOWN')}"
+                        f" with fields: {fields}"
+                    )
+                await callback(tws_ticks_to_quote_data(rt_data))
+
+        sub_ids = []
+        for ticker in tickers:
+            contract = build_contract(ticker)
+            if contract.primaryExchange in SMART_EXCHANGES:
+                now_us_eastern = datetime.now(us_eastern)
+                contract.exchange = (
+                    "OVERNIGHT"
+                    if (
+                        now_us_eastern.weekday() < 5
+                        and (
+                            now_us_eastern.time()
+                            >= datetime.strptime("20:00:00", "%H:%M:%S").time()
+                            or now_us_eastern.time()
+                            < datetime.strptime("4:00:00", "%H:%M:%S").time()
+                        )
+                    )
+                    else "SMART"
+                )
+            sub_ids.append(
+                self._tws_client.reqMktDataStream(
+                    build_contract(ticker), quote_callback, **kwargs
+                )
             )
 
-        self._ticks[ticker] = tick
-        return tick
+        return sub_ids
 
-    def _remove_ticker(self, ticker_key: str) -> None:
-        if DEBUG_TWS_PROVIDER:
-            debug_log(f"Removing ticker {ticker_key} due to no active subscriptions")
-        stale_ticker = self._ticks.pop(ticker_key)
-        self._tws_client.remove_ticker(stale_ticker)
-        if DEBUG_TWS_PROVIDER:
-            debug_log(f"remove_ticker {ticker_key}")
+    def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
+        """Unsubscribe from real-time bars.
+
+        Args:
+            subscription_id: ID from subscribe_realtime_bars
+
+        Raises:
+            DatafeedError: If subscription ID not found
+        """
+        # Lookup symbol/exchange from reverse mapping
+        self._tws_client.cancelBarDataStream(subscription_id)
+
+    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
+        """Unsubscribe from market data.
+
+        Args:
+            subscription_ids: IDs from subscribe_market_data
+
+        Raises:
+            DatafeedError: If subscription ID not found
+        """
+        for sub_id in subscription_ids:
+            self._tws_client.cancelMktDataStream(sub_id)
 
     def shutdown(self) -> None:
         """Perform any necessary cleanup on provider shutdown.

@@ -18,7 +18,7 @@ from trading_api.models import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.models.common import CapabilitySpec
+from trading_api.models.common import CapabilitySpec, DatafeedError
 from trading_api.models.market import Resolution
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.shared.ws.ws_router import WsRouteService
@@ -82,7 +82,7 @@ class DatafeedService(WsRouteService):
         """
         return self.configuration
 
-    async def create_topic(
+    def create_topic(
         self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
     ) -> None:
         """Parse topic and create appropriate subscription task.
@@ -97,12 +97,11 @@ class DatafeedService(WsRouteService):
         """
 
         if topic in self._topic_to_subscription_id:
-            logger.error(f"Topic already exists in DatafeedService: {topic}")
-            return
+            raise DatafeedError(f"Topic already exists in DatafeedService: {topic}")
 
         # Parse topic format: "topic_type:{json_params}"
         if ":" not in topic:
-            raise ValueError(f"Invalid topic format: {topic}")
+            raise DatafeedError(f"Invalid topic format: {topic}")
 
         topic_type, params_json = topic.split(":", 1)
 
@@ -139,7 +138,7 @@ class DatafeedService(WsRouteService):
             )
 
             if not all_symbols:
-                raise ValueError("No symbols provided for quote subscription")
+                raise DatafeedError("No symbols provided for quote subscription")
 
             logger.info(f"creating new topic : {topic}")
 
@@ -151,7 +150,7 @@ class DatafeedService(WsRouteService):
             # Track subscription IDs for cleanup (list for quotes, int for bars)
             self._topic_to_subscription_id[topic] = subscription_ids
         else:
-            raise ValueError(f"Unknown topic type: {topic_type}")
+            raise DatafeedError(f"Unknown topic type: {topic_type}")
 
     def remove_topic(self, topic: str) -> None:
         """Remove topic and cleanup subscriptions.

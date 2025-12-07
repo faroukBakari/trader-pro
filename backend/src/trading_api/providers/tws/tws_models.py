@@ -4,9 +4,7 @@ Combines realtime bars and market data (quotes) into a single typed dataclass.
 Handles all TickTypeEnum values with proper typing.
 """
 
-import asyncio
-from dataclasses import dataclass, field, fields
-from typing import Awaitable, Callable
+from dataclasses import dataclass, field
 
 from ibapi.contract import Contract
 
@@ -36,22 +34,11 @@ class RTMarketData:
     All fields are optional (None = not received yet).
     """
 
-    reqId_callback_map: dict[
-        str,
-        tuple[
-            asyncio.AbstractEventLoop,
-            Callable[
-                ["RTMarketData", list[str] | None],
-                Awaitable[None],
-            ],
-        ],
-    ] = field(default_factory=dict)
-
     # tracking flags
     contract: Contract | None = None  # Symbol:Exchange identifier
     bar_data_reqId: int | None = None
     mkt_data_reqId: int | None = None
-    barSize_setting: str | None = None
+    bar_size: str | None = None
     format_date: int | None = None
     whatToShow: str | None = None
 
@@ -237,12 +224,6 @@ class RTMarketData:
         init=False,
         repr=False,
     )
-
-    def reset(self) -> None:
-        """Reset all data fields to None (for reuse)."""
-        for f in fields(self):
-            if f.name not in self._PRESERVE_ON_RESET:
-                setattr(self, f.name, None)
 
 
 # Mapping from TickTypeEnum name → TwsRTData attribute name
