@@ -33,7 +33,7 @@ function getLanguageFromURL() {
 
 const props = defineProps({
   symbol: {
-    default: 'BTC:PAXOS:CRYPTO-479624278',
+    default: 'GOOGL:NASDAQ:STK-208813719',
     type: String,
   },
   interval: {

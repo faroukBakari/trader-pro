@@ -465,7 +465,8 @@ class TestGetQuotesSnapshot:
         Note: Current implementation returns basic quote data structures
         based on ticker names without actual market data.
         """
-        mock_client = Mock()
+        mock_client = AsyncMock()
+        mock_client.reqQuoteSnapshot.return_value = {}
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
@@ -480,7 +481,8 @@ class TestGetQuotesSnapshot:
     @pytest.mark.asyncio
     async def test_get_quotes_snapshot_single_symbol(self) -> None:
         """Test get_quotes_snapshot with single symbol."""
-        mock_client = Mock()
+        mock_client = AsyncMock()
+        mock_client.reqQuoteSnapshot.return_value = {}
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
@@ -492,7 +494,10 @@ class TestGetQuotesSnapshot:
     @pytest.mark.asyncio
     async def test_get_quotes_snapshot_extracts_symbol_name(self) -> None:
         """Test get_quotes_snapshot extracts symbol name from ticker."""
-        mock_client = Mock()
+        mock_client = AsyncMock()
+        mock_client.reqQuoteSnapshot.return_value = {
+            "ticker_name": "AAPL:NASDAQ:STK-12345"
+        }
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
