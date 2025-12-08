@@ -368,7 +368,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private wsAdapter: WsAdapterType
   private wsFallback?: Partial<WsAdapterType>
 
-  debug_datafeed: boolean = true
+  debug_datafeed: boolean = false
 
   private pendingRequests = new Map<string, {
     promise: Promise<unknown>

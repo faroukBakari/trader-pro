@@ -350,7 +350,9 @@ class TestTwsTicksToQuoteDataMapper:
         result = tws_ticks_to_quote_data(rt_data)
 
         assert result.s == "ok"
-        assert result.n == "AAPL"
+        assert (
+            result.n == "AAPL:NASDAQ:STK-12345"
+        )  # Full ticker name for identification
         assert isinstance(result.v, QuoteValues)
         assert result.v.bid == 150.25
         assert result.v.ask == 150.30
@@ -427,3 +429,282 @@ class TestTwsTicksToQuoteDataMapper:
         assert result.v.volume == 500000
         assert result.v.bid == 0.0  # Missing defaults to 0
         assert result.v.ask == 0.0
+
+    def test_rt_trd_volume_fallback_for_last_price(self) -> None:
+        """Test rt_trd_volume provides fallback for last price when direct tick missing."""
+        from trading_api.models.market import QuoteValues
+
+        # Simulates STK market data stream where 'last' tick doesn't arrive
+        # but rt_trd_volume does (Generic 375)
+        rt_data = {
+            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "bid": 320.55,
+            "ask": 320.78,
+            # No "last" field - this is the bug we're fixing
+            "rt_trd_volume": "320.64;1.0;1765200318856;4027.0;320.359;true",
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 320.64  # Parsed from rt_trd_volume
+        assert result.v.bid == 320.55
+        assert result.v.ask == 320.78
+        assert result.v.volume == 4027  # totalVolume from rt_trd_volume
+
+    def test_rt_volume_fallback_when_rt_trd_volume_missing(self) -> None:
+        """Test rt_volume provides fallback when rt_trd_volume is missing."""
+        from trading_api.models.market import QuoteValues
+
+        rt_data = {
+            "ticker_name": "TEST:SMART:STK-0",
+            "bid": 100.00,
+            "ask": 100.05,
+            "rt_volume": "99.95;100.0;1765200318856;5000.0;99.90;false",
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 99.95  # Parsed from rt_volume
+        assert result.v.volume == 5000
+
+    def test_rt_volume_with_empty_price_ignored(self) -> None:
+        """Test rt_volume with empty price (odd lot) doesn't override zero."""
+        from trading_api.models.market import QuoteValues
+
+        # Odd lot trades have empty price field
+        rt_data = {
+            "ticker_name": "TEST:SMART:STK-0",
+            "bid": 100.00,
+            "ask": 100.05,
+            "rt_volume": ";0E-16;1765200320968;4026.0;320.95;true",  # Empty price
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 0.0  # Should remain 0, not parsed from empty
+
+    def test_direct_last_takes_priority_over_rt_volume(self) -> None:
+        """Test direct 'last' tick takes priority over rt_trd_volume."""
+        from trading_api.models.market import QuoteValues
+
+        rt_data = {
+            "ticker_name": "TEST:SMART:STK-0",
+            "last": 150.00,  # Direct tick
+            "rt_trd_volume": "149.50;1.0;1765200318856;1000.0;149.00;true",  # Different
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 150.00  # Direct 'last' wins
+
+
+class TestTwsTicksToQuoteDataRealWorldScenarios:
+    """Tests using real production data sampled from api-traces.log."""
+
+    def test_googl_stock_stream_without_last_tick(self) -> None:
+        """Test GOOGL STK stream - real scenario where 'last' tick doesn't arrive.
+
+        From logs: reqId=23 GOOGL subscription receives bid/ask but no 'last' tick.
+        The rt_trd_volume field provides the last trade price as fallback.
+        """
+        from trading_api.models.market import QuoteValues
+
+        # Real data from api-traces.log - GOOGL market data stream
+        rt_data = {
+            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "bid": 320.55,
+            "ask": 320.78,
+            # No "last" - this is the actual bug scenario
+            "rt_trd_volume": "320.64;1.0000000000000000;1765200318856;363.0000000000000000;320.35900826;true",
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 320.64  # From rt_trd_volume
+        assert result.v.bid == 320.55
+        assert result.v.ask == 320.78
+        assert result.v.spread == 0.23
+        assert result.v.volume == 363
+        assert result.v.short_name == "GOOGL"
+        assert result.v.exchange == "NASDAQ"
+
+    def test_googl_stock_rt_volume_with_empty_price(self) -> None:
+        """Test GOOGL with rt_volume odd lot (empty price field).
+
+        From logs: rt_volume sometimes has empty price for odd lot trades.
+        Format: ";0E-16;timestamp;totalVolume;vwap;singleMM"
+
+        When price field is empty (starts with ";"), we skip the entire rt_volume
+        parsing to avoid using potentially stale/irrelevant data.
+        """
+        from trading_api.models.market import QuoteValues
+
+        # Real data - odd lot update with empty price
+        rt_data = {
+            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "bid": 320.51,
+            "ask": 320.88,
+            "rt_volume": ";0E-16;1765200320968;4026.0000000000000000;320.95565875;true",
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 0.0  # Empty price - entire rt_volume skipped
+        assert result.v.bid == 320.51
+        assert result.v.ask == 320.88
+        # Volume also 0 since rt_volume was skipped (no bar_volume provided)
+        assert result.v.volume == 0
+
+    def test_googl_stock_rt_volume_with_valid_price(self) -> None:
+        """Test GOOGL with rt_volume containing valid trade price.
+
+        From logs: rt_volume with actual trade data.
+        """
+        from trading_api.models.market import QuoteValues
+
+        # Real data - rt_volume with trade
+        rt_data = {
+            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "bid": 320.51,
+            "ask": 320.60,
+            "rt_volume": "320.58;4.0000000000000000;1765200301083;4015.0000000000000000;320.95659154;false",
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 320.58  # Parsed from rt_volume
+        assert result.v.volume == 4015
+
+    def test_btc_crypto_with_all_ticks(self) -> None:
+        """Test BTC CRYPTO with complete tick data.
+
+        From logs: BTC subscription receives all standard ticks including 'last'.
+        """
+        from trading_api.models.market import QuoteValues
+
+        # Real data from api-traces.log - BTC complete tick data
+        rt_data = {
+            "ticker_name": "BTC:PAXOS:CRYPTO-479624278",
+            "bid": 91588.25,
+            "ask": 91588.5,
+            "last": 91608.75,
+            "high": 92460.0,
+            "low": 89032.5,
+            "close": 91434.75,
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 91608.75
+        assert result.v.bid == 91588.25
+        assert result.v.ask == 91588.5
+        assert result.v.spread == 0.25
+        assert result.v.short_name == "BTC"
+        assert result.v.exchange == "PAXOS"
+
+    def test_btc_crypto_initial_zero_values(self) -> None:
+        """Test BTC CRYPTO with initial zero values before data arrives.
+
+        From logs: Initial subscription may receive 0.0 for all prices.
+        """
+        from trading_api.models.market import QuoteValues
+
+        # Real data - initial state with zeros
+        rt_data = {
+            "ticker_name": "BTC:PAXOS:CRYPTO-479624278",
+            "bid": 0.0,
+            "ask": 0.0,
+            "high": 0.0,
+            "low": 0.0,
+            "close": 0.0,
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 0.0
+        assert result.v.bid == 0.0
+        assert result.v.ask == 0.0
+        assert result.v.spread == 0.0  # No spread when bid/ask are 0
+
+    def test_stock_snapshot_with_complete_data(self) -> None:
+        """Test stock snapshot request - receives all standard ticks.
+
+        From logs: Snapshot requests (reqId=1,3,4,5) receive complete data.
+        """
+        from trading_api.models.market import QuoteValues
+
+        # Real data from snapshot request
+        rt_data = {
+            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "bid": 320.55,
+            "ask": 320.6,
+            "last": 320.56,
+            "bar_volume": 4011,
+            "bar_close": 321.06,
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 320.56
+        assert result.v.bid == 320.55
+        assert result.v.ask == 320.6
+        assert result.v.spread == 0.05
+        assert result.v.volume == 4011
+        assert result.v.prev_close_price == 321.06
+        # Change calculation: last - close = 320.56 - 321.06 = -0.50
+        assert result.v.ch == -0.5
+        # Change percent: -0.50 / 321.06 * 100 = -0.16%
+        assert result.v.chp == -0.16
+
+    def test_rt_trd_volume_preferred_over_rt_volume(self) -> None:
+        """Test that rt_trd_volume is preferred over rt_volume when both present.
+
+        rt_trd_volume excludes unreportable trades (odd lots) so is more reliable.
+        """
+        from trading_api.models.market import QuoteValues
+
+        rt_data = {
+            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "bid": 320.55,
+            "ask": 320.78,
+            # Both present - rt_trd_volume should win
+            "rt_trd_volume": "320.64;1.0;1765200318856;363.0;320.36;true",
+            "rt_volume": "320.58;4.0;1765200301083;4015.0;320.96;false",
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 320.64  # From rt_trd_volume, not rt_volume
+        assert result.v.volume == 363  # From rt_trd_volume
+
+    def test_high_precision_rt_volume_values(self) -> None:
+        """Test parsing rt_volume with high precision decimal values.
+
+        TWS sends values like "4.0000000000000000" which should parse correctly.
+        """
+        from trading_api.models.market import QuoteValues
+
+        rt_data = {
+            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "bid": 320.51,
+            "ask": 320.60,
+            # High precision values from actual logs
+            "rt_volume": "320.60;3.0000000000000000;1765200301942;4018.0000000000000000;320.95632843;false",
+        }
+
+        result = tws_ticks_to_quote_data(rt_data)
+
+        assert isinstance(result.v, QuoteValues)
+        assert result.v.lp == 320.60
+        assert result.v.volume == 4018

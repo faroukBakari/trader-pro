@@ -498,7 +498,7 @@ ASSET_TYPE_CONFIG: dict[str, AssetTypeConfig] = {
             "165",  # 52-week data
             "225",  # Auction
             "232",  # Mark price
-            "233",  # RT Volume
+            # "233",  # RT Volume
             "236",  # Shortable
             "293",  # Trade count
             "294",  # Trade rate
@@ -517,7 +517,7 @@ ASSET_TYPE_CONFIG: dict[str, AssetTypeConfig] = {
             "165",  # 52-week data
             "225",  # Auction
             "232",  # Mark price
-            "233",  # RT Volume
+            # "233",  # RT Volume
             "236",  # Shortable
             "293",  # Trade count
             "294",  # Trade rate
@@ -536,7 +536,7 @@ ASSET_TYPE_CONFIG: dict[str, AssetTypeConfig] = {
             "165",  # 52-week data
             "225",  # Auction
             "232",  # Mark price
-            "233",  # RT Volume
+            # "233",  # RT Volume
             "236",  # Shortable
             "293",  # Trade count
             "294",  # Trade rate
@@ -554,7 +554,7 @@ ASSET_TYPE_CONFIG: dict[str, AssetTypeConfig] = {
             "165",  # 52-week data
             "225",  # Auction
             "232",  # Mark price
-            "233",  # RT Volume
+            # "233",  # RT Volume
             "236",  # Shortable
             "293",  # Trade count
             "294",  # Trade rate
@@ -572,7 +572,7 @@ ASSET_TYPE_CONFIG: dict[str, AssetTypeConfig] = {
             "165",  # 52-week data
             "225",  # Auction
             "232",  # Mark price
-            "233",  # RT Volume
+            # "233",  # RT Volume
             "236",  # Shortable
             "293",  # Trade count
             "294",  # Trade rate
@@ -590,7 +590,7 @@ ASSET_TYPE_CONFIG: dict[str, AssetTypeConfig] = {
             "165",  # 52-week data
             "225",  # Auction
             "232",  # Mark price
-            "233",  # RT Volume
+            # "233",  # RT Volume
             "236",  # Shortable
             "293",  # Trade count
             "294",  # Trade rate
@@ -608,7 +608,7 @@ ASSET_TYPE_CONFIG: dict[str, AssetTypeConfig] = {
             "165",  # 52-week data
             "225",  # Auction
             "232",  # Mark price
-            "233",  # RT Volume
+            # "233",  # RT Volume
             "236",  # Shortable
             "293",  # Trade count
             "294",  # Trade rate
@@ -638,7 +638,7 @@ ASSET_TYPE_CONFIG: dict[str, AssetTypeConfig] = {
             "165",  # 52-week data
             "225",  # Auction
             "232",  # Mark price
-            "233",  # RT Volume
+            # "233",  # RT Volume
             "236",  # Shortable
             "293",  # Trade count
             "294",  # Trade rate
@@ -657,7 +657,7 @@ ASSET_TYPE_CONFIG: dict[str, AssetTypeConfig] = {
             "165",  # 52-week data
             "225",  # Auction
             "232",  # Mark price
-            "233",  # RT Volume
+            # "233",  # RT Volume
             "236",  # Shortable
             "293",  # Trade count
             "294",  # Trade rate
@@ -677,7 +677,7 @@ DEFAULT_ASSET_CONFIG = AssetTypeConfig(
         "165",  # 52-week data
         "225",  # Auction
         "232",  # Mark price
-        "233",  # RT Volume
+        # "233",  # RT Volume
         "236",  # Shortable
         "293",  # Trade count
         "294",  # Trade rate
