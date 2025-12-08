@@ -433,7 +433,7 @@ The `WsRouter` passes a `topic_update` callback to your service's `create_topic(
 
 **Location**: `backend/src/trading_api/modules/{module}/service.py`
 
-**Note**: Service implements `WsRouteService` Protocol from `shared.ws.ws_router`.
+**Note**: Service implements `WsRouteService` Protocol from `shared.ws.ws_router`. The `create_topic()` method is synchronous - use `asyncio.create_task()` internally to start async streaming tasks.
 
 **Example (DatafeedService)**:
 
@@ -451,8 +451,8 @@ class DatafeedService(WsRouteService):
     def __init__(self):
         self._topic_generators: dict[str, asyncio.Task] = {}
 
-    async def create_topic(self, topic: str, topic_update: Callable) -> None:
-        """Start generator task for topic
+    def create_topic(self, topic: str, topic_update: Callable) -> None:
+        """Start generator task for topic (synchronous)
 
         Args:
             topic: Topic string in format "bars:{json_params}"
@@ -471,6 +471,7 @@ class DatafeedService(WsRouteService):
                 subscription_request = BarsSubscriptionRequest.model_validate(params_dict)
 
                 # Create generator task with the topic_update callback
+                # Note: create_topic is sync, but can start async tasks
                 task = asyncio.create_task(
                     self._bar_generator(subscription_request.symbol, topic_update)
                 )
@@ -505,7 +506,7 @@ class DatafeedService(WsRouteService):
 **Key Points**:
 
 - Service manages its own `_topic_generators` dict
-- `create_topic()` receives a `topic_update` callback from the router
+- `create_topic()` is synchronous but can use `asyncio.create_task()` to start async work
 - Background task calls `topic_update(data)` to broadcast updates
 - `remove_topic()` cancels task and cleans up
 - No separate `publish()` method needed - use the callback directly
