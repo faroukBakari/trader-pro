@@ -492,8 +492,8 @@ class TestGetQuotesSnapshot:
         assert len(results) == 1
 
     @pytest.mark.asyncio
-    async def test_get_quotes_snapshot_extracts_symbol_name(self) -> None:
-        """Test get_quotes_snapshot extracts symbol name from ticker."""
+    async def test_get_quotes_snapshot_uses_ticker_name_as_symbol(self) -> None:
+        """Test get_quotes_snapshot uses full ticker_name as symbol."""
         mock_client = AsyncMock()
         mock_client.reqQuoteSnapshot.return_value = {
             "ticker_name": "AAPL:NASDAQ:STK-12345"
@@ -503,8 +503,8 @@ class TestGetQuotesSnapshot:
             provider = TWSProvider()
             results = await provider.get_quotes_snapshot(["AAPL:NASDAQ:STK-12345"])
 
-        # Verify the symbol name was extracted correctly
-        assert results[0].n == "AAPL"
+        # Verify the symbol name is the full ticker_name
+        assert results[0].n == "AAPL:NASDAQ:STK-12345"
 
 
 class TestSubscriptionMethods:

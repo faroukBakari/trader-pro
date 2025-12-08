@@ -326,18 +326,53 @@ def tws_ticks_to_bar(rt_data: dict[str, Any]) -> Bar:
     )
 
 
-def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
-    symbol, exchange, _, _, _ = parse_ticker(rt_data.get("ticker_name", "UNKNOWN"))
+def _parse_rt_volume(rt_volume_str: str | None) -> tuple[float, float, float]:
+    """Parse RT Trade Volume string to extract last price, volume, and vwap.
 
-    # Extract values with defaults
+    Format: "price;size;timestamp;totalVolume;vwap;singleMM"
+    Example: "320.64;1.0;1765200318856;363.0;320.359;true"
+
+    Args:
+        rt_volume_str: RT Volume or RT Trade Volume string from TWS
+
+    Returns:
+        Tuple of (last_price, total_volume, vwap) - returns (0.0, 0, 0.0) if parsing fails
+    """
+    if not rt_volume_str or rt_volume_str.startswith(";"):
+        # Empty string or starts with ";" (odd lot with no price)
+        return 0.0, 0, 0.0
+
+    try:
+        parts = rt_volume_str.split(";")
+        if len(parts) >= 5:
+            last_price = float(parts[0]) if parts[0] else 0.0
+            total_volume = int(float(parts[3])) if parts[3] else 0
+            vwap = float(parts[4]) if parts[4] else 0.0
+            return last_price, total_volume, vwap
+    except (ValueError, IndexError):
+        pass
+
+    return 0.0, 0, 0.0
+
+
+def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
+    ticker_name = rt_data.get("ticker_name", "UNKNOWN")
+    symbol, exchange, _, _, _ = parse_ticker(ticker_name)
+    ticker_name = ticker_name.split("@")[0]
+
+    # Parse RT Trade Volume as fallback source (more reliable than rt_volume)
+    rt_trd_volume = rt_data.get("rt_trd_volume") or rt_data.get("rt_volume")
+    rt_last, rt_volume, _ = _parse_rt_volume(rt_trd_volume)
+
+    # Extract values with fallbacks: direct tick > rt_volume > 0
     bid = round(rt_data.get("bid", 0.0), 2)
     ask = round(rt_data.get("ask", 0.0), 2)
-    last = round(rt_data.get("last", 0.0), 2)
-    open_price = round(rt_data.get("bar_open", last), 2)
-    high_price = round(rt_data.get("bar_high", last), 2)
-    low_price = round(rt_data.get("bar_low", last), 2)
-    close_price = round(rt_data.get("bar_close", last), 2)
-    volume = rt_data.get("bar_volume", 0)
+    last = round(rt_data.get("last") or rt_last or 0.0, 2)
+    open_price = round(rt_data.get("bar_open") or last, 2)
+    high_price = round(rt_data.get("bar_high") or last, 2)
+    low_price = round(rt_data.get("bar_low") or last, 2)
+    close_price = round(rt_data.get("bar_close") or last, 2)
+    volume = int(rt_data.get("bar_volume") or rt_volume or 0)
     # Calculate spread
     spread = round(ask - bid, 2) if (ask > 0 and bid > 0) else 0.0
 
@@ -367,7 +402,7 @@ def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
         original_name=symbol,
     )
 
-    return QuoteData(s="ok", n=symbol, v=quote_values)
+    return QuoteData(s="ok", n=ticker_name, v=quote_values)
 
 
 def parse_ticker(ticker: str) -> tuple[str, str, str, str, str]:

@@ -305,7 +305,6 @@ class TWSProvider(Provider, DatafeedCapability):
     async def get_quotes_snapshot(
         self,
         tickers: list[str],
-        timeout: float = 1.0,
         **kwargs: Any,
     ) -> list[QuoteData]:
         """Get current market quotes for multiple symbols (snapshot).
@@ -354,7 +353,6 @@ class TWSProvider(Provider, DatafeedCapability):
                     *[
                         self._tws_client.reqQuoteSnapshot(
                             contract,
-                            timeout=1,
                             **kwargs,
                         )
                         for contract in contracts
