@@ -155,7 +155,7 @@ Services with WebSocket features must implement the `WsRouteService` protocol, w
 
 ```python
 class WsRouteService(ServiceInterface):
-    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+    def create_topic(self, topic: str, topic_update: Callable) -> None:
         """Start generating data for topic (first subscriber)"""
         ...
 
@@ -163,6 +163,8 @@ class WsRouteService(ServiceInterface):
         """Stop generating data for topic (last unsubscribe)"""
         ...
 ```
+
+**Note**: `create_topic` is synchronous. If you need to start async tasks, use `asyncio.create_task()` inside the method.
 
 **Reference Counting Pattern**: Routers track subscribers per topic and call service methods on first subscribe / last unsubscribe.
 
@@ -444,8 +446,8 @@ class DatafeedService(ServiceInterface):
         self._topic_generators: dict[str, asyncio.Task] = {}
 
     # !! IMPORTANT SECTION !!
-    # MAIN BUSINESS SETUP METHOD
-    async def create_topic(self, topic: str, topic_update: Callable) -> None:
+    # MAIN BUSINESS SETUP METHOD (SYNCHRONOUS)
+    def create_topic(self, topic: str, topic_update: Callable) -> None:
         """Start streaming data for topic (first subscriber)
 
         Topic format: "{route}:{json_params}"
@@ -468,7 +470,7 @@ class DatafeedService(ServiceInterface):
 
         route, params_json = topic.split(":", 1)
 
-        # !! IMORTANT SECTION !!
+        # !! IMPORTANT SECTION !!
         # Route-specific handling
         if route == "bars":
             # Parse and validate subscription params
@@ -476,14 +478,12 @@ class DatafeedService(ServiceInterface):
             subscription_request = BarsSubscriptionRequest.model_validate(params_dict)
 
             # THIS IS AN IMPLEMENTATION EXAMPLE FOR ILLUSTRATION
-            # ROUTINE MIGHT BE SUB TO AN EXTERNAL SERVICE OR WATCH
-            # SOME INTERNAL/EXTERNAL EVENT, ETC. WITH TOPIC_UPDATE
-            # AS A CALLBACK / TRIGER
-            # SETUP A ROUTINE FOR TOPIC UPDATE HERE
+            # Use asyncio.create_task() to start async work from sync method
+            task = asyncio.create_task(
+                self._stream_bars(subscription_request, topic_update)
+            )
 
-            ...
-
-            # MIGHT NEED TO REGISTER A TASK OR SUB HANDLER, ETC.
+            # Register task for cleanup
             self._topic_generators[topic] = task
 
         # HANDLE ALL WS ROUTES
@@ -769,7 +769,7 @@ ws.send(
 ### Implementation
 
 ```python
-# In generated router
+# In WsRouter
 self.topic_trackers: dict[str, int] = {}
 
 async def send_subscribe(payload: Request, client: Client) -> Response:
@@ -777,8 +777,8 @@ async def send_subscribe(payload: Request, client: Client) -> Response:
     client.subscribe(topic)
 
     if topic not in self.topic_trackers:
-        # First subscriber - create topic
-        await self.service.create_topic(topic, topic_update_callback)
+        # First subscriber - create topic (synchronous call)
+        self.service.create_topic(topic, topic_update_callback)
         self.topic_trackers[topic] = 1
     else:
         # Subsequent subscriber - increment counter
@@ -794,6 +794,8 @@ def send_unsubscribe(payload: Request, client: Client) -> Response:
         self.service.remove_topic(topic)
         self.topic_trackers.pop(topic)
 ```
+
+**Note**: `create_topic` is synchronous. The service can use `asyncio.create_task()` internally to start async streaming tasks.
 
 **Benefits**:
 

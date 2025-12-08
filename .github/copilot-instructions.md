@@ -96,11 +96,13 @@ modules/{name}/
 ### WebSocket Router Pattern
 ```python
 # modules/broker/ws/v1/__init__.py
+# Use class inheritance for dynamic type resolution
+class OrderRouter(WsRouter[OrderSubscriptionRequest, PlacedOrder]):
+    pass
+
 class BrokerWsRouters(WsRouterBase):
     def __init__(self, service: WsRouteService):
-        order_router = WsRouter[OrderSubscriptionRequest, PlacedOrder](
-            route="orders", tags=["broker"], service=service
-        )
+        order_router = OrderRouter(route="orders", tags=["broker"], service=service)
         super().__init__([order_router], service=service)
 ```
 

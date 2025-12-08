@@ -445,10 +445,10 @@ class BrokerApi(APIRouterInterface):
 
     @property
     def service(self) -> BrokerService:
-        """Get the DatafeedService instance.
+        """Get the BrokerService instance.
 
         Returns:
-            DatafeedService: The datafeed service
+            BrokerService: The broker service
         """
         if not isinstance(self._service, BrokerService):
             raise ValueError("Service has not been initialized")

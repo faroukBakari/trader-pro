@@ -491,10 +491,15 @@ class IBSocket(EWrapper):
         loop = asyncio.get_event_loop()
         future: asyncio.Future[Any] = loop.create_future()
         self._reader_futures[reqId] = (loop, future)
-        self._reader_tickers[reqId] = {
-            "reqId": reqId,
-            "ticker_name": ticker_name,
-        }
+        ticker = self._reader_tickers.setdefault(
+            reqId,
+            {
+                "reqId": reqId,
+                "ticker_name": ticker_name,
+            },
+        )
+        if all(att in ticker for att in ["bid", "ask", "last"]):
+            future.set_result(ticker)
         return asyncio.wait_for(future, timeout)
 
     def _resolve_future(self, reqId: int) -> None:
@@ -1177,8 +1182,9 @@ class TWSClient:
             self._active_streams[stream_key]
             if DEBUG_TWS_REQUEST:
                 debug_log(f"reusing active stream '{stream_key}' for reqQuoteSnapshot")
-            return await self.ibsocket.create_future(  # type: ignore[no-any-return]
+            return await self.ibsocket.create_tick_future(  # type: ignore[no-any-return]
                 self._active_streams[stream_key],
+                stream_key,
                 timeout=timeout or self._timeout,
             )
 

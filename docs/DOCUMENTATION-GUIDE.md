@@ -508,14 +508,15 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TWS API Integration
 
-**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources
+**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, ticker slots, stream keys, AssetConfig, Resolution enum, ticker naming convention
 
 **Scope**: Interactive Brokers TWS API integration  
 **Out of Scope**: Other broker APIs, custom trading protocols
 
 - **backend/src/trading_api/providers/tws/README.md** - ⭐ TWS Datafeed Provider implementation guide (start here for integration)
   - Three-layer architecture: TWSProvider → TWSClient → IBSocket
-  - Threading model, domain mappers, testing patterns
+  - Ticker slot streaming pattern, domain mappers, testing patterns
+  - Composite ticker format: `{symbol}:{exchange}:{secType}-{conId}[@{bar_size}]`
 - **backend/external_packages/tws/docs/README.md** - TWS API documentation index (includes local modifications)
 - **backend/external_packages/tws/docs/06-SETUP-GUIDE.md** - TWS/Gateway installation and configuration
 - **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md** - Connection management, threading, error handling
@@ -557,6 +558,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2025-12-07**: ws-refinements documentation sync - TWS README overhauled (ticker-slot pattern, stream keys, AsyncMock testing), BACKEND_WEBSOCKETS.md and WEBSOCKET-METHODOLOGY.md updated (sync create_topic), DOCUMENTATION-GUIDE.md keywords updated
 - **2025-11-30**: Wave 4 final validation - Verified all internal links, fixed remaining broken refs (ENVIRONMENT-CONFIG.md, WORKSPACE-SETUP.md → GETTING-STARTED.md), updated docs/README.md, validated cross-references and section anchors
 - **2025-11-30**: Wave 3 documentation assessment - Fixed ARCHITECTURE.md links, BROKER-ARCHITECTURE.md links, CLIENT-GENERATION.md refs, methodologies updates, root README.md links. RE-GROUP operations deferred (low ROI)
 - **2025-11-30**: Wave 2 documentation assessment - WEBSOCKET-CLIENTS.md archived (merged into WEBSOCKET-ARCHITECTURE.md), fixed broken links across backend/frontend docs, AUTHENTICATION.md consolidated in backend/docs/
@@ -583,5 +585,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: November 30, 2025  
+**Last Updated**: December 7, 2025  
 **Maintained by**: Development Team

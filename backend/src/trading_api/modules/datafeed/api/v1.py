@@ -211,19 +211,9 @@ class DatafeedApi(APIRouterInterface):
         Returns:
             DatafeedService: The datafeed service
         """
-        try:
-            if not isinstance(self._service, DatafeedService):
-                raise ValueError("Service has not been initialized")
-            return self._service
-        except (TimeoutError, asyncio.TimeoutError):
-            raise HTTPException(
-                status_code=504,
-                detail="Request timeout",
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        if not isinstance(self._service, DatafeedService):
+            raise ValueError("Service has not been initialized")
+        return self._service
 
 
 __all__ = ["DatafeedApi"]
