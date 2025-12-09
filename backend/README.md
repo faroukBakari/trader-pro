@@ -12,10 +12,9 @@ For comprehensive project documentation, see the [root README](../README.md) and
 - [Provider System](docs/PROVIDER-SYSTEM.md) - Pluggable provider/capability system for external integrations
 - [Backend Manager Guide](docs/BACKEND_MANAGER_GUIDE.md) - Multi-process deployment
 - [Backend Testing](docs/BACKEND_TESTING.md) - Testing strategy and module isolation
-- [WebSockets](docs/BACKEND_WEBSOCKETS.md) - FastWS integration
+- [WebSockets](docs/BACKEND_WEBSOCKETS.md) - FastWS integration and WebSocket routers
 - [API Specs & Client Generation](docs/SPECS_AND_CLIENT_GEN.md) - Spec generation workflow
 - [Modular Versioning](docs/MODULAR_VERSIONNING.md) - Module-level API versioning
-- [WebSocket Router Generation](docs/WS_ROUTERS_GEN.md) - WS router code generation
 
 ## Architecture Overview
 
@@ -59,7 +58,7 @@ The system includes a JWT-based authentication module providing secure, stateles
 **Documentation:**
 
 - **Module Details**: [Auth Module README](src/trading_api/modules/auth/README.md)
-- **Implementation Guide**: [Authentication System Documentation](../docs/AUTHENTICATION.md)
+- **Implementation Guide**: [Authentication System Documentation](docs/AUTHENTICATION.md)
 - **Middleware**: Shared middleware in `shared/middleware/auth.py`
 - **Models**: JWT and user models in `models/auth/`
 
@@ -117,7 +116,7 @@ async def authenticate(
 - ✅ Same middleware for REST and WebSocket
 - ✅ 401/403 errors handled automatically
 
-See [Authentication Documentation](../docs/AUTHENTICATION.md) for complete implementation details.
+See [Authentication Documentation](docs/AUTHENTICATION.md) for complete implementation details.
 
 ## Quick Start
 

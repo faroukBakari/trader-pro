@@ -1,22 +1,23 @@
 # TWS Datafeed Provider
 
 **Status:** Production-Ready (Core Capabilities)  
-**Architecture:** Three-Layer Composition Pattern
+**Architecture:** Three-Layer Streaming Pattern  
+**Last Updated:** December 7, 2025
 
 ---
 
 ## Quick Reference
 
-| Layer               | File                                  | Responsibility                             |
-| ------------------- | ------------------------------------- | ------------------------------------------ |
-| **3 - TWSProvider** | `__init__.py`                         | DatafeedCapability impl, domain conversion |
-| **2 - TWSClient**   | `tws_connection.py`                   | AsyncIO facade, owns TWSCallback           |
-| **2 - TWSCallback** | `tws_connection.py`                   | EWrapper callbacks, Future registry        |
-| **1 - IBSocket**    | `tws_connection.py`                   | Raw TCP, daemon thread reader loop         |
-| **Mappers**         | `tws_mappers.py`                      | TWS ↔ domain model conversion              |
-| **Config**          | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic validation      |
+| Layer               | File                                  | Responsibility                                   |
+| ------------------- | ------------------------------------- | ------------------------------------------------ |
+| **3 - TWSProvider** | `__init__.py`                         | DatafeedCapability impl, domain conversion       |
+| **2 - TWSClient**   | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket |
+| **1 - IBSocket**    | `tws_connection.py`                   | Raw TCP, daemon thread, ticker slot registry     |
+| **Mappers**         | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing    |
+| **Models**          | `tws_models.py`                       | `TWSError`, `AssetConfig`, tick type mappings    |
+| **Config**          | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings              |
 
-**Tests:** `providers/tws/tests/test_{callback,client,config,mappers,provider}.py`
+**Tests:** `providers/tws/tests/test_{client,mappers,provider}.py`
 
 ---
 
@@ -29,13 +30,13 @@ DatafeedService (provider-agnostic)
         │ requires capability="datafeed"
         ▼
 TWSProvider (Layer 3) ─── implements DatafeedCapability
-        │ domain ↔ TWS conversion
+        │ domain ↔ TWS conversion, stream key management
         ▼
-TWSClient (Layer 2) ─── owns TWSCallback (EWrapper)
-        │ asyncio.Future + loop.call_soon_threadsafe()
+TWSClient (Layer 2) ─── owns IBSocket, manages _active_streams
+        │ asyncio.Future + ticker slot registry
         ▼
 IBSocket (Layer 1) ─── daemon thread _reader_loop()
-        │ TCP socket
+        │ _reader_tickers (slot registry), _reader_streams (callbacks)
         ▼
 TWS/IB Gateway (localhost:7497)
 ```
@@ -43,84 +44,238 @@ TWS/IB Gateway (localhost:7497)
 ### Threading Model
 
 ```
-Main Thread (AsyncIO)              Daemon Thread
-─────────────────────              ─────────────
-TWSProvider.search_symbols()       IBSocket._reader_loop()
-        │                                  │
-TWSClient.reqMatchingSymbols()     Decoder.interpret()
-        │                                  │
-await future ◄──────────────────── TWSCallback.symbolSamples()
-                                           │
-              loop.call_soon_threadsafe(future.set_result, data)
+Main Thread (AsyncIO)                    Daemon Thread
+─────────────────────                    ─────────────
+TWSProvider.subscribe_market_data()      IBSocket._reader_loop()
+        │                                        │
+TWSClient.reqMktDataStream()             Decoder.interpret()
+        │                                        │
+register_stream(reqId, callback)         tickPrice(reqId, price)
+        │                                        │
+        │                                _reader_tickers[reqId]["bid"] = price
+        │                                        │
+callback(data) ◄──────────────────────── _notify_stream(reqId, ["bid"])
+                                                 │
+                    loop.call_soon_threadsafe(callback, ticker_data, fields)
 ```
 
 **Key Patterns:**
 
 - **Lazy Connection**: `TWSClient.ibsocket` connects on first access
-- **Future Bridge**: `asyncio.Future` + `call_soon_threadsafe()` for thread-safe resolution
-- **Accumulator**: Streaming data collected before Future resolution
-- **Composition**: TWSClient owns TWSCallback (no EWrapper inheritance)
+- **Future Bridge**: `asyncio.Future` + `call_soon_threadsafe()` for one-shot requests
+- **Ticker Slots**: `_reader_tickers[reqId]` dict accumulates real-time data
+- **Stream Registry**: `_reader_streams[reqId]` holds (loop, callback) for continuous updates
+- **Stream Keys**: `"AAPL:NASDAQ:STK-12345@5 mins"` identifies unique subscriptions
 
 ---
 
-## 2. DatafeedCapability Interface
+## 2. Ticker Naming Convention
+
+**Composite Ticker Format:**
+
+```
+{symbol}:{exchange}:{secType}-{conId}[@{bar_size}]
+```
+
+**Examples:**
+
+- `"AAPL:NASDAQ:STK-12345"` - Stock ticker
+- `"AAPL:NASDAQ:STK-12345@5 mins"` - Stream key with bar size
+
+**Functions:**
+
+```python
+# Build stream key from contract
+from tws_mappers import ticker_name, parse_ticker, build_contract
+
+# ticker_name(contract) → "AAPL:NASDAQ:STK-12345"
+# ticker_name(contract, "5 mins") → "AAPL:NASDAQ:STK-12345@5 mins"
+
+# parse_ticker("AAPL:NASDAQ:STK-12345") → ("AAPL", "NASDAQ", "STK", 12345, None)
+# parse_ticker("AAPL:NASDAQ:STK-12345@5 mins") → ("AAPL", "NASDAQ", "STK", 12345, "5 mins")
+
+# build_contract("AAPL:NASDAQ:STK-12345") → Contract(symbol="AAPL", ...)
+```
+
+**Usage:**
+
+- Subscription tracking: `TWSClient._active_streams[stream_key] = reqId`
+- Ticker slot caching: Reuse existing stream for same contract
+- Unsubscription: Cancel by stream key, not reqId
+
+---
+
+## 3. Asset Configuration
+
+**File:** `tws_models.py`
+
+Per-asset-type configuration for TWS API parameters:
+
+```python
+from tws_models import get_asset_config, AssetTypeConfig
+
+@dataclass
+class AssetTypeConfig:
+    what_to_show_hist: str      # For historical data ("TRADES", "MIDPOINT", etc.)
+    what_to_show_live: str      # For live streaming ("TRADES", "MIDPOINT", etc.)
+    generic_tick_list: tuple[str, ...]  # Additional tick types to request
+
+config = get_asset_config("STK")  # Returns AssetTypeConfig for stocks
+config.what_to_show_hist  # "TRADES"
+config.what_to_show_live  # "TRADES"
+config.generic_tick_list_str  # "165,225,232,233,236,..."
+```
+
+**Supported Asset Types:**
+| secType | what_to_show | Notes |
+|---------|--------------|-------|
+| STK | TRADES | Stocks - full support |
+| OPT | TRADES | Options - includes Greeks ticks |
+| FUT | TRADES | Futures |
+| CRYPTO | AGGTRADES | Crypto - aggregated trades |
+| CASH | MIDPOINT | Forex - no TRADES support |
+| IND | TRADES | Index |
+| BOND | TRADES | Bonds - includes bond factor |
+
+---
+
+## 4. DatafeedCapability Interface
 
 ```python
 class DatafeedCapability(Protocol):
-    async def search_symbols(self, pattern: str, timeout: float = 5.0) -> list[SearchSymbolResultItem]
-    async def get_symbol_info(self, symbol: str, exchange: str | None = None) -> SymbolInfo
-    async def get_historical_bars(self, symbol: str, start: datetime, end: datetime,
-                                   timeframe: TimeFrame, exchange: str | None = None) -> list[Bar]
-    async def get_quotes_snapshot(self, symbols: list[str]) -> list[QuoteData]
-    # Subscriptions (not yet implemented)
-    def subscribe_realtime_bars(self, symbol: str, callback: Callable[[Bar], None]) -> int
-    def subscribe_market_data(self, symbol: str, callback: Callable[[QuoteData], None]) -> int
-    def unsubscribe_realtime_bars(self, subscription_id: int) -> None
-    def unsubscribe_market_data(self, subscription_id: int) -> None
+    # One-shot requests (return data)
+    async def search_symbols(self, pattern: str, **kwargs) -> list[SearchSymbolResultItem]
+    async def get_symbol_info(self, ticker: str, **kwargs) -> SymbolInfo
+    async def get_historical_bars(self, ticker: str, start_time: datetime, end_time: datetime,
+                                   resolution: Resolution, **kwargs) -> list[Bar]
+    async def get_quotes_snapshot(self, tickers: list[str], **kwargs) -> list[QuoteData]
+
+    # Subscription methods (return stream keys)
+    def subscribe_realtime_bars(self, ticker: str, resolution: Resolution,
+                                 callback: Callable[[Bar], Awaitable[None]], **kwargs) -> str
+    def subscribe_market_data(self, tickers: list[str],
+                               callback: Callable[[QuoteData], Awaitable[None]], **kwargs) -> list[str]
+    def unsubscribe_realtime_bars(self, subscription_id: str) -> None
+    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None
 ```
+
+**Key Changes from Previous Version:**
+
+- `ticker` parameter replaces `symbol` + `exchange`
+- `Resolution` enum replaces `TimeFrame`
+- Subscription IDs are `str` (stream keys) not `int` (reqIds)
 
 ---
 
-## 3. Domain Models
+## 5. Domain Models
 
 **File:** `models/market.py` — Used by Service and Provider
 
-| Model                    | Key Fields                                            | Purpose         |
-| ------------------------ | ----------------------------------------------------- | --------------- |
-| `Bar`                    | `time`, `open`, `high`, `low`, `close`, `volume`      | OHLCV data      |
-| `SearchSymbolResultItem` | `symbol`, `exchange`, `type`, `ticker`                | Search results  |
-| `SymbolInfo`             | `name`, `type`, `session`, `timezone`, `pricescale`   | Symbol metadata |
-| `QuoteData`              | `symbol`, `bid`, `ask`, `last`, `volume`, `timestamp` | Tick data       |
-| `TimeFrame`              | `SEC_5`, `MIN_1`, `HOUR_1`, `DAY_1`, etc.             | Resolution enum |
+| Model                    | Key Fields                                          | Purpose         |
+| ------------------------ | --------------------------------------------------- | --------------- |
+| `Bar`                    | `time`, `open`, `high`, `low`, `close`, `volume`    | OHLCV data      |
+| `SearchSymbolResultItem` | `symbol`, `exchange`, `type`, `ticker`              | Search results  |
+| `SymbolInfo`             | `name`, `type`, `session`, `timezone`, `pricescale` | Symbol metadata |
+| `QuoteData`              | `n`, `s`, `v` (QuoteValues embedded)                | Tick data       |
+| `Resolution`             | `MIN_1`, `MIN_5`, `HOUR_1`, `DAY_1`, etc.           | Resolution enum |
 
-**TWS Types** (used ONLY in TWSProvider):
+**TWS Types** (used ONLY in TWSProvider/TWSClient):
 
 - `Contract`, `ContractDetails`, `ContractDescription` — from `ibapi.contract`
 - `BarData` — from `ibapi.common`
 
 ---
 
-## 4. Domain Mappers
+## 6. Domain Mappers
 
 **File:** `tws_mappers.py`
 
-| Function                                  | TWS → Domain                                     |
+| Function                                  | Description                                      |
 | ----------------------------------------- | ------------------------------------------------ |
 | `contract_description_to_search_result()` | `ContractDescription` → `SearchSymbolResultItem` |
 | `contract_details_to_symbol_info()`       | `ContractDetails` → `SymbolInfo`                 |
-| `tws_bar_to_domain_bar()`                 | `BarData` → `Bar`                                |
-| `tws_ticks_to_quote_data()`               | Accumulated ticks → `QuoteData`                  |
+| `tws_bar_to_domain_bar()`                 | `BarData` → `Bar` (historical)                   |
+| `tws_ticks_to_bar()`                      | `dict[str, Any]` → `Bar` (real-time)             |
+| `tws_ticks_to_quote_data()`               | `dict[str, Any]` → `QuoteData`                   |
+| `ticker_name()`                           | `Contract` → stream key string                   |
+| `parse_ticker()`                          | stream key → (symbol, exchange, secType, conId)  |
+| `build_contract()`                        | ticker string → `Contract`                       |
+| `map_resolution_to_tws_bar_size()`        | `Resolution` → TWS bar size string               |
+| `calculate_tws_duration()`                | time range → TWS duration string                 |
 
 **secType Mapping:**
 
 ```python
 SEC_TYPE_MAP = {"STK": "stock", "OPT": "option", "FUT": "futures",
-                "CASH": "forex", "IND": "index", "CRYPTO": "crypto"}
+                "CASH": "forex", "IND": "index", "CRYPTO": "crypto", ...}
 ```
 
 ---
 
-## 5. Configuration
+## 7. Ticker Slot Pattern (Real-time Data)
+
+**Replaces the old `TwsRTData` dataclass.**
+
+Ticker slots are `dict[str, Any]` managed by IBSocket:
+
+```python
+# IBSocket internal state
+_reader_tickers: dict[int, dict[str, Any]] = {}   # reqId → ticker data
+_reader_streams: dict[int, tuple[loop, callback]] = {}  # reqId → notification callback
+
+# Ticker slot structure (example)
+ticker_slot = {
+    "ticker_name": "AAPL:NASDAQ:STK-12345",
+    # Price fields
+    "bid": 150.25,
+    "ask": 150.30,
+    "last": 150.27,
+    # Bar fields (for historicalDataUpdate)
+    "bar_date": "20251207 10:30:00",
+    "bar_open": 150.00,
+    "bar_high": 150.50,
+    "bar_low": 149.90,
+    "bar_close": 150.27,
+    "bar_volume": 1000,
+    # Metadata
+    "market_data_type": 1,
+    "min_tick": 0.01,
+}
+```
+
+**Field Mapping:** `TICK_TYPE_TO_FIELD` in `tws_models.py` maps TWS tick types to slot fields:
+
+```python
+TICK_TYPE_TO_FIELD = {
+    "BID": "bid",
+    "ASK": "ask",
+    "LAST": "last",
+    "VOLUME": "volume",
+    ...
+}
+```
+
+**Notification Pattern:**
+
+```python
+# In IBSocket callback (daemon thread)
+def tickPrice(self, reqId: int, tickType: int, price: float, attrib) -> None:
+    ticker = self._reader_tickers.get(reqId)
+    if ticker is None:
+        return
+
+    field_name = TICK_TYPE_TO_FIELD.get(get_tick_type_name(tickType))
+    current_value = ticker.get(field_name)
+
+    # Only notify on actual change
+    if current_value is None or not math.isclose(current_value, price, abs_tol=1e-3):
+        ticker[field_name] = price
+        self._notify_stream(reqId, [field_name])  # Notifies main thread
+```
+
+---
+
+## 8. Configuration
 
 **File:** `models/providers/tws/tws_configs.py` — Pydantic BaseSettings with `TWS_` prefix
 
@@ -143,89 +298,106 @@ SEC_TYPE_MAP = {"STK": "stock", "OPT": "option", "FUT": "futures",
 
 ---
 
-## 6. Implementation Patterns
+## 9. Implementation Patterns
 
-### Request/Response (Single Callback)
+### One-Shot Request (Future-based)
 
-Used by: `search_symbols()` — complete data in one callback
+Used by: `search_symbols()`, `get_historical_bars()`, `get_quotes_snapshot()`
 
 ```python
 # TWSClient
 async def reqMatchingSymbols(self, pattern: str) -> list[ContractDescription]:
-    req_id = self._get_next_req_id()
-    future = self._cb_wrapper.create_future_coroutine(req_id)
-    self.ibsocket.send_message(REQ_MATCHING_SYMBOLS, [req_id, pattern])
-    return await future
+    reqId = self.next_req_id
+    coroutine = self.ibsocket.create_future(reqId, timeout=self._timeout)
+    self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
+    return await coroutine
 
-# TWSCallback
+# IBSocket (daemon thread)
 def symbolSamples(self, reqId: int, contractDescriptions: list) -> None:
-    self._resolve_future(reqId, contractDescriptions)  # Single resolution
+    accumulator = self._reader_accumulators.get(reqId)
+    if isinstance(accumulator, list):
+        accumulator.extend(contractDescriptions)
+        self._resolve_future(reqId)  # Resolves Future with accumulated data
 ```
 
-### Accumulator (Multiple Callbacks)
+### Streaming Subscription (Ticker Slot + Callback)
 
-Used by: `get_historical_bars()` — streaming data collected before resolution
+Used by: `subscribe_realtime_bars()`, `subscribe_market_data()`
 
 ```python
 # TWSClient
-async def reqHistoricalData(self, ...) -> list[BarData]:
-    req_id = self._get_next_req_id()
-    self._cb_wrapper.init_accumulator(req_id)  # Initialize accumulator
-    future = self._cb_wrapper.create_future_coroutine(req_id)
-    self.ibsocket.send_message(REQ_HISTORICAL_DATA, [...])
-    return await future
+def reqBarDataStream(self, contract: Contract, bar_size: str, callback) -> str:
+    stream_key = ticker_name(contract, bar_size)
 
-# TWSCallback
-def historicalData(self, reqId: int, bar: BarData) -> None:
-    self._accumulators[reqId].append(bar)  # Accumulate
+    if stream_key in self._active_streams:
+        # Reuse existing stream, update callback
+        self.ibsocket.update_stream(self._active_streams[stream_key], callback)
+        return stream_key
 
-def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
-    bars = self._accumulators.pop(reqId, [])
-    self._resolve_future(reqId, bars)  # Resolve with all bars
+    reqId = self.next_req_id
+    self._active_streams[stream_key] = reqId
+    self.ibsocket.register_stream(reqId, ticker_name(contract, bar_size), callback)
+
+    # Send REQ_HISTORICAL_DATA with keepUpToDate=1
+    self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, [..., keepUpToDate=1, ...])
+    return stream_key
+
+# TWSProvider
+def subscribe_realtime_bars(self, ticker: str, resolution: Resolution, callback) -> str:
+    bar_size = map_resolution_to_tws_bar_size(resolution)
+
+    async def bar_callback(rt_data: dict, fields: list[str] | None) -> None:
+        if fields is None or any(f.startswith("bar_") for f in fields):
+            await callback(tws_ticks_to_bar(rt_data))
+
+    contract = build_contract(ticker)
+    return self._tws_client.reqBarDataStream(contract, bar_size, bar_callback)
 ```
 
-### Subscription (Continuous)
-
-Used by: `subscribe_realtime_bars()` — indefinite streaming (NOT YET IMPLEMENTED)
+### Cancellation
 
 ```python
-def subscribe_realtime_bars(self, symbol: str, callback: Callable[[Bar], None]) -> int:
-    req_id = self._get_next_req_id()
-    self._subscription_callbacks[req_id] = lambda bar: callback(tws_bar_to_domain_bar(bar))
-    self.ibsocket.send_message(REQ_REAL_TIME_BARS, [...])
-    return req_id  # Return for unsubscribe
+# TWSClient
+def cancelBarDataStream(self, stream_key: str) -> None:
+    reqId = self._active_streams.pop(stream_key, None)
+    if reqId is not None:
+        self.ibsocket.send_message(OUT.CANCEL_HISTORICAL_DATA, [1, reqId])
+        self.ibsocket.unregister_stream(reqId)
 ```
 
 ---
 
-## 7. Thread Safety Rules
+## 10. Thread Safety Rules
 
 ### ✅ DO
 
 - Use `threading.Lock` for socket writes (`IBSocket.send_message`)
-- Use `loop.call_soon_threadsafe()` for cross-thread Future resolution
+- Use `loop.call_soon_threadsafe()` for cross-thread callback dispatch
 - Use `threading.Event` for ready signaling (not `asyncio.Event`)
-- Keep domain conversion in main thread
+- Update ticker slots in daemon thread, notify via `call_soon_threadsafe`
+- Keep domain conversion in main thread (mappers called from callbacks)
 
 ### ❌ DON'T
 
 - Never await/async in EWrapper callbacks (daemon thread)
 - Never share mutable state between threads without sync
 - Never use `asyncio.Event.set()` from daemon thread
+- Never call mappers directly in daemon thread
 
 ---
 
-## 8. Error Handling
+## 11. Error Handling
 
-**TWSError Dataclass:**
+**TWSError Dataclass:** (in `tws_models.py`)
 
 ```python
 @dataclass
-class TWSError:
-    req_id: int
-    error_code: int
-    error_string: str
-    is_warning: bool  # 2100-2199 are warnings
+class TWSError(Exception):
+    reqId: int
+    errorCode: int
+    errorString: str
+    errorTime: int
+    advancedOrderRejectJson: str = ""
 ```
 
 **Common Error Codes:**
@@ -239,16 +411,27 @@ class TWSError:
 
 ---
 
-## 9. Testing
+## 12. Testing
 
 ### Test Strategy
 
-| Layer       | Mock             | Focus                           |
-| ----------- | ---------------- | ------------------------------- |
-| TWSProvider | Mock `TWSClient` | Domain conversion               |
-| TWSClient   | Mock `IBSocket`  | Lazy connection, delegation     |
-| TWSCallback | Mock loop        | Future resolution, accumulators |
-| Integration | Mock TWS Gateway | End-to-end flow                 |
+| Layer       | Mock                  | Focus                              |
+| ----------- | --------------------- | ---------------------------------- |
+| TWSProvider | `AsyncMock` TWSClient | Domain conversion, stream keys     |
+| TWSClient   | Mock `IBSocket`       | Stream management, lazy connection |
+| Integration | Mock TWS Gateway      | End-to-end flow                    |
+
+### Mock Pattern for Async Methods
+
+```python
+# For async methods like reqQuoteSnapshot
+mock_client = AsyncMock()
+mock_client.reqQuoteSnapshot.return_value = {"ticker_name": "AAPL:NASDAQ:STK-12345"}
+
+# For sync methods that return stream keys
+mock_client = Mock()
+mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
+```
 
 ### Run Tests
 
@@ -259,7 +442,7 @@ poetry run pytest src/trading_api/providers/tws/tests/ -v
 
 ---
 
-## 10. Installation
+## 13. Installation
 
 **Requirements:** Python 3.11+, protobuf 5.29.3
 
@@ -276,10 +459,10 @@ make validate-tws
 
 ## Cross-References
 
-| Topic               | Document                                       |
-| ------------------- | ---------------------------------------------- |
-| Provider System     | `backend/docs/PROVIDER-SYSTEM.md`              |
-| TWS API Reference   | `backend/external_packages/tws/docs/README.md` |
-| DatafeedService     | `modules/datafeed/service.py`                  |
-| Implementation Plan | `docs/tmp/plan_tws_datafeed_provider.md`       |
-| Backend Testing     | `backend/docs/BACKEND_TESTING.md`              |
+| Topic                | Document                                       |
+| -------------------- | ---------------------------------------------- |
+| Provider System      | `backend/docs/PROVIDER-SYSTEM.md`              |
+| TWS API Reference    | `backend/external_packages/tws/docs/README.md` |
+| DatafeedService      | `modules/datafeed/service.py`                  |
+| Backend Testing      | `backend/docs/BACKEND_TESTING.md`              |
+| Modular Architecture | `backend/docs/MODULAR_BACKEND_ARCHITECTURE.md` |

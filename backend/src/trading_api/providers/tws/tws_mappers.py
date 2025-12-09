@@ -3,17 +3,21 @@
 Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar, QuoteData, etc.).
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from ibapi.common import BarData
-from ibapi.contract import ContractDescription, ContractDetails
+from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.ticktype import TickTypeEnum
 
 from trading_api.models.market import (
     Bar,
     QuoteData,
     QuoteValues,
+    Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
 )
@@ -36,15 +40,15 @@ SEC_TYPE_MAP: dict[str, str] = {
 }
 
 # Default supported resolutions for TWS datafeed
-DEFAULT_SUPPORTED_RESOLUTIONS: list[str] = [
-    "1",
-    "5",
-    "15",
-    "30",
-    "60",
-    "1D",
-    "1W",
-    "1M",
+DEFAULT_SUPPORTED_RESOLUTIONS: list[Resolution] = [
+    Resolution.MIN_1,
+    Resolution.MIN_5,
+    Resolution.MIN_15,
+    Resolution.MIN_30,
+    Resolution.HOUR_1,
+    Resolution.DAY_1,
+    Resolution.WEEK_1,
+    Resolution.MONTH_1,
 ]
 
 get_tick_type_name_ = TickTypeEnum.idx2name.get
@@ -60,6 +64,21 @@ def get_tick_type_name(tick_type: int) -> str:
     return get_tick_type_name_(tick_type, f"UNKNOWN_{tick_type}")
 
 
+def ticker_name(contract: Contract, bar_size: str | None = None) -> str:
+    ticker = (
+        contract.symbol
+        + ":"
+        + (contract.primaryExchange or contract.exchange)
+        + ":"
+        + contract.secType
+        + "-"
+        + str(contract.conId)
+    )
+    if bar_size:
+        ticker += "@" + bar_size
+    return ticker
+
+
 def contract_description_to_search_result(
     desc: ContractDescription,
 ) -> SearchSymbolResultItem:
@@ -72,12 +91,19 @@ def contract_description_to_search_result(
         Domain SearchSymbolResultItem for frontend consumption
     """
     contract = desc.contract
+    symbol = contract.symbol
+    description = contract.description or f"{contract.symbol} ({contract.secType})"
+    exchange = contract.primaryExchange or contract.exchange
+    type = SEC_TYPE_MAP.get(contract.secType, "stock")
+    ticker = (
+        symbol + ":" + exchange + ":" + contract.secType + "-" + str(contract.conId)
+    )
     return SearchSymbolResultItem(
         symbol=contract.symbol,
-        description=contract.description or f"{contract.symbol} ({contract.secType})",
-        exchange=contract.primaryExchange or contract.exchange,
-        ticker=contract.localSymbol or contract.symbol,
-        type=SEC_TYPE_MAP.get(contract.secType, "stock"),
+        description=description,
+        exchange=exchange,
+        ticker=ticker,
+        type=type,
     )
 
 
@@ -96,22 +122,42 @@ def _convert_tws_trading_hours_to_session(trading_hours: str) -> str:
         TradingView-compatible session string (e.g., "0930-1600")
     """
     if not trading_hours:
-        return "0930-1600"  # Default US equity hours
+        return "0000-2359"  # Default US equity hours
 
-    for segment in trading_hours.split(";"):
-        if "CLOSED" in segment:
-            continue
-        # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" → "HHMM-HHMM"
-        if ":" in segment:
-            _, times = segment.split(":", 1)
-            if "-" in times:
-                start_datetime, end_datetime = times.split("-", 1)
-                # Extract just HHMM from YYYYMMDDHHMM (last 4 chars after date prefix)
-                start_time = start_datetime[-4:]
-                end_time = end_datetime[-4:] if len(end_datetime) >= 4 else end_datetime
-                return f"{start_time}-{end_time}"
+    # for segment in trading_hours.split(";"):
+    #     if "CLOSED" in segment:
+    #         continue
+    #     # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" → "HHMM-HHMM"
+    #     if "-" in segment:
+    #         start, end = segment.split("-", 1)
+    #         start_time = start.split(":", 1)[1] if ":" in start else start
+    #         end_time = end.split(":", 1)[1] if ":" in end else end
+    #         if int(end_time) < int(start_time):
+    #             current_hour = (
+    #                 datetime.now().astimezone(ZoneInfo("US/Eastern")).time().hour
+    #             )
+    #             if int(end_time) / 100 < current_hour:
+    #                 end_time = "2359"
+    #             else:
+    #                 start_time = "0000"
 
-    return "0930-1600"  # Fallback
+    #         return start_time + "-" + end_time
+
+    return "0000-2359"  # Fallback
+
+
+TWS_TIMEZONE_MAP: dict[str, str] = {
+    "US/Eastern": "America/New_York",
+    "US/Central": "America/Chicago",
+    "US/Mountain": "US/Mountain",  # TradingView supports this one
+    "US/Pacific": "America/Los_Angeles",
+    # Add more as encountered
+}
+
+
+def _normalize_timezone(tws_timezone: str) -> str:
+    """Convert TWS timeZoneId to TradingView-compatible timezone."""
+    return TWS_TIMEZONE_MAP.get(tws_timezone, tws_timezone) or "America/New_York"
 
 
 def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
@@ -131,16 +177,21 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     )
 
     # Determine symbol type
+
+    symbol = contract.symbol
+    exchange = contract.primaryExchange or contract.exchange
     symbol_type = SEC_TYPE_MAP.get(contract.secType, "stock")
 
     return SymbolInfo(
-        name=contract.symbol,
-        description=details.longName or contract.symbol,
+        name=symbol,
+        description=details.longName or symbol,
         type=symbol_type,
         session=_convert_tws_trading_hours_to_session(details.tradingHours),
-        timezone=details.timeZoneId or "America/New_York",
-        ticker=contract.localSymbol or contract.symbol,
-        exchange=contract.primaryExchange or contract.exchange,
+        timezone=_normalize_timezone(details.timeZoneId),
+        ticker=(
+            symbol + ":" + exchange + ":" + contract.secType + "-" + str(contract.conId)
+        ),
+        exchange=exchange,
         listed_exchange=contract.exchange,
         format="price",
         pricescale=pricescale,
@@ -153,19 +204,22 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     )
 
 
-def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
-    """Map TWS BarData → domain Bar.
+def parse_tws_bar_date(date_str: str) -> int:
+    """Parse TWS bar date string to milliseconds timestamp.
+
+    Handles multiple TWS date formats:
+    - "yyyyMMdd  HH:mm:ss US/Eastern" (two spaces, timezone)
+    - "yyyyMMdd HH:mm:ss UTC" (single space, UTC)
+    - "yyyyMMdd" (daily bars, date only)
+    - epoch string (if formatDate=2 was used)
 
     Args:
-        tws_bar: TWS BarData object
+        date_str: TWS date string
 
     Returns:
-        Domain Bar model
+        Timestamp in milliseconds
     """
-    # Parse TWS date format: "yyyyMMdd  HH:mm:ss", "yyyyMMdd", or epoch
-    # TWS returns string dates like "20231215  16:00:00" (note: two spaces)
-    # Daily bars return just "20231215" without time component
-    date_str = tws_bar.date.strip()
+    date_str = date_str.strip()
     time_ms: int = 0
 
     # Try datetime with timezone (two spaces)
@@ -186,8 +240,20 @@ def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
                 # Fall back to epoch format (if formatDate=2 was used)
                 time_ms = int(date_str) * 1000
 
+    return time_ms
+
+
+def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
+    """Map TWS BarData → domain Bar.
+
+    Args:
+        tws_bar: TWS BarData object
+
+    Returns:
+        Domain Bar model
+    """
     return Bar(
-        time=time_ms,
+        time=parse_tws_bar_date(tws_bar.date),
         open=float(tws_bar.open),
         high=float(tws_bar.high),
         low=float(tws_bar.low),
@@ -241,72 +307,254 @@ def tws_rt_bar_to_domain_bar(
     )
 
 
-def tws_ticks_to_quote_data(
-    symbol: str,
-    ticks: dict[str, float],
-) -> QuoteData:
-    """Convert TWS tick data → domain QuoteData.
+def tws_ticks_to_bar(rt_data: dict[str, Any]) -> Bar:
+    # Prefer bar_date (string) over bar_time (legacy int)
+    if rt_data.get("bar_date"):
+        time_ms = parse_tws_bar_date(rt_data["bar_date"])
+    elif rt_data.get("bar_time"):
+        time_ms = rt_data["bar_time"] * 1000
+    else:
+        time_ms = 0
+    return Bar(
+        time=time_ms,
+        open=float(rt_data.get("bar_open", 0.0)),
+        high=float(rt_data.get("bar_high", 0.0)),
+        low=float(rt_data.get("bar_low", 0.0)),
+        close=float(rt_data.get("bar_close", 0.0)),
+        volume=rt_data.get("bar_volume", 0),
+        count=rt_data.get("bar_count", 0),
+    )
+
+
+def _parse_rt_volume(rt_volume_str: str | None) -> tuple[float, float, float]:
+    """Parse RT Trade Volume string to extract last price, volume, and vwap.
+
+    Format: "price;size;timestamp;totalVolume;vwap;singleMM"
+    Example: "320.64;1.0;1765200318856;363.0;320.359;true"
 
     Args:
-        symbol: Symbol name
-        ticks: Dictionary with "prices" and "sizes" from TWS callbacks
-               Example: {"prices": {1: 150.25, 2: 150.30}, "sizes": {0: 100}}
+        rt_volume_str: RT Volume or RT Trade Volume string from TWS
 
     Returns:
-        QuoteData with status="ok" and QuoteValues populated from ticks
+        Tuple of (last_price, total_volume, vwap) - returns (0.0, 0, 0.0) if parsing fails
     """
+    if not rt_volume_str or rt_volume_str.startswith(";"):
+        # Empty string or starts with ";" (odd lot with no price)
+        return 0.0, 0, 0.0
 
-    # Extract tick values (None if not present)
-    bid = ticks.get(get_tick_type_name(TickTypeEnum.BID))
-    ask = ticks.get(get_tick_type_name(TickTypeEnum.ASK))
-    last = ticks.get(get_tick_type_name(TickTypeEnum.LAST))
-    open_price = ticks.get(get_tick_type_name(TickTypeEnum.OPEN))
-    high_price = ticks.get(get_tick_type_name(TickTypeEnum.HIGH))
-    low_price = ticks.get(get_tick_type_name(TickTypeEnum.LOW))
-    close_price = ticks.get(get_tick_type_name(TickTypeEnum.CLOSE))
+    try:
+        parts = rt_volume_str.split(";")
+        if len(parts) >= 5:
+            last_price = float(parts[0]) if parts[0] else 0.0
+            total_volume = int(float(parts[3])) if parts[3] else 0
+            vwap = float(parts[4]) if parts[4] else 0.0
+            return last_price, total_volume, vwap
+    except (ValueError, IndexError):
+        pass
 
-    ticks.get(get_tick_type_name(TickTypeEnum.BID_SIZE))
-    ticks.get(get_tick_type_name(TickTypeEnum.ASK_SIZE))
-    volume = ticks.get(get_tick_type_name(TickTypeEnum.VOLUME))
+    return 0.0, 0, 0.0
 
-    # Calculate spread (if both bid and ask available)
-    spread = (ask - bid) if (ask is not None and bid is not None) else 0.0
 
-    # Calculate change and change percent (if last and close available)
-    if last is not None and close_price is not None and close_price != 0:
-        change = last - close_price
-        change_percent = (change / close_price) * 100
+def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
+    ticker_name = rt_data.get("ticker_name", "UNKNOWN")
+    symbol, exchange, _, _, _ = parse_ticker(ticker_name)
+    ticker_name = ticker_name.split("@")[0]
+
+    # Parse RT Trade Volume as fallback source (more reliable than rt_volume)
+    rt_trd_volume = rt_data.get("rt_trd_volume") or rt_data.get("rt_volume")
+    rt_last, rt_volume, _ = _parse_rt_volume(rt_trd_volume)
+
+    # Extract values with fallbacks: direct tick > rt_volume > 0
+    bid = round(rt_data.get("bid", 0.0), 2)
+    ask = round(rt_data.get("ask", 0.0), 2)
+    last = round(rt_data.get("last") or rt_last or 0.0, 2)
+    open_price = round(rt_data.get("bar_open") or last, 2)
+    high_price = round(rt_data.get("bar_high") or last, 2)
+    low_price = round(rt_data.get("bar_low") or last, 2)
+    close_price = round(rt_data.get("bar_close") or last, 2)
+    volume = int(rt_data.get("bar_volume") or rt_volume or 0)
+    # Calculate spread
+    spread = round(ask - bid, 2) if (ask > 0 and bid > 0) else 0.0
+
+    # Calculate change and change percent
+    if last > 0 and close_price > 0:
+        change = round(last - close_price, 2)
+        change_percent = round((change / close_price) * 100, 2)
     else:
         change = 0.0
         change_percent = 0.0
 
-    # Build QuoteValues with available data (use 0.0 for missing prices)
     quote_values = QuoteValues(
-        lp=last or 0.0,
-        ask=ask or 0.0,
-        bid=bid or 0.0,
+        lp=last,
+        ask=ask,
+        bid=bid,
         spread=spread,
-        open_price=open_price or 0.0,
-        high_price=high_price or 0.0,
-        low_price=low_price or 0.0,
-        prev_close_price=close_price or 0.0,
-        volume=int(volume) if volume is not None else 0,
+        open_price=open_price,
+        high_price=high_price,
+        low_price=low_price,
+        prev_close_price=close_price,
+        volume=volume,
         ch=change,
         chp=change_percent,
         short_name=symbol,
-        exchange="",  # Not provided in tick data
+        exchange=exchange,
         description=f"Quote for {symbol}",
         original_name=symbol,
     )
 
-    return QuoteData(s="ok", n=symbol, v=quote_values)
+    return QuoteData(s="ok", n=ticker_name, v=quote_values)
+
+
+def parse_ticker(ticker: str) -> tuple[str, str, str, str, str]:
+    """Parse ticker string into components.
+    Args:
+        ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE-CONTRACTID"
+    Returns:
+        Tuple of (symbol_name, exchange, secType, contractId, bar_size)
+    Examples:
+        >>> self.parse_ticker('AAPL:NASDAQ:STK-12345@1D')
+        ('AAPL', 'NASDAQ', 'STK', '12345', '1D')
+        >>> self.parse_ticker('GOOGL:NASDAQ')
+        ('GOOGL', 'NASDAQ', '', '', '')
+    """
+
+    ticker_parts = ticker.split(":")
+    symbol_name = ticker_parts[0].strip()
+    exchange = ""
+    if len(ticker_parts) > 1:
+        exchange = ticker_parts[1].strip()
+    secType = ""
+    contractId = ""
+    bar_size = ""
+    if len(ticker_parts) > 2:
+        ticker_parts = ticker_parts[2].split("-")
+        secType = ticker_parts[0].strip()
+        if len(ticker_parts) > 1:
+            ticker_parts = ticker_parts[1].split("@")
+            contractId = ticker_parts[0].strip()
+            if len(ticker_parts) > 1:
+                bar_size = ticker_parts[1].strip()
+    return symbol_name, exchange, secType, contractId, bar_size
+
+
+def build_contract(
+    ticker: str,
+) -> Contract:
+    """Build TWS Contract object from domain parameters.
+
+    Args:
+        symbol: Symbol name (e.g., "AAPL")
+        exchange: Exchange name (default: "SMART" for smart routing)
+        sec_type: Security type (default: "STK" for stocks)
+        currency: Currency code (default: "USD")
+
+    Returns:
+        TWS Contract object ready for API calls
+    """
+    symbol, exchange, sec_type, conId, _ = parse_ticker(ticker)
+    contract = Contract()
+    contract.symbol = symbol
+    contract.secType = sec_type
+    contract.exchange = exchange if exchange else "SMART"
+    contract.primaryExchange = exchange
+    contract.conId = int(conId)
+    return contract
+
+
+def map_resolution_to_tws_bar_size(resolution: Resolution) -> str:
+    """Map domain Resolution → TWS barSizeSetting.
+
+    Args:
+        resolution: Domain Resolution enum (TradingView format)
+
+    Returns:
+        TWS bar size string ("1 min", "5 mins", "1 hour", "1 day", etc.)
+
+    Raises:
+        DatafeedError: If resolution not supported
+    """
+    # Map Resolution enum members directly to TWS bar size strings
+    # Resolution values are TradingView format: "1", "5", "60", "1D", "1W", "1M", "12M"
+    mapping: dict[Resolution, str] = {
+        Resolution.MIN_1: "1 min",
+        Resolution.MIN_5: "5 mins",
+        Resolution.MIN_15: "15 mins",
+        Resolution.MIN_30: "30 mins",
+        Resolution.HOUR_1: "1 hour",
+        Resolution.DAY_1: "1 day",
+        Resolution.WEEK_1: "1 week",
+        Resolution.MONTH_1: "1 month",
+        Resolution.YEAR_1: "1 month",  # TWS doesn't support year bars, use monthly
+    }
+
+    bar_size = mapping.get(resolution)
+    if not bar_size:
+        raise ValueError(
+            f"Unsupported resolution: {resolution}. "
+            f"Supported: {[r.name for r in mapping.keys()]}"
+        )
+    return bar_size
+
+
+def calculate_tws_duration(
+    start_time: datetime, end_time: datetime, resolution: Resolution
+) -> str:
+    """Calculate TWS duration string from time range.
+
+    TWS requires duration in format: "n S|D|W|M|Y"
+    Maximum durations depend on bar size (e.g., 1 sec bars max 2000 S)
+
+    Args:
+        start_time: Start datetime
+        end_time: End datetime
+        resolution: Bar resolution (used to select appropriate unit)
+
+    Returns:
+        TWS duration string (e.g., "1 D", "2 W", "86400 S")
+    """
+    delta = end_time - start_time
+
+    # Select duration unit based on resolution and time range
+    # TWS limits: seconds (max 2000 S), days (max 365 D), weeks, months, years
+
+    # Intraday bars (1 min - 1 hour)
+    if resolution in [
+        Resolution.MIN_1,
+        Resolution.MIN_5,
+        Resolution.MIN_15,
+        Resolution.MIN_30,
+        Resolution.HOUR_1,
+    ]:
+        # Use days for intraday bars
+        days = delta.days + 1
+        if days <= 365:
+            return f"{days} D"
+        # Use years for very long ranges
+        weeks = days // 365 + 1
+        return f"{weeks} Y"
+
+    # Daily and above
+    else:
+        days = delta.days + 1
+        if days <= 365:
+            return f"{days} D"
+        # TWS: durations > 52 weeks must use years
+        years = days // 365 + 1
+        return f"{years} Y"
 
 
 __all__ = [
     "SEC_TYPE_MAP",
     "DEFAULT_SUPPORTED_RESOLUTIONS",
+    "parse_tws_bar_date",
     "contract_description_to_search_result",
     "contract_details_to_symbol_info",
     "tws_bar_to_domain_bar",
+    "tws_rt_bar_to_domain_bar",
+    "tws_ticks_to_bar",
     "tws_ticks_to_quote_data",
+    "parse_ticker",
+    "build_contract",
+    "map_resolution_to_tws_bar_size",
+    "calculate_tws_duration",
 ]

@@ -189,7 +189,7 @@ export FRONTEND_PORT=5173
 export VITE_API_URL=http://localhost:8000
 ```
 
-See `ENVIRONMENT-CONFIG.md` for full details.
+See [GETTING-STARTED.md](GETTING-STARTED.md) for full environment setup details.
 
 ## Client Generation
 
@@ -372,6 +372,6 @@ cd frontend && make generate
 
 - **Architecture**: See `ARCHITECTURE.md`
 - **Client Generation**: See `docs/CLIENT-GENERATION.md`
-- **WebSocket Clients**: See `docs/WEBSOCKET-CLIENTS.md`
+- **WebSocket Architecture**: See `frontend/docs/WEBSOCKET-ARCHITECTURE.md`
 - **Testing Strategy**: See `docs/TESTING.md`
-- **Workspace Setup**: See `WORKSPACE-SETUP.md`
+- **Setup Guide**: See `docs/GETTING-STARTED.md`

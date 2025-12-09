@@ -67,7 +67,9 @@ def create_test_app(
         app = create_test_app(enabled_modules=[])
     """
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=enabled_modules)
+    return asyncio.get_event_loop().run_until_complete(
+        factory.create_app(enabled_module_names=enabled_modules)
+    )
 
 
 @pytest.fixture(scope="session")

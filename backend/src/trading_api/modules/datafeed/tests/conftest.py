@@ -19,13 +19,12 @@ from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.market import (
     Bar,
     QuoteData,
+    Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
-    TimeFrame,
 )
-from trading_api.providers.base import Provider
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
-from trading_api.shared import FastWSAdapter
+from trading_api.shared import FastWSAdapter, Provider
 
 
 class MockDatafeedProvider(Provider, DatafeedCapability):
@@ -36,7 +35,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     def __init__(self) -> None:
         self._subscription_counter = count(start=1)
-        self._subscriptions: dict[int, Callable[..., Awaitable[None]]] = {}
+        self._subscriptions: dict[str, Callable[..., Awaitable[None]]] = {}
 
     @classmethod
     def provider_dir(cls) -> Path:
@@ -73,17 +72,18 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
             )
         ]
 
-    async def get_symbol_info(
-        self, symbol: str, exchange: str | None = None, **kwargs: Any
-    ) -> SymbolInfo:
+    async def get_symbol_info(self, ticker: str, **kwargs: Any) -> SymbolInfo:
         """Return mock symbol info."""
+        parts = ticker.split(":")
+        symbol = parts[0] if parts else ticker
+        exchange = parts[1] if len(parts) > 1 else "SMART"
         return SymbolInfo(
             name=symbol,
-            ticker=f"{symbol}:{exchange or 'SMART'}",
+            ticker=ticker,
             description=f"Mock {symbol}",
             type="stock",
-            exchange=exchange or "SMART",
-            listed_exchange=exchange or "SMART",
+            exchange=exchange,
+            listed_exchange=exchange,
             session="0930-1600",
             timezone="America/New_York",
             format="price",
@@ -91,18 +91,26 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
             pricescale=100,
             has_intraday=True,
             has_daily=True,
-            supported_resolutions=["1", "5", "15", "30", "60", "1D", "1W", "1M"],
+            supported_resolutions=[
+                Resolution.MIN_1,
+                Resolution.MIN_5,
+                Resolution.MIN_15,
+                Resolution.MIN_30,
+                Resolution.HOUR_1,
+                Resolution.DAY_1,
+                Resolution.WEEK_1,
+                Resolution.MONTH_1,
+            ],
             volume_precision=0,
             data_status="streaming",
         )
 
     async def get_historical_bars(
         self,
-        symbol: str,
+        ticker: str,
         start_time: Any,
         end_time: Any,
-        resolution: TimeFrame,
-        exchange: str | None = None,
+        resolution: Resolution,
         **kwargs: Any,
     ) -> list[Bar]:
         """Return mock historical bars."""
@@ -119,46 +127,45 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
         ]
 
     async def get_quotes_snapshot(
-        self, symbols: list[str], exchange: str | None = None, **kwargs: Any
+        self, tickers: list[str], **kwargs: Any
     ) -> list[QuoteData]:
         """Return mock quote snapshots."""
         return [
-            QuoteData(s="ok", n=symbol, v={"bid": 150.0, "ask": 150.1})
-            for symbol in symbols
+            QuoteData(s="ok", n=ticker, v={"bid": 150.0, "ask": 150.1})
+            for ticker in tickers
         ]
 
     def subscribe_realtime_bars(
         self,
-        symbol: str,
+        ticker: str,
+        resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
-        exchange: str | None = None,
         **kwargs: Any,
-    ) -> int:
+    ) -> str:
         """Subscribe to mock realtime bars."""
-        sub_id = next(self._subscription_counter)
+        sub_id = str(next(self._subscription_counter))
         self._subscriptions[sub_id] = callback
         return sub_id
 
     def subscribe_market_data(
         self,
-        symbols: list[str],
+        tickers: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
-        exchange: str | None = None,
         **kwargs: Any,
-    ) -> list[int]:
+    ) -> list[str]:
         """Subscribe to mock market data."""
         sub_ids = []
-        for _ in symbols:
-            sub_id = next(self._subscription_counter)
+        for _ in tickers:
+            sub_id = str(next(self._subscription_counter))
             self._subscriptions[sub_id] = callback
             sub_ids.append(sub_id)
         return sub_ids
 
-    def unsubscribe_realtime_bars(self, subscription_id: int) -> None:
+    def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         """Unsubscribe from mock realtime bars."""
         self._subscriptions.pop(subscription_id, None)
 
-    def unsubscribe_market_data(self, subscription_ids: list[int]) -> None:
+    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
         """Unsubscribe from mock market data."""
         for sub_id in subscription_ids:
             self._subscriptions.pop(sub_id, None)

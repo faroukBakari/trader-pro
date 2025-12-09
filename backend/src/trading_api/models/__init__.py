@@ -61,6 +61,7 @@ from .broker import (
 from .common import (
     BaseApiResponse,
     ErrorApiResponse,
+    SubscriptionRequest,
     SubscriptionResponse,
     SubscriptionUpdate,
 )
@@ -79,6 +80,7 @@ from .market import (
     QuoteData,
     QuoteDataSubscriptionRequest,
     QuoteValues,
+    Resolution,
     SearchSymbolResultItem,
     SearchSymbolsRequest,
     SymbolInfo,
@@ -92,6 +94,7 @@ __all__ = [
     "BaseApiResponse",
     "BarsSubscriptionRequest",
     "ErrorApiResponse",
+    "SubscriptionRequest",
     "SubscriptionResponse",
     "SubscriptionUpdate",
     # Auth models
@@ -119,6 +122,7 @@ __all__ = [
     "QuoteData",
     "QuoteDataSubscriptionRequest",
     "QuoteValues",
+    "Resolution",
     "SearchSymbolResultItem",
     "SearchSymbolsRequest",
     "SymbolInfo",

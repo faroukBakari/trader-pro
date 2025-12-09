@@ -1,7 +1,7 @@
 # TradingView Charting Library TypeScript Types
 
-**Version**: 1.0.0  
-**Last Updated**: November 11, 2025  
+**Version**: 1.0.1  
+**Last Updated**: November 30, 2025  
 **Purpose**: Guide to TradingView TypeScript type definitions and usage patterns
 
 ---
@@ -447,7 +447,7 @@ To add real-time data streaming:
 
 ### Broker Terminal Service
 
-For complete documentation on the broker implementation, see **[BROKER-TERMINAL-SERVICE.md](./BROKER-TERMINAL-SERVICE.md)**.
+For complete documentation on the broker implementation, see **[BROKER-INTEGRATION.md](../BROKER-INTEGRATION.md)**.
 
 This includes:
 

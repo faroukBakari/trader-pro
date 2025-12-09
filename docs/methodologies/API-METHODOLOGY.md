@@ -167,7 +167,7 @@ npm run type-check  # No TypeScript errors
 
 **Goal**: Create backend API structure matching the client interface, generate OpenAPI client, verify interface alignment.
 
-> ⚠️ **WebSocket Features**: If implementing WebSocket operations (not REST), use the router code generation mechanism documented in [`backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md`](backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md) instead of creating routers manually. Module-specific WebSocket routers are generated into `modules/{module}/ws_generated/`. This ensures type safety and consistency.
+> **Note**: For WebSocket features (not REST), see [backend/docs/BACKEND_WEBSOCKETS.md](../../backend/docs/BACKEND_WEBSOCKETS.md) and use the `WsRouter[Request, Data]` pattern directly. This ensures type safety and consistency.
 
 ### Step 2.1: Create Backend Models
 
@@ -1506,6 +1506,6 @@ When implementing a new service, replace these placeholders:
 ---
 
 **Document Version**: 3.0 (Generic Template - Modular Architecture)  
-**Last Updated**: November 11, 2025  
+**Last Updated**: November 30, 2025  
 **Original Implementation**: Broker Terminal Service  
 **Migration**: Updated for modular backend architecture with factory pattern

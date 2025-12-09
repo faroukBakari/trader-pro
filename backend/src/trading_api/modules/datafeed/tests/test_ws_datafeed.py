@@ -54,10 +54,13 @@ class TestBarsWebSocketIntegration:
         client.cookies.set("access_token", valid_jwt_token)
 
         with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
-            # Send subscribe message
+            # Send subscribe message (SubscriptionRequest format: sub_id + sub_params)
             subscribe_msg = {
                 "type": "bars.subscribe",
-                "payload": {"symbol": "AAPL", "resolution": "1"},
+                "payload": {
+                    "sub_id": "test-sub-001",
+                    "sub_params": {"symbol": "AAPL", "resolution": "1"},
+                },
             }
             websocket.send_json(subscribe_msg)
 
@@ -67,11 +70,11 @@ class TestBarsWebSocketIntegration:
             # Verify response structure
             assert response["type"] == "bars.subscribe.response"
             assert response["payload"]["status"] == "ok"
+            assert response["payload"]["sub_id"] == "test-sub-001"
             assert (
                 response["payload"]["topic"]
                 == 'bars:{"resolution":"1","symbol":"AAPL"}'
             )
-            assert "Subscribed" in response["payload"]["message"]
 
     def test_subscribe_with_different_resolutions(
         self, client: TestClient, valid_jwt_token: str
@@ -84,7 +87,10 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.subscribe",
-                    "payload": {"symbol": "AAPL", "resolution": "1"},
+                    "payload": {
+                        "sub_id": "test-sub-1min",
+                        "sub_params": {"symbol": "AAPL", "resolution": "1"},
+                    },
                 }
             )
             response1 = websocket.receive_json()
@@ -97,13 +103,16 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.subscribe",
-                    "payload": {"symbol": "AAPL", "resolution": "D"},
+                    "payload": {
+                        "sub_id": "test-sub-daily",
+                        "sub_params": {"symbol": "AAPL", "resolution": "1D"},
+                    },
                 }
             )
             response2 = websocket.receive_json()
             assert (
                 response2["payload"]["topic"]
-                == 'bars:{"resolution":"D","symbol":"AAPL"}'
+                == 'bars:{"resolution":"1D","symbol":"AAPL"}'
             )
 
     def test_unsubscribe_from_bars(
@@ -117,7 +126,10 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.subscribe",
-                    "payload": {"symbol": "GOOGL", "resolution": "5"},
+                    "payload": {
+                        "sub_id": "test-unsub-001",
+                        "sub_params": {"symbol": "GOOGL", "resolution": "5"},
+                    },
                 }
             )
             subscribe_response = websocket.receive_json()
@@ -127,7 +139,10 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.unsubscribe",
-                    "payload": {"symbol": "GOOGL", "resolution": "5"},
+                    "payload": {
+                        "sub_id": "test-unsub-001",
+                        "sub_params": {"symbol": "GOOGL", "resolution": "5"},
+                    },
                 }
             )
             unsubscribe_response = websocket.receive_json()
@@ -135,11 +150,11 @@ class TestBarsWebSocketIntegration:
             # Verify unsubscribe response
             assert unsubscribe_response["type"] == "bars.unsubscribe.response"
             assert unsubscribe_response["payload"]["status"] == "ok"
+            assert unsubscribe_response["payload"]["sub_id"] == "test-unsub-001"
             assert (
                 unsubscribe_response["payload"]["topic"]
                 == 'bars:{"resolution":"5","symbol":"GOOGL"}'
             )
-            assert "Unsubscribed" in unsubscribe_response["payload"]["message"]
 
     def test_multiple_symbols_subscription(
         self, client: TestClient, valid_jwt_token: str
@@ -150,11 +165,14 @@ class TestBarsWebSocketIntegration:
         with client.websocket_connect("/api/v1/datafeed/ws") as websocket:
             symbols = ["AAPL", "GOOGL", "MSFT"]
 
-            for symbol in symbols:
+            for i, symbol in enumerate(symbols):
                 websocket.send_json(
                     {
                         "type": "bars.subscribe",
-                        "payload": {"symbol": symbol, "resolution": "1"},
+                        "payload": {
+                            "sub_id": f"test-multi-{i}",
+                            "sub_params": {"symbol": symbol, "resolution": "1"},
+                        },
                     }
                 )
                 response = websocket.receive_json()
@@ -175,7 +193,10 @@ class TestBarsWebSocketIntegration:
             websocket.send_json(
                 {
                     "type": "bars.subscribe",
-                    "payload": {"symbol": "AAPL", "resolution": "1"},
+                    "payload": {
+                        "sub_id": "test-explicit-res",
+                        "sub_params": {"symbol": "AAPL", "resolution": "1"},
+                    },
                 }
             )
             response = websocket.receive_json()

@@ -11,19 +11,19 @@ from trading_api.providers.tws import TWSProvider
 
 @pytest.fixture
 def mock_tws_connection():
-    """Mock TWSConnection to avoid real broker connection in tests."""
-    with patch("trading_api.providers.tws.TWSConnection") as mock_conn_class:
+    """Mock TWSClient to avoid real broker connection in tests."""
+    with patch(
+        "trading_api.providers.tws.tws_connection.TWSClient"
+    ) as mock_client_class:
         # Create mock instance
         mock_instance = MagicMock()
-        mock_instance.is_ready.wait.return_value = (
-            True  # Simulate successful connection
-        )
-        mock_instance.is_ready.is_set.return_value = True
-        mock_instance.get_req_id.return_value = 1
-        mock_instance.disconnect = MagicMock()
+        mock_instance._cb_wrapper._ready_event.is_set.return_value = True
+        mock_instance._cb_wrapper._ready_event.wait.return_value = True
+        mock_instance.next_req_id = 1
+        mock_instance.shutdown = MagicMock()
 
         # Make the class return our mock instance
-        mock_conn_class.return_value = mock_instance
+        mock_client_class.return_value = mock_instance
 
         yield mock_instance
 

@@ -1,7 +1,7 @@
 # Implementation Methodologies
 
-**Version**: 1.0.0  
-**Last Updated**: November 18, 2025  
+**Version**: 1.0.1  
+**Last Updated**: November 30, 2025  
 **Status**: ✅ Current
 
 This directory contains proven implementation methodologies for building new features using Test-Driven Development (TDD) principles.
@@ -50,7 +50,7 @@ Our implementation methodologies provide step-by-step templates for adding new f
 
 **Key Features**:
 
-- Backend WebSocket operations (routers, code generation)
+- Backend WebSocket operations using direct generic types
 - AsyncAPI type generation and frontend mappers
 - WsAdapter client integration
 - Service integration with TDD red-green phases
@@ -179,7 +179,6 @@ Each methodology document follows this structure:
 
 - [Client Generation](../CLIENT-GENERATION.md) - Auto-generation overview
 - [Specs and Client Gen](../../backend/docs/SPECS_AND_CLIENT_GEN.md) - Detailed generation guide
-- [WebSocket Router Gen](../../backend/docs/WS_ROUTERS_GEN.md) - Router generation
 
 ---
 
@@ -217,6 +216,6 @@ If you encounter issues:
 
 ---
 
-**Last Updated**: November 18, 2025  
+**Last Updated**: November 30, 2025  
 **Maintained by**: Development Team  
 **Ready to Start**: Choose your methodology and begin building! 🚀

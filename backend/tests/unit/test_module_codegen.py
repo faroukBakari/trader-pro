@@ -4,7 +4,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 import pytest
 
@@ -19,15 +19,15 @@ from trading_api.models.common import (  # noqa: E402
 from trading_api.models.market import (  # noqa: E402
     Bar,
     QuoteData,
+    Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
-    TimeFrame,
 )
 from trading_api.modules.auth import AuthModule  # noqa: E402
 from trading_api.modules.broker import BrokerModule  # noqa: E402
 from trading_api.modules.datafeed import DatafeedModule  # noqa: E402
-from trading_api.providers.base import Provider  # noqa: E402
 from trading_api.providers.capabilities.datafeed import DatafeedCapability  # noqa: E402
+from trading_api.shared import Provider  # noqa: E402
 from trading_api.shared.module_interface import ModuleApp  # noqa: E402
 
 
@@ -55,38 +55,45 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     ) -> list[SearchSymbolResultItem]:
         return []
 
-    async def get_symbol_info(self, symbol: str, **kwargs: Any) -> SymbolInfo:
+    async def get_symbol_info(self, ticker: str, **kwargs: Any) -> SymbolInfo:
         raise NotImplementedError("Mock provider")
 
     async def get_historical_bars(
         self,
-        symbol: str,
+        ticker: str,
         start_time: datetime,
         end_time: datetime,
-        resolution: TimeFrame,
+        resolution: Resolution,
         **kwargs: Any,
     ) -> list[Bar]:
         return []
 
     async def get_quotes_snapshot(
-        self, symbols: list[str], **kwargs: Any
+        self, tickers: list[str], **kwargs: Any
     ) -> list[QuoteData]:
         return []
 
     def subscribe_realtime_bars(
-        self, symbol: str, callback: Callable[[Bar], None], **kwargs: Any
-    ) -> int:
-        return 0
+        self,
+        ticker: str,
+        resolution: Resolution,
+        callback: Callable[[Bar], Awaitable[None]],
+        **kwargs: Any,
+    ) -> str:
+        return "sub_0"
 
     def subscribe_market_data(
-        self, symbols: list[str], callback: Callable[[QuoteData], None], **kwargs: Any
-    ) -> list[int]:
+        self,
+        tickers: list[str],
+        callback: Callable[[QuoteData], Awaitable[None]],
+        **kwargs: Any,
+    ) -> list[str]:
         return []
 
-    def unsubscribe_realtime_bars(self, subscription_id: int) -> None:
+    def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         pass
 
-    def unsubscribe_market_data(self, subscription_ids: list[int]) -> None:
+    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
         pass
 
 

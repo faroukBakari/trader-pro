@@ -10,7 +10,7 @@ from .bars import (
     BarsSubscriptionRequest,
     GetBarsRequest,
     GetBarsResponse,
-    TimeFrame,
+    Resolution,
 )
 from .configuration import DatafeedConfiguration
 from .instruments import (
@@ -34,7 +34,7 @@ __all__: list[str] = [
     "Exchange",
     "DatafeedSymbolType",
     # Bars and historical data
-    "TimeFrame",
+    "Resolution",
     "Bar",
     "BarsSubscriptionRequest",
     "GetBarsRequest",

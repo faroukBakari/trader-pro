@@ -217,10 +217,16 @@ function generateTypes(specPath, outputDir) {
         } else {
           // For string enums
           schema.enum.forEach((value) => {
-            const memberName = value
+            let memberName = value
               .toString()
               .toUpperCase()
               .replace(/[^A-Z0-9]/g, '_')
+
+            // Prefix with underscore if starts with a digit (invalid TS identifier)
+            if (/^[0-9]/.test(memberName)) {
+              memberName = '_' + memberName
+            }
+
             output += `  ${memberName} = '${value}',\n`
           })
         }

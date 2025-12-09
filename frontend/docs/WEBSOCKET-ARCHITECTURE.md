@@ -131,7 +131,7 @@ private handleError(event: Event): void {
 }
 ```
 
-See [Authentication Guide](../../docs/AUTHENTICATION.md) for complete authentication system documentation.
+See [Authentication Guide](../../backend/docs/AUTHENTICATION.md) for complete authentication system documentation.
 
 ---
 
@@ -1286,8 +1286,81 @@ The WebSocket architecture provides a robust, type-safe foundation for real-time
 
 ---
 
-**Version**: 3.0.0 (Consolidated)  
-**Date**: November 12, 2025  
+## ⚠️ Topic Builder Compliance (Critical Contract)
+
+**MUST BE SHARED ACROSS BACKEND AND FRONTEND**
+
+The topic builder algorithm is the **critical contract** between backend and frontend. Both implementations **MUST** produce identical topic strings for the same subscription parameters.
+
+### Topic Format
+
+```
+{route}:{JSON-serialized-params}
+```
+
+**Examples**:
+
+- `bars:{"resolution":"1","symbol":"AAPL"}` - Apple 1-minute bars
+- `orders:{"accountId":"TEST-001"}` - Orders for account TEST-001
+
+### Algorithm Requirements
+
+**BOTH backend (Python) and frontend (TypeScript) MUST**:
+
+1. **Sort object keys alphabetically** before serialization
+2. **Use compact JSON format** with separators `(",", ":")` - no spaces
+3. **Handle nested objects recursively** with sorted keys at all levels
+4. **Handle null/undefined** by converting to empty string `""`
+
+### Implementation Contract
+
+#### Backend (Python)
+
+```python
+# backend/src/trading_api/shared/ws/ws_router.py
+def buildTopicParams(obj: Any) -> str:
+    def sort_recursive(item: Any) -> Any:
+        if isinstance(item, dict):
+            return {k: sort_recursive(v) for k, v in sorted(item.items())}
+        elif isinstance(item, list):
+            return [sort_recursive(element) for element in item]
+        elif item is None:
+            return ""
+        else:
+            return item
+    sorted_obj = sort_recursive(obj)
+    return json.dumps(sorted_obj, separators=(",", ":"))
+```
+
+#### Frontend (TypeScript)
+
+```typescript
+// frontend/src/plugins/wsClientBase.ts
+function buildTopicParams(obj: unknown): string {
+  if (obj === null || obj === undefined) return ''
+  if (typeof obj !== 'object') return JSON.stringify(obj)
+  if (Array.isArray(obj)) return `[${obj.map(buildTopicParams).join(',')}]`
+
+  const sortedKeys = Object.keys(obj as Record<string, unknown>).sort()
+  const pairs = sortedKeys.map(
+    (key) => `${JSON.stringify(key)}:${buildTopicParams((obj as Record<string, unknown>)[key])}`,
+  )
+  return `{${pairs.join(',')}}`
+}
+```
+
+### Why This Matters
+
+**Topic string is the subscription identifier**:
+
+- Backend uses it to route update messages to correct subscribers
+- Frontend uses it to match incoming updates to callbacks
+- **Mismatch = No updates received** even though subscription appears successful
+
+---
+
+**Version**: 3.1.0 (Consolidated + Topic Builder Contract)  
+**Date**: November 30, 2025  
 **Status**: ✅ Production Ready  
 **Maintainers**: Development Team
 
@@ -1296,3 +1369,4 @@ The WebSocket architecture provides a robust, type-safe foundation for real-time
 - `WEBSOCKET-CLIENT-PATTERN.md` (v2.0.0)
 - `WEBSOCKET-CLIENT-BASE.md` (v2.0.0)
 - `WEBSOCKET-ARCHITECTURE-DIAGRAMS.md` (v2.0.0)
+- Topic Builder Compliance (previously in `docs/WEBSOCKET-CLIENTS.md`, now archived)

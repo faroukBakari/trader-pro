@@ -10,7 +10,7 @@ from trading_api.models.common import (
     CapabilitySpec,
     ProviderNotFoundError,
 )
-from trading_api.providers.base import Provider
+from trading_api.shared import Provider
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,9 @@ class ProviderRegistry:
             providers_dir: Path to providers directory
                           (defaults to trading_api/providers/)
         """
-        self._providers_dir = providers_dir or Path(__file__).parent
+        self._providers_dir = (
+            providers_dir or Path(__file__).parent.parent / "providers"
+        )
         self._provider_classes: dict[str, type[Provider]] = {}
         self._instances: dict[str, Provider] = {}
         self._lock = asyncio.Lock()  # Thread-safe lazy loading

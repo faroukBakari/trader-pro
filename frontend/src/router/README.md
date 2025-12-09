@@ -1,6 +1,6 @@
 # Router Authentication
 
-**Last Updated:** November 14, 2025  
+**Last Updated:** November 30, 2025  
 **Status:** ✅ Production Ready
 
 Stateless authentication guards for Vue Router with API introspection and automatic token refresh.
@@ -589,10 +589,10 @@ router.beforeEach(async (to, from, next) => {
 
 - [Auth Service](../services/README.md#authservice) - Authentication service implementation
 - [Auth Module](../../../backend/src/trading_api/modules/auth/README.md) - Backend authentication
-- [Authentication Guide](../../../docs/AUTHENTICATION.md) - Comprehensive cross-cutting guide
+- [Authentication Guide](../../../backend/docs/AUTHENTICATION.md) - Comprehensive cross-cutting guide
 - [WebSocket Architecture](../../docs/WEBSOCKET-ARCHITECTURE.md) - WebSocket cleanup integration
 
 ---
 
-**Last Updated:** November 14, 2025  
+**Last Updated:** November 30, 2025  
 **Maintained by:** Development Team

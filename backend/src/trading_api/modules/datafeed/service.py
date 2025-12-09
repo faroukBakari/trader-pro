@@ -7,6 +7,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, List, Optional
+from zoneinfo import ZoneInfo
 
 from trading_api.models import (
     Bar,
@@ -17,12 +18,14 @@ from trading_api.models import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.models.common import CapabilitySpec
-from trading_api.models.market import TimeFrame
+from trading_api.models.common import CapabilitySpec, DatafeedError
+from trading_api.models.market import Resolution
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
-from trading_api.shared.ws.ws_route_interface import WsRouteService
+from trading_api.shared.ws.ws_router import WsRouteService
 
 logger = logging.getLogger(__name__)
+
+us_eastern = ZoneInfo("US/Eastern")
 
 
 class DatafeedService(WsRouteService):
@@ -58,90 +61,28 @@ class DatafeedService(WsRouteService):
         self,
         module_dir: Path,
         *,  # Force keyword-only arguments
-        symbols_file_path: Optional[str] = None,
         providers: list | None = None,
     ):
         """Initialize the datafeed service
 
         Args:
             module_dir: Path to the module directory
-            symbols_file_path: Path to symbols JSON file. If None, uses
-                default embedded symbols.
             providers: Provider instances for capabilities (unused, for interface compatibility)
         """
         super().__init__(module_dir, providers=providers)
         self.configuration = DatafeedConfiguration()
-        self.symbols_file_path = symbols_file_path
-        self._symbols: List[SymbolInfo] = []
-        self._sample_bars: List[Bar] = []
         # Track provider subscription IDs for each topic (for cleanup)
-        self._topic_to_subscription_id: dict[str, int | list[int]] = {}
+        self._topic_to_subscription_id: dict[str, str | list[str]] = {}
 
-    # === Helper Methods ===
-
-    def _parse_ticker(self, ticker: str) -> tuple[str, str]:
-        """Parse ticker format 'SYMBOL:EXCHANGE' into components.
-
-        Args:
-            ticker: Ticker in format 'SYMBOL:EXCHANGE' or just 'SYMBOL'
+    def get_configuration(self) -> DatafeedConfiguration:
+        """Get datafeed configuration.
 
         Returns:
-            Tuple of (symbol, exchange)
-                - If ticker contains ':', returns (SYMBOL, EXCHANGE)
-                - If ticker has no ':', returns (SYMBOL, 'SMART')
-
-        Examples:
-            >>> self._parse_ticker('AAPL:NASDAQ')
-            ('AAPL', 'NASDAQ')
-            >>> self._parse_ticker('GOOGL')
-            ('GOOGL', 'SMART')
+            DatafeedConfiguration with supported resolutions, exchanges, etc.
         """
-        if ":" in ticker:
-            symbol, exchange = ticker.split(":", 1)
-            return symbol.strip(), exchange.strip()
-        return ticker.strip(), "SMART"
+        return self.configuration
 
-    def _convert_resolution_to_timeframe(self, resolution: str) -> TimeFrame:
-        """Convert TradingView resolution string to TimeFrame enum.
-
-        Args:
-            resolution: TradingView resolution string
-                - Intraday: "1", "5", "15", "30", "60" (minutes)
-                - Daily+: "1D", "1W", "1M"
-
-        Returns:
-            TimeFrame enum value
-
-        Raises:
-            ValueError: If resolution is not supported
-
-        Examples:
-            >>> self._convert_resolution_to_timeframe('1')
-            TimeFrame.MIN_1
-            >>> self._convert_resolution_to_timeframe('1D')
-            TimeFrame.DAY_1
-        """
-        # Map TradingView resolution strings to TimeFrame enum
-        resolution_map: dict[str, TimeFrame] = {
-            "1": TimeFrame.MIN_1,
-            "5": TimeFrame.MIN_5,
-            "15": TimeFrame.MIN_15,
-            "30": TimeFrame.MIN_30,
-            "60": TimeFrame.HOUR_1,
-            "1D": TimeFrame.DAY_1,
-            "1W": TimeFrame.WEEK_1,
-            "1M": TimeFrame.MONTH_1,
-        }
-
-        if resolution not in resolution_map:
-            raise ValueError(
-                f"Unsupported resolution: {resolution}. "
-                f"Supported: {list(resolution_map.keys())}"
-            )
-
-        return resolution_map[resolution]
-
-    async def create_topic(
+    def create_topic(
         self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
     ) -> None:
         """Parse topic and create appropriate subscription task.
@@ -155,66 +96,71 @@ class DatafeedService(WsRouteService):
             json.JSONDecodeError: If JSON params cannot be parsed
         """
 
-        if topic not in self._topic_to_subscription_id:
-            logger.info(f"New topic in DatafeedService : {topic}")
-            # Parse topic format: "topic_type:{json_params}"
-            if ":" not in topic:
-                raise ValueError(f"Invalid topic format: {topic}")
+        if topic in self._topic_to_subscription_id:
+            raise DatafeedError(f"Topic already exists in DatafeedService: {topic}")
 
-            topic_type, params_json = topic.split(":", 1)
+        # Parse topic format: "topic_type:{json_params}"
+        if ":" not in topic:
+            raise DatafeedError(f"Invalid topic format: {topic}")
 
-            # TODO: need to validate create_topic params/types against provider capabilities at runtime
+        topic_type, params_json = topic.split(":", 1)
 
-            if topic_type == "bars":
-                # Parse the JSON params part / Validate model
-                params_dict = json.loads(params_json)
-                subscription_request = BarsSubscriptionRequest.model_validate(
-                    params_dict
+        # TODO: need to validate create_topic params/types against provider capabilities at runtime
+
+        if topic_type == "bars":
+            # Parse the JSON params part / Validate model
+            params_dict = json.loads(params_json)
+            subscription_request = BarsSubscriptionRequest.model_validate(params_dict)
+
+            logger.info(f"creating new topic : {topic}")
+
+            subscription_id = self.datafeed_provider.subscribe_realtime_bars(
+                ticker=subscription_request.symbol,
+                resolution=subscription_request.resolution,
+                callback=topic_update,
+            )
+
+            # Track subscription ID for cleanup
+            self._topic_to_subscription_id[topic] = subscription_id
+        elif topic_type == "quotes":
+            # Parse the JSON params part / Validate model
+            params_dict = json.loads(params_json)
+            quote_subscription_request = QuoteDataSubscriptionRequest.model_validate(
+                params_dict
+            )
+
+            # Combine all symbols (both slow and fast)
+            all_symbols = list(
+                set(
+                    quote_subscription_request.symbols
+                    + quote_subscription_request.fast_symbols
                 )
+            )
 
-                subscription_id = self.datafeed_provider.subscribe_realtime_bars(
-                    symbol=subscription_request.symbol, callback=topic_update
-                )
+            if not all_symbols:
+                raise DatafeedError("No symbols provided for quote subscription")
 
-                # Track subscription ID for cleanup
-                self._topic_to_subscription_id[topic] = subscription_id
-            elif topic_type == "quotes":
-                # Parse the JSON params part / Validate model
-                params_dict = json.loads(params_json)
-                quote_subscription_request = (
-                    QuoteDataSubscriptionRequest.model_validate(params_dict)
-                )
+            logger.info(f"creating new topic : {topic}")
 
-                # Combine all symbols (both slow and fast)
-                all_symbols = list(
-                    set(
-                        quote_subscription_request.symbols
-                        + quote_subscription_request.fast_symbols
-                    )
-                )
+            # Subscribe to market data for all symbols via provider (returns list of subscription IDs)
+            subscription_ids = self.datafeed_provider.subscribe_market_data(
+                tickers=all_symbols, callback=topic_update
+            )
 
-                if not all_symbols:
-                    raise ValueError("No symbols provided for quote subscription")
-
-                # Subscribe to market data for all symbols via provider (returns list of subscription IDs)
-                subscription_ids = self.datafeed_provider.subscribe_market_data(
-                    symbols=all_symbols, callback=topic_update
-                )
-
-                # Track subscription IDs for cleanup (list for quotes, int for bars)
-                self._topic_to_subscription_id[topic] = subscription_ids
-            else:
-                raise ValueError(f"Unknown topic type: {topic_type}")
+            # Track subscription IDs for cleanup (list for quotes, int for bars)
+            self._topic_to_subscription_id[topic] = subscription_ids
+        else:
+            raise DatafeedError(f"Unknown topic type: {topic_type}")
 
     def remove_topic(self, topic: str) -> None:
         """Remove topic and cleanup subscriptions.
 
         Handles both legacy asyncio tasks and provider subscriptions.
         """
-        logger.info(f"Deleting topic queue for: {topic}")
+        logger.info(f"removing topic: {topic}")
 
         # Unsubscribe from provider if subscription exists
-        subscription_id = self._topic_to_subscription_id.get(topic)
+        subscription_id = self._topic_to_subscription_id.pop(topic, None)
         if subscription_id is not None:
             # Determine topic type from topic string
             if ":" in topic:
@@ -222,33 +168,24 @@ class DatafeedService(WsRouteService):
 
                 if topic_type == "bars":
                     # Single subscription ID for bars (always int)
-                    if isinstance(subscription_id, int):
-                        logger.info(
-                            f"Unsubscribing from bars: subscription ID {subscription_id}"
-                        )
-                        self.datafeed_provider.unsubscribe_realtime_bars(
-                            subscription_id
-                        )
+                    assert isinstance(
+                        subscription_id, str
+                    ), "Expected str subscription ID for bars"
+                    logger.info(
+                        f"Unsubscribing from bars: subscription ID {subscription_id}"
+                    )
+                    self.datafeed_provider.unsubscribe_realtime_bars(subscription_id)
                 elif topic_type == "quotes":
                     # Multiple subscription IDs for quotes (one per symbol)
-                    if isinstance(subscription_id, list):
-                        logger.info(
-                            f"Unsubscribing from quotes: subscription IDs {subscription_id}"
-                        )
-                        self.datafeed_provider.unsubscribe_market_data(subscription_id)
-                    else:
-                        logger.info(
-                            f"Unsubscribing from quotes: subscription ID {subscription_id}"
-                        )
-                        self.datafeed_provider.unsubscribe_market_data(
-                            [subscription_id]
-                        )
-
-            self._topic_to_subscription_id.pop(topic, None)
-
-    def get_configuration(self) -> DatafeedConfiguration:
-        """Get datafeed configuration"""
-        return self.configuration
+                    assert isinstance(
+                        subscription_id, list
+                    ), "Expected list[str] subscription ID for quotes"
+                    logger.info(
+                        f"Unsubscribing from quotes: subscription IDs {subscription_id}"
+                    )
+                    self.datafeed_provider.unsubscribe_market_data(subscription_id)
+        else:
+            logger.error(f"No subscription_id found for topic: {topic}")
 
     async def search_symbols(
         self,
@@ -298,23 +235,21 @@ class DatafeedService(WsRouteService):
         # Limit results
         return filtered_results[:max_results]
 
-    async def resolve_symbol(self, symbol_name: str) -> Optional[SymbolInfo]:
+    async def resolve_ticker(self, ticker: str) -> Optional[SymbolInfo]:
         """Resolve symbol information via datafeed provider."""
-        parsed_symbol, exchange = self._parse_ticker(symbol_name)
         try:
             return await self.datafeed_provider.get_symbol_info(
-                symbol=parsed_symbol,
-                exchange=exchange,
+                ticker=ticker,
                 timeout=5.0,
             )
         except Exception as e:
-            logger.warning(f"Failed to resolve symbol '{symbol_name}': {e}")
+            logger.warning(f"Failed to resolve symbol '{ticker}': {e}")
             return None
 
     async def get_bars(
         self,
-        symbol: str,
-        resolution: str,
+        ticker: str,
+        resolution: Resolution,
         from_time: int,
         to_time: int,
         count_back: Optional[int] = None,
@@ -324,8 +259,8 @@ class DatafeedService(WsRouteService):
         Delegates to datafeed provider with proper parameter conversion.
 
         Args:
-            symbol: Symbol ticker (format: "SYMBOL" or "SYMBOL:EXCHANGE")
-            resolution: TradingView resolution string ("1", "5", "1D", etc.)
+            ticker: Symbol ticker (format: "SYMBOL" or "SYMBOL:EXCHANGE")
+            resolution: Resolution enum (type-safe TradingView resolution)
             from_time: Start time (Unix milliseconds)
             to_time: End time (Unix milliseconds)
             count_back: Optional limit on number of bars to return
@@ -333,16 +268,6 @@ class DatafeedService(WsRouteService):
         Returns:
             List of bars in ascending time order
         """
-        # Parse ticker to extract symbol and exchange
-        parsed_symbol, exchange = self._parse_ticker(symbol)
-
-        # Convert resolution to TimeFrame enum
-        try:
-            timeframe = self._convert_resolution_to_timeframe(resolution)
-        except ValueError as e:
-            logger.warning(f"Unsupported resolution '{resolution}': {e}")
-            return []
-
         # Convert timestamps from milliseconds to datetime
         start_time = datetime.fromtimestamp(from_time / 1000)
         end_time = datetime.fromtimestamp(to_time / 1000)
@@ -350,11 +275,10 @@ class DatafeedService(WsRouteService):
         # Delegate to provider
         try:
             bars = await self.datafeed_provider.get_historical_bars(
-                symbol=parsed_symbol,
+                ticker=ticker,
                 start_time=start_time,
                 end_time=end_time,
-                resolution=timeframe,
-                exchange=exchange,
+                resolution=resolution,
                 timeout=30.0,
             )
 
@@ -365,24 +289,22 @@ class DatafeedService(WsRouteService):
             return bars
 
         except Exception as e:
-            logger.error(f"Failed to get bars for {symbol}: {e}")
+            logger.exception(f"Failed to get bars for {ticker}: {e}")
             return []
 
-    async def get_quotes(self, symbols: List[str]) -> List[QuoteData]:
+    async def get_quotes(self, tickers: List[str]) -> List[QuoteData]:
         """Get quotes for multiple symbols"""
-
-        parsed_symbols = [self._parse_ticker(s)[0] for s in symbols]
 
         try:
             # Delegate to provider for real quote snapshots
             return await self.datafeed_provider.get_quotes_snapshot(
-                symbols=parsed_symbols,
-                timeout=12.0,
+                tickers=tickers,
+                timeout=4.0,
             )
         except Exception as e:
-            logger.error(f"Failed to get quotes for {symbols}: {e}")
+            logger.exception(f"Failed to get quotes for {tickers}: {e}")
             # Return error responses for all symbols
             return [
                 QuoteData(s="error", n=symbol, v={"error": str(e)})
-                for symbol in symbols
+                for symbol in tickers
             ]

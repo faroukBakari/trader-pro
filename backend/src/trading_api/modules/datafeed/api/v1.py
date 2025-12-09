@@ -2,6 +2,7 @@
 Datafeed API endpoints
 """
 
+import asyncio
 from typing import Annotated, Any, List, Optional
 
 from fastapi import Depends, HTTPException, Query
@@ -15,6 +16,7 @@ from trading_api.models import (
     SymbolInfo,
 )
 from trading_api.models.auth import UserData
+from trading_api.models.market import Resolution
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.middleware.auth import get_current_user
 
@@ -44,10 +46,15 @@ class DatafeedApi(APIRouterInterface):
             try:
                 config = self.service.get_configuration()
                 return config
-            except Exception as e:
+            except (TimeoutError, asyncio.TimeoutError):
                 raise HTTPException(
-                    status_code=500, detail=f"Error getting configuration: {str(e)}"
+                    status_code=504,
+                    detail="Request timeout",
                 )
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
 
         @self.get(
             "/search",
@@ -81,10 +88,15 @@ class DatafeedApi(APIRouterInterface):
                     max_results=max_results,
                 )
                 return results
-            except Exception as e:
+            except (TimeoutError, asyncio.TimeoutError):
                 raise HTTPException(
-                    status_code=500, detail=f"Error searching symbols: {str(e)}"
+                    status_code=504,
+                    detail="Request timeout",
                 )
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
 
         @self.get(
             "/resolve/{symbol}",
@@ -104,16 +116,19 @@ class DatafeedApi(APIRouterInterface):
             - **symbol**: Symbol name or ticker to resolve
             """
             try:
-                symbol_info = await self.service.resolve_symbol(symbol)
+                symbol_info = await self.service.resolve_ticker(symbol)
                 if not symbol_info:
                     raise HTTPException(status_code=404, detail="Symbol not found")
                 return symbol_info
+            except (TimeoutError, asyncio.TimeoutError):
+                raise HTTPException(
+                    status_code=504,
+                    detail="Request timeout",
+                )
             except HTTPException:
                 raise
             except Exception as e:
-                raise HTTPException(
-                    status_code=500, detail=f"Error resolving symbol: {str(e)}"
-                )
+                raise HTTPException(status_code=500, detail=str(e))
 
         @self.get(
             "/bars",
@@ -124,7 +139,7 @@ class DatafeedApi(APIRouterInterface):
         async def get_bars(
             _: Annotated[UserData, Depends(get_current_user)],
             symbol: str = Query(..., description="Symbol name"),
-            resolution: str = Query(..., description="Resolution (e.g., '1D')"),
+            resolution: Resolution = Query(..., description="Resolution (e.g., '1D')"),
             from_time: int = Query(..., description="From timestamp (seconds)"),
             to_time: int = Query(..., description="To timestamp (seconds)"),
             count_back: Optional[int] = Query(None, description="Count back"),
@@ -142,17 +157,22 @@ class DatafeedApi(APIRouterInterface):
             """
             try:
                 bars = await self.service.get_bars(
-                    symbol=symbol,
+                    ticker=symbol,
                     resolution=resolution,
                     from_time=from_time,
                     to_time=to_time,
                     count_back=count_back,
                 )
                 return GetBarsResponse(bars=bars, no_data=len(bars) == 0)
-            except Exception as e:
+            except (TimeoutError, asyncio.TimeoutError):
                 raise HTTPException(
-                    status_code=500, detail=f"Error getting bars: {str(e)}"
+                    status_code=504,
+                    detail="Request timeout",
                 )
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
 
         @self.post(
             "/quotes",
@@ -174,10 +194,15 @@ class DatafeedApi(APIRouterInterface):
             try:
                 quotes = await self.service.get_quotes(body.symbols)
                 return quotes
-            except Exception as e:
+            except (TimeoutError, asyncio.TimeoutError):
                 raise HTTPException(
-                    status_code=500, detail=f"Error getting quotes: {str(e)}"
+                    status_code=504,
+                    detail="Request timeout",
                 )
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
 
     @property
     def service(self) -> DatafeedService:

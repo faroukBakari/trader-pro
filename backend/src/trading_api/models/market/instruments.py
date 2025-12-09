@@ -9,6 +9,8 @@ from typing import List, Literal
 
 from pydantic import BaseModel, Field
 
+from .bars import Resolution
+
 
 class SymbolInfo(BaseModel):
     """Symbol information model matching LibrarySymbolInfo interface"""
@@ -26,7 +28,9 @@ class SymbolInfo(BaseModel):
     minmov: int = Field(..., description="Minimum movement")
     has_intraday: bool = Field(..., description="Has intraday data")
     has_daily: bool = Field(..., description="Has daily data")
-    supported_resolutions: List[str] = Field(..., description="Supported resolutions")
+    supported_resolutions: List[Resolution] = Field(
+        ..., description="Supported resolutions"
+    )
     volume_precision: int = Field(..., description="Volume precision")
     data_status: Literal["streaming", "endofday", "delayed_streaming"] = Field(
         ..., description="Data status"

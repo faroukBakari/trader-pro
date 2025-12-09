@@ -191,7 +191,7 @@ class ServerManager:
                     generate_nginx_config(config, f, pid_file=self.nginx_pid_file)
                 logger.info(f"Generated nginx config: {self.nginx_config_path}")
             except Exception as e:
-                logger.error(f"Failed to generate nginx config: {e}")
+                logger.exception(f"Failed to generate nginx config: {e}")
         else:
             if not validate_nginx_config(self.nginx_config_path):
                 raise ValueError("Invalid nginx configuration")
@@ -311,8 +311,6 @@ class ServerManager:
                     "*/asyncapi.json",
                     "--reload-exclude",
                     "*/clients/*",
-                    "--reload-exclude",
-                    "*/ws_generated/*",
                     "--reload-exclude",
                     "*/.local/*",
                     "--reload-exclude",
@@ -688,7 +686,7 @@ class ServerManager:
                     self.processes[instance_name] = process
 
                 except Exception as e:
-                    logger.error(f"Failed to start {instance_name}: {e}")
+                    logger.exception(f"Failed to start {instance_name}: {e}")
                     await self.stop_all()
                     return False
 
@@ -717,7 +715,7 @@ class ServerManager:
             self._start_nginx()
             logger.info("Nginx started successfully")
         except Exception as e:
-            logger.error(f"Failed to start nginx: {e}")
+            logger.exception(f"Failed to start nginx: {e}")
             await self.stop_all()
             return False
 
@@ -856,7 +854,7 @@ class ServerManager:
             return 0
 
         except Exception as e:
-            logger.error(f"Unexpected error: {e}")
+            logger.exception(f"Unexpected error: {e}")
             await self.stop_all()
             return 1
 
@@ -1164,7 +1162,7 @@ async def cmd_start(args: argparse.Namespace) -> int:
         config = load_config(args.config)
         logger.info(f"Loaded configuration from {args.config}")
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        logger.exception(f"Failed to load configuration: {e}")
         return 1
 
     # Create and run server manager (always runs in detached mode)
@@ -1207,7 +1205,7 @@ async def cmd_stop(args: argparse.Namespace) -> int:
         config = load_config(args.config)
         logger.info(f"Loaded configuration from {args.config}")
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        logger.exception(f"Failed to load configuration: {e}")
         return 1
 
     # Create server manager (without starting)
@@ -1234,7 +1232,7 @@ async def cmd_status(args: argparse.Namespace) -> int:
     try:
         config = load_config(args.config)
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        logger.exception(f"Failed to load configuration: {e}")
         return 1
 
     # Create server manager (without starting)
@@ -1357,7 +1355,7 @@ def cmd_gen_nginx_conf(args: argparse.Namespace) -> int:
         config = load_config(args.config)
         logger.info(f"Loaded configuration from {args.config}")
     except Exception as e:
-        logger.error(f"Failed to load configuration: {e}")
+        logger.exception(f"Failed to load configuration: {e}")
         return 1
 
     # Generate nginx configuration
@@ -1366,7 +1364,7 @@ def cmd_gen_nginx_conf(args: argparse.Namespace) -> int:
             generate_nginx_config(config, f)
         logger.info(f"✅ Generated nginx configuration: {args.output}")
     except Exception as e:
-        logger.error(f"❌ Failed to generate nginx configuration: {e}")
+        logger.exception(f"❌ Failed to generate nginx configuration: {e}")
         return 1
 
     # Validate if requested
@@ -1563,7 +1561,7 @@ def main() -> int:
         logger.info("Interrupted by user")
         return 130
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        logger.exception(f"Unexpected error: {e}", exc_info=True)
         return 1
 
 

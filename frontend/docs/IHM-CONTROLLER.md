@@ -1,7 +1,7 @@
 # IHM Controller Service
 
-**Version**: 1.0.0  
-**Last Updated**: November 19, 2025  
+**Version**: 1.0.1  
+**Last Updated**: November 30, 2025  
 **Status**: ✅ Frontend Implementation Complete | ⚠️ Backend Module Pending
 
 ---

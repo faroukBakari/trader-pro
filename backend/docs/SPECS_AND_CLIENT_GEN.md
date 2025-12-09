@@ -1,7 +1,7 @@
 # Specs and Client Generation Guide
 
-**Version**: 1.0.0  
-**Date**: November 11, 2025  
+**Version**: 1.1.0  
+**Date**: November 30, 2025  
 **Status**: ✅ Current Reference
 
 ---
@@ -34,8 +34,9 @@ This unified command handles:
 - ✅ OpenAPI specification generation
 - ✅ AsyncAPI specification generation
 - ✅ Python HTTP client generation
-- ✅ WebSocket router generation (automatic)
 - ✅ Client index updates
+
+**Note**: WebSocket routers are now **direct code** using class inheritance pattern (`class MyRouter(WsRouter[Request, Data]): pass`). No code generation is needed for WS routers.
 
 **See the [Manual Generation](#manual-generation---make-generate) section for complete usage details.**
 
@@ -139,9 +140,7 @@ make generate modules=broker
 │  │  ├─ Module.__init__() creates service
 │  │  ├─ Imports API routers from api/v1.py
 │  │  └─ Imports WS routers from ws/v1/__init__.py
-│  │     └─ ⚡ WS router generation happens during import
-│  │        ├─ WsRouters.__init__() calls generate_routers(__file__)
-│  │        └─ Generates concrete classes in ws_generated/
+│  │     └─ WsRouters uses direct generic types (no code generation)
 │
 ├─ 3. App Creation
 │  ├─ module_app = ModuleApp(module)
@@ -198,13 +197,12 @@ make generate [modules=<modules>] [output_dir=<path>]
 
 This unified command generates **all artifacts** for selected modules:
 
-| Artifact          | File Pattern             | Description                                                 |
-| ----------------- | ------------------------ | ----------------------------------------------------------- |
-| **OpenAPI Spec**  | `{module}_openapi.json`  | REST API specification with all endpoints and models        |
-| **AsyncAPI Spec** | `{module}_asyncapi.json` | WebSocket specification (only if module has WS routers)     |
-| **Python Client** | `{module}_client.py`     | Type-safe async HTTP client using httpx                     |
-| **Client Index**  | `__init__.py`            | Global index exporting all available clients                |
-| **WS Routers**    | `ws_generated/*.py`      | Auto-generated concrete router classes (during module init) |
+| Artifact          | File Pattern             | Description                                             |
+| ----------------- | ------------------------ | ------------------------------------------------------- |
+| **OpenAPI Spec**  | `{module}_openapi.json`  | REST API specification with all endpoints and models    |
+| **AsyncAPI Spec** | `{module}_asyncapi.json` | WebSocket specification (only if module has WS routers) |
+| **Python Client** | `{module}_client.py`     | Type-safe async HTTP client using httpx                 |
+| **Client Index**  | `__init__.py`            | Global index exporting all available clients            |
 
 ---
 
@@ -488,10 +486,7 @@ make generate modules=broker output_dir=/tmp/broker
    ├─ Instantiate module
    │  ├─ Creates service instance
    │  ├─ Creates API routers
-   │  └─ ⚡ Auto-generates WS routers (if ws.py exists)
-   │     ├─ Parse TypeAlias from ws.py
-   │     ├─ Generate concrete router classes
-   │     └─ Save to ws_generated/
+   │  └─ Creates WS routers (direct generic types)
    │
    ├─ Create FastAPI apps
    │  ├─ api_app = FastAPI with REST routers
@@ -707,12 +702,6 @@ generate:
    - Auto-updated with all available clients
    - Exports all client classes
 
-**WebSocket Routers** (if `ws.py` exists):
-
-- Generated automatically during module initialization
-- Concrete classes in `ws_generated/` directory
-- No manual generation needed (happens before spec generation)
-
 #### Detailed Flow
 
 ```
@@ -723,16 +712,12 @@ make generate modules=broker
 │
 ├─ 2. Module Instantiation
 │  ├─ Import module class: BrokerModule
-│  ├─ Instantiate: broker = BrokerModule()
-│  └─ ⚡ Triggers WS router generation (if ws.py exists)
-│     ├─ Parse TypeAlias declarations
-│     ├─ Generate concrete router classes
-│     └─ Save to ws_generated/
+│  └─ Instantiate: broker = BrokerModule()
 │
 ├─ 3. App Creation
 │  ├─ api_app, ws_app = broker.create_app()
 │  ├─ Include REST routers
-│  └─ Include WS routers (from ws_generated/)
+│  └─ Include WS routers (direct generic types)
 │
 ├─ 4. Spec Generation
 │  ├─ Generate OpenAPI spec
@@ -913,7 +898,6 @@ make list-modules
 # After generation
 ls modules/broker/specs_generated/     # broker_openapi.json, broker_asyncapi.json
 ls modules/broker/client_generated/    # broker_client.py, __init__.py
-ls modules/broker/ws_generated/        # Concrete router classes
 ```
 
 **Test generated client**:
@@ -1013,27 +997,6 @@ finally:
 
 ---
 
-## WebSocket Router Generation
-
-**Separate Process**: WebSocket routers are generated during module initialization, NOT during spec generation.
-
-**Trigger**: `WsRouters` class instantiation in module's `__init__.py`  
-**Location**: `shared/ws/module_router_generator.py`  
-**Documentation**: See `WS_ROUTERS_GEN.md`
-
-**Flow**:
-
-1. Module instantiated → `WsRouters.__init__()` called
-2. Calls `generate_module_routers(module_name)`
-3. Parses TypeAlias declarations from `ws.py`
-4. Generates concrete router classes in `ws_generated/`
-5. Module imports generated routers
-6. Module instantiates routers with service
-
-**Important**: WS router generation happens BEFORE `create_app()`, ensuring routers exist when AsyncAPI spec is generated.
-
----
-
 ## Creating Generation-Compliant Modules
 
 ### Checklist
@@ -1046,14 +1009,13 @@ finally:
 
 **Optional for WebSocket Support**:
 
-- [ ] `modules/{module}/ws.py` - WebSocket router TypeAlias declarations
-- [ ] Service implements `WsRouteService` protocol (has `broadcast()` method)
+- [ ] `modules/{module}/ws/v{N}/__init__.py` - WebSocket routers using `WsRouter[Request, Data]` pattern
+- [ ] Service implements `WsRouteService` protocol (has `create_topic`, `remove_topic` methods)
 
 **Generated Directories** (auto-created):
 
 - `specs_generated/` - OpenAPI and AsyncAPI specs
 - `client_generated/` - Python HTTP client
-- `ws_generated/` - WebSocket routers (if ws.py exists)
 
 ### Module Template
 
@@ -1062,11 +1024,11 @@ finally:
 from pathlib import Path
 from fastapi.routing import APIRouter
 from trading_api.shared import Module
-from trading_api.shared.ws.ws_route_interface import WsRouteInterface
+from trading_api.shared.ws.ws_router import WsRouteFeature
 
 from .api import {Module}Api
 from .service import {Module}Service
-from .ws import {Module}WsRouters  # Optional
+from .ws.v1 import {Module}WsRouters  # Optional
 
 class {Module}Module(Module):
     """Module description."""
@@ -1100,7 +1062,7 @@ class {Module}Module(Module):
         return self._api_routers
 
     @property
-    def ws_routers(self) -> list[WsRouteInterface]:
+    def ws_routers(self) -> list[WsRouteFeature]:
         return self._ws_routers
 
     @property
@@ -1136,28 +1098,22 @@ class {Module}Api(APIRouter):
 ### WebSocket Template
 
 ```python
-# modules/{module}/ws.py
-from typing import TYPE_CHECKING, TypeAlias
+# modules/{module}/ws/v1/__init__.py
+from pathlib import Path
+from trading_api.models import DataRequest, DataResponse
 from trading_api.shared.ws.generic_route import WsRouter
-from trading_api.shared.ws.module_router_generator import generate_module_routers
+from trading_api.shared.ws.ws_router import WsRouterBase, WsRouteService
 
-if TYPE_CHECKING:
-    # TypeAlias declarations for generation
-    DataWsRouter: TypeAlias = WsRouter[DataRequest, DataResponse]
-
-class {Module}WsRouters(list[WsRouteInterface]):
+class {Module}WsRouters(WsRouterBase):
     def __init__(self, service: WsRouteService):
-        # Generate routers from TypeAlias declarations
-        module_name = os.path.basename(os.path.dirname(__file__))
-        generate_module_routers(module_name)
+        module_name = Path(__file__).parent.parent.parent.name
 
-        # Import generated routers
-        if not TYPE_CHECKING:
-            from .ws_generated import DataWsRouter
+        # Direct generic type instantiation
+        data_router = WsRouter[DataRequest, DataResponse](
+            route="data", tags=[module_name], service=service
+        )
 
-        # Instantiate routers
-        data_router = DataWsRouter(route="data", service=service)
-        super().__init__([data_router])
+        super().__init__([data_router], service=service)
 ```
 
 ---
@@ -1170,8 +1126,11 @@ class {Module}WsRouters(list[WsRouteInterface]):
 modules/{module}/
 ├── __init__.py                  # Module class
 ├── service.py                   # Business logic
-├── api.py                       # REST endpoints
-├── ws.py                        # WS router declarations (optional)
+├── api/                         # REST endpoints
+│   └── v1.py                    # API router v1
+├── ws/                          # WebSocket routers
+│   └── v1/
+│       └── __init__.py          # WsRouterBase subclass with WsRouter[T,D] instances
 │
 ├── specs_generated/             # Generated specs
 │   ├── {module}_openapi.json   # REST API spec
@@ -1180,10 +1139,6 @@ modules/{module}/
 ├── client_generated/            # Generated Python client
 │   ├── {module}_client.py      # Async HTTP client
 │   └── __init__.py              # Exports client class
-│
-├── ws_generated/                # Generated WS routers (if ws.py)
-│   ├── __init__.py              # Exports all routers
-│   └── {router}.py              # Concrete router classes
 │
 └── tests/                       # Module tests
     ├── test_api.py
@@ -1214,9 +1169,6 @@ ls backend/src/trading_api/modules/{module}/specs_generated/
 
 # List module clients
 ls backend/src/trading_api/modules/{module}/client_generated/
-
-# List WS routers
-ls backend/src/trading_api/modules/{module}/ws_generated/
 ```
 
 ### Validate Generated Code
@@ -1404,7 +1356,7 @@ cat src/trading_api/clients/__init__.py
 **Core Architecture**:
 
 - `backend/docs/MODULAR_BACKEND_ARCHITECTURE.md` - Module system overview
-- `backend/docs/WS_ROUTERS_GEN.md` - WebSocket router generation
+- `backend/docs/BACKEND_WEBSOCKETS.md` - WebSocket router and broadcasting guide
 
 **Implementation**:
 
@@ -1467,7 +1419,6 @@ make test        # All tests
 modules/{module}/specs_generated/{module}_openapi.json
 modules/{module}/specs_generated/{module}_asyncapi.json
 modules/{module}/client_generated/{module}_client.py
-modules/{module}/ws_generated/{router}.py
 
 # App-level merged specs (runtime)
 /api/v1/openapi.json            # Merged OpenAPI
@@ -1496,6 +1447,6 @@ ClientGenerationService.update_clients_index()
 
 ---
 
-**Last Updated**: November 2, 2025  
+**Last Updated**: November 30, 2025  
 **Maintainer**: Backend Team  
 **Status**: ✅ Production-ready

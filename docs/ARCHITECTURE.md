@@ -1,7 +1,7 @@
 # Trading Pro - Architecture Documentation
 
-**Version**: 4.0.0 (Modular Architecture)
-**Last Updated**: November 11, 2025
+**Version**: 4.1.0 (Modular Architecture)
+**Last Updated**: November 30, 2025
 **Status**: ✅ Production Ready
 
 ## Overview
@@ -166,7 +166,7 @@ Protected REST/WebSocket endpoints validate cookie
 - ✅ Comprehensive test coverage (100% passing)
 - ✅ Production-ready security (device fingerprinting, token rotation)
 
-See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete implementation details.
+See [AUTHENTICATION.md](../backend/docs/AUTHENTICATION.md) for complete implementation details.
 
 ### 8. Provider/Capability System (Pluggable External Integrations)
 
@@ -363,35 +363,6 @@ Module.gen_module_specs_and_clients()
 
 See [backend/docs/SPECS_AND_CLIENT_GEN.md](../backend/docs/SPECS_AND_CLIENT_GEN.md) for complete generation guide.
 
-### 4. Backend WebSocket Router Generation
-
-**Command**: Auto-generated at module initialization (no manual command needed)
-
-**Purpose**: Generate concrete (non-generic) router classes from generic template
-
-**Generation Process**:
-
-| Step        | Description                                  | Output                     |
-| ----------- | -------------------------------------------- | -------------------------- |
-| 1. Scan     | Find TypeAlias declarations in ws/ directory | List of router definitions |
-| 2. Extract  | Parse generic parameters (TRequest, TData)   | Type information           |
-| 3. Generate | Create concrete class from template          | Generated router file      |
-| 4. Validate | Run MyPy and quality checks                  | Type-safe router           |
-
-**Pattern**:
-
-```
-TypeAlias Definition → Code Generator → Concrete Router Class
-(at type-check time)    (build step)     (runtime implementation)
-```
-
-**Benefits**:
-
-- Better IDE autocomplete and IntelliSense
-- Improved static type checking (MyPy compliance)
-- Runtime performance (no generic overhead)
-- Consistent implementation across all routers
-
 ### 4. File Watchers (Development Mode)
 
 **Command**: `make dev-fullstack` (root)
@@ -502,8 +473,8 @@ src/trading_api/
 │   │   ├── health.py        # HealthApi class - Health checks
 │   │   └── versions.py      # VersionApi class - API versioning
 │   ├── ws/                  # Shared WebSocket infrastructure
-│   │   ├── ws_route_interface.py  # WsRouteInterface, WsRouteService Protocol
-│   │   └── generic_route.py     # Generic WsRouter implementation
+│   │   ├── ws_router.py         # WsRouteFeature, WsRouterBase, WsRouteService Protocol
+│   │   └── generic_route.py     # WsRouter generic implementation
 │   ├── plugins/
 │   │   └── fastws_adapter.py  # FastWS integration adapter
 │   └── tests/
@@ -513,10 +484,9 @@ src/trading_api/
     │   ├── __init__.py     # DatafeedModule class (implements Module Protocol)
     │   ├── service.py      # DatafeedService (implements WsRouteService Protocol)
     │   ├── api.py          # DatafeedApi class - Market data REST endpoints
-    │   ├── ws.py           # DatafeedWsRouters factory (bars, quotes)
-    │   ├── ws_generated/   # Auto-generated concrete WS router classes
-    │   │   ├── barwsrouter.py
-    │   │   └── quotewsrouter.py
+    │   ├── ws/             # WebSocket routers using direct generic types
+    │   │   └── v1/         # Version-specific routers
+    │   │       └── __init__.py  # DatafeedWsRouters (bars, quotes)
     │   └── tests/          # Module-specific tests
     │       ├── conftest.py
     │       └── test_ws_datafeed.py
@@ -524,13 +494,9 @@ src/trading_api/
         ├── __init__.py     # BrokerModule class (implements Module Protocol)
         ├── service.py      # BrokerService (implements WsRouteService Protocol)
         ├── api.py          # BrokerApi class - Broker REST endpoints
-        ├── ws.py           # BrokerWsRouters factory (orders, positions, etc.)
-        ├── ws_generated/   # Auto-generated concrete WS router classes
-        │   ├── orderwsrouter.py
-        │   ├── positionwsrouter.py
-        │   ├── executionwsrouter.py
-        │   ├── equitywsrouter.py
-        │   └── brokerconnectionwsrouter.py
+        ├── ws/             # WebSocket routers using direct generic types
+        │   └── v1/         # Version-specific routers
+        │       └── __init__.py  # BrokerWsRouters (orders, positions, etc.)
         └── tests/          # Module-specific tests
             ├── conftest.py
             ├── test_api_broker.py
@@ -712,7 +678,7 @@ class Module(Protocol):
     """Return module's REST API routers"""
     ...
 
-  def get_ws_routers(self) -> list[WsRouteInterface]:
+  def get_ws_routers(self) -> list[WsRouteFeature]:
     """Return module's WebSocket routers"""
     ...
 
@@ -751,8 +717,8 @@ class BrokerModule:
   def get_api_routers(self) -> list[APIRouter]:
     return [BrokerApi(service=self.service, prefix=f"/{self.name}")]
 
-  def get_ws_routers(self) -> list[WsRouteInterface]:
-    return BrokerWsRouters(broker_service=self.service)
+  def get_ws_routers(self) -> list[WsRouteFeature]:
+    return BrokerWsRouters(service=self.service)
 ```
 
 **Application Factory Pattern**:
@@ -1036,25 +1002,25 @@ models/
 **Model-to-Router Flow**:
 
 ```
-Topic File (models/broker/orders.py) → Router File (modules/broker/ws.py) → Generated Router
-        ↓                                      ↓                                  ↓
-  OrderSubscriptionRequest              TypeAlias definition              OrderWsRouter
-  PlacedOrder                           Generic parameters                (concrete class in ws_generated/)
+Topic File (models/broker/orders.py) → Router File (modules/broker/ws/v1/__init__.py)
+        ↓                                      ↓
+  OrderSubscriptionRequest              WsRouter[OrderSubscriptionRequest, PlacedOrder]
+  PlacedOrder                           Direct generic type instantiation
 ```
 
 **Integration Pattern**:
 
 1. **Business concept** defines all related models in one topic file (`models/broker/orders.py`)
-2. **Router factory** imports subscription request + update model from topic file (`modules/broker/ws.py`)
-3. **Type alias** declares generic router with topic-specific types
-4. **Code generator** creates concrete router class in `modules/broker/ws_generated/`
-5. **Type safety** ensured across REST and WebSocket operations
+2. **Router factory** imports subscription request + update model from topic file
+3. **Direct generic instantiation** using `WsRouter[Request, Data]` pattern
+4. **Type safety** ensured at compile time via Python generics
 
 **Benefits**:
 
 - Models and routers stay synchronized
 - Change in topic file automatically propagates to router
 - Type mismatches caught at build time
+- No code generation overhead - direct generic types
 
 #### Guidelines for New Models
 
@@ -1426,7 +1392,7 @@ The backend implements a **Protocol-based WebSocket service architecture** where
 
 **1. `WsRouteService` (Protocol)**
 
-**Location**: `shared/ws/ws_route_interface.py`
+**Location**: `shared/ws/ws_router.py`
 
 **Protocol Methods**:
 
@@ -1556,28 +1522,27 @@ Unsubscribe Request
 
 **Adapter Responsibilities**:
 
-| Component            | Purpose                     | Details                                                     |
-| -------------------- | --------------------------- | ----------------------------------------------------------- |
-| Background Tasks     | Broadcasting workers        | `_broadcast_tasks: list[asyncio.Task]`                      |
-| Router Registration  | `include_router()` override | Registers router, stores broadcast coroutine                |
-| Setup Method         | `setup()` override          | Starts all pending broadcast tasks                          |
-| Message Broadcasting | Background task per router  | Polls router.updates_queue, sends via FastWS                |
-| Queue Management     | Per-router message queues   | `router.updates_queue: asyncio.Queue` (in WsRouteInterface) |
+| Component            | Purpose                     | Details                                             |
+| -------------------- | --------------------------- | --------------------------------------------------- |
+| Connection Lifecycle | Manages client connections  | `manage()` context manager for client lifecycle     |
+| Router Registration  | `include_router()` override | Registers router, validates WsRouteFeature type     |
+| Client Tracking      | Per-router active clients   | `router._active_clients: set[Client]` (in WsRouter) |
+| Message Broadcasting | Direct client iteration     | Router's `broadcast_update()` filters by topic      |
 
-**Broadcasting Flow**:
+**Broadcasting Flow** (Direct Pattern):
 
 ```
 Service generator calls topic_update(data)
     ↓
-  topic_update enqueues SubscriptionUpdate(topic, data)
+  topic_update wraps in SubscriptionUpdate(topic, data)
     ↓
-  router.updates_queue.put_nowait(update)
+  WsRouter.broadcast_update(route, update) called
     ↓
-  Background task polls router.updates_queue
+  Filters _active_clients by topic subscription
     ↓
-  Create Message(type="{route}.update", payload=update.model_dump())
+  Create Message(type="{route}.update", payload=update.model_dump_json())
     ↓
-  server_send(message, topic=update.topic) → Only to subscribed clients
+  asyncio.gather sends to all matching clients
 ```
 
 #### Data Flow Architecture
@@ -1592,17 +1557,16 @@ Service generator calls topic_update(data)
 │     └─> create_topic(topic, topic_update) stores callback      │
 │     └─> Service generates data and calls topic_update(data)    │
 │                                                                 │
-│  2. WsRouter (Subscription Management)                         │
-│     └─> topic_update callback enqueues to updates_queue        │
-│     └─> updates_queue: asyncio.Queue in WsRouteInterface      │
+│  2. WsRouter (Subscription Management + Broadcasting)          │
+│     └─> topic_update callback calls broadcast_update()         │
+│     └─> _active_clients: set[Client] tracks subscribed clients │
+│     └─> broadcast_update() filters clients by topic            │
 │                                                                 │
-│  3. FastWSAdapter (Broadcasting Layer)                         │
-│     └─> include_router() override registers routers            │
-│     └─> setup() starts background tasks per router             │
-│     └─> Background task polls router.updates_queue             │
-│         await server_send(message, topic=update.topic)         │
+│  3. FastWSAdapter (Connection Lifecycle)                       │
+│     └─> manage() context manager for client connections        │
+│     └─> include_router() registers WsRouteFeature routers      │
 │                                                                 │
-│  4. WsRouter (Subscription Management)                         │
+│  4. WsRouter (Subscription Tracking)                           │
 │     └─> Subscribe: Increments topic_trackers[topic]            │
 │     └─> First subscriber → service.create_topic()              │
 │     └─> Unsubscribe: Decrements topic_trackers[topic]          │
@@ -1659,7 +1623,7 @@ Service generator calls topic_update(data)
 
 **WebSocket Router Factory Pattern**:
 
-- Inherits from `list[WsRouteInterface]`
+- Inherits from `WsRouterBase` (which extends `list[WsRouteFeature]`)
 - Constructor creates multiple related routers
 - Each router configured with shared service
 - Returns list for registration
@@ -1684,12 +1648,16 @@ class BrokerApi(APIRouter):
 **WebSocket Router Factories**:
 
 ```python
-# modules/broker/ws.py
-class BrokerWsRouters(list[WsRouteInterface]):
-    def __init__(self, broker_service: WsRouteService):
-        order_router = OrderWsRouter(route="orders", service=broker_service)
-        position_router = PositionWsRouter(route="positions", service=broker_service)
-        super().__init__([order_router, position_router, ...])
+# modules/broker/ws/v1/__init__.py
+class BrokerWsRouters(WsRouterBase):
+    def __init__(self, service: WsRouteService):
+        order_router = WsRouter[OrderSubscriptionRequest, PlacedOrder](
+            route="orders", tags=["broker"], service=service
+        )
+        position_router = WsRouter[PositionSubscriptionRequest, Position](
+            route="positions", tags=["broker"], service=service
+        )
+        super().__init__([order_router, position_router], service=service)
 ```
 
 **Benefits**:
@@ -1901,16 +1869,16 @@ scripts/
          │
          ▼
 ┌─────────────────┐
-│ WsRouter        │  topic_update(data) → Enqueue to updates_queue
-│ (Generic)       │  • updates_queue.put_nowait(SubscriptionUpdate)
-│                 │  • SubscriptionUpdate(topic=topic, payload=data)
+│ WsRouter        │  topic_update(data) → broadcast_update()
+│ (Generic)       │  • Wraps in SubscriptionUpdate(topic, data)
+│                 │  • Filters _active_clients by topic
 └────────┬────────┘
          │
          ▼
 ┌─────────────────┐
-│ FastWSAdapter   │  Background task polling updates_queue
-│ Broadcasting    │  • Runs per-router broadcast coroutine
-│ Task            │  • await router.updates_queue.get()
+│ WsRouter        │  Direct broadcasting to subscribed clients
+│ Broadcasting    │  • asyncio.gather sends to all matching clients
+│                 │  • Message type: "{route}.update"
 └────────┬────────┘
          │
          ▼
@@ -2355,9 +2323,9 @@ Key Features:
 │                                                                         │
 │ Backend: Order fills, BrokerService updates state                       │
 │     ↓                                                                   │
-│ Calls topic_update(updatedOrder) → Enqueues to router.updates_queue    │
+│ Calls topic_update(updatedOrder) → Triggers broadcast_update()         │
 │     ↓                                                                   │
-│ FastWSAdapter broadcast task polls queue                                │
+│ WsRouter filters _active_clients by topic, sends to all                 │
 │     ↓                                                                   │
 │ WebSocket SEND {type: "orders.update", payload: {topic, payload}}      │
 │     ↓                                                                   │
@@ -2645,7 +2613,7 @@ Services Layer
 **Framework**: FastWS 0.1.7
 **Documentation**: AsyncAPI at `/api/v1/ws/asyncapi`
 
-> ⚠️ **IMPORTANT**: All WebSocket routers are generated using code generation from a generic template. When implementing WebSocket features, always follow the router generation mechanism documented in [`backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md`](backend/src/trading_api/shared/ws/WS-ROUTER-GENERATION.md). This ensures type safety, consistency, and passes all quality checks.
+> **Note**: WebSocket routers use direct generic types (`WsRouter[Request, Data]`) for type safety. See [backend/docs/BACKEND_WEBSOCKETS.md](../backend/docs/BACKEND_WEBSOCKETS.md) for implementation details.
 
 ### Centralized Adapter Pattern
 
@@ -2709,9 +2677,9 @@ Services Layer
 
 **⚠️ Topic Builder Compliance**: The topic builder algorithm MUST be **identical** in backend (Python) and frontend (TypeScript). See:
 
-- Backend: `backend/src/trading_api/shared/ws/ws_route_interface.py` - `buildTopicParams()`
+- Backend: `backend/src/trading_api/shared/ws/ws_router.py` - `buildTopicParams()`
 - Frontend: `frontend/src/plugins/wsClientBase.ts` - `buildTopicParams()`
-- Documentation: `docs/WEBSOCKET-CLIENTS.md`
+- Documentation: `frontend/docs/WEBSOCKET-ARCHITECTURE.md`
 
 **Features**:
 
@@ -2830,7 +2798,7 @@ Services Layer
 - Enhanced device fingerprinting (more entropy)
 - Rate limiting on login endpoints
 
-See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete details.
+See [AUTHENTICATION.md](../backend/docs/AUTHENTICATION.md) for complete details.
 
 ### Current Measures
 
@@ -2875,14 +2843,12 @@ See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete details.
 - **docs/DEVELOPMENT.md** - Development workflows
 - **docs/TESTING.md** - Testing strategies
 - **docs/CLIENT-GENERATION.md** - API client generation
-- **docs/WEBSOCKET-CLIENTS.md** - WebSocket implementation
+- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket implementation
 
 ### Configuration
 
-- **WORKSPACE-SETUP.md** - VS Code workspace
-- **ENVIRONMENT-CONFIG.md** - Environment variables
+- **docs/GETTING-STARTED.md** - Complete setup guide (workspace, hooks, environment)
 - **MAKEFILE-GUIDE.md** - Make commands reference
-- **HOOKS-SETUP.md** - Git hooks
 
 ### Component Documentation
 
@@ -2972,7 +2938,7 @@ VITE_TRADER_API_BASE_PATH=/api
 npm run build
 ```
 
-See `ENVIRONMENT-CONFIG.md` for complete environment variable documentation.
+See [GETTING-STARTED.md](GETTING-STARTED.md) for complete environment variable documentation.
 
 ## Deployment
 

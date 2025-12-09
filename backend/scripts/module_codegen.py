@@ -29,8 +29,8 @@ async def main_async() -> None:
 
     try:
         # Import dependencies
-        from trading_api.providers.registry import ProviderRegistry
         from trading_api.shared.module_interface import ModuleApp
+        from trading_api.shared.provider_registry import ProviderRegistry
 
         # Import module class
         module_pkg = __import__(module_path, fromlist=[module_class_name])

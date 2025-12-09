@@ -505,7 +505,7 @@ npm run test -- authService
 make -f project.mk test-all
 ```
 
-See [AUTHENTICATION.md](./AUTHENTICATION.md) for complete authentication system documentation.
+See [backend/docs/AUTHENTICATION.md](../backend/docs/AUTHENTICATION.md) for complete authentication system documentation.
 
 ## CI/CD Testing
 
@@ -732,6 +732,8 @@ git commit --no-verify
 
 ## Related Documentation
 
-- **Architecture**: See `ARCHITECTURE.md`
-- **Development Guide**: See `docs/DEVELOPMENT.md`
+- **Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md)
+- **Development Guide**: See [DEVELOPMENT.md](DEVELOPMENT.md)
+- **Backend Testing Guide**: See [backend/docs/BACKEND_TESTING.md](../backend/docs/BACKEND_TESTING.md) for comprehensive backend testing
+- **Frontend Services Testing**: See [frontend/src/services/**tests**/README.md](../frontend/src/services/__tests__/README.md) for frontend testing
 - **CI/CD**: See `.github/workflows/ci.yml`

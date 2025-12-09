@@ -2,6 +2,7 @@ import type { ApiPromise, GetBarsResponse, GetQuotesRequest } from '@/plugins/ap
 import { ApiAdapter } from '@/plugins/apiAdapter';
 import type { WsAdapterType } from '@/plugins/wsAdapter';
 import { WsAdapter, WsFallback } from '@/plugins/wsAdapter';
+import { Resolution } from '@clients/ws-types-datafeed_v1';
 import symbolsData from '@debug/symbols.json';
 import type {
   Bar,
@@ -395,20 +396,23 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
 
     // No pending request: execute immediately
     const execute = async (call: () => Promise<unknown>): Promise<T> => {
-      const result = await call()
 
-      // Check if a next call was queued while we were executing
-      const current = this.pendingRequests.get(key)
-      if (current?.nextCall) {
-        const nextCall = current.nextCall
-        current.nextCall = null  // Clear before executing
-        current.promise = execute(nextCall)  // Chain the next call (reuse execute for recursion)
-        return current.promise as Promise<T>
+      try {
+        const result = await call()
+        return result as T
+      } finally {
+        // Check if a next call was queued while we were executing
+        const apiRequest = this.pendingRequests.get(key)
+        if (apiRequest?.nextCall) {
+          const nextCall = apiRequest.nextCall
+          apiRequest.nextCall = null  // Clear before executing
+          apiRequest.promise = execute(nextCall)  // Chain the next call (reuse execute for recursion)
+          return apiRequest.promise as Promise<T>
+        }
+
+        // No queued call: cleanup
+        this.pendingRequests.delete(key)
       }
-
-      // No queued call: cleanup
-      this.pendingRequests.delete(key)
-      return result as Promise<T>
     }
 
     const promise = execute(currentCall)
@@ -444,6 +448,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         `[Datafeed] searchSymbols found ${response.data.length} symbols for input "${userInput}"`,
       )
       onResult(response.data)
+    }).catch((error) => {
+      if (this.debug_datafeed) console.error('[Datafeed] Error in searchSymbols:', error)
+      onResult([])
     })
   }
   resolveSymbol(
@@ -464,6 +471,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         if (this.debug_datafeed) console.log('[Datafeed] Symbol not found:', symbolName)
         onError('unknown_symbol')
       }
+    }).catch((error) => {
+      if (this.debug_datafeed) console.error('[Datafeed] Error in resolveSymbol:', error)
+      onError(error instanceof Error ? error.message : 'Unknown error occurred')
     })
   }
   getBars(
@@ -475,7 +485,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   ): void {
     this._getApiAdapter()
       .getBars(
-        symbolInfo.name,
+        symbolInfo.ticker ?? symbolInfo.name,
         resolution,
         periodParams.from * 1000,
         periodParams.to * 1000,
@@ -483,7 +493,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
       )
       .then((response) => {
         if (this.debug_datafeed) console.log(
-          `[Datafeed] getBars returned ${response.data.bars.length} bars for ${symbolInfo.name} in range ${new Date(
+          `[Datafeed] getBars returned ${response.data.bars.length} bars for ${symbolInfo.ticker ?? symbolInfo.name} in range ${new Date(
             periodParams.from * 1000,
           ).toISOString()} - ${new Date(periodParams.to * 1000).toISOString()}`,
         )
@@ -500,17 +510,20 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     symbolInfo: LibrarySymbolInfo,
     resolution: string,
     onTick: SubscribeBarsCallback,
-    listenerGuid: string,
+    listenerGUID: string,
     // onResetCacheNeededCallback?: () => void,
   ): void {
-    this._getWsAdapter().bars?.subscribe(listenerGuid, { symbol: symbolInfo.name, resolution }, (bar) => {
-      if (this.debug_datafeed) console.debug('[Datafeed] Bar received from WebSocket:', {
-        symbol: symbolInfo.name,
-        resolution,
-        listenerGuid,
-        bar,
-      })
+    console.log(`[Datafeed] Subscribing to rt bars for ${symbolInfo.ticker ?? symbolInfo.name} symbol`)
+    this._getWsAdapter().bars?.subscribe(listenerGUID, { symbol: symbolInfo.ticker ?? symbolInfo.name, resolution: resolution as Resolution }, (bar) => {
+      if (this.debug_datafeed) {
+        console.warn(`[${listenerGUID}] bar data received close: ${bar.close}, high: ${bar.high} / low: ${bar.low}`)
+      }
       onTick(bar)
+    }).then((topic) => {
+      if (this.debug_datafeed)
+        console.log(`[Datafeed] Bar subscription started : ${topic}`)
+    }).catch((error) => {
+      if (this.debug_datafeed) console.error('[Datafeed] Bar subscription failed:', error)
     })
   }
   unsubscribeBars(listenerGuid: string): void {
@@ -539,34 +552,41 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   }
   subscribeQuotes(
     symbols: string[],
-    fastSymbols: string[],
+    fast_symbols: string[],
     onRealtimeCallback: QuotesCallback,
     listenerGUID: string,
   ): void {
     // Combine all symbols for subscription
-    const allSymbols = [...new Set([...symbols, ...fastSymbols])]
+    const allSymbols = [...new Set([...symbols, ...fast_symbols])]
 
     if (allSymbols.length === 0) {
       if (this.debug_datafeed) console.log('[Datafeed] No symbols to subscribe to for quotes')
       return
     }
 
-    this._getWsAdapter().quotes
-      ?.subscribe(
-        listenerGUID,
-        { symbols, fast_symbols: fastSymbols },
-        (quoteData) => {
-          if (this.debug_datafeed) console.log('[Datafeed] Quote data received from WebSocket:', {
-            listenerGUID,
-            quoteData,
-          })
-          onRealtimeCallback([quoteData])
-        }
-      ).then(() => {
-        if (this.debug_datafeed) console.log(
-          `[Datafeed] Quote subscription started for ${allSymbols.length} symbols (${listenerGUID})`,
-        )
-      })
+    console.log(`[Datafeed] Subscribing to quotes for ${allSymbols.length} symbols`)
+
+    for (const symbol of allSymbols) {
+      const symbolSubId = listenerGUID + '_' + symbol
+      this._getWsAdapter().quotes
+        ?.subscribe(
+          symbolSubId,
+          { symbols: [], fast_symbols: [symbol] },
+          (quoteData) => {
+            if (this.debug_datafeed) {
+              const v = quoteData.v as { bid?: number; ask?: number; lp?: number }
+              console.warn(`[${listenerGUID}] Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask} / last: ${v?.lp}`)
+            }
+            onRealtimeCallback([quoteData])
+          }
+        ).then((topic) => {
+          if (this.debug_datafeed) console.log(
+            `[Datafeed] Quote subscription started : ${topic}`,
+          )
+        }).catch((error) => {
+          if (this.debug_datafeed) console.error('[Datafeed] Quote subscription failed:', error)
+        })
+    }
   }
   unsubscribeQuotes(listenerGUID: string): void {
     this._getWsAdapter().quotes?.unsubscribe(listenerGUID).then(() => {

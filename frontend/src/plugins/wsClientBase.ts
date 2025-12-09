@@ -7,10 +7,34 @@
 // }
 
 
+function serialize_params(obj: unknown): string {
+  if (obj === null || obj === undefined) {
+    return ''
+  }
+
+  if (typeof obj !== 'object') {
+    return JSON.stringify(obj)
+  }
+
+  if (Array.isArray(obj)) {
+    return `[${obj.map(serialize_params).join(',')}]`
+  }
+
+  const objRecord = obj as Record<string, unknown>
+  const sortedKeys = Object.keys(objRecord).sort()
+  const pairs = sortedKeys.map(key => `${JSON.stringify(key)}:${serialize_params(objRecord[key])}`)
+  return `{${pairs.join(',')}}`
+}
+
+interface SubscriptionRequest<TParams extends object = object> {
+  sub_id: string
+  sub_params: TParams
+}
 interface SubscriptionResponse {
   status: 'ok' | 'error'
-  message: string
+  sub_id: string
   topic: string
+  error?: string
 }
 
 interface SubscriptionUpdate<TBackendData extends object = object> {
@@ -24,30 +48,10 @@ interface WebSocketMessage<TBackendData extends object = object> {
 }
 
 interface SubscriptionState<TParams extends object = object, TData extends object = object> {
-  topic: string
-  subscriptionParams: TParams
-  confirmed: boolean
-  subscriptionType: string
-  listeners: Map<string, (data: TData) => void>
-}
-
-function buildTopicParams(obj: unknown): string {
-  if (obj === null || obj === undefined) {
-    return ''
-  }
-
-  if (typeof obj !== 'object') {
-    return JSON.stringify(obj)
-  }
-
-  if (Array.isArray(obj)) {
-    return `[${obj.map(buildTopicParams).join(',')}]`
-  }
-
-  const objRecord = obj as Record<string, unknown>
-  const sortedKeys = Object.keys(objRecord).sort()
-  const pairs = sortedKeys.map(key => `${JSON.stringify(key)}:${buildTopicParams(objRecord[key])}`)
-  return `{${pairs.join(',')}}`
+  sub_id: string
+  sub_type: string
+  sub_params: TParams
+  on_update: (data: TData) => void
 }
 
 export class WebSocketBase {
@@ -79,10 +83,12 @@ export class WebSocketBase {
       reconnect: true,
       maxReconnectAttempts: 5,
       reconnectDelay: 1000,
-      debug: true,
+      debug: false,
       wsUrl,
     }
-    this.logger = this.config.debug ? console : { log: () => { }, error: () => { } } as Console
+    this.logger = this.config.debug
+      ? console
+      : ({ log: () => { }, warn: () => { }, error: () => { }, debug: () => { } } as Console)
   }
 
   static getInstance(wsUrl: string): WebSocketBase {
@@ -180,11 +186,11 @@ export class WebSocketBase {
     return this.ws?.readyState === WebSocket.OPEN
   }
 
-  private async sendRequest(type: string, payload: object): Promise<void> {
+  private async sendRequest(type: string, payload: SubscriptionRequest): Promise<void> {
     await this.connect()
-    const message = JSON.stringify({ type, payload })
+    const message = JSON.stringify({ type, payload }, null, 2)
     this.ws!.send(message)
-    this.logger.log('Sent:', type, payload)
+    this.logger.log('Sent:', type, message)
   }
 
   private handleMessage(event: MessageEvent): void {
@@ -204,13 +210,12 @@ export class WebSocketBase {
         if (type.endsWith('.response')) {
           if (type.replace(/.response$/, '').endsWith('.subscribe')) {
             const subResponse = payload as SubscriptionResponse
-            const requestId = `${type.replace(/.response$/, '')}-${subResponse.topic}`
-            const pendingRequest = this.pendingRequests.get(requestId)
+            const pendingRequest = this.pendingRequests.get(subResponse.sub_id)
             if (pendingRequest) {
-              this.pendingRequests.delete(requestId)
+              this.pendingRequests.delete(subResponse.sub_id)
               pendingRequest.resolve(subResponse)
             } else {
-              this.logger.error('Cannot find request Id:', requestId)
+              this.logger.error(`Cannot find sub_id ${subResponse.sub_id} for response :`, payload)
             }
           }
         } else {
@@ -223,62 +228,42 @@ export class WebSocketBase {
   }
 
   private routeUpdateMessage(data: SubscriptionUpdate): void {
-    if (!(data.topic.startsWith('quotes:') || data.topic.startsWith('bars:'))) {
-      this.logger.debug(`${data.topic} message received:`, data)
+    this.logger.debug(`${data.topic} message received:`, data)
+    const subscription = this.subscriptions.get(data.topic)
+    if (!subscription) {
+      this.logger.warn(`No subscription found for topic: ${data.topic}`)
+      return
     }
-    for (const subscription of Array.from(this.subscriptions.values())) {
-      if (subscription.confirmed && subscription.topic === data.topic) {
-        try {
-          for (const onUpdate of subscription.listeners.values()) {
-            onUpdate(data.payload)
-          }
-        } catch (error) {
-          this.logger.error('Error in subscription onUpdate:', error)
-        }
-      }
+    try {
+      subscription.on_update(data.payload)
+    } catch (error) {
+      this.logger.error(`Error in subscription onUpdate for sub_id ${subscription.sub_id} / topic ${data.topic}:`, error)
     }
   }
 
   async subscribe(
-    topic: string,
-    subscriptionType: string,
-    subscriptionParams: object,
-    listenerId: string,
-    onUpdate: (TbackendData: object) => void
-  ): Promise<SubscriptionState> {
+    sub_type: string,
+    sub_params: object,
+    on_update: (TbackendData: object) => void
+  ): Promise<string> {
 
-    let subscription = this.subscriptions.get(topic)
-    if (subscription) {
-      subscription?.listeners.set(listenerId, onUpdate)
-      return subscription;
-    }
-
-    subscription = {
-      topic,
-      subscriptionParams,
-      subscriptionType,
-      confirmed: false,
-      listeners: new Map<string, (data: object) => void>([[listenerId, onUpdate]]),
-    }
-
-    this.subscriptions.set(topic, subscription)
+    // Generate unique sub_id hash
+    const sub_id = `${sub_type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
 
     while (true)
       try {
-        subscription.confirmed = false
 
         const response: SubscriptionResponse = await new Promise((resolve, reject) => {
           // Expected response type
-          const requestId = `${subscription.subscriptionType}-${subscription.topic}`
 
           // Set up timeout
           const timeout = setTimeout(() => {
-            this.pendingRequests.delete(requestId)
-            reject(new Error(`Request timeout: ${requestId}`))
+            this.pendingRequests.delete(sub_id)
+            reject(new Error(`Request timeout: ${sub_id}`))
           }, 3000)
 
           // Register response handler
-          this.pendingRequests.set(requestId, {
+          this.pendingRequests.set(sub_id, {
             resolve: (response: SubscriptionResponse) => {
               clearTimeout(timeout)
               resolve(response)
@@ -291,24 +276,36 @@ export class WebSocketBase {
           })
 
           // Send request after registering the handler
-          this.sendRequest(subscription.subscriptionType, subscription.subscriptionParams)
-            .catch((error) => {
-              this.pendingRequests.delete(requestId)
-              clearTimeout(timeout)
-              reject(error)
-            })
+          this.sendRequest(
+            sub_type + '.subscribe',
+            { sub_id, sub_params }
+          ).catch((error) => {
+            this.pendingRequests.delete(sub_id)
+            clearTimeout(timeout)
+            reject(error)
+          })
         })
 
         if (response.status !== 'ok') {
-          throw new Error(response.message)
+          throw new Error(`Subscription ${sub_id} failed: ${response.error || 'unknown error'}`)
         }
 
-        subscription.confirmed = true
-        this.logger.log(`Subscription confirmed: ${subscription.topic}`, response)
-        return subscription
+        this.logger.log(`Subscription confirmed: `, response)
+
+        this.subscriptions.set(response.topic, {
+          sub_id,
+          sub_type,
+          sub_params,
+          on_update,
+        })
+
+        return response.topic
+
       } catch (error) {
+
         this.logger.error('Subscription error:', error)
         await new Promise(resolve => setTimeout(resolve, 200))
+
       }
   }
 
@@ -317,62 +314,82 @@ export class WebSocketBase {
 
     await new Promise(resolve => setTimeout(resolve, 200))
 
-    this.pendingRequests.forEach((pending) => {
-      clearTimeout(pending.timeout)
-    })
+    try {
+      this.pendingRequests.forEach((pending) => {
+        clearTimeout(pending.timeout)
+      })
+      this.pendingRequests.forEach((pending) => {
+        pending.reject(new Error('WebSocket disconnected'))
+      })
+    } finally {
+      this.pendingRequests.clear()
+    }
 
-    this.pendingRequests.clear()
+    for (const [topic, subscription] of this.subscriptions.entries()) {
 
-    for (const subscription of this.subscriptions.values()) {
-      subscription.confirmed = false
+      try {
+        const response: SubscriptionResponse = await new Promise((resolve, reject) => {
+          // Expected response type
+          // Set up timeout
+          const timeout = setTimeout(() => {
+            this.pendingRequests.delete(subscription.sub_id)
+            reject(new Error(`Request timeout: ${subscription.sub_id}`))
+          }, 3000)
 
-      const response: SubscriptionResponse = await new Promise((_resolve, _reject) => {
-        const requestId = `${subscription.subscriptionType}-${subscription.topic}`
+          // Register response handler
+          this.pendingRequests.set(subscription.sub_id, {
+            resolve: (response: SubscriptionResponse) => {
+              clearTimeout(timeout)
+              resolve(response)
+            },
+            reject: (error: Error) => {
+              clearTimeout(timeout)
+              reject(error)
+            },
+            timeout,
+          })
 
-        this.pendingRequests.set(requestId, {
-          resolve: (response: SubscriptionResponse) => {
-            _resolve(response)
-          },
-          reject: (error: Error) => {
-            _reject(error)
-          },
-          // undefently awaits resubscription
-          timeout: null as unknown as NodeJS.Timeout,
+          // Send request after registering the handler
+          this.sendRequest(
+            subscription.sub_type + '.subscribe',
+            { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
+          ).catch((error) => {
+            this.pendingRequests.delete(subscription.sub_id)
+            clearTimeout(timeout)
+            reject(error)
+          })
         })
 
-        this.sendRequest(subscription.subscriptionType, subscription.subscriptionParams)
-          .catch((error) => {
-            this.pendingRequests.delete(requestId)
-            _reject(error)
-          })
-      })
-
-      if (response.status === 'ok') {
-        subscription.confirmed = true
-        this.logger.log(`Resubscription confirmed: ${subscription.topic}`, response)
-      } else {
-        this.logger.error(`Resubscription failed: ${subscription.topic}`, response)
+        if (response.status === 'ok') {
+          this.logger.log(`Resubscription confirmed sub_id ${subscription.sub_id} / topic: ${topic}`)
+        } else {
+          this.logger.log(`Resubscription failed sub_id ${subscription.sub_id} / topic: ${topic}`)
+        }
+      }
+      catch (error) {
+        this.logger.log(`Resubscription error sub_id ${subscription.sub_id} / topic: ${topic}:`, error)
+        this.logger.error('Resubscription error:', error)
       }
     }
   }
 
-  async unsubscribe(listenerId: string, topic?: string | undefined): Promise<void> {
-    for (const subscription of this.subscriptions.values()) {
-      if ((!topic || subscription.topic === topic) && subscription.listeners.has(listenerId)) {
-        subscription.listeners.delete(listenerId)
-        if (subscription.listeners.size === 0) {
-          try {
-            const unsubscribeType = subscription.subscriptionType.replace('subscribe', 'unsubscribe')
-            const unsubscribePayload = subscription.subscriptionParams
-            await this.sendRequest(unsubscribeType, unsubscribePayload)
-          } finally {
-            this.subscriptions.delete(subscription.topic)
-          }
-          if (this.subscriptions.size === 0) {
-            this.ws?.close()
-            this.ws = null
-          }
-        }
+  async unsubscribe(topic: string): Promise<void> {
+    const subscription = this.subscriptions.get(topic)
+    if (!subscription) {
+      this.logger.warn(`No active subscription for topic: ${topic}`)
+      return
+    }
+    try {
+      const response = await this.sendRequest(
+        subscription.sub_type + '.unsubscribe',
+        { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
+      )
+      this.logger.log(`Unsubscribed sub_id ${subscription.sub_id} / topic: ${topic}`, response)
+    } finally {
+      this.subscriptions.delete(topic)
+      if (this.subscriptions.size === 0) {
+        this.ws?.close()
+        this.ws = null
       }
     }
   }
@@ -390,17 +407,23 @@ export interface WebSocketInterface<TParams extends object, TData extends object
 
 export class WebSocketClient<TParams extends object, TBackendData extends object, TData extends object> implements WebSocketInterface<TParams, TData> {
   protected baseSocket: WebSocketBase
-  protected listeners: Map<string, Set<string>>
+  protected topics: Map<string, Promise<string>>
+  protected listeners: Map<string, Map<string, (data: TData) => void>>
+  protected debouncedUnsub: Map<string, NodeJS.Timeout>
 
   private wsRoute: string = ''
+  private debounceMs?: number
   private dataMapper: ((data: TBackendData) => TData)
 
   // dont defaut to identity dataMapper to detect types missmatch (data => data as unknown as TData)
-  constructor(wsUrl: string, wsRoute: string, dataMapper: ((data: TBackendData) => TData)) {
+  constructor(wsUrl: string, wsRoute: string, dataMapper: ((data: TBackendData) => TData), debounceMs?: number) {
     this.wsRoute = wsRoute
+    this.debounceMs = debounceMs
     this.dataMapper = dataMapper
     this.baseSocket = WebSocketBase.getInstance(wsUrl)
-    this.listeners = new Map<string, Set<string>>()
+    this.topics = new Map()
+    this.listeners = new Map()
+    this.debouncedUnsub = new Map()
   }
 
   async subscribe(
@@ -408,34 +431,63 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     subscriptionParams: TParams,
     onUpdate: (data: TData) => void,
   ): Promise<string> {
-    const topic = `${this.wsRoute}:${buildTopicParams(subscriptionParams)}`
 
-    if (this.listeners.has(listenerId)) {
-      this.listeners.get(listenerId)!.add(topic)
-    } else {
-      this.listeners.set(listenerId, new Set([topic]))
+    const paramsKey = serialize_params(subscriptionParams)
+
+    const unsubTimeout = this.debouncedUnsub.get(paramsKey)
+    if (unsubTimeout) {
+      console.log(`Clearing debounced unsubscribe for topic ${paramsKey}`)
+      clearTimeout(unsubTimeout)
+      this.debouncedUnsub.delete(paramsKey)
     }
 
-
-    await this.baseSocket.subscribe(
-      topic,
-      this.wsRoute + '.subscribe',
-      subscriptionParams,
-      listenerId,
-      (backendData: object) => {
-        onUpdate(this.dataMapper(backendData as TBackendData))
+    if (this.listeners.has(paramsKey)) {
+      const topicListeners = this.listeners.get(paramsKey)!
+      if (topicListeners?.has(listenerId)) {
+        console.warn(`listener ${listenerId} spamming for the same subscription`, paramsKey)
       }
-    )
-
-    return topic
+      topicListeners.set(listenerId, onUpdate)
+    } else {
+      console.log(`listener ${listenerId} subscribing to new params:`, paramsKey)
+      this.listeners.set(paramsKey, new Map([[listenerId, onUpdate]]))
+      const topicPromise = this.baseSocket.subscribe(
+        this.wsRoute,
+        subscriptionParams,
+        (backendData: object) =>
+          this.listeners.get(paramsKey)?.forEach(
+            (onUpdate) => onUpdate(this.dataMapper(backendData as TBackendData))
+          )
+      )
+      this.topics.set(paramsKey, topicPromise)
+    }
+    return await this.topics.get(paramsKey)!
   }
 
-  async unsubscribe(listenerId: string, topic?: string | undefined): Promise<void> {
-    if (!this.listeners.has(listenerId)) {
-      return
+  // TODO: unsub and debounce not working as expected. need to fiabilize that!
+  async unsubscribe(listenerId: string): Promise<void> {
+    for (const [paramsKey, listenersMap] of this.listeners.entries()) {
+      for (const id of listenersMap.keys())
+        if (id.startsWith(listenerId)) {
+          listenersMap.delete(id)
+          const topic = await this.topics.get(paramsKey)
+          console.log(`listener ${listenerId} unsubscribed from topic ${paramsKey}`)
+          if (topic && !listenersMap.size) {
+            console.log(`No more listeners for topic ${paramsKey}. Debouncing Unsub in ${this.debounceMs}ms...`)
+            this.debouncedUnsub.set(
+              paramsKey,
+              setTimeout(async () => {
+                if (this.debouncedUnsub.get(paramsKey)) {
+                  console.log(`Unsubscribing from topic ${paramsKey}...`)
+                  this.topics.delete(paramsKey)
+                  this.listeners.delete(paramsKey)
+                  this.debouncedUnsub.delete(paramsKey)
+                  await this.baseSocket.unsubscribe(topic)
+                }
+              }, this.debounceMs || 0)
+            )
+          }
+        }
     }
-    this.listeners.delete(listenerId)
-    await this.baseSocket.unsubscribe(listenerId, topic)
   }
 }
 
@@ -447,7 +499,7 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
   private intervalId: NodeJS.Timeout
 
   constructor(mockData: () => TData | undefined) {
-    // Mock data updates every 3 seconds
+    // Mock data updates every 100ms for fast test execution
     this.intervalId = setInterval(() => {
       this.subscriptions.forEach(({ onUpdate }) => {
         const data = mockData()
@@ -466,7 +518,12 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
   }
 
   async unsubscribe(subscriptionId: string): Promise<void> {
-    this.subscriptions.delete(subscriptionId)
+    // Match prefix to support bulk unsubscribe (same as WebSocketClient)
+    for (const id of this.subscriptions.keys()) {
+      if (id.startsWith(subscriptionId)) {
+        this.subscriptions.delete(id)
+      }
+    }
   }
 
   destroy(): void {

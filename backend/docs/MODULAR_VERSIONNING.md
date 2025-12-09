@@ -1,7 +1,7 @@
 # API Versioning
 
 **Status**: ✅ Production Ready  
-**Last Updated**: November 5, 2025  
+**Last Updated**: November 30, 2025  
 **Current Version**: v1
 
 ---
@@ -69,7 +69,7 @@ modules/broker/
 │   └── v1.py          # APIRouterInterface subclass for v1
 └── ws/
     ├── __init__.py
-    └── v1.py          # WsRouterInterface subclass for v1
+    └── v1.py          # WsRouterBase subclass for v1
 ```
 
 **Module Loading Process**:
@@ -277,7 +277,7 @@ modules/{module_name}/
 │   └── v{N}.py       # APIRouterInterface subclass (health/version auto-exposed)
 └── ws/                # Optional
     ├── __init__.py
-    └── v{N}.py       # WsRouterInterface subclass
+    └── v{N}.py       # WsRouterBase subclass
 ```
 
 ---
@@ -510,10 +510,9 @@ When introducing breaking changes in new version:
 ## Related Documentation
 
 - **[MODULAR_BACKEND_ARCHITECTURE.md](MODULAR_BACKEND_ARCHITECTURE.md)** - Module system and ServiceInterface base class
-- **[MODULAR_VERSIONNING.md](MODULAR_VERSIONNING.md)** - Auto-discovery and version management
 - **[SPECS_AND_CLIENT_GEN.md](SPECS_AND_CLIENT_GEN.md)** - Client generation
 - **[docs/methodologies/API-METHODOLOGY.md](../../docs/methodologies/API-METHODOLOGY.md)** - API design patterns
-- **[ARCHITECTURE.md](../../ARCHITECTURE.md)** - Overall system design
+- **[docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md)** - Overall system design
 
 ---
 
