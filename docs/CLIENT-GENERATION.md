@@ -1,6 +1,6 @@
 # API Client Generation
 
-**Last Updated**: November 11, 2025  
+**Last Updated**: November 30, 2025  
 **Status**: ✅ Implemented | **Mode**: Offline Generation
 
 ## Overview
@@ -516,5 +516,5 @@ npm run type-check
 ## Related Documentation
 
 - **Backend Spec Export**: See `backend/Makefile` (`export-openapi-offline` target)
-- **WebSocket Clients**: See `docs/WEBSOCKET-CLIENTS.md`
+- **WebSocket Architecture**: See `frontend/docs/WEBSOCKET-ARCHITECTURE.md`
 - **Architecture**: See `ARCHITECTURE.md`

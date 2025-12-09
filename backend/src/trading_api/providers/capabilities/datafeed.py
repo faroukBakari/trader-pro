@@ -7,9 +7,9 @@ from typing import Any, Awaitable, Callable
 from trading_api.models.market import (
     Bar,
     QuoteData,
+    Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
-    TimeFrame,
 )
 
 
@@ -51,7 +51,7 @@ class DatafeedCapability(ABC):
     @abstractmethod
     async def get_symbol_info(
         self,
-        symbol: str,
+        ticker: str,
         **kwargs: Any,
     ) -> SymbolInfo:
         """Get detailed symbol information.
@@ -73,16 +73,16 @@ class DatafeedCapability(ABC):
     @abstractmethod
     async def get_historical_bars(
         self,
-        symbol: str,
+        ticker: str,
         start_time: datetime,
         end_time: datetime,
-        resolution: TimeFrame,
+        resolution: Resolution,
         **kwargs: Any,
     ) -> list[Bar]:
         """Get historical OHLCV bars.
 
         Args:
-            symbol: Symbol name
+            ticker: ticker chain
             start_time: Start of time range (inclusive)
             end_time: End of time range (inclusive)
             resolution: Bar timeframe
@@ -101,18 +101,18 @@ class DatafeedCapability(ABC):
     @abstractmethod
     async def get_quotes_snapshot(
         self,
-        symbols: list[str],
+        tickers: list[str],
         **kwargs: Any,
     ) -> list[QuoteData]:
-        """Get current market quotes for multiple symbols (snapshot).
+        """Get current market quotes for multiple tickers (snapshot).
 
         Args:
-            symbols: List of symbol names
+            tickers: List of ticker chains
             exchange: Optional exchange filter
             timeout: Request timeout in seconds
 
         Returns:
-            List of QuoteData (one per symbol)
+            List of QuoteData (one per ticker)
 
         Raises:
             DatafeedError: If request fails
@@ -123,14 +123,15 @@ class DatafeedCapability(ABC):
     @abstractmethod
     def subscribe_realtime_bars(
         self,
-        symbol: str,
+        ticker: str,
+        resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
         **kwargs: Any,
-    ) -> int:
+    ) -> str:
         """Subscribe to real-time bars.
 
         Args:
-            symbol: Symbol name
+            ticker: Ticker chain
             callback: Callback invoked for each new bar
             exchange: Optional exchange filter
             resolution: Bar timeframe (default: 5 seconds)
@@ -149,14 +150,14 @@ class DatafeedCapability(ABC):
     @abstractmethod
     def subscribe_market_data(
         self,
-        symbols: list[str],
+        tickers: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
         **kwargs: Any,
-    ) -> list[int]:
+    ) -> list[str]:
         """Subscribe to real-time market data (ticks/quotes).
 
         Args:
-            symbol: Symbol name
+            tickers: List of ticker chains
             callback: Callback invoked for each tick update
             exchange: Optional exchange filter
 
@@ -172,7 +173,7 @@ class DatafeedCapability(ABC):
         ...
 
     @abstractmethod
-    def unsubscribe_realtime_bars(self, subscription_id: int) -> None:
+    def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         """Unsubscribe from real-time bars.
 
         Args:
@@ -184,7 +185,7 @@ class DatafeedCapability(ABC):
         ...
 
     @abstractmethod
-    def unsubscribe_market_data(self, subscription_ids: list[int]) -> None:
+    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
         """Unsubscribe from market data.
 
         Args:

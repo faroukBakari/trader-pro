@@ -14,8 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
 from trading_api.models.common import CapabilitySpec
-from trading_api.providers.registry import ProviderRegistry
 from trading_api.shared import Module, ModuleApp, ModuleRegistry, settings
+from trading_api.shared.provider_registry import ProviderRegistry
 
 # Configure logging for the application
 logging.basicConfig(

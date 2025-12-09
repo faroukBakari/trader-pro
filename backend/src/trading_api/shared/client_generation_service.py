@@ -332,7 +332,7 @@ class ClientGenerationService:
             return success, missing_routes
 
         except Exception as e:
-            logger.error(f"Failed to generate client for '{module_name}': {e}")
+            logger.exception(f"Failed to generate client for '{module_name}': {e}")
             return False, []
 
     def update_clients_index(self) -> None:
@@ -383,7 +383,7 @@ __all__ = [
             logger.info(f"✅ Updated clients index: {len(client_files)} clients")
 
         except Exception as e:
-            logger.error(f"Failed to update clients __init__.py: {e}")
+            logger.exception(f"Failed to update clients __init__.py: {e}")
 
     def format_generated_code(self, module_name: str, version: str) -> bool:
         """Format generated client code using autoflake, black, and isort.
@@ -430,7 +430,9 @@ __all__ = [
             return True
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to format client for '{module_name} {version}': {e}")
+            logger.exception(
+                f"Failed to format client for '{module_name} {version}': {e}"
+            )
             return False
         except FileNotFoundError:
             logger.warning(

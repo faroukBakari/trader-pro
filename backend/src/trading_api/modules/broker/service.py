@@ -56,7 +56,7 @@ from trading_api.models.broker import (
     Side,
 )
 from trading_api.models.common import CapabilitySpec
-from trading_api.shared.ws.ws_route_interface import WsRouteService
+from trading_api.shared.ws.ws_router import WsRouteService
 
 logger = logging.getLogger(__name__)
 
@@ -729,7 +729,7 @@ class BrokerService(WsRouteService):
 
     # ========================== WEBSOCKET STREAMING ==========================#
 
-    async def create_topic(
+    def create_topic(
         self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
     ) -> None:
         """Register callback for topic type and start execution simulator if needed.
@@ -770,7 +770,7 @@ class BrokerService(WsRouteService):
                     disconnectType=None,
                     timestamp=int(time.time() * 1000),
                 )
-                await topic_update(status)
+                asyncio.create_task(topic_update(status))  # type: ignore[arg-type]
 
         # Start execution simulator if not already running and we have orders topic
         if self._execution_simulator_task is None and len(self._update_callbacks) > 0:
@@ -840,7 +840,7 @@ class BrokerService(WsRouteService):
                 logger.info("Execution simulator cancelled")
                 break
             except Exception as e:
-                logger.error(f"Error in execution simulator: {e}", exc_info=True)
+                logger.exception(f"Error in execution simulator: {e}")
                 # Continue running despite errors
 
     def _get_execution_price(self, order: PlacedOrder) -> float:

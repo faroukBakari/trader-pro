@@ -10,8 +10,8 @@ from trading_api.models.common import (
     ProviderConfig,
     ProviderNotFoundError,
 )
-from trading_api.providers.base import Provider
-from trading_api.providers.registry import ProviderRegistry
+from trading_api.shared import Provider
+from trading_api.shared.provider_registry import ProviderRegistry
 
 
 class MockProviderConfig(ProviderConfig):

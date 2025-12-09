@@ -18,14 +18,14 @@ This directory contains the consolidated, streamlined documentation for the Trad
 
 ---
 
-### [WEBSOCKET-CLIENTS.md](WEBSOCKET-CLIENTS.md)
+### [../frontend/docs/WEBSOCKET-ARCHITECTURE.md](../frontend/docs/WEBSOCKET-ARCHITECTURE.md)
 
 **Real-Time WebSocket Implementation**
 
 - Auto-generated client factories
-- Three-layer architecture
+- Five-layer architecture
 - Message protocol and topics
-- Plugin-based client loading
+- Topic builder compliance
 - Usage examples and patterns
 
 **When to read**: Working with WebSocket real-time data streaming
@@ -66,8 +66,6 @@ Located in the project root:
 
 - **[../ARCHITECTURE.md](../ARCHITECTURE.md)** - Complete system architecture
 - **[../README.md](../README.md)** - Project overview and quick start
-- **[../WORKSPACE-SETUP.md](../WORKSPACE-SETUP.md)** - VS Code configuration
-- **[../ENVIRONMENT-CONFIG.md](../ENVIRONMENT-CONFIG.md)** - Environment variables
 - **[../MAKEFILE-GUIDE.md](../MAKEFILE-GUIDE.md)** - Makefile commands
 
 ## Component-Specific Documentation
@@ -77,20 +75,20 @@ Located in the project root:
 Located in `backend/docs/`:
 
 - **MODULAR_BACKEND_ARCHITECTURE.md** - Module system and architecture
+- **AUTHENTICATION.md** - JWT-based authentication with Google OAuth
+- **PROVIDER-SYSTEM.md** - Provider/capability system for external integrations
 - **SPECS_AND_CLIENT_GEN.md** - Spec and client generation guide
-- **WS_ROUTERS_GEN.md** - WebSocket router generation
+- **BACKEND_WEBSOCKETS.md** - WebSocket implementation guide
+- **BACKEND_TESTING.md** - Backend testing strategy
 
 ### Frontend Documentation
 
-Located in `frontend/`:
+Located in `frontend/docs/`:
 
-- **WEBSOCKET-CLIENT-PATTERN.md** - Detailed WebSocket pattern documentation
-- **WEBSOCKET-QUICK-REFERENCE.md** - Quick reference for daily usage
-- **WEBSOCKET-CLIENT-BASE.md** - Base client implementation deep dive
-- **WEBSOCKET-SINGLETON-REFACTORING.md** - Singleton pattern migration
-- **WEBSOCKET-ARCHITECTURE-DIAGRAMS.md** - Visual architecture diagrams
-- **WS-CLIENT-AUTO-GENERATION.md** - Client generation implementation
-- **src/plugins/ws-plugin-usage.md** - Plugin integration guide
+- **WEBSOCKET-ARCHITECTURE.md** - Complete WebSocket architecture guide (consolidated)
+- **BROKER-INTEGRATION.md** - TradingView broker integration (consolidated)
+- **IHM-CONTROLLER.md** - IHM Controller service design
+- **FRONTEND-EXCLUSIONS.md** - Public folder exclusions
 
 ## Reading Paths
 
@@ -109,8 +107,7 @@ Located in `frontend/`:
 
 1. **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development setup
 2. **[CLIENT-GENERATION.md](CLIENT-GENERATION.md)** - API client generation
-3. **[WEBSOCKET-CLIENTS.md](WEBSOCKET-CLIENTS.md)** - WebSocket implementation
-4. **[../frontend/WEBSOCKET-QUICK-REFERENCE.md](../frontend/WEBSOCKET-QUICK-REFERENCE.md)** - Daily reference
+3. **[../frontend/docs/WEBSOCKET-ARCHITECTURE.md](../frontend/docs/WEBSOCKET-ARCHITECTURE.md)** - WebSocket implementation
 
 **Time**: ~25-35 minutes
 
@@ -191,5 +188,5 @@ If documentation is unclear or missing:
 
 ---
 
-**Last Updated**: [Current Date]
+**Last Updated**: November 30, 2025
 **Maintained By**: Development Team

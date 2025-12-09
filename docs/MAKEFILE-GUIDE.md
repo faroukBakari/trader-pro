@@ -105,7 +105,6 @@ make generate modules=broker output_dir=/tmp/custom  # Combine options
 #   - OpenAPI specs (REST API documentation)
 #   - AsyncAPI specs (WebSocket API documentation)
 #   - Python HTTP clients (for inter-module communication)
-# Note: WebSocket routers auto-generate at module init (no manual step needed)
 
 # Multi-Process Backend (Development)
 make backend-manager-start          # Start multi-process backend with nginx
@@ -169,7 +168,6 @@ make generate modules=broker output_dir=/custom/path  # Combine options
 # - OpenAPI specs: REST API documentation (specs_generated/*.json)
 # - AsyncAPI specs: WebSocket API documentation (specs_generated/*.json)
 # - Python HTTP clients: Type-safe inter-module communication (client_generated/*.py)
-# Note: WebSocket routers auto-generate at module init (ws_generated/*.py)
 
 # Import Boundary Validation
 make test-boundaries          # Verify module import boundaries

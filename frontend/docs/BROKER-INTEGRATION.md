@@ -1,7 +1,7 @@
 # Broker Integration - Complete Implementation Guide
 
-**Version**: 2.0.0  
-**Last Updated**: November 12, 2025  
+**Version**: 2.0.1  
+**Last Updated**: November 30, 2025  
 **Status**: ✅ Full Implementation - Backend Integration Complete
 
 ---
@@ -1395,7 +1395,7 @@ debug_broker: 'all' // Logs all broker API calls and responses
 
 ### Project Documentation
 
-- **Architecture Overview**: `../../ARCHITECTURE.md`
+- **Architecture Overview**: `../../docs/ARCHITECTURE.md`
 - **TradingView Types Guide**: `./tradingview/TYPE-DEFINITIONS.md`
 - **Frontend README**: `../README.md`
 - **Development Guide**: `../../docs/DEVELOPMENT.md`

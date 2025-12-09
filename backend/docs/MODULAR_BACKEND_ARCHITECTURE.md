@@ -1,8 +1,8 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: November 20, 2025  
-**Version**: 5.2.0
+**Last Updated**: November 30, 2025  
+**Version**: 5.3.0
 
 ## Table of Contents
 
@@ -158,7 +158,7 @@ class Module(ABC):
 
         # Import version-specific routers
         self._api_routers: dict[str, APIRouterInterface] = {}
-        self._ws_routers: dict[str, WsRouterInterface] = {}
+        self._ws_routers: dict[str, WsRouterBase] = {}
 
         for version in versions:
             # Import from api/v1.py (file)
@@ -182,8 +182,8 @@ class Module(ABC):
         """API routers organized by version (all extend APIRouterInterface)"""
 
     @property
-    def ws_routers(self) -> dict[str, WsRouterInterface]:
-        """WebSocket routers organized by version (WsRouterInterface is list[WsRouteInterface])"""
+    def ws_routers(self) -> dict[str, WsRouterBase]:
+        """WebSocket routers organized by version (WsRouterBase extends list[WsRouteFeature])"""
 
     @property
     @abstractmethod
@@ -426,9 +426,8 @@ modules/broker/api/
 
 ```
 modules/broker/ws/
-└── v1/                # ✅ MUST be directory (required for generated routers)
-    ├── __init__.py
-    └── ws_generated/  # Generated routers created here
+└── v1/                # ✅ MUST be directory for WsRouterBase subclass
+    └── __init__.py    # Contains WsRouterBase subclass with WsRouter[T,D] instances
 ```
 
 **Discovery Logic**:
@@ -483,8 +482,8 @@ for version, api_router in module.api_routers.items():
     # WebSocket setup if available
     if module.ws_routers:
         ws_app = FastWSAdapter(...)
-        # Note: ws_routers is dict[str, WsRouterInterface]
-        # WsRouterInterface is actually list[WsRouteInterface]
+        # ws_routers is dict[str, WsRouterBase]
+        # WsRouterBase extends list[WsRouteFeature]
         for version, ws_routers in module.ws_routers.items():
             for ws_router in ws_routers:
                 ws_app.include_router(ws_router)
@@ -553,20 +552,20 @@ def _import_api_routers_for_version(self, version: str) -> APIRouterInterface:
 
 ```python
 # In Module._import_ws_routers_for_version()
-def _import_ws_routers_for_version(self, version: str) -> WsRouterInterface | None:
+def _import_ws_routers_for_version(self, version: str) -> WsRouterBase | None:
     """Import WebSocket routers for a specific version."""
     try:
         ws_module = importlib.import_module(f"...ws.{version}")
 
-        # Scan for WsRouterInterface subclass
+        # Scan for WsRouterBase subclass
         for attr_name in dir(ws_module):
             if attr_name.startswith("_"):
                 continue
             attr = getattr(ws_module, attr_name)
             if (
                 isinstance(attr, type)
-                and issubclass(attr, WsRouterInterface)  # ← VALIDATION
-                and attr is not WsRouterInterface
+                and issubclass(attr, WsRouterBase)  # ← VALIDATION
+                and attr is not WsRouterBase
             ):
                 return attr(service=self._service)
 
@@ -577,7 +576,7 @@ def _import_ws_routers_for_version(self, version: str) -> WsRouterInterface | No
 
 **What This Enforces**:
 
-- ✅ WS routers **should** inherit from `WsRouterInterface` if present
+- ✅ WS routers **should** inherit from `WsRouterBase` if present
 - ✅ WebSocket support is **optional** (returns None if not found)
 - ✅ Version **must** be a directory (enforced in `_discover_versions()`)
 - ✅ Multiple routers per version supported (list-based pattern)
@@ -740,7 +739,9 @@ backend/src/trading_api/
 ├── shared/                     # Shared infrastructure (always loaded)
 │   ├── module_interface.py    # Module ABC definition
 │   ├── module_registry.py     # Module discovery and registration
-│   ├── service.py             # Base Service class (health, versions)
+│   ├── provider_interface.py  # Provider ABC definition
+│   ├── provider_registry.py   # Provider discovery and lazy-loading
+│   ├── service_interface.py   # ServiceInterface (version discovery, capability resolution)
 │   ├── client_generation_service.py  # Python client generation
 │   ├── api/                   # Shared API utilities
 │   │   └── api_router_interface.py  # APIRouterInterface (auto health/version)
@@ -749,7 +750,8 @@ backend/src/trading_api/
 │   ├── plugins/               # FastWS adapter and plugins
 │   ├── ws/                    # WebSocket framework
 │   │   ├── fastws_adapter.py  # FastWSAdapter integration
-│   │   └── ws_route_interface.py  # WsRouterInterface (list[WsRouteInterface])
+│   │   ├── ws_router.py       # WsRouterBase (list[WsRouteFeature]), WsRouteService
+│   │   └── generic_route.py   # WsRouter[TRequest, TData] generic class
 │   └── templates/             # Code generation templates
 │
 ├── modules/                   # Feature modules (pluggable)
@@ -807,7 +809,7 @@ backend/src/trading_api/
 - **Required WS directories**: WebSocket versions must be directories
 - **No core module**: Health/version functionality provided by `shared/service_interface.py` and `shared/api/api_router_interface.py`
 - **APIRouterInterface**: All API routers inherit from this, automatically getting health/version endpoints
-- **WsRouterInterface**: Is `list[WsRouteInterface]`, allowing multiple WS routers per version
+- **WsRouterBase**: Is `list[WsRouteFeature]`, allowing multiple WS routers per version
 
 ---
 
@@ -885,18 +887,23 @@ class BrokerApi(APIRouterInterface):
             return await self.service.create_order(order)
 
 # modules/broker/ws/v1/__init__.py (DIRECTORY with __init__.py)
-from trading_api.shared.ws import WsRouterInterface
+from trading_api.models import PlacedOrder, OrderSubscriptionRequest, Position, PositionSubscriptionRequest
+from trading_api.shared.ws.generic_route import WsRouter
+from trading_api.shared.ws.ws_router import WsRouterBase, WsRouteService
 
-class BrokerWsRouters(WsRouterInterface):
+class BrokerWsRouters(WsRouterBase):
     """Broker WebSocket v1 routers."""
 
     def __init__(self, service: WsRouteService):
-        self.generate_routers(__file__)
+        module_name = "broker"
 
-        from .ws_generated import OrderWsRouter, PositionWsRouter
-
-        order_router = OrderWsRouter(route="orders", service=service)
-        position_router = PositionWsRouter(route="positions", service=service)
+        # Direct generic type instantiation
+        order_router = WsRouter[OrderSubscriptionRequest, PlacedOrder](
+            route="orders", tags=[module_name], service=service
+        )
+        position_router = WsRouter[PositionSubscriptionRequest, Position](
+            route="positions", tags=[module_name], service=service
+        )
 
         super().__init__([order_router, position_router], service=service)
 ```
@@ -1167,7 +1174,7 @@ req.matches(prov)  # True - version matches or not specified
 #### Provider ABC - Base Class for All Providers
 
 ```python
-from trading_api.providers.base import Provider
+from trading_api.shared import Provider
 
 class MyProvider(Provider):
     @classmethod
@@ -1185,7 +1192,7 @@ class MyProvider(Provider):
 
 **Convention**: `providers/{name}/__init__.py` exports `{Name}Provider` class (e.g., `GoogleProvider`)
 
-**File**: `backend/src/trading_api/providers/base.py`
+**File**: `backend/src/trading_api/shared/provider_interface.py`
 
 #### AuthCapability - Authentication Contract Interface
 
@@ -1298,7 +1305,7 @@ class AuthService(ServiceInterface):
 
 ```python
 # providers/google/__init__.py
-from trading_api.providers.base import Provider
+from trading_api.shared import Provider
 from trading_api.providers.capabilities.auth import AuthCapability
 
 class GoogleProvider(Provider, AuthCapability):
@@ -1330,8 +1337,8 @@ class GoogleProvider(Provider, AuthCapability):
 
 **Provider Infrastructure:**
 
-- **Provider Base**: `backend/src/trading_api/providers/base.py`
-- **Provider Registry**: `backend/src/trading_api/providers/registry.py`
+- **Provider ABC**: `backend/src/trading_api/shared/provider_interface.py`
+- **Provider Registry**: `backend/src/trading_api/shared/provider_registry.py`
 - **Auth Capability**: `backend/src/trading_api/providers/capabilities/auth.py`
 
 **Provider Implementations:**
@@ -1376,8 +1383,7 @@ modules/{module_name}/
 │   └── v1.py                # ✅ v1 API router (file pattern - recommended for API)
 ├── ws/                      # Versioned WebSocket routers (optional)
 │   └── v1/                  # ✅ v1 WS router (directory pattern - required for WS)
-│       ├── __init__.py      # Exports WsRouterInterface subclass
-│       └── ws_generated/    # Generated routers
+│       └── __init__.py      # Exports WsRouterBase subclass with WsRouter[T,D] instances
 ├── specs_generated/         # Generated API specifications
 │   ├── {module}_v1_openapi.json
 │   └── {module}_v1_asyncapi.json
@@ -1393,31 +1399,35 @@ modules/{module_name}/
 **Key Structure Points**:
 
 - **`api/v1.py`**: API router as **file** (recommended, though directories also work via `.stem`)
-- **`ws/v1/`**: WebSocket router as **directory** with `__init__.py` (required for generated routers)
+- **`ws/v1/`**: WebSocket router as **directory** with `__init__.py` containing `WsRouterBase` subclass
 - **Versioning patterns**: API flexible (file or directory), WS strict (directory only)
 - **APIRouterInterface**: All API routers extend this for automatic health/version endpoints
 - **ServiceInterface**: All services extend this base class for version metadata and health checks
-- **WsRouterInterface**: List-based pattern (`extends list[WsRouteInterface]`) supporting multiple WS routers per version
+- **WsRouterBase**: List-based pattern (`extends list[WsRouteFeature]`) supporting multiple WS routers per version
 
-**Understanding WsRouterInterface**:
+**Understanding WsRouterBase**:
 
-`WsRouterInterface` extends `list[WsRouteInterface]`, which means:
+`WsRouterBase` extends `list[WsRouteFeature]`, which means:
 
 ```python
-# Each version maps to a WsRouterInterface, which IS a list
-ws_routers: dict[str, WsRouterInterface] = {
-    "v1": WsRouterInterface([router1, router2, router3], service=service)
+# Each version maps to a WsRouterBase, which IS a list
+ws_routers: dict[str, WsRouterBase] = {
+    "v1": BrokerWsRouters(service=service)  # Contains [order_router, position_router]
 }
 
 # You can iterate directly over it
-for ws_router in module.ws_routers["v1"]:  # WsRouterInterface is a list!
+for ws_router in module.ws_routers["v1"]:  # WsRouterBase is a list!
     ws_app.include_router(ws_router)
 
 # Actual usage in broker module
-class BrokerWsRouters(WsRouterInterface):  # Inherits from list!
+class BrokerWsRouters(WsRouterBase):  # Inherits from list!
     def __init__(self, service: WsRouteService):
-        order_router = OrderWsRouter(route="orders", service=service)
-        position_router = PositionWsRouter(route="positions", service=service)
+        order_router = WsRouter[OrderSubscriptionRequest, PlacedOrder](
+            route="orders", tags=["broker"], service=service
+        )
+        position_router = WsRouter[PositionSubscriptionRequest, Position](
+            route="positions", tags=["broker"], service=service
+        )
 
         # Pass list to parent constructor
         super().__init__([order_router, position_router], service=service)
@@ -1433,7 +1443,7 @@ When creating a new module:
 - [ ] Implement `{ModuleName}Module` class extending `Module` ABC
 - [ ] Create `service.py` extending `ServiceInterface` base class
 - [ ] Create `api/v1.py` **file** extending `APIRouterInterface` with `prefix=""`
-- [ ] (Optional) Create `ws/v1/` **directory** with `__init__.py` extending `WsRouterInterface`
+- [ ] (Optional) Create `ws/v1/` **directory** with `__init__.py` extending `WsRouterBase`
 - [ ] Add module tests in `tests/` directory
 - [ ] Verify module with `make test-module-{module_name}`
 
@@ -1442,7 +1452,7 @@ When creating a new module:
 - **Module** → Extend `trading_api.shared.module_interface.Module` (ABC)
 - **ServiceInterface** → Extend `trading_api.shared.service_interface.ServiceInterface` (ABC)
 - **API Router** → Extend `trading_api.shared.api.api_router_interface.APIRouterInterface`
-- **WebSocket Router** → Extend `trading_api.shared.ws.ws_route_interface.WsRouterInterface` (list-based)
+- **WebSocket Router** → Extend `trading_api.shared.ws.ws_router.WsRouterBase` (list-based)
 
 ---
 
@@ -1480,22 +1490,54 @@ if module.ws_routers:
 | Broker   | `/api/v1/broker/ws`   | `/api/v1/broker/ws/asyncapi`   |
 | Datafeed | `/api/v1/datafeed/ws` | `/api/v1/datafeed/ws/asyncapi` |
 
-### WsRouterInterface and WsRouteService
+### WsRouterBase and WsRouteService
 
-**WsRouterInterface** is `list[WsRouteInterface]`:
+**WsRouterBase** extends `list[WsRouteFeature]`:
 
 ```python
-# shared/ws/ws_route_interface.py
-class WsRouterInterface(list[WsRouteInterface]):
+# shared/ws/ws_router.py
+class WsRouterBase(list[WsRouteFeature]):
     """Collection of WebSocket routers for a module version."""
 
-    def __init__(self, *args, service: ServiceInterface, **kwargs):
+    def __init__(self, *args: Any, service: ServiceInterface, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._service = service
-
-    def generate_routers(self, ws_file: str) -> None:
-        """Generate WebSocket routers from type aliases."""
 ```
+
+### Dynamic Type Resolution
+
+WebSocket routers use **runtime type introspection** instead of code generation:
+
+```python
+# In WsRouter (shared/ws/generic_route.py)
+def _resolve_generic_types(self):
+    """
+    Introspects the class to find the Generic type arguments.
+    Uses __orig_bases__ to extract [TRequest, TData] at runtime.
+    """
+    types = next(iter(getattr(self.__class__, "__orig_bases__", [])), None)
+    return get_args(types)  # Returns (RequestType, DataType)
+```
+
+**Usage Pattern** (class inheritance required):
+
+```python
+# Step 1: Define concrete router class
+class OrderRouter(WsRouter[OrderSubscriptionRequest, PlacedOrder]):
+    pass
+
+# Step 2: Instantiate in router factory
+order_router = OrderRouter(route="orders", tags=[module_name], service=service)
+```
+
+**Why Class Inheritance?** The `_resolve_generic_types()` method introspects `__orig_bases__` which only exists on concrete subclasses. Direct generic instantiation (`WsRouter[T, D](...)`) would not preserve type information.
+
+**What This Enables**:
+
+- ✅ Type parameters resolved at runtime (no code generation)
+- ✅ Annotations set dynamically for AsyncAPI spec generation
+- ✅ Type-safe subscribe/unsubscribe handlers
+- ✅ Proper IDE autocomplete via generic type hints
 
 **WsRouteService Protocol** for topic lifecycle:
 
@@ -1558,21 +1600,23 @@ main_app.openapi()  # → /api/openapi.json
 main_app.asyncapi()  # → /api/ws/asyncapi.json
 ```
 
-### WebSocket Router Generation
+### WebSocket Router Pattern
 
-WebSocket routers are defined in versioned directories:
+WebSocket routers are defined in versioned directories using direct generic types:
 
 ```python
-class BrokerWsRouters(WsRouterInterface):
+# modules/broker/ws/v1/__init__.py
+class BrokerWsRouters(WsRouterBase):
     """Broker WebSocket v1 routers."""
 
     def __init__(self, service: WsRouteService):
-        self.generate_routers(__file__)
-
-        from .ws_generated import OrderWsRouter, PositionWsRouter
-
-        order_router = OrderWsRouter(route="orders", service=service)
-        position_router = PositionWsRouter(route="positions", service=service)
+        # Direct generic type instantiation - no code generation
+        order_router = WsRouter[OrderSubscriptionRequest, PlacedOrder](
+            route="orders", tags=["broker"], service=service
+        )
+        position_router = WsRouter[PositionSubscriptionRequest, Position](
+            route="positions", tags=["broker"], service=service
+        )
 
         super().__init__([order_router, position_router], service=service)
 ```
@@ -1659,10 +1703,12 @@ WebSocket connections are authenticated automatically via cookies:
 ```python
 from trading_api.shared.middleware.auth import get_current_user_ws
 
-class BrokerWsRouters(WsRouterInterface):
+class BrokerWsRouters(WsRouterBase):
     def __init__(self, service: WsRouteService):
         # Router automatically validates authentication
-        order_router = OrderWsRouter(route="orders", service=service)
+        order_router = WsRouter[OrderSubscriptionRequest, PlacedOrder](
+            route="orders", tags=["broker"], service=service
+        )
 
         # Access user data in route handler
         @order_router.on_subscribe
@@ -1671,6 +1717,8 @@ class BrokerWsRouters(WsRouterInterface):
             user_data = await get_current_user_ws(client.websocket)
             # Filter data by user_id
             await service.subscribe_user_orders(user_data.user_id, topic)
+
+        super().__init__([order_router], service=service)
 ```
 
 **Key Points:**
@@ -1995,16 +2043,18 @@ Use these exact names when working with the modular architecture:
 | ------------------ | -------------------- | ------------------------------------ | ---------------------------------------------------------------------------- |
 | Service base class | `ServiceInterface`   | `shared/service_interface.py`        | `from trading_api.shared.service_interface import ServiceInterface`          |
 | API router base    | `APIRouterInterface` | `shared/api/api_router_interface.py` | `from trading_api.shared.api.api_router_interface import APIRouterInterface` |
-| WS router base     | `WsRouterInterface`  | `shared/ws/ws_route_interface.py`    | `from trading_api.shared.ws.ws_route_interface import WsRouterInterface`     |
+| WS router base     | `WsRouterBase`       | `shared/ws/ws_router.py`             | `from trading_api.shared.ws.ws_router import WsRouterBase`                   |
+| WS route feature   | `WsRouteFeature`     | `shared/ws/ws_router.py`             | `from trading_api.shared.ws.ws_router import WsRouteFeature`                 |
+| WS generic router  | `WsRouter[T, D]`     | `shared/ws/generic_route.py`         | `from trading_api.shared.ws.generic_route import WsRouter`                   |
 | Module base class  | `Module`             | `shared/module_interface.py`         | `from trading_api.shared.module_interface import Module`                     |
-| WS route service   | `WsRouteService`     | `shared/ws/ws_route_interface.py`    | `from trading_api.shared.ws.ws_route_interface import WsRouteService`        |
+| WS route service   | `WsRouteService`     | `shared/ws/ws_router.py`             | `from trading_api.shared.ws.ws_router import WsRouteService`                 |
 
 ### Version Pattern Reference
 
 | Component         | Pattern                | Example                                  | Notes                               |
 | ----------------- | ---------------------- | ---------------------------------------- | ----------------------------------- |
 | API Router        | File or Directory      | `api/v1.py` or `api/v1/__init__.py`      | Both supported via `.stem` property |
-| WebSocket Router  | Directory only         | `ws/v1/__init__.py`                      | Required for generated routers      |
+| WebSocket Router  | Directory only         | `ws/v1/__init__.py`                      | Required for WsRouterBase subclass  |
 | Version Discovery | Auto-detected          | Scans `api/` and `ws/` dirs              | Uses `d.stem.startswith("v")`       |
 | Enforcement       | Import-time validation | Module loading fails if wrong base class | See section 7                       |
 
@@ -2054,7 +2104,6 @@ class MymoduleApi(APIRouterInterface):
 - **[MODULAR_VERSIONNING.md](./MODULAR_VERSIONNING.md)** - API versioning strategy
 - **[BACKEND_WEBSOCKETS.md](./BACKEND_WEBSOCKETS.md)** - WebSocket implementation guide
 - **[SPECS_AND_CLIENT_GEN.md](./SPECS_AND_CLIENT_GEN.md)** - Spec and client generation
-- **[WS_ROUTERS_GEN.md](./WS_ROUTERS_GEN.md)** - WebSocket router generation
 - **[docs/DOCUMENTATION-GUIDE.md](../../docs/DOCUMENTATION-GUIDE.md)** - Documentation index
 
 ---
@@ -2076,9 +2125,10 @@ The modular backend architecture provides:
 **Architectural Patterns**:
 
 - **Flexible API Versioning**: API routers support both file (`api/v1.py`) and directory (`api/v1/`) patterns via `.stem`
-- **Strict WS Versioning**: WebSocket routers require directories (`ws/v1/`) for generated routers
+- **Strict WS Versioning**: WebSocket routers require directories (`ws/v1/`) for WsRouterBase subclass
 - **ABC Pattern**: Uses Python's `abc.ABC`, not `typing.Protocol`
-- **List-Based WS**: `WsRouterInterface` extends `list[WsRouteInterface]` for multiple routers per version
+- **List-Based WS**: `WsRouterBase` extends `list[WsRouteFeature]` for multiple routers per version
+- **Direct Generic Types**: WebSocket routers use `WsRouter[TRequest, TData]` pattern (no code generation)
 - **Auto Health/Version**: All modules get health/version endpoints via `APIRouterInterface` inheritance
 - **Enforcement**: Module loading validates base class inheritance at import time
 
