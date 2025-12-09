@@ -484,9 +484,7 @@ class TWSProvider(Provider, DatafeedCapability):
                     else "SMART"
                 )
             sub_ids.append(
-                self._tws_client.reqMktDataStream(
-                    build_contract(ticker), quote_callback, **kwargs
-                )
+                self._tws_client.reqMktDataStream(contract, quote_callback, **kwargs)
             )
 
         return sub_ids
