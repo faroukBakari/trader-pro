@@ -4,12 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from trading_api.models.common import (
-    CapabilityNotFoundError,
-    CapabilitySpec,
-    ProviderConfig,
-    ProviderNotFoundError,
-)
+from trading_api.models.common import CapabilitySpec, ProviderConfig
+from trading_api.models.exceptions import CommonException
 from trading_api.shared import Provider
 from trading_api.shared.provider_registry import ProviderRegistry
 
@@ -82,7 +78,7 @@ async def test_get_providers_capability_not_found(registry: ProviderRegistry) ->
     registry.register(MockProvider, "mock")
 
     # MockProvider only provides "auth", not "broker"
-    with pytest.raises(CapabilityNotFoundError, match="No provider found"):
+    with pytest.raises(CommonException, match="No provider found"):
         await registry.get_providers([CapabilitySpec(name="broker")])  # type: ignore[arg-type]
 
 
@@ -117,7 +113,7 @@ async def test_get_provider_by_name(registry: ProviderRegistry) -> None:
 @pytest.mark.asyncio
 async def test_get_provider_not_found(registry: ProviderRegistry) -> None:
     """Raise error when provider not registered."""
-    with pytest.raises(ProviderNotFoundError, match="not registered"):
+    with pytest.raises(CommonException, match="not registered"):
         await registry.get_provider("nonexistent")
 
 

@@ -65,6 +65,14 @@ from .common import (
     SubscriptionResponse,
     SubscriptionUpdate,
 )
+
+# Import exception models
+from .exceptions import (
+    CommonException,
+    ProviderException,
+    ServiceException,
+    TradingApiException,
+)
 from .health import HealthResponse
 
 # Import from market data domain
@@ -97,6 +105,11 @@ __all__ = [
     "SubscriptionRequest",
     "SubscriptionResponse",
     "SubscriptionUpdate",
+    # Exception models
+    "TradingApiException",
+    "CommonException",
+    "ServiceException",
+    "ProviderException",
     # Auth models
     "DeviceInfo",
     "GoogleLoginRequest",

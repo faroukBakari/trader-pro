@@ -15,6 +15,7 @@ from fastapi.routing import APIRoute
 
 from trading_api.models.common import CapabilitySpec
 from trading_api.shared import Module, ModuleApp, ModuleRegistry, settings
+from trading_api.shared.exception_handlers import register_exception_handlers
 from trading_api.shared.provider_registry import ProviderRegistry
 
 # Configure logging for the application
@@ -27,6 +28,9 @@ logging.basicConfig(
 logging.getLogger("trading_api").setLevel(logging.INFO)
 logging.getLogger("uvicorn").setLevel(logging.INFO)
 logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+# Suppress uvicorn's "Exception in ASGI application" logs
+# (our exception handlers already log with full context)
+logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)
 
 # Module logger for app_factory
 logger = logging.getLogger(__name__)
@@ -389,6 +393,10 @@ class AppFactory:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+        # Register exception handlers on main app as fallback
+        # (also registered on sub-apps; duplicate logging prevented via request state)
+        register_exception_handlers(modular_app)
 
         # Add root endpoint with API information
         @modular_app.get("/", include_in_schema=False)

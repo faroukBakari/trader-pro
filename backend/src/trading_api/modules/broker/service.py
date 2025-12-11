@@ -56,6 +56,7 @@ from trading_api.models.broker import (
     Side,
 )
 from trading_api.models.common import CapabilitySpec
+from trading_api.models.exceptions import ServiceException
 from trading_api.shared.ws.ws_router import WsRouteService
 
 logger = logging.getLogger(__name__)
@@ -494,11 +495,17 @@ class BrokerService(WsRouteService):
         """
         existing_order = self._orders.get(order_id)
         if not existing_order:
-            raise ValueError(f"Order {order_id} not found")
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_ORDER_NOT_FOUND",
+                message=f"Order {order_id} not found",
+            )
 
         if existing_order.status not in [OrderStatus.WORKING, OrderStatus.PLACING]:
-            raise ValueError(
-                f"Cannot modify order {order_id} with status {existing_order.status}"
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_ORDER_INVALID_STATUS",
+                message=f"Cannot modify order {order_id} with status {existing_order.status}",
             )
 
         # Determine limit price: use explicit limitPrice, then seenPrice, then current quotes
@@ -531,15 +538,21 @@ class BrokerService(WsRouteService):
         """
         order = self._orders.get(order_id)
         if not order:
-            raise ValueError(f"Order {order_id} not found")
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_ORDER_NOT_FOUND",
+                message=f"Order {order_id} not found",
+            )
 
         if order.status not in [
             OrderStatus.WORKING,
             OrderStatus.PLACING,
             OrderStatus.FILLED,
         ]:
-            raise ValueError(
-                f"Cannot cancel order {order_id} with status {order.status}"
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_ORDER_INVALID_STATUS",
+                message=f"Cannot cancel order {order_id} with status {order.status}",
             )
 
         order.status = OrderStatus.CANCELED
@@ -560,16 +573,26 @@ class BrokerService(WsRouteService):
         """
         position = self._positions.get(position_id)
         if not position:
-            raise ValueError(f"Position {position_id} not found")
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_POSITION_NOT_FOUND",
+                message=f"Position {position_id} not found",
+            )
 
         # Determine quantity to close
         close_qty = amount if amount is not None else position.qty
 
         if close_qty <= 0:
-            raise ValueError("Amount must be positive")
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_INVALID_AMOUNT",
+                message="Amount must be positive",
+            )
         if close_qty > position.qty:
-            raise ValueError(
-                f"Amount {close_qty} exceeds position quantity {position.qty}"
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_INVALID_AMOUNT",
+                message=f"Amount {close_qty} exceeds position quantity {position.qty}",
             )
 
         # Create a closing order (opposite side of the position)
@@ -613,7 +636,11 @@ class BrokerService(WsRouteService):
         """
         position = self._positions.get(position_id)
         if not position:
-            raise ValueError(f"Position {position_id} not found")
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_POSITION_NOT_FOUND",
+                message=f"Position {position_id} not found",
+            )
 
         # Cancel existing bracket orders for this position
         # Bracket orders are identified by symbol and opposite side
@@ -678,13 +705,21 @@ class BrokerService(WsRouteService):
             LeverageSetResult: Confirmed leverage value
 
         Raises:
-            ValueError: If leverage value is out of range
+            ServiceException: If leverage value is out of range
         """
         # Validate leverage range
         if params.leverage < 1.0:
-            raise ValueError("Leverage must be at least 1.0")
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_INVALID_LEVERAGE",
+                message="Leverage must be at least 1.0",
+            )
         if params.leverage > 100.0:
-            raise ValueError("Leverage cannot exceed 100.0")
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_INVALID_LEVERAGE",
+                message="Leverage cannot exceed 100.0",
+            )
 
         # Store leverage setting
         self._leverage_settings[params.symbol] = params.leverage
@@ -746,10 +781,14 @@ class BrokerService(WsRouteService):
             topic_update: Callback to broadcast updates
 
         Raises:
-            ValueError: If topic format is invalid
+            ServiceException: If topic format is invalid
         """
         if ":" not in topic:
-            raise ValueError(f"Invalid topic format: {topic}")
+            raise ServiceException(
+                module="broker",
+                code="SERVICE_BROKER_INVALID_TOPIC_FORMAT",
+                message=f"Invalid topic format: {topic}",
+            )
 
         topic_type, _ = topic.split(":", 1)
 

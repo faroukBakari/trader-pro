@@ -342,15 +342,12 @@ def _parse_rt_volume(rt_volume_str: str | None) -> tuple[float, float, float]:
         # Empty string or starts with ";" (odd lot with no price)
         return 0.0, 0, 0.0
 
-    try:
-        parts = rt_volume_str.split(";")
-        if len(parts) >= 5:
-            last_price = float(parts[0]) if parts[0] else 0.0
-            total_volume = int(float(parts[3])) if parts[3] else 0
-            vwap = float(parts[4]) if parts[4] else 0.0
-            return last_price, total_volume, vwap
-    except (ValueError, IndexError):
-        pass
+    parts = rt_volume_str.split(";")
+    if len(parts) >= 5:
+        last_price = float(parts[0]) if parts[0] else 0.0
+        total_volume = int(float(parts[3])) if parts[3] else 0
+        vwap = float(parts[4]) if parts[4] else 0.0
+        return last_price, total_volume, vwap
 
     return 0.0, 0, 0.0
 
@@ -471,7 +468,7 @@ def map_resolution_to_tws_bar_size(resolution: Resolution) -> str:
         TWS bar size string ("1 min", "5 mins", "1 hour", "1 day", etc.)
 
     Raises:
-        DatafeedError: If resolution not supported
+        ProviderException: If resolution not supported
     """
     # Map Resolution enum members directly to TWS bar size strings
     # Resolution values are TradingView format: "1", "5", "60", "1D", "1W", "1M", "12M"

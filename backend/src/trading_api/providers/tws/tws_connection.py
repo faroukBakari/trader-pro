@@ -46,9 +46,10 @@ from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
 
+from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.tws_mappers import ticker_name
 
-from .tws_models import TICK_TYPE_TO_FIELD, TWSError, get_asset_config
+from .tws_models import TICK_TYPE_TO_FIELD, get_asset_config
 
 logger = logging.getLogger(__name__)
 DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
@@ -931,12 +932,12 @@ class IBSocket(EWrapper):
             errorString: Error message
             advancedOrderRejectJson: Advanced order reject details (optional)
         """
-        tws_error = TWSError(
-            reqId=reqId,
-            errorTime=errorTime,
-            errorCode=errorCode,
-            errorString=errorString,
-            advancedOrderRejectJson=advancedOrderRejectJson,
+        tws_error = ProviderException(
+            code=f"PROVIDER_DATAFEED_TWS_{errorCode}",
+            message=f"[reqId={reqId}] {errorString}{advancedOrderRejectJson and (' | ' + advancedOrderRejectJson)}",
+            provider="tws",
+            capability="datafeed",
+            timestamp=errorTime // 1000 if errorTime > 10_000_000_000 else errorTime,
         )
 
         # 1. Store error in ticker slot ticker if tracked
@@ -950,8 +951,9 @@ class IBSocket(EWrapper):
                 f"TWS rt data error [symbol= [{ticker_name}] "
                 f"reqId={reqId}, time={errorTime}, code={errorCode}]: {errorString}"
             )
-            errors: list[TWSError] = ticker.get("error_messages", [])
+            errors: list[ProviderException] = ticker.setdefault("error_messages", [])
             errors.append(tws_error)
+            self._notify_stream(reqId, ["error_messages"])
             return
 
         # 2. Handle error (existing behavior)

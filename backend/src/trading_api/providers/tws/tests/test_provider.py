@@ -23,7 +23,7 @@ import pytest
 from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
-from trading_api.models.common import DatafeedError
+from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import (
     Bar,
     QuoteData,
@@ -282,14 +282,14 @@ class TestGetSymbolInfo:
 
     @pytest.mark.asyncio
     async def test_get_symbol_info_not_found_raises_error(self) -> None:
-        """Test get_symbol_info raises DatafeedError when symbol not found."""
+        """Test get_symbol_info raises ProviderException when symbol not found."""
         mock_client = Mock()
         mock_client.reqContractDetails = AsyncMock(return_value=[])
 
         with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
             provider = TWSProvider()
 
-            with pytest.raises(DatafeedError, match="Symbol not found"):
+            with pytest.raises(ProviderException, match="Symbol not found"):
                 # Use composite ticker format
                 await provider.get_symbol_info("NONEXISTENT:SMART:STK-0")
 
@@ -324,21 +324,6 @@ class TestGetSymbolInfo:
         # Should use first result
         assert result.description == "Apple Inc NASDAQ"
         assert result.exchange == "NASDAQ"
-
-    @pytest.mark.asyncio
-    async def test_get_symbol_info_exception_wrapped(self) -> None:
-        """Test get_symbol_info wraps exceptions in DatafeedError."""
-        mock_client = Mock()
-        mock_client.reqContractDetails = AsyncMock(
-            side_effect=RuntimeError("TWS error")
-        )
-
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
-
-            with pytest.raises(DatafeedError, match="Failed to get symbol info"):
-                # Use composite ticker format
-                await provider.get_symbol_info("AAPL:NASDAQ:STK-12345")
 
 
 class TestGetHistoricalBars:
@@ -433,26 +418,6 @@ class TestGetHistoricalBars:
         call_args = mock_client.reqHistoricalData.call_args
         contract = call_args[0][0]
         assert contract.primaryExchange == "NASDAQ"
-
-    @pytest.mark.asyncio
-    async def test_get_historical_bars_wraps_exceptions(self) -> None:
-        """Test get_historical_bars wraps exceptions in DatafeedError."""
-        mock_client = Mock()
-        mock_client.reqHistoricalData = AsyncMock(side_effect=RuntimeError("TWS error"))
-
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
-
-            start = datetime(2023, 12, 15, 9, 30, 0, tzinfo=timezone.utc)
-            end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
-
-            with pytest.raises(DatafeedError, match="Failed to get historical bars"):
-                await provider.get_historical_bars(
-                    ticker="AAPL:NASDAQ:STK-12345",
-                    start_time=start,
-                    end_time=end,
-                    resolution=Resolution.MIN_1,
-                )
 
 
 class TestGetQuotesSnapshot:

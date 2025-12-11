@@ -427,9 +427,10 @@ def ws_app(ws_apps: list[FastWSAdapter]) -> FastWSAdapter | None:
 def client(app: ModularApp, valid_jwt_token: str):
     """Sync test client for WebSocket tests with authentication cookies.
 
-    Uses context manager to ensure proper cleanup of TestClient's internal event loop.
+    Uses raise_server_exceptions=False so that exceptions are handled by
+    FastAPI's exception handlers and return proper HTTP responses.
     """
-    with TestClient(app) as c:
+    with TestClient(app, raise_server_exceptions=False) as c:
         c.cookies.set("access_token", valid_jwt_token)
         yield c
 
@@ -438,9 +439,10 @@ def client(app: ModularApp, valid_jwt_token: str):
 def client_no_auth(app: ModularApp):
     """Sync test client WITHOUT authentication (for testing auth rejection).
 
-    Uses context manager to ensure proper cleanup of TestClient's internal event loop.
+    Uses raise_server_exceptions=False so that exceptions are handled by
+    FastAPI's exception handlers and return proper HTTP responses.
     """
-    with TestClient(app) as c:
+    with TestClient(app, raise_server_exceptions=False) as c:
         yield c
 
 
@@ -448,15 +450,37 @@ def client_no_auth(app: ModularApp):
 async def async_client(
     app: ModularApp, auth_cookies: dict[str, str]
 ) -> AsyncGenerator[AsyncClient, None]:
-    """Async test client for API tests with authentication cookies."""
-    async with AsyncClient(app=app, base_url="http://test", cookies=auth_cookies) as ac:
+    """Async test client for API tests with authentication cookies.
+
+    Uses ASGITransport with raise_app_exceptions=False so that exceptions
+    are handled by FastAPI's exception handlers and return proper HTTP responses.
+    """
+    from httpx import ASGITransport
+
+    transport = ASGITransport(
+        app=app,  # type: ignore[arg-type]  # FastAPI is ASGI-compatible
+        raise_app_exceptions=False,
+    )
+    async with AsyncClient(
+        transport=transport, base_url="http://test", cookies=auth_cookies
+    ) as ac:
         yield ac
 
 
 @pytest.fixture
 async def async_client_no_auth(app: ModularApp) -> AsyncGenerator[AsyncClient, None]:
-    """Async test client for API tests WITHOUT authentication (for testing auth flows)."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    """Async test client for API tests WITHOUT authentication (for testing auth flows).
+
+    Uses ASGITransport with raise_app_exceptions=False so that exceptions
+    are handled by FastAPI's exception handlers and return proper HTTP responses.
+    """
+    from httpx import ASGITransport
+
+    transport = ASGITransport(
+        app=app,  # type: ignore[arg-type]  # FastAPI is ASGI-compatible
+        raise_app_exceptions=False,
+    )
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 
