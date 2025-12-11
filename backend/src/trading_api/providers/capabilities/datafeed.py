@@ -44,7 +44,7 @@ class DatafeedCapability(ABC):
 
         Raises:
             TimeoutError: If request exceeds timeout
-            DatafeedError: If search fails
+            ProviderException: If search fails
         """
         ...
 
@@ -66,7 +66,7 @@ class DatafeedCapability(ABC):
 
         Raises:
             TimeoutError: If request exceeds timeout
-            DatafeedError: If symbol not found or request fails
+            ProviderException: If symbol not found or request fails
         """
         ...
 
@@ -94,7 +94,7 @@ class DatafeedCapability(ABC):
 
         Raises:
             TimeoutError: If request exceeds timeout
-            DatafeedError: If request fails
+            ProviderException: If request fails
         """
         ...
 
@@ -115,7 +115,7 @@ class DatafeedCapability(ABC):
             List of QuoteData (one per ticker)
 
         Raises:
-            DatafeedError: If request fails
+            ProviderException: If request fails
             TimeoutError: If snapshot exceeds timeout
         """
         ...
@@ -140,7 +140,7 @@ class DatafeedCapability(ABC):
             Subscription ID (for unsubscribe)
 
         Raises:
-            DatafeedError: If subscription fails
+            ProviderException: If subscription fails
 
         [CONTINUOUS]: Callback invoked continuously until unsubscribe.
         [THREAD-SAFE]: Callback may be invoked from provider thread.
@@ -165,7 +165,7 @@ class DatafeedCapability(ABC):
             Subscription ID (for unsubscribe)
 
         Raises:
-            DatafeedError: If subscription fails
+            ProviderException: If subscription fails
 
         [CONTINUOUS]: Callback invoked continuously until unsubscribe.
         [THREAD-SAFE]: Callback may be invoked from provider thread.
@@ -180,7 +180,7 @@ class DatafeedCapability(ABC):
             subscription_id: ID returned from subscribe_realtime_bars
 
         Raises:
-            DatafeedError: If subscription ID not found
+            ProviderException: If subscription ID not found
         """
         ...
 
@@ -192,6 +192,6 @@ class DatafeedCapability(ABC):
             subscription_id: ID returned from subscribe_market_data
 
         Raises:
-            DatafeedError: If subscription ID not found
+            ProviderException: If subscription ID not found
         """
         ...

@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from trading_api.models.common import CapabilityNotFoundError, CapabilitySpec
+from trading_api.models.common import CapabilitySpec
+from trading_api.models.exceptions import CommonException
 from trading_api.shared.service_interface import ServiceInterface
 
 
@@ -23,7 +24,7 @@ class MockServiceRequiringAuth(ServiceInterface):
 def test_service_fails_without_required_capability() -> None:
     """Service requiring capability fails if no provider available."""
     with pytest.raises(
-        CapabilityNotFoundError,
+        CommonException,
         match="requires capability 'auth' but no provider found",
     ):
         MockServiceRequiringAuth(

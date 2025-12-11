@@ -5,7 +5,8 @@ from typing import Any
 
 import httpx
 
-from trading_api.models.common import AuthenticationError, CapabilitySpec
+from trading_api.models.common import CapabilitySpec
+from trading_api.models.exceptions import ProviderException
 from trading_api.models.providers.google_oauth_configs import GoogleProviderConfig
 from trading_api.providers.capabilities.auth import AuthCapability
 from trading_api.shared import Provider
@@ -61,17 +62,32 @@ class GoogleProvider(Provider, AuthCapability):
             )
 
             if resp.status_code != 200:
-                raise AuthenticationError(f"Invalid Google token: {resp.text}")
+                raise ProviderException(
+                    code="PROVIDER_AUTH_TOKEN_INVALID",
+                    message=f"Invalid Google token: {resp.text}",
+                    provider="google",
+                    capability="auth",
+                )
 
             claims: dict[str, Any] = resp.json()
 
             # Validate audience
             if claims.get("aud") != self.config.client_id:
-                raise AuthenticationError("Invalid token audience")
+                raise ProviderException(
+                    code="PROVIDER_AUTH_AUDIENCE_INVALID",
+                    message="Invalid token audience",
+                    provider="google",
+                    capability="auth",
+                )
 
             # Validate email verified
             if claims.get("email_verified") not in (True, "true"):
-                raise AuthenticationError("Email not verified")
+                raise ProviderException(
+                    code="PROVIDER_AUTH_EMAIL_NOT_VERIFIED",
+                    message="Email not verified",
+                    provider="google",
+                    capability="auth",
+                )
 
             return claims
 

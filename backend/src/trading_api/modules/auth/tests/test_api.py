@@ -30,8 +30,13 @@ async def auth_app() -> ModularApp:
 
 @pytest.fixture
 def client(auth_app: ModularApp) -> Generator[TestClient, None, None]:
-    """Test client for auth API"""
-    with TestClient(auth_app) as c:
+    """Test client for auth API.
+
+    Uses raise_server_exceptions=False so that exceptions are handled by
+    FastAPI's exception handlers and return proper HTTP responses instead
+    of bubbling up to the test.
+    """
+    with TestClient(auth_app, raise_server_exceptions=False) as c:
         yield c
 
 
@@ -107,13 +112,16 @@ class TestLoginEndpoint:
     def test_login_with_invalid_google_token(self, client: TestClient) -> None:
         """Test login fails with invalid Google ID token"""
         # Mock GoogleProvider to raise authentication error
-        from trading_api.models.common import AuthenticationError
+        from trading_api.models.exceptions import ProviderException
 
         with patch(
             "trading_api.providers.google.GoogleProvider.verify_token"
         ) as mock_verify:
-            mock_verify.side_effect = AuthenticationError(
-                'Invalid Google token: {"error": "invalid_token"}'
+            mock_verify.side_effect = ProviderException(
+                provider="google",
+                capability="auth",
+                code="PROVIDER_AUTH_TOKEN_INVALID",
+                message='Invalid Google token: {"error": "invalid_token"}',
             )
 
             response = client.post(
@@ -122,27 +130,32 @@ class TestLoginEndpoint:
             )
 
             assert response.status_code == 401
-            assert "Invalid Google token" in response.json()["detail"]
+            assert "Invalid Google token" in response.json()["message"]
 
     def test_login_with_unverified_email(
         self, client: TestClient, mock_google_claims: dict[str, Any]
     ) -> None:
         """Test login fails when Google email is not verified"""
         # Mock GoogleProvider to raise error for unverified email
-        from trading_api.models.common import AuthenticationError
+        from trading_api.models.exceptions import ProviderException
 
         with patch(
             "trading_api.providers.google.GoogleProvider.verify_token"
         ) as mock_verify:
-            mock_verify.side_effect = AuthenticationError("Email not verified")
+            mock_verify.side_effect = ProviderException(
+                provider="google",
+                capability="auth",
+                code="PROVIDER_AUTH_EMAIL_NOT_VERIFIED",
+                message="Email not verified",
+            )
 
             response = client.post(
                 "/api/v1/auth/login",
                 json={"google_token": "valid_google_id_token"},
             )
 
-            assert response.status_code == 401
-            assert "Email not verified" in response.json()["detail"]
+            assert response.status_code == 403
+            assert "Email not verified" in response.json()["message"]
 
     def test_login_missing_google_token(self, client: TestClient) -> None:
         """Test login fails when google_token is missing"""
@@ -206,7 +219,7 @@ class TestRefreshTokenEndpoint:
         )
 
         assert response.status_code == 401
-        assert "Invalid refresh token" in response.json()["detail"]
+        assert "Invalid refresh token" in response.json()["message"]
 
     def test_refresh_with_revoked_token(
         self, client: TestClient, mock_google_claims: dict[str, Any]
@@ -239,7 +252,7 @@ class TestRefreshTokenEndpoint:
         )
 
         assert refresh_response.status_code == 401
-        assert "Invalid refresh token" in refresh_response.json()["detail"]
+        assert "Invalid refresh token" in refresh_response.json()["message"]
 
     def test_refresh_missing_token(self, client: TestClient) -> None:
         """Test refresh fails when refresh_token is missing"""
@@ -418,7 +431,7 @@ class TestTokenRotation:
         )
 
         assert reuse_response.status_code == 401
-        assert "Invalid refresh token" in reuse_response.json()["detail"]
+        assert "Invalid refresh token" in reuse_response.json()["message"]
 
 
 class TestAccessTokenStructure:

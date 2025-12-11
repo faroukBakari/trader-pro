@@ -11,11 +11,8 @@ import pytest
 # Add src to path for module imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from trading_api.models.common import (  # noqa: E402
-    CapabilityNotFoundError,
-    CapabilitySpec,
-    ProviderConfig,
-)
+from trading_api.models.common import CapabilitySpec, ProviderConfig  # noqa: E402
+from trading_api.models.exceptions import CommonException  # noqa: E402
 from trading_api.models.market import (  # noqa: E402
     Bar,
     QuoteData,
@@ -154,7 +151,7 @@ class TestModuleCodegen:
         instantiated directly (e.g., in codegen scripts).
         """
         with pytest.raises(
-            CapabilityNotFoundError,
+            CommonException,
             match="Service 'auth' requires capability 'auth'",
         ):
             AuthModule()  # Should fail: no providers for auth capability
@@ -199,4 +196,4 @@ class TestModuleCodegen:
 
         # Should succeed (after fix to module_codegen.py)
         assert result.returncode == 0, f"Script failed for auth: {result.stderr}"
-        assert "CapabilityNotFoundError" not in result.stderr
+        assert "CommonException" not in result.stderr

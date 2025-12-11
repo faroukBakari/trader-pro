@@ -63,11 +63,6 @@ __all__ = [
     "CapabilityName",
     "CapabilitySpec",
     "ProviderConfig",
-    "ProviderError",
-    "AuthenticationError",
-    "ProviderNotFoundError",
-    "CapabilityNotFoundError",
-    "DatafeedError",
 ]
 
 
@@ -135,32 +130,3 @@ class ProviderConfig(BaseModel):
     """
 
     enabled: bool = True
-
-
-# Provider-specific exceptions
-class ProviderError(Exception):
-    """Base exception for all provider errors."""
-
-
-class AuthenticationError(ProviderError):
-    """Authentication verification failed."""
-
-
-class ProviderNotFoundError(ProviderError):
-    """Required provider not found."""
-
-
-class CapabilityNotFoundError(ProviderError):
-    """Required capability not satisfied by any provider."""
-
-
-class DatafeedError(ProviderError):
-    """Datafeed operation failed.
-
-    Raised by datafeed providers when:
-    - Symbol search fails
-    - Symbol not found
-    - Historical data request fails
-    - Subscription fails
-    - Invalid parameters
-    """

@@ -5,11 +5,8 @@ import importlib
 import logging
 from pathlib import Path
 
-from trading_api.models.common import (
-    CapabilityNotFoundError,
-    CapabilitySpec,
-    ProviderNotFoundError,
-)
+from trading_api.models.common import CapabilitySpec
+from trading_api.models.exceptions import CommonException
 from trading_api.shared import Provider
 
 logger = logging.getLogger(__name__)
@@ -102,7 +99,7 @@ class ProviderRegistry:
             List of provider instances (deduplicated)
 
         Raises:
-            CapabilityNotFoundError: If capability not satisfied
+            CommonException: If capability not satisfied
 
         [LAZY-LOADING]: Provider instances created on first request.
         [ASYNC]: Must be awaited due to lifecycle hooks.
@@ -127,9 +124,10 @@ class ProviderRegistry:
                     break
 
             if not matched:
-                raise CapabilityNotFoundError(
-                    f"No provider found for capability '{req_cap}'. "
-                    f"Available providers: {list(self._provider_classes.keys())}"
+                raise CommonException(
+                    code="COMMON_CAPABILITY_NOT_FOUND",
+                    message=f"No provider found for capability '{req_cap}'. "
+                    f"Available providers: {list(self._provider_classes.keys())}",
                 )
 
         return list(providers.values())
@@ -156,7 +154,10 @@ class ProviderRegistry:
                 return self._instances[name]
 
             if name not in self._provider_classes:
-                raise ProviderNotFoundError(f"Provider '{name}' not registered")
+                raise CommonException(
+                    code="COMMON_PROVIDER_NOT_FOUND",
+                    message=f"Provider '{name}' not registered",
+                )
 
             provider_class = self._provider_classes[name]
             instance = provider_class()
@@ -176,7 +177,7 @@ class ProviderRegistry:
             Provider instance
 
         Raises:
-            ProviderNotFoundError: If provider not found
+            CommonException: If provider not found
         """
         return await self._get_instance(name)
 

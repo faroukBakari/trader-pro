@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
-from fastapi import HTTPException
 from jose import jwt
 
 from trading_api.models.auth import (
@@ -17,6 +16,7 @@ from trading_api.models.auth import (
     UserCreate,
 )
 from trading_api.models.common import CapabilitySpec
+from trading_api.models.exceptions import ServiceException
 from trading_api.modules.auth.repository import (
     InMemoryRefreshTokenRepository,
     InMemoryUserRepository,
@@ -121,19 +121,8 @@ class AuthService(AuthServiceInterface, ServiceInterface):
             Use auth_provider.verify_token() instead.
             This method will be removed in a future version.
         """
-        try:
-            # Delegate to auth provider (refactored to use provider pattern)
-            claims = await self.auth_provider.verify_token(id_token)
-            return claims
-        except Exception as e:
-            # Convert provider exceptions to HTTPException for backward compatibility
-            from trading_api.models.common import AuthenticationError
-
-            if isinstance(e, AuthenticationError):
-                raise HTTPException(status_code=401, detail=str(e))
-            raise HTTPException(
-                status_code=500, detail=f"Token verification error: {str(e)}"
-            )
+        claims = await self.auth_provider.verify_token(id_token)
+        return claims
 
     async def authenticate_google_user(
         self, id_token: str, device_info: DeviceInfo
@@ -197,11 +186,19 @@ class AuthService(AuthServiceInterface, ServiceInterface):
         )
 
         if token_data is None:
-            raise HTTPException(status_code=401, detail="Invalid refresh token")
+            raise ServiceException(
+                code="SERVICE_AUTH_INVALID_REFRESH_TOKEN",
+                message="Invalid refresh token",
+                module="auth",
+            )
 
         user = await self.user_repository.get_by_id(token_data["user_id"])
         if user is None:
-            raise HTTPException(status_code=401, detail="User not found")
+            raise ServiceException(
+                code="SERVICE_AUTH_USER_NOT_FOUND",
+                message="User not found",
+                module="auth",
+            )
 
         new_access_token = self._create_access_token(user)
         new_refresh_token = self._generate_refresh_token()

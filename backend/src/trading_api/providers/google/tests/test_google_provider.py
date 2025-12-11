@@ -4,7 +4,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from trading_api.models.common import AuthenticationError, CapabilitySpec
+from trading_api.models.common import CapabilitySpec
+from trading_api.models.exceptions import ProviderException
 from trading_api.models.providers.google_oauth_configs import GoogleProviderConfig
 from trading_api.providers.google import GoogleProvider
 
@@ -69,7 +70,7 @@ async def test_verify_token_invalid_response(provider: GoogleProvider) -> None:
     mock_response.text = "Invalid token"
 
     with patch("httpx.AsyncClient.get", return_value=mock_response):
-        with pytest.raises(AuthenticationError, match="Invalid Google token"):
+        with pytest.raises(ProviderException, match="Invalid Google token"):
             await provider.verify_token("invalid_token")
 
 
@@ -86,7 +87,7 @@ async def test_verify_token_invalid_audience(provider: GoogleProvider) -> None:
     }
 
     with patch("httpx.AsyncClient.get", return_value=mock_response):
-        with pytest.raises(AuthenticationError, match="Invalid token audience"):
+        with pytest.raises(ProviderException, match="Invalid token audience"):
             await provider.verify_token("invalid_token")
 
 
@@ -103,7 +104,7 @@ async def test_verify_token_email_not_verified(provider: GoogleProvider) -> None
     }
 
     with patch("httpx.AsyncClient.get", return_value=mock_response):
-        with pytest.raises(AuthenticationError, match="Email not verified"):
+        with pytest.raises(ProviderException, match="Email not verified"):
             await provider.verify_token("invalid_token")
 
 

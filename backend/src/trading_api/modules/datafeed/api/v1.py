@@ -2,10 +2,9 @@
 Datafeed API endpoints
 """
 
-import asyncio
 from typing import Annotated, Any, List, Optional
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, Query
 
 from trading_api.models import (
     DatafeedConfiguration,
@@ -16,6 +15,7 @@ from trading_api.models import (
     SymbolInfo,
 )
 from trading_api.models.auth import UserData
+from trading_api.models.exceptions import ServiceException
 from trading_api.models.market import Resolution
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.middleware.auth import get_current_user
@@ -43,18 +43,7 @@ class DatafeedApi(APIRouterInterface):
 
             Requires authentication but data is global (market data).
             """
-            try:
-                config = self.service.get_configuration()
-                return config
-            except (TimeoutError, asyncio.TimeoutError):
-                raise HTTPException(
-                    status_code=504,
-                    detail="Request timeout",
-                )
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+            return self.service.get_configuration()
 
         @self.get(
             "/search",
@@ -80,23 +69,12 @@ class DatafeedApi(APIRouterInterface):
             - **max_results**: Maximum number of results to return
             """
 
-            try:
-                results = await self.service.search_symbols(
-                    user_input=user_input,
-                    exchange=exchange,
-                    symbol_type=symbol_type,
-                    max_results=max_results,
-                )
-                return results
-            except (TimeoutError, asyncio.TimeoutError):
-                raise HTTPException(
-                    status_code=504,
-                    detail="Request timeout",
-                )
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+            return await self.service.search_symbols(
+                user_input=user_input,
+                exchange=exchange,
+                symbol_type=symbol_type,
+                max_results=max_results,
+            )
 
         @self.get(
             "/resolve/{symbol}",
@@ -115,20 +93,14 @@ class DatafeedApi(APIRouterInterface):
 
             - **symbol**: Symbol name or ticker to resolve
             """
-            try:
-                symbol_info = await self.service.resolve_ticker(symbol)
-                if not symbol_info:
-                    raise HTTPException(status_code=404, detail="Symbol not found")
-                return symbol_info
-            except (TimeoutError, asyncio.TimeoutError):
-                raise HTTPException(
-                    status_code=504,
-                    detail="Request timeout",
+            symbol_info = await self.service.resolve_ticker(symbol)
+            if not symbol_info:
+                raise ServiceException(
+                    code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
+                    message=f"Symbol '{symbol}' not found.",
+                    module="datafeed",
                 )
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+            return symbol_info
 
         @self.get(
             "/bars",
@@ -155,24 +127,14 @@ class DatafeedApi(APIRouterInterface):
             - **to_time**: End timestamp in seconds
             - **count_back**: Number of bars to count back (optional)
             """
-            try:
-                bars = await self.service.get_bars(
-                    ticker=symbol,
-                    resolution=resolution,
-                    from_time=from_time,
-                    to_time=to_time,
-                    count_back=count_back,
-                )
-                return GetBarsResponse(bars=bars, no_data=len(bars) == 0)
-            except (TimeoutError, asyncio.TimeoutError):
-                raise HTTPException(
-                    status_code=504,
-                    detail="Request timeout",
-                )
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+            bars = await self.service.get_bars(
+                ticker=symbol,
+                resolution=resolution,
+                from_time=from_time,
+                to_time=to_time,
+                count_back=count_back,
+            )
+            return GetBarsResponse(bars=bars, no_data=len(bars) == 0)
 
         @self.post(
             "/quotes",
@@ -191,18 +153,7 @@ class DatafeedApi(APIRouterInterface):
 
             - **symbols**: Array of symbol names to get quotes for
             """
-            try:
-                quotes = await self.service.get_quotes(body.symbols)
-                return quotes
-            except (TimeoutError, asyncio.TimeoutError):
-                raise HTTPException(
-                    status_code=504,
-                    detail="Request timeout",
-                )
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+            return await self.service.get_quotes(body.symbols)
 
     @property
     def service(self) -> DatafeedService:
@@ -212,7 +163,11 @@ class DatafeedApi(APIRouterInterface):
             DatafeedService: The datafeed service
         """
         if not isinstance(self._service, DatafeedService):
-            raise ValueError("Service has not been initialized")
+            raise ServiceException(
+                code="DATAFEED_SERVICE_NOT_INITIALIZED",
+                message="DatafeedService is not initialized properly.",
+                module="datafeed",
+            )
         return self._service
 
 

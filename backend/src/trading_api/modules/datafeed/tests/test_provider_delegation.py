@@ -329,25 +329,3 @@ async def test_get_bars_applies_count_back_filter() -> None:
     # Should return only last 3 bars
     assert len(results) == 3
     assert results == mock_bars[-3:]
-
-
-@pytest.mark.asyncio
-async def test_get_bars_handles_provider_exception() -> None:
-    """Test get_bars handles provider exceptions gracefully."""
-    mock_provider = MockDatafeedProvider()
-    mock_provider._get_historical_bars_mock.side_effect = Exception("Provider error")
-
-    module_dir = Path(__file__).parent.parent
-    service = DatafeedService(module_dir, providers=[mock_provider])
-
-    # Call get_bars
-    results = await service.get_bars(
-        ticker="AAPL",
-        resolution=Resolution.DAY_1,
-        from_time=0,
-        to_time=999999999999,
-        count_back=None,
-    )
-
-    # Should return empty list on error
-    assert results == []

@@ -18,7 +18,8 @@ from trading_api.models import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.models.common import CapabilitySpec, DatafeedError
+from trading_api.models.common import CapabilitySpec
+from trading_api.models.exceptions import ServiceException
 from trading_api.models.market import Resolution
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.shared.ws.ws_router import WsRouteService
@@ -97,11 +98,19 @@ class DatafeedService(WsRouteService):
         """
 
         if topic in self._topic_to_subscription_id:
-            raise DatafeedError(f"Topic already exists in DatafeedService: {topic}")
+            raise ServiceException(
+                code="SERVICE_DATAFEED_TOPIC_EXISTS",
+                message=f"Topic already exists in DatafeedService: {topic}",
+                module="datafeed",
+            )
 
         # Parse topic format: "topic_type:{json_params}"
         if ":" not in topic:
-            raise DatafeedError(f"Invalid topic format: {topic}")
+            raise ServiceException(
+                code="SERVICE_DATAFEED_INVALID_TOPIC_FORMAT",
+                message=f"Invalid topic format: {topic}",
+                module="datafeed",
+            )
 
         topic_type, params_json = topic.split(":", 1)
 
@@ -138,7 +147,11 @@ class DatafeedService(WsRouteService):
             )
 
             if not all_symbols:
-                raise DatafeedError("No symbols provided for quote subscription")
+                raise ServiceException(
+                    code="SERVICE_DATAFEED_NO_SYMBOLS",
+                    message="No symbols provided for quote subscription",
+                    module="datafeed",
+                )
 
             logger.info(f"creating new topic : {topic}")
 
@@ -150,7 +163,11 @@ class DatafeedService(WsRouteService):
             # Track subscription IDs for cleanup (list for quotes, int for bars)
             self._topic_to_subscription_id[topic] = subscription_ids
         else:
-            raise DatafeedError(f"Unknown topic type: {topic_type}")
+            raise ServiceException(
+                code="SERVICE_DATAFEED_UNKNOWN_TOPIC_TYPE",
+                message=f"Unknown topic type: {topic_type}",
+                module="datafeed",
+            )
 
     def remove_topic(self, topic: str) -> None:
         """Remove topic and cleanup subscriptions.
@@ -237,14 +254,10 @@ class DatafeedService(WsRouteService):
 
     async def resolve_ticker(self, ticker: str) -> Optional[SymbolInfo]:
         """Resolve symbol information via datafeed provider."""
-        try:
-            return await self.datafeed_provider.get_symbol_info(
-                ticker=ticker,
-                timeout=5.0,
-            )
-        except Exception as e:
-            logger.warning(f"Failed to resolve symbol '{ticker}': {e}")
-            return None
+        return await self.datafeed_provider.get_symbol_info(
+            ticker=ticker,
+            timeout=5.0,
+        )
 
     async def get_bars(
         self,
@@ -272,39 +285,33 @@ class DatafeedService(WsRouteService):
         start_time = datetime.fromtimestamp(from_time / 1000)
         end_time = datetime.fromtimestamp(to_time / 1000)
 
-        # Delegate to provider
-        try:
-            bars = await self.datafeed_provider.get_historical_bars(
-                ticker=ticker,
-                start_time=start_time,
-                end_time=end_time,
-                resolution=resolution,
-                timeout=30.0,
-            )
+        bars = await self.datafeed_provider.get_historical_bars(
+            ticker=ticker,
+            start_time=start_time,
+            end_time=end_time,
+            resolution=resolution,
+            timeout=30.0,
+        )
 
-            # Apply count_back filter if specified
-            if count_back and count_back > 0:
-                bars = bars[-count_back:]
+        # Apply count_back filter if specified
+        if count_back and count_back > 0:
+            bars = bars[-count_back:]
 
-            return bars
-
-        except Exception as e:
-            logger.exception(f"Failed to get bars for {ticker}: {e}")
-            return []
+        return bars
 
     async def get_quotes(self, tickers: List[str]) -> List[QuoteData]:
         """Get quotes for multiple symbols"""
 
-        try:
-            # Delegate to provider for real quote snapshots
-            return await self.datafeed_provider.get_quotes_snapshot(
-                tickers=tickers,
-                timeout=4.0,
-            )
-        except Exception as e:
-            logger.exception(f"Failed to get quotes for {tickers}: {e}")
-            # Return error responses for all symbols
-            return [
-                QuoteData(s="error", n=symbol, v={"error": str(e)})
-                for symbol in tickers
-            ]
+        # try:
+        # Delegate to provider for real quote snapshots
+        return await self.datafeed_provider.get_quotes_snapshot(
+            tickers=tickers,
+            timeout=4.0,
+        )
+        # except ProviderException as e:
+        #     logger.exception(e)
+        #     # Return error responses for all symbols
+        #     return [
+        #         QuoteData(s="error", n=symbol, v={"error": f"{e!r}"})
+        #         for symbol in tickers
+        #     ]
