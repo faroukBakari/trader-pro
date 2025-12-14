@@ -59,7 +59,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 debug_log(f"Client {client.uid} subscribed to topic: {topic}")
             return SubscriptionResponse(status="ok", sub_id=payload.sub_id, topic=topic)
 
-        def update(
+        def recv_update(
             payload: SubscriptionUpdate[_TData],
         ) -> SubscriptionUpdate[_TData]:
             """Broadcast data updates to subscribed clients"""
@@ -74,45 +74,38 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             client.unsubscribe(topic)
             if DEBUG_WS_ROUTER:
                 debug_log(f"Client {client.uid} unsubscribed from topic: {topic}")
-            try:
-                self._clients = self._refresh_active_clients()
 
-                remaining_topic_clients = [
-                    clt for clt in self._clients if topic in clt.topics
-                ]
-                if not remaining_topic_clients:
-                    if DEBUG_WS_ROUTER:
-                        debug_log(
-                            f"No more clients for topic : {topic} in router {self.route}"
-                        )
-                    self._remove_topic(topic)
+            self._clients = self._refresh_active_clients()
 
-                remaining_client_topics = [
-                    tpc for tpc in client.topics if tpc in self._topics
-                ]
-                if not remaining_client_topics:
-                    if DEBUG_WS_ROUTER:
-                        debug_log(
-                            f"No more topics for client: {client.uid} in router {self.route}"
-                        )
-                    self._clients.discard(client)
+            remaining_topic_clients = [
+                clt for clt in self._clients if topic in clt.topics
+            ]
+            if not remaining_topic_clients:
+                if DEBUG_WS_ROUTER:
+                    debug_log(
+                        f"No more clients for topic : {topic} in router {self.route}"
+                    )
+                self._remove_topic(topic)
 
-                return SubscriptionResponse(
-                    status="ok",
-                    sub_id=payload.sub_id,
-                    topic=topic,
-                )
-            except Exception as e:
-                logger.exception(f"Error during unsubscribe for topic {topic}: {e}")
-                return SubscriptionResponse(
-                    status="error",
-                    sub_id=payload.sub_id,
-                    topic=f"Unsubscribe failed: {e}",
-                )
+            remaining_client_topics = [
+                tpc for tpc in client.topics if tpc in self._topics
+            ]
+            if not remaining_client_topics:
+                if DEBUG_WS_ROUTER:
+                    debug_log(
+                        f"No more topics for client: {client.uid} in router {self.route}"
+                    )
+                self._clients.discard(client)
 
-        update.__annotations__["payload"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
-        update.__annotations__["return"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
-        self.recv("update")(update)
+            return SubscriptionResponse(
+                status="ok",
+                sub_id=payload.sub_id,
+                topic=topic,
+            )
+
+        recv_update.__annotations__["payload"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
+        recv_update.__annotations__["return"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
+        self.recv("update")(recv_update)
         # Use correct parameter names and wrap request_type in SubscriptionRequest
         send_subscribe.__annotations__["payload"] = SubscriptionRequest[request_type]  # type: ignore[valid-type]
         self.send("subscribe", reply="subscribe.response")(send_subscribe)
@@ -145,7 +138,6 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                     f"No more clients for topic : {update.topic} in router {self.route}"
                 )
             self._remove_topic(topic)
-            await asyncio.sleep(1)
             return
 
         try:

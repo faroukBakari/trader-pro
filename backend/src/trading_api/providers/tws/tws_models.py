@@ -4,226 +4,266 @@ Combines realtime bars and market data (quotes) into a single typed dataclass.
 Handles all TickTypeEnum values with proper typing.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from enum import Enum
+from typing import Literal
 
-from ibapi.contract import Contract
-
-
-@dataclass
-class TWSError(Exception):
-    """TWS API Error with structured error details."""
-
-    reqId: int
-    errorCode: int
-    errorString: str
-    errorTime: int
-    advancedOrderRejectJson: str = ""
-
-    def __str__(self) -> str:
-        return f"TWS error {self.errorCode} (reqId={self.reqId}): {self.errorString}"
+# =============================================================================
+# TWS Message ID to Capability Mapping
+# =============================================================================
+# Maps incoming message IDs (IN class from ibapi.message) to provider capabilities.
+# Used for routing errors and responses to the correct capability handler.
+# =============================================================================
 
 
-@dataclass(slots=True)
-class RTMarketData:
-    """Unified real-time market data from TWS.
+class TWSCapability(str, Enum):
+    """TWS provider capability types."""
 
-    Consolidates:
-    - Real-time 5-second bars (realtimeBar callback)
-    - Market data ticks (tickPrice, tickSize, tickString, tickGeneric callbacks)
+    DATAFEED = "datafeed"
+    BROKER = "broker"
+    SHARED = "shared"  # Used by both capabilities
 
-    All fields are optional (None = not received yet).
+
+# Incoming message ID → Capability mapping
+# Reference: ibapi/message.py IN class
+IN_MSG_CAPABILITY: dict[int, TWSCapability] = {
+    # =========================================================================
+    # Market Data (datafeed capability)
+    # =========================================================================
+    1: TWSCapability.DATAFEED,  # TICK_PRICE
+    2: TWSCapability.DATAFEED,  # TICK_SIZE
+    12: TWSCapability.DATAFEED,  # MARKET_DEPTH
+    13: TWSCapability.DATAFEED,  # MARKET_DEPTH_L2
+    14: TWSCapability.DATAFEED,  # NEWS_BULLETINS
+    17: TWSCapability.DATAFEED,  # HISTORICAL_DATA
+    19: TWSCapability.DATAFEED,  # SCANNER_PARAMETERS
+    20: TWSCapability.DATAFEED,  # SCANNER_DATA
+    21: TWSCapability.DATAFEED,  # TICK_OPTION_COMPUTATION
+    45: TWSCapability.DATAFEED,  # TICK_GENERIC
+    46: TWSCapability.DATAFEED,  # TICK_STRING
+    47: TWSCapability.DATAFEED,  # TICK_EFP
+    50: TWSCapability.DATAFEED,  # REAL_TIME_BARS
+    51: TWSCapability.DATAFEED,  # FUNDAMENTAL_DATA
+    57: TWSCapability.DATAFEED,  # TICK_SNAPSHOT_END
+    58: TWSCapability.DATAFEED,  # MARKET_DATA_TYPE
+    75: TWSCapability.DATAFEED,  # SECURITY_DEFINITION_OPTION_PARAMETER
+    76: TWSCapability.DATAFEED,  # SECURITY_DEFINITION_OPTION_PARAMETER_END
+    80: TWSCapability.DATAFEED,  # MKT_DEPTH_EXCHANGES
+    81: TWSCapability.DATAFEED,  # TICK_REQ_PARAMS
+    82: TWSCapability.DATAFEED,  # SMART_COMPONENTS
+    83: TWSCapability.DATAFEED,  # NEWS_ARTICLE
+    84: TWSCapability.DATAFEED,  # TICK_NEWS
+    85: TWSCapability.DATAFEED,  # NEWS_PROVIDERS
+    86: TWSCapability.DATAFEED,  # HISTORICAL_NEWS
+    87: TWSCapability.DATAFEED,  # HISTORICAL_NEWS_END
+    88: TWSCapability.DATAFEED,  # HEAD_TIMESTAMP
+    89: TWSCapability.DATAFEED,  # HISTOGRAM_DATA
+    90: TWSCapability.DATAFEED,  # HISTORICAL_DATA_UPDATE
+    91: TWSCapability.DATAFEED,  # REROUTE_MKT_DATA_REQ
+    92: TWSCapability.DATAFEED,  # REROUTE_MKT_DEPTH_REQ
+    93: TWSCapability.DATAFEED,  # MARKET_RULE
+    96: TWSCapability.DATAFEED,  # HISTORICAL_TICKS
+    97: TWSCapability.DATAFEED,  # HISTORICAL_TICKS_BID_ASK
+    98: TWSCapability.DATAFEED,  # HISTORICAL_TICKS_LAST
+    99: TWSCapability.DATAFEED,  # TICK_BY_TICK
+    104: TWSCapability.DATAFEED,  # WSH_META_DATA
+    105: TWSCapability.DATAFEED,  # WSH_EVENT_DATA
+    106: TWSCapability.DATAFEED,  # HISTORICAL_SCHEDULE
+    108: TWSCapability.DATAFEED,  # HISTORICAL_DATA_END
+    # =========================================================================
+    # Order/Account (broker capability)
+    # =========================================================================
+    3: TWSCapability.BROKER,  # ORDER_STATUS
+    5: TWSCapability.BROKER,  # OPEN_ORDER
+    6: TWSCapability.BROKER,  # ACCT_VALUE
+    7: TWSCapability.BROKER,  # PORTFOLIO_VALUE
+    8: TWSCapability.BROKER,  # ACCT_UPDATE_TIME
+    11: TWSCapability.BROKER,  # EXECUTION_DATA
+    15: TWSCapability.BROKER,  # MANAGED_ACCTS
+    16: TWSCapability.BROKER,  # RECEIVE_FA
+    53: TWSCapability.BROKER,  # OPEN_ORDER_END
+    54: TWSCapability.BROKER,  # ACCT_DOWNLOAD_END
+    55: TWSCapability.BROKER,  # EXECUTION_DATA_END
+    56: TWSCapability.BROKER,  # DELTA_NEUTRAL_VALIDATION
+    59: TWSCapability.BROKER,  # COMMISSION_AND_FEES_REPORT
+    61: TWSCapability.BROKER,  # POSITION_DATA
+    62: TWSCapability.BROKER,  # POSITION_END
+    63: TWSCapability.BROKER,  # ACCOUNT_SUMMARY
+    64: TWSCapability.BROKER,  # ACCOUNT_SUMMARY_END
+    71: TWSCapability.BROKER,  # POSITION_MULTI
+    72: TWSCapability.BROKER,  # POSITION_MULTI_END
+    73: TWSCapability.BROKER,  # ACCOUNT_UPDATE_MULTI
+    74: TWSCapability.BROKER,  # ACCOUNT_UPDATE_MULTI_END
+    77: TWSCapability.BROKER,  # SOFT_DOLLAR_TIERS
+    78: TWSCapability.BROKER,  # FAMILY_CODES
+    94: TWSCapability.BROKER,  # PNL
+    95: TWSCapability.BROKER,  # PNL_SINGLE
+    100: TWSCapability.BROKER,  # ORDER_BOUND
+    101: TWSCapability.BROKER,  # COMPLETED_ORDER
+    102: TWSCapability.BROKER,  # COMPLETED_ORDERS_END
+    103: TWSCapability.BROKER,  # REPLACE_FA_END
+    # =========================================================================
+    # Shared (both capabilities)
+    # =========================================================================
+    4: TWSCapability.SHARED,  # ERR_MSG
+    9: TWSCapability.SHARED,  # NEXT_VALID_ID
+    10: TWSCapability.SHARED,  # CONTRACT_DATA
+    18: TWSCapability.SHARED,  # BOND_CONTRACT_DATA
+    49: TWSCapability.SHARED,  # CURRENT_TIME
+    52: TWSCapability.SHARED,  # CONTRACT_DATA_END
+    65: TWSCapability.SHARED,  # VERIFY_MESSAGE_API
+    66: TWSCapability.SHARED,  # VERIFY_COMPLETED
+    67: TWSCapability.SHARED,  # DISPLAY_GROUP_LIST
+    68: TWSCapability.SHARED,  # DISPLAY_GROUP_UPDATED
+    69: TWSCapability.SHARED,  # VERIFY_AND_AUTH_MESSAGE_API
+    70: TWSCapability.SHARED,  # VERIFY_AND_AUTH_COMPLETED
+    79: TWSCapability.SHARED,  # SYMBOL_SAMPLES
+    107: TWSCapability.SHARED,  # USER_INFO
+    109: TWSCapability.SHARED,  # CURRENT_TIME_IN_MILLIS
+}
+
+# Message ID → Name mapping (reverse lookup from IN class constants)
+# Used to generate error codes like "TICK_PRICE_ERROR"
+IN_MSG_ID_TO_NAME: dict[int, str] = {
+    1: "TICK_PRICE",
+    2: "TICK_SIZE",
+    3: "ORDER_STATUS",
+    4: "ERR_MSG",
+    5: "OPEN_ORDER",
+    6: "ACCT_VALUE",
+    7: "PORTFOLIO_VALUE",
+    8: "ACCT_UPDATE_TIME",
+    9: "NEXT_VALID_ID",
+    10: "CONTRACT_DATA",
+    11: "EXECUTION_DATA",
+    12: "MARKET_DEPTH",
+    13: "MARKET_DEPTH_L2",
+    14: "NEWS_BULLETINS",
+    15: "MANAGED_ACCTS",
+    16: "RECEIVE_FA",
+    17: "HISTORICAL_DATA",
+    18: "BOND_CONTRACT_DATA",
+    19: "SCANNER_PARAMETERS",
+    20: "SCANNER_DATA",
+    21: "TICK_OPTION_COMPUTATION",
+    45: "TICK_GENERIC",
+    46: "TICK_STRING",
+    47: "TICK_EFP",
+    49: "CURRENT_TIME",
+    50: "REAL_TIME_BARS",
+    51: "FUNDAMENTAL_DATA",
+    52: "CONTRACT_DATA_END",
+    53: "OPEN_ORDER_END",
+    54: "ACCT_DOWNLOAD_END",
+    55: "EXECUTION_DATA_END",
+    56: "DELTA_NEUTRAL_VALIDATION",
+    57: "TICK_SNAPSHOT_END",
+    58: "MARKET_DATA_TYPE",
+    59: "COMMISSION_AND_FEES_REPORT",
+    61: "POSITION_DATA",
+    62: "POSITION_END",
+    63: "ACCOUNT_SUMMARY",
+    64: "ACCOUNT_SUMMARY_END",
+    65: "VERIFY_MESSAGE_API",
+    66: "VERIFY_COMPLETED",
+    67: "DISPLAY_GROUP_LIST",
+    68: "DISPLAY_GROUP_UPDATED",
+    69: "VERIFY_AND_AUTH_MESSAGE_API",
+    70: "VERIFY_AND_AUTH_COMPLETED",
+    71: "POSITION_MULTI",
+    72: "POSITION_MULTI_END",
+    73: "ACCOUNT_UPDATE_MULTI",
+    74: "ACCOUNT_UPDATE_MULTI_END",
+    75: "SECURITY_DEFINITION_OPTION_PARAMETER",
+    76: "SECURITY_DEFINITION_OPTION_PARAMETER_END",
+    77: "SOFT_DOLLAR_TIERS",
+    78: "FAMILY_CODES",
+    79: "SYMBOL_SAMPLES",
+    80: "MKT_DEPTH_EXCHANGES",
+    81: "TICK_REQ_PARAMS",
+    82: "SMART_COMPONENTS",
+    83: "NEWS_ARTICLE",
+    84: "TICK_NEWS",
+    85: "NEWS_PROVIDERS",
+    86: "HISTORICAL_NEWS",
+    87: "HISTORICAL_NEWS_END",
+    88: "HEAD_TIMESTAMP",
+    89: "HISTOGRAM_DATA",
+    90: "HISTORICAL_DATA_UPDATE",
+    91: "REROUTE_MKT_DATA_REQ",
+    92: "REROUTE_MKT_DEPTH_REQ",
+    93: "MARKET_RULE",
+    94: "PNL",
+    95: "PNL_SINGLE",
+    96: "HISTORICAL_TICKS",
+    97: "HISTORICAL_TICKS_BID_ASK",
+    98: "HISTORICAL_TICKS_LAST",
+    99: "TICK_BY_TICK",
+    100: "ORDER_BOUND",
+    101: "COMPLETED_ORDER",
+    102: "COMPLETED_ORDERS_END",
+    103: "REPLACE_FA_END",
+    104: "WSH_META_DATA",
+    105: "WSH_EVENT_DATA",
+    106: "HISTORICAL_SCHEDULE",
+    107: "USER_INFO",
+    108: "HISTORICAL_DATA_END",
+    109: "CURRENT_TIME_IN_MILLIS",
+}
+
+
+def get_msg_capability(msg_id: int) -> TWSCapability:
+    """Get capability for a given msgId.
+
+    Args:
+        msg_id: TWS incoming message ID (from IN class)
+
+    Returns:
+        TWSCapability enum value. Defaults to SHARED for unknown msgIds.
     """
+    return IN_MSG_CAPABILITY.get(msg_id, TWSCapability.SHARED)
 
-    # tracking flags
-    contract: Contract | None = None  # Symbol:Exchange identifier
-    bar_data_reqId: int | None = None
-    mkt_data_reqId: int | None = None
-    bar_size: str | None = None
-    format_date: int | None = None
-    whatToShow: str | None = None
 
-    # === Real-time bar fields (from realtimeBar callback) ===
-    bar_date: str | None = None  # Raw TWS date string (yyyyMMdd HH:mm:ss or epoch)
-    bar_time: int | None = None  # Unix timestamp of bar
-    bar_open: float | None = None
-    bar_high: float | None = None
-    bar_low: float | None = None
-    bar_close: float | None = None
-    bar_volume: int | None = None
-    bar_wap: float | None = None  # Weighted average price
-    bar_count: int | None = None  # Trade count in bar
+def get_msg_name(msg_id: int) -> str:
+    """Get the IN class constant name for a message ID.
 
-    # === Core price ticks (tickPrice callback) ===
-    # TickTypeEnum indices: BID=1, ASK=2, LAST=4, HIGH=6, LOW=7, CLOSE=9, OPEN=14
-    bid: float | None = None  # 1
-    ask: float | None = None  # 2
-    last: float | None = None  # 4
-    high: float | None = None  # 6
-    low: float | None = None  # 7
-    close: float | None = None  # 9
-    open: float | None = None  # 14
+    Args:
+        msg_id: TWS incoming message ID
 
-    # === Core size ticks (tickSize callback) ===
-    # TickTypeEnum indices: BID_SIZE=0, ASK_SIZE=3, LAST_SIZE=5, VOLUME=8
-    bid_size: int | None = None  # 0
-    ask_size: int | None = None  # 3
-    last_size: int | None = None  # 5
-    volume: int | None = None  # 8
+    Returns:
+        Message name string (e.g., "TICK_PRICE", "ORDER_STATUS").
+        Returns "UNKNOWN_{msg_id}" for unmapped IDs.
+    """
+    return IN_MSG_ID_TO_NAME.get(msg_id, f"UNKNOWN_{msg_id}")
 
-    # === Historical range ticks ===
-    low_13_week: float | None = None  # 15
-    high_13_week: float | None = None  # 16
-    low_26_week: float | None = None  # 17
-    high_26_week: float | None = None  # 18
-    low_52_week: float | None = None  # 19
-    high_52_week: float | None = None  # 20
-    avg_volume: int | None = None  # 21
 
-    # === Option ticks ===
-    open_interest: int | None = None  # 22
-    option_historical_vol: float | None = None  # 23
-    option_implied_vol: float | None = None  # 24
-    option_bid_exch: str | None = None  # 25
-    option_ask_exch: str | None = None  # 26
-    option_call_open_interest: int | None = None  # 27
-    option_put_open_interest: int | None = None  # 28
-    option_call_volume: int | None = None  # 29
-    option_put_volume: int | None = None  # 30
+def get_error_code(msg_id: int, tws_error_code: int) -> str:
+    """Generate error code string for ProviderException.
 
-    # === Index/futures ticks ===
-    index_future_premium: float | None = None  # 31
+    Args:
+        msg_id: TWS incoming message ID
+        tws_error_code: TWS-specific error code
 
-    # === Exchange info ticks ===
-    bid_exch: str | None = None  # 32
-    ask_exch: str | None = None  # 33
+    Returns:
+        Error code string like "PROVIDER_TWS_TICK_PRICE_2106"
+    """
+    msg_name = get_msg_name(msg_id)
+    return f"PROVIDER_TWS_{msg_name}_{tws_error_code}"
 
-    # === Auction ticks ===
-    auction_volume: int | None = None  # 34
-    auction_price: float | None = None  # 35
-    auction_imbalance: int | None = None  # 36
 
-    # === Mark price ===
-    mark_price: float | None = None  # 37
+def get_capability_str(msg_id: int) -> Literal["datafeed", "broker", "shared"]:
+    """Get capability string for ProviderException.
 
-    # === Timestamp ticks ===
-    last_timestamp: str | None = None  # 45
+    Args:
+        msg_id: TWS incoming message ID
 
-    # === Shortability ticks ===
-    shortable: float | None = None  # 46
-    shortable_shares: int | None = None  # 89
-
-    # === Fundamental data ===
-    fundamental_ratios: str | None = None  # 47
-
-    # === Real-time volume ===
-    rt_volume: str | None = None  # 48
-    rt_trd_volume: int | None = None  # 77
-
-    # === Trading status ===
-    halted: int | None = None  # 49
-
-    # === Yield ticks ===
-    bid_yield: float | None = None  # 50
-    ask_yield: float | None = None  # 51
-    last_yield: float | None = None  # 52
-
-    # === Trade statistics ===
-    trade_count: int | None = None  # 54
-    trade_rate: float | None = None  # 55
-    volume_rate: float | None = None  # 56
-    last_rth_trade: float | None = None  # 57
-
-    # === Volatility ===
-    rt_historical_vol: float | None = None  # 58
-
-    # === Dividends ===
-    ib_dividends: str | None = None  # 59
-
-    # === Bond specific ===
-    bond_factor_multiplier: float | None = None  # 60
-
-    # === Regulatory ===
-    regulatory_imbalance: int | None = None  # 61
-
-    # === News ===
-    news_tick: str | None = None  # 62
-
-    # === Short-term volume ===
-    short_term_volume_3_min: int | None = None  # 63
-    short_term_volume_5_min: int | None = None  # 64
-    short_term_volume_10_min: int | None = None  # 65
-
-    # === Delayed data ticks (for non-professional subscribers) ===
-    delayed_bid: float | None = None  # 66
-    delayed_ask: float | None = None  # 67
-    delayed_last: float | None = None  # 68
-    delayed_bid_size: int | None = None  # 69
-    delayed_ask_size: int | None = None  # 70
-    delayed_last_size: int | None = None  # 71
-    delayed_high: float | None = None  # 72
-    delayed_low: float | None = None  # 73
-    delayed_volume: int | None = None  # 74
-    delayed_close: float | None = None  # 75
-    delayed_open: float | None = None  # 76
-    delayed_last_timestamp: str | None = None  # 88
-    delayed_halted: int | None = None  # 90
-
-    # === Credit manager ===
-    creditman_mark_price: float | None = None  # 78
-    creditman_slow_mark_price: float | None = None  # 79
-
-    # === Exchange info ===
-    last_exch: str | None = None  # 84
-    last_reg_time: str | None = None  # 85
-
-    # === Futures ===
-    futures_open_interest: int | None = None  # 86
-
-    # === Options average volume ===
-    avg_opt_volume: int | None = None  # 87
-
-    # === ETF NAV ticks ===
-    etf_nav_close: float | None = None  # 92
-    etf_nav_prior_close: float | None = None  # 93
-    etf_nav_bid: float | None = None  # 94
-    etf_nav_ask: float | None = None  # 95
-    etf_nav_last: float | None = None  # 96
-    etf_frozen_nav_last: float | None = None  # 97
-    etf_nav_high: float | None = None  # 98
-    etf_nav_low: float | None = None  # 99
-
-    # === Social/sentiment ===
-    social_market_analytics: str | None = None  # 100
-
-    # === IPO ticks ===
-    estimated_ipo_midpoint: float | None = None  # 101
-    final_ipo_last: float | None = None  # 102
-
-    # === Delayed yield ===
-    delayed_yield_bid: float | None = None  # 103
-    delayed_yield_ask: float | None = None  # 104
-
-    # === Metadata (from tickReqParams / marketDataType callbacks) ===
-    market_data_type: int | None = None
-    min_tick: float | None = None
-    bbo_exchange: str | None = None
-    snapshot_permissions: int | None = None
-
-    # === Error tracking ===
-    error_messages: list[TWSError] = field(default_factory=list)
-
-    # Fields to preserve during reset
-    _PRESERVE_ON_RESET: frozenset[str] = field(
-        default=frozenset(
-            {
-                "contract",
-                "reqId_callback_map",
-                "_PRESERVE_ON_RESET",
-            }
-        ),
-        init=False,
-        repr=False,
-    )
+    Returns:
+        Capability string ("datafeed", "broker", or "" for shared).
+    """
+    cap = get_msg_capability(msg_id)
+    if cap == TWSCapability.SHARED:
+        return "shared"
+    return cap.value  # type: ignore[no-any-return]
 
 
 # Mapping from TickTypeEnum name → TwsRTData attribute name

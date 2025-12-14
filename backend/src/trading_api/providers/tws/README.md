@@ -2,20 +2,20 @@
 
 **Status:** Production-Ready (Core Capabilities)  
 **Architecture:** Three-Layer Streaming Pattern  
-**Last Updated:** December 7, 2025
+**Last Updated:** December 14, 2025
 
 ---
 
 ## Quick Reference
 
-| Layer               | File                                  | Responsibility                                   |
-| ------------------- | ------------------------------------- | ------------------------------------------------ |
-| **3 - TWSProvider** | `__init__.py`                         | DatafeedCapability impl, domain conversion       |
-| **2 - TWSClient**   | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket |
-| **1 - IBSocket**    | `tws_connection.py`                   | Raw TCP, daemon thread, ticker slot registry     |
-| **Mappers**         | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing    |
-| **Models**          | `tws_models.py`                       | `TWSError`, `AssetConfig`, tick type mappings    |
-| **Config**          | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings              |
+| Layer               | File                                  | Responsibility                                    |
+| ------------------- | ------------------------------------- | ------------------------------------------------- |
+| **3 - TWSProvider** | `__init__.py`                         | DatafeedCapability impl, domain conversion        |
+| **2 - TWSClient**   | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket  |
+| **1 - IBSocket**    | `tws_connection.py`                   | Raw TCP, daemon thread, ticker slot registry      |
+| **Mappers**         | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing     |
+| **Models**          | `tws_models.py`                       | `TWSCapability`, `AssetConfig`, tick/msg mappings |
+| **Config**          | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings               |
 
 **Tests:** `providers/tws/tests/test_{client,mappers,provider}.py`
 
@@ -240,6 +240,8 @@ ticker_slot = {
     # Metadata
     "market_data_type": 1,
     "min_tick": 0.01,
+    # Error tracking (set by _handle_request_error)
+    "last_exception": None,  # ProviderException | None
 }
 ```
 
@@ -308,11 +310,14 @@ Used by: `search_symbols()`, `get_historical_bars()`, `get_quotes_snapshot()`
 # TWSClient
 async def reqMatchingSymbols(self, pattern: str) -> list[ContractDescription]:
     reqId = self.next_req_id
-    coroutine = self.ibsocket.create_future(reqId, timeout=self._timeout)
+    coroutine = self.ibsocket.create_future(
+        reqId, timeout=self._timeout, capability="shared"  # capability for error routing
+    )
     self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
     return await coroutine
 
-# IBSocket (daemon thread)
+# IBSocket (daemon thread) - decorated with @error_handler
+@error_handler(capability="shared")
 def symbolSamples(self, reqId: int, contractDescriptions: list) -> None:
     accumulator = self._reader_accumulators.get(reqId)
     if isinstance(accumulator, list):
@@ -388,26 +393,71 @@ def cancelBarDataStream(self, stream_key: str) -> None:
 
 ## 11. Error Handling
 
-**TWSError Dataclass:** (in `tws_models.py`)
+TWS errors are converted to `ProviderException` and routed through centralized error handling.
+
+> **Full Reference:** See [ERROR-MANAGEMENT.md](../../../docs/ERROR-MANAGEMENT.md) for complete exception hierarchy.
+
+### Error Categories
+
+`TWSErrorCategory` in `tws_connection.py` defines error code prefixes:
+
+| Category   | Code Prefix               | Description                              |
+| ---------- | ------------------------- | ---------------------------------------- |
+| `CONN`     | `PROVIDER_TWS_CONN_*`     | Socket/connection errors                 |
+| `API`      | `PROVIDER_TWS_API_*`      | TWS API errors (from `error()` callback) |
+| `CALLBACK` | `PROVIDER_TWS_CALLBACK_*` | Callback processing errors               |
+
+### Error Handler Decorator
+
+All IBSocket callbacks use `@error_handler(capability)` to catch exceptions:
 
 ```python
-@dataclass
-class TWSError(Exception):
-    reqId: int
-    errorCode: int
-    errorString: str
-    errorTime: int
-    advancedOrderRejectJson: str = ""
+@error_handler(capability="datafeed")
+def tickPrice(self, reqId: int, tickType: int, price: float, attrib) -> None:
+    # Exceptions auto-wrapped as ProviderException
+    # Routes to _handle_request_error() on failure
+    ...
 ```
 
-**Common Error Codes:**
-| Code | Meaning | Action |
-|------|---------|--------|
-| 162 | Historical data pacing | Wait and retry |
-| 200 | No security found | Invalid symbol |
-| 354 | Not subscribed | Missing market data subscription |
-| 504 | Not connected | Reconnect |
-| 2104/2106 | Farm connected | Informational (warning) |
+### Centralized Error Routing
+
+`_handle_request_error()` routes errors based on request state:
+
+```python
+def _handle_request_error(self, category, detail, reqId, message, ...):
+    error = ProviderException(
+        code=f"PROVIDER_TWS_{category}_{detail}",
+        message=f"[reqId={reqId}] {message}",
+        provider="tws",
+        capability=self._reqId_to_capability.get(reqId, "shared"),
+    )
+
+    # 1. Ticker stream exists → store in last_exception + notify
+    # 2. Future exists → reject future with error
+    # 3. Neither → log as orphan error
+```
+
+### Capability Tracking
+
+Request IDs are mapped to capabilities for proper error routing:
+
+```python
+# On create_future() or register_stream()
+self._reqId_to_capability[reqId] = capability  # "datafeed", "broker", "shared"
+
+# On resolve/reject/unregister
+self._reqId_to_capability.pop(reqId, None)
+```
+
+### Common TWS Error Codes
+
+| Code      | Meaning                | Mapped Exception Code            |
+| --------- | ---------------------- | -------------------------------- |
+| 162       | Historical data pacing | `PROVIDER_TWS_API_TWS_CODE_162`  |
+| 200       | No security found      | `PROVIDER_TWS_API_TWS_CODE_200`  |
+| 354       | Not subscribed         | `PROVIDER_TWS_API_TWS_CODE_354`  |
+| 504       | Not connected          | `PROVIDER_TWS_API_TWS_CODE_504`  |
+| 2104/2106 | Farm connected         | Logged as warning (system error) |
 
 ---
 
@@ -462,6 +512,7 @@ make validate-tws
 | Topic                | Document                                       |
 | -------------------- | ---------------------------------------------- |
 | Provider System      | `backend/docs/PROVIDER-SYSTEM.md`              |
+| Error Management     | `backend/docs/ERROR-MANAGEMENT.md`             |
 | TWS API Reference    | `backend/external_packages/tws/docs/README.md` |
 | DatafeedService      | `modules/datafeed/service.py`                  |
 | Backend Testing      | `backend/docs/BACKEND_TESTING.md`              |

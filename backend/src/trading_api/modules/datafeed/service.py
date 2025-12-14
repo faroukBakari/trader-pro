@@ -306,7 +306,7 @@ class DatafeedService(WsRouteService):
         # Delegate to provider for real quote snapshots
         return await self.datafeed_provider.get_quotes_snapshot(
             tickers=tickers,
-            timeout=4.0,
+            timeout=1.0,
         )
         # except ProviderException as e:
         #     logger.exception(e)

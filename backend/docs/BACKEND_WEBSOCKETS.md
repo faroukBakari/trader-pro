@@ -351,6 +351,142 @@ ws.onmessage = (event) => {
 
 ---
 
+## WebSocket Error Handling
+
+WebSocket errors are handled by the global `_ws_exception_handler()` which converts exceptions to appropriate WebSocket close codes.
+
+> **Full Reference:** See [ERROR-MANAGEMENT.md](ERROR-MANAGEMENT.md) for complete exception hierarchy and HTTP handlers.
+
+### Exception Handler
+
+**Location:** `shared/exception_handlers.py`
+
+```python
+async def _ws_exception_handler(websocket: WebSocket, exc: TradingApiException) -> None:
+    """Handle exceptions during WebSocket communication."""
+    close_code = _map_code_to_ws_close_code(exc.code)
+    await websocket.close(code=close_code, reason=exc.message)
+```
+
+### Close Code Mapping
+
+| Error Code Pattern | WebSocket Close Code | Meaning |
+|-------------------|---------------------|---------|
+| `*AUTH*` | 1008 (Policy Violation) | Authentication/authorization failed |
+| `*INVALID*`, `*NOT_FOUND*` | 1003 (Unsupported Data) | Invalid request or resource not found |
+| Other | 1011 (Internal Error) | Unexpected server error |
+
+### Examples
+
+#### Authentication Failure (1008)
+
+```python
+# In middleware or router
+from trading_api.models.exceptions import CommonException
+
+async def get_current_user_ws(websocket: WebSocket) -> UserData:
+    token = websocket.cookies.get("access_token")
+    if not token:
+        raise CommonException(
+            code="COMMON_AUTH_TOKEN_MISSING",
+            message="No access token provided"
+        )
+    # ... validate token ...
+```
+
+Client receives: `WebSocket closed with code 1008: No access token provided`
+
+#### Invalid Subscription (1003)
+
+```python
+# In service
+from trading_api.models.exceptions import ServiceException
+
+def create_topic(self, topic: str, topic_update: Callable) -> None:
+    if ":" not in topic:
+        raise ServiceException(
+            code="SERVICE_DATAFEED_TOPIC_INVALID",
+            message=f"Invalid topic format: {topic}"
+        )
+```
+
+Client receives: `WebSocket closed with code 1003: Invalid topic format`
+
+#### Service Error (1011)
+
+```python
+# In service
+from trading_api.models.exceptions import ServiceException
+
+async def _stream_bars(self, symbol: str, callback: Callable) -> None:
+    try:
+        data = await self._provider.get_bars(symbol)
+    except ProviderConnectionError:
+        raise ServiceException(
+            code="SERVICE_DATAFEED_PROVIDER_ERROR",
+            message="Failed to connect to data provider"
+        )
+```
+
+Client receives: `WebSocket closed with code 1011: Failed to connect to data provider`
+
+### Client Handling
+
+```typescript
+const ws = new WebSocket('ws://localhost:8000/api/v1/datafeed/ws');
+
+ws.onclose = (event) => {
+    switch (event.code) {
+        case 1008:
+            // Authentication failed - redirect to login
+            window.location.href = '/login';
+            break;
+        case 1003:
+            // Invalid request - show user error
+            showError(`Request error: ${event.reason}`);
+            break;
+        case 1011:
+            // Server error - retry with backoff
+            scheduleReconnect();
+            break;
+        default:
+            console.log(`Connection closed: ${event.code}`);
+    }
+};
+```
+
+### Exception Types for WebSocket
+
+Use the standard exception hierarchy:
+
+```python
+from trading_api.models.exceptions import (
+    CommonException,      # Cross-cutting: COMMON_AUTH_*, COMMON_*
+    ServiceException,     # Service layer: SERVICE_{MODULE}_*
+    ProviderException,    # Provider layer: PROVIDER_{CAPABILITY}_*
+)
+
+# Authentication errors
+raise CommonException(
+    code="COMMON_AUTH_TOKEN_EXPIRED",
+    message="Session has expired, please re-authenticate"
+)
+
+# Service errors
+raise ServiceException(
+    code="SERVICE_BROKER_ORDER_NOT_FOUND",
+    message=f"Order {order_id} not found"
+)
+
+# Provider errors (usually wrapped by service)
+raise ProviderException(
+    code="PROVIDER_TWS_CONNECTION_LOST",
+    message="Lost connection to TWS"
+)
+```
+
+---
+
 ## Creating a WebSocket-Ready Module
 
 ### Checklist
