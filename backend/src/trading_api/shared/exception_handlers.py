@@ -313,7 +313,9 @@ async def _ws_exception_handler(websocket: WebSocket, exc: Exception) -> None:
     _log_exception(ws_exc, http_status, websocket)
 
     # Close WebSocket with code and reason (truncate reason to 123 bytes per RFC 6455)
-    reason = f"{ws_exc.code}: {ws_exc.message}"[:123]
+    reason = f"{ws_exc.code}: {ws_exc.message}"
+    if len(reason.encode("utf-8")) > 123:
+        reason = reason.encode("utf-8")[:120].decode("utf-8", errors="ignore") + "..."
     await websocket.close(code=close_code, reason=reason)
 
 

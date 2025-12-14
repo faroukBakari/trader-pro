@@ -1008,46 +1008,132 @@ class MyProvider(Provider):
 
 ### 8.4 Error Handling
 
-1. **Use domain-specific exceptions:**
+Providers should use the **ProviderException** class for error handling. This integrates with the global exception handlers for proper HTTP/WebSocket responses.
 
-   ```python
-   from trading_api.models.common import AuthenticationError
+> **Full Reference:** See [ERROR-MANAGEMENT.md](ERROR-MANAGEMENT.md) for complete error handling documentation.
 
-   # ✅ GOOD
-   raise AuthenticationError("Invalid token signature")
+#### Use ProviderException
 
-   # ❌ BAD
-   raise ValueError("Invalid token signature")
-   ```
+```python
+from trading_api.models.exceptions import ProviderException
 
-2. **Provide actionable error messages:**
+class GoogleProvider(Provider, AuthCapability):
+    async def verify_token(self, token: str) -> dict[str, Any]:
+        try:
+            # Validate with Google
+            claims = await self._validate_with_google(token)
+            return claims
+        except InvalidTokenError:
+            raise ProviderException(
+                code="PROVIDER_AUTH_TOKEN_INVALID",
+                message="Google token validation failed: invalid signature",
+            )
+        except TokenExpiredError:
+            raise ProviderException(
+                code="PROVIDER_AUTH_TOKEN_EXPIRED",
+                message="Google token has expired",
+            )
+```
 
-   ```python
-   # ✅ GOOD
-   raise AuthenticationError(
-       f"Token expired at {expiry}. Current time: {now}. "
-       "Please refresh your token."
-   )
+#### Error Code Convention
 
-   # ❌ BAD
-   raise AuthenticationError("Token invalid")
-   ```
+Provider error codes follow the pattern: `PROVIDER_{CAPABILITY}_{ERROR_TYPE}`
 
-3. **Handle transient errors:**
+| Code Pattern | HTTP Status | Description |
+|-------------|-------------|-------------|
+| `PROVIDER_*_NOT_FOUND` | 404 | Resource not found |
+| `PROVIDER_AUTH_*_INVALID` | 401 | Authentication failure |
+| `PROVIDER_*_INVALID` | 400 | Invalid input/request |
+| `PROVIDER_*` (other) | 500 | Internal provider error |
 
-   ```python
-   import httpx
-   from tenacity import retry, stop_after_attempt, wait_exponential
+**Examples:**
+- `PROVIDER_AUTH_TOKEN_INVALID` → 401 Unauthorized
+- `PROVIDER_DATAFEED_SYMBOL_NOT_FOUND` → 404 Not Found
+- `PROVIDER_BROKER_ORDER_INVALID` → 400 Bad Request
+- `PROVIDER_TWS_CONNECTION_ERROR` → 500 Internal Server Error
 
-   class MyProvider(Provider):
-       @retry(
-           stop=stop_after_attempt(3),
-           wait=wait_exponential(multiplier=1, min=2, max=10)
-       )
-       async def _call_api(self, endpoint: str):
-           # Automatically retries on transient failures
-           ...
-   ```
+#### Real-World Example (GoogleProvider)
+
+```python
+# From providers/google/__init__.py
+class GoogleProvider(Provider, AuthCapability):
+    async def verify_token(self, token: str) -> dict[str, Any]:
+        try:
+            claims = await self._parse_and_verify_token(token)
+        except InvalidClaimError as e:
+            raise ProviderException(
+                code="PROVIDER_AUTH_TOKEN_INVALID",
+                message=f"Google token claims invalid: {e}",
+            )
+        
+        # Validate audience
+        if claims.get("aud") != self._config.client_id:
+            raise ProviderException(
+                code="PROVIDER_AUTH_AUDIENCE_MISMATCH",
+                message="Token audience doesn't match configured client ID",
+            )
+        
+        return {
+            "sub": claims["sub"],
+            "email": claims["email"],
+            "email_verified": claims.get("email_verified", False),
+        }
+```
+
+#### Handle Transient Errors with Retries
+
+```python
+import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+class MyProvider(Provider):
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10)
+    )
+    async def _call_api(self, endpoint: str):
+        # Automatically retries on transient failures
+        try:
+            response = await self._client.get(endpoint)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code >= 500:
+                raise  # Retry on server errors
+            # Don't retry client errors
+            raise ProviderException(
+                code="PROVIDER_API_REQUEST_FAILED",
+                message=f"API request failed: {e.response.status_code}",
+            )
+```
+
+#### Logging Provider Errors
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+class MyProvider(Provider):
+    async def some_operation(self, param: str) -> Result:
+        try:
+            result = await self._external_api_call(param)
+            return result
+        except ExternalApiError as e:
+            logger.error(
+                "Provider operation failed",
+                extra={
+                    "provider": self.name,
+                    "operation": "some_operation",
+                    "error": str(e),
+                },
+                exc_info=True,
+            )
+            raise ProviderException(
+                code="PROVIDER_OPERATION_FAILED",
+                message=f"External API error: {e}",
+            )
+```
 
 ### 8.5 Documentation
 
@@ -1192,18 +1278,63 @@ class AuthCapability(ABC):
 
 ### 9.3 Exceptions
 
-```python
-class ProviderError(Exception):
-    """Base exception for provider errors."""
+> **Full Reference:** See [ERROR-MANAGEMENT.md](ERROR-MANAGEMENT.md) for complete exception hierarchy and handlers.
 
+Provider-related exceptions are part of the unified exception hierarchy:
+
+```python
+# models/exceptions.py
+class TradingApiException(Exception):
+    """Base exception with error code."""
+    code: str
+    message: str
+
+class ProviderException(TradingApiException):
+    """Provider layer errors (external integrations)."""
+    # Code pattern: PROVIDER_{CAPABILITY}_{ERROR_TYPE}
+```
+
+**Usage in providers:**
+
+```python
+from trading_api.models.exceptions import ProviderException
+
+# Authentication provider errors
+raise ProviderException(
+    code="PROVIDER_AUTH_TOKEN_INVALID",
+    message="Token signature verification failed"
+)
+
+# Datafeed provider errors
+raise ProviderException(
+    code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
+    message=f"Symbol {symbol} not found"
+)
+```
+
+**HTTP Status Mapping:**
+
+| Code Pattern | HTTP Status |
+|-------------|-------------|
+| `*_NOT_FOUND` | 404 |
+| `*AUTH*_INVALID` | 401 |
+| `*_INVALID` | 400 |
+| Other | 500 |
+
+**Legacy Exceptions (deprecated):**
+
+The following exceptions are deprecated in favor of `ProviderException`:
+
+```python
+# ❌ DEPRECATED - Do not use in new code
 class AuthenticationError(ProviderError):
-    """Authentication verification failed."""
+    """Use ProviderException with PROVIDER_AUTH_* code instead."""
 
 class ProviderNotFoundError(ProviderError):
-    """Provider not found in registry."""
+    """Use CommonException with COMMON_PROVIDER_NOT_FOUND instead."""
 
 class CapabilityNotFoundError(ProviderError):
-    """Required capability not satisfied."""
+    """Use CommonException with COMMON_CAPABILITY_NOT_FOUND instead."""
 ```
 
 ---

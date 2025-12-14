@@ -127,7 +127,7 @@ class TestTWSClientReqMatchingSymbols:
         future: asyncio.Future[list[ContractDescription]] = loop.create_future()
 
         def create_future_side_effect(
-            reqId: int, timeout: float | None = None
+            reqId: int, *, capability: str, timeout: float | None = None
         ) -> Awaitable[Any]:
             # Schedule resolution
             async def resolve() -> None:
@@ -163,7 +163,7 @@ class TestTWSClientReqMatchingSymbols:
         future: asyncio.Future[list[Any]] = loop.create_future()
 
         def create_future_side_effect(
-            reqId: int, timeout: float | None = None
+            reqId: int, *, capability: str, timeout: float | None = None
         ) -> Awaitable[Any]:
             async def resolve() -> None:
                 await asyncio.sleep(0.01)
@@ -213,7 +213,7 @@ class TestTWSClientReqContractDetails:
         future: asyncio.Future[list[ContractDetails]] = loop.create_future()
 
         def create_future_side_effect(
-            reqId: int, timeout: float | None = None
+            reqId: int, *, capability: str, timeout: float | None = None
         ) -> Awaitable[Any]:
             async def resolve() -> None:
                 await asyncio.sleep(0.01)
@@ -269,7 +269,7 @@ class TestTWSClientReqHistoricalData:
         future: asyncio.Future[list[BarData]] = loop.create_future()
 
         def create_future_side_effect(
-            reqId: int, timeout: float | None = None
+            reqId: int, *, capability: str, timeout: float | None = None
         ) -> Awaitable[Any]:
             async def resolve() -> None:
                 await asyncio.sleep(0.01)
@@ -460,7 +460,7 @@ class TestTWSClientErrorHandling:
 
         # Setup future that never resolves
         def create_future_side_effect(
-            reqId: int, timeout: float | None = None
+            reqId: int, *, capability: str, timeout: float | None = None
         ) -> Awaitable[Any]:
             loop = asyncio.get_running_loop()
             future: asyncio.Future[Any] = loop.create_future()

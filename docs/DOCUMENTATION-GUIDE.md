@@ -158,6 +158,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture, functional `ModuleRegistry.get_modules(...)` workflow, and module system |
 | **backend/docs/AUTHENTICATION.md**               | JWT-based authentication with Google OAuth, cookies, security                                          |
+| **backend/docs/ERROR-MANAGEMENT.md**             | ⭐ Exception hierarchy, error codes, global handlers, testing patterns                                  |
 | **backend/docs/PROVIDER-SYSTEM.md**              | Provider/capability system developer guide                                                             |
 | **backend/docs/MODULAR_VERSIONNING.md**          | Module-level API versioning strategy                                                                   |
 | **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx                                                            |
@@ -341,6 +342,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 | "Authentication/auth/login"    | `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md` | Auth doc first        |
 | "Testing [component]"          | `TESTING.md` → component-specific testing docs                                      | General first         |
 | "Error/CI/build issue"         | `CI-TROUBLESHOOTING.md` + relevant architecture docs                                | Troubleshooting first |
+| "Error handling/exceptions"    | `ERROR-MANAGEMENT.md` → `BACKEND_TESTING.md` (for testing)                          | Error doc first       |
 | "TWS API/broker integration"   | `providers/tws/README.md` → `tws/docs/README.md` → specific API docs                | Provider then API     |
 | "TradingView [anything]"       | `BROKER-INTEGRATION.md` → `tradingview/` docs                                       | Integration first     |
 | "Client generation"            | `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`                                  | Backend then frontend |
@@ -361,6 +363,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **REST API Development**: `API-METHODOLOGY.md` → `MODULAR_BACKEND_ARCHITECTURE.md` → `SPECS_AND_CLIENT_GEN.md`
 - **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md`
 - **Authentication**: `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
+- **Error Handling**: `ERROR-MANAGEMENT.md` → `PROVIDER-SYSTEM.md` (providers) + `BACKEND_TESTING.md` (testing)
 - **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BROKER-CONNECTION-ADAPTER.md`
 - **TWS Provider Integration**: `PROVIDER-SYSTEM.md` → `providers/tws/README.md` → `tws/docs/README.md` → specific API reference docs
 - **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`
@@ -483,6 +486,18 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **frontend/src/views/LoginView.vue** - Google OAuth login UI
 - **docs/TESTING.md** - Authentication testing strategies
 
+### Error Handling
+
+**Keywords**: exceptions, error codes, error handling, HTTP status, WebSocket close codes, TradingApiException, ServiceException, ProviderException, CommonException, global handlers
+
+**Scope**: Backend exception hierarchy and error handling  
+**Out of Scope**: Frontend error handling, user-facing error messages
+
+- **backend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete error management guide (exception hierarchy, error codes, handlers)
+- **backend/docs/PROVIDER-SYSTEM.md** - ProviderException usage in providers (Section 8.4)
+- **backend/docs/BACKEND_WEBSOCKETS.md** - WebSocket error handling (close codes)
+- **backend/docs/BACKEND_TESTING.md** - Testing error responses (test client configuration)
+
 ### Build & DevOps
 
 **Keywords**: build system, deployment, CI/CD, nginx, multi-process, development mode, make commands
@@ -534,7 +549,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 - **Root Documentation**: 10 essential project-wide guides
 - **docs/ Folder**: 9 core cross-cutting documentation files
-- **Backend Documentation**: 8 current backend guides + 8 TWS API guides + 1 third-party doc
+- **Backend Documentation**: 9 current backend guides + 8 TWS API guides + 1 third-party doc
 - **Frontend Documentation**: 10 frontend-specific guides + 2 third-party docs
 - **Auto-Generated Docs**: Per-module generated clients and type definitions
 - **DevOps & Git**: 2 setup and operations guides
@@ -558,6 +573,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2025-12-11**: Error management documentation - Created ERROR-MANAGEMENT.md (exception hierarchy, error codes, handlers), updated MODULAR_BACKEND_ARCHITECTURE.md, PROVIDER-SYSTEM.md, BACKEND_TESTING.md, BACKEND_WEBSOCKETS.md with error handling sections
 - **2025-12-07**: ws-refinements documentation sync - TWS README overhauled (ticker-slot pattern, stream keys, AsyncMock testing), BACKEND_WEBSOCKETS.md and WEBSOCKET-METHODOLOGY.md updated (sync create_topic), DOCUMENTATION-GUIDE.md keywords updated
 - **2025-11-30**: Wave 4 final validation - Verified all internal links, fixed remaining broken refs (ENVIRONMENT-CONFIG.md, WORKSPACE-SETUP.md → GETTING-STARTED.md), updated docs/README.md, validated cross-references and section anchors
 - **2025-11-30**: Wave 3 documentation assessment - Fixed ARCHITECTURE.md links, BROKER-ARCHITECTURE.md links, CLIENT-GENERATION.md refs, methodologies updates, root README.md links. RE-GROUP operations deferred (low ROI)
@@ -585,5 +601,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: December 7, 2025  
+**Last Updated**: December 11, 2025  
 **Maintained by**: Development Team

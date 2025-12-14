@@ -357,8 +357,13 @@ class TWSProvider(Provider, DatafeedCapability):
             except TimeoutError:
                 nb_retreis -= 1
                 if nb_retreis == 0:
-                    raise
-                await asyncio.sleep(0.2)
+                    raise ProviderException(
+                        code="PROVIDER_DATAFEED_QUOTE_SNAPSHOT_TIMEOUT",
+                        message="Timeout while getting quotes snapshot from TWS provider",
+                        provider="tws",
+                        capability="datafeed",
+                    )
+                await asyncio.sleep(0.5)
                 logger.warning(
                     f"TimeoutError when getting quotes snapshot. Retrying... ({nb_retreis} retries left)"
                 )
