@@ -6,6 +6,7 @@ Overrides the apps fixture to inject mock provider instead of real TWSProvider.
 
 import asyncio
 from collections.abc import Generator
+from datetime import datetime
 from itertools import count
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from trading_api.app_factory import AppFactory, ModularApp
 from trading_api.models.common import CapabilitySpec, ProviderConfig
+from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
     Bar,
     QuoteData,
@@ -72,14 +74,14 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
             )
         ]
 
-    async def get_symbol_info(self, ticker: str, **kwargs: Any) -> SymbolInfo:
+    async def get_symbol_info(self, ticker_name: str, **kwargs: Any) -> SymbolInfo:
         """Return mock symbol info."""
-        parts = ticker.split(":")
-        symbol = parts[0] if parts else ticker
+        parts = ticker_name.split(":")
+        symbol = parts[0] if parts else ticker_name
         exchange = parts[1] if len(parts) > 1 else "SMART"
         return SymbolInfo(
             name=symbol,
-            ticker=ticker,
+            ticker=ticker_name,
             description=f"Mock {symbol}",
             type="stock",
             exchange=exchange,
@@ -107,9 +109,9 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     async def get_historical_bars(
         self,
-        ticker: str,
-        start_time: Any,
-        end_time: Any,
+        ticker_name: str,
+        start_time: datetime,
+        end_time: datetime,
         resolution: Resolution,
         **kwargs: Any,
     ) -> list[Bar]:
@@ -127,19 +129,20 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
         ]
 
     async def get_quotes_snapshot(
-        self, tickers: list[str], **kwargs: Any
+        self, ticker_names: list[str], **kwargs: Any
     ) -> list[QuoteData]:
         """Return mock quote snapshots."""
         return [
-            QuoteData(s="ok", n=ticker, v={"bid": 150.0, "ask": 150.1})
-            for ticker in tickers
+            QuoteData(s="ok", n=ticker_name, v={"bid": 150.0, "ask": 150.1})
+            for ticker_name in ticker_names
         ]
 
     def subscribe_realtime_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> str:
         """Subscribe to mock realtime bars."""
@@ -149,13 +152,14 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     def subscribe_market_data(
         self,
-        tickers: list[str],
+        ticker_names: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> list[str]:
         """Subscribe to mock market data."""
         sub_ids = []
-        for _ in tickers:
+        for _ in ticker_names:
             sub_id = str(next(self._subscription_counter))
             self._subscriptions[sub_id] = callback
             sub_ids.append(sub_id)

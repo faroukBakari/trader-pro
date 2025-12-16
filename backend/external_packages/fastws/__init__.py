@@ -7,5 +7,6 @@ from .application import FastWS as FastWS  # type: ignore
 from .docs import get_asyncapi as get_asyncapi  # type: ignore
 from .docs import get_asyncapi_html as get_asyncapi_html  # type: ignore
 from .routing import Message as Message  # type: ignore
+from .routing import NoMatchingOperation as NoMatchingOperation  # type: ignore
 from .routing import Operation as Operation  # type: ignore
 from .routing import OperationRouter as OperationRouter  # type: ignore

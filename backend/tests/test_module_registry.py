@@ -16,6 +16,7 @@ from typing import Any, Callable
 import pytest
 
 from trading_api.models.common import CapabilitySpec, ProviderConfig
+from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
     Bar,
     QuoteData,
@@ -52,12 +53,12 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     ) -> list[SearchSymbolResultItem]:
         return []
 
-    async def get_symbol_info(self, ticker: str, **kwargs: Any) -> SymbolInfo:
+    async def get_symbol_info(self, ticker_name: str, **kwargs: Any) -> SymbolInfo:
         raise NotImplementedError("Mock provider")
 
     async def get_historical_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         start_time: datetime,
         end_time: datetime,
         resolution: Resolution,
@@ -66,23 +67,25 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
         return []
 
     async def get_quotes_snapshot(
-        self, tickers: list[str], **kwargs: Any
+        self, ticker_names: list[str], **kwargs: Any
     ) -> list[QuoteData]:
         return []
 
     def subscribe_realtime_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> str:
         return "sub_0"
 
     def subscribe_market_data(
         self,
-        tickers: list[str],
+        ticker_names: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> list[str]:
         return []

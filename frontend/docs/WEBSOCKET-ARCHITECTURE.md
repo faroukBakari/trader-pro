@@ -520,6 +520,10 @@ Final State: Subscription removed
 - Null/undefined handling
 - Only place where backend types are imported
 
+**Error Types (Future Work)**:
+
+The backend now supports subscription-level error notifications via `{route}.error` messages containing `ErrorPayload` and `SubscriptionError` types. These types will be auto-generated in `ws-types-{module}_v1` once client generation is updated. Frontend error handling integration is planned for a future iteration.
+
 **Example Mappers**:
 
 ```typescript

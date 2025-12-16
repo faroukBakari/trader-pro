@@ -358,7 +358,7 @@ class TestGetHistoricalBars:
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
 
             results = await provider.get_historical_bars(
-                ticker="AAPL:ARCA:STK-12345",  # Use ARCA (not in SMART_EXCHANGES) to avoid duplicate queries
+                ticker_name="AAPL:ARCA:STK-12345",  # Use ARCA (not in SMART_EXCHANGES) to avoid duplicate queries
                 start_time=start,
                 end_time=end,
                 resolution=Resolution.MIN_1,
@@ -383,7 +383,7 @@ class TestGetHistoricalBars:
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
 
             await provider.get_historical_bars(
-                ticker="AAPL:NASDAQ:STK-12345",
+                ticker_name="AAPL:NASDAQ:STK-12345",
                 start_time=start,
                 end_time=end,
                 resolution=Resolution.MIN_5,
@@ -408,7 +408,7 @@ class TestGetHistoricalBars:
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
 
             await provider.get_historical_bars(
-                ticker="AAPL:NASDAQ:STK-12345",
+                ticker_name="AAPL:NASDAQ:STK-12345",
                 start_time=start,
                 end_time=end,
                 resolution=Resolution.MIN_1,

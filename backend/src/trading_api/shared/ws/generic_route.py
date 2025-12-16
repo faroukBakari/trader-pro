@@ -1,17 +1,21 @@
 import asyncio
 import logging
 import os
-from typing import Any, Generic, TypeVar, get_args
+from typing import Any, Generic, Literal, TypeVar, get_args
 
 from fastapi.websockets import WebSocketState
 from pydantic import BaseModel
 
 from external_packages.fastws import Client
 from trading_api.models import (
+    ErrorPayload,
+    SubscriptionError,
     SubscriptionRequest,
     SubscriptionResponse,
     SubscriptionUpdate,
 )
+from trading_api.models.exceptions import TradingApiException
+from trading_api.shared.exception_handlers import exception_handler
 from trading_api.shared.ws.ws_router import WsRouteFeature, WsRouteService
 
 logger = logging.getLogger(__name__)
@@ -106,6 +110,16 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         recv_update.__annotations__["payload"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
         recv_update.__annotations__["return"] = SubscriptionUpdate[data_type]  # type: ignore[valid-type]
         self.recv("update")(recv_update)
+
+        # Register error message type for AsyncAPI spec generation
+        def recv_error(
+            payload: SubscriptionError,
+        ) -> SubscriptionError:
+            """Broadcast error notifications to subscribed clients"""
+            return payload
+
+        self.recv("error")(recv_error)
+
         # Use correct parameter names and wrap request_type in SubscriptionRequest
         send_subscribe.__annotations__["payload"] = SubscriptionRequest[request_type]  # type: ignore[valid-type]
         self.send("subscribe", reply="subscribe.response")(send_subscribe)
@@ -126,39 +140,65 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 "Ensure you inherit like: class MyRouter(WsRouter[Req, Res]): ..."
             )
 
-    async def _broadcast_update(self, update: SubscriptionUpdate) -> None:
-        topic = update.topic
-        self._clients = self._refresh_active_clients()
+    async def _broadcast_payload(
+        self,
+        topic: str,
+        payload: BaseModel,
+        operation: Literal["update", "error"],
+    ) -> None:
+        """Broadcast payload to all clients subscribed to topic.
 
+        Args:
+            topic: Target subscription topic
+            payload: Pydantic model to serialize (SubscriptionUpdate or SubscriptionError)
+            operation: Message type suffix ("update" or "error")
+        """
+        self._clients = self._refresh_active_clients()
         topic_clients = [client for client in self._clients if topic in client.topics]
 
         if not topic_clients:
             if DEBUG_WS_ROUTER:
-                debug_log(
-                    f"No more clients for topic : {update.topic} in router {self.route}"
-                )
+                debug_log(f"No more clients for topic : {topic} in router {self.route}")
             self._remove_topic(topic)
             return
 
         try:
             # Build message with pre-serialized payload to avoid model_dump overhead
-            # update.model_dump_json() uses orjson internally when configured
-            msg = (
-                f'{{"type":"{self.route}.update","payload":{update.model_dump_json()}}}'
-            )
+            msg = f'{{"type":"{self.route}.{operation}","payload":{payload.model_dump_json()}}}'
 
             await asyncio.gather(
                 *(client.ws.send_text(msg) for client in topic_clients)
             )
 
             if DEBUG_WS_ROUTER:
-                debug_log(f"Broadcasted message from router:: {update}")
+                debug_log(f"Broadcasted {self.route}.{operation} for topic {topic}")
         except Exception as e:
-            logger.exception(f"Error during FastWS {self.route}.update broadcast, {e}")
+            logger.exception(
+                f"Error during FastWS {self.route}.{operation} broadcast, {e}"
+            )
             await asyncio.sleep(1)
 
+    async def _broadcast_update(self, update: SubscriptionUpdate) -> None:
+        """Broadcast data update to all clients subscribed to topic.
+
+        Convenience wrapper around _broadcast_payload for data updates.
+        """
+        await self._broadcast_payload(update.topic, update, "update")
+
     def _create_topic(self, topic: str) -> None:
+        """Create a new topic and register callbacks with the service.
+
+        Sets up both update and error callbacks:
+        - topic_update: Called by service/provider with data updates
+        - topic_error: Called by service/provider with errors
+
+        The error callback wrapper handles:
+        - Recoverable errors: Broadcast SubscriptionError, keep connection open
+        - Unrecoverable errors: Use exception_handler to log and close connection
+        """
+
         async def topic_update(data: _TData) -> None:
+            """Callback for data updates - wraps data in SubscriptionUpdate."""
             await self._broadcast_update(
                 SubscriptionUpdate(
                     topic=topic,
@@ -166,9 +206,43 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 ),
             )
 
+        async def topic_error(
+            exc: TradingApiException,
+            recoverable: bool = False,
+            retry_after_ms: int | None = None,
+        ) -> None:
+            """Callback for errors - handles recoverable vs unrecoverable.
+
+            Args:
+                exc: The exception that occurred
+                recoverable: If True, broadcast error and keep connection open.
+                            If False, close connection via exception_handler.
+                retry_after_ms: Suggested retry delay for recoverable errors
+            """
+            # Unrecoverable errors: log and close connection via exception_handler
+            if not recoverable:
+                self._topics.discard(topic)
+                topic_clients = [c for c in self._clients if topic in c.topics]
+                for client in topic_clients:
+                    await exception_handler(client.ws, exc)
+                return
+
+            # Recoverable errors: broadcast error message, keep connection open
+            await self._broadcast_payload(
+                topic,
+                SubscriptionError(
+                    topic=topic,
+                    error=ErrorPayload.from_exception(exc),
+                    recoverable=recoverable,
+                    retry_after_ms=retry_after_ms,
+                ),
+                "error",
+            )
+
         if DEBUG_WS_ROUTER:
             debug_log(f"Creating new topic in {self.route} service: {topic}")
-        self.service.create_topic(topic, topic_update)
+
+        self.service.create_topic(topic, topic_update, topic_error)
         self._topics.add(topic)
 
     def _remove_topic(self, topic: str) -> None:

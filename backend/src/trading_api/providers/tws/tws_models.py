@@ -740,3 +740,210 @@ def get_asset_config(sec_type: str) -> AssetTypeConfig:
         Falls back to DEFAULT_ASSET_CONFIG for unknown types.
     """
     return ASSET_TYPE_CONFIG.get(sec_type, DEFAULT_ASSET_CONFIG)
+
+
+# =============================================================================
+# TWS Error Code Classification
+# =============================================================================
+# Classifies TWS error codes by category and recoverability.
+# Based on: https://interactivebrokers.github.io/tws-api/message_codes.html
+#
+# Categories:
+# - INFO: Not errors, just status notifications (2104, 2106, 2158, etc.)
+# - CONNECTION: Connection state changes (1100, 1101, 1102, 502, 504)
+# - PACING: Rate limiting (100) - recoverable with throttling
+# - DUPLICATE: ID conflicts (102, 326, 385, 386, 501) - use different ID
+# - SUBSCRIPTION: Market data permissions (354, 10090, 10186) - requires action
+# - VALIDATION: Invalid request params (200, 201, 203) - fix request
+# - FATAL: Protocol/system errors (503, 505-509, 520) - cannot recover
+# - WARNING: Non-critical issues (2xxx range)
+# - SYSTEM: System messages (1xxx range)
+# - ERROR: Unclassified errors
+# =============================================================================
+
+
+class TWSErrorClassification:
+    """TWS error classification categories (from TWS error codes).
+
+    Note: This is separate from TWSErrorCategory in tws_connection.py which
+    categorizes error sources (CONN, API, CALLBACK). This class categorizes
+    the specific TWS error code meanings.
+    """
+
+    INFO = "INFO"  # Not errors - status notifications
+    CONNECTION = "CONNECTION"  # Connection state changes
+    PACING = "PACING"  # Rate limiting errors
+    DUPLICATE = "DUPLICATE"  # Duplicate ID errors
+    SUBSCRIPTION = "SUBSCRIPTION"  # Market data subscription issues
+    VALIDATION = "VALIDATION"  # Invalid request/contract
+    FATAL = "FATAL"  # Unrecoverable system errors
+    WARNING = "WARNING"  # Non-critical warnings
+    SYSTEM = "SYSTEM"  # System state messages
+    ERROR = "ERROR"  # Unclassified errors
+
+
+# Informational status messages - not real errors
+_INFO_CODES: frozenset[int] = frozenset(
+    {
+        2104,  # Market data farm connection is OK
+        2106,  # Historical data farm is connected
+        2107,  # Historical data farm connection inactive (dormant)
+        2108,  # Market data farm connection inactive (dormant)
+        2158,  # Sec-def data farm connection is OK
+    }
+)
+
+# Connection state changes - recoverable via reconnect/wait
+_CONNECTION_RECOVERABLE: frozenset[int] = frozenset(
+    {
+        502,  # Couldn't connect to TWS - retry
+        504,  # Not connected - reconnect
+        1100,  # Connectivity lost - wait for 1101/1102
+        1101,  # Connectivity restored, data lost - resubscribe
+        1102,  # Connectivity restored, data maintained
+        1300,  # Socket port reset - reconnect on new port
+        2103,  # Market data farm disconnected - temporary
+        2105,  # Historical data farm disconnected - temporary
+        2110,  # TWS-server connection broken - auto-restores
+    }
+)
+
+# Rate limiting - recoverable with throttling
+_PACING_CODES: frozenset[int] = frozenset(
+    {
+        100,  # Max rate of messages exceeded (50/sec)
+        420,  # Invalid real-time query (pacing violation)
+    }
+)
+
+# Duplicate/conflict errors - use different ID and retry
+_DUPLICATE_CODES: frozenset[int] = frozenset(
+    {
+        102,  # Duplicate ticker ID
+        103,  # Duplicate order ID
+        326,  # Client ID already in use
+        385,  # Duplicate ticker ID for scanner
+        386,  # Duplicate ticker ID for historical data
+        501,  # Already connected (not really an error)
+    }
+)
+
+# Subscription/permission issues - requires user action (not auto-recoverable)
+_SUBSCRIPTION_CODES: frozenset[int] = frozenset(
+    {
+        354,  # Not subscribed to market data
+        10090,  # Part of requested market data not subscribed
+        10167,  # Requested market data requires subscription
+        10186,  # Market data not subscribed, delayed not enabled
+        10197,  # No market data during competing session
+    }
+)
+
+# Invalid request/contract - not recoverable without fixing request
+_VALIDATION_CODES: frozenset[int] = frozenset(
+    {
+        200,  # No security definition found
+        201,  # Order rejected
+        202,  # Order cancelled (may be expected)
+        203,  # Security not available for account
+        300,  # Can't find ticker ID
+        321,  # Server error validating request
+        322,  # Server error processing request
+        323,  # Server error
+        399,  # Order message error
+        400,  # Algo order error
+    }
+)
+
+# Fatal protocol/system errors - cannot recover
+_FATAL_CODES: frozenset[int] = frozenset(
+    {
+        503,  # TWS out of date - must upgrade
+        505,  # Unknown message ID
+        506,  # Unsupported version
+        507,  # Bad message length
+        508,  # Bad message
+        509,  # Socket exception
+        520,  # Failed to create socket
+        530,  # SSL error
+    }
+)
+
+# Request not found - usually means already cancelled/completed (informational)
+_NOT_FOUND_CODES: frozenset[int] = frozenset(
+    {
+        135,  # Can't find order with ID
+        300,  # Can't find ticker ID
+        366,  # No historical data query found
+        365,  # No scanner subscription found
+        10148,  # Order cannot be cancelled, wrong state
+    }
+)
+
+
+def classify_error(error_code: int) -> tuple[str, bool]:
+    """Classify TWS error code by category and recoverability.
+
+    Based on TWS API documentation:
+    https://interactivebrokers.github.io/tws-api/message_codes.html
+
+    Args:
+        error_code: TWS error code from error() callback
+
+    Returns:
+        Tuple of (category, is_recoverable):
+        - category: TWSErrorClassification string (INFO, CONNECTION, PACING, etc.)
+        - is_recoverable: True if error can be recovered from automatically
+
+    Examples:
+        >>> classify_error(2104)  # Market data farm OK
+        ('INFO', True)
+        >>> classify_error(1100)  # Connectivity lost
+        ('CONNECTION', True)
+        >>> classify_error(200)   # No security definition
+        ('VALIDATION', False)
+        >>> classify_error(503)   # TWS out of date
+        ('FATAL', False)
+    """
+    # Informational/Status messages - not real errors
+    if error_code in _INFO_CODES:
+        return (TWSErrorClassification.INFO, True)
+
+    # Connection recoverable - wait/retry
+    if error_code in _CONNECTION_RECOVERABLE:
+        return (TWSErrorClassification.CONNECTION, True)
+
+    # Rate limiting - throttle and retry
+    if error_code in _PACING_CODES:
+        return (TWSErrorClassification.PACING, True)
+
+    # Duplicate/already exists - use different ID and retry
+    if error_code in _DUPLICATE_CODES:
+        return (TWSErrorClassification.DUPLICATE, True)
+
+    # Data subscription issues - requires user action
+    if error_code in _SUBSCRIPTION_CODES:
+        return (TWSErrorClassification.SUBSCRIPTION, False)
+
+    # Invalid contract/request - not recoverable without fixing request
+    if error_code in _VALIDATION_CODES:
+        return (TWSErrorClassification.VALIDATION, False)
+
+    # System/protocol errors - not recoverable
+    if error_code in _FATAL_CODES:
+        return (TWSErrorClassification.FATAL, False)
+
+    # Request not found - informational (already cancelled/completed)
+    if error_code in _NOT_FOUND_CODES:
+        return (TWSErrorClassification.INFO, True)
+
+    # Warnings (2xxx range, excluding handled above)
+    if 2000 <= error_code < 3000:
+        return (TWSErrorClassification.WARNING, True)
+
+    # System messages (1xxx range, excluding handled above)
+    if 1000 <= error_code < 2000:
+        return (TWSErrorClassification.SYSTEM, True)
+
+    # Default for unclassified errors (conservative: non-recoverable)
+    return (TWSErrorClassification.ERROR, False)

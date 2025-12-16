@@ -536,6 +536,7 @@ class ModuleApp:
                     # Uvicorn's built-in mechanism already handles this
                     # heartbeat_interval=30.0,
                     max_connection_lifespan=3600.0,
+                    debug=True,
                 )
 
                 for version, ws_routers in module.ws_routers.items():
@@ -549,13 +550,7 @@ class ModuleApp:
                 ) -> None:
                     f"""WebSocket endpoint for {module.name} real-time streaming"""
                     client.user_data = user_data
-                    try:
-                        await _ws_app.serve(client)
-                    except Exception as e:
-                        logger.error(f"WebSocket connection error: {e}")
-                        await client.ws.close(
-                            code=1011, reason=f"Server connection error: {e}"
-                        )
+                    await _ws_app.serve(client)
 
                 ws_app = _ws_app
 

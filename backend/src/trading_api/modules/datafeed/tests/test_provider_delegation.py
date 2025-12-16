@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from trading_api.models.common import CapabilitySpec, ProviderConfig
+from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
     Bar,
     QuoteData,
@@ -55,21 +56,21 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     ) -> list[SearchSymbolResultItem]:
         return await self._search_symbols_mock(pattern=pattern, **kwargs)  # type: ignore[no-any-return]
 
-    async def get_symbol_info(self, ticker: str, **kwargs: Any) -> SymbolInfo:
+    async def get_symbol_info(self, ticker_name: str, **kwargs: Any) -> SymbolInfo:
         return await self._get_symbol_info_mock(  # type: ignore[no-any-return]
-            ticker=ticker, **kwargs
+            ticker_name=ticker_name, **kwargs
         )
 
     async def get_historical_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         start_time: datetime,
         end_time: datetime,
         resolution: Resolution,
         **kwargs: Any,
     ) -> list[Bar]:
         return await self._get_historical_bars_mock(  # type: ignore[no-any-return]
-            ticker=ticker,
+            ticker_name=ticker_name,
             start_time=start_time,
             end_time=end_time,
             resolution=resolution,
@@ -78,23 +79,25 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     def subscribe_realtime_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> str:
         return self._subscribe_realtime_bars_mock(  # type: ignore[no-any-return]
-            ticker=ticker, resolution=resolution, callback=callback, **kwargs
+            ticker_name=ticker_name, resolution=resolution, callback=callback, **kwargs
         )
 
     def subscribe_market_data(
         self,
-        tickers: list[str],
+        ticker_names: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> list[str]:
         return self._subscribe_market_data_mock(  # type: ignore[no-any-return]
-            tickers=tickers, callback=callback, **kwargs
+            ticker_names=ticker_names, callback=callback, **kwargs
         )
 
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
@@ -105,11 +108,11 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     async def get_quotes_snapshot(
         self,
-        tickers: list[str],
+        ticker_names: list[str],
         **kwargs: Any,
     ) -> list[QuoteData]:
         return await self._get_quotes_snapshot_mock(  # type: ignore[no-any-return]
-            tickers=tickers, **kwargs
+            ticker_names=ticker_names, **kwargs
         )
 
 
@@ -277,8 +280,8 @@ async def test_get_bars_delegates_to_provider() -> None:
     mock_provider._get_historical_bars_mock.assert_called_once()
     call_kwargs = mock_provider._get_historical_bars_mock.call_args.kwargs
 
-    # Verify ticker passed through
-    assert call_kwargs["ticker"] == "AAPL:NASDAQ"
+    # Verify ticker_name passed through
+    assert call_kwargs["ticker_name"] == "AAPL:NASDAQ"
 
     # Verify resolution passed through
     assert call_kwargs["resolution"] == Resolution.DAY_1

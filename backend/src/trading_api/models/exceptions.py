@@ -17,8 +17,10 @@ Usage:
     2. Translated to appropriate HTTP/WebSocket error format
 """
 
+import sys
 import traceback
 from datetime import datetime
+from types import TracebackType
 from typing import Any
 
 
@@ -38,16 +40,29 @@ class TradingApiException(Exception):
         self,
         code: str,
         message: str,
-        backtrace: str | None = None,
+        backtrace: list[traceback.FrameSummary] | TracebackType | None = None,
         timestamp: int | None = None,
     ) -> None:
         self.code = code
         self.message = message
-        # Capture backtrace if not provided
-        self.backtrace = backtrace if backtrace else traceback.format_exc()
-        self.timestamp = timestamp or datetime.now().timestamp()
+        self.timestamp = timestamp or int(datetime.now().timestamp())
 
-        # Initialize Exception with formatted message
+        # Convert backtrace to List[FrameSummary]
+        if backtrace is None:
+            # User-raised: capture from sys.exc_info() or current stack
+            _, _, tb = sys.exc_info()
+            if tb:
+                self.backtrace = list(traceback.extract_tb(tb))
+            else:
+                # No active exception - capture current call stack
+                self.backtrace = list(traceback.extract_stack()[:-1])
+        elif isinstance(backtrace, list):
+            # Already List[FrameSummary]
+            self.backtrace = backtrace
+        else:
+            # TracebackType object - extract frames
+            self.backtrace = list(traceback.extract_tb(backtrace))
+
         super().__init__(f"[{code}] {message}")
 
     def __str__(self) -> str:
@@ -62,6 +77,7 @@ class TradingApiException(Exception):
         return {
             "code": self.code,
             "message": self.message,
+            "timestamp": self.timestamp,
             "backtrace": self.backtrace,
         }
 

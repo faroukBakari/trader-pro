@@ -395,7 +395,7 @@ class TestGetMeEndpoint:
         response = client.get("/api/v1/auth/me")
 
         assert response.status_code == 401
-        assert "expired" in response.json()["detail"].lower()
+        assert "expired" in response.json()["message"].lower()
 
 
 class TestTokenRotation:

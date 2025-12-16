@@ -10,9 +10,11 @@ from http import HTTPStatus
 from pathlib import Path
 from typing import List
 
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, Request, WebSocket, WebSocketException
 from fastapi import status as WebSocketStatus
+from fastapi.exceptions import RequestValidationError, WebSocketRequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from trading_api.models.exceptions import TradingApiException
 
@@ -33,66 +35,53 @@ def _is_project_frame(frame: traceback.FrameSummary, project_root: Path) -> bool
 
 def _filter_project_frames(
     frames: List[traceback.FrameSummary], project_root: Path
-) -> tuple[List[traceback.FrameSummary], int]:
+) -> tuple[List[traceback.FrameSummary], List[traceback.FrameSummary]]:
     """Filter frames to only project frames, return (project_frames, omitted_count)."""
-    project_frames = [f for f in frames if _is_project_frame(f, project_root)]
-    omitted = len(frames) - len(project_frames)
-    return project_frames, omitted
+    project_frames: list[traceback.FrameSummary] = []
+    omitted_frames: list[traceback.FrameSummary] = []
+
+    for f in frames:
+        if _is_project_frame(f, project_root):
+            project_frames.append(f)
+        else:
+            omitted_frames.append(f)
+
+    return project_frames, omitted_frames
 
 
-def _filter_backtrace_string(backtrace_str: str, project_root: str) -> str:
-    """Filter a traceback string to only include project-related frames.
+def _extract_project_backtrace(
+    exc: BaseException, project_root: Path
+) -> tuple[List[traceback.FrameSummary], List[traceback.FrameSummary]]:
+    """Return a string containing only traceback frames whose filename is inside project_root.
 
-    Parses the traceback string and keeps only frames with files under project_root.
+    project_root: Path to your repo or package root (e.g., Path(__file__).resolve().parents[2])
+
+    Handles multiple traceback sources in order:
+    1. exc.__traceback__ (live traceback from raise)
+    2. exc.__cause__.__traceback__ (chained exception via 'raise ... from ...')
+    3. exc.backtrace (stored string in TradingApiException)
     """
-    lines = backtrace_str.split("\n")
-    filtered_lines: List[str] = []
-    omitted_count = 0
-    i = 0
+    project_frames: List[traceback.FrameSummary] = []
+    omitted_frames: List[traceback.FrameSummary] = []
 
-    while i < len(lines):
-        line = lines[i]
-
-        # Check if this is a frame line (starts with "  File ")
-        if line.strip().startswith('File "'):
-            # Extract filename from the line
-            # Format: '  File "/path/to/file.py", line X, in func'
-            try:
-                start = line.index('"') + 1
-                end = line.index('"', start)
-                filename = line[start:end]
-
-                if project_root in filename:
-                    # Keep this frame and all following lines until next frame
-                    filtered_lines.append(line)
-                    i += 1
-                    # Include continuation lines (code snippet, etc.)
-                    while i < len(lines) and not lines[i].strip().startswith('File "'):
-                        if lines[i].strip():  # Skip empty lines between frames
-                            filtered_lines.append(lines[i])
-                        if lines[i].strip() and not lines[i].startswith(" "):
-                            # This is likely the exception line at the end
-                            break
-                        i += 1
-                    continue
-                else:
-                    omitted_count += 1
-            except ValueError:
-                pass  # Malformed line, skip
-
-        i += 1
-
-    if not filtered_lines:
-        return "<no project frames in stored backtrace>\n"
-
-    result = (
-        f"... omitted {omitted_count} frame(s) from external libraries ...\n"
-        if omitted_count
-        else ""
+    # 1. Try live traceback from exc.__traceback__
+    frames: list[traceback.FrameSummary] | None = getattr(
+        exc, "backtrace", traceback.extract_tb(exc.__traceback__)
     )
-    result += "\n".join(filtered_lines)
+    if frames:
+        project_frames, omitted_frames = _filter_project_frames(frames, project_root)
 
-    return result or backtrace_str
+    # 2. If no project frames, try chained cause (__cause__ or __context__)
+    if not project_frames:
+        cause = exc.__cause__ or exc.__context__
+        if cause and cause.__traceback__:
+            cause_frames = traceback.extract_tb(cause.__traceback__)
+            project_frames, new_omitted_frames = _filter_project_frames(
+                cause_frames, project_root
+            )
+            omitted_frames.extend(new_omitted_frames)
+
+    return project_frames, omitted_frames
 
 
 def format_project_traceback(exc: BaseException, project_root: Path) -> str:
@@ -105,48 +94,15 @@ def format_project_traceback(exc: BaseException, project_root: Path) -> str:
     2. exc.__cause__.__traceback__ (chained exception via 'raise ... from ...')
     3. exc.backtrace (stored string in TradingApiException)
     """
-    parts: List[str] = []
-    project_frames: List[traceback.FrameSummary] = []
-    omitted = 0
 
-    # 1. Try live traceback from exc.__traceback__
-    if exc.__traceback__:
-        frames = traceback.extract_tb(exc.__traceback__)
-        project_frames, omitted = _filter_project_frames(frames, project_root)
-
-    # 2. If no project frames, try chained cause (__cause__ or __context__)
-    if not project_frames:
-        cause = exc.__cause__ or exc.__context__
-        if cause and cause.__traceback__:
-            cause_frames = traceback.extract_tb(cause.__traceback__)
-            cause_project_frames, cause_omitted = _filter_project_frames(
-                cause_frames, project_root
-            )
-            if cause_project_frames:
-                project_frames = cause_project_frames
-                omitted = cause_omitted
-                parts.append(f"... from chained exception ({type(cause).__name__}) ...")
-
-    # 3. If still no project frames, try stored backtrace string (TradingApiException)
-    if not project_frames and hasattr(exc, "backtrace") and getattr(exc, "backtrace"):
-        backtrace_str: str = getattr(exc, "backtrace")
-        # Only use if it's not "NoneType: None" (default traceback.format_exc() when no exception)
-        if backtrace_str.strip() and "NoneType: None" not in backtrace_str:
-            # Filter the stored backtrace to only project frames
-            filtered_backtrace = _filter_backtrace_string(
-                backtrace_str, str(project_root.resolve())
-            )
-            parts.append(filtered_backtrace)
-            return "\n".join(parts)
-
+    project_frames, omitted_frames = _extract_project_backtrace(exc, project_root)
+    parts: List[str] = traceback.format_list(project_frames or omitted_frames)
     # Format output
-    if project_frames:
-        parts.append("".join(traceback.format_list(project_frames)))
-    else:
-        parts.append("<no project frames retained>\n")
-    if omitted:
-        parts.insert(0, f"... omitted {omitted} frame(s) from external libraries ...\n")
-    parts.append("".join(traceback.format_exception_only(type(exc), exc)))
+    if project_frames and omitted_frames:
+        parts.insert(
+            0,
+            f"... omitted {len(omitted_frames)} frame(s) from external libraries ...\n",
+        )
     return "".join(parts)
 
 
@@ -255,6 +211,8 @@ def _log_exception(
     log_message = (
         f"[{request_info} --> {status_code}: {HTTPStatus(status_code).name}]"
         + f"\n{format_project_traceback(exc, PROJECT_ROOT)}"
+        + f"\n{''.join(traceback.format_exception_only(type(exc), exc))}"
+        + f"\n{exc}"
     )
 
     if status_code >= 500:
@@ -270,18 +228,33 @@ def _api_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     - Logs once with format: request info / code / message / backtrace
     - Returns only code + message to client (no backtrace in response)
     """
-    if isinstance(exc, TradingApiException):
+    # Handle validation errors specially (422 Unprocessable Entity)
+    if isinstance(exc, RequestValidationError):
+        api_exc = TradingApiException(
+            code="VALIDATION_ERROR",
+            message=str(exc.errors()),
+            backtrace=exc.__traceback__,
+        )
+        status_code = 422
+    # Handle HTTPException (FastAPI/Starlette standard exceptions, including 404)
+    elif isinstance(exc, StarletteHTTPException):
+        api_exc = TradingApiException(
+            code=HTTPStatus(exc.status_code).name.upper(),
+            message=str(exc.detail),
+            backtrace=exc.__traceback__,
+        )
+        status_code = exc.status_code
+    elif isinstance(exc, TradingApiException):
         api_exc = exc
+        status_code = _get_status_code_from_code(api_exc.code)
     else:
         api_exc = TradingApiException(
             code="UNHANDLED_EXCEPTION",
             message=str(exc),
-            backtrace="".join(
-                traceback.format_exception(type(exc), exc, exc.__traceback__)
-            ),
+            backtrace=exc.__traceback__,
         )
+        status_code = _get_status_code_from_code(api_exc.code)
 
-    status_code = _get_status_code_from_code(api_exc.code)
     _log_exception(api_exc, status_code, request)
 
     return JSONResponse(
@@ -300,12 +273,11 @@ async def _ws_exception_handler(websocket: WebSocket, exc: Exception) -> None:
     if isinstance(exc, TradingApiException):
         ws_exc = exc
     else:
+        project_frames, omitted_frames = _extract_project_backtrace(exc, PROJECT_ROOT)
         ws_exc = TradingApiException(
             code="UNHANDLED_EXCEPTION",
             message=str(exc),
-            backtrace="".join(
-                traceback.format_exception(type(exc), exc, exc.__traceback__)
-            ),
+            backtrace=project_frames or omitted_frames,
         )
 
     close_code = _get_ws_close_code_from_code(ws_exc.code)
@@ -341,4 +313,16 @@ def register_exception_handlers(app: FastAPI) -> None:
     Call this during app initialization.
     """
     # Single unified handler for both HTTP and WebSocket
-    app.add_exception_handler(Exception, exception_handler)  # type: ignore[arg-type]
+    for key in app.exception_handlers.keys():
+        app.add_exception_handler(key, exception_handler)  # type: ignore[arg-type]
+
+    must_have_exceptions = [
+        Exception,
+        StarletteHTTPException,  # Includes FastAPI HTTPException (subclass)
+        WebSocketException,
+        RequestValidationError,
+        WebSocketRequestValidationError,
+        500,
+    ]
+    for exc in must_have_exceptions:
+        app.add_exception_handler(exc, exception_handler)  # type: ignore[arg-type]

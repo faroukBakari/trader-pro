@@ -60,7 +60,7 @@ TradingApiException (base)
 │  ─────────────────────────────────────────────────────────  │
 │  + code: str              # Machine-readable error code     │
 │  + message: str           # Human-readable description      │
-│  + backtrace: str         # Full stack trace               │
+│  + backtrace: List[FrameSummary]  # Stack frames            │
 │  + timestamp: int         # Unix timestamp                  │
 │  ─────────────────────────────────────────────────────────  │
 │  + to_dict() → dict       # Serialize for JSON response    │
@@ -95,7 +95,7 @@ raise TradingApiException(
 |-----------|------|-------------|
 | `code` | `str` | Machine-readable error code |
 | `message` | `str` | Human-readable error description |
-| `backtrace` | `str` | Full stack trace (auto-captured) |
+| `backtrace` | `List[FrameSummary]` | Stack frames (auto-captured via `traceback.extract_tb()`) |
 | `timestamp` | `int` | Unix timestamp (auto-set) |
 
 ### CommonException
@@ -195,6 +195,72 @@ raise ProviderException(
 - Connection errors to external services
 - Invalid responses from providers
 - Provider-specific validation errors
+
+---
+
+## Subscription-Level Error Models
+
+For WebSocket streaming, errors can occur at the subscription level (specific topic fails) rather than connection level. These models provide structured error payloads for client notification.
+
+**Source:** [models/common.py](../src/trading_api/models/common.py)
+
+### ErrorPayload
+
+Pydantic model that bridges `TradingApiException` to client-safe JSON payloads:
+
+```python
+from trading_api.models import ErrorPayload
+
+# Convert exception to client payload
+exc = ProviderException(
+    provider="tws",
+    capability="datafeed",
+    code="PROVIDER_DATAFEED_TIMEOUT",
+    message="Request timed out",
+)
+payload = ErrorPayload.from_exception(exc)
+
+# Result:
+{
+    "code": "PROVIDER_DATAFEED_TIMEOUT",
+    "message": "Request timed out",
+    "timestamp": 1702656000.0,
+    "details": {"provider": "tws", "capability": "datafeed"}
+}
+```
+
+**Attributes:**
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `code` | `str` | Error code from exception |
+| `message` | `str` | Human-readable error message |
+| `timestamp` | `float` | Unix timestamp |
+| `details` | `dict \| None` | Extra context (provider, capability, module) |
+
+**Note:** `backtrace` is intentionally excluded (backend-only concern).
+
+### SubscriptionError
+
+Wraps `ErrorPayload` with subscription context and recovery hints:
+
+```python
+from trading_api.models import SubscriptionError, ErrorPayload
+
+error = SubscriptionError(
+    topic="bars:AAPL:1",
+    error=ErrorPayload.from_exception(exc),
+    recoverable=True,
+    retry_after_ms=5000,
+)
+```
+
+**Attributes:**
+| Attribute | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `topic` | `str` | required | Subscription topic that failed |
+| `error` | `ErrorPayload` | required | Structured error payload |
+| `recoverable` | `bool` | `True` | If client can retry |
+| `retry_after_ms` | `int \| None` | `None` | Suggested retry delay |
 
 ---
 
@@ -359,6 +425,51 @@ WebSocket errors close the connection with a code and reason:
 # Reason: "SERVICE_DATAFEED_INVALID_TOPIC: Invalid topic format" (max 123 bytes)
 await websocket.close(code=1003, reason=f"{code}: {message}"[:123])
 ```
+
+### WebSocket Subscription Errors
+
+Subscription-level errors notify clients without closing the connection. This is distinct from connection-level errors which terminate the WebSocket.
+
+**Connection-Level vs Subscription-Level:**
+| Level | When | Action | Example |
+|-------|------|--------|---------|
+| **Connection** | Auth failure, protocol error | Close WebSocket | Invalid JWT, malformed message |
+| **Subscription** | Specific topic fails | Send error message | Symbol timeout, rate limit |
+
+**Error Message Format:**
+
+```json
+{
+  "type": "{route}.error",
+  "payload": {
+    "topic": "bars:AAPL:1",
+    "error": {
+      "code": "PROVIDER_DATAFEED_TIMEOUT",
+      "message": "Request timed out",
+      "timestamp": 1702656000.0,
+      "details": { "provider": "tws", "capability": "datafeed" }
+    },
+    "recoverable": true,
+    "retry_after_ms": 5000
+  }
+}
+```
+
+**Handling Flow:**
+
+```
+Provider Error
+     │
+     ├─► Recoverable (timeout, rate limit)
+     │        │
+     │        └─► Broadcast SubscriptionError → Keep connection open
+     │
+     └─► Non-recoverable (symbol invalid, permission denied)
+              │
+              └─► exception_handler() → Log + Close connection
+```
+
+**See:** [BACKEND_WEBSOCKETS.md](BACKEND_WEBSOCKETS.md#websocket-error-handling) for implementation details.
 
 ### Unhandled Exceptions
 

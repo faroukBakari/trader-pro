@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, Awaitable, Callable
 
+from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
     Bar,
     QuoteData,
@@ -51,7 +52,7 @@ class DatafeedCapability(ABC):
     @abstractmethod
     async def get_symbol_info(
         self,
-        ticker: str,
+        ticker_name: str,
         **kwargs: Any,
     ) -> SymbolInfo:
         """Get detailed symbol information.
@@ -73,7 +74,7 @@ class DatafeedCapability(ABC):
     @abstractmethod
     async def get_historical_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         start_time: datetime,
         end_time: datetime,
         resolution: Resolution,
@@ -101,7 +102,7 @@ class DatafeedCapability(ABC):
     @abstractmethod
     async def get_quotes_snapshot(
         self,
-        tickers: list[str],
+        ticker_names: list[str],
         **kwargs: Any,
     ) -> list[QuoteData]:
         """Get current market quotes for multiple tickers (snapshot).
@@ -123,18 +124,20 @@ class DatafeedCapability(ABC):
     @abstractmethod
     def subscribe_realtime_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> str:
         """Subscribe to real-time bars.
 
         Args:
             ticker: Ticker chain
-            callback: Callback invoked for each new bar
-            exchange: Optional exchange filter
             resolution: Bar timeframe (default: 5 seconds)
+            callback: Callback invoked for each new bar
+            on_error: Optional callback invoked on errors (e.g., timeout, connection lost)
+            **kwargs: Provider-specific options (e.g., exchange)
 
         Returns:
             Subscription ID (for unsubscribe)
@@ -144,14 +147,16 @@ class DatafeedCapability(ABC):
 
         [CONTINUOUS]: Callback invoked continuously until unsubscribe.
         [THREAD-SAFE]: Callback may be invoked from provider thread.
+        [ERROR-HANDLING]: If on_error is provided, transient errors call it instead of raising.
         """
         ...
 
     @abstractmethod
     def subscribe_market_data(
         self,
-        tickers: list[str],
+        ticker_names: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> list[str]:
         """Subscribe to real-time market data (ticks/quotes).
@@ -159,7 +164,8 @@ class DatafeedCapability(ABC):
         Args:
             tickers: List of ticker chains
             callback: Callback invoked for each tick update
-            exchange: Optional exchange filter
+            on_error: Optional callback invoked on errors (e.g., timeout, rate limit)
+            **kwargs: Provider-specific options (e.g., exchange)
 
         Returns:
             Subscription ID (for unsubscribe)
@@ -169,6 +175,7 @@ class DatafeedCapability(ABC):
 
         [CONTINUOUS]: Callback invoked continuously until unsubscribe.
         [THREAD-SAFE]: Callback may be invoked from provider thread.
+        [ERROR-HANDLING]: If on_error is provided, transient errors call it instead of raising.
         """
         ...
 
