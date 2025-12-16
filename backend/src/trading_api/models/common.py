@@ -3,13 +3,26 @@ Base models and common utilities for the trading API.
 
 This module contains shared base classes and utilities
 that are used across multiple domains.
+
+IMPORTANT: Models are pure data - no trading_api imports allowed.
 """
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Generic, Literal, Optional, TypeVar
+from typing import Any, Generic, Literal, Optional, Protocol, TypeVar
 
 from pydantic import BaseModel, Field
+
+
+class ExceptionLike(Protocol):
+    """Protocol for exception-like objects with to_dict() method.
+
+    Used by ErrorPayload.from_exception() to avoid circular imports.
+    TradingApiException implements this protocol.
+    """
+
+    def to_dict(self) -> dict[str, Any]:
+        ...
 
 
 class BaseApiResponse(BaseModel):
@@ -55,9 +68,86 @@ class SubscriptionUpdate(BaseModel, Generic[T]):
     payload: T = Field(..., description="Update payload")
 
 
+class ErrorPayload(BaseModel):
+    """Pydantic-serializable representation of TradingApiException.
+
+    Bridges Python exceptions (Exception inheritance) and Pydantic models
+    (BaseModel inheritance) - these are mutually exclusive hierarchies.
+
+    Constructor accepts a TradingApiException directly and uses its
+    existing to_dict() method for field extraction.
+
+    Fields:
+    - code, message, timestamp: Mandatory (from base TradingApiException)
+    - details: Optional dict for extra metadata (module, provider, capability)
+    - backtrace: Intentionally omitted (backend-only concern)
+    """
+
+    code: str = Field(..., description="Error code (e.g., PROVIDER_TIMEOUT)")
+    message: str = Field(..., description="Human-readable error description")
+    timestamp: float = Field(..., description="Unix timestamp when error occurred")
+    details: dict[str, Any] | None = Field(
+        default=None,
+        description="Additional error context (module, provider, capability, etc.)",
+    )
+
+    @classmethod
+    def from_exception(cls, exc: ExceptionLike) -> "ErrorPayload":
+        """Construct ErrorPayload from a TradingApiException.
+
+        Args:
+            exc: Exception with to_dict() method (TradingApiException implements ExceptionLike)
+
+        Returns:
+            ErrorPayload instance with exception data
+        """
+        exc_dict = exc.to_dict()
+
+        code = exc_dict.pop("code")
+        message = exc_dict.pop("message")
+        timestamp = exc_dict.pop("timestamp")
+        exc_dict.pop("backtrace", None)  # Remove backend-only field
+
+        details = exc_dict if exc_dict else None
+
+        return cls(
+            code=code,
+            message=message,
+            timestamp=timestamp,
+            details=details,
+        )
+
+
+class SubscriptionError(BaseModel):
+    """Error notification for an active subscription.
+
+    Sent when a subscription encounters an error but connection remains open.
+    Client can decide to unsubscribe, retry, or wait for recovery.
+
+    Part of the WebSocket pub/sub protocol:
+    - {route}.subscribe → {route}.subscribe.response
+    - {route}.unsubscribe → {route}.unsubscribe.response
+    - {route}.update (data)
+    - {route}.error (this message type)
+    """
+
+    topic: str = Field(..., description="Affected subscription topic")
+    error: ErrorPayload = Field(..., description="Serialized exception details")
+    recoverable: bool = Field(
+        default=True,
+        description="If True, client should expect automatic recovery",
+    )
+    retry_after_ms: int | None = Field(
+        default=None,
+        description="Suggested retry delay in milliseconds",
+    )
+
+
 __all__ = [
     "BaseApiResponse",
     "ErrorApiResponse",
+    "ErrorPayload",
+    "SubscriptionError",
     "SubscriptionResponse",
     "SubscriptionUpdate",
     "CapabilityName",

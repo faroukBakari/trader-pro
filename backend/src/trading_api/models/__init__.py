@@ -61,6 +61,8 @@ from .broker import (
 from .common import (
     BaseApiResponse,
     ErrorApiResponse,
+    ErrorPayload,
+    SubscriptionError,
     SubscriptionRequest,
     SubscriptionResponse,
     SubscriptionUpdate,
@@ -102,6 +104,8 @@ __all__ = [
     "BaseApiResponse",
     "BarsSubscriptionRequest",
     "ErrorApiResponse",
+    "ErrorPayload",
+    "SubscriptionError",
     "SubscriptionRequest",
     "SubscriptionResponse",
     "SubscriptionUpdate",

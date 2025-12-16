@@ -57,7 +57,11 @@ from trading_api.models.broker import (
 )
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ServiceException
-from trading_api.shared.ws.ws_router import WsRouteService
+from trading_api.shared.ws.ws_router import (
+    ProviderUpdateCallback,
+    TopicErrorCallback,
+    WsRouteService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -765,7 +769,10 @@ class BrokerService(WsRouteService):
     # ========================== WEBSOCKET STREAMING ==========================#
 
     def create_topic(
-        self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
+        self,
+        topic: str,
+        topic_update: ProviderUpdateCallback,
+        topic_error: TopicErrorCallback,
     ) -> None:
         """Register callback for topic type and start execution simulator if needed.
 
@@ -779,10 +786,15 @@ class BrokerService(WsRouteService):
         Args:
             topic: Topic string in format "topic_type:{json_params}"
             topic_update: Callback to broadcast updates
+            topic_error: Callback to broadcast errors (not used in mock broker)
 
         Raises:
             ServiceException: If topic format is invalid
         """
+        # Note: topic_error is accepted but not used in mock broker implementation
+        # Real broker integration would forward provider errors through this callback
+        _ = topic_error  # Acknowledge parameter (unused in mock)
+
         if ":" not in topic:
             raise ServiceException(
                 module="broker",

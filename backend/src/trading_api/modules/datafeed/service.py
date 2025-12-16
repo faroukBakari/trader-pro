@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable, List, Optional
+from typing import List, Optional
 from zoneinfo import ZoneInfo
 
 from trading_api.models import (
@@ -19,14 +19,37 @@ from trading_api.models import (
     SymbolInfo,
 )
 from trading_api.models.common import CapabilitySpec
-from trading_api.models.exceptions import ServiceException
+from trading_api.models.exceptions import ServiceException, TradingApiException
 from trading_api.models.market import Resolution
 from trading_api.providers.capabilities.datafeed import DatafeedCapability
-from trading_api.shared.ws.ws_router import WsRouteService
+from trading_api.shared.ws.ws_router import (
+    ProviderUpdateCallback,
+    TopicErrorCallback,
+    WsRouteService,
+)
 
 logger = logging.getLogger(__name__)
 
 us_eastern = ZoneInfo("US/Eastern")
+
+
+# ============================================================================
+# Recoverable Error Configuration
+# ============================================================================
+# Default behavior: ALL errors are non-recoverable (connection closes)
+# Only exceptions in this set will keep the connection open and broadcast
+# a SubscriptionError message instead.
+
+_RECOVERABLE_ERROR_CODES: frozenset[str] = frozenset(
+    {
+        "PROVIDER_DATAFEED_TIMEOUT",
+        "PROVIDER_DATAFEED_CONNECTION_LOST",
+        "PROVIDER_DATAFEED_RATE_LIMIT",
+        "PROVIDER_DATAFEED_DATA_GAP",
+    }
+)
+
+_DEFAULT_RETRY_AFTER_MS = 5000
 
 
 class DatafeedService(WsRouteService):
@@ -84,13 +107,22 @@ class DatafeedService(WsRouteService):
         return self.configuration
 
     def create_topic(
-        self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
+        self,
+        topic: str,
+        topic_update: ProviderUpdateCallback,
+        topic_error: TopicErrorCallback,
     ) -> None:
         """Parse topic and create appropriate subscription task.
 
         Topic formats:
             - bars:{"resolution":"1D","symbol":"AAPL"}
             - quotes:{"symbols":["AAPL","GOOGL"],"fast_symbols":["MSFT"]}
+
+        Args:
+            topic: Topic string in format "topic_type:{json_params}"
+            topic_update: Callback to broadcast data updates to subscribers
+            topic_error: Callback to broadcast errors to subscribers.
+                        Service wraps this to determine recoverable/retry_after_ms.
 
         Raises:
             ValueError: If topic format is invalid or unknown topic type
@@ -114,6 +146,17 @@ class DatafeedService(WsRouteService):
 
         topic_type, params_json = topic.split(":", 1)
 
+        # Wrap error callback to compute recoverable/retry at service level
+        async def on_provider_error(exc: TradingApiException) -> None:
+            """Handle provider errors - determine recoverable status and forward."""
+            recoverable = self._is_error_recoverable(exc)
+            if not recoverable:
+                logger.error(f"Non-recoverable error on topic {topic} : {exc!r}")
+                self._topic_to_subscription_id.pop(topic, None)
+
+            retry_after_ms = _DEFAULT_RETRY_AFTER_MS if recoverable else None
+            await topic_error(exc, recoverable, retry_after_ms)
+
         # TODO: need to validate create_topic params/types against provider capabilities at runtime
 
         if topic_type == "bars":
@@ -124,9 +167,10 @@ class DatafeedService(WsRouteService):
             logger.info(f"creating new topic : {topic}")
 
             subscription_id = self.datafeed_provider.subscribe_realtime_bars(
-                ticker=subscription_request.symbol,
+                ticker_name=subscription_request.symbol,
                 resolution=subscription_request.resolution,
                 callback=topic_update,
+                on_error=on_provider_error,
             )
 
             # Track subscription ID for cleanup
@@ -157,7 +201,9 @@ class DatafeedService(WsRouteService):
 
             # Subscribe to market data for all symbols via provider (returns list of subscription IDs)
             subscription_ids = self.datafeed_provider.subscribe_market_data(
-                tickers=all_symbols, callback=topic_update
+                ticker_names=all_symbols,
+                callback=topic_update,
+                on_error=on_provider_error,
             )
 
             # Track subscription IDs for cleanup (list for quotes, int for bars)
@@ -168,6 +214,40 @@ class DatafeedService(WsRouteService):
                 message=f"Unknown topic type: {topic_type}",
                 module="datafeed",
             )
+
+    def _is_error_recoverable(self, exc: TradingApiException) -> bool:
+        """Determine if error is transient and streaming should continue.
+
+        Default: ALL errors are non-recoverable (strict approach).
+        Only errors in _RECOVERABLE_ERROR_CODES will keep the connection open.
+
+        PROVIDER_TWS errors use suffix-based classification:
+        - Codes ending in _NON_RECOVERABLE are not recoverable
+        - Other PROVIDER_TWS_API codes are recoverable by default
+
+        Args:
+            exc: The exception to check
+
+        Returns:
+            True if error is recoverable, False otherwise
+        """
+        code = exc.code
+
+        # Check explicit recoverable codes first
+        if code in _RECOVERABLE_ERROR_CODES:
+            return True
+
+        # Handle PROVIDER_TWS_API error codes with suffix-based classification
+        # Format: PROVIDER_TWS_API_{CATEGORY}_{CODE}[_NON_RECOVERABLE]
+        if code.startswith("PROVIDER_TWS_API_"):
+            # Non-recoverable if suffix indicates so
+            if code.endswith("_NON_RECOVERABLE"):
+                return False
+            # All other PROVIDER_TWS_API errors are recoverable
+            return True
+
+        # Default: non-recoverable for unknown error codes
+        return False
 
     def remove_topic(self, topic: str) -> None:
         """Remove topic and cleanup subscriptions.
@@ -255,7 +335,7 @@ class DatafeedService(WsRouteService):
     async def resolve_ticker(self, ticker: str) -> Optional[SymbolInfo]:
         """Resolve symbol information via datafeed provider."""
         return await self.datafeed_provider.get_symbol_info(
-            ticker=ticker,
+            ticker_name=ticker,
             timeout=5.0,
         )
 
@@ -286,7 +366,7 @@ class DatafeedService(WsRouteService):
         end_time = datetime.fromtimestamp(to_time / 1000)
 
         bars = await self.datafeed_provider.get_historical_bars(
-            ticker=ticker,
+            ticker_name=ticker,
             start_time=start_time,
             end_time=end_time,
             resolution=resolution,
@@ -305,8 +385,8 @@ class DatafeedService(WsRouteService):
         # try:
         # Delegate to provider for real quote snapshots
         return await self.datafeed_provider.get_quotes_snapshot(
-            tickers=tickers,
-            timeout=1.0,
+            ticker_names=tickers,
+            timeout=6.0,
         )
         # except ProviderException as e:
         #     logger.exception(e)

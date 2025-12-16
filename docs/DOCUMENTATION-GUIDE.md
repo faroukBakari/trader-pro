@@ -158,7 +158,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture, functional `ModuleRegistry.get_modules(...)` workflow, and module system |
 | **backend/docs/AUTHENTICATION.md**               | JWT-based authentication with Google OAuth, cookies, security                                          |
-| **backend/docs/ERROR-MANAGEMENT.md**             | ⭐ Exception hierarchy, error codes, global handlers, testing patterns                                  |
+| **backend/docs/ERROR-MANAGEMENT.md**             | ⭐ Exception hierarchy, error codes, global handlers, testing patterns                                 |
 | **backend/docs/PROVIDER-SYSTEM.md**              | Provider/capability system developer guide                                                             |
 | **backend/docs/MODULAR_VERSIONNING.md**          | Module-level API versioning strategy                                                                   |
 | **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx                                                            |
@@ -361,7 +361,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 ### Feature Implementation Chains
 
 - **REST API Development**: `API-METHODOLOGY.md` → `MODULAR_BACKEND_ARCHITECTURE.md` → `SPECS_AND_CLIENT_GEN.md`
-- **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md`
+- **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `ERROR-MANAGEMENT.md` (subscription errors)
 - **Authentication**: `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
 - **Error Handling**: `ERROR-MANAGEMENT.md` → `PROVIDER-SYSTEM.md` (providers) + `BACKEND_TESTING.md` (testing)
 - **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BROKER-CONNECTION-ADAPTER.md`
@@ -488,14 +488,14 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### Error Handling
 
-**Keywords**: exceptions, error codes, error handling, HTTP status, WebSocket close codes, TradingApiException, ServiceException, ProviderException, CommonException, global handlers
+**Keywords**: exceptions, error codes, error handling, HTTP status, WebSocket close codes, TradingApiException, ServiceException, ProviderException, CommonException, global handlers, subscription errors, recoverable errors, ErrorPayload, SubscriptionError, topic_error callback
 
 **Scope**: Backend exception hierarchy and error handling  
 **Out of Scope**: Frontend error handling, user-facing error messages
 
-- **backend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete error management guide (exception hierarchy, error codes, handlers)
+- **backend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete error management guide (exception hierarchy, error codes, handlers, subscription errors)
 - **backend/docs/PROVIDER-SYSTEM.md** - ProviderException usage in providers (Section 8.4)
-- **backend/docs/BACKEND_WEBSOCKETS.md** - WebSocket error handling (close codes)
+- **backend/docs/BACKEND_WEBSOCKETS.md** - WebSocket error handling (close codes, subscription-level errors)
 - **backend/docs/BACKEND_TESTING.md** - Testing error responses (test client configuration)
 
 ### Build & DevOps

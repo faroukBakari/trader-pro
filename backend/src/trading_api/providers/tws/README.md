@@ -52,19 +52,19 @@ TWSClient.reqMktDataStream()             Decoder.interpret()
         │                                        │
 register_stream(reqId, callback)         tickPrice(reqId, price)
         │                                        │
-        │                                _reader_tickers[reqId]["bid"] = price
+        │                                _stream_data[reqId]["bid"] = price
         │                                        │
 callback(data) ◄──────────────────────── _notify_stream(reqId, ["bid"])
                                                  │
-                    loop.call_soon_threadsafe(callback, ticker_data, fields)
+                    loop.call_soon_threadsafe(callback, stream_data, fields)
 ```
 
 **Key Patterns:**
 
 - **Lazy Connection**: `TWSClient.ibsocket` connects on first access
 - **Future Bridge**: `asyncio.Future` + `call_soon_threadsafe()` for one-shot requests
-- **Ticker Slots**: `_reader_tickers[reqId]` dict accumulates real-time data
-- **Stream Registry**: `_reader_streams[reqId]` holds (loop, callback) for continuous updates
+- **Stream Slots**: `_stream_data[reqId]` dict accumulates real-time data
+- **Stream Hooks**: `_stream_hooks[reqId]` holds (loop, callback, on_error) for continuous updates
 - **Stream Keys**: `"AAPL:NASDAQ:STK-12345@5 mins"` identifies unique subscriptions
 
 ---
@@ -145,25 +145,44 @@ config.generic_tick_list_str  # "165,225,232,233,236,..."
 class DatafeedCapability(Protocol):
     # One-shot requests (return data)
     async def search_symbols(self, pattern: str, **kwargs) -> list[SearchSymbolResultItem]
-    async def get_symbol_info(self, ticker: str, **kwargs) -> SymbolInfo
-    async def get_historical_bars(self, ticker: str, start_time: datetime, end_time: datetime,
+    async def get_symbol_info(self, ticker_name: str, **kwargs) -> SymbolInfo
+    async def get_historical_bars(self, ticker_name: str, start_time: datetime, end_time: datetime,
                                    resolution: Resolution, **kwargs) -> list[Bar]
-    async def get_quotes_snapshot(self, tickers: list[str], **kwargs) -> list[QuoteData]
+    async def get_quotes_snapshot(self, ticker_names: list[str], **kwargs) -> list[QuoteData]
 
     # Subscription methods (return stream keys)
-    def subscribe_realtime_bars(self, ticker: str, resolution: Resolution,
-                                 callback: Callable[[Bar], Awaitable[None]], **kwargs) -> str
-    def subscribe_market_data(self, tickers: list[str],
-                               callback: Callable[[QuoteData], Awaitable[None]], **kwargs) -> list[str]
+    def subscribe_realtime_bars(
+        self,
+        ticker_name: str,
+        resolution: Resolution,
+        callback: Callable[[Bar], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        **kwargs,
+    ) -> str
+
+    def subscribe_market_data(
+        self,
+        ticker_names: list[str],
+        callback: Callable[[QuoteData], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        **kwargs,
+    ) -> list[str]
+
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None
     def unsubscribe_market_data(self, subscription_ids: list[str]) -> None
 ```
 
+**Interface Tags:**
+
+- `[CONTINUOUS]`: Callback invoked continuously until unsubscribe
+- `[THREAD-SAFE]`: Callback may be invoked from provider thread
+- `[ERROR-HANDLING]`: If `on_error` is provided, transient errors call it instead of raising
+
 **Key Changes from Previous Version:**
 
-- `ticker` parameter replaces `symbol` + `exchange`
-- `Resolution` enum replaces `TimeFrame`
-- Subscription IDs are `str` (stream keys) not `int` (reqIds)
+- `ticker` → `ticker_name` parameter rename for consistency
+- `tickers` → `ticker_names` parameter rename
+- Added `on_error` callback for subscription-level error notifications
 
 ---
 
@@ -397,15 +416,83 @@ TWS errors are converted to `ProviderException` and routed through centralized e
 
 > **Full Reference:** See [ERROR-MANAGEMENT.md](../../../docs/ERROR-MANAGEMENT.md) for complete exception hierarchy.
 
-### Error Categories
+### Error Source Categories
 
-`TWSErrorCategory` in `tws_connection.py` defines error code prefixes:
+`TWSErrorCategory` in `tws_connection.py` defines error code prefixes by source:
 
 | Category   | Code Prefix               | Description                              |
 | ---------- | ------------------------- | ---------------------------------------- |
 | `CONN`     | `PROVIDER_TWS_CONN_*`     | Socket/connection errors                 |
 | `API`      | `PROVIDER_TWS_API_*`      | TWS API errors (from `error()` callback) |
 | `CALLBACK` | `PROVIDER_TWS_CALLBACK_*` | Callback processing errors               |
+
+### TWS Error Classification
+
+`classify_error()` in `tws_models.py` classifies TWS error codes by meaning and recoverability:
+
+```python
+from tws_models import classify_error, TWSErrorClassification
+
+category, is_recoverable = classify_error(error_code)
+# Returns: (TWSErrorClassification.*, bool)
+```
+
+**Classification Categories:**
+
+| Category       | Example Codes  | Recoverable | Description                        |
+| -------------- | -------------- | ----------- | ---------------------------------- |
+| `INFO`         | 2104, 2106     | ✓           | Status notifications (not errors)  |
+| `CONNECTION`   | 502, 504, 1100 | ✓           | Connection state changes           |
+| `PACING`       | 100, 420       | ✓           | Rate limiting (throttle and retry) |
+| `DUPLICATE`    | 102, 103, 326  | ✓           | ID conflicts (use different ID)    |
+| `SUBSCRIPTION` | 354, 10090     | ✗           | Market data permission issues      |
+| `VALIDATION`   | 200, 201, 203  | ✗           | Invalid request/contract           |
+| `FATAL`        | 503, 505-509   | ✗           | Protocol/system errors             |
+| `WARNING`      | 2xxx range     | ✓           | Non-critical warnings              |
+| `SYSTEM`       | 1xxx range     | ✓           | System state messages              |
+| `ERROR`        | (default)      | ✗           | Unclassified errors                |
+
+**Non-Recoverable Error Convention:**
+
+Error details ending with `_NON_RECOVERABLE` trigger cleanup of associated data structures:
+
+```python
+# In _handle_request_error():
+detail = f"{category}_{code}" if recoverable else f"{category}_{code}_NON_RECOVERABLE"
+# Example: "VALIDATION_200_NON_RECOVERABLE"
+```
+
+### Stream Error Callbacks
+
+Subscription methods accept optional `on_error` callback for streaming errors:
+
+```python
+def subscribe_realtime_bars(
+    self,
+    ticker_name: str,
+    resolution: Resolution,
+    callback: Callable[[Bar], Awaitable[None]],
+    on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,  # NEW
+    **kwargs: Any,
+) -> str:
+    ...
+```
+
+**Error Flow:**
+
+```
+TWS error() callback
+        │
+classify_error(code)  →  (category, is_recoverable)
+        │
+_handle_request_error()
+        │
+        ├─► Future exists → reject with ProviderException
+        │
+        └─► Stream exists + on_error → invoke on_error callback
+                │
+                └─► Non-recoverable → cleanup _stream_data, _stream_hooks
+```
 
 ### Error Handler Decorator
 
@@ -425,16 +512,20 @@ def tickPrice(self, reqId: int, tickType: int, price: float, attrib) -> None:
 
 ```python
 def _handle_request_error(self, category, detail, reqId, message, ...):
+    # Determine recoverability from detail suffix
+    is_non_recoverable = detail.endswith("_NON_RECOVERABLE")
+
     error = ProviderException(
-        code=f"PROVIDER_TWS_{category}_{detail}",
+        code=f"PROVIDER_TWS_{category}_{detail.upper()}",
         message=f"[reqId={reqId}] {message}",
         provider="tws",
-        capability=self._reqId_to_capability.get(reqId, "shared"),
+        capability=self._reqId_to_capability.pop(reqId, capability_fallback),
     )
 
-    # 1. Ticker stream exists → store in last_exception + notify
-    # 2. Future exists → reject future with error
+    # 1. Future exists → reject future with error
+    # 2. Stream exists + on_error → invoke error callback
     # 3. Neither → log as orphan error
+    # 4. Non-recoverable → cleanup all data structures for reqId
 ```
 
 ### Capability Tracking
@@ -445,19 +536,22 @@ Request IDs are mapped to capabilities for proper error routing:
 # On create_future() or register_stream()
 self._reqId_to_capability[reqId] = capability  # "datafeed", "broker", "shared"
 
-# On resolve/reject/unregister
+# On resolve/reject/unregister (or non-recoverable error)
 self._reqId_to_capability.pop(reqId, None)
 ```
 
 ### Common TWS Error Codes
 
-| Code      | Meaning                | Mapped Exception Code            |
-| --------- | ---------------------- | -------------------------------- |
-| 162       | Historical data pacing | `PROVIDER_TWS_API_TWS_CODE_162`  |
-| 200       | No security found      | `PROVIDER_TWS_API_TWS_CODE_200`  |
-| 354       | Not subscribed         | `PROVIDER_TWS_API_TWS_CODE_354`  |
-| 504       | Not connected          | `PROVIDER_TWS_API_TWS_CODE_504`  |
-| 2104/2106 | Farm connected         | Logged as warning (system error) |
+| Code      | Category     | Recoverable | Meaning                              |
+| --------- | ------------ | ----------- | ------------------------------------ |
+| 100       | PACING       | ✓           | Max rate exceeded (50/sec)           |
+| 162       | PACING       | ✓           | Historical data pacing               |
+| 200       | VALIDATION   | ✗           | No security definition found         |
+| 354       | SUBSCRIPTION | ✗           | Not subscribed to market data        |
+| 502       | CONNECTION   | ✓           | Couldn't connect to TWS              |
+| 504       | CONNECTION   | ✓           | Not connected                        |
+| 1100      | CONNECTION   | ✓           | Connectivity lost                    |
+| 2104/2106 | INFO         | ✓           | Farm connected (status notification) |
 
 ---
 

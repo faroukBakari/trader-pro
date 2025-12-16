@@ -7,7 +7,7 @@
 // }
 
 
-function serialize_params(obj: unknown): string {
+function serializeParams(obj: unknown): string {
   if (obj === null || obj === undefined) {
     return ''
   }
@@ -17,12 +17,12 @@ function serialize_params(obj: unknown): string {
   }
 
   if (Array.isArray(obj)) {
-    return `[${obj.map(serialize_params).join(',')}]`
+    return `[${obj.map(serializeParams).join(',')}]`
   }
 
   const objRecord = obj as Record<string, unknown>
   const sortedKeys = Object.keys(objRecord).sort()
-  const pairs = sortedKeys.map(key => `${JSON.stringify(key)}:${serialize_params(objRecord[key])}`)
+  const pairs = sortedKeys.map(key => `${JSON.stringify(key)}:${serializeParams(objRecord[key])}`)
   return `{${pairs.join(',')}}`
 }
 
@@ -49,9 +49,9 @@ interface WebSocketMessage<TBackendData extends object = object> {
 
 interface SubscriptionState<TParams extends object = object, TData extends object = object> {
   sub_id: string
-  sub_type: string
+  subType: string
   sub_params: TParams
-  on_update: (data: TData) => void
+  onUpdate: (data: TData) => void
 }
 
 export class WebSocketBase {
@@ -83,7 +83,7 @@ export class WebSocketBase {
       reconnect: true,
       maxReconnectAttempts: 5,
       reconnectDelay: 1000,
-      debug: false,
+      debug: true,
       wsUrl,
     }
     this.logger = this.config.debug
@@ -235,20 +235,20 @@ export class WebSocketBase {
       return
     }
     try {
-      subscription.on_update(data.payload)
+      subscription.onUpdate(data.payload)
     } catch (error) {
       this.logger.error(`Error in subscription onUpdate for sub_id ${subscription.sub_id} / topic ${data.topic}:`, error)
     }
   }
 
   async subscribe(
-    sub_type: string,
+    subType: string,
     sub_params: object,
-    on_update: (TbackendData: object) => void
+    onUpdate: (TbackendData: object) => void
   ): Promise<string> {
 
     // Generate unique sub_id hash
-    const sub_id = `${sub_type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+    const sub_id = `${subType}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
 
     while (true)
       try {
@@ -277,8 +277,8 @@ export class WebSocketBase {
 
           // Send request after registering the handler
           this.sendRequest(
-            sub_type + '.subscribe',
-            { sub_id, sub_params }
+            subType + '.subscribe',
+            { sub_id: sub_id, sub_params: sub_params }
           ).catch((error) => {
             this.pendingRequests.delete(sub_id)
             clearTimeout(timeout)
@@ -294,9 +294,9 @@ export class WebSocketBase {
 
         this.subscriptions.set(response.topic, {
           sub_id,
-          sub_type,
+          subType,
           sub_params,
-          on_update,
+          onUpdate,
         })
 
         return response.topic
@@ -351,7 +351,7 @@ export class WebSocketBase {
 
           // Send request after registering the handler
           this.sendRequest(
-            subscription.sub_type + '.subscribe',
+            subscription.subType + '.subscribe',
             { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
           ).catch((error) => {
             this.pendingRequests.delete(subscription.sub_id)
@@ -381,7 +381,7 @@ export class WebSocketBase {
     }
     try {
       const response = await this.sendRequest(
-        subscription.sub_type + '.unsubscribe',
+        subscription.subType + '.unsubscribe',
         { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
       )
       this.logger.log(`Unsubscribed sub_id ${subscription.sub_id} / topic: ${topic}`, response)
@@ -432,7 +432,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     onUpdate: (data: TData) => void,
   ): Promise<string> {
 
-    const paramsKey = serialize_params(subscriptionParams)
+    const paramsKey = serializeParams(subscriptionParams)
 
     const unsubTimeout = this.debouncedUnsub.get(paramsKey)
     if (unsubTimeout) {

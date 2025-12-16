@@ -50,7 +50,7 @@ from ibapi.wrapper import EWrapper, current_fn_name
 from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.tws_mappers import ticker_name
 
-from .tws_models import TICK_TYPE_TO_FIELD, get_asset_config
+from .tws_models import TICK_TYPE_TO_FIELD, classify_error, get_asset_config
 
 logger = logging.getLogger(__name__)
 DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
@@ -232,11 +232,10 @@ class IBSocket(EWrapper):
         self._reader_loop: asyncio.AbstractEventLoop | None = None
 
         # callback related attributes
-        self._reader_futures: dict[
+        self._future_hooks: dict[
             int, tuple[asyncio.AbstractEventLoop, asyncio.Future]
         ] = {}
-        self._reqId_to_capability: dict[int, str] = {}
-        self._reader_streams: dict[
+        self._stream_hooks: dict[
             int,
             tuple[
                 asyncio.AbstractEventLoop,
@@ -244,14 +243,18 @@ class IBSocket(EWrapper):
                     [dict[str, Any], list[str]],
                     Awaitable[None],
                 ],
+                Callable[[ProviderException], Awaitable[None]] | None,  # error callback
             ],
         ] = {}
 
         # Data tracking attributes
-        self._reader_accumulators: dict[int, list[Any]] = {}
-        self._reader_tickers: dict[int, dict[str, Any]] = {}
+        self._future_data: dict[int, list[Any]] = {}
+        self._stream_data: dict[int, dict[str, Any]] = {}
         self._nxt_order_id: int | None = None
         self._reader_accounts: list[str] = []
+
+        # for error management on capability basis
+        self._reqId_to_capability: dict[int, str] = {}
 
         # Signals when IBKR connection is fully established
         self._ready_event = threading.Event()
@@ -400,9 +403,9 @@ class IBSocket(EWrapper):
     def _reset(self) -> None:
         """Reset internal state - clear futures, accumulators, callbacks."""
         with self._socket_lock:
-            self._reader_futures.clear()
-            self._reader_accumulators.clear()
-            self._reader_tickers.clear()
+            self._future_hooks.clear()
+            self._future_data.clear()
+            self._stream_data.clear()
             self._reader_accounts.clear()
             self._ready_event.clear()
             self._nxt_order_id = None
@@ -420,9 +423,13 @@ class IBSocket(EWrapper):
             Route error to appropriate handler based on request state.
 
             Handles three scenarios:
-            1. Ticker stream exists → store in last_exception + notify stream
+            1. stream exists → notify stream error callback
             2. Future exists → reject future with error
             3. Neither → log warning (orphan error)
+
+            For non-recoverable errors (detail ends with _NON_RECOVERABLE):
+            - Cleans up all associated data structures for the reqId
+            - Removes hooks, data, and capability tracking
 
             This method never raises - errors are stored/routed, not propagated.
 
@@ -438,27 +445,41 @@ class IBSocket(EWrapper):
             ProviderException with consistent code format:
             PROVIDER_TWS_{CATEGORY}_{DETAIL}
         """
+        # Determine if error is non-recoverable from detail suffix
+        is_non_recoverable = detail.endswith("_NON_RECOVERABLE")
+
         error = ProviderException(
             code=f"PROVIDER_TWS_{category}_{detail.upper()}",
             message=f"[reqId={reqId}] {message}",
             provider="tws",
-            capability=self._reqId_to_capability.get(reqId, capability_fallback),
+            capability=self._reqId_to_capability.pop(reqId, capability_fallback),
             timestamp=timestamp,
         )
-        # 1. Check for active ticker stream
-        ticker = self._reader_tickers.get(reqId)
-        if ticker is not None:
-            ticker["last_exception"] = error
-            self._notify_stream(reqId, ["last_exception"])
 
-        # 2. Check for pending future
-        future = self._reader_futures.get(reqId)
-        if future is not None:
-            self._reject_future(reqId, error)
+        # 1. Check for pending future
+        future_loop, future = self._future_hooks.get(reqId, (None, None))
+        if future_loop is not None and future is not None and not future.done():
+            future_loop.call_soon_threadsafe(future.set_exception, error)
 
-        # 3. Orphan error (no ticker, no future) - just log
-        if ticker is None and future is None:
-            logger.exception(f"TWS orphan error [reqId={reqId}]: {error!r}")
+        # 2. Check for active stream
+        stream = self._stream_data.get(reqId)
+        stream_loop, _, on_error = self._stream_hooks.get(reqId, (None, None, None))
+        if stream_loop is not None and stream is not None and on_error is not None:
+            stream_loop.call_soon_threadsafe(stream_loop.create_task, on_error(error))  # type: ignore
+
+        # 3. Log orphan error if neither future nor stream handler exists
+        if (future is None or future.done()) and on_error is None:
+            logger.warning(f"TWS orphan error [reqId={reqId}]: {error!r}")
+
+        # 4. Cleanup data structures for non-recoverable errors
+        if is_non_recoverable:
+            # Remove future hooks and data
+            self._future_hooks.pop(reqId, None)
+            self._future_data.pop(reqId, None)
+            # Remove stream hooks and data
+            self._stream_hooks.pop(reqId, None)
+            self._stream_data.pop(reqId, None)
+            # Note: _reqId_to_capability already popped above
 
     # == exposed socket methods ===
 
@@ -577,22 +598,12 @@ class IBSocket(EWrapper):
 
     def _resolve_future(self, reqId: int) -> None:
         """Helper to resolve a future in the asyncio loop."""
-        results = self._reader_accumulators.pop(reqId, [])
-        loop, future = self._reader_futures.pop(reqId, (None, None))
-        self._reqId_to_capability.pop(reqId, None)
+        results = self._future_data.pop(reqId, [])
+        loop, future = self._future_hooks.pop(reqId, (None, None))
         if loop is None or future is None or future.done():
             logger.warning(f"future/loop not found or already done for reqId {reqId}.")
             return
         loop.call_soon_threadsafe(future.set_result, results)
-
-    def _reject_future(self, reqId: int, exception: ProviderException) -> None:
-        """Helper to reject a future with an exception in the asyncio loop."""
-        loop, future = self._reader_futures.pop(reqId, (None, None))
-        self._reqId_to_capability.pop(reqId, None)
-        if loop is None or future is None or future.done():
-            logger.warning(f"future/loop not found or already done for reqId {reqId}.")
-            return
-        loop.call_soon_threadsafe(future.set_exception, exception)
 
     # =======================
 
@@ -602,79 +613,10 @@ class IBSocket(EWrapper):
         """Create a new Future attached to the current event loop."""
         loop = asyncio.get_event_loop()
         future: asyncio.Future[Any] = loop.create_future()
-        self._reader_futures[reqId] = (loop, future)
-        self._reader_accumulators[reqId] = []
+        self._future_hooks[reqId] = (loop, future)
+        self._future_data[reqId] = []
         self._reqId_to_capability[reqId] = capability
         return asyncio.wait_for(future, timeout)
-
-    # === Stream management ===
-
-    def _register_stream(
-        self,
-        reqId: int,
-        ticker_name: str,
-        *,
-        capability: str,
-    ) -> None:
-        """Create and register a new stream slot slot for a reqId."""
-        # reader thread ownership
-        self._reader_tickers[reqId] = {
-            "reqId": reqId,
-            "ticker_name": ticker_name,
-        }
-        self._reqId_to_capability[reqId] = capability
-
-    def _unregister_stream(self, reqId: int) -> None:
-        """Create and register a new ticker slot slot for a reqId."""
-        # reader thread ownership
-        self._reader_tickers.pop(reqId, None)
-        self._reader_streams.pop(reqId, (None, None))
-        self._reqId_to_capability.pop(reqId, None)  # Clean up capability tracking
-
-    def _notify_stream(
-        self,
-        reqId: int,
-        updated_fields: list[str],
-    ) -> None:
-        """Trigger ticker callbacks if registered."""
-        # reader thread ownership
-        ticker = self._reader_tickers.get(reqId)
-        if ticker is None:
-            debug_log(f"No ticker slot found for reqId {reqId}")
-            return
-
-        # quote snapshot future resolution
-        if reqId in self._reader_futures and (
-            all(att in ticker for att in ["bid", "ask", "last"])
-            or "last_exception" in updated_fields
-        ):
-            loop, future = self._reader_futures.pop(reqId, (None, None))
-            if loop is None or future is None or future.done():
-                logger.error(
-                    f"future/loop not found or already done for reqId {reqId}."
-                )
-                return
-            if "last_exception" in updated_fields:
-                exception = ticker["last_exception"]
-                loop.call_soon_threadsafe(future.set_exception, exception)
-            else:
-                loop.call_soon_threadsafe(future.set_result, ticker)
-
-        loop, callback = self._reader_streams.get(reqId, (None, None))
-        if loop is None or callback is None:
-            if DEBUG_TWS_CALLBACK:
-                debug_log(f"No stream registered for reqId {reqId}")
-            return
-
-        # carefull here we are passing ticker by reference and will have to prevent mutation issues
-        # we do this to avoid model_dump overhead
-        if DEBUG_TWS_CALLBACK:
-            debug_log(
-                f"_notify_ticker [{ticker.get('ticker_name', 'UNKNOWN')}] with fields: {updated_fields}"
-            )
-        loop.call_soon_threadsafe(loop.create_task, callback(ticker, updated_fields))  # type: ignore
-
-    # =======================
 
     def create_tick_future(
         self,
@@ -687,18 +629,54 @@ class IBSocket(EWrapper):
         """Create a new Future attached to the current event loop."""
         loop = asyncio.get_event_loop()
         future: asyncio.Future[Any] = loop.create_future()
-        self._reader_futures[reqId] = (loop, future)
+        self._future_hooks[reqId] = (loop, future)
         self._reqId_to_capability[reqId] = capability
-        ticker = self._reader_tickers.setdefault(
+        stream = self._stream_data.setdefault(
             reqId,
             {
                 "reqId": reqId,
                 "ticker_name": ticker_name,
             },
         )
-        if all(att in ticker for att in ["bid", "ask", "last"]):
-            future.set_result(ticker)
+        if all(att in stream for att in ["bid", "ask", "last"]):
+            future.set_result(stream)
         return asyncio.wait_for(future, timeout)
+
+    # === Stream management ===
+
+    def _notify_stream(
+        self,
+        reqId: int,
+        updated_fields: list[str],
+    ) -> None:
+        """Trigger stream callbacks if registered."""
+        # reader thread ownership
+        stream = self._stream_data.get(reqId)
+        if stream is None:
+            debug_log(f"No stream slot found for reqId {reqId}")
+            return
+
+        # quote snapshot future resolution workaround
+        if all(att in stream for att in ["bid", "ask", "last"]):
+            loop, future = self._future_hooks.pop(reqId, (None, None))
+            if loop is not None and future is not None and not future.done():
+                loop.call_soon_threadsafe(future.set_result, stream)
+
+        loop, callback, _ = self._stream_hooks.get(reqId, (None, None, None))
+        if loop is None or callback is None:
+            if DEBUG_TWS_CALLBACK:
+                debug_log(f"No stream registered for reqId {reqId}")
+            return
+
+        # carefull here we are passing stream by reference and will have to prevent mutation issues
+        # we do this to avoid model_dump overhead
+        if DEBUG_TWS_CALLBACK:
+            debug_log(
+                f"_notify_stream [{stream.get('ticker_name', 'UNKNOWN')}] with fields: {updated_fields}"
+            )
+        loop.call_soon_threadsafe(loop.create_task, callback(stream, updated_fields))  # type: ignore
+
+    # =======================
 
     def register_stream(
         self,
@@ -709,18 +687,32 @@ class IBSocket(EWrapper):
             Awaitable[None],
         ],
         capability: str,
+        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
     ) -> None:
-        """Create and register a new ticker slot slot for a reqId."""
+        """Create and register a new stream slot for a reqId.
+
+        Args:
+            reqId: Request ID for the stream
+            ticker_name: Human-readable ticker_name
+            callback: Callback for data updates (receives stream dict and updated fields)
+            capability: Capability name for error routing
+            on_error: Optional callback for streaming errors (receives ProviderException)
+        """
         # main thread ownership
-        self._reader_streams[reqId] = (
+        self._stream_hooks[reqId] = (
             asyncio.get_event_loop(),
             callback,
+            on_error,
         )
         # assert self._reader_loop is not None, "Reader loop not initialized."
         # self._reader_loop.call_soon_threadsafe(
         #     self._register_stream, reqId, ticker_name
         # )
-        self._register_stream(reqId, ticker_name, capability=capability)
+        self._stream_data[reqId] = {
+            "reqId": reqId,
+            "ticker_name": ticker_name,
+        }
+        self._reqId_to_capability[reqId] = capability
 
     def update_stream(
         self,
@@ -729,21 +721,30 @@ class IBSocket(EWrapper):
             [dict[str, Any], list[str]],
             Awaitable[None],
         ],
+        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
     ) -> None:
-        """Create and register a new ticker slot slot for a reqId."""
+        """Update stream callbacks for an existing reqId.
+
+        Args:
+            reqId: Request ID for the stream
+            callback: New callback for data updates
+            on_error: Optional new callback for streaming errors
+        """
         # main thread ownership
-        self._reader_streams[reqId] = (
+        self._stream_hooks[reqId] = (
             asyncio.get_event_loop(),
             callback,
+            on_error,
         )
 
     def unregister_stream(self, reqId: int) -> None:
-        """Remove ticker slot slot and associated reqIds."""
+        """Remove stream slot slot and associated reqIds."""
         # main thread ownership
-        self._reader_streams.pop(reqId, None)
+        self._stream_hooks.pop(reqId, None)
         # assert self._reader_loop is not None, "Reader loop not initialized."
         # self._reader_loop.call_soon_threadsafe(self._unregister_stream, reqId)
-        self._unregister_stream(reqId)
+        self._stream_data.pop(reqId, None)
+        self._stream_hooks.pop(reqId, (None, None, None))
 
     # ================================================
     # == Dispatch handlers for subscription events ===
@@ -772,7 +773,7 @@ class IBSocket(EWrapper):
     ) -> None:
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._reader_accumulators.get(reqId)
+        accumulator = self._future_data.get(reqId)
         if isinstance(accumulator, list):
             accumulator.extend(contractDescriptions)
             self._resolve_future(reqId)
@@ -788,7 +789,7 @@ class IBSocket(EWrapper):
         """
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._reader_accumulators.get(reqId)
+        accumulator = self._future_data.get(reqId)
         if isinstance(accumulator, list):
             accumulator.append(contractDetails)
 
@@ -810,7 +811,7 @@ class IBSocket(EWrapper):
         """
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._reader_accumulators.get(reqId)
+        accumulator = self._future_data.get(reqId)
         if isinstance(accumulator, list):
             accumulator.append(bar)
         else:
@@ -819,13 +820,13 @@ class IBSocket(EWrapper):
     @error_handler(capability="datafeed")
     def historicalDataUpdate(self, reqId: int, bar: BarData) -> None:
         """Returns updates in real time when keepUpToDate is set to True."""
-        ticker = self._reader_tickers.get(reqId)
-        if ticker is None:
+        stream = self._stream_data.get(reqId)
+        if stream is None:
             return
 
         updated_fields: list[str] = []
 
-        # Field mapping: (ticker_attr, bar_attr, transform)
+        # Field mapping: (stream_attr, bar_attr, transform)
         field_mappings: list[tuple[str, object]] = [
             ("bar_date", bar.date),
             ("bar_open", bar.open),
@@ -838,13 +839,13 @@ class IBSocket(EWrapper):
         ]
 
         for field_name, new_value in field_mappings:
-            current_value = ticker.get(field_name)
+            current_value = stream.get(field_name)
             if current_value is None or not (
                 math.isclose(current_value, new_value, abs_tol=1e-3)
                 if isinstance(new_value, float)
                 else current_value == new_value
             ):
-                ticker[field_name] = new_value
+                stream[field_name] = new_value
                 updated_fields.append(field_name)
 
         # Only notify if at least one field changed
@@ -865,48 +866,48 @@ class IBSocket(EWrapper):
         self, reqId: int, tickType: int, price: float, attrib: TickAttrib
     ) -> None:
         """Accumulate price ticks for market data snapshot."""
-        ticker = self._reader_tickers.get(reqId)
-        if ticker is None:
+        stream = self._stream_data.get(reqId)
+        if stream is None:
             return
         tick_name = get_tick_type_name(tickType)
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        current_value: float | None = ticker.get(field_name)
+        current_value: float | None = stream.get(field_name)
         if current_value is None or not math.isclose(
             current_value, price, abs_tol=1e-3
         ):
-            ticker[field_name] = price
+            stream[field_name] = price
             fields = [field_name]
             if field_name in ["last", "close"]:
-                ticker["bar_close"] = price
+                stream["bar_close"] = price
                 fields.append("bar_close")
             self._notify_stream(reqId, fields)
 
     @error_handler(capability="datafeed")
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
         """Accumulate size ticks for market data snapshot."""
-        ticker = self._reader_tickers.get(reqId)
-        if ticker is None:
+        stream = self._stream_data.get(reqId)
+        if stream is None:
             return
         tick_name = get_tick_type_name(tickType)
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        current_value: float | None = ticker.get(field_name)
+        current_value: float | None = stream.get(field_name)
         if current_value is None or not math.isclose(current_value, size, abs_tol=1e-3):
-            ticker[field_name] = size
+            stream[field_name] = size
             self._notify_stream(reqId, [field_name])
 
     @error_handler(capability="datafeed")
     def marketDataType(self, reqId: int, marketDataType: int) -> None:
         """Set market data type for the request."""
-        ticker = self._reader_tickers.get(reqId)
-        if ticker is None:
+        stream = self._stream_data.get(reqId)
+        if stream is None:
             return
-        current_val: int | None = ticker.get("market_data_type")
+        current_val: int | None = stream.get("market_data_type")
         if current_val is None or current_val != marketDataType:
-            ticker["market_data_type"] = marketDataType
+            stream["market_data_type"] = marketDataType
             self._notify_stream(reqId, ["market_data_type"])
 
     @error_handler(capability="datafeed")
@@ -914,18 +915,18 @@ class IBSocket(EWrapper):
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
     ) -> None:
         """Returns exchange map of a particular contract."""
-        ticker = self._reader_tickers.get(tickerId)
-        if ticker is None:
+        stream = self._stream_data.get(tickerId)
+        if stream is None:
             return
         update_list: list[str] = []
-        if ticker.get("min_tick") != minTick:
-            ticker["min_tick"] = minTick
+        if stream.get("min_tick") != minTick:
+            stream["min_tick"] = minTick
             update_list.append("min_tick")
-        if ticker.get("bbo_exchange") != bboExchange:
-            ticker["bbo_exchange"] = bboExchange
+        if stream.get("bbo_exchange") != bboExchange:
+            stream["bbo_exchange"] = bboExchange
             update_list.append("bbo_exchange")
-        if ticker.get("snapshot_permissions") != snapshotPermissions:
-            ticker["snapshot_permissions"] = snapshotPermissions
+        if stream.get("snapshot_permissions") != snapshotPermissions:
+            stream["snapshot_permissions"] = snapshotPermissions
             update_list.append("snapshot_permissions")
         if update_list:
             self._notify_stream(tickerId, update_list)
@@ -933,32 +934,32 @@ class IBSocket(EWrapper):
     @error_handler(capability="datafeed")
     def tickString(self, reqId: int, tickType: int, value: str) -> None:
         """Generic string tick for market data snapshot."""
-        ticker = self._reader_tickers.get(reqId)
-        if ticker is None:
+        stream = self._stream_data.get(reqId)
+        if stream is None:
             return
         tick_name = get_tick_type_name(tickType)
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        if ticker.get(field_name) != value:
-            ticker[field_name] = value
+        if stream.get(field_name) != value:
+            stream[field_name] = value
             self._notify_stream(reqId, [field_name])
 
     @error_handler(capability="datafeed")
     def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
         """Generic float tick for market data snapshot."""
-        ticker = self._reader_tickers.get(reqId)
-        if ticker is None:
+        stream = self._stream_data.get(reqId)
+        if stream is None:
             return
         tick_name = get_tick_type_name(tickType)
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        current_value: float | None = ticker.get(field_name)
+        current_value: float | None = stream.get(field_name)
         if current_value is None or not math.isclose(
             current_value, value, abs_tol=1e-3
         ):
-            ticker[field_name] = value
+            stream[field_name] = value
             self._notify_stream(reqId, [field_name])
 
     # === error handling ===
@@ -980,10 +981,14 @@ class IBSocket(EWrapper):
             errorString: Error message from TWS
             advancedOrderRejectJson: Advanced order reject details (optional)
         """
+        # Classify error by category and recoverability
+        category, recoverable = classify_error(errorCode)
+
         # Handle system-wide errors (reqId=-1) separately
         if reqId == NO_VALID_ID:
-            logger.error(
-                f"TWS system error [code={errorCode}, time={errorTime}]: {errorString}"
+            log_fn = logger.info if recoverable else logger.error
+            log_fn(
+                f"TWS system {category} [code={errorCode}, recoverable={recoverable}]: {errorString}"
             )
             return
 
@@ -993,9 +998,15 @@ class IBSocket(EWrapper):
             message = f"{errorString} | {advancedOrderRejectJson}"
 
         # Create standardized error and route through centralized handler
+        # Detail format: {category}_{code} or {category}_{code}_NON_RECOVERABLE
+        detail = (
+            f"{category}_{errorCode}"
+            if recoverable
+            else f"{category}_{errorCode}_NON_RECOVERABLE"
+        )
         self._handle_request_error(
             category=TWSErrorCategory.API,
-            detail=f"TWS_CODE_{errorCode}",
+            detail=detail,
             reqId=reqId,
             message=message,
             timestamp=errorTime // 1000 if errorTime > 10_000_000_000 else errorTime,
@@ -1278,15 +1289,29 @@ class TWSClient:
             [dict[str, Any], list[str]],
             Awaitable[None],
         ],
+        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> str:
-        """Create a real-time data subscription (stub for future use)."""
+        """Create a real-time bar data subscription.
+
+        Args:
+            contract: TWS Contract for the symbol
+            bar_size: Bar size string (e.g., "1 min", "5 mins")
+            callback: Callback for bar updates
+            on_error: Optional callback for streaming errors
+            **kwargs: Additional options
+
+        Returns:
+            Stream key (for cancellation)
+        """
 
         stream_key = ticker_name(contract, bar_size)
 
         if stream_key in self._active_streams:
             logger.warning(f"BarDataStream for '{stream_key}' already active!")
-            self.ibsocket.update_stream(self._active_streams[stream_key], callback)
+            self.ibsocket.update_stream(
+                self._active_streams[stream_key], callback, on_error
+            )
             return stream_key
 
         bar_data_reqId = self.next_req_id
@@ -1296,6 +1321,7 @@ class TWSClient:
             ticker_name(contract, bar_size),
             callback,
             capability="datafeed",
+            on_error=on_error,
         )
 
         asset_config = get_asset_config(contract.secType)
@@ -1348,19 +1374,36 @@ class TWSClient:
             [dict[str, Any], list[str]],
             Awaitable[None],
         ],
+        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> str:
-        """Create a real-time data subscription (stub for future use)."""
+        """Create a real-time market data subscription.
+
+        Args:
+            contract: TWS Contract for the symbol
+            callback: Callback for market data updates
+            on_error: Optional callback for streaming errors
+            **kwargs: Additional options
+
+        Returns:
+            Stream key (for cancellation)
+        """
 
         stream_key = ticker_name(contract)
         if stream_key in self._active_streams:
             logger.warning(f"MktDataStream for '{stream_key}' already active!")
-            self.ibsocket.update_stream(self._active_streams[stream_key], callback)
+            self.ibsocket.update_stream(
+                self._active_streams[stream_key], callback, on_error
+            )
             return stream_key
 
         mkt_data_reqId = self.next_req_id
         self.ibsocket.register_stream(
-            mkt_data_reqId, ticker_name(contract), callback, capability="datafeed"
+            mkt_data_reqId,
+            ticker_name(contract),
+            callback,
+            capability="datafeed",
+            on_error=on_error,
         )
         self._active_streams[stream_key] = mkt_data_reqId
 

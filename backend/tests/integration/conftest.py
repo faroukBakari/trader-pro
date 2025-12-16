@@ -23,6 +23,7 @@ from jose import jwt
 
 from trading_api.app_factory import ModularApp
 from trading_api.models.common import CapabilitySpec, ProviderConfig
+from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
     Bar,
     QuoteData,
@@ -114,14 +115,14 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
             )
         ]
 
-    async def get_symbol_info(self, ticker: str, **kwargs: Any) -> SymbolInfo:
+    async def get_symbol_info(self, ticker_name: str, **kwargs: Any) -> SymbolInfo:
         """Return mock symbol info."""
         return SymbolInfo(
-            name=ticker,
-            description=f"Mock {ticker} stock",
+            name=ticker_name,
+            description=f"Mock {ticker_name} stock",
             exchange="MOCK",
             listed_exchange="MOCK",
-            ticker=ticker,
+            ticker=ticker_name,
             type="stock",
             session="0930-1600",
             timezone="America/New_York",
@@ -130,14 +131,20 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
             format="price",
             has_intraday=True,
             has_daily=True,
-            supported_resolutions=["1", "5", "15", "60", "D"],
+            supported_resolutions=[
+                Resolution.MIN_1,
+                Resolution.MIN_5,
+                Resolution.MIN_15,
+                Resolution.HOUR_1,
+                Resolution.DAY_1,
+            ],
             volume_precision=0,
             data_status="streaming",
         )
 
     async def get_historical_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         start_time: datetime,
         end_time: datetime,
         resolution: Resolution,
@@ -157,13 +164,13 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
         ]
 
     async def get_quotes_snapshot(
-        self, tickers: list[str], **kwargs: Any
+        self, ticker_names: list[str], **kwargs: Any
     ) -> list[QuoteData]:
         """Return mock quotes snapshot."""
         return [
             QuoteData(
                 s="ok",
-                n=ticker,
+                n=ticker_name,
                 v=QuoteValues(
                     lp=100.02,
                     ask=100.05,
@@ -176,40 +183,42 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
                     volume=10000,
                     ch=0.22,
                     chp=0.22,
-                    short_name=ticker,
+                    short_name=ticker_name,
                     exchange="MOCK",
-                    description=f"Mock {ticker}",
-                    original_name=ticker,
+                    description=f"Mock {ticker_name}",
+                    original_name=ticker_name,
                 ),
             )
-            for ticker in tickers
+            for ticker_name in ticker_names
         ]
 
     def subscribe_realtime_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> str:
         """Subscribe to realtime bars (mock - no actual streaming)."""
         sub_id = str(self._next_sub_id)
         self._next_sub_id += 1
-        self._subscriptions[sub_id] = ticker
+        self._subscriptions[sub_id] = ticker_name
         return sub_id
 
     def subscribe_market_data(
         self,
-        tickers: list[str],
+        ticker_names: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> list[str]:
         """Subscribe to market data (mock - no actual streaming)."""
         sub_ids: list[str] = []
-        for ticker in tickers:
+        for ticker_name in ticker_names:
             sub_id = str(self._next_sub_id)
             self._next_sub_id += 1
-            self._subscriptions[sub_id] = ticker
+            self._subscriptions[sub_id] = ticker_name
             sub_ids.append(sub_id)
         return sub_ids
 
