@@ -1,6 +1,6 @@
 ---
 agent: "Plan"
-model: "Claude Opus 4.5 (Preview)"
+model: "Claude Opus 4.5"
 name: "doc-assessment-planner"
 description: "Conduct a comprehensive structural assessment of project documentation and generate a detailed refactoring and update plan."
 ---

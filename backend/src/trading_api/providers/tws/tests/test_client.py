@@ -309,6 +309,7 @@ class TestTWSClientStreamMethods:
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
         mock_ibsocket.next_req_id = 1
+        mock_ibsocket.stream_req_id = MagicMock(return_value=None)  # No existing stream
         mock_ibsocket.register_stream = MagicMock()
         mock_ibsocket.send_message = MagicMock()
 
@@ -337,6 +338,7 @@ class TestTWSClientStreamMethods:
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
         mock_ibsocket.next_req_id = 1
+        mock_ibsocket.stream_req_id = MagicMock(return_value=None)  # No existing stream
         mock_ibsocket.register_stream = MagicMock()
         mock_ibsocket.send_message = MagicMock()
 

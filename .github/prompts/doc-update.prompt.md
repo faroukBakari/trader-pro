@@ -1,6 +1,6 @@
 ---
 agent: "agent"
-model: "Claude Opus 4.5 (Preview)"
+model: "Claude Opus 4.5"
 name: "doc-update"
 description: "Generate a self-sufficient documentation update plan (no edits made)."
 ---

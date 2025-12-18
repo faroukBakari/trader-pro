@@ -1,7 +1,7 @@
 ---
 agent: "agent"
 name: "study-v2"
-model: "Claude Opus 4.5 (Preview)"
+model: "Claude Opus 4.5"
 description: "Principal Engineer agent for conducting technical implementation studies and risk analysis."
 ---
 

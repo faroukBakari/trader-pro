@@ -2,7 +2,7 @@
 
 **Status:** Production-Ready (Core Capabilities)  
 **Architecture:** Three-Layer Streaming Pattern  
-**Last Updated:** December 14, 2025
+**Last Updated:** December 19, 2025
 
 ---
 
@@ -32,11 +32,11 @@ DatafeedService (provider-agnostic)
 TWSProvider (Layer 3) ─── implements DatafeedCapability
         │ domain ↔ TWS conversion, stream key management
         ▼
-TWSClient (Layer 2) ─── owns IBSocket, manages _active_streams
-        │ asyncio.Future + ticker slot registry
+TWSClient (Layer 2) ─── owns IBSocket, async facade
+        │ asyncio.Future bridge, stream subscription API
         ▼
-IBSocket (Layer 1) ─── daemon thread _reader_loop()
-        │ _reader_tickers (slot registry), _reader_streams (callbacks)
+IBSocket (Layer 1) ─── daemon thread _reader_loop(), _active_streams registry
+        │ ticker slots, stream hooks, stream key ↔ reqId mapping
         ▼
 TWS/IB Gateway (localhost:7497)
 ```
@@ -65,7 +65,8 @@ callback(data) ◄────────────────────�
 - **Future Bridge**: `asyncio.Future` + `call_soon_threadsafe()` for one-shot requests
 - **Stream Slots**: `_stream_data[reqId]` dict accumulates real-time data
 - **Stream Hooks**: `_stream_hooks[reqId]` holds (loop, callback, on_error) for continuous updates
-- **Stream Keys**: `"AAPL:NASDAQ:STK-12345@5 mins"` identifies unique subscriptions
+- **Active Streams**: `IBSocket._active_streams[stream_key] → reqId` maps stream keys to request IDs
+- **Stream Key Lookup**: `ibsocket.stream_req_id(key)` checks for existing subscription
 
 ---
 
@@ -241,6 +242,7 @@ Ticker slots are `dict[str, Any]` managed by IBSocket:
 # IBSocket internal state
 _reader_tickers: dict[int, dict[str, Any]] = {}   # reqId → ticker data
 _reader_streams: dict[int, tuple[loop, callback]] = {}  # reqId → notification callback
+_active_streams: dict[str, int] = {}  # stream_key → reqId (for duplicate detection)
 
 # Ticker slot structure (example)
 ticker_slot = {
@@ -353,14 +355,15 @@ Used by: `subscribe_realtime_bars()`, `subscribe_market_data()`
 def reqBarDataStream(self, contract: Contract, bar_size: str, callback) -> str:
     stream_key = ticker_name(contract, bar_size)
 
-    if stream_key in self._active_streams:
+    # Check existing subscription via IBSocket registry
+    existing_req_id = self.ibsocket.stream_req_id(stream_key)
+    if existing_req_id is not None:
         # Reuse existing stream, update callback
-        self.ibsocket.update_stream(self._active_streams[stream_key], callback)
+        self.ibsocket.update_stream(existing_req_id, callback)
         return stream_key
 
     reqId = self.next_req_id
-    self._active_streams[stream_key] = reqId
-    self.ibsocket.register_stream(reqId, ticker_name(contract, bar_size), callback)
+    self.ibsocket.register_stream(reqId, stream_key, callback)  # Registers reqId ↔ stream_key
 
     # Send REQ_HISTORICAL_DATA with keepUpToDate=1
     self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, [..., keepUpToDate=1, ...])
@@ -383,7 +386,7 @@ def subscribe_realtime_bars(self, ticker: str, resolution: Resolution, callback)
 ```python
 # TWSClient
 def cancelBarDataStream(self, stream_key: str) -> None:
-    reqId = self._active_streams.pop(stream_key, None)
+    reqId = self.ibsocket._pop_stream_req_id(stream_key)  # Removes from _active_streams
     if reqId is not None:
         self.ibsocket.send_message(OUT.CANCEL_HISTORICAL_DATA, [1, reqId])
         self.ibsocket.unregister_stream(reqId)
@@ -523,9 +526,17 @@ def _handle_request_error(self, category, detail, reqId, message, ...):
     )
 
     # 1. Future exists → reject future with error
-    # 2. Stream exists + on_error → invoke error callback
+    # 2. Stream exists + on_error → invoke error callback via call_soon_threadsafe
     # 3. Neither → log as orphan error
-    # 4. Non-recoverable → cleanup all data structures for reqId
+    # 4. Non-recoverable → cleanup via call_soon_threadsafe (safe from daemon thread)
+```
+
+**Thread-Safe Cleanup:** Non-recoverable errors trigger cleanup via `loop.call_soon_threadsafe()`
+to safely remove stream entries from the daemon thread:
+
+```python
+# Daemon thread schedules cleanup in event loop
+self._loop.call_soon_threadsafe(self._pop_stream_req_id, stream_key)
 ```
 
 ### Capability Tracking
@@ -575,6 +586,11 @@ mock_client.reqQuoteSnapshot.return_value = {"ticker_name": "AAPL:NASDAQ:STK-123
 # For sync methods that return stream keys
 mock_client = Mock()
 mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
+
+# Mock IBSocket for TWSClient tests
+mock_ibsocket = Mock()
+mock_ibsocket.stream_req_id = Mock(return_value=None)  # No existing subscription
+mock_ibsocket._pop_stream_req_id = Mock(return_value=123)  # Return reqId for cleanup
 ```
 
 ### Run Tests
