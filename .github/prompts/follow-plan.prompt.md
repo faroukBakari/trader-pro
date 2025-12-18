@@ -1,6 +1,6 @@
 ---
 agent: "agent"
-model: "Claude Opus 4.5 (Preview)"
+model: "Claude Opus 4.5"
 name: "follow-plan-v2.1"
 description: "Follow a predefined plan step-by-step with validation and a clear action hierarchy."
 ---

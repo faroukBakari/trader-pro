@@ -1,7 +1,7 @@
 # Backend Error Management
 
 **Status**: ✅ Production Ready  
-**Last Updated**: December 11, 2025  
+**Last Updated**: December 19, 2025  
 **Version**: 1.0.0
 
 ---
@@ -425,6 +425,19 @@ WebSocket errors close the connection with a code and reason:
 # Reason: "SERVICE_DATAFEED_INVALID_TOPIC: Invalid topic format" (max 123 bytes)
 await websocket.close(code=1003, reason=f"{code}: {message}"[:123])
 ```
+
+**Connection State Guard:**
+
+The WebSocket exception handler checks for `DISCONNECTED` state to avoid double-closing:
+
+```python
+# Exception handler in shared/exception_handlers.py
+if websocket.client_state == WebSocketState.DISCONNECTED:
+    return  # Already disconnected, nothing to close
+```
+
+> ⚠️ **Critical:** Must check for `DISCONNECTED` (not `!= CONNECTED`). During the handshake phase,
+> `client_state` is `CONNECTING`, and an early exit would leave the client hanging without a response.
 
 ### WebSocket Subscription Errors
 

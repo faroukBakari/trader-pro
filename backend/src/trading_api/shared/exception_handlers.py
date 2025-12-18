@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketException
 from fastapi import status as WebSocketStatus
 from fastapi.exceptions import RequestValidationError, WebSocketRequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.websockets import WebSocketState
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from trading_api.models.exceptions import TradingApiException
@@ -270,6 +271,12 @@ async def _ws_exception_handler(websocket: WebSocket, exc: Exception) -> None:
     - Logs once with format: request info / code / message / backtrace
     - Closes WebSocket with appropriate close code and reason
     """
+    if (
+        websocket.client_state == WebSocketState.DISCONNECTED
+        or websocket.application_state == WebSocketState.DISCONNECTED
+    ):
+        return  # Already disconnected, no need to handle
+
     if isinstance(exc, TradingApiException):
         ws_exc = exc
     else:
@@ -325,4 +332,5 @@ def register_exception_handlers(app: FastAPI) -> None:
         500,
     ]
     for exc in must_have_exceptions:
+        app.add_exception_handler(exc, exception_handler)  # type: ignore[arg-type]
         app.add_exception_handler(exc, exception_handler)  # type: ignore[arg-type]
