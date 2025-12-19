@@ -1,0 +1,79 @@
+/**
+ * Global toast notification styles for vue-sonner.
+ * Used with `unstyled` prop - no !important overrides needed.
+ *
+ * @see AppToaster.vue for component configuration
+ */
+
+/* Toaster container positioning */
+[data-sonner-toaster] {
+  --width: auto;
+  z-index: 99999;
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  right: auto;
+  top: auto;
+  transform: translateX(-50%);
+}
+
+/* Base toast styles */
+.toast-base {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  padding: 14px 24px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  font-size: 14px;
+  font-weight: 500;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Toast title text */
+.toast-title {
+  color: white;
+  font-weight: 500;
+}
+
+/* Hide description/subtitle - not used */
+.toast-description {
+  display: none;
+}
+
+/* Toast type variants */
+.toast-error {
+  background: #d12bd1;
+}
+
+.toast-warning {
+  background: #fff017;
+}
+
+.toast-success {
+  background: #6edb15;
+}
+
+.toast-info {
+  background: #146eff;
+}
+
+/* Toast enter/exit animations */
+[data-sonner-toast] {
+  opacity: 0;
+  transform: translateY(10px);
+  transition:
+    opacity 300ms ease,
+    transform 300ms ease;
+}
+
+[data-sonner-toast][data-mounted='true'] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+[data-sonner-toast][data-removed='true'] {
+  opacity: 0;
+  transform: translateY(10px);
+}

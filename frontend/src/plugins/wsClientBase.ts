@@ -1,11 +1,4 @@
-// interface WebSocketClientBaseConfig {
-//   wsUrl: string
-//   reconnect?: boolean
-//   maxReconnectAttempts?: number
-//   reconnectDelay?: number
-//   debug?: boolean
-// }
-
+import { WebSocketError } from '@/errors'
 
 function serializeParams(obj: unknown): string {
   if (obj === null || obj === undefined) {
@@ -174,11 +167,9 @@ export class WebSocketBase {
             resolve()
             this.wsCnxPromise = null
           }
-        } catch (error) {
-          this.logger.log('WS creation Error:', error)
+        } finally {
           setTimeout(() => {
             this.wsCnxPromise = null
-            reject(error)
           }, 200)
         }
       })
@@ -190,16 +181,19 @@ export class WebSocketBase {
   private async connect(): Promise<void> {
 
     let attemps = 0
-    while (!this.isConnected() && attemps++ < this.config.maxReconnectAttempts) {
+    let connectionError: unknown;
+    while (attemps < this.config.maxReconnectAttempts && !this.isConnected()) {
       try {
-        await this.__socketConnect()
+        return this.__socketConnect()
       } catch (error) {
-        this.logger.log('Connection error:', error)
+        connectionError = error
         await new Promise(resolve => setTimeout(resolve, 1000))
+      } finally {
+        attemps++
       }
     }
     if (this.config.maxReconnectAttempts <= attemps) {
-      throw new Error('Max reconnect attempts reached')
+      throw (connectionError ?? new Error('Max reconnect attempts reached'))
     }
   }
 
@@ -215,40 +209,38 @@ export class WebSocketBase {
   }
 
   private handleMessage(event: MessageEvent): void {
-    try {
-      // Handle both text and binary (ArrayBuffer) messages
-      const text = typeof event.data === 'string'
-        ? event.data
-        : new TextDecoder().decode(event.data as ArrayBuffer)
-      const message: WebSocketMessage = JSON.parse(text)
-      const { type, payload } = message
 
-      if (type.endsWith('.update')) {
-        const update = payload as SubscriptionUpdate
-        this.routeUpdateMessage(update)
-      } else if (type.endsWith('.error')) {
-        const error = payload as unknown as SubscriptionError
-        this.routeErrorMessage(error)
-      } else {
-        this.logger.log('Received:', type, payload)
-        if (type.endsWith('.response')) {
-          if (type.replace(/.response$/, '').endsWith('.subscribe')) {
-            const subResponse = payload as SubscriptionResponse
-            const pendingRequest = this.pendingRequests.get(subResponse.sub_id)
-            if (pendingRequest) {
-              this.pendingRequests.delete(subResponse.sub_id)
-              pendingRequest.resolve(subResponse)
-            } else {
-              this.logger.error(`Cannot find sub_id ${subResponse.sub_id} for response :`, payload)
-            }
+    // Handle both text and binary (ArrayBuffer) messages
+    const text = typeof event.data === 'string'
+      ? event.data
+      : new TextDecoder().decode(event.data as ArrayBuffer)
+    const message: WebSocketMessage = JSON.parse(text)
+    const { type, payload } = message
+
+    if (type.endsWith('.update')) {
+      const update = payload as SubscriptionUpdate
+      this.routeUpdateMessage(update)
+    } else if (type.endsWith('.error')) {
+      const error = payload as unknown as SubscriptionError
+      this.routeErrorMessage(error)
+    } else {
+      this.logger.log('Received:', type, payload)
+      if (type.endsWith('.response')) {
+        if (type.replace(/.response$/, '').endsWith('.subscribe')) {
+          const subResponse = payload as SubscriptionResponse
+          const pendingRequest = this.pendingRequests.get(subResponse.sub_id)
+          if (pendingRequest) {
+            this.pendingRequests.delete(subResponse.sub_id)
+            pendingRequest.resolve(subResponse)
+          } else {
+            this.logger.error(`Cannot find sub_id ${subResponse.sub_id} for response :`, payload)
           }
-        } else {
-          this.logger.error('Unknown message type:', type)
         }
+      } else {
+        this.logger.error('Unknown message type:', type)
       }
-    } catch (error) {
-      this.logger.error('Failed to parse message:', error)
     }
+
   }
 
   private routeUpdateMessage(data: SubscriptionUpdate): void {
@@ -258,23 +250,20 @@ export class WebSocketBase {
       this.logger.warn(`No subscription found for topic: ${data.topic}`)
       return
     }
-    try {
-      subscription.onUpdate(data.payload)
-    } catch (error) {
-      this.logger.error(`Error in subscription onUpdate for sub_id ${subscription.sub_id} / topic ${data.topic}:`, error)
-    }
+    subscription.onUpdate(data.payload)
   }
 
   /**
    * Global error handler for subscription errors without specific onError callback.
-   * Override this method to customize global error handling behavior.
+   * Throws WebSocketError to bubble up to global error handler.
    */
   protected globalErrorHandler(error: SubscriptionError): void {
-    console.error(
-      `[WebSocket] Unhandled subscription error for topic ${error.topic}:`,
+    throw new WebSocketError(
+      error.topic,
       error.error.code,
       error.error.message,
-      error.recoverable ? '(recoverable)' : '(non-recoverable)'
+      error.recoverable ?? false,
+      error.error.details ?? undefined,
     )
   }
 
@@ -291,11 +280,7 @@ export class WebSocketBase {
     }
 
     if (subscription.onError) {
-      try {
-        subscription.onError(error)
-      } catch (e) {
-        this.logger.error(`Error in onError handler for ${error.topic}:`, e)
-      }
+      subscription.onError(error)
     } else {
       this.globalErrorHandler(error)
     }
@@ -314,6 +299,8 @@ export class WebSocketBase {
 
     let maxSubscriptionAttempts = 5;
 
+
+    let subscriptionError: unknown;
     while (maxSubscriptionAttempts-- > 0)
       try {
 
@@ -367,13 +354,16 @@ export class WebSocketBase {
         return response.topic
 
       } catch (error) {
-
-        this.logger.error('Subscription error:', error)
+        subscriptionError = error
+        this.logger.error('Subscription error:', subscriptionError)
         await new Promise(resolve => setTimeout(resolve, 200))
 
       }
 
-    throw new Error(`Subscription failed after multiple attempts: ${subType} with params ${JSON.stringify(sub_params)}`)
+    throw (subscriptionError ??
+      new Error(
+        `Subscription failed after multiple attempts: ${subType} with params ${JSON.stringify(sub_params)}`
+      ))
   }
 
   private async resubscribeAll(): Promise<void> {
@@ -381,62 +371,55 @@ export class WebSocketBase {
 
     await new Promise(resolve => setTimeout(resolve, 200))
 
-    try {
-      this.pendingRequests.forEach((pending) => {
-        clearTimeout(pending.timeout)
-      })
-      this.pendingRequests.forEach((pending) => {
-        pending.reject(new Error('WebSocket disconnected'))
-      })
-    } finally {
-      this.pendingRequests.clear()
-    }
+    this.pendingRequests.forEach((pending) => {
+      clearTimeout(pending.timeout)
+    })
+    this.pendingRequests.forEach((pending) => {
+      pending.reject(new Error('WebSocket disconnected'))
+    })
+
+    this.pendingRequests.clear()
 
     for (const [topic, subscription] of this.subscriptions.entries()) {
 
-      try {
-        const response: SubscriptionResponse = await new Promise((resolve, reject) => {
-          // Expected response type
-          // Set up timeout
-          const timeout = setTimeout(() => {
-            this.pendingRequests.delete(subscription.sub_id)
-            reject(new Error(`Request timeout: ${subscription.sub_id}`))
-          }, 3000)
+      const response: SubscriptionResponse = await new Promise((resolve, reject) => {
+        // Expected response type
+        // Set up timeout
+        const timeout = setTimeout(() => {
+          this.pendingRequests.delete(subscription.sub_id)
+          reject(new Error(`Request timeout: ${subscription.sub_id}`))
+        }, 3000)
 
-          // Register response handler
-          this.pendingRequests.set(subscription.sub_id, {
-            resolve: (response: SubscriptionResponse) => {
-              clearTimeout(timeout)
-              resolve(response)
-            },
-            reject: (error: Error) => {
-              clearTimeout(timeout)
-              reject(error)
-            },
-            timeout,
-          })
-
-          // Send request after registering the handler
-          this.sendRequest(
-            subscription.subType + '.subscribe',
-            { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
-          ).catch((error) => {
-            this.pendingRequests.delete(subscription.sub_id)
+        // Register response handler
+        this.pendingRequests.set(subscription.sub_id, {
+          resolve: (response: SubscriptionResponse) => {
+            clearTimeout(timeout)
+            resolve(response)
+          },
+          reject: (error: Error) => {
             clearTimeout(timeout)
             reject(error)
-          })
+          },
+          timeout,
         })
 
-        if (response.status === 'ok') {
-          this.logger.log(`Resubscription confirmed sub_id ${subscription.sub_id} / topic: ${topic}`)
-        } else {
-          this.logger.log(`Resubscription failed sub_id ${subscription.sub_id} / topic: ${topic}`)
-        }
+        // Send request after registering the handler
+        this.sendRequest(
+          subscription.subType + '.subscribe',
+          { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
+        ).catch((error) => {
+          this.pendingRequests.delete(subscription.sub_id)
+          clearTimeout(timeout)
+          reject(error)
+        })
+      })
+
+      if (response.status === 'ok') {
+        this.logger.log(`Resubscription confirmed sub_id ${subscription.sub_id} / topic: ${topic}`)
+      } else {
+        throw new Error(`Resubscription failed for sub_id ${subscription.sub_id} / topic: ${topic} : ${response.error || 'unknown error'}`)
       }
-      catch (error) {
-        this.logger.log(`Resubscription error sub_id ${subscription.sub_id} / topic: ${topic}:`, error)
-        this.logger.error('Resubscription error:', error)
-      }
+
     }
   }
 

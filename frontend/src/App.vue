@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
+import AppToaster from '@/components/AppToaster.vue'
 import ApiStatus from '@/components/ApiStatus.vue'
 </script>
 
 <template>
   <div id="app-container">
+    <AppToaster />
+
     <main>
       <RouterView />
     </main>

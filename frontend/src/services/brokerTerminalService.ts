@@ -28,6 +28,7 @@ import type {
   TradeContext,
 } from '@public/trading_terminal'
 
+import { WebSocketError } from '@/errors'
 import { ApiAdapter, type ApiPromise } from '@/plugins/apiAdapter'
 import { WsAdapter, WsFallback, type BrokerConnectionStatus, type EquityData, type WsAdapterType } from '@/plugins/wsAdapter'
 import type { SubscriptionError } from '@/plugins/wsClientBase'
@@ -662,36 +663,24 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   /**
-   * Handle subscription-level errors from WebSocket
-   * Shows user notification for recoverable errors, logs all errors
+   * Handle subscription-level errors from WebSocket.
+   * Throws WebSocketError to bubble up to global error handler for toast display.
    */
   private handleSubscriptionError(
     subscriptionName: string,
     error: SubscriptionError
   ): void {
-    console.error(`[BrokerTerminalService] ${subscriptionName} subscription error:`, error)
-
-    // Extract error details from nested structure
-    const errorMessage = error.error.message
-    const isRecoverable = error.recoverable ?? false
-
-    // Show notification for user-facing errors
-    // Note: TradingView only supports Error and Success notification types
-    // We use Error for both recoverable and non-recoverable errors
-    // but include "Warning" in title for recoverable ones
-    if (isRecoverable) {
-      this._hostAdapter.showNotification(
-        `${subscriptionName} Warning`,
-        errorMessage,
-        NotificationType.Error  // TradingView has no Warning type
-      )
-    } else {
-      this._hostAdapter.showNotification(
-        `${subscriptionName} Error`,
-        errorMessage,
-        NotificationType.Error
-      )
-    }
+    // Throw WebSocketError - global error handler will display toast
+    throw new WebSocketError(
+      error.topic,
+      error.error.code,
+      `${subscriptionName}: ${error.error.message}`,
+      error.recoverable ?? false,
+      {
+        ...error.error.details,
+        subscriptionName,
+      },
+    )
   }
 
   /**
