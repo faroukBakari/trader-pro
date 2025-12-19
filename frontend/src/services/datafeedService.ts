@@ -17,7 +17,6 @@ import type {
   PeriodParams,
   QuoteData,
   QuotesCallback,
-  QuotesErrorCallback,
   ResolutionString,
   ResolveCallback,
   SearchSymbolResultItem,
@@ -448,9 +447,6 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         `[Datafeed] searchSymbols found ${response.data.length} symbols for input "${userInput}"`,
       )
       onResult(response.data)
-    }).catch((error) => {
-      if (this.debug_datafeed) console.error('[Datafeed] Error in searchSymbols:', error)
-      onResult([])
     })
   }
   resolveSymbol(
@@ -471,9 +467,6 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         if (this.debug_datafeed) console.log('[Datafeed] Symbol not found:', symbolName)
         onError('unknown_symbol')
       }
-    }).catch((error) => {
-      if (this.debug_datafeed) console.error('[Datafeed] Error in resolveSymbol:', error)
-      onError(error instanceof Error ? error.message : 'Unknown error occurred')
     })
   }
   getBars(
@@ -481,7 +474,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     resolution: string,
     periodParams: PeriodParams,
     onResult: HistoryCallback,
-    onError: DatafeedErrorCallback,
+    // onError: DatafeedErrorCallback,
   ): void {
     this._getApiAdapter()
       .getBars(
@@ -501,10 +494,6 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
           response.data.bars = [...response.data.bars, ...response.data.bars]
         onResult(response.data.bars, { noData: response.data.no_data || false })
       })
-      .catch((error) => {
-        if (this.debug_datafeed) console.error('[Datafeed] Error in getBars:', error)
-        onError(error instanceof Error ? error.message : 'Unknown error occurred')
-      })
   }
   subscribeBars(
     symbolInfo: LibrarySymbolInfo,
@@ -522,19 +511,15 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     }).then((topic) => {
       if (this.debug_datafeed)
         console.log(`[Datafeed] Bar subscription started : ${topic}`)
-    }).catch((error) => {
-      if (this.debug_datafeed) console.error('[Datafeed] Bar subscription failed:', error)
     })
   }
   unsubscribeBars(listenerGuid: string): void {
-    this._getWsAdapter().bars?.unsubscribe(listenerGuid).catch((error) => {
-      if (this.debug_datafeed) console.error('[Datafeed] WebSocket unsubscription failed:', error)
-    })
+    this._getWsAdapter().bars?.unsubscribe(listenerGuid)
   }
   getQuotes(
     symbols: string[],
     onDataCallback: QuotesCallback,
-    onErrorCallback: QuotesErrorCallback,
+    // onErrorCallback: QuotesErrorCallback,
   ): void {
     this.coalesce(`getQuotes`, () =>
       this._getApiAdapter()
@@ -544,10 +529,6 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
           `[Datafeed] getQuotes returned ${response.data.length} quotes for ${symbols.length} requested symbols`,
         )
         onDataCallback(response.data)
-      })
-      .catch((error) => {
-        if (this.debug_datafeed) console.error('[Datafeed] Error in getQuotes:', error)
-        onErrorCallback(error instanceof Error ? error.message : 'Unknown error occurred')
       })
   }
   subscribeQuotes(
@@ -583,8 +564,6 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
           if (this.debug_datafeed) console.log(
             `[Datafeed] Quote subscription started : ${topic}`,
           )
-        }).catch((error) => {
-          if (this.debug_datafeed) console.error('[Datafeed] Quote subscription failed:', error)
         })
     }
   }

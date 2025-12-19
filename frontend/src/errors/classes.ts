@@ -3,16 +3,18 @@
  * All application errors should extend AppError to ensure consistent handling.
  */
 
+import type { SubscriptionError } from '@/plugins/wsClientBase'
+
 export type ErrorSeverity = 'error' | 'warning' | 'info'
 
 /**
  * Abstract base class for all application errors.
  * Provides consistent structure for error handling and toast display.
+ * The inherited `message` property is used for toast display (technical format).
  */
 export abstract class AppError extends Error {
     abstract readonly code: string
     abstract readonly severity: ErrorSeverity
-    abstract readonly userMessage: string
     readonly timestamp: number = Date.now()
     readonly details?: Record<string, unknown>
 
@@ -35,23 +37,45 @@ export abstract class AppError extends Error {
 export class WebSocketError extends AppError {
     readonly code: string
     readonly severity: ErrorSeverity
-    readonly userMessage: string
     readonly topic: string
     readonly recoverable: boolean
 
     constructor(
         topic: string,
         code: string,
-        userMessage: string,
+        message: string,
         recoverable: boolean = false,
         details?: Record<string, unknown>,
     ) {
-        super(`[${code}] ${userMessage}`, details)
+        super(`[${code}] ${message}`, details)
         this.topic = topic
         this.code = code
-        this.userMessage = userMessage
         this.recoverable = recoverable
         this.severity = recoverable ? 'warning' : 'error'
+    }
+
+    /**
+     * Factory method to create WebSocketError from raw SubscriptionError payload.
+     * Single source of truth for SubscriptionError → WebSocketError conversion.
+     *
+     * @param error - Raw subscription error from backend
+     * @param context - Optional context like subscription name for enriched messages
+     */
+    static fromSubscription(
+        error: SubscriptionError,
+        context?: { subscriptionName?: string },
+    ): WebSocketError {
+        const prefix = context?.subscriptionName ? `${context.subscriptionName}: ` : ''
+        return new WebSocketError(
+            error.topic,
+            error.error.code,
+            `${prefix}${error.error.message}`,
+            error.recoverable ?? false,
+            {
+                ...error.error.details,
+                ...(context?.subscriptionName && { subscriptionName: context.subscriptionName }),
+            },
+        )
     }
 }
 
@@ -61,7 +85,6 @@ export class WebSocketError extends AppError {
 export class NetworkError extends AppError {
     readonly code: string
     readonly severity: ErrorSeverity = 'error'
-    readonly userMessage: string
     readonly statusCode?: number
 
     constructor(
@@ -72,7 +95,6 @@ export class NetworkError extends AppError {
         super(message, details)
         this.statusCode = statusCode
         this.code = statusCode ? `HTTP_${statusCode}` : 'NETWORK_ERROR'
-        this.userMessage = message
     }
 }
 
@@ -83,11 +105,9 @@ export class NetworkError extends AppError {
 export class AuthError extends AppError {
     readonly code: string = 'AUTH_ERROR'
     readonly severity: ErrorSeverity = 'error'
-    readonly userMessage: string
 
     constructor(message: string = 'Authentication required', details?: Record<string, unknown>) {
         super(message, details)
-        this.userMessage = message
     }
 
     /** Auth errors redirect to login, don't show toast */
@@ -103,7 +123,6 @@ export class AuthError extends AppError {
 export class ValidationError extends AppError {
     readonly code: string = 'VALIDATION_ERROR'
     readonly severity: ErrorSeverity = 'warning'
-    readonly userMessage: string
     readonly fieldErrors?: Record<string, string>
 
     constructor(
@@ -112,7 +131,6 @@ export class ValidationError extends AppError {
         details?: Record<string, unknown>,
     ) {
         super(message, details)
-        this.userMessage = message
         this.fieldErrors = fieldErrors
     }
 
