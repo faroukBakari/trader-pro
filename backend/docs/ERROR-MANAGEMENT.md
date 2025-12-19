@@ -30,14 +30,56 @@ The Trading Pro backend implements a **structured exception handling system** th
 
 ### Design Philosophy
 
-**"Let exceptions bubble up to the API/WS boundary"**
+#### Core Principle: "Only Catch What You Can Handle"
 
-Exceptions are NOT caught within services or providers. Instead, they propagate naturally through the call stack until reaching the global exception handler at the API or WebSocket endpoint boundary. This approach:
+> _"If unsure, let it throw. Let it crash. Log the error."_  
+> — Industry best practice, inspired by Erlang's "Let It Crash" philosophy (Joe Armstrong)
+
+**Exceptions are NOT caught within services or providers.** Instead, they propagate naturally through the call stack until reaching the global exception handler at the API or WebSocket endpoint boundary. This approach:
 
 - ✅ Avoids duplicate try/catch blocks throughout the codebase
 - ✅ Ensures consistent error responses
 - ✅ Provides complete backtraces for debugging
 - ✅ Simplifies business logic code
+
+#### Decision Matrix: When to Catch Locally
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                   CAN YOU MITIGATE?                            │
+├──────────────────────┬─────────────────────────────────────────┤
+│         YES          │                   NO                    │
+├──────────────────────┼─────────────────────────────────────────┤
+│ • Retry with backoff │ • Unknown/unexpected error              │
+│ • Fallback value     │ • No recovery possible                  │
+│ • Partial results    │ • Caller needs to know anyway           │
+│ • Graceful degrade   │                                         │
+├──────────────────────┼─────────────────────────────────────────┤
+│   ✅ CATCH LOCALLY   │        ❌ LET IT PROPAGATE              │
+│   (handle + recover) │   (global handler returns HTTP error)   │
+└──────────────────────┴─────────────────────────────────────────┘
+```
+
+#### Anti-Patterns Avoided
+
+| Anti-Pattern                   | Description                                | Our Approach                       |
+| ------------------------------ | ------------------------------------------ | ---------------------------------- |
+| **Pokémon Exception Handling** | "Gotta catch 'em all" — `except Exception` | ❌ Only catch specific types       |
+| **Error Swallowing**           | `except: pass` silently discards           | ❌ All errors reach global handler |
+| **Defensive Overkill**         | try-except on every line                   | ❌ Single boundary at API/WS level |
+| **Log & Pray**                 | `except: logger.error(e)` without re-raise | ❌ Global handler logs + responds  |
+| **Cascaded Try-Except**        | Nested try-except blocks                   | ❌ Flat error propagation          |
+
+#### Why This Matters
+
+Scattered try-except blocks cause:
+
+- **Debugging nightmares**: Errors caught and re-raised lose original context
+- **Inconsistent responses**: Different catch blocks format errors differently
+- **Hidden failures**: Silent catches mask bugs until production
+- **Code bloat**: Business logic buried under exception handling boilerplate
+
+**See also:** [Frontend Error Management](../../frontend/docs/ERROR-MANAGEMENT.md) for parallel philosophy in the frontend.
 
 ---
 

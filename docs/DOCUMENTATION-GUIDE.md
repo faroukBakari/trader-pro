@@ -212,7 +212,8 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 | File                                        | Purpose                                           |
 | ------------------------------------------- | ------------------------------------------------- |
-| **frontend/docs/WEBSOCKET-ARCHITECTURE.md** | ✅ Complete WebSocket architecture guide (v2.0.0) |
+| **frontend/docs/ERROR-MANAGEMENT.md**       | ⭐ Frontend error handling architecture (v1.0.0)  |
+| **frontend/docs/WEBSOCKET-ARCHITECTURE.md** | ✅ Complete WebSocket architecture guide (v3.3.0) |
 | **frontend/docs/BROKER-INTEGRATION.md**     | ✅ Complete broker integration guide (v2.0.0)     |
 | **frontend/docs/IHM-CONTROLLER.md**         | IHM Controller service design and usage (v1.0.0)  |
 | **frontend/docs/FRONTEND-EXCLUSIONS.md**    | Public folder exclusions (linting, testing, etc.) |
@@ -488,14 +489,16 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### Error Handling
 
-**Keywords**: exceptions, error codes, error handling, HTTP status, WebSocket close codes, TradingApiException, ServiceException, ProviderException, CommonException, global handlers, subscription errors, recoverable errors, ErrorPayload, SubscriptionError, topic_error callback
+**Keywords**: exceptions, error codes, error handling, HTTP status, WebSocket close codes, TradingApiException, ServiceException, ProviderException, CommonException, global handlers, subscription errors, recoverable errors, ErrorPayload, SubscriptionError, topic_error callback, AppError, WebSocketError, NetworkError, AuthError, ValidationError, errorService, toast notifications
 
-**Scope**: Backend exception hierarchy and error handling  
-**Out of Scope**: Frontend error handling, user-facing error messages
+**Scope**: Backend exception hierarchy and frontend error handling  
+**Out of Scope**: User-facing error messages content
 
-- **backend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete error management guide (exception hierarchy, error codes, handlers, subscription errors)
+- **backend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete backend error management guide (exception hierarchy, error codes, handlers, subscription errors)
+- **frontend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete frontend error management guide (error classes, errorService, toast notifications)
 - **backend/docs/PROVIDER-SYSTEM.md** - ProviderException usage in providers (Section 8.4)
 - **backend/docs/BACKEND_WEBSOCKETS.md** - WebSocket error handling (close codes, subscription-level errors)
+- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket subscription error handling (globalErrorHandler)
 - **backend/docs/BACKEND_TESTING.md** - Testing error responses (test client configuration)
 
 ### Build & DevOps
@@ -573,6 +576,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2025-12-19**: Frontend error management documentation - Created frontend/docs/ERROR-MANAGEMENT.md (error classes, errorService, toast notifications, philosophy emphasis), expanded backend ERROR-MANAGEMENT.md philosophy section (decision matrix, anti-patterns), updated WEBSOCKET-ARCHITECTURE.md v3.3.0 (globalErrorHandler integration), added error handling section to services README
 - **2025-12-19**: WebSocket subscription error handling - Updated BACKEND_WEBSOCKETS.md (unified error broadcasting), WEBSOCKET-ARCHITECTURE.md v3.2.0 (frontend error handling section), generic_route.py (all errors now broadcast before cleanup)
 - **2025-12-11**: Error management documentation - Created ERROR-MANAGEMENT.md (exception hierarchy, error codes, handlers), updated MODULAR_BACKEND_ARCHITECTURE.md, PROVIDER-SYSTEM.md, BACKEND_TESTING.md, BACKEND_WEBSOCKETS.md with error handling sections
 - **2025-12-07**: ws-refinements documentation sync - TWS README overhauled (ticker-slot pattern, stream keys, AsyncMock testing), BACKEND_WEBSOCKETS.md and WEBSOCKET-METHODOLOGY.md updated (sync create_topic), DOCUMENTATION-GUIDE.md keywords updated
