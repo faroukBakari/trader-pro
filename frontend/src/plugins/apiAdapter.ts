@@ -191,16 +191,25 @@ export class ApiAdapter {
       basePath: ApiV1BasePath + '/broker',
       // @ts-expect-error - withCredentials not in type definition but supported by axios
       withCredentials: true,
+      baseOptions: {
+        timeout: 5000,  // 5 seconds
+      },
     })
     this.datafeedConfig = new DatafeedConfigurationV1({
       basePath: ApiV1BasePath + '/datafeed',
       // @ts-expect-error - withCredentials not in type definition but supported by axios
       withCredentials: true,
+      baseOptions: {
+        timeout: 5000,  // 5 seconds
+      },
     })
     this.authConfig = new AuthConfigurationV1({
       basePath: ApiV1BasePath + '/auth',
       // @ts-expect-error - withCredentials not in type definition but supported by axios
       withCredentials: true,
+      baseOptions: {
+        timeout: 5000,  // 5 seconds
+      },
     })
 
     // Initialize per-module API clients
@@ -318,26 +327,17 @@ export class ApiAdapter {
     const healthChecks = await Promise.all(
       modules.map(async (module) => {
         const start = Date.now()
-        try {
-          const response = await this.getModuleHealth(module.name)
-          const moduleHealth: import('@/types/apiStatus').ModuleHealth = {
-            moduleName: module.name,
-            health: response.data,
-            loading: false,
-            error: null,
-            responseTime: Date.now() - start,
-          }
-          return [module.name, moduleHealth] as [string, import('@/types/apiStatus').ModuleHealth]
-        } catch (error) {
-          const moduleHealth: import('@/types/apiStatus').ModuleHealth = {
-            moduleName: module.name,
-            health: null,
-            loading: false,
-            error: error instanceof Error ? error.message : String(error),
-            responseTime: Date.now() - start,
-          }
-          return [module.name, moduleHealth] as [string, import('@/types/apiStatus').ModuleHealth]
+
+        const response = await this.getModuleHealth(module.name)
+        const moduleHealth: import('@/types/apiStatus').ModuleHealth = {
+          moduleName: module.name,
+          health: response.data,
+          loading: false,
+          error: null,
+          responseTime: Date.now() - start,
         }
+        return [module.name, moduleHealth] as [string, import('@/types/apiStatus').ModuleHealth]
+
       })
     )
 
@@ -359,24 +359,16 @@ export class ApiAdapter {
 
     const versionChecks = await Promise.all(
       modules.map(async (module) => {
-        try {
-          const response = await this.getModuleVersions(module.name)
-          const moduleVersions: import('@/types/apiStatus').ModuleVersions = {
-            moduleName: module.name,
-            versions: response.data,
-            loading: false,
-            error: null,
-          }
-          return [module.name, moduleVersions] as [string, import('@/types/apiStatus').ModuleVersions]
-        } catch (error) {
-          const moduleVersions: import('@/types/apiStatus').ModuleVersions = {
-            moduleName: module.name,
-            versions: null,
-            loading: false,
-            error: error instanceof Error ? error.message : String(error),
-          }
-          return [module.name, moduleVersions] as [string, import('@/types/apiStatus').ModuleVersions]
+
+        const response = await this.getModuleVersions(module.name)
+        const moduleVersions: import('@/types/apiStatus').ModuleVersions = {
+          moduleName: module.name,
+          versions: response.data,
+          loading: false,
+          error: null,
         }
+        return [module.name, moduleVersions] as [string, import('@/types/apiStatus').ModuleVersions]
+
       })
     )
 

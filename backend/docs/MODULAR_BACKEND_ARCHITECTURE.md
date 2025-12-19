@@ -291,7 +291,7 @@ class ServiceInterface(ABC):
             providers: Provider instances for required capabilities
 
         Raises:
-            CapabilityNotFoundError: If required capability not satisfied
+            CommonException: If required capability not satisfied
         """
         super().__init__()
         self.module_dir = module_dir
@@ -348,9 +348,9 @@ class ServiceInterface(ABC):
         [FAIL-FAST]: Validates at initialization, not at request time.
 
         Raises:
-            CapabilityNotFoundError: If required capability not found
+            CommonException: If required capability not found
         """
-        from trading_api.models.common import CapabilityNotFoundError
+        from trading_api.models.exceptions import CommonException
 
         required_capabilities = self.capabilities()
 
@@ -369,10 +369,13 @@ class ServiceInterface(ABC):
                     break
 
             if not matched:
-                raise CapabilityNotFoundError(
-                    f"Service '{self.module_name}' requires capability "
-                    f"'{req_cap}' but no provider found. "
-                    f"Available providers: {[p.name for p in self._providers]}"
+                raise CommonException(
+                    code="COMMON_CAPABILITY_NOT_FOUND",
+                    message=(
+                        f"Service '{self.module_name}' requires capability "
+                        f"'{req_cap}' but no provider found. "
+                        f"Available providers: {[p.name for p in self._providers]}"
+                    ),
                 )
 
     def _get_capability_provider(self, capability_name: str) -> "Provider":
@@ -1050,6 +1053,29 @@ class AppFactory:
 
         return app
 ```
+
+### Exception Handler Registration
+
+The factory registers global exception handlers on the `ModularApp` instance to provide unified error handling across all modules:
+
+```python
+from trading_api.shared.exception_handlers import register_exception_handlers
+
+# In AppFactory.create_app()
+modular_app = ModularApp(...)
+register_exception_handlers(modular_app)
+```
+
+This enables:
+
+- **Consistent error responses**: All exceptions converted to structured JSON format
+- **Automatic status code mapping**: Error codes mapped to appropriate HTTP status
+- **WebSocket error handling**: Exceptions translated to proper close codes
+- **Clean logging**: Project-only backtraces with external library frames filtered
+
+Exception handlers are also registered on mounted sub-apps for routing completeness, but duplicate logging is prevented via request state tracking.
+
+See [ERROR-MANAGEMENT.md](./ERROR-MANAGEMENT.md) for complete error handling patterns and exception hierarchy.
 
 ### Usage Examples
 

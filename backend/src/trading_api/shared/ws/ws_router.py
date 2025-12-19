@@ -5,10 +5,22 @@ from typing import Any, Awaitable, Callable
 from pydantic import BaseModel
 
 from external_packages.fastws import FastWS, OperationRouter
+from trading_api.models.exceptions import TradingApiException
 from trading_api.shared.service_interface import ServiceInterface
 
 # Module logger for app_factory
 logger = logging.getLogger(__name__)
+
+
+# Type alias for provider update callback (data updates)
+ProviderUpdateCallback = Callable[[Any], Awaitable[None]]
+
+# Type alias for topic error callback signature
+# Service calls: topic_error(exc, recoverable, retry_after_ms)
+TopicErrorCallback = Callable[
+    [TradingApiException, bool, int | None],
+    Awaitable[None],
+]
 
 
 def buildTopicParams(obj: Any) -> str:
@@ -32,12 +44,35 @@ def buildTopicParams(obj: Any) -> str:
 
 
 class WsRouteService(ServiceInterface):
+    """Protocol for WebSocket route services.
+
+    Services implementing this protocol can be used with WsRouter
+    for pub/sub WebSocket communication.
+
+    Methods:
+        create_topic: Called when first client subscribes to a new topic.
+                      Service receives callbacks for updates and errors.
+        remove_topic: Called when last client unsubscribes from a topic.
+    """
+
     def create_topic(
-        self, topic: str, topic_update: Callable[[Any], Awaitable[None]]
+        self,
+        topic: str,
+        topic_update: ProviderUpdateCallback,
+        topic_error: TopicErrorCallback,
     ) -> None:
+        """Create a new subscription topic.
+
+        Args:
+            topic: Unique topic identifier (e.g., "bars:AAPL:1")
+            topic_update: Callback to broadcast data updates to subscribers
+            topic_error: Callback to broadcast errors to subscribers.
+                        Called with (exception, recoverable, retry_after_ms).
+        """
         ...
 
     def remove_topic(self, topic: str) -> None:
+        """Remove a subscription topic when no more subscribers."""
         ...
 
 
@@ -65,6 +100,7 @@ class WsRouteFeature(OperationRouter):
                 f"{self.route}.subscribe",
                 f"{self.route}.unsubscribe",
                 f"{self.route}.update",
+                f"{self.route}.error",
             ],
             "note": "WebSocket endpoints use AsyncAPI spec, not OpenAPI/Swagger",
         }

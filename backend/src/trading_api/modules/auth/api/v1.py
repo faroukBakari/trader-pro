@@ -10,7 +10,7 @@ This module provides REST API endpoints for:
 
 from typing import Annotated, Any, cast
 
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import Depends, Request, Response
 from jose import JWTError, jwt
 
 from trading_api.models.auth import (
@@ -24,7 +24,7 @@ from trading_api.models.auth import (
     User,
     UserData,
 )
-from trading_api.models.common import AuthenticationError
+from trading_api.models.exceptions import ServiceException
 from trading_api.shared import settings
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.middleware.auth import get_current_user
@@ -72,28 +72,21 @@ class AuthApi(APIRouterInterface):
 
             auth_service = cast(AuthService, self.service)
 
-            try:
-                tokens = await auth_service.authenticate_google_user(
-                    request.google_token, device_info
-                )
+            tokens = await auth_service.authenticate_google_user(
+                request.google_token, device_info
+            )
 
-                # Set access token as HttpOnly cookie
-                response.set_cookie(
-                    key="access_token",
-                    value=tokens.access_token,
-                    httponly=True,  # Prevents JavaScript access (XSS protection)
-                    secure=settings.COOKIE_SECURE,  # HTTPS only when True
-                    samesite="strict",  # CSRF protection
-                    max_age=300,  # 5 minutes (matches token expiry)
-                )
+            # Set access token as HttpOnly cookie
+            response.set_cookie(
+                key="access_token",
+                value=tokens.access_token,
+                httponly=True,  # Prevents JavaScript access (XSS protection)
+                secure=settings.COOKIE_SECURE,  # HTTPS only when True
+                samesite="strict",  # CSRF protection
+                max_age=300,  # 5 minutes (matches token expiry)
+            )
 
-                return tokens
-            except HTTPException:
-                raise
-            except AuthenticationError as e:
-                raise HTTPException(status_code=401, detail=str(e))
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+            return tokens
 
         @self.post(
             "/refresh-token",
@@ -127,26 +120,22 @@ class AuthApi(APIRouterInterface):
 
             auth_service = cast(AuthService, self.service)
 
-            try:
-                tokens = await auth_service.refresh_access_token(
-                    request.refresh_token, device_info
-                )
+            # ServiceException will be handled by global exception handler
+            tokens = await auth_service.refresh_access_token(
+                request.refresh_token, device_info
+            )
 
-                # Update access token cookie
-                response.set_cookie(
-                    key="access_token",
-                    value=tokens.access_token,
-                    httponly=True,
-                    secure=settings.COOKIE_SECURE,
-                    samesite="strict",
-                    max_age=300,  # 5 minutes
-                )
+            # Update access token cookie
+            response.set_cookie(
+                key="access_token",
+                value=tokens.access_token,
+                httponly=True,
+                secure=settings.COOKIE_SECURE,
+                samesite="strict",
+                max_age=300,  # 5 minutes
+            )
 
-                return tokens
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+            return tokens
 
         @self.post(
             "/logout",
@@ -173,19 +162,14 @@ class AuthApi(APIRouterInterface):
 
             try:
                 await auth_service.logout(request.refresh_token)
-            except Exception:
-                # Silent failure - logout always succeeds
-                pass
-
-            # Clear access token cookie
-            response.delete_cookie(
-                key="access_token",
-                httponly=True,
-                secure=settings.COOKIE_SECURE,
-                samesite="strict",
-            )
-
-            return {"message": "Logged out successfully"}
+                return {"message": "Logged out successfully"}
+            finally:
+                response.delete_cookie(
+                    key="access_token",
+                    httponly=True,
+                    secure=settings.COOKIE_SECURE,
+                    samesite="strict",
+                )
 
         @self.get(
             "/me",
@@ -211,16 +195,16 @@ class AuthApi(APIRouterInterface):
 
             auth_service = cast(AuthService, self.service)
 
-            try:
-                user = await auth_service.user_repository.get_by_id(user_id)
-                if user is None:
-                    raise HTTPException(status_code=404, detail="User not found")
-                return user
-            except HTTPException:
-                raise
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
+            user = await auth_service.user_repository.get_by_id(user_id)
+            if user is None:
+                raise ServiceException(
+                    code="SERVICE_AUTH_USER_NOT_FOUND",
+                    message=f"User with ID {user_id} not found.",
+                    module="auth",
+                )
+            return user
 
+        # TODO: move processing to service layer
         @self.get(
             "/introspect",
             response_model=TokenIntrospectResponse,
@@ -264,12 +248,14 @@ class AuthApi(APIRouterInterface):
 
             except JWTError as e:
                 error_str = str(e).lower()
-                if "expired" in error_str:
-                    return TokenIntrospectResponse(
-                        status=TokenStatus.EXPIRED, exp=None, error=str(e)
-                    )
                 return TokenIntrospectResponse(
-                    status=TokenStatus.ERROR, exp=None, error=str(e)
+                    status=(
+                        TokenStatus.EXPIRED
+                        if "expired" in error_str
+                        else TokenStatus.ERROR
+                    ),
+                    exp=None,
+                    error=str(e),
                 )
 
 

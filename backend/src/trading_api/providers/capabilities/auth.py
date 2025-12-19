@@ -29,7 +29,7 @@ class AuthCapability(ABC):
                 - email_verified: Email verification status
 
         Raises:
-            AuthenticationError: If token invalid or verification fails
+            ProviderException: If token invalid or verification fails
 
         [SECURITY]: Must validate token signature, audience, expiration.
         """

@@ -138,7 +138,7 @@ export class WsAdapter implements WsAdapterType {
   }
 }
 
-export interface wsMocker {
+export interface WsMocker {
   barsMocker?: () => Bar | undefined,
   quotesMocker?: () => QuoteData | undefined,
   ordersMocker?: () => PlacedOrder | undefined,
@@ -158,7 +158,7 @@ export class WsFallback implements Partial<WsAdapterType> {
   equity?: WebSocketInterface<EquitySubscriptionRequest, EquityData>
   brokerConnection?: WebSocketInterface<BrokerConnectionSubscriptionRequest, BrokerConnectionStatus>
 
-  constructor(wsMocker: wsMocker) {
+  constructor(wsMocker: WsMocker) {
     if (wsMocker.barsMocker) this.bars = new WebSocketFallback<BarsSubscriptionRequest, Bar>(wsMocker.barsMocker.bind(wsMocker))
     if (wsMocker.quotesMocker) this.quotes = new WebSocketFallback<QuoteDataSubscriptionRequest, QuoteData>(wsMocker.quotesMocker.bind(wsMocker))
     if (wsMocker.ordersMocker) this.orders = new WebSocketFallback<OrderSubscriptionRequest, PlacedOrder>(wsMocker.ordersMocker.bind(wsMocker))

@@ -108,8 +108,6 @@ class FastWS(Broker):
         self._connect(client)
         try:
             yield client
-        except Exception:
-            self.log("unknown disconnect")
         finally:
             self._disconnect(client)
 
@@ -125,8 +123,9 @@ class FastWS(Broker):
 
     async def handle_exception(
         self,
+        client: Client,
         exc: ValueError | ValidationError | NoMatchingOperation | TimeoutError,
-    ):
+    ) -> None:
         self.log(f"could not parse message {exc}")
         error = WebSocketException(
             code=status.WS_1003_UNSUPPORTED_DATA, reason="Could not decode message"
@@ -158,7 +157,7 @@ class FastWS(Broker):
                         )
                     await self.client_send(message, client=client)
         except (ValueError, ValidationError, NoMatchingOperation, TimeoutError) as exc:
-            await self.handle_exception(exc)
+            await self.handle_exception(client, exc)
 
     async def client_send(self, message: Message, *, client: Client):
         if (

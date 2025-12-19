@@ -11,10 +11,10 @@ import pytest
 # Add src to path for module imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from trading_api.models.common import (  # noqa: E402
-    CapabilityNotFoundError,
-    CapabilitySpec,
-    ProviderConfig,
+from trading_api.models.common import CapabilitySpec, ProviderConfig  # noqa: E402
+from trading_api.models.exceptions import (  # noqa: E402
+    CommonException,
+    TradingApiException,
 )
 from trading_api.models.market import (  # noqa: E402
     Bar,
@@ -55,12 +55,12 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
     ) -> list[SearchSymbolResultItem]:
         return []
 
-    async def get_symbol_info(self, ticker: str, **kwargs: Any) -> SymbolInfo:
+    async def get_symbol_info(self, ticker_name: str, **kwargs: Any) -> SymbolInfo:
         raise NotImplementedError("Mock provider")
 
     async def get_historical_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         start_time: datetime,
         end_time: datetime,
         resolution: Resolution,
@@ -69,23 +69,25 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
         return []
 
     async def get_quotes_snapshot(
-        self, tickers: list[str], **kwargs: Any
+        self, ticker_names: list[str], **kwargs: Any
     ) -> list[QuoteData]:
         return []
 
     def subscribe_realtime_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> str:
         return "sub_0"
 
     def subscribe_market_data(
         self,
-        tickers: list[str],
+        ticker_names: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> list[str]:
         return []
@@ -154,7 +156,7 @@ class TestModuleCodegen:
         instantiated directly (e.g., in codegen scripts).
         """
         with pytest.raises(
-            CapabilityNotFoundError,
+            CommonException,
             match="Service 'auth' requires capability 'auth'",
         ):
             AuthModule()  # Should fail: no providers for auth capability
@@ -199,4 +201,4 @@ class TestModuleCodegen:
 
         # Should succeed (after fix to module_codegen.py)
         assert result.returncode == 0, f"Script failed for auth: {result.stderr}"
-        assert "CapabilityNotFoundError" not in result.stderr
+        assert "CommonException" not in result.stderr

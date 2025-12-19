@@ -158,6 +158,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | **backend/docs/MODULAR_BACKEND_ARCHITECTURE.md** | Modular backend architecture, functional `ModuleRegistry.get_modules(...)` workflow, and module system |
 | **backend/docs/AUTHENTICATION.md**               | JWT-based authentication with Google OAuth, cookies, security                                          |
+| **backend/docs/ERROR-MANAGEMENT.md**             | ⭐ Exception hierarchy, error codes, global handlers, testing patterns                                 |
 | **backend/docs/PROVIDER-SYSTEM.md**              | Provider/capability system developer guide                                                             |
 | **backend/docs/MODULAR_VERSIONNING.md**          | Module-level API versioning strategy                                                                   |
 | **backend/docs/BACKEND_MANAGER_GUIDE.md**        | Multi-process backend management with nginx                                                            |
@@ -211,7 +212,8 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 | File                                        | Purpose                                           |
 | ------------------------------------------- | ------------------------------------------------- |
-| **frontend/docs/WEBSOCKET-ARCHITECTURE.md** | ✅ Complete WebSocket architecture guide (v2.0.0) |
+| **frontend/docs/ERROR-MANAGEMENT.md**       | ⭐ Frontend error handling architecture (v1.0.0)  |
+| **frontend/docs/WEBSOCKET-ARCHITECTURE.md** | ✅ Complete WebSocket architecture guide (v3.3.0) |
 | **frontend/docs/BROKER-INTEGRATION.md**     | ✅ Complete broker integration guide (v2.0.0)     |
 | **frontend/docs/IHM-CONTROLLER.md**         | IHM Controller service design and usage (v1.0.0)  |
 | **frontend/docs/FRONTEND-EXCLUSIONS.md**    | Public folder exclusions (linting, testing, etc.) |
@@ -341,6 +343,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 | "Authentication/auth/login"    | `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md` | Auth doc first        |
 | "Testing [component]"          | `TESTING.md` → component-specific testing docs                                      | General first         |
 | "Error/CI/build issue"         | `CI-TROUBLESHOOTING.md` + relevant architecture docs                                | Troubleshooting first |
+| "Error handling/exceptions"    | `ERROR-MANAGEMENT.md` → `BACKEND_TESTING.md` (for testing)                          | Error doc first       |
 | "TWS API/broker integration"   | `providers/tws/README.md` → `tws/docs/README.md` → specific API docs                | Provider then API     |
 | "TradingView [anything]"       | `BROKER-INTEGRATION.md` → `tradingview/` docs                                       | Integration first     |
 | "Client generation"            | `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`                                  | Backend then frontend |
@@ -359,8 +362,9 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 ### Feature Implementation Chains
 
 - **REST API Development**: `API-METHODOLOGY.md` → `MODULAR_BACKEND_ARCHITECTURE.md` → `SPECS_AND_CLIENT_GEN.md`
-- **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md`
+- **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `ERROR-MANAGEMENT.md` (subscription errors)
 - **Authentication**: `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
+- **Error Handling**: `ERROR-MANAGEMENT.md` → `PROVIDER-SYSTEM.md` (providers) + `BACKEND_TESTING.md` (testing)
 - **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BROKER-CONNECTION-ADAPTER.md`
 - **TWS Provider Integration**: `PROVIDER-SYSTEM.md` → `providers/tws/README.md` → `tws/docs/README.md` → specific API reference docs
 - **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`
@@ -435,7 +439,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### WebSocket & Real-Time
 
-**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming
+**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming, subscription errors, error broadcasting, topic_error callback, SubscriptionError, recoverable errors
 
 **Scope**: WebSocket implementation (backend + frontend)  
 **Out of Scope**: HTTP polling, SSE, long-polling alternatives
@@ -482,6 +486,20 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **frontend/src/router/README.md** - Router authentication guards
 - **frontend/src/views/LoginView.vue** - Google OAuth login UI
 - **docs/TESTING.md** - Authentication testing strategies
+
+### Error Handling
+
+**Keywords**: exceptions, error codes, error handling, HTTP status, WebSocket close codes, TradingApiException, ServiceException, ProviderException, CommonException, global handlers, subscription errors, recoverable errors, ErrorPayload, SubscriptionError, topic_error callback, AppError, WebSocketError, NetworkError, AuthError, ValidationError, errorService, toast notifications
+
+**Scope**: Backend exception hierarchy and frontend error handling  
+**Out of Scope**: User-facing error messages content
+
+- **backend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete backend error management guide (exception hierarchy, error codes, handlers, subscription errors)
+- **frontend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete frontend error management guide (error classes, errorService, toast notifications)
+- **backend/docs/PROVIDER-SYSTEM.md** - ProviderException usage in providers (Section 8.4)
+- **backend/docs/BACKEND_WEBSOCKETS.md** - WebSocket error handling (close codes, subscription-level errors)
+- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket subscription error handling (globalErrorHandler)
+- **backend/docs/BACKEND_TESTING.md** - Testing error responses (test client configuration)
 
 ### Build & DevOps
 
@@ -534,7 +552,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 - **Root Documentation**: 10 essential project-wide guides
 - **docs/ Folder**: 9 core cross-cutting documentation files
-- **Backend Documentation**: 8 current backend guides + 8 TWS API guides + 1 third-party doc
+- **Backend Documentation**: 9 current backend guides + 8 TWS API guides + 1 third-party doc
 - **Frontend Documentation**: 10 frontend-specific guides + 2 third-party docs
 - **Auto-Generated Docs**: Per-module generated clients and type definitions
 - **DevOps & Git**: 2 setup and operations guides
@@ -558,6 +576,9 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2025-12-19**: Frontend error management documentation - Created frontend/docs/ERROR-MANAGEMENT.md (error classes, errorService, toast notifications, philosophy emphasis), expanded backend ERROR-MANAGEMENT.md philosophy section (decision matrix, anti-patterns), updated WEBSOCKET-ARCHITECTURE.md v3.3.0 (globalErrorHandler integration), added error handling section to services README
+- **2025-12-19**: WebSocket subscription error handling - Updated BACKEND_WEBSOCKETS.md (unified error broadcasting), WEBSOCKET-ARCHITECTURE.md v3.2.0 (frontend error handling section), generic_route.py (all errors now broadcast before cleanup)
+- **2025-12-11**: Error management documentation - Created ERROR-MANAGEMENT.md (exception hierarchy, error codes, handlers), updated MODULAR_BACKEND_ARCHITECTURE.md, PROVIDER-SYSTEM.md, BACKEND_TESTING.md, BACKEND_WEBSOCKETS.md with error handling sections
 - **2025-12-07**: ws-refinements documentation sync - TWS README overhauled (ticker-slot pattern, stream keys, AsyncMock testing), BACKEND_WEBSOCKETS.md and WEBSOCKET-METHODOLOGY.md updated (sync create_topic), DOCUMENTATION-GUIDE.md keywords updated
 - **2025-11-30**: Wave 4 final validation - Verified all internal links, fixed remaining broken refs (ENVIRONMENT-CONFIG.md, WORKSPACE-SETUP.md → GETTING-STARTED.md), updated docs/README.md, validated cross-references and section anchors
 - **2025-11-30**: Wave 3 documentation assessment - Fixed ARCHITECTURE.md links, BROKER-ARCHITECTURE.md links, CLIENT-GENERATION.md refs, methodologies updates, root README.md links. RE-GROUP operations deferred (low ROI)
@@ -585,5 +606,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: December 7, 2025  
+**Last Updated**: December 19, 2025  
 **Maintained by**: Development Team

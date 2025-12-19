@@ -771,6 +771,122 @@ def test_datafeed_only():
         assert response.status_code == 404
 ```
 
+### Testing Error Responses
+
+When testing error scenarios, configure test clients to NOT raise exceptions. This allows you to verify HTTP status codes and error response bodies.
+
+> **Full Reference:** See [ERROR-MANAGEMENT.md](ERROR-MANAGEMENT.md) for complete exception hierarchy and handlers.
+
+#### Test Client Configuration
+
+```python
+# For synchronous tests (WebSocket)
+from starlette.testclient import TestClient
+
+client = TestClient(app, raise_server_exceptions=False)  # Critical!
+
+# For async tests (REST API)
+from httpx import AsyncClient
+
+async with AsyncClient(
+    transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),  # Critical!
+    base_url="http://test"
+) as client:
+    response = await client.get("/api/v1/broker/invalid")
+```
+
+**Why this matters:**
+
+- `raise_server_exceptions=False` (TestClient): Prevents test client from re-raising server exceptions
+- `raise_app_exceptions=False` (ASGITransport): Returns HTTP responses instead of raising
+
+Without these flags, your tests will raise Python exceptions instead of returning HTTP error responses.
+
+#### Example: Testing 404 Not Found
+
+```python
+@pytest.mark.asyncio
+async def test_invalid_endpoint_returns_404(async_client: AsyncClient) -> None:
+    """Test that invalid endpoint returns proper 404 response."""
+    response = await async_client.get("/api/v1/broker/nonexistent")
+
+    assert response.status_code == 404
+    data = response.json()
+    assert data["code"] == "COMMON_RESOURCE_NOT_FOUND"
+    assert "message" in data
+```
+
+#### Example: Testing 400 Bad Request
+
+```python
+@pytest.mark.asyncio
+async def test_invalid_input_returns_400(async_client: AsyncClient) -> None:
+    """Test that invalid input returns proper 400 response."""
+    response = await async_client.post(
+        "/api/v1/broker/orders",
+        json={"invalid": "data"}
+    )
+
+    assert response.status_code == 400
+    data = response.json()
+    assert "INVALID" in data["code"]
+```
+
+#### Example: Testing Service Errors
+
+```python
+@pytest.mark.asyncio
+async def test_service_error_returns_500(
+    async_client: AsyncClient, monkeypatch
+) -> None:
+    """Test that service errors return proper 500 response."""
+    # Mock service to raise exception
+    async def mock_get_account():
+        from trading_api.models.exceptions import ServiceException
+        raise ServiceException(
+            code="SERVICE_BROKER_INTERNAL_ERROR",
+            message="Database connection failed"
+        )
+
+    monkeypatch.setattr(
+        "trading_api.modules.broker.service.BrokerService.get_account",
+        mock_get_account
+    )
+
+    response = await async_client.get("/api/v1/broker/account")
+
+    assert response.status_code == 500
+    data = response.json()
+    assert data["code"] == "SERVICE_BROKER_INTERNAL_ERROR"
+```
+
+#### Fixture Configuration (conftest.py)
+
+The shared conftest already configures this correctly:
+
+```python
+# backend/src/trading_api/conftest.py
+@pytest.fixture
+async def async_client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+    """Async test client for API tests.
+
+    Uses raise_app_exceptions=False to test error responses.
+    """
+    async with AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test"
+    ) as ac:
+        yield ac
+
+@pytest.fixture
+def client(app: FastAPI) -> TestClient:
+    """Sync test client for WebSocket tests.
+
+    Uses raise_server_exceptions=False to test error responses.
+    """
+    return TestClient(app, raise_server_exceptions=False)
+```
+
 ### Creating Isolated Test Apps
 
 ```python

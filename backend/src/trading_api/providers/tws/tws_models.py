@@ -4,227 +4,55 @@ Combines realtime bars and market data (quotes) into a single typed dataclass.
 Handles all TickTypeEnum values with proper typing.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from ibapi.contract import Contract
+# =============================================================================
+# Bar Size Constants
+# =============================================================================
+# Maps TWS bar size strings to duration in seconds.
+# Used for calculating historical data duration requests.
+# =============================================================================
+
+BAR_SIZE_TO_SECONDS: dict[str, int] = {
+    "1 secs": 1,
+    "5 secs": 5,
+    "10 secs": 10,
+    "15 secs": 15,
+    "30 secs": 30,
+    "1 min": 60,
+    "2 mins": 120,
+    "3 mins": 180,
+    "5 mins": 300,
+    "10 mins": 600,
+    "15 mins": 900,
+    "20 mins": 1200,
+    "30 mins": 1800,
+    "1 hour": 3600,
+    "2 hours": 7200,
+    "3 hours": 10800,
+    "4 hours": 14400,
+    "8 hours": 28800,
+    "1 day": 86400,
+    "1 week": 604800,
+    "1 month": 2592000,
+}
 
 
-@dataclass
-class TWSError(Exception):
-    """TWS API Error with structured error details."""
+def get_bar_duration_seconds(bar_size: str) -> int:
+    """Get duration in seconds for a bar size.
 
-    reqId: int
-    errorCode: int
-    errorString: str
-    errorTime: int
-    advancedOrderRejectJson: str = ""
+    Args:
+        bar_size: TWS bar size string (e.g., "1 min", "1 hour", "1 day")
 
-    def __str__(self) -> str:
-        return f"TWS error {self.errorCode} (reqId={self.reqId}): {self.errorString}"
-
-
-@dataclass(slots=True)
-class RTMarketData:
-    """Unified real-time market data from TWS.
-
-    Consolidates:
-    - Real-time 5-second bars (realtimeBar callback)
-    - Market data ticks (tickPrice, tickSize, tickString, tickGeneric callbacks)
-
-    All fields are optional (None = not received yet).
+    Returns:
+        Duration in seconds. Defaults to 86400 (1 day) for unknown sizes.
     """
+    return BAR_SIZE_TO_SECONDS.get(bar_size, 86400)
 
-    # tracking flags
-    contract: Contract | None = None  # Symbol:Exchange identifier
-    bar_data_reqId: int | None = None
-    mkt_data_reqId: int | None = None
-    bar_size: str | None = None
-    format_date: int | None = None
-    whatToShow: str | None = None
 
-    # === Real-time bar fields (from realtimeBar callback) ===
-    bar_date: str | None = None  # Raw TWS date string (yyyyMMdd HH:mm:ss or epoch)
-    bar_time: int | None = None  # Unix timestamp of bar
-    bar_open: float | None = None
-    bar_high: float | None = None
-    bar_low: float | None = None
-    bar_close: float | None = None
-    bar_volume: int | None = None
-    bar_wap: float | None = None  # Weighted average price
-    bar_count: int | None = None  # Trade count in bar
-
-    # === Core price ticks (tickPrice callback) ===
-    # TickTypeEnum indices: BID=1, ASK=2, LAST=4, HIGH=6, LOW=7, CLOSE=9, OPEN=14
-    bid: float | None = None  # 1
-    ask: float | None = None  # 2
-    last: float | None = None  # 4
-    high: float | None = None  # 6
-    low: float | None = None  # 7
-    close: float | None = None  # 9
-    open: float | None = None  # 14
-
-    # === Core size ticks (tickSize callback) ===
-    # TickTypeEnum indices: BID_SIZE=0, ASK_SIZE=3, LAST_SIZE=5, VOLUME=8
-    bid_size: int | None = None  # 0
-    ask_size: int | None = None  # 3
-    last_size: int | None = None  # 5
-    volume: int | None = None  # 8
-
-    # === Historical range ticks ===
-    low_13_week: float | None = None  # 15
-    high_13_week: float | None = None  # 16
-    low_26_week: float | None = None  # 17
-    high_26_week: float | None = None  # 18
-    low_52_week: float | None = None  # 19
-    high_52_week: float | None = None  # 20
-    avg_volume: int | None = None  # 21
-
-    # === Option ticks ===
-    open_interest: int | None = None  # 22
-    option_historical_vol: float | None = None  # 23
-    option_implied_vol: float | None = None  # 24
-    option_bid_exch: str | None = None  # 25
-    option_ask_exch: str | None = None  # 26
-    option_call_open_interest: int | None = None  # 27
-    option_put_open_interest: int | None = None  # 28
-    option_call_volume: int | None = None  # 29
-    option_put_volume: int | None = None  # 30
-
-    # === Index/futures ticks ===
-    index_future_premium: float | None = None  # 31
-
-    # === Exchange info ticks ===
-    bid_exch: str | None = None  # 32
-    ask_exch: str | None = None  # 33
-
-    # === Auction ticks ===
-    auction_volume: int | None = None  # 34
-    auction_price: float | None = None  # 35
-    auction_imbalance: int | None = None  # 36
-
-    # === Mark price ===
-    mark_price: float | None = None  # 37
-
-    # === Timestamp ticks ===
-    last_timestamp: str | None = None  # 45
-
-    # === Shortability ticks ===
-    shortable: float | None = None  # 46
-    shortable_shares: int | None = None  # 89
-
-    # === Fundamental data ===
-    fundamental_ratios: str | None = None  # 47
-
-    # === Real-time volume ===
-    rt_volume: str | None = None  # 48
-    rt_trd_volume: int | None = None  # 77
-
-    # === Trading status ===
-    halted: int | None = None  # 49
-
-    # === Yield ticks ===
-    bid_yield: float | None = None  # 50
-    ask_yield: float | None = None  # 51
-    last_yield: float | None = None  # 52
-
-    # === Trade statistics ===
-    trade_count: int | None = None  # 54
-    trade_rate: float | None = None  # 55
-    volume_rate: float | None = None  # 56
-    last_rth_trade: float | None = None  # 57
-
-    # === Volatility ===
-    rt_historical_vol: float | None = None  # 58
-
-    # === Dividends ===
-    ib_dividends: str | None = None  # 59
-
-    # === Bond specific ===
-    bond_factor_multiplier: float | None = None  # 60
-
-    # === Regulatory ===
-    regulatory_imbalance: int | None = None  # 61
-
-    # === News ===
-    news_tick: str | None = None  # 62
-
-    # === Short-term volume ===
-    short_term_volume_3_min: int | None = None  # 63
-    short_term_volume_5_min: int | None = None  # 64
-    short_term_volume_10_min: int | None = None  # 65
-
-    # === Delayed data ticks (for non-professional subscribers) ===
-    delayed_bid: float | None = None  # 66
-    delayed_ask: float | None = None  # 67
-    delayed_last: float | None = None  # 68
-    delayed_bid_size: int | None = None  # 69
-    delayed_ask_size: int | None = None  # 70
-    delayed_last_size: int | None = None  # 71
-    delayed_high: float | None = None  # 72
-    delayed_low: float | None = None  # 73
-    delayed_volume: int | None = None  # 74
-    delayed_close: float | None = None  # 75
-    delayed_open: float | None = None  # 76
-    delayed_last_timestamp: str | None = None  # 88
-    delayed_halted: int | None = None  # 90
-
-    # === Credit manager ===
-    creditman_mark_price: float | None = None  # 78
-    creditman_slow_mark_price: float | None = None  # 79
-
-    # === Exchange info ===
-    last_exch: str | None = None  # 84
-    last_reg_time: str | None = None  # 85
-
-    # === Futures ===
-    futures_open_interest: int | None = None  # 86
-
-    # === Options average volume ===
-    avg_opt_volume: int | None = None  # 87
-
-    # === ETF NAV ticks ===
-    etf_nav_close: float | None = None  # 92
-    etf_nav_prior_close: float | None = None  # 93
-    etf_nav_bid: float | None = None  # 94
-    etf_nav_ask: float | None = None  # 95
-    etf_nav_last: float | None = None  # 96
-    etf_frozen_nav_last: float | None = None  # 97
-    etf_nav_high: float | None = None  # 98
-    etf_nav_low: float | None = None  # 99
-
-    # === Social/sentiment ===
-    social_market_analytics: str | None = None  # 100
-
-    # === IPO ticks ===
-    estimated_ipo_midpoint: float | None = None  # 101
-    final_ipo_last: float | None = None  # 102
-
-    # === Delayed yield ===
-    delayed_yield_bid: float | None = None  # 103
-    delayed_yield_ask: float | None = None  # 104
-
-    # === Metadata (from tickReqParams / marketDataType callbacks) ===
-    market_data_type: int | None = None
-    min_tick: float | None = None
-    bbo_exchange: str | None = None
-    snapshot_permissions: int | None = None
-
-    # === Error tracking ===
-    error_messages: list[TWSError] = field(default_factory=list)
-
-    # Fields to preserve during reset
-    _PRESERVE_ON_RESET: frozenset[str] = field(
-        default=frozenset(
-            {
-                "contract",
-                "reqId_callback_map",
-                "_PRESERVE_ON_RESET",
-            }
-        ),
-        init=False,
-        repr=False,
-    )
-
+# =============================================================================
+# Tick Type Field Mapping
+# =============================================================================
 
 # Mapping from TickTypeEnum name → TwsRTData attribute name
 # Only includes ticks that map to dedicated fields (not extended dict)
@@ -700,3 +528,210 @@ def get_asset_config(sec_type: str) -> AssetTypeConfig:
         Falls back to DEFAULT_ASSET_CONFIG for unknown types.
     """
     return ASSET_TYPE_CONFIG.get(sec_type, DEFAULT_ASSET_CONFIG)
+
+
+# =============================================================================
+# TWS Error Code Classification
+# =============================================================================
+# Classifies TWS error codes by category and recoverability.
+# Based on: https://interactivebrokers.github.io/tws-api/message_codes.html
+#
+# Categories:
+# - INFO: Not errors, just status notifications (2104, 2106, 2158, etc.)
+# - CONNECTION: Connection state changes (1100, 1101, 1102, 502, 504)
+# - PACING: Rate limiting (100) - recoverable with throttling
+# - DUPLICATE: ID conflicts (102, 326, 385, 386, 501) - use different ID
+# - SUBSCRIPTION: Market data permissions (354, 10090, 10186) - requires action
+# - VALIDATION: Invalid request params (200, 201, 203) - fix request
+# - FATAL: Protocol/system errors (503, 505-509, 520) - cannot recover
+# - WARNING: Non-critical issues (2xxx range)
+# - SYSTEM: System messages (1xxx range)
+# - ERROR: Unclassified errors
+# =============================================================================
+
+
+class TWSErrorClassification:
+    """TWS error classification categories (from TWS error codes).
+
+    Note: This is separate from TWSErrorCategory in tws_connection.py which
+    categorizes error sources (CONN, API, CALLBACK). This class categorizes
+    the specific TWS error code meanings.
+    """
+
+    INFO = "INFO"  # Not errors - status notifications
+    CONNECTION = "CONNECTION"  # Connection state changes
+    PACING = "PACING"  # Rate limiting errors
+    DUPLICATE = "DUPLICATE"  # Duplicate ID errors
+    SUBSCRIPTION = "SUBSCRIPTION"  # Market data subscription issues
+    VALIDATION = "VALIDATION"  # Invalid request/contract
+    FATAL = "FATAL"  # Unrecoverable system errors
+    WARNING = "WARNING"  # Non-critical warnings
+    SYSTEM = "SYSTEM"  # System state messages
+    ERROR = "ERROR"  # Unclassified errors
+
+
+# Informational status messages - not real errors
+_INFO_CODES: frozenset[int] = frozenset(
+    {
+        2104,  # Market data farm connection is OK
+        2106,  # Historical data farm is connected
+        2107,  # Historical data farm connection inactive (dormant)
+        2108,  # Market data farm connection inactive (dormant)
+        2158,  # Sec-def data farm connection is OK
+    }
+)
+
+# Connection state changes - recoverable via reconnect/wait
+_CONNECTION_RECOVERABLE: frozenset[int] = frozenset(
+    {
+        502,  # Couldn't connect to TWS - retry
+        504,  # Not connected - reconnect
+        1100,  # Connectivity lost - wait for 1101/1102
+        1101,  # Connectivity restored, data lost - resubscribe
+        1102,  # Connectivity restored, data maintained
+        1300,  # Socket port reset - reconnect on new port
+        2103,  # Market data farm disconnected - temporary
+        2105,  # Historical data farm disconnected - temporary
+        2110,  # TWS-server connection broken - auto-restores
+    }
+)
+
+# Rate limiting - recoverable with throttling
+_PACING_CODES: frozenset[int] = frozenset(
+    {
+        100,  # Max rate of messages exceeded (50/sec)
+        420,  # Invalid real-time query (pacing violation)
+    }
+)
+
+# Duplicate/conflict errors - use different ID and retry
+_DUPLICATE_CODES: frozenset[int] = frozenset(
+    {
+        102,  # Duplicate ticker ID
+        103,  # Duplicate order ID
+        326,  # Client ID already in use
+        385,  # Duplicate ticker ID for scanner
+        386,  # Duplicate ticker ID for historical data
+        501,  # Already connected (not really an error)
+    }
+)
+
+# Subscription/permission issues - requires user action (not auto-recoverable)
+_SUBSCRIPTION_CODES: frozenset[int] = frozenset(
+    {
+        354,  # Not subscribed to market data
+        10090,  # Part of requested market data not subscribed
+        10167,  # Requested market data requires subscription
+        10186,  # Market data not subscribed, delayed not enabled
+        10197,  # No market data during competing session
+    }
+)
+
+# Invalid request/contract - not recoverable without fixing request
+_VALIDATION_CODES: frozenset[int] = frozenset(
+    {
+        200,  # No security definition found
+        201,  # Order rejected
+        202,  # Order cancelled (may be expected)
+        203,  # Security not available for account
+        300,  # Can't find ticker ID
+        321,  # Server error validating request
+        322,  # Server error processing request
+        323,  # Server error
+        399,  # Order message error
+        400,  # Algo order error
+    }
+)
+
+# Fatal protocol/system errors - cannot recover
+_FATAL_CODES: frozenset[int] = frozenset(
+    {
+        503,  # TWS out of date - must upgrade
+        505,  # Unknown message ID
+        506,  # Unsupported version
+        507,  # Bad message length
+        508,  # Bad message
+        509,  # Socket exception
+        520,  # Failed to create socket
+        530,  # SSL error
+    }
+)
+
+# Request not found - usually means already cancelled/completed (informational)
+_NOT_FOUND_CODES: frozenset[int] = frozenset(
+    {
+        135,  # Can't find order with ID
+        300,  # Can't find ticker ID
+        366,  # No historical data query found
+        365,  # No scanner subscription found
+        10148,  # Order cannot be cancelled, wrong state
+    }
+)
+
+
+def classify_error(error_code: int) -> tuple[str, bool]:
+    """Classify TWS error code by category and recoverability.
+
+    Based on TWS API documentation:
+    https://interactivebrokers.github.io/tws-api/message_codes.html
+
+    Args:
+        error_code: TWS error code from error() callback
+
+    Returns:
+        Tuple of (category, is_recoverable):
+        - category: TWSErrorClassification string (INFO, CONNECTION, PACING, etc.)
+        - is_recoverable: True if error can be recovered from automatically
+
+    Examples:
+        >>> classify_error(2104)  # Market data farm OK
+        ('INFO', True)
+        >>> classify_error(1100)  # Connectivity lost
+        ('CONNECTION', True)
+        >>> classify_error(200)   # No security definition
+        ('VALIDATION', False)
+        >>> classify_error(503)   # TWS out of date
+        ('FATAL', False)
+    """
+    # Informational/Status messages - not real errors
+    if error_code in _INFO_CODES:
+        return (TWSErrorClassification.INFO, True)
+
+    # Connection recoverable - wait/retry
+    if error_code in _CONNECTION_RECOVERABLE:
+        return (TWSErrorClassification.CONNECTION, True)
+
+    # Rate limiting - throttle and retry
+    if error_code in _PACING_CODES:
+        return (TWSErrorClassification.PACING, True)
+
+    # Duplicate/already exists - use different ID and retry
+    if error_code in _DUPLICATE_CODES:
+        return (TWSErrorClassification.DUPLICATE, True)
+
+    # Data subscription issues - requires user action
+    if error_code in _SUBSCRIPTION_CODES:
+        return (TWSErrorClassification.SUBSCRIPTION, False)
+
+    # Invalid contract/request - not recoverable without fixing request
+    if error_code in _VALIDATION_CODES:
+        return (TWSErrorClassification.VALIDATION, False)
+
+    # System/protocol errors - not recoverable
+    if error_code in _FATAL_CODES:
+        return (TWSErrorClassification.FATAL, False)
+
+    # Request not found - informational (already cancelled/completed)
+    if error_code in _NOT_FOUND_CODES:
+        return (TWSErrorClassification.INFO, True)
+
+    # Warnings (2xxx range, excluding handled above)
+    if 2000 <= error_code < 3000:
+        return (TWSErrorClassification.WARNING, True)
+
+    # System messages (1xxx range, excluding handled above)
+    if 1000 <= error_code < 2000:
+        return (TWSErrorClassification.SYSTEM, True)
+
+    # Default for unclassified errors (conservative: non-recoverable)
+    return (TWSErrorClassification.ERROR, False)
