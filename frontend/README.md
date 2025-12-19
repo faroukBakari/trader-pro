@@ -12,6 +12,7 @@ A Vue.js frontend application for the Trading API built with TypeScript, Vue Rou
 - ✅ Cookie-based session management
 - ✅ Service-based auth architecture (no Pinia store)
 - ✅ Protected routes with stateless guards
+- ✅ Centralized error management with toast notifications
 - ✅ Vitest for testing
 - ✅ ESLint + Prettier for code quality
 - ✅ API service integration with FastAPI backend
@@ -315,6 +316,28 @@ npm run lint
 # Format code
 npm run format
 ```
+
+## Error Management
+
+The frontend implements a centralized error handling system following the **"Only Catch What You Can Handle"** philosophy.
+
+### Key Features
+
+- ✅ **Global Error Capture**: Vue, window, and unhandled promise rejection handlers
+- ✅ **Type-Safe Errors**: Class hierarchy (`AppError` → `WebSocketError`, `NetworkError`, `AuthError`, `ValidationError`)
+- ✅ **Toast Notifications**: User-friendly error display via vue-sonner
+- ✅ **Deduplication**: Prevents error spam within 2s window
+
+### Philosophy
+
+Exceptions are NOT caught within services or components unless there is a specific mitigation strategy (retry, fallback, partial results). Instead, errors propagate to the global handler which displays toast notifications consistently.
+
+### Documentation
+
+- **Full Guide**: See [docs/ERROR-MANAGEMENT.md](docs/ERROR-MANAGEMENT.md) for complete architecture
+- **WebSocket Errors**: See [docs/WEBSOCKET-ARCHITECTURE.md](docs/WEBSOCKET-ARCHITECTURE.md#subscription-error-handling) for subscription error handling
+
+---
 
 ## WebSocket Integration
 

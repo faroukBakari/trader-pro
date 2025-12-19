@@ -2,7 +2,7 @@
 
 **Date**: December 19, 2025  
 **Status**: ✅ Production Ready  
-**Version**: 3.2.0 (Added Subscription Error Handling)
+**Version**: 3.3.0 (Global Error Handler Integration)
 
 ## 📋 Table of Contents
 
@@ -1469,14 +1469,12 @@ When no `onError` callback is provided, errors are handled by `globalErrorHandle
 ```typescript
 // wsClientBase.ts
 protected globalErrorHandler(error: SubscriptionError): void {
-  console.warn(
-    `[WebSocket] Unhandled subscription error for topic "${error.topic}":`,
-    error.error.code,
-    error.error.message
-  )
-  // Future: Could emit events, trigger reconnection, etc.
+  // Propagate to global error system - displays toast and logs
+  throw WebSocketError.fromSubscription(error, { source: 'WebSocket' })
 }
 ```
+
+> **Note**: The `globalErrorHandler` throws instead of logging because the error system follows the ["Only Catch What You Can Handle"](./ERROR-MANAGEMENT.md#error-handling-philosophy) philosophy. The thrown error propagates to `window.onunhandledrejection` which routes it to `errorService.handle()` for consistent toast display.
 
 ### Error Routing Logic
 
@@ -1539,9 +1537,11 @@ async def topic_error(topic: str, error: Exception) -> None:
 
 See [Backend Error Management](../../backend/docs/ERROR-MANAGEMENT.md) for complete error code reference.
 
+See [Frontend Error Management](./ERROR-MANAGEMENT.md) for error class hierarchy and toast notification system.
+
 ---
 
-**Version**: 3.2.0 (Consolidated + Subscription Error Handling)  
+**Version**: 3.3.0 (Global Error Handler Integration)  
 **Date**: December 19, 2025  
 **Status**: ✅ Production Ready  
 **Maintainers**: Development Team

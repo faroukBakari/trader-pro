@@ -799,6 +799,57 @@ const response = await healthApi.getHealthStatus()
 const health = response.data
 ```
 
+## Error Handling
+
+### Philosophy: "Only Catch What You Can Handle"
+
+Services in this directory follow a **centralized error handling pattern**. Exceptions are NOT caught within services unless there is a specific mitigation strategy.
+
+### Why No Try-Catch?
+
+```typescript
+// ❌ WRONG - Don't do this
+async getBars(symbol: string): Promise<Bar[]> {
+  try {
+    const response = await this.api.getBars(symbol)
+    return response.data.bars
+  } catch (error) {
+    console.error('Error:', error)  // Just logging = useless
+    throw error                      // Just re-throwing = pointless
+  }
+}
+
+// ✅ CORRECT - Let errors propagate
+async getBars(symbol: string): Promise<Bar[]> {
+  const response = await this.api.getBars(symbol)
+  return response.data.bars
+  // Error? → Propagates to global handler → Toast displayed
+}
+```
+
+### When to Catch Locally
+
+Only catch when you can **mitigate**:
+
+| Mitigation         | Example                              |
+| ------------------ | ------------------------------------ |
+| Retry with backoff | Network timeout → retry 3x           |
+| Fallback value     | Config fetch fails → use defaults    |
+| Partial results    | `Promise.allSettled` for multi-fetch |
+| User prompt        | Ask user to retry/cancel             |
+
+### Global Error System
+
+All uncaught errors reach the global handler (`errorService.handle()`) which:
+
+- ✅ Displays toast notification to user
+- ✅ Logs full error details for debugging
+- ✅ Handles deduplication (2s window)
+
+**Full documentation**: See [docs/ERROR-MANAGEMENT.md](../../docs/ERROR-MANAGEMENT.md)
+
+---
+
 ## Testing
 
 ### Unit Tests with Mocking
