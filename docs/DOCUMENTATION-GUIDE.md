@@ -438,7 +438,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### WebSocket & Real-Time
 
-**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming
+**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming, subscription errors, error broadcasting, topic_error callback, SubscriptionError, recoverable errors
 
 **Scope**: WebSocket implementation (backend + frontend)  
 **Out of Scope**: HTTP polling, SSE, long-polling alternatives
@@ -573,6 +573,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2025-12-19**: WebSocket subscription error handling - Updated BACKEND_WEBSOCKETS.md (unified error broadcasting), WEBSOCKET-ARCHITECTURE.md v3.2.0 (frontend error handling section), generic_route.py (all errors now broadcast before cleanup)
 - **2025-12-11**: Error management documentation - Created ERROR-MANAGEMENT.md (exception hierarchy, error codes, handlers), updated MODULAR_BACKEND_ARCHITECTURE.md, PROVIDER-SYSTEM.md, BACKEND_TESTING.md, BACKEND_WEBSOCKETS.md with error handling sections
 - **2025-12-07**: ws-refinements documentation sync - TWS README overhauled (ticker-slot pattern, stream keys, AsyncMock testing), BACKEND_WEBSOCKETS.md and WEBSOCKET-METHODOLOGY.md updated (sync create_topic), DOCUMENTATION-GUIDE.md keywords updated
 - **2025-11-30**: Wave 4 final validation - Verified all internal links, fixed remaining broken refs (ENVIRONMENT-CONFIG.md, WORKSPACE-SETUP.md → GETTING-STARTED.md), updated docs/README.md, validated cross-references and section anchors
@@ -601,5 +602,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: December 11, 2025  
+**Last Updated**: December 19, 2025  
 **Maintained by**: Development Team

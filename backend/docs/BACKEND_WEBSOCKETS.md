@@ -523,7 +523,7 @@ raise ProviderException(
 
 ### Subscription-Level Errors
 
-For errors affecting a specific subscription (not the whole connection), services use the `topic_error` callback to notify clients without closing the WebSocket.
+For errors affecting a specific subscription (not the whole connection), services use the `topic_error` callback to notify clients. **All errors (recoverable and unrecoverable) broadcast an error message to clients before cleanup.**
 
 **Router Error Callback Setup (automatic):**
 
@@ -536,12 +536,11 @@ async def topic_error(
     recoverable: bool = False,
     retry_after_ms: int | None = None,
 ) -> None:
+    # Step 1: Unrecoverable errors discard topic immediately
     if not recoverable:
-        # Unrecoverable: close connection via exception_handler
-        await exception_handler(client.ws, exc)
-        return
+        self._topics.discard(topic)
 
-    # Recoverable: broadcast error message, keep connection open
+    # Step 2: ALL errors broadcast error message to clients
     await self._broadcast_payload(
         topic,
         SubscriptionError(
@@ -553,9 +552,22 @@ async def topic_error(
         "error",
     )
 
+    # Step 3: Log via exception_handler and cleanup if unrecoverable
+    topic_clients = [c for c in self._clients if topic in c.topics]
+    for client in topic_clients:
+        await exception_handler(client.ws, exc)  # Logs error
+        if not recoverable:
+            client.unsubscribe(topic)
+
 # Passed to service:
 service.create_topic(topic, topic_update, topic_error)
 ```
+
+**Error Flow:**
+
+1. **Topic Discard** (unrecoverable only): Remove topic from router tracking
+2. **Broadcast**: Send `SubscriptionError` message to all subscribed clients
+3. **Cleanup** (unrecoverable only): Unsubscribe clients from topic
 
 **Service Error Wrapping Pattern (DatafeedService example):**
 

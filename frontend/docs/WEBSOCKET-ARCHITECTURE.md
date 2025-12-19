@@ -1,8 +1,8 @@
 # WebSocket Architecture
 
-**Date**: November 12, 2025  
+**Date**: December 19, 2025  
 **Status**: ✅ Production Ready  
-**Version**: 3.0.0 (Consolidated)
+**Version**: 3.2.0 (Added Subscription Error Handling)
 
 ## 📋 Table of Contents
 
@@ -15,6 +15,8 @@
 7. [Usage Examples](#usage-examples)
 8. [Testing Approach](#testing-approach)
 9. [Best Practices](#best-practices)
+10. [Topic Builder Compliance](#️-topic-builder-compliance-critical-contract)
+11. [Subscription Error Handling](#subscription-error-handling)
 
 ---
 
@@ -1363,8 +1365,184 @@ function buildTopicParams(obj: unknown): string {
 
 ---
 
-**Version**: 3.1.0 (Consolidated + Topic Builder Contract)  
-**Date**: November 30, 2025  
+## Subscription Error Handling
+
+**Added**: December 19, 2025  
+**Status**: ✅ Production Ready
+
+### Overview
+
+The WebSocket architecture supports subscription-level error notifications. When the backend encounters an error for an active subscription (e.g., data provider timeout, invalid parameters), it sends an error message to the frontend without closing the connection.
+
+### Error Message Flow
+
+```
+Backend Error Occurs (e.g., provider timeout)
+    ↓
+Backend sends: { type: "{route}.error", payload: { topic, error, recoverable } }
+    ↓
+WebSocketBase.handleMessage() routes to routeErrorMessage()
+    ↓
+routeErrorMessage() finds matching subscription by topic
+    ↓
+Subscription's onError callback invoked (if provided)
+    ↓
+Or globalErrorHandler() logs warning (fallback)
+```
+
+### Error Message Format
+
+```typescript
+interface SubscriptionError {
+  topic: string // Affected subscription (e.g., "orders:{"accountId":"TEST"}")
+  error: {
+    code: string // Error code (e.g., "PROVIDER_TIMEOUT")
+    message: string // Human-readable message
+    timestamp: number // Unix timestamp (seconds)
+    details?: Record<string, unknown> | null // Optional context
+  }
+  recoverable?: boolean // If true, subscription may auto-recover
+  retry_after_ms?: number | null // Suggested retry delay
+}
+```
+
+### Subscribing with Error Handler
+
+```typescript
+// Option A: With error callback (recommended for critical subscriptions)
+await wsAdapter.orders.subscribe(
+  'orders',
+  { accountId: 'TEST-001' },
+  (order) => {
+    // Handle order update
+  },
+  (error) => {
+    // Handle subscription error
+    console.error('Order subscription error:', error)
+    if (!error.recoverable) {
+      showNotification('Orders Error', error.error.message)
+    }
+  },
+)
+
+// Option B: Without error callback (uses global fallback)
+await wsAdapter.positions.subscribe('positions', { accountId: 'TEST-001' }, (position) => {
+  // Handle position update
+  // Errors logged to console by globalErrorHandler
+})
+```
+
+### Service Integration Example
+
+```typescript
+// brokerTerminalService.ts
+private handleSubscriptionError(
+  subscriptionName: string,
+  error: SubscriptionError
+): void {
+  console.error(`[BrokerTerminalService] ${subscriptionName} subscription error:`, error)
+
+  const errorMessage = error.error.message
+  const isRecoverable = error.recoverable ?? false
+
+  // Show notification to user
+  this._hostAdapter.showNotification(
+    isRecoverable ? `${subscriptionName} Warning` : `${subscriptionName} Error`,
+    errorMessage,
+    NotificationType.Error
+  )
+}
+
+// Usage in setupWebSocketHandlers()
+await this._wsAdapter.orders.subscribe(
+  'orders',
+  { accountId: this.accountId },
+  (order) => this._hostAdapter.orderUpdate(order),
+  (error) => this.handleSubscriptionError('Orders', error)  // ← Error handler
+)
+```
+
+### Global Error Handler
+
+When no `onError` callback is provided, errors are handled by `globalErrorHandler()`:
+
+```typescript
+// wsClientBase.ts
+protected globalErrorHandler(error: SubscriptionError): void {
+  console.warn(
+    `[WebSocket] Unhandled subscription error for topic "${error.topic}":`,
+    error.error.code,
+    error.error.message
+  )
+  // Future: Could emit events, trigger reconnection, etc.
+}
+```
+
+### Error Routing Logic
+
+```typescript
+protected routeErrorMessage(errorPayload: SubscriptionError): void {
+  const subscription = this.subscriptions.get(errorPayload.topic)
+
+  if (!subscription || !subscription.confirmed) {
+    // No active subscription for this topic
+    this.globalErrorHandler(errorPayload)
+    return
+  }
+
+  if (subscription.onError) {
+    // Use subscription-specific handler
+    subscription.onError(errorPayload)
+  } else {
+    // Fall back to global handler
+    this.globalErrorHandler(errorPayload)
+  }
+}
+```
+
+### Backend Integration
+
+The backend sends error messages via the `topic_error` callback in `generic_route.py`:
+
+```python
+# Backend: generic_route.py
+async def topic_error(topic: str, error: Exception) -> None:
+    error_payload = SubscriptionError(
+        topic=topic,
+        error=ErrorPayload.from_exception(error),
+        recoverable=getattr(error, 'recoverable', False)
+    )
+    message = WebSocketMessage(
+        type=f"{route_name}.error",
+        payload=error_payload.model_dump()
+    )
+    await send_to_topic(topic, message)
+```
+
+### Best Practices
+
+1. **Always provide `onError` for critical subscriptions** (orders, positions, equity)
+2. **Log all errors** even when handled - aids debugging
+3. **Show user notifications** for non-recoverable errors
+4. **Check `recoverable` flag** to decide on retry behavior
+5. **Don't close connection** on subscription errors - other subscriptions remain active
+
+### Error Types (from Backend)
+
+| Code               | Description                          | Recoverable        |
+| ------------------ | ------------------------------------ | ------------------ |
+| `PROVIDER_TIMEOUT` | Data provider didn't respond in time | Yes                |
+| `PROVIDER_ERROR`   | Data provider returned error         | Depends            |
+| `INVALID_PARAMS`   | Subscription parameters invalid      | No                 |
+| `AUTH_EXPIRED`     | Authentication token expired         | No (reauth needed) |
+| `RATE_LIMITED`     | Too many requests                    | Yes (after delay)  |
+
+See [Backend Error Management](../../backend/docs/ERROR-MANAGEMENT.md) for complete error code reference.
+
+---
+
+**Version**: 3.2.0 (Consolidated + Subscription Error Handling)  
+**Date**: December 19, 2025  
 **Status**: ✅ Production Ready  
 **Maintainers**: Development Team
 
@@ -1374,3 +1552,4 @@ function buildTopicParams(obj: unknown): string {
 - `WEBSOCKET-CLIENT-BASE.md` (v2.0.0)
 - `WEBSOCKET-ARCHITECTURE-DIAGRAMS.md` (v2.0.0)
 - Topic Builder Compliance (previously in `docs/WEBSOCKET-CLIENTS.md`, now archived)
+- Subscription Error Handling (added December 2025)

@@ -15,7 +15,7 @@ from trading_api.models import (
     SubscriptionUpdate,
 )
 from trading_api.models.exceptions import TradingApiException
-from trading_api.shared.exception_handlers import exception_handler
+from trading_api.shared.exception_handlers import log_exception
 from trading_api.shared.ws.ws_router import WsRouteFeature, WsRouteService
 
 logger = logging.getLogger(__name__)
@@ -193,8 +193,8 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         - topic_error: Called by service/provider with errors
 
         The error callback wrapper handles:
-        - Recoverable errors: Broadcast SubscriptionError, keep connection open
-        - Unrecoverable errors: Use exception_handler to log and close connection
+        - Recoverable errors: just log and broadcast error message
+        - Unrecoverable errors: log and broadcast error message + remove topic and unsubscribe clients
         """
 
         async def topic_update(data: _TData) -> None:
@@ -216,16 +216,9 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             Args:
                 exc: The exception that occurred
                 recoverable: If True, broadcast error and keep connection open.
-                            If False, close connection via exception_handler.
+                            If False, remove topic and unsubscribe clients.
                 retry_after_ms: Suggested retry delay for recoverable errors
             """
-            # Unrecoverable errors: log and close connection via exception_handler
-            if not recoverable:
-                self._topics.discard(topic)
-                topic_clients = [c for c in self._clients if topic in c.topics]
-                for client in topic_clients:
-                    await exception_handler(client.ws, exc)
-                return
 
             # Recoverable errors: broadcast error message, keep connection open
             await self._broadcast_payload(
@@ -238,6 +231,17 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
                 ),
                 "error",
             )
+
+            # Unrecoverable errors: Unsubscribe all clients subscribed to this topic
+            topic_clients = [c for c in self._clients if topic in c.topics]
+            for client in topic_clients:
+                log_exception(exc, client.ws)
+                if not recoverable:
+                    client.unsubscribe(topic)
+
+            # Unrecoverable errors: remove topic
+            if not recoverable:
+                self._topics.discard(topic)
 
         if DEBUG_WS_ROUTER:
             debug_log(f"Creating new topic in {self.route} service: {topic}")
