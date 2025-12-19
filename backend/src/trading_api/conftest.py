@@ -96,14 +96,28 @@ def ws_app(ws_apps: list[FastWSAdapter]) -> FastWSAdapter | None:
 def client(app: FastAPI) -> Generator[TestClient, None]:
     """Sync test client for WebSocket tests.
 
-    Uses context manager to ensure proper cleanup of TestClient's internal event loop.
+    Uses raise_server_exceptions=False so that exceptions are handled by
+    FastAPI's exception handlers and return proper HTTP responses instead
+    of bubbling up to the test.
     """
-    with TestClient(app) as c:
+    with TestClient(app, raise_server_exceptions=False) as c:
         yield c
 
 
 @pytest.fixture
 async def async_client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
-    """Async test client for API tests."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    """Async test client for API tests.
+
+    Uses ASGITransport with raise_app_exceptions=False so that exceptions
+    are handled by FastAPI's exception handlers and return proper HTTP responses
+    instead of bubbling up to the test.
+    """
+
+    from httpx import ASGITransport
+
+    transport = ASGITransport(
+        app=app,  # type: ignore[arg-type]  # FastAPI is ASGI-compatible
+        raise_app_exceptions=False,
+    )
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

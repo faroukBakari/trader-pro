@@ -4,7 +4,15 @@ Generic FastWS adapter with built-in WebSocket endpoint
 
 import logging
 
-from external_packages.fastws import FastWS, OperationRouter
+from pydantic import ValidationError
+
+from external_packages.fastws import (
+    Client,
+    FastWS,
+    NoMatchingOperation,
+    OperationRouter,
+)
+from trading_api.shared.exception_handlers import exception_handler
 from trading_api.shared.ws.ws_router import WsRouteFeature
 
 logger = logging.getLogger(__name__)
@@ -38,3 +46,10 @@ class FastWSAdapter(FastWS):
 
     def shutdown(self) -> None:
         pass
+
+    async def handle_exception(
+        self,
+        client: Client,
+        exc: ValueError | ValidationError | NoMatchingOperation | TimeoutError,
+    ) -> None:
+        await exception_handler(client.ws, exc)

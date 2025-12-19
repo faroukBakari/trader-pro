@@ -1540,30 +1540,6 @@ class Decoder(object):
 
         self.wrapper.errorProtoBuf(errorMessageProto)
 
-        reqId = errorMessageProto.id if errorMessageProto.HasField("id") else 0
-        errorCode = (
-            errorMessageProto.errorCode
-            if errorMessageProto.HasField("errorCode")
-            else 0
-        )
-        errorMsg = (
-            errorMessageProto.errorMsg if errorMessageProto.HasField("errorMsg") else ""
-        )
-        advancedOrderRejectJson = (
-            errorMessageProto.advancedOrderRejectJson
-            if errorMessageProto.HasField("advancedOrderRejectJson")
-            else ""
-        )
-        errorTime = (
-            errorMessageProto.errorTime
-            if errorMessageProto.HasField("errorTime")
-            else 0
-        )
-
-        self.wrapper.error(
-            reqId, errorTime, errorCode, errorMsg, advancedOrderRejectJson
-        )
-
     ######################################################################
 
     def readLastTradeDate(self, fields, contract: ContractDetails, isBond: bool):

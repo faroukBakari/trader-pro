@@ -5,7 +5,6 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from fastapi import HTTPException
 from jose import jwt
 
 from trading_api.models.auth import TokenResponse
@@ -65,36 +64,46 @@ class TestAuthServiceGoogleTokenVerification:
 
     @pytest.mark.asyncio
     async def test_verify_invalid_google_token(self, auth_service: AuthService) -> None:
-        """Test verifying invalid Google ID token raises HTTPException"""
-        from trading_api.models.common import AuthenticationError
+        """Test verifying invalid Google ID token raises ProviderException"""
+        from trading_api.models.exceptions import ProviderException
 
         with patch.object(
             auth_service.auth_provider,
             "verify_token",
-            side_effect=AuthenticationError("Invalid Google token"),
+            side_effect=ProviderException(
+                provider="google",
+                capability="auth",
+                code="PROVIDER_AUTH_TOKEN_INVALID",
+                message="Invalid Google token",
+            ),
         ):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(ProviderException) as exc_info:
                 await auth_service.verify_google_id_token("invalid_token")
 
-            assert exc_info.value.status_code == 401
+            assert exc_info.value.code == "PROVIDER_AUTH_TOKEN_INVALID"
 
     @pytest.mark.asyncio
     async def test_verify_unverified_email_rejected(
         self, auth_service: AuthService, mock_google_claims: dict[str, Any]
     ) -> None:
         """Test that unverified email is rejected"""
-        from trading_api.models.common import AuthenticationError
+        from trading_api.models.exceptions import ProviderException
 
         with patch.object(
             auth_service.auth_provider,
             "verify_token",
-            side_effect=AuthenticationError("Email not verified"),
+            side_effect=ProviderException(
+                provider="google",
+                capability="auth",
+                code="PROVIDER_AUTH_EMAIL_NOT_VERIFIED",
+                message="Email not verified",
+            ),
         ):
-            with pytest.raises(HTTPException) as exc_info:
+            with pytest.raises(ProviderException) as exc_info:
                 await auth_service.verify_google_id_token("token_with_unverified_email")
 
-            assert exc_info.value.status_code == 401
-            assert "Email not verified" in str(exc_info.value.detail)
+            assert exc_info.value.code == "PROVIDER_AUTH_EMAIL_NOT_VERIFIED"
+            assert "Email not verified" in exc_info.value.message
 
 
 class TestAuthServiceAuthentication:

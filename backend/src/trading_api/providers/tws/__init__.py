@@ -23,7 +23,8 @@ from zoneinfo import ZoneInfo
 from ibapi.common import BarData
 from ibapi.contract import Contract
 
-from trading_api.models.common import CapabilitySpec, DatafeedError
+from trading_api.models.common import CapabilitySpec
+from trading_api.models.exceptions import ProviderException, TradingApiException
 from trading_api.models.market import (
     Bar,
     QuoteData,
@@ -42,7 +43,6 @@ from .tws_mappers import (
     contract_description_to_search_result,
     contract_details_to_symbol_info,
     map_resolution_to_tws_bar_size,
-    ticker_name,
     tws_bar_to_domain_bar,
     tws_ticks_to_bar,
     tws_ticks_to_quote_data,
@@ -94,19 +94,6 @@ class TWSProvider(Provider, DatafeedCapability):
             self._config.host, self._config.port, self._config.client_id
         )
 
-        # Reverse mapping: subscription_id → (symbol, exchange, callback_type)
-        self._subscriptions: dict[str, list[int]] = {}
-        self._callbacks: dict[
-            str,
-            tuple[
-                asyncio.AbstractEventLoop,
-                Callable[
-                    [dict[str, Any], list[str] | None],
-                    Awaitable[None],
-                ],
-            ],
-        ] = {}
-
     @classmethod
     def provider_dir(cls) -> Path:
         """Return provider directory path."""
@@ -151,7 +138,7 @@ class TWSProvider(Provider, DatafeedCapability):
 
         Raises:
             TimeoutError: If request exceeds timeout
-            DatafeedError: If search fails
+            ProviderException: If search fails
         """
         result = await self._tws_client.reqMatchingSymbols(pattern, **kwargs)
 
@@ -159,7 +146,7 @@ class TWSProvider(Provider, DatafeedCapability):
 
     async def get_symbol_info(
         self,
-        ticker: str,
+        ticker_name: str,
         **kwargs: Any,
     ) -> SymbolInfo:
         """Get detailed symbol information.
@@ -176,11 +163,11 @@ class TWSProvider(Provider, DatafeedCapability):
             Detailed symbol metadata (SymbolInfo)
 
         Raises:
-            DatafeedError: If symbol not found or request fails
+            ProviderException: If symbol not found or request fails
         """
 
         # Build TWS Contract for the request
-        contract = build_contract(ticker)
+        contract = build_contract(ticker_name)
 
         if contract.primaryExchange in SMART_EXCHANGES:
             now_us_eastern = datetime.now(us_eastern)
@@ -202,26 +189,25 @@ class TWSProvider(Provider, DatafeedCapability):
 
         contract.exchange = smart_exchange
 
-        try:
-            # Get contract details via TWSClient (returns list)
-            contract_details_list = await self._tws_client.reqContractDetails(
-                contract, **kwargs
+        # Get contract details via TWSClient (returns list)
+        contract_details_list = await self._tws_client.reqContractDetails(
+            contract, **kwargs
+        )
+
+        if not contract_details_list:
+            raise ProviderException(
+                code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
+                message=f"Symbol not found: {ticker_name}",
+                provider="tws",
+                capability="datafeed",
             )
 
-            if not contract_details_list:
-                raise DatafeedError(f"Symbol not found: {ticker}")
-
-            # Use first match (most common case is single result)
-            return contract_details_to_symbol_info(contract_details_list[0])
-
-        except DatafeedError:
-            raise
-        except Exception as e:
-            raise DatafeedError(f"Failed to get symbol info for {ticker}: {e}") from e
+        # Use first match (most common case is single result)
+        return contract_details_to_symbol_info(contract_details_list[0])
 
     async def get_historical_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         start_time: datetime,
         end_time: datetime,
         resolution: Resolution,
@@ -245,7 +231,7 @@ class TWSProvider(Provider, DatafeedCapability):
             List of historical bars (ascending time order)
 
         Raises:
-            DatafeedError: If request fails or symbol invalid
+            ProviderException: If request fails or symbol invalid
             TimeoutError: If request exceeds timeout
         """
         # Map domain parameters to TWS format
@@ -265,46 +251,41 @@ class TWSProvider(Provider, DatafeedCapability):
             end_dt_str = end_time_tz.strftime("%Y%m%d %H:%M:%S US/Eastern")
 
         tws_bars: list[BarData] = []
-        try:
-            contract = build_contract(ticker)
-            exchanges = [contract.primaryExchange]
-            if contract.primaryExchange in SMART_EXCHANGES and resolution in [
-                Resolution.MIN_1,
-                Resolution.MIN_5,
-                Resolution.MIN_15,
-                Resolution.MIN_30,
-                Resolution.HOUR_1,
-                Resolution.HOUR_2,
-                Resolution.HOUR_4,
-            ]:
-                exchanges.append("OVERNIGHT")
-            for exch in exchanges:
-                contract.exchange = exch
-                bars = await self._tws_client.reqHistoricalData(
-                    contract,
-                    end_dt_str,
-                    duration_str,
-                    bar_size,
-                    **kwargs,
-                )
-                tws_bars.extend(bars)
 
-            # Convert TWS BarData → domain Bar
-            domain_bars = [tws_bar_to_domain_bar(bar) for bar in tws_bars]
+        contract = build_contract(ticker_name)
+        exchanges = [contract.primaryExchange]
+        if contract.primaryExchange in SMART_EXCHANGES and resolution in [
+            Resolution.MIN_1,
+            Resolution.MIN_5,
+            Resolution.MIN_15,
+            Resolution.MIN_30,
+            Resolution.HOUR_1,
+            Resolution.HOUR_2,
+            Resolution.HOUR_4,
+        ]:
+            exchanges.append("OVERNIGHT")
+        for exch in exchanges:
+            contract.exchange = exch
+            bars = await self._tws_client.reqHistoricalData(
+                contract,
+                end_dt_str,
+                duration_str,
+                bar_size,
+                **kwargs,
+            )
+            tws_bars.extend(bars)
 
-            # Sort bars by time (ascending order)
-            domain_bars.sort(key=lambda bar: bar.time)
+        # Convert TWS BarData → domain Bar
+        domain_bars = [tws_bar_to_domain_bar(bar) for bar in tws_bars]
 
-            return domain_bars
+        # Sort bars by time (ascending order)
+        domain_bars.sort(key=lambda bar: bar.time)
 
-        except Exception as e:
-            raise DatafeedError(
-                f"Failed to get historical bars for {ticker}: {e}"
-            ) from e
+        return domain_bars
 
     async def get_quotes_snapshot(
         self,
-        tickers: list[str],
+        ticker_names: list[str],
         **kwargs: Any,
     ) -> list[QuoteData]:
         """Get current market quotes for multiple symbols (snapshot).
@@ -317,7 +298,7 @@ class TWSProvider(Provider, DatafeedCapability):
             List of QuoteData (one per symbol, same order as input)
 
         Raises:
-            DatafeedError: If request fails
+            ProviderException: If request fails
             TimeoutError: If snapshot exceeds timeout
         """
 
@@ -337,13 +318,13 @@ class TWSProvider(Provider, DatafeedCapability):
         )
 
         contracts: list[Contract] = []
-        for ticker in tickers:
-            contract = build_contract(ticker)
+        for ticker_name in ticker_names:
+            contract = build_contract(ticker_name)
             if contract.primaryExchange in SMART_EXCHANGES:
                 contract.exchange = smart_exchange
             contracts.append(contract)
             logger.info(
-                f"Getting quotes snapshot for tickers: {ticker} for exchange: {contract.exchange}"
+                f"Getting quotes snapshot for ticker: {ticker_name} for exchange: {contract.exchange}"
             )
 
         nb_retreis = 3
@@ -362,34 +343,40 @@ class TWSProvider(Provider, DatafeedCapability):
             except TimeoutError:
                 nb_retreis -= 1
                 if nb_retreis == 0:
-                    raise
-                await asyncio.sleep(0.2)
+                    raise ProviderException(
+                        code="PROVIDER_TWS_QUOTE_SNAPSHOT_TIMEOUT",
+                        message="Timeout while getting quotes snapshot from TWS provider",
+                        provider="tws",
+                        capability="datafeed",
+                    )
+                await asyncio.sleep(0.5)
                 logger.warning(
                     f"TimeoutError when getting quotes snapshot. Retrying... ({nb_retreis} retries left)"
                 )
 
     def subscribe_realtime_bars(
         self,
-        ticker: str,
+        ticker_name: str,
         resolution: Resolution,
         callback: Callable[[Bar], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> str:
         """Subscribe to real-time bars.
 
         Args:
-            symbol: Symbol name
+            ticker: Ticker chain (e.g., "AAPL:SMART:STK")
             resolution: Bar resolution
             callback: Callback for each new bar
-            exchange: Optional exchange filter
+            on_error: Optional callback for streaming errors (ProviderException)
+            **kwargs: Provider-specific options
 
         Returns:
             Subscription ID (for unsubscribe)
 
         Raises:
-            DatafeedError: If subscription fails or resolution not supported
+            ProviderException: If subscription fails or resolution not supported
         """
-
         bar_size = map_resolution_to_tws_bar_size(resolution)
 
         async def bar_callback(
@@ -398,11 +385,11 @@ class TWSProvider(Provider, DatafeedCapability):
             if fields is None or any(f.startswith("bar_") for f in fields):
                 if DEBUG_TWS_PROVIDER:
                     debug_log(
-                        f"Received real-time bar update for {ticker} with fields: {fields}"
+                        f"Received real-time bar update for {ticker_name} with fields: {fields}"
                     )
                 await callback(tws_ticks_to_bar(rt_data))
 
-        contract = build_contract(ticker)
+        contract = build_contract(ticker_name)
         if contract.primaryExchange in SMART_EXCHANGES and resolution in [
             Resolution.MIN_1,
             Resolution.MIN_5,
@@ -430,27 +417,30 @@ class TWSProvider(Provider, DatafeedCapability):
             contract,
             bar_size,
             bar_callback,
+            on_error=on_error,
             **kwargs,
         )
 
     def subscribe_market_data(
         self,
-        tickers: list[str],
+        ticker_names: list[str],
         callback: Callable[[QuoteData], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> list[str]:
         """Subscribe to real-time market data.
 
         Args:
-            symbols: List of symbol names
+            tickers: List of ticker chains
             callback: Callback for tick updates
-            exchange: Optional exchange filter
+            on_error: Optional callback for streaming errors (ProviderException)
+            **kwargs: Provider-specific options
 
         Returns:
             List of subscription IDs (one per symbol)
 
         Raises:
-            DatafeedError: If subscription fails
+            ProviderException: If subscription fails
         """
 
         # Register quote callback on the ticker
@@ -466,8 +456,8 @@ class TWSProvider(Provider, DatafeedCapability):
                 await callback(tws_ticks_to_quote_data(rt_data))
 
         sub_ids = []
-        for ticker in tickers:
-            contract = build_contract(ticker)
+        for ticker_name in ticker_names:
+            contract = build_contract(ticker_name)
             if contract.primaryExchange in SMART_EXCHANGES:
                 now_us_eastern = datetime.now(us_eastern)
                 contract.exchange = (
@@ -484,7 +474,9 @@ class TWSProvider(Provider, DatafeedCapability):
                     else "SMART"
                 )
             sub_ids.append(
-                self._tws_client.reqMktDataStream(contract, quote_callback, **kwargs)
+                self._tws_client.reqMktDataStream(
+                    contract, quote_callback, on_error=on_error, **kwargs
+                )
             )
 
         return sub_ids
@@ -496,7 +488,7 @@ class TWSProvider(Provider, DatafeedCapability):
             subscription_id: ID from subscribe_realtime_bars
 
         Raises:
-            DatafeedError: If subscription ID not found
+            ProviderException: If subscription ID not found
         """
         # Lookup symbol/exchange from reverse mapping
         self._tws_client.cancelBarDataStream(subscription_id)
@@ -508,7 +500,7 @@ class TWSProvider(Provider, DatafeedCapability):
             subscription_ids: IDs from subscribe_market_data
 
         Raises:
-            DatafeedError: If subscription ID not found
+            ProviderException: If subscription ID not found
         """
         for sub_id in subscription_ids:
             self._tws_client.cancelMktDataStream(sub_id)

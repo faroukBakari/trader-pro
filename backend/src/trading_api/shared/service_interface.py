@@ -22,7 +22,7 @@ class ServiceInterface(ABC):
             providers: Provider instances for required capabilities
 
         Raises:
-            CapabilityNotFoundError: If required capability not satisfied
+            CommonException: If required capability not satisfied
         """
         super().__init__()
         self.module_dir = module_dir
@@ -86,9 +86,9 @@ class ServiceInterface(ABC):
         [FAIL-FAST]: Validates at initialization, not at request time.
 
         Raises:
-            CapabilityNotFoundError: If required capability not found
+            CommonException: If required capability not found
         """
-        from trading_api.models.common import CapabilityNotFoundError
+        from trading_api.models.exceptions import CommonException
 
         required_capabilities = self.capabilities()
 
@@ -107,10 +107,13 @@ class ServiceInterface(ABC):
                     break
 
             if not matched:
-                raise CapabilityNotFoundError(
-                    f"Service '{self.module_name}' requires capability "
-                    f"'{req_cap}' but no provider found. "
-                    f"Available providers: {[p.name for p in self._providers]}"
+                raise CommonException(
+                    code="COMMON_CAPABILITY_NOT_FOUND",
+                    message=(
+                        f"Service '{self.module_name}' requires capability "
+                        f"'{req_cap}' but no provider found. "
+                        f"Available providers: {[p.name for p in self._providers]}"
+                    ),
                 )
 
     def get_capability_provider(self, capability_name: str) -> Provider:

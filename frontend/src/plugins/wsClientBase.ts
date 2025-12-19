@@ -1,13 +1,6 @@
-// interface WebSocketClientBaseConfig {
-//   wsUrl: string
-//   reconnect?: boolean
-//   maxReconnectAttempts?: number
-//   reconnectDelay?: number
-//   debug?: boolean
-// }
+import { WebSocketError } from '@/errors'
 
-
-function serialize_params(obj: unknown): string {
+function serializeParams(obj: unknown): string {
   if (obj === null || obj === undefined) {
     return ''
   }
@@ -17,12 +10,12 @@ function serialize_params(obj: unknown): string {
   }
 
   if (Array.isArray(obj)) {
-    return `[${obj.map(serialize_params).join(',')}]`
+    return `[${obj.map(serializeParams).join(',')}]`
   }
 
   const objRecord = obj as Record<string, unknown>
   const sortedKeys = Object.keys(objRecord).sort()
-  const pairs = sortedKeys.map(key => `${JSON.stringify(key)}:${serialize_params(objRecord[key])}`)
+  const pairs = sortedKeys.map(key => `${JSON.stringify(key)}:${serializeParams(objRecord[key])}`)
   return `{${pairs.join(',')}}`
 }
 
@@ -42,6 +35,26 @@ interface SubscriptionUpdate<TBackendData extends object = object> {
   payload: TBackendData
 }
 
+/**
+ * Error notification for an active subscription.
+ * Sent when a subscription encounters an error but connection remains open.
+ */
+export interface SubscriptionError {
+  /** Affected subscription topic */
+  topic: string
+  /** Serialized exception details */
+  error: {
+    code: string
+    message: string
+    timestamp: number
+    details?: Record<string, unknown> | null
+  }
+  /** If true, client should expect automatic recovery */
+  recoverable?: boolean
+  /** Suggested retry delay in milliseconds */
+  retry_after_ms?: number | null
+}
+
 interface WebSocketMessage<TBackendData extends object = object> {
   type: string
   payload: SubscriptionUpdate<TBackendData> | SubscriptionResponse
@@ -49,9 +62,10 @@ interface WebSocketMessage<TBackendData extends object = object> {
 
 interface SubscriptionState<TParams extends object = object, TData extends object = object> {
   sub_id: string
-  sub_type: string
+  subType: string
   sub_params: TParams
-  on_update: (data: TData) => void
+  onUpdate: (data: TData) => void
+  onError: (error: SubscriptionError) => void
 }
 
 export class WebSocketBase {
@@ -153,11 +167,9 @@ export class WebSocketBase {
             resolve()
             this.wsCnxPromise = null
           }
-        } catch (error) {
-          this.logger.log('WS creation Error:', error)
+        } finally {
           setTimeout(() => {
             this.wsCnxPromise = null
-            reject(error)
           }, 200)
         }
       })
@@ -169,16 +181,19 @@ export class WebSocketBase {
   private async connect(): Promise<void> {
 
     let attemps = 0
-    while (!this.isConnected() && attemps++ < this.config.maxReconnectAttempts) {
+    let connectionError: unknown;
+    while (attemps < this.config.maxReconnectAttempts && !this.isConnected()) {
       try {
-        await this.__socketConnect()
+        return this.__socketConnect()
       } catch (error) {
-        this.logger.log('Connection error:', error)
+        connectionError = error
         await new Promise(resolve => setTimeout(resolve, 1000))
+      } finally {
+        attemps++
       }
     }
     if (this.config.maxReconnectAttempts <= attemps) {
-      throw new Error('Max reconnect attempts reached')
+      throw (connectionError ?? new Error('Max reconnect attempts reached'))
     }
   }
 
@@ -194,37 +209,38 @@ export class WebSocketBase {
   }
 
   private handleMessage(event: MessageEvent): void {
-    try {
-      // Handle both text and binary (ArrayBuffer) messages
-      const text = typeof event.data === 'string'
-        ? event.data
-        : new TextDecoder().decode(event.data as ArrayBuffer)
-      const message: WebSocketMessage = JSON.parse(text)
-      const { type, payload } = message
 
-      if (type.endsWith('.update')) {
-        const update = payload as SubscriptionUpdate
-        this.routeUpdateMessage(update)
-      } else {
-        this.logger.log('Received:', type, payload)
-        if (type.endsWith('.response')) {
-          if (type.replace(/.response$/, '').endsWith('.subscribe')) {
-            const subResponse = payload as SubscriptionResponse
-            const pendingRequest = this.pendingRequests.get(subResponse.sub_id)
-            if (pendingRequest) {
-              this.pendingRequests.delete(subResponse.sub_id)
-              pendingRequest.resolve(subResponse)
-            } else {
-              this.logger.error(`Cannot find sub_id ${subResponse.sub_id} for response :`, payload)
-            }
+    // Handle both text and binary (ArrayBuffer) messages
+    const text = typeof event.data === 'string'
+      ? event.data
+      : new TextDecoder().decode(event.data as ArrayBuffer)
+    const message: WebSocketMessage = JSON.parse(text)
+    const { type, payload } = message
+
+    if (type.endsWith('.update')) {
+      const update = payload as SubscriptionUpdate
+      this.routeUpdateMessage(update)
+    } else if (type.endsWith('.error')) {
+      const error = payload as unknown as SubscriptionError
+      this.routeErrorMessage(error)
+    } else {
+      this.logger.log('Received:', type, payload)
+      if (type.endsWith('.response')) {
+        if (type.replace(/.response$/, '').endsWith('.subscribe')) {
+          const subResponse = payload as SubscriptionResponse
+          const pendingRequest = this.pendingRequests.get(subResponse.sub_id)
+          if (pendingRequest) {
+            this.pendingRequests.delete(subResponse.sub_id)
+            pendingRequest.resolve(subResponse)
+          } else {
+            this.logger.error(`Cannot find sub_id ${subResponse.sub_id} for response :`, payload)
           }
-        } else {
-          this.logger.error('Unknown message type:', type)
         }
+      } else {
+        this.logger.error('Unknown message type:', type)
       }
-    } catch (error) {
-      this.logger.error('Failed to parse message:', error)
     }
+
   }
 
   private routeUpdateMessage(data: SubscriptionUpdate): void {
@@ -234,23 +250,45 @@ export class WebSocketBase {
       this.logger.warn(`No subscription found for topic: ${data.topic}`)
       return
     }
-    try {
-      subscription.on_update(data.payload)
-    } catch (error) {
-      this.logger.error(`Error in subscription onUpdate for sub_id ${subscription.sub_id} / topic ${data.topic}:`, error)
+    subscription.onUpdate(data.payload)
+  }
+
+  /**
+   * Global error handler for subscription errors without specific onError callback.
+   * Throws WebSocketError to bubble up to global error handler.
+   */
+  globalErrorHandler(error: SubscriptionError): void {
+    throw WebSocketError.fromSubscription(error)
+  }
+
+  /**
+   * Route error messages to the appropriate subscription handler or global handler.
+   */
+  private routeErrorMessage(error: SubscriptionError): void {
+    const subscription = this.subscriptions.get(error.topic)
+    if (subscription) {
+      subscription.onError(error)
+    } else {
+      this.globalErrorHandler(error)
     }
   }
 
   async subscribe(
-    sub_type: string,
+    subType: string,
     sub_params: object,
-    on_update: (TbackendData: object) => void
+    onUpdate: (TbackendData: object) => void,
+    onError: (error: SubscriptionError) => void
   ): Promise<string> {
 
     // Generate unique sub_id hash
-    const sub_id = `${sub_type}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+    const sub_id = `${subType}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
 
-    while (true)
+
+    let maxSubscriptionAttempts = 5;
+
+
+    let subscriptionError: unknown;
+    while (maxSubscriptionAttempts-- > 0)
       try {
 
         const response: SubscriptionResponse = await new Promise((resolve, reject) => {
@@ -277,8 +315,8 @@ export class WebSocketBase {
 
           // Send request after registering the handler
           this.sendRequest(
-            sub_type + '.subscribe',
-            { sub_id, sub_params }
+            subType + '.subscribe',
+            { sub_id: sub_id, sub_params: sub_params }
           ).catch((error) => {
             this.pendingRequests.delete(sub_id)
             clearTimeout(timeout)
@@ -294,19 +332,25 @@ export class WebSocketBase {
 
         this.subscriptions.set(response.topic, {
           sub_id,
-          sub_type,
+          subType,
           sub_params,
-          on_update,
+          onUpdate,
+          onError,
         })
 
         return response.topic
 
       } catch (error) {
-
-        this.logger.error('Subscription error:', error)
+        subscriptionError = error
+        this.logger.error('Subscription error:', subscriptionError)
         await new Promise(resolve => setTimeout(resolve, 200))
 
       }
+
+    throw (subscriptionError ??
+      new Error(
+        `Subscription failed after multiple attempts: ${subType} with params ${JSON.stringify(sub_params)}`
+      ))
   }
 
   private async resubscribeAll(): Promise<void> {
@@ -314,62 +358,55 @@ export class WebSocketBase {
 
     await new Promise(resolve => setTimeout(resolve, 200))
 
-    try {
-      this.pendingRequests.forEach((pending) => {
-        clearTimeout(pending.timeout)
-      })
-      this.pendingRequests.forEach((pending) => {
-        pending.reject(new Error('WebSocket disconnected'))
-      })
-    } finally {
-      this.pendingRequests.clear()
-    }
+    this.pendingRequests.forEach((pending) => {
+      clearTimeout(pending.timeout)
+    })
+    this.pendingRequests.forEach((pending) => {
+      pending.reject(new Error('WebSocket disconnected'))
+    })
+
+    this.pendingRequests.clear()
 
     for (const [topic, subscription] of this.subscriptions.entries()) {
 
-      try {
-        const response: SubscriptionResponse = await new Promise((resolve, reject) => {
-          // Expected response type
-          // Set up timeout
-          const timeout = setTimeout(() => {
-            this.pendingRequests.delete(subscription.sub_id)
-            reject(new Error(`Request timeout: ${subscription.sub_id}`))
-          }, 3000)
+      const response: SubscriptionResponse = await new Promise((resolve, reject) => {
+        // Expected response type
+        // Set up timeout
+        const timeout = setTimeout(() => {
+          this.pendingRequests.delete(subscription.sub_id)
+          reject(new Error(`Request timeout: ${subscription.sub_id}`))
+        }, 3000)
 
-          // Register response handler
-          this.pendingRequests.set(subscription.sub_id, {
-            resolve: (response: SubscriptionResponse) => {
-              clearTimeout(timeout)
-              resolve(response)
-            },
-            reject: (error: Error) => {
-              clearTimeout(timeout)
-              reject(error)
-            },
-            timeout,
-          })
-
-          // Send request after registering the handler
-          this.sendRequest(
-            subscription.sub_type + '.subscribe',
-            { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
-          ).catch((error) => {
-            this.pendingRequests.delete(subscription.sub_id)
+        // Register response handler
+        this.pendingRequests.set(subscription.sub_id, {
+          resolve: (response: SubscriptionResponse) => {
+            clearTimeout(timeout)
+            resolve(response)
+          },
+          reject: (error: Error) => {
             clearTimeout(timeout)
             reject(error)
-          })
+          },
+          timeout,
         })
 
-        if (response.status === 'ok') {
-          this.logger.log(`Resubscription confirmed sub_id ${subscription.sub_id} / topic: ${topic}`)
-        } else {
-          this.logger.log(`Resubscription failed sub_id ${subscription.sub_id} / topic: ${topic}`)
-        }
+        // Send request after registering the handler
+        this.sendRequest(
+          subscription.subType + '.subscribe',
+          { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
+        ).catch((error) => {
+          this.pendingRequests.delete(subscription.sub_id)
+          clearTimeout(timeout)
+          reject(error)
+        })
+      })
+
+      if (response.status === 'ok') {
+        this.logger.log(`Resubscription confirmed sub_id ${subscription.sub_id} / topic: ${topic}`)
+      } else {
+        throw new Error(`Resubscription failed for sub_id ${subscription.sub_id} / topic: ${topic} : ${response.error || 'unknown error'}`)
       }
-      catch (error) {
-        this.logger.log(`Resubscription error sub_id ${subscription.sub_id} / topic: ${topic}:`, error)
-        this.logger.error('Resubscription error:', error)
-      }
+
     }
   }
 
@@ -381,7 +418,7 @@ export class WebSocketBase {
     }
     try {
       const response = await this.sendRequest(
-        subscription.sub_type + '.unsubscribe',
+        subscription.subType + '.unsubscribe',
         { sub_id: subscription.sub_id, sub_params: subscription.sub_params }
       )
       this.logger.log(`Unsubscribed sub_id ${subscription.sub_id} / topic: ${topic}`, response)
@@ -399,16 +436,23 @@ export interface WebSocketInterface<TParams extends object, TData extends object
   subscribe(
     subscriptionId: string,
     params: TParams,
-    onUpdate: (data: TData) => void
+    onUpdate: (data: TData) => void,
+    onError?: (error: SubscriptionError) => void
   ): Promise<string>
   unsubscribe(subscriptionId: string): Promise<void>
   destroy?(): void
 }
 
+/** Listener callbacks stored per-listener for fanout */
+interface ListenerCallbacks<TData extends object> {
+  onUpdate: (data: TData) => void
+  onError: (error: SubscriptionError) => void
+}
+
 export class WebSocketClient<TParams extends object, TBackendData extends object, TData extends object> implements WebSocketInterface<TParams, TData> {
   protected baseSocket: WebSocketBase
   protected topics: Map<string, Promise<string>>
-  protected listeners: Map<string, Map<string, (data: TData) => void>>
+  protected listeners: Map<string, Map<string, ListenerCallbacks<TData>>>
   protected debouncedUnsub: Map<string, NodeJS.Timeout>
 
   private wsRoute: string = ''
@@ -430,9 +474,10 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     listenerId: string,
     subscriptionParams: TParams,
     onUpdate: (data: TData) => void,
+    onError?: (error: SubscriptionError) => void,
   ): Promise<string> {
 
-    const paramsKey = serialize_params(subscriptionParams)
+    const paramsKey = serializeParams(subscriptionParams)
 
     const unsubTimeout = this.debouncedUnsub.get(paramsKey)
     if (unsubTimeout) {
@@ -446,17 +491,28 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
       if (topicListeners?.has(listenerId)) {
         console.warn(`listener ${listenerId} spamming for the same subscription`, paramsKey)
       }
-      topicListeners.set(listenerId, onUpdate)
+      topicListeners.set(listenerId, {
+        onUpdate,
+        onError: onError || ((error) => this.baseSocket.globalErrorHandler(error))
+      })
     } else {
       console.log(`listener ${listenerId} subscribing to new params:`, paramsKey)
-      this.listeners.set(paramsKey, new Map([[listenerId, onUpdate]]))
+      this.listeners.set(paramsKey, new Map([[listenerId, {
+        onUpdate,
+        onError: onError || ((error) => this.baseSocket.globalErrorHandler(error))
+      }]]))
       const topicPromise = this.baseSocket.subscribe(
         this.wsRoute,
         subscriptionParams,
         (backendData: object) =>
           this.listeners.get(paramsKey)?.forEach(
-            (onUpdate) => onUpdate(this.dataMapper(backendData as TBackendData))
+            ({ onUpdate }) => onUpdate(this.dataMapper(backendData as TBackendData))
+          ),
+        (error: SubscriptionError) => {
+          this.listeners.get(paramsKey)?.forEach(
+            ({ onError }) => onError?.(error)
           )
+        }
       )
       this.topics.set(paramsKey, topicPromise)
     }
@@ -512,7 +568,10 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
     subscriptionId: string,
     params: TParams,
     onUpdate: (data: TData) => void,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    onError?: (error: SubscriptionError) => void,
   ): Promise<string> {
+    // Note: onError is ignored in fallback - errors don't occur in mock mode
     this.subscriptions.set(subscriptionId, { params, onUpdate })
     return subscriptionId
   }

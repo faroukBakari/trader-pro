@@ -11,7 +11,7 @@ This module provides REST API endpoints for broker operations:
 
 from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import Depends, HTTPException, Query
+from fastapi import Depends, Query
 
 from trading_api.models.auth import UserData
 from trading_api.models.broker import (
@@ -32,6 +32,7 @@ from trading_api.models.broker import (
     Side,
     SuccessResponse,
 )
+from trading_api.models.exceptions import ServiceException
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.middleware.auth import get_current_user
 
@@ -94,10 +95,8 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 PlaceOrderResult: Result containing the generated order ID
             """
-            try:
-                return await self.service.place_order(order)
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
+            # ServiceException will be handled by global exception handler
+            return await self.service.place_order(order)
 
         @self.post(
             "/orders/preview",
@@ -121,10 +120,8 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 OrderPreviewResult: Estimated costs, fees, margin, and confirmation ID
             """
-            try:
-                return await self.service.preview_order(order)
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
+            # ServiceException will be handled by global exception handler
+            return await self.service.preview_order(order)
 
         @self.put(
             "/orders/{order_id}",
@@ -150,11 +147,9 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 SuccessResponse: Success confirmation
             """
-            try:
-                await self.service.modify_order(order_id, order)
-                return SuccessResponse()
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
+            # ServiceException will be handled by global exception handler
+            await self.service.modify_order(order_id, order)
+            return SuccessResponse()
 
         @self.delete(
             "/orders/{order_id}",
@@ -178,11 +173,9 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 SuccessResponse: Success confirmation
             """
-            try:
-                await self.service.cancel_order(order_id)
-                return SuccessResponse()
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
+            # ServiceException will be handled by global exception handler
+            await self.service.cancel_order(order_id)
+            return SuccessResponse()
 
         @self.get(
             "/orders",
@@ -302,16 +295,14 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 SuccessResponse: Success confirmation
             """
-            try:
-                await self.service.close_position(position_id, amount)
-                if amount:
-                    return SuccessResponse(
-                        message=f"Partially closed position {position_id} ({amount} units)"
-                    )
-                else:
-                    return SuccessResponse(message=f"Closed position {position_id}")
-            except ValueError as e:
-                raise HTTPException(status_code=404, detail=str(e))
+            # ServiceException will be handled by global exception handler
+            await self.service.close_position(position_id, amount)
+            if amount:
+                return SuccessResponse(
+                    message=f"Partially closed position {position_id} ({amount} units)"
+                )
+            else:
+                return SuccessResponse(message=f"Closed position {position_id}")
 
         @self.put(
             "/positions/{position_id}/brackets",
@@ -342,15 +333,13 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 SuccessResponse: Success confirmation
             """
-            try:
-                await self.service.edit_position_brackets(
-                    position_id, brackets, customFields
-                )
-                return SuccessResponse(
-                    message=f"Updated brackets for position {position_id}"
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=404, detail=str(e))
+            # ServiceException will be handled by global exception handler
+            await self.service.edit_position_brackets(
+                position_id, brackets, customFields
+            )
+            return SuccessResponse(
+                message=f"Updated brackets for position {position_id}"
+            )
 
         @self.get(
             "/leverage/info",
@@ -411,10 +400,8 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 LeverageSetResult: Confirmed leverage value
             """
-            try:
-                return await self.service.set_leverage(params)
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
+            # ServiceException will be handled by global exception handler
+            return await self.service.set_leverage(params)
 
         @self.post(
             "/leverage/preview",
@@ -451,5 +438,9 @@ class BrokerApi(APIRouterInterface):
             BrokerService: The broker service
         """
         if not isinstance(self._service, BrokerService):
-            raise ValueError("Service has not been initialized")
+            raise ServiceException(
+                code="SERVICE_BROKER_INVALID_SERVICE",
+                message="BrokerApi is not configured with a valid BrokerService instance.",
+                module="broker",
+            )
         return self._service

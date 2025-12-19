@@ -63,20 +63,19 @@ describe('DatafeedService', () => {
     to: number,
     countBack?: number,
   ): Promise<Bar[]> => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       datafeedService.getBars(
         symbolInfo,
         resolution,
         { from, to, countBack: countBack ?? 0, firstDataRequest: false },
         (bars) => resolve(bars),
-        reject,
       )
     })
   }
 
   const getQuotesPromise = (symbols: string[]): Promise<QuoteData[]> => {
-    return new Promise((resolve, reject) => {
-      datafeedService.getQuotes(symbols, resolve, reject)
+    return new Promise((resolve) => {
+      datafeedService.getQuotes(symbols, resolve)
     })
   }
 

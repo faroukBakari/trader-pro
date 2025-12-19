@@ -61,9 +61,19 @@ from .broker import (
 from .common import (
     BaseApiResponse,
     ErrorApiResponse,
+    ErrorPayload,
+    SubscriptionError,
     SubscriptionRequest,
     SubscriptionResponse,
     SubscriptionUpdate,
+)
+
+# Import exception models
+from .exceptions import (
+    CommonException,
+    ProviderException,
+    ServiceException,
+    TradingApiException,
 )
 from .health import HealthResponse
 
@@ -94,9 +104,16 @@ __all__ = [
     "BaseApiResponse",
     "BarsSubscriptionRequest",
     "ErrorApiResponse",
+    "ErrorPayload",
+    "SubscriptionError",
     "SubscriptionRequest",
     "SubscriptionResponse",
     "SubscriptionUpdate",
+    # Exception models
+    "TradingApiException",
+    "CommonException",
+    "ServiceException",
+    "ProviderException",
     # Auth models
     "DeviceInfo",
     "GoogleLoginRequest",

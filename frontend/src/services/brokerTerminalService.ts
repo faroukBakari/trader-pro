@@ -28,8 +28,10 @@ import type {
   TradeContext,
 } from '@public/trading_terminal'
 
+import { WebSocketError } from '@/errors'
 import { ApiAdapter, type ApiPromise } from '@/plugins/apiAdapter'
 import { WsAdapter, WsFallback, type BrokerConnectionStatus, type EquityData, type WsAdapterType } from '@/plugins/wsAdapter'
+import type { SubscriptionError } from '@/plugins/wsClientBase'
 import { ConnectionStatus, NotificationType, OrderStatus, Side, StandardFormatterName } from '@public/trading_terminal'
 
 
@@ -642,13 +644,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
           message: 'Broker data subscriptions established'
         })
       })
-      .catch((error) => {
-        this.brokerConnectionStatus = ConnectionStatus.Error
-        console.error('[BrokerTerminalService] WebSocket setup failed:', error)
-        this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
-          message: 'Failed to establish broker data subscriptions'
-        })
-      })
 
   }
 
@@ -658,6 +653,17 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   private _getWsAdapter(): WsAdapterType | Partial<WsAdapterType> {
     return this._wsFallback ?? this._wsAdapter
+  }
+
+  /**
+   * Handle subscription-level errors from WebSocket.
+   * Throws WebSocketError to bubble up to global error handler for toast display.
+   */
+  private handleSubscriptionError(
+    subscriptionName: string,
+    error: SubscriptionError
+  ): void {
+    throw WebSocketError.fromSubscription(error, { subscriptionName })
   }
 
   /**
@@ -682,11 +688,10 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
               NotificationType.Success
             )
           }
-        }
+        },
+        (error) => this.handleSubscriptionError('Orders', error)
       ).then((topic) => {
         console.log('Subscribed to WebSocket order updates:', topic)
-      }).catch((error) => {
-        console.error('Failed to subscribe to WebSocket order updates:', error)
       }),
 
       // Position updates
@@ -696,11 +701,10 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         (position: Position) => {
           console.log('Received position update via WebSocket:', position)
           this._hostAdapter.positionUpdate(position)
-        }
+        },
+        (error) => this.handleSubscriptionError('Positions', error)
       ).then((topic) => {
         console.log('Subscribed to WebSocket position updates:', topic)
-      }).catch((error) => {
-        console.error('Failed to subscribe to WebSocket position updates:', error)
       }),
 
       // Execution updates
@@ -710,11 +714,10 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         (execution: Execution) => {
           console.log('Received execution update via WebSocket:', execution)
           this._hostAdapter.executionUpdate(execution)
-        }
+        },
+        (error) => this.handleSubscriptionError('Executions', error)
       ).then((topic) => {
         console.log('Subscribed to WebSocket execution updates:', topic)
-      }).catch((error) => {
-        console.error('Failed to subscribe to WebSocket execution updates:', error)
       }),
       // Equity updates
       this._getWsAdapter().equity?.subscribe(
@@ -732,11 +735,10 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
             console.log('Updating equity to:', data.equity)
             this.equity.setValue(data.equity)
           }
-        }
+        },
+        (error) => this.handleSubscriptionError('Equity', error)
       ).then((topic) => {
         console.log('Subscribed to WebSocket equity updates:', topic)
-      }).catch((error) => {
-        console.error('Failed to subscribe to WebSocket equity updates:', error)
       }),
 
       // Broker connection status (backend ↔ real broker)
@@ -764,11 +766,10 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
               NotificationType.Success
             )
           }
-        }
+        },
+        (error) => this.handleSubscriptionError('Broker Connection', error)
       ).then((topic) => {
         console.log('Subscribed to WebSocket broker-connection updates:', topic)
-      }).catch((error) => {
-        console.error('Failed to subscribe to WebSocket broker-connection updates:', error)
       }),
     ])
   }
@@ -951,16 +952,11 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async formatter(symbol: string, alignToMinMove: boolean): Promise<INumberFormatter> {
-    try {
-      const timeoutMs = 5000;
-      return await Promise.race([
-        this._hostAdapter.defaultFormatter(symbol, alignToMinMove),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
-      ]);
-    } catch (error) {
-      console.warn(`[BrokerTerminalService] defaultFormatter failed for ${symbol}, using fallback`, error);
-      return this._hostAdapter.numericFormatter(2);
-    }
+    const timeoutMs = 5000;
+    return await Promise.race([
+      this._hostAdapter.defaultFormatter(symbol, alignToMinMove),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
+    ]);
   }
 
   currentAccount(): AccountId {

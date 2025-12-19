@@ -19,6 +19,7 @@ from external_packages.fastws import Client
 from trading_api.models.auth import UserData
 from trading_api.shared.api import APIRouterInterface
 from trading_api.shared.client_generation_service import ClientGenerationService
+from trading_api.shared.exception_handlers import register_exception_handlers
 from trading_api.shared.middleware.auth import get_current_user_ws
 from trading_api.shared.service_interface import ServiceInterface
 from trading_api.shared.ws.fastws_adapter import FastWSAdapter
@@ -518,6 +519,9 @@ class ModuleApp:
                 redoc_url="/redoc",
                 openapi_tags=module.tags,
             )
+            # Register exception handlers on sub-app to catch exceptions
+            # before ServerErrorMiddleware logs them
+            register_exception_handlers(api_app)
             api_app.include_router(api_router)
 
             ws_app: FastWSAdapter | None = None
@@ -532,6 +536,7 @@ class ModuleApp:
                     # Uvicorn's built-in mechanism already handles this
                     # heartbeat_interval=30.0,
                     max_connection_lifespan=3600.0,
+                    debug=True,
                 )
 
                 for version, ws_routers in module.ws_routers.items():
@@ -545,13 +550,7 @@ class ModuleApp:
                 ) -> None:
                     f"""WebSocket endpoint for {module.name} real-time streaming"""
                     client.user_data = user_data
-                    try:
-                        await _ws_app.serve(client)
-                    except Exception as e:
-                        logger.error(f"WebSocket connection error: {e}")
-                        await client.ws.close(
-                            code=1011, reason=f"Server connection error: {e}"
-                        )
+                    await _ws_app.serve(client)
 
                 ws_app = _ws_app
 
