@@ -264,6 +264,11 @@ def _api_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     )
 
 
+def log_exception(exc: TradingApiException, request: Request | WebSocket) -> None:
+    http_status = _get_status_code_from_code(exc.code)
+    _log_exception(exc, http_status, request)
+
+
 async def _ws_exception_handler(websocket: WebSocket, exc: Exception) -> None:
     """
     Handle all exceptions for WebSocket connections.

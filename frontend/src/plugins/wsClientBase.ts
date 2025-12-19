@@ -42,6 +42,26 @@ interface SubscriptionUpdate<TBackendData extends object = object> {
   payload: TBackendData
 }
 
+/**
+ * Error notification for an active subscription.
+ * Sent when a subscription encounters an error but connection remains open.
+ */
+export interface SubscriptionError {
+  /** Affected subscription topic */
+  topic: string
+  /** Serialized exception details */
+  error: {
+    code: string
+    message: string
+    timestamp: number
+    details?: Record<string, unknown> | null
+  }
+  /** If true, client should expect automatic recovery */
+  recoverable?: boolean
+  /** Suggested retry delay in milliseconds */
+  retry_after_ms?: number | null
+}
+
 interface WebSocketMessage<TBackendData extends object = object> {
   type: string
   payload: SubscriptionUpdate<TBackendData> | SubscriptionResponse
@@ -52,6 +72,7 @@ interface SubscriptionState<TParams extends object = object, TData extends objec
   subType: string
   sub_params: TParams
   onUpdate: (data: TData) => void
+  onError?: (error: SubscriptionError) => void
 }
 
 export class WebSocketBase {
@@ -205,6 +226,9 @@ export class WebSocketBase {
       if (type.endsWith('.update')) {
         const update = payload as SubscriptionUpdate
         this.routeUpdateMessage(update)
+      } else if (type.endsWith('.error')) {
+        const error = payload as unknown as SubscriptionError
+        this.routeErrorMessage(error)
       } else {
         this.logger.log('Received:', type, payload)
         if (type.endsWith('.response')) {
@@ -241,10 +265,47 @@ export class WebSocketBase {
     }
   }
 
+  /**
+   * Global error handler for subscription errors without specific onError callback.
+   * Override this method to customize global error handling behavior.
+   */
+  protected globalErrorHandler(error: SubscriptionError): void {
+    console.error(
+      `[WebSocket] Unhandled subscription error for topic ${error.topic}:`,
+      error.error.code,
+      error.error.message,
+      error.recoverable ? '(recoverable)' : '(non-recoverable)'
+    )
+  }
+
+  /**
+   * Route error messages to the appropriate subscription handler or global handler.
+   */
+  private routeErrorMessage(error: SubscriptionError): void {
+    this.logger.debug(`${error.topic} error received:`, error)
+    const subscription = this.subscriptions.get(error.topic)
+    if (!subscription) {
+      this.logger.warn(`No subscription found for error topic: ${error.topic}`)
+      this.globalErrorHandler(error)
+      return
+    }
+
+    if (subscription.onError) {
+      try {
+        subscription.onError(error)
+      } catch (e) {
+        this.logger.error(`Error in onError handler for ${error.topic}:`, e)
+      }
+    } else {
+      this.globalErrorHandler(error)
+    }
+  }
+
   async subscribe(
     subType: string,
     sub_params: object,
-    onUpdate: (TbackendData: object) => void
+    onUpdate: (TbackendData: object) => void,
+    onError?: (error: SubscriptionError) => void
   ): Promise<string> {
 
     // Generate unique sub_id hash
@@ -297,6 +358,7 @@ export class WebSocketBase {
           subType,
           sub_params,
           onUpdate,
+          onError,
         })
 
         return response.topic
@@ -399,7 +461,8 @@ export interface WebSocketInterface<TParams extends object, TData extends object
   subscribe(
     subscriptionId: string,
     params: TParams,
-    onUpdate: (data: TData) => void
+    onUpdate: (data: TData) => void,
+    onError?: (error: SubscriptionError) => void
   ): Promise<string>
   unsubscribe(subscriptionId: string): Promise<void>
   destroy?(): void
@@ -430,6 +493,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     listenerId: string,
     subscriptionParams: TParams,
     onUpdate: (data: TData) => void,
+    onError?: (error: SubscriptionError) => void,
   ): Promise<string> {
 
     const paramsKey = serializeParams(subscriptionParams)
@@ -456,7 +520,8 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
         (backendData: object) =>
           this.listeners.get(paramsKey)?.forEach(
             (onUpdate) => onUpdate(this.dataMapper(backendData as TBackendData))
-          )
+          ),
+        onError
       )
       this.topics.set(paramsKey, topicPromise)
     }
@@ -512,7 +577,10 @@ export class WebSocketFallback<TParams extends object, TData extends object> imp
     subscriptionId: string,
     params: TParams,
     onUpdate: (data: TData) => void,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    onError?: (error: SubscriptionError) => void,
   ): Promise<string> {
+    // Note: onError is ignored in fallback - errors don't occur in mock mode
     this.subscriptions.set(subscriptionId, { params, onUpdate })
     return subscriptionId
   }

@@ -255,13 +255,13 @@ class TestCreateTopicErrorCallback:
         mock_client.ws.close.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_unrecoverable_error_closes_connection(
+    async def test_unrecoverable_error_logs_exception(
         self,
         router: MockRouter,
         mock_service: MockWsRouteService,
         mock_client: MagicMock,
     ) -> None:
-        """Unrecoverable errors close connection via exception_handler."""
+        """Unrecoverable errors log exception via log_exception."""
         topic = "test:AAPL"
         mock_client.topics = {topic}
         router._clients = {mock_client}
@@ -280,28 +280,24 @@ class TestCreateTopicErrorCallback:
             message="Symbol INVALID not found",
         )
 
-        # Mock exception_handler to verify it's called
-        with patch(
-            "trading_api.shared.ws.generic_route.exception_handler"
-        ) as mock_handler:
-            mock_handler.return_value = None  # exception_handler returns None for WS
-
+        # Mock log_exception to verify it's called
+        with patch("trading_api.shared.ws.generic_route.log_exception") as mock_log:
             await topic_error(exc, False, None)
 
-            # Verify exception_handler was called
-            mock_handler.assert_called_once()
-            call_args = mock_handler.call_args[0]
-            assert call_args[0] == mock_client.ws  # WebSocket
-            assert call_args[1] == exc  # Exception
+            # Verify log_exception was called
+            mock_log.assert_called_once()
+            call_args = mock_log.call_args[0]
+            assert call_args[0] == exc  # Exception
+            assert call_args[1] == mock_client.ws  # WebSocket
 
     @pytest.mark.asyncio
-    async def test_unrecoverable_error_does_not_broadcast(
+    async def test_unrecoverable_error_broadcasts_before_cleanup(
         self,
         router: MockRouter,
         mock_service: MockWsRouteService,
         mock_client: MagicMock,
     ) -> None:
-        """Unrecoverable errors do not broadcast error message."""
+        """Unrecoverable errors broadcast error message before cleanup."""
         topic = "test:AAPL"
         mock_client.topics = {topic}
         router._clients = {mock_client}
@@ -317,15 +313,174 @@ class TestCreateTopicErrorCallback:
             message="Fatal error occurred",
         )
 
-        with patch(
-            "trading_api.shared.ws.generic_route.exception_handler"
-        ) as mock_handler:
-            mock_handler.return_value = None
-
+        with patch("trading_api.shared.ws.generic_route.log_exception"):
             await topic_error(exc, False, None)
 
-            # Verify NO broadcast (send_text not called)
-            mock_client.ws.send_text.assert_not_called()
+            # Verify error WAS broadcast (before cleanup)
+            mock_client.ws.send_text.assert_called_once()
+            sent_msg = mock_client.ws.send_text.call_args[0][0]
+            assert '"type":"test.error"' in sent_msg
+            assert '"recoverable":false' in sent_msg
+
+    @pytest.mark.asyncio
+    async def test_unrecoverable_error_discards_topic(
+        self,
+        router: MockRouter,
+        mock_service: MockWsRouteService,
+        mock_client: MagicMock,
+    ) -> None:
+        """Unrecoverable errors discard topic from router._topics."""
+        topic = "test:AAPL"
+        mock_client.topics = {topic}
+        router._clients = {mock_client}
+
+        router._create_topic(topic)
+        assert topic in router._topics  # Pre-condition
+
+        callbacks = mock_service.get_callbacks(topic)
+        assert callbacks is not None
+        _, topic_error = callbacks
+
+        exc = ProviderException(
+            provider="tws",
+            capability="datafeed",
+            code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
+            message="Symbol INVALID not found",
+        )
+
+        with patch("trading_api.shared.ws.generic_route.log_exception"):
+            await topic_error(exc, False, None)
+
+            # Topic should be discarded
+            assert topic not in router._topics
+
+    @pytest.mark.asyncio
+    async def test_unrecoverable_error_unsubscribes_client(
+        self,
+        router: MockRouter,
+        mock_service: MockWsRouteService,
+        mock_client: MagicMock,
+    ) -> None:
+        """Unrecoverable errors unsubscribe client from topic."""
+        topic = "test:AAPL"
+        mock_client.topics = {topic}
+        router._clients = {mock_client}
+
+        router._create_topic(topic)
+
+        callbacks = mock_service.get_callbacks(topic)
+        assert callbacks is not None
+        _, topic_error = callbacks
+
+        exc = ProviderException(
+            provider="tws",
+            capability="datafeed",
+            code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
+            message="Symbol INVALID not found",
+        )
+
+        with patch("trading_api.shared.ws.generic_route.log_exception"):
+            await topic_error(exc, False, None)
+
+            # Client should be unsubscribed from topic
+            mock_client.unsubscribe.assert_called_once_with(topic)
+
+    @pytest.mark.asyncio
+    async def test_recoverable_error_keeps_topic(
+        self,
+        router: MockRouter,
+        mock_service: MockWsRouteService,
+        mock_client: MagicMock,
+    ) -> None:
+        """Recoverable errors do NOT discard topic from router._topics."""
+        topic = "test:AAPL"
+        mock_client.topics = {topic}
+        router._clients = {mock_client}
+
+        router._create_topic(topic)
+        assert topic in router._topics  # Pre-condition
+
+        callbacks = mock_service.get_callbacks(topic)
+        assert callbacks is not None
+        _, topic_error = callbacks
+
+        exc = ProviderException(
+            provider="tws",
+            capability="datafeed",
+            code="PROVIDER_DATAFEED_TIMEOUT",
+            message="Request timed out",
+        )
+
+        with patch("trading_api.shared.ws.generic_route.log_exception"):
+            await topic_error(exc, True, 5000)
+
+            # Topic should NOT be discarded
+            assert topic in router._topics
+
+    @pytest.mark.asyncio
+    async def test_recoverable_error_keeps_client_subscribed(
+        self,
+        router: MockRouter,
+        mock_service: MockWsRouteService,
+        mock_client: MagicMock,
+    ) -> None:
+        """Recoverable errors do NOT unsubscribe client from topic."""
+        topic = "test:AAPL"
+        mock_client.topics = {topic}
+        router._clients = {mock_client}
+
+        router._create_topic(topic)
+
+        callbacks = mock_service.get_callbacks(topic)
+        assert callbacks is not None
+        _, topic_error = callbacks
+
+        exc = ProviderException(
+            provider="tws",
+            capability="datafeed",
+            code="PROVIDER_DATAFEED_TIMEOUT",
+            message="Request timed out",
+        )
+
+        with patch("trading_api.shared.ws.generic_route.log_exception"):
+            await topic_error(exc, True, 5000)
+
+            # Client should NOT be unsubscribed
+            mock_client.unsubscribe.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_recoverable_error_calls_log_exception(
+        self,
+        router: MockRouter,
+        mock_service: MockWsRouteService,
+        mock_client: MagicMock,
+    ) -> None:
+        """Recoverable errors call log_exception for logging."""
+        topic = "test:AAPL"
+        mock_client.topics = {topic}
+        router._clients = {mock_client}
+
+        router._create_topic(topic)
+
+        callbacks = mock_service.get_callbacks(topic)
+        assert callbacks is not None
+        _, topic_error = callbacks
+
+        exc = ProviderException(
+            provider="tws",
+            capability="datafeed",
+            code="PROVIDER_DATAFEED_TIMEOUT",
+            message="Request timed out",
+        )
+
+        with patch("trading_api.shared.ws.generic_route.log_exception") as mock_log:
+            await topic_error(exc, True, 5000)
+
+            # log_exception should be called (for logging)
+            mock_log.assert_called_once()
+            call_args = mock_log.call_args[0]
+            assert call_args[0] == exc
+            assert call_args[1] == mock_client.ws
 
 
 # ============================================================================

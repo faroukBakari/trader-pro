@@ -668,9 +668,8 @@ class IBSocket(EWrapper):
     ) -> Awaitable[Any]:
         """Create a new Future attached to the current event loop."""
         loop = asyncio.get_event_loop()
-        loop, future = self._future_hooks.setdefault(
-            reqId, (loop, loop.create_future())
-        )
+        future = loop.create_future()
+        self._future_hooks[reqId] = (loop, future)
         self._reqId_to_capability.setdefault(reqId, capability)
         stream = self._stream_data.setdefault(
             reqId,
