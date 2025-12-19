@@ -311,7 +311,10 @@ export class WebSocketBase {
     // Generate unique sub_id hash
     const sub_id = `${subType}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
 
-    while (true)
+
+    let maxSubscriptionAttempts = 5;
+
+    while (maxSubscriptionAttempts-- > 0)
       try {
 
         const response: SubscriptionResponse = await new Promise((resolve, reject) => {
@@ -369,6 +372,8 @@ export class WebSocketBase {
         await new Promise(resolve => setTimeout(resolve, 200))
 
       }
+
+    throw new Error(`Subscription failed after multiple attempts: ${subType} with params ${JSON.stringify(sub_params)}`)
   }
 
   private async resubscribeAll(): Promise<void> {
