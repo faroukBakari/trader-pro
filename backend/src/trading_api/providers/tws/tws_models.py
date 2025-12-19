@@ -5,266 +5,54 @@ Handles all TickTypeEnum values with proper typing.
 """
 
 from dataclasses import dataclass
-from enum import Enum
-from typing import Literal
 
 # =============================================================================
-# TWS Message ID to Capability Mapping
+# Bar Size Constants
 # =============================================================================
-# Maps incoming message IDs (IN class from ibapi.message) to provider capabilities.
-# Used for routing errors and responses to the correct capability handler.
+# Maps TWS bar size strings to duration in seconds.
+# Used for calculating historical data duration requests.
 # =============================================================================
 
-
-class TWSCapability(str, Enum):
-    """TWS provider capability types."""
-
-    DATAFEED = "datafeed"
-    BROKER = "broker"
-    SHARED = "shared"  # Used by both capabilities
-
-
-# Incoming message ID → Capability mapping
-# Reference: ibapi/message.py IN class
-IN_MSG_CAPABILITY: dict[int, TWSCapability] = {
-    # =========================================================================
-    # Market Data (datafeed capability)
-    # =========================================================================
-    1: TWSCapability.DATAFEED,  # TICK_PRICE
-    2: TWSCapability.DATAFEED,  # TICK_SIZE
-    12: TWSCapability.DATAFEED,  # MARKET_DEPTH
-    13: TWSCapability.DATAFEED,  # MARKET_DEPTH_L2
-    14: TWSCapability.DATAFEED,  # NEWS_BULLETINS
-    17: TWSCapability.DATAFEED,  # HISTORICAL_DATA
-    19: TWSCapability.DATAFEED,  # SCANNER_PARAMETERS
-    20: TWSCapability.DATAFEED,  # SCANNER_DATA
-    21: TWSCapability.DATAFEED,  # TICK_OPTION_COMPUTATION
-    45: TWSCapability.DATAFEED,  # TICK_GENERIC
-    46: TWSCapability.DATAFEED,  # TICK_STRING
-    47: TWSCapability.DATAFEED,  # TICK_EFP
-    50: TWSCapability.DATAFEED,  # REAL_TIME_BARS
-    51: TWSCapability.DATAFEED,  # FUNDAMENTAL_DATA
-    57: TWSCapability.DATAFEED,  # TICK_SNAPSHOT_END
-    58: TWSCapability.DATAFEED,  # MARKET_DATA_TYPE
-    75: TWSCapability.DATAFEED,  # SECURITY_DEFINITION_OPTION_PARAMETER
-    76: TWSCapability.DATAFEED,  # SECURITY_DEFINITION_OPTION_PARAMETER_END
-    80: TWSCapability.DATAFEED,  # MKT_DEPTH_EXCHANGES
-    81: TWSCapability.DATAFEED,  # TICK_REQ_PARAMS
-    82: TWSCapability.DATAFEED,  # SMART_COMPONENTS
-    83: TWSCapability.DATAFEED,  # NEWS_ARTICLE
-    84: TWSCapability.DATAFEED,  # TICK_NEWS
-    85: TWSCapability.DATAFEED,  # NEWS_PROVIDERS
-    86: TWSCapability.DATAFEED,  # HISTORICAL_NEWS
-    87: TWSCapability.DATAFEED,  # HISTORICAL_NEWS_END
-    88: TWSCapability.DATAFEED,  # HEAD_TIMESTAMP
-    89: TWSCapability.DATAFEED,  # HISTOGRAM_DATA
-    90: TWSCapability.DATAFEED,  # HISTORICAL_DATA_UPDATE
-    91: TWSCapability.DATAFEED,  # REROUTE_MKT_DATA_REQ
-    92: TWSCapability.DATAFEED,  # REROUTE_MKT_DEPTH_REQ
-    93: TWSCapability.DATAFEED,  # MARKET_RULE
-    96: TWSCapability.DATAFEED,  # HISTORICAL_TICKS
-    97: TWSCapability.DATAFEED,  # HISTORICAL_TICKS_BID_ASK
-    98: TWSCapability.DATAFEED,  # HISTORICAL_TICKS_LAST
-    99: TWSCapability.DATAFEED,  # TICK_BY_TICK
-    104: TWSCapability.DATAFEED,  # WSH_META_DATA
-    105: TWSCapability.DATAFEED,  # WSH_EVENT_DATA
-    106: TWSCapability.DATAFEED,  # HISTORICAL_SCHEDULE
-    108: TWSCapability.DATAFEED,  # HISTORICAL_DATA_END
-    # =========================================================================
-    # Order/Account (broker capability)
-    # =========================================================================
-    3: TWSCapability.BROKER,  # ORDER_STATUS
-    5: TWSCapability.BROKER,  # OPEN_ORDER
-    6: TWSCapability.BROKER,  # ACCT_VALUE
-    7: TWSCapability.BROKER,  # PORTFOLIO_VALUE
-    8: TWSCapability.BROKER,  # ACCT_UPDATE_TIME
-    11: TWSCapability.BROKER,  # EXECUTION_DATA
-    15: TWSCapability.BROKER,  # MANAGED_ACCTS
-    16: TWSCapability.BROKER,  # RECEIVE_FA
-    53: TWSCapability.BROKER,  # OPEN_ORDER_END
-    54: TWSCapability.BROKER,  # ACCT_DOWNLOAD_END
-    55: TWSCapability.BROKER,  # EXECUTION_DATA_END
-    56: TWSCapability.BROKER,  # DELTA_NEUTRAL_VALIDATION
-    59: TWSCapability.BROKER,  # COMMISSION_AND_FEES_REPORT
-    61: TWSCapability.BROKER,  # POSITION_DATA
-    62: TWSCapability.BROKER,  # POSITION_END
-    63: TWSCapability.BROKER,  # ACCOUNT_SUMMARY
-    64: TWSCapability.BROKER,  # ACCOUNT_SUMMARY_END
-    71: TWSCapability.BROKER,  # POSITION_MULTI
-    72: TWSCapability.BROKER,  # POSITION_MULTI_END
-    73: TWSCapability.BROKER,  # ACCOUNT_UPDATE_MULTI
-    74: TWSCapability.BROKER,  # ACCOUNT_UPDATE_MULTI_END
-    77: TWSCapability.BROKER,  # SOFT_DOLLAR_TIERS
-    78: TWSCapability.BROKER,  # FAMILY_CODES
-    94: TWSCapability.BROKER,  # PNL
-    95: TWSCapability.BROKER,  # PNL_SINGLE
-    100: TWSCapability.BROKER,  # ORDER_BOUND
-    101: TWSCapability.BROKER,  # COMPLETED_ORDER
-    102: TWSCapability.BROKER,  # COMPLETED_ORDERS_END
-    103: TWSCapability.BROKER,  # REPLACE_FA_END
-    # =========================================================================
-    # Shared (both capabilities)
-    # =========================================================================
-    4: TWSCapability.SHARED,  # ERR_MSG
-    9: TWSCapability.SHARED,  # NEXT_VALID_ID
-    10: TWSCapability.SHARED,  # CONTRACT_DATA
-    18: TWSCapability.SHARED,  # BOND_CONTRACT_DATA
-    49: TWSCapability.SHARED,  # CURRENT_TIME
-    52: TWSCapability.SHARED,  # CONTRACT_DATA_END
-    65: TWSCapability.SHARED,  # VERIFY_MESSAGE_API
-    66: TWSCapability.SHARED,  # VERIFY_COMPLETED
-    67: TWSCapability.SHARED,  # DISPLAY_GROUP_LIST
-    68: TWSCapability.SHARED,  # DISPLAY_GROUP_UPDATED
-    69: TWSCapability.SHARED,  # VERIFY_AND_AUTH_MESSAGE_API
-    70: TWSCapability.SHARED,  # VERIFY_AND_AUTH_COMPLETED
-    79: TWSCapability.SHARED,  # SYMBOL_SAMPLES
-    107: TWSCapability.SHARED,  # USER_INFO
-    109: TWSCapability.SHARED,  # CURRENT_TIME_IN_MILLIS
-}
-
-# Message ID → Name mapping (reverse lookup from IN class constants)
-# Used to generate error codes like "TICK_PRICE_ERROR"
-IN_MSG_ID_TO_NAME: dict[int, str] = {
-    1: "TICK_PRICE",
-    2: "TICK_SIZE",
-    3: "ORDER_STATUS",
-    4: "ERR_MSG",
-    5: "OPEN_ORDER",
-    6: "ACCT_VALUE",
-    7: "PORTFOLIO_VALUE",
-    8: "ACCT_UPDATE_TIME",
-    9: "NEXT_VALID_ID",
-    10: "CONTRACT_DATA",
-    11: "EXECUTION_DATA",
-    12: "MARKET_DEPTH",
-    13: "MARKET_DEPTH_L2",
-    14: "NEWS_BULLETINS",
-    15: "MANAGED_ACCTS",
-    16: "RECEIVE_FA",
-    17: "HISTORICAL_DATA",
-    18: "BOND_CONTRACT_DATA",
-    19: "SCANNER_PARAMETERS",
-    20: "SCANNER_DATA",
-    21: "TICK_OPTION_COMPUTATION",
-    45: "TICK_GENERIC",
-    46: "TICK_STRING",
-    47: "TICK_EFP",
-    49: "CURRENT_TIME",
-    50: "REAL_TIME_BARS",
-    51: "FUNDAMENTAL_DATA",
-    52: "CONTRACT_DATA_END",
-    53: "OPEN_ORDER_END",
-    54: "ACCT_DOWNLOAD_END",
-    55: "EXECUTION_DATA_END",
-    56: "DELTA_NEUTRAL_VALIDATION",
-    57: "TICK_SNAPSHOT_END",
-    58: "MARKET_DATA_TYPE",
-    59: "COMMISSION_AND_FEES_REPORT",
-    61: "POSITION_DATA",
-    62: "POSITION_END",
-    63: "ACCOUNT_SUMMARY",
-    64: "ACCOUNT_SUMMARY_END",
-    65: "VERIFY_MESSAGE_API",
-    66: "VERIFY_COMPLETED",
-    67: "DISPLAY_GROUP_LIST",
-    68: "DISPLAY_GROUP_UPDATED",
-    69: "VERIFY_AND_AUTH_MESSAGE_API",
-    70: "VERIFY_AND_AUTH_COMPLETED",
-    71: "POSITION_MULTI",
-    72: "POSITION_MULTI_END",
-    73: "ACCOUNT_UPDATE_MULTI",
-    74: "ACCOUNT_UPDATE_MULTI_END",
-    75: "SECURITY_DEFINITION_OPTION_PARAMETER",
-    76: "SECURITY_DEFINITION_OPTION_PARAMETER_END",
-    77: "SOFT_DOLLAR_TIERS",
-    78: "FAMILY_CODES",
-    79: "SYMBOL_SAMPLES",
-    80: "MKT_DEPTH_EXCHANGES",
-    81: "TICK_REQ_PARAMS",
-    82: "SMART_COMPONENTS",
-    83: "NEWS_ARTICLE",
-    84: "TICK_NEWS",
-    85: "NEWS_PROVIDERS",
-    86: "HISTORICAL_NEWS",
-    87: "HISTORICAL_NEWS_END",
-    88: "HEAD_TIMESTAMP",
-    89: "HISTOGRAM_DATA",
-    90: "HISTORICAL_DATA_UPDATE",
-    91: "REROUTE_MKT_DATA_REQ",
-    92: "REROUTE_MKT_DEPTH_REQ",
-    93: "MARKET_RULE",
-    94: "PNL",
-    95: "PNL_SINGLE",
-    96: "HISTORICAL_TICKS",
-    97: "HISTORICAL_TICKS_BID_ASK",
-    98: "HISTORICAL_TICKS_LAST",
-    99: "TICK_BY_TICK",
-    100: "ORDER_BOUND",
-    101: "COMPLETED_ORDER",
-    102: "COMPLETED_ORDERS_END",
-    103: "REPLACE_FA_END",
-    104: "WSH_META_DATA",
-    105: "WSH_EVENT_DATA",
-    106: "HISTORICAL_SCHEDULE",
-    107: "USER_INFO",
-    108: "HISTORICAL_DATA_END",
-    109: "CURRENT_TIME_IN_MILLIS",
+BAR_SIZE_TO_SECONDS: dict[str, int] = {
+    "1 secs": 1,
+    "5 secs": 5,
+    "10 secs": 10,
+    "15 secs": 15,
+    "30 secs": 30,
+    "1 min": 60,
+    "2 mins": 120,
+    "3 mins": 180,
+    "5 mins": 300,
+    "10 mins": 600,
+    "15 mins": 900,
+    "20 mins": 1200,
+    "30 mins": 1800,
+    "1 hour": 3600,
+    "2 hours": 7200,
+    "3 hours": 10800,
+    "4 hours": 14400,
+    "8 hours": 28800,
+    "1 day": 86400,
+    "1 week": 604800,
+    "1 month": 2592000,
 }
 
 
-def get_msg_capability(msg_id: int) -> TWSCapability:
-    """Get capability for a given msgId.
+def get_bar_duration_seconds(bar_size: str) -> int:
+    """Get duration in seconds for a bar size.
 
     Args:
-        msg_id: TWS incoming message ID (from IN class)
+        bar_size: TWS bar size string (e.g., "1 min", "1 hour", "1 day")
 
     Returns:
-        TWSCapability enum value. Defaults to SHARED for unknown msgIds.
+        Duration in seconds. Defaults to 86400 (1 day) for unknown sizes.
     """
-    return IN_MSG_CAPABILITY.get(msg_id, TWSCapability.SHARED)
+    return BAR_SIZE_TO_SECONDS.get(bar_size, 86400)
 
 
-def get_msg_name(msg_id: int) -> str:
-    """Get the IN class constant name for a message ID.
-
-    Args:
-        msg_id: TWS incoming message ID
-
-    Returns:
-        Message name string (e.g., "TICK_PRICE", "ORDER_STATUS").
-        Returns "UNKNOWN_{msg_id}" for unmapped IDs.
-    """
-    return IN_MSG_ID_TO_NAME.get(msg_id, f"UNKNOWN_{msg_id}")
-
-
-def get_error_code(msg_id: int, tws_error_code: int) -> str:
-    """Generate error code string for ProviderException.
-
-    Args:
-        msg_id: TWS incoming message ID
-        tws_error_code: TWS-specific error code
-
-    Returns:
-        Error code string like "PROVIDER_TWS_TICK_PRICE_2106"
-    """
-    msg_name = get_msg_name(msg_id)
-    return f"PROVIDER_TWS_{msg_name}_{tws_error_code}"
-
-
-def get_capability_str(msg_id: int) -> Literal["datafeed", "broker", "shared"]:
-    """Get capability string for ProviderException.
-
-    Args:
-        msg_id: TWS incoming message ID
-
-    Returns:
-        Capability string ("datafeed", "broker", or "" for shared).
-    """
-    cap = get_msg_capability(msg_id)
-    if cap == TWSCapability.SHARED:
-        return "shared"
-    return cap.value  # type: ignore[no-any-return]
-
+# =============================================================================
+# Tick Type Field Mapping
+# =============================================================================
 
 # Mapping from TickTypeEnum name → TwsRTData attribute name
 # Only includes ticks that map to dedicated fields (not extended dict)
