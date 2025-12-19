@@ -21,11 +21,33 @@ function isSubscriptionError(error: unknown): error is SubscriptionError {
   )
 }
 
+/**
+ * Type guard for WebSocket DOM error events.
+ * Browser WebSocket errors are Events with no message (security restriction).
+ */
+function isWebSocketErrorEvent(error: unknown): error is Event & { target: WebSocket } {
+  return (
+    typeof Event !== 'undefined' &&
+    error instanceof Event &&
+    error.type === 'error' &&
+    error.target instanceof WebSocket
+  )
+}
+
+const WS_STATE_MAP: Record<number, string> = {
+  0: 'CONNECTING',
+  1: 'OPEN',
+  2: 'CLOSING',
+  3: 'CLOSED',
+}
+
 interface ErrorServiceConfig {
-  /** Duration in ms for toast display (default: 5000) */
+  /** Duration in ms for toast display (default: 6000) */
   defaultDuration: number
-  /** Maximum concurrent toasts (default: 5) */
+  /** Maximum concurrent toasts (default: 1) */
   maxToasts: number
+  /** Maximum pending queue size (default: 20) */
+  maxQueueSize: number
   /** Dedupe window in ms - errors with same code within this window are not shown twice */
   dedupeWindowMs: number
 }
@@ -33,12 +55,15 @@ interface ErrorServiceConfig {
 const DEFAULT_CONFIG: ErrorServiceConfig = {
   defaultDuration: 6000,
   maxToasts: 1,
+  maxQueueSize: 20,
   dedupeWindowMs: 2000,
 }
 
 class ErrorService {
   private config: ErrorServiceConfig
   private recentErrors: Map<string, number> = new Map()
+  private pendingQueue: AppError[] = []
+  private activeCount = 0
 
   constructor(config: Partial<ErrorServiceConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config }
@@ -85,14 +110,17 @@ class ErrorService {
 
     // Raw SubscriptionError from WebSocket (not yet wrapped)
     if (isSubscriptionError(error)) {
-      const { code, message, details } = error.error
-      const detailsSuffix = details ? ` ${JSON.stringify(details)}` : ''
-      return new WebSocketError(
-        error.topic,
-        code,
-        `[${code}] ${message} ${detailsSuffix}`,
-        error.recoverable ?? false,
-        details ?? undefined,
+      return WebSocketError.fromSubscription(error)
+    }
+
+    // WebSocket DOM error event (browser hides actual error message)
+    if (isWebSocketErrorEvent(error)) {
+      const ws = error.target
+      const state = WS_STATE_MAP[ws.readyState] ?? 'UNKNOWN'
+      return new NetworkError(
+        `WebSocket connection failed: ${ws.url} (${state})`,
+        undefined,
+        { url: ws.url, readyState: ws.readyState },
       )
     }
 
@@ -144,11 +172,30 @@ class ErrorService {
 
   /**
    * Display toast based on error severity.
-   * Shows only the message - no icons, buttons, or descriptions.
+   * Respects maxToasts limit by queueing excess notifications.
    */
   private showToast(error: AppError): void {
+    if (this.activeCount >= this.config.maxToasts) {
+      // Queue is full, drop oldest pending error
+      if (this.pendingQueue.length >= this.config.maxQueueSize) {
+        this.pendingQueue.shift()
+      }
+      this.pendingQueue.push(error)
+      return
+    }
+    this.displayToast(error)
+  }
+
+  /**
+   * Actually display the toast and track active count.
+   */
+  private displayToast(error: AppError): void {
+    this.activeCount++
+
     const options = {
       duration: this.config.defaultDuration,
+      onDismiss: () => this.onToastComplete(),
+      onAutoClose: () => this.onToastComplete(),
     }
 
     switch (error.severity) {
@@ -161,6 +208,18 @@ class ErrorService {
       case 'info':
         toast.info(error.message, options)
         break
+    }
+  }
+
+  /**
+   * Called when a toast is dismissed or auto-closes.
+   * Processes the next queued error if any.
+   */
+  private onToastComplete(): void {
+    this.activeCount--
+    if (this.pendingQueue.length > 0) {
+      const nextError = this.pendingQueue.shift()!
+      this.displayToast(nextError)
     }
   }
 }

@@ -644,13 +644,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
           message: 'Broker data subscriptions established'
         })
       })
-      .catch((error) => {
-        this.brokerConnectionStatus = ConnectionStatus.Error
-        console.error('[BrokerTerminalService] WebSocket setup failed:', error)
-        this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
-          message: 'Failed to establish broker data subscriptions'
-        })
-      })
 
   }
 
@@ -670,17 +663,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     subscriptionName: string,
     error: SubscriptionError
   ): void {
-    // Throw WebSocketError - global error handler will display toast
-    throw new WebSocketError(
-      error.topic,
-      error.error.code,
-      `${subscriptionName}: ${error.error.message}`,
-      error.recoverable ?? false,
-      {
-        ...error.error.details,
-        subscriptionName,
-      },
-    )
+    throw WebSocketError.fromSubscription(error, { subscriptionName })
   }
 
   /**
@@ -709,8 +692,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         (error) => this.handleSubscriptionError('Orders', error)
       ).then((topic) => {
         console.log('Subscribed to WebSocket order updates:', topic)
-      }).catch((error) => {
-        console.error('Failed to subscribe to WebSocket order updates:', error)
       }),
 
       // Position updates
@@ -724,8 +705,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         (error) => this.handleSubscriptionError('Positions', error)
       ).then((topic) => {
         console.log('Subscribed to WebSocket position updates:', topic)
-      }).catch((error) => {
-        console.error('Failed to subscribe to WebSocket position updates:', error)
       }),
 
       // Execution updates
@@ -739,8 +718,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         (error) => this.handleSubscriptionError('Executions', error)
       ).then((topic) => {
         console.log('Subscribed to WebSocket execution updates:', topic)
-      }).catch((error) => {
-        console.error('Failed to subscribe to WebSocket execution updates:', error)
       }),
       // Equity updates
       this._getWsAdapter().equity?.subscribe(
@@ -762,8 +739,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         (error) => this.handleSubscriptionError('Equity', error)
       ).then((topic) => {
         console.log('Subscribed to WebSocket equity updates:', topic)
-      }).catch((error) => {
-        console.error('Failed to subscribe to WebSocket equity updates:', error)
       }),
 
       // Broker connection status (backend ↔ real broker)
@@ -795,8 +770,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         (error) => this.handleSubscriptionError('Broker Connection', error)
       ).then((topic) => {
         console.log('Subscribed to WebSocket broker-connection updates:', topic)
-      }).catch((error) => {
-        console.error('Failed to subscribe to WebSocket broker-connection updates:', error)
       }),
     ])
   }
@@ -979,16 +952,11 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async formatter(symbol: string, alignToMinMove: boolean): Promise<INumberFormatter> {
-    try {
-      const timeoutMs = 5000;
-      return await Promise.race([
-        this._hostAdapter.defaultFormatter(symbol, alignToMinMove),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
-      ]);
-    } catch (error) {
-      console.warn(`[BrokerTerminalService] defaultFormatter failed for ${symbol}, using fallback`, error);
-      return this._hostAdapter.numericFormatter(2);
-    }
+    const timeoutMs = 5000;
+    return await Promise.race([
+      this._hostAdapter.defaultFormatter(symbol, alignToMinMove),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
+    ]);
   }
 
   currentAccount(): AccountId {

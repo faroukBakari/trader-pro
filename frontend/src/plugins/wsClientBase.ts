@@ -65,7 +65,7 @@ interface SubscriptionState<TParams extends object = object, TData extends objec
   subType: string
   sub_params: TParams
   onUpdate: (data: TData) => void
-  onError?: (error: SubscriptionError) => void
+  onError: (error: SubscriptionError) => void
 }
 
 export class WebSocketBase {
@@ -257,29 +257,16 @@ export class WebSocketBase {
    * Global error handler for subscription errors without specific onError callback.
    * Throws WebSocketError to bubble up to global error handler.
    */
-  protected globalErrorHandler(error: SubscriptionError): void {
-    throw new WebSocketError(
-      error.topic,
-      error.error.code,
-      error.error.message,
-      error.recoverable ?? false,
-      error.error.details ?? undefined,
-    )
+  globalErrorHandler(error: SubscriptionError): void {
+    throw WebSocketError.fromSubscription(error)
   }
 
   /**
    * Route error messages to the appropriate subscription handler or global handler.
    */
   private routeErrorMessage(error: SubscriptionError): void {
-    this.logger.debug(`${error.topic} error received:`, error)
     const subscription = this.subscriptions.get(error.topic)
-    if (!subscription) {
-      this.logger.warn(`No subscription found for error topic: ${error.topic}`)
-      this.globalErrorHandler(error)
-      return
-    }
-
-    if (subscription.onError) {
+    if (subscription) {
       subscription.onError(error)
     } else {
       this.globalErrorHandler(error)
@@ -290,7 +277,7 @@ export class WebSocketBase {
     subType: string,
     sub_params: object,
     onUpdate: (TbackendData: object) => void,
-    onError?: (error: SubscriptionError) => void
+    onError: (error: SubscriptionError) => void
   ): Promise<string> {
 
     // Generate unique sub_id hash
@@ -456,10 +443,16 @@ export interface WebSocketInterface<TParams extends object, TData extends object
   destroy?(): void
 }
 
+/** Listener callbacks stored per-listener for fanout */
+interface ListenerCallbacks<TData extends object> {
+  onUpdate: (data: TData) => void
+  onError: (error: SubscriptionError) => void
+}
+
 export class WebSocketClient<TParams extends object, TBackendData extends object, TData extends object> implements WebSocketInterface<TParams, TData> {
   protected baseSocket: WebSocketBase
   protected topics: Map<string, Promise<string>>
-  protected listeners: Map<string, Map<string, (data: TData) => void>>
+  protected listeners: Map<string, Map<string, ListenerCallbacks<TData>>>
   protected debouncedUnsub: Map<string, NodeJS.Timeout>
 
   private wsRoute: string = ''
@@ -498,18 +491,28 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
       if (topicListeners?.has(listenerId)) {
         console.warn(`listener ${listenerId} spamming for the same subscription`, paramsKey)
       }
-      topicListeners.set(listenerId, onUpdate)
+      topicListeners.set(listenerId, {
+        onUpdate,
+        onError: onError || ((error) => this.baseSocket.globalErrorHandler(error))
+      })
     } else {
       console.log(`listener ${listenerId} subscribing to new params:`, paramsKey)
-      this.listeners.set(paramsKey, new Map([[listenerId, onUpdate]]))
+      this.listeners.set(paramsKey, new Map([[listenerId, {
+        onUpdate,
+        onError: onError || ((error) => this.baseSocket.globalErrorHandler(error))
+      }]]))
       const topicPromise = this.baseSocket.subscribe(
         this.wsRoute,
         subscriptionParams,
         (backendData: object) =>
           this.listeners.get(paramsKey)?.forEach(
-            (onUpdate) => onUpdate(this.dataMapper(backendData as TBackendData))
+            ({ onUpdate }) => onUpdate(this.dataMapper(backendData as TBackendData))
           ),
-        onError
+        (error: SubscriptionError) => {
+          this.listeners.get(paramsKey)?.forEach(
+            ({ onError }) => onError?.(error)
+          )
+        }
       )
       this.topics.set(paramsKey, topicPromise)
     }
