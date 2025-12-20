@@ -14,11 +14,24 @@ BOUNDARY_RULES = {
         "forbidden_patterns": ["trading_api.*"],
         "description": "Models are pure data - no trading_api imports allowed",
     },
+    "capabilities/*": {
+        "allowed_patterns": [
+            "trading_api.models.*",
+            "trading_api.capabilities.*",  # Capabilities can reference each other
+        ],
+        "forbidden_patterns": [
+            "trading_api.modules.*",
+            "trading_api.providers.*",
+            "trading_api.shared.*",
+        ],
+        "description": "Capabilities are pure ABCs - only models and other capabilities allowed",
+    },
     "providers/*": {
         "allowed_patterns": [
             "trading_api.models.*",
             "trading_api.shared.*",
             "trading_api.providers.*",  # Providers can import other providers
+            "trading_api.capabilities.*",  # Providers implement capabilities
         ],
         "forbidden_patterns": ["trading_api.modules.*"],
         "description": "Providers can import models, config, and other providers, but not modules",
@@ -28,6 +41,7 @@ BOUNDARY_RULES = {
             "trading_api.models.*",
             "trading_api.shared.*",
             "trading_api.providers.*",  # Tests can import concrete providers for DI
+            "trading_api.capabilities.*",
             "trading_api.app_factory",
         ],
         "forbidden_patterns": ["trading_api.modules.*"],  # Block cross-module imports
@@ -43,7 +57,7 @@ BOUNDARY_RULES = {
         "forbidden_patterns": [
             "trading_api.modules.*",
             "trading_api.providers.google",  # Block concrete providers
-            "trading_api.providers.capabilities.*",  # Block capability interfaces
+            "trading_api.capabilities.*",  # Block capability interfaces
         ],
         "description": "Shared can import models, Provider ABC (types only), but not modules or capability interfaces",
     },
@@ -52,7 +66,7 @@ BOUNDARY_RULES = {
             "trading_api.models.*",
             "trading_api.shared.*",
             "trading_api.providers.base",  # Provider ABC for types
-            "trading_api.providers.capabilities.*",  # Capability interfaces
+            "trading_api.capabilities.*",  # Capability interfaces
             "trading_api.app_factory",
         ],
         "forbidden_patterns": [
@@ -67,6 +81,7 @@ BOUNDARY_RULES = {
             "trading_api.models.*",
             "trading_api.shared.*",
             "trading_api.providers.*",  # Tests can import concrete providers for DI
+            "trading_api.capabilities.*",  # Capability interfaces
             "trading_api.app_factory",
         ],
         "forbidden_patterns": [

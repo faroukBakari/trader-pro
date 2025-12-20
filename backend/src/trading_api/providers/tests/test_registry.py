@@ -79,7 +79,7 @@ async def test_get_providers_capability_not_found(registry: ProviderRegistry) ->
 
     # MockProvider only provides "auth", not "broker"
     with pytest.raises(CommonException, match="No provider found"):
-        await registry.get_providers([CapabilitySpec(name="broker")])  # type: ignore[arg-type]
+        await registry.get_providers([CapabilitySpec(name="broker")])
 
 
 @pytest.mark.asyncio

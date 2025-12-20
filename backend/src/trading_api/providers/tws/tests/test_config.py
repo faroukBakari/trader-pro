@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from trading_api.models.providers.tws.tws_configs import TWSProviderConfig
+from trading_api.models.providers.tws_configs import TWSProviderConfig
 
 
 class TestTWSProviderConfig:

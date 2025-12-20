@@ -160,8 +160,8 @@ __all__ = [
 # Provider/Capability System Models
 # ==============================================================================
 
-# Capability name for auth, datafeed (future: "broker", etc.)
-CapabilityName = Literal["auth", "datafeed"]
+# Capability name for auth, broker, datafeed
+CapabilityName = Literal["auth", "broker", "datafeed"]
 
 
 @dataclass(frozen=True)

@@ -31,7 +31,7 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.models.providers.tws.tws_configs import TWSProviderConfig
+from trading_api.models.providers.tws_configs import TWSProviderConfig
 from trading_api.providers.tws import TWSProvider
 from trading_api.providers.tws.tws_mappers import contract_description_to_search_result
 

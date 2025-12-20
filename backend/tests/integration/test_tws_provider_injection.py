@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from trading_api.app_factory import AppFactory
-from trading_api.providers.capabilities.datafeed import DatafeedCapability
+from trading_api.capabilities.datafeed import DatafeedCapability
 from trading_api.providers.tws import TWSProvider
 
 

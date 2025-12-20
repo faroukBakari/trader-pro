@@ -22,6 +22,11 @@ from httpx import AsyncClient
 from jose import jwt
 
 from trading_api.app_factory import ModularApp
+from trading_api.capabilities.auth import AuthCapability
+
+# Import BrokerService for broker_provider fixture
+from trading_api.capabilities.broker import BrokerCapability
+from trading_api.capabilities.datafeed import DatafeedCapability
 from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
@@ -32,8 +37,10 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.providers.capabilities.auth import AuthCapability
-from trading_api.providers.capabilities.datafeed import DatafeedCapability
+from trading_api.modules.broker.service import BrokerService
+
+# Import FakeBrokerProvider for integration tests (needs full broker functionality)
+from trading_api.providers.fakebroker import FakeBrokerProvider
 from trading_api.shared import FastWSAdapter, Provider
 from trading_api.shared.config import Settings
 
@@ -369,6 +376,7 @@ async def apps() -> ModularApp:
     factory.provider_registry.clear()
     factory.provider_registry.register(MockDatafeedProvider, "mock_datafeed")
     factory.provider_registry.register(MockAuthProvider, "mock_auth")
+    factory.provider_registry.register(FakeBrokerProvider, "fake_broker")
 
     # Resolve required capabilities
     required_capabilities = factory._resolve_capabilities(None)
@@ -407,6 +415,24 @@ async def apps() -> ModularApp:
     )
 
     return modular_app
+
+
+@pytest.fixture(scope="module")
+def broker_provider(apps: ModularApp) -> BrokerCapability:
+    """Get the broker provider from the apps fixture.
+
+    Args:
+        apps: The full modular application with all modules
+
+    Returns:
+        BrokerCapability: The broker provider (e.g., FakeBrokerProvider)
+    """
+    # Find the broker module app and extract the provider
+    for module_app in apps.modules_apps:
+        if isinstance(module_app.module.service, BrokerService):
+            return module_app.module.service.broker_provider
+
+    raise RuntimeError("BrokerService not found in apps.modules_apps")
 
 
 @pytest.fixture(scope="module")

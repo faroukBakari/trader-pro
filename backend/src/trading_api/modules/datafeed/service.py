@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
+from trading_api.capabilities.datafeed import DatafeedCapability
 from trading_api.models import (
     Bar,
     BarsSubscriptionRequest,
@@ -21,7 +22,7 @@ from trading_api.models import (
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ServiceException, TradingApiException
 from trading_api.models.market import Resolution
-from trading_api.providers.capabilities.datafeed import DatafeedCapability
+from trading_api.models.market.quotes import QuoteValues
 from trading_api.shared.ws.ws_router import (
     ProviderUpdateCallback,
     TopicErrorCallback,
@@ -97,6 +98,7 @@ class DatafeedService(WsRouteService):
         self.configuration = DatafeedConfiguration()
         # Track provider subscription IDs for each topic (for cleanup)
         self._topic_to_subscription_id: dict[str, str | list[str]] = {}
+        self._last_bars: dict[str, Bar] = {}
 
     def get_configuration(self) -> DatafeedConfiguration:
         """Get datafeed configuration.
@@ -377,21 +379,53 @@ class DatafeedService(WsRouteService):
         if count_back and count_back > 0:
             bars = bars[-count_back:]
 
+        # Cache the last bar for the ticker
+        if bars and (
+            ticker not in self._last_bars
+            or self._last_bars[ticker].time < bars[-1].time
+        ):
+            self._last_bars[ticker] = bars[-1]
+
         return bars
 
     async def get_quotes(self, tickers: List[str]) -> List[QuoteData]:
         """Get quotes for multiple symbols"""
 
-        # try:
-        # Delegate to provider for real quote snapshots
-        return await self.datafeed_provider.get_quotes_snapshot(
-            ticker_names=tickers,
-            timeout=6.0,
-        )
-        # except ProviderException as e:
-        #     logger.exception(e)
-        #     # Return error responses for all symbols
-        #     return [
-        #         QuoteData(s="error", n=symbol, v={"error": f"{e!r}"})
-        #         for symbol in tickers
-        #     ]
+        try:
+            # Delegate to provider for real quote snapshots
+            return await self.datafeed_provider.get_quotes_snapshot(
+                ticker_names=tickers,
+                timeout=1.0,
+            )
+        except Exception as e:
+            # Fallback: use last cached bar as quote (if available) for debugging
+            if any(ticker not in self._last_bars for ticker in tickers):
+                raise e  # Reraise if we have no cached data for any ticker
+            logger.exception(e)
+            quotes_result: list[QuoteData] = []
+            for ticker in tickers:
+                last_bar: Optional[Bar] = self._last_bars.get(ticker)
+                quotes_result.append(
+                    QuoteData(
+                        s="ok",
+                        n=ticker,
+                        v=QuoteValues(
+                            lp=last_bar.close if last_bar else 0.0,
+                            ask=last_bar.close + 0.01 if last_bar else 0.0,
+                            bid=last_bar.close - 0.01 if last_bar else 0.0,
+                            spread=0.2,
+                            open_price=last_bar.open if last_bar else 0.0,
+                            high_price=last_bar.high if last_bar else 0.0,
+                            low_price=last_bar.low if last_bar else 0.0,
+                            prev_close_price=last_bar.close if last_bar else 0.0,
+                            volume=last_bar.volume if last_bar else 0,
+                            ch=0.0,
+                            chp=0.0,
+                            short_name=ticker,
+                            exchange="",
+                            description=f"Quote for {ticker}",
+                            original_name=ticker,
+                        ),
+                    )
+                )
+            return quotes_result

@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from trading_api.app_factory import AppFactory, ModularApp
+from trading_api.capabilities.datafeed import DatafeedCapability
 from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
@@ -25,7 +26,6 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.shared import FastWSAdapter, Provider
 
 

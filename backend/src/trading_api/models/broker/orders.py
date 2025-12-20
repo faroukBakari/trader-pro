@@ -65,24 +65,26 @@ class PreOrder(BaseModel):
     type: OrderType = Field(..., description="Order type")
     side: Side = Field(..., description="Order/execution side")
     qty: float = Field(..., description="Order quantity", gt=0)
-    limitPrice: Optional[float] = Field(None, description="Order limit price")
-    stopPrice: Optional[float] = Field(None, description="Order stop price")
+    limitPrice: Optional[float] = Field(default=None, description="Order limit price")
+    stopPrice: Optional[float] = Field(default=None, description="Order stop price")
     takeProfit: Optional[float] = Field(
-        None, description="Order take profit (Brackets)"
+        default=None, description="Order take profit (Brackets)"
     )
-    stopLoss: Optional[float] = Field(None, description="Order stop loss (Brackets)")
+    stopLoss: Optional[float] = Field(
+        default=None, description="Order stop loss (Brackets)"
+    )
     guaranteedStop: Optional[float] = Field(
-        None, description="Order guaranteed stop loss (Brackets)"
+        default=None, description="Order guaranteed stop loss (Brackets)"
     )
     trailingStopPips: Optional[float] = Field(
-        None, description="Order trailing stop (Brackets)"
+        default=None, description="Order trailing stop (Brackets)"
     )
-    stopType: Optional[StopType] = Field(None, description="Type of stop order")
+    stopType: Optional[StopType] = Field(default=None, description="Type of stop order")
     seenPrice: Optional[float] = Field(
-        None, description="Price seen at order creation time"
+        default=None, description="Price seen at order creation time"
     )
     currentQuotes: Optional[CurrentQuotes] = Field(
-        None, description="Current market quotes (ask and bid)"
+        default=None, description="Current market quotes (ask and bid)"
     )
 
     model_config = {"use_enum_values": True}

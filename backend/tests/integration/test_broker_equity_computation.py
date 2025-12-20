@@ -30,14 +30,19 @@ from pathlib import Path
 import pytest
 
 from trading_api.models.broker import OrderType, PreOrder, Side
+from trading_api.models.providers.fake_broker_configs import FakeBrokerProviderConfig
 from trading_api.modules.broker.service import BrokerService
+from trading_api.providers.fakebroker import FakeBrokerProvider
 
 # ================================ FIXTURES ================================= #
 
 
 @pytest.fixture
 def broker_service() -> BrokerService:
-    """Create broker service with manual execution control."""
+    """Create broker service with manual execution control.
+
+    Uses FakeBrokerProvider with fast execution delays for testing.
+    """
     module_dir = (
         Path(__file__).parent.parent.parent
         / "src"
@@ -45,7 +50,15 @@ def broker_service() -> BrokerService:
         / "modules"
         / "broker"
     )
-    service = BrokerService(module_dir=module_dir, execution_delay=None)
+
+    # Create provider with fast execution for tests (effectively disabled)
+    config = FakeBrokerProviderConfig(
+        execution_delay_min=0.01,
+        execution_delay_max=0.02,
+    )
+    provider = FakeBrokerProvider(config=config)
+
+    service = BrokerService(module_dir=module_dir, providers=[provider])
     return service
 
 
@@ -88,8 +101,10 @@ async def place_and_execute(
     )
     result = await service.place_order(order)
 
-    # Execute immediately
-    await service._simulate_execution(result.orderId)
+    # Execute immediately via provider
+    provider = service.broker_provider
+    assert isinstance(provider, FakeBrokerProvider)
+    await provider._simulate_execution(result.orderId)
 
 
 def assert_accounting(
@@ -110,7 +125,9 @@ def assert_accounting(
         realized_pl: Expected realized P/L
         tolerance: Acceptable deviation for floating-point comparison
     """
-    accounting = service.accounting
+    provider = service.broker_provider
+    assert isinstance(provider, FakeBrokerProvider)
+    accounting = provider._equity
 
     assert (
         abs(accounting.balance - balance) < tolerance
@@ -144,7 +161,9 @@ def assert_position(
         expected_avg_price: Expected average price
         tolerance: Acceptable deviation for floating-point comparison
     """
-    position = service._positions.get(symbol)
+    provider = service.broker_provider
+    assert isinstance(provider, FakeBrokerProvider)
+    position = provider._positions.get(symbol)
 
     if expected_qty == 0:
         assert (
@@ -171,11 +190,12 @@ def set_initial_balance(service: BrokerService, balance: float) -> None:
         service: Broker service instance
         balance: Initial balance to set
     """
-    service.initial_balance = balance
-    service.accounting.balance = balance
-    service.accounting.equity = balance
-    service.accounting.unrealizedPL = 0.0
-    service.accounting.realizedPL = 0.0
+    provider = service.broker_provider
+    assert isinstance(provider, FakeBrokerProvider)
+    provider._equity.balance = balance
+    provider._equity.equity = balance
+    provider._equity.unrealizedPL = 0.0
+    provider._equity.realizedPL = 0.0
 
 
 # ================================ TEST CASES =============================== #
@@ -483,7 +503,9 @@ async def test_case_8_round_trip_with_commission(broker_service: BrokerService) 
     set_initial_balance(broker_service, 50000.0)
 
     # Apply commission manually for first order
-    broker_service.accounting.balance -= 5.0
+    provider = broker_service.broker_provider
+    assert isinstance(provider, FakeBrokerProvider)
+    provider._equity.balance -= 5.0
 
     # Execution 1: Buy 100 @ 500.00
     await place_and_execute(broker_service, "AAPL", Side.BUY, 100, 500.0)
@@ -491,7 +513,7 @@ async def test_case_8_round_trip_with_commission(broker_service: BrokerService) 
     assert_accounting(broker_service, 49995.0, 49995.0, 0.0, 0.0)
 
     # Apply commission for second order
-    broker_service.accounting.balance -= 5.0
+    provider._equity.balance -= 5.0
 
     # Execution 2: Sell 100 @ 510.00
     await place_and_execute(broker_service, "AAPL", Side.SELL, 100, 510.0)

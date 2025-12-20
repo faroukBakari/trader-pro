@@ -52,7 +52,7 @@ async def test_auth_service_uses_provider():
     assert hasattr(auth_service, "auth_provider")
 
     # Should be AuthCapability instance
-    from trading_api.providers.capabilities.auth import AuthCapability
+    from trading_api.capabilities.auth import AuthCapability
 
     assert isinstance(auth_service.get_capability_provider("auth"), AuthCapability)
 
