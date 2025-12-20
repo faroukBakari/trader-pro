@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from trading_api.capabilities.datafeed import DatafeedCapability
 from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
@@ -17,7 +18,6 @@ from trading_api.models.market import (
     SymbolInfo,
 )
 from trading_api.modules.datafeed.service import DatafeedService
-from trading_api.providers.capabilities.datafeed import DatafeedCapability
 from trading_api.shared import Provider
 
 

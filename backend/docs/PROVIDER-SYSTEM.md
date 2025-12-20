@@ -76,7 +76,7 @@ from pathlib import Path
 from typing import Any
 from trading_api.models.common import CapabilitySpec, AuthenticationError
 from trading_api.shared import Provider
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class LocalProvider(Provider, AuthCapability):
     def __init__(self, config: LocalProviderConfig | None = None):
@@ -180,7 +180,7 @@ class MyProvider(Provider):
 Contract that providers must implement.
 
 ```python
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class MyProvider(Provider, AuthCapability):
     async def verify_token(self, token: str) -> dict[str, Any]:
@@ -324,7 +324,7 @@ from trading_api.models.common import (
     CapabilitySpec,
 )
 from trading_api.shared import Provider
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 
 class LocalProvider(Provider, AuthCapability):
@@ -730,8 +730,8 @@ async def test_verify_token_mocks_google_api(provider):
 **Use Case:** Single provider implements multiple capabilities.
 
 ```python
-from trading_api.providers.capabilities.auth import AuthCapability
-from trading_api.providers.capabilities.broker import BrokerCapability  # Future
+from trading_api.capabilities.auth import AuthCapability
+from trading_api.capabilities.broker import BrokerCapability  # Future
 
 class IBKRProvider(Provider, AuthCapability, BrokerCapability):
     """IBKR provider implementing auth + broker capabilities."""
@@ -1366,7 +1366,7 @@ See **[TWS Provider Implementation Guide](../src/trading_api/providers/tws/READM
 from pathlib import Path
 from trading_api.models.common import CapabilitySpec
 from trading_api.shared import Provider
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class MyproviderProvider(Provider, AuthCapability):
     @classmethod

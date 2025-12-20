@@ -4,13 +4,16 @@ Tests that verify all modules work correctly together.
 """
 
 import time
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 from starlette.websockets import WebSocketDisconnect
+
+if TYPE_CHECKING:
+    from trading_api.capabilities.broker import BrokerCapability
 
 
 def receive_message_by_type(
@@ -253,7 +256,10 @@ async def test_cors_headers_present(async_client: AsyncClient) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_multi_module_workflow_end_to_end(async_client: AsyncClient) -> None:
+async def test_multi_module_workflow_end_to_end(
+    async_client: AsyncClient,
+    broker_provider: "BrokerCapability",
+) -> None:
     """Test complete workflow across multiple modules."""
     # 1. Check datafeed config
     config_response = await async_client.get("/api/v1/datafeed/config")
@@ -293,9 +299,8 @@ async def test_multi_module_workflow_end_to_end(async_client: AsyncClient) -> No
     order = order_response.json()
     order["orderId"]
 
-    # 5. Execute the order
-    execute_response = await async_client.post("/api/v1/broker/debug/execute-orders")
-    assert execute_response.status_code == 200
+    # 5. Execute the order via provider directly
+    await broker_provider.execute_all_working_orders()  # type: ignore[attr-defined]
 
     # 6. Verify position created
     updated_positions_response = await async_client.get("/api/v1/broker/positions")

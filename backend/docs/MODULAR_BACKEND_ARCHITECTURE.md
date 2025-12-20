@@ -1223,7 +1223,7 @@ class MyProvider(Provider):
 #### AuthCapability - Authentication Contract Interface
 
 ```python
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class MyProvider(Provider, AuthCapability):
     async def verify_token(self, token: str) -> dict[str, Any]:
@@ -1299,7 +1299,7 @@ def _get_capability_provider(self, capability_name: str) -> "Provider":
 ```python
 # modules/auth/service.py
 from trading_api.models.common import CapabilitySpec
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class AuthService(ServiceInterface):
     @classmethod
@@ -1332,7 +1332,7 @@ class AuthService(ServiceInterface):
 ```python
 # providers/google/__init__.py
 from trading_api.shared import Provider
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class GoogleProvider(Provider, AuthCapability):
     @classmethod

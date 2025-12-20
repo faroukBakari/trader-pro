@@ -5,10 +5,10 @@ from typing import Any
 
 import httpx
 
+from trading_api.capabilities.auth import AuthCapability
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.providers.google_oauth_configs import GoogleProviderConfig
-from trading_api.providers.capabilities.auth import AuthCapability
 from trading_api.shared import Provider
 
 

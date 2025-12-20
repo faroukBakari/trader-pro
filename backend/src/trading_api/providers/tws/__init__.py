@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 from ibapi.common import BarData
 from ibapi.contract import Contract
 
+from trading_api.capabilities.datafeed import DatafeedCapability
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ProviderException, TradingApiException
 from trading_api.models.market import (
@@ -32,8 +33,7 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.models.providers.tws.tws_configs import TWSProviderConfig
-from trading_api.providers.capabilities.datafeed import DatafeedCapability
+from trading_api.models.providers.tws_configs import TWSProviderConfig
 from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.shared import Provider
 
@@ -327,7 +327,7 @@ class TWSProvider(Provider, DatafeedCapability):
                 f"Getting quotes snapshot for ticker: {ticker_name} for exchange: {contract.exchange}"
             )
 
-        nb_retreis = 3
+        nb_retreis = 2
         while True:
             try:
                 results_raw = await asyncio.gather(
