@@ -560,8 +560,8 @@ dev:
 		exit 1; \
 	fi
 	@echo "✅ Port $(BACKEND_PORT) is available"
-	@echo "Debug server listening on port 5678 (attach debugger to localhost:5678)"
-	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" \
+	@echo "Debug server listening on port 4444 (attach debugger to localhost:4444)"
+	poetry run python -m debugpy --listen 0.0.0.0:4444 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" \
 		--reload \
 		--reload-exclude '**/*__generated/*' \
 		--reload-exclude '**/.local/*' \

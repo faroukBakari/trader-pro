@@ -27,12 +27,12 @@
             ]
         },
         {
-            "name": "Backend: Attach to Remote Debugpy (Port 5678)",
+            "name": "Backend: Attach to Remote Debugpy (Port 4444)",
             "type": "debugpy",
             "request": "attach",
             "connect": {
                 "host": "localhost",
-                "port": 5678
+                "port": 4444
             },
             "pathMappings": [
                 {
