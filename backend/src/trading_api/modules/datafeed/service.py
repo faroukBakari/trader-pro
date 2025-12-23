@@ -60,7 +60,7 @@ class DatafeedService(WsRouteService):
     def capabilities(cls) -> list[CapabilitySpec]:
         """Return required capabilities for datafeed service.
 
-        Requires datafeed capability from provider (e.g., TWSProvider).
+        Requires datafeed capability from provider (e.g., TWSDatafeedProvider).
 
         Returns:
             List with datafeed capability requirement

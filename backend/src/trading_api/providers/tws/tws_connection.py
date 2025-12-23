@@ -3,8 +3,8 @@
 Layer 1 of TWS integration:
 - Pure EWrapper implementation (callbacks only)
 - Zero-copy callback dispatch (< 2µs latency target)
-- No connection management (handled by TWSProvider)
-- No request ID generation (handled by TWSProvider)
+- No connection management (handled by TWSDatafeedProvider)
+- No request ID generation (handled by TWSDatafeedProvider)
 - No AsyncIO - pure sync callbacks in TWS reader thread
 - Signals end-of-stream with None parameter
 - Passes Exception objects directly (no re-wrapping)
@@ -17,7 +17,7 @@ Performance Design:
 Architecture:
 - Pure EWrapper inheritance (no EClient)
 - Callback registry for request-based dispatch
-- Used via composition by TWSProvider
+- Used via composition by TWSDatafeedProvider
 """
 
 import asyncio

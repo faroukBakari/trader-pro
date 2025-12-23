@@ -176,9 +176,9 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### backend/src/trading_api/providers/tws/ (TWS Provider Implementation)
 
-| File                                                | Purpose                                                                                                                                              |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **backend/src/trading_api/providers/tws/README.md** | ⭐ **TWS Datafeed Provider implementation guide** - Three-layer architecture (TWSProvider → TWSClient → IBSocket), threading model, testing patterns |
+| File                                                | Purpose                                                                                                                                                      |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **backend/src/trading_api/providers/tws/README.md** | ⭐ **TWS Datafeed Provider implementation guide** - Three-layer architecture (TWSDatafeedProvider → TWSClient → IBSocket), threading model, testing patterns |
 
 ### backend/external_packages/tws/docs/ (TWS API Documentation)
 
@@ -526,13 +526,13 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TWS API Integration
 
-**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, ticker slots, stream keys, AssetConfig, Resolution enum, ticker naming convention
+**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSDatafeedProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, ticker slots, stream keys, AssetConfig, Resolution enum, ticker naming convention
 
 **Scope**: Interactive Brokers TWS API integration  
 **Out of Scope**: Other broker APIs, custom trading protocols
 
 - **backend/src/trading_api/providers/tws/README.md** - ⭐ TWS Datafeed Provider implementation guide (start here for integration)
-  - Three-layer architecture: TWSProvider → TWSClient → IBSocket
+  - Three-layer architecture: TWSDatafeedProvider → TWSClient → IBSocket
   - Ticker slot streaming pattern, domain mappers, testing patterns
   - Composite ticker format: `{symbol}:{exchange}:{secType}-{conId}[@{bar_size}]`
 - **backend/external_packages/tws/docs/README.md** - TWS API documentation index (includes local modifications)

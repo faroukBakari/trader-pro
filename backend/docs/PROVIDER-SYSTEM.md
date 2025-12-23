@@ -1039,14 +1039,15 @@ class GoogleProvider(Provider, AuthCapability):
 
 Provider error codes follow the pattern: `PROVIDER_{CAPABILITY}_{ERROR_TYPE}`
 
-| Code Pattern | HTTP Status | Description |
-|-------------|-------------|-------------|
-| `PROVIDER_*_NOT_FOUND` | 404 | Resource not found |
-| `PROVIDER_AUTH_*_INVALID` | 401 | Authentication failure |
-| `PROVIDER_*_INVALID` | 400 | Invalid input/request |
-| `PROVIDER_*` (other) | 500 | Internal provider error |
+| Code Pattern              | HTTP Status | Description             |
+| ------------------------- | ----------- | ----------------------- |
+| `PROVIDER_*_NOT_FOUND`    | 404         | Resource not found      |
+| `PROVIDER_AUTH_*_INVALID` | 401         | Authentication failure  |
+| `PROVIDER_*_INVALID`      | 400         | Invalid input/request   |
+| `PROVIDER_*` (other)      | 500         | Internal provider error |
 
 **Examples:**
+
 - `PROVIDER_AUTH_TOKEN_INVALID` → 401 Unauthorized
 - `PROVIDER_DATAFEED_SYMBOL_NOT_FOUND` → 404 Not Found
 - `PROVIDER_BROKER_ORDER_INVALID` → 400 Bad Request
@@ -1065,14 +1066,14 @@ class GoogleProvider(Provider, AuthCapability):
                 code="PROVIDER_AUTH_TOKEN_INVALID",
                 message=f"Google token claims invalid: {e}",
             )
-        
+
         # Validate audience
         if claims.get("aud") != self._config.client_id:
             raise ProviderException(
                 code="PROVIDER_AUTH_AUDIENCE_MISMATCH",
                 message="Token audience doesn't match configured client ID",
             )
-        
+
         return {
             "sub": claims["sub"],
             "email": claims["email"],
@@ -1314,12 +1315,12 @@ raise ProviderException(
 
 **HTTP Status Mapping:**
 
-| Code Pattern | HTTP Status |
-|-------------|-------------|
-| `*_NOT_FOUND` | 404 |
-| `*AUTH*_INVALID` | 401 |
-| `*_INVALID` | 400 |
-| Other | 500 |
+| Code Pattern     | HTTP Status |
+| ---------------- | ----------- |
+| `*_NOT_FOUND`    | 404         |
+| `*AUTH*_INVALID` | 401         |
+| `*_INVALID`      | 400         |
+| Other            | 500         |
 
 **Legacy Exceptions (deprecated):**
 
@@ -1354,7 +1355,7 @@ class CapabilityNotFoundError(ProviderError):
 
 See **[TWS Provider Implementation Guide](../src/trading_api/providers/tws/README.md)** for a production-ready provider implementing:
 
-- Three-layer architecture (TWSProvider → TWSClient → IBSocket)
+- Three-layer architecture (TWSDatafeedProvider → TWSClient → IBSocket)
 - DatafeedCapability interface
 - Async/await with Future-based threading bridge
 - Comprehensive domain mappers

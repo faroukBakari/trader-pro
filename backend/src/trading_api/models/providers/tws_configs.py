@@ -4,7 +4,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class TWSProviderConfig(BaseSettings):
+class TWSDatafeedProviderConfig(BaseSettings):
     """TWS provider configuration.
 
     [AUTO-LOAD]: Reads from environment variables with TWS_ prefix.
@@ -86,4 +86,4 @@ class TWSProviderConfig(BaseSettings):
         return v
 
 
-__all__ = ["TWSProviderConfig"]
+__all__ = ["TWSDatafeedProviderConfig"]
