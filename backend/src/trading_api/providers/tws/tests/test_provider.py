@@ -1,4 +1,4 @@
-"""Tests for TWSProvider - DatafeedCapability implementation.
+"""Tests for TWSDatafeedProvider - DatafeedCapability implementation.
 
 Tests cover:
 - Provider initialization and configuration
@@ -31,29 +31,29 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.models.providers.tws_configs import TWSProviderConfig
-from trading_api.providers.tws import TWSProvider
+from trading_api.models.providers.tws_configs import TWSDatafeedProviderConfig
+from trading_api.providers.tws import TWSDatafeedProvider
 from trading_api.providers.tws.tws_mappers import contract_description_to_search_result
 
 
 class TestProviderInitialization:
-    """Test TWSProvider initialization and configuration."""
+    """Test TWSDatafeedProvider initialization and configuration."""
 
     def test_provider_default_config(self) -> None:
-        """Test TWSProvider uses default config when none provided."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
+        """Test TWSDatafeedProvider uses default config when none provided."""
+        with patch("trading_api.providers.tws.datafeed_provider.TWSClient"):
+            provider = TWSDatafeedProvider()
 
         assert provider.config.host == "127.0.0.1"
         assert provider.config.port == 7497
         assert provider.config.client_id == 1
 
     def test_provider_with_custom_config(self) -> None:
-        """Test TWSProvider config is stored correctly."""
-        config = TWSProviderConfig(host="192.168.1.1", port=4002, client_id=2)
+        """Test TWSDatafeedProvider config is stored correctly."""
+        config = TWSDatafeedProviderConfig(host="192.168.1.1", port=4002, client_id=2)
 
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider(config=config)
+        with patch("trading_api.providers.tws.datafeed_provider.TWSClient"):
+            provider = TWSDatafeedProvider(config=config)
 
         assert provider.config.host == "192.168.1.1"
         assert provider.config.port == 4002
@@ -61,23 +61,25 @@ class TestProviderInitialization:
 
     def test_provider_capabilities(self) -> None:
         """Test provider capabilities declaration."""
-        caps = TWSProvider.capabilities()
+        caps = TWSDatafeedProvider.capabilities()
 
         assert len(caps) == 1
         assert caps[0].name == "datafeed"
 
     def test_provider_name(self) -> None:
         """Test provider name."""
-        with patch("trading_api.providers.tws.TWSClient"):
-            provider = TWSProvider()
+        with patch("trading_api.providers.tws.datafeed_provider.TWSClient"):
+            provider = TWSDatafeedProvider()
 
         assert provider.name == "tws"
 
     def test_provider_creates_tws_client(self) -> None:
         """Test provider creates TWSClient with config."""
-        with patch("trading_api.providers.tws.TWSClient") as MockClient:
-            config = TWSProviderConfig(host="10.0.0.1", port=4001, client_id=10)
-            TWSProvider(config=config)
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient"
+        ) as MockClient:
+            config = TWSDatafeedProviderConfig(host="10.0.0.1", port=4001, client_id=10)
+            TWSDatafeedProvider(config=config)
 
         MockClient.assert_called_once_with("10.0.0.1", 4001, 10)
 
@@ -178,8 +180,11 @@ class TestSearchSymbols:
         mock_client = Mock()
         mock_client.reqMatchingSymbols = AsyncMock(return_value=[desc1, desc2])
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
 
             # Execute search
             results = await provider.search_symbols("AAPL")
@@ -201,8 +206,11 @@ class TestSearchSymbols:
         mock_client = Mock()
         mock_client.reqMatchingSymbols = AsyncMock(return_value=[])
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
             results = await provider.search_symbols("NONEXISTENT")
 
         assert results == []
@@ -234,8 +242,11 @@ class TestGetSymbolInfo:
         mock_client = Mock()
         mock_client.reqContractDetails = AsyncMock(return_value=[details])
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
 
             # Execute get_symbol_info with composite ticker format
             result = await provider.get_symbol_info("MSFT:NASDAQ:STK-12345")
@@ -271,8 +282,11 @@ class TestGetSymbolInfo:
         mock_client = Mock()
         mock_client.reqContractDetails = AsyncMock(return_value=[details])
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
             # Use composite ticker format (exchange already in ticker)
             await provider.get_symbol_info("AAPL:NASDAQ:STK-12345")
 
@@ -286,8 +300,11 @@ class TestGetSymbolInfo:
         mock_client = Mock()
         mock_client.reqContractDetails = AsyncMock(return_value=[])
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
 
             with pytest.raises(ProviderException, match="Symbol not found"):
                 # Use composite ticker format
@@ -316,8 +333,11 @@ class TestGetSymbolInfo:
         mock_client = Mock()
         mock_client.reqContractDetails = AsyncMock(return_value=[details1, details2])
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
             # Use composite ticker format
             result = await provider.get_symbol_info("AAPL:NASDAQ:STK-12345")
 
@@ -351,8 +371,11 @@ class TestGetHistoricalBars:
         mock_client = Mock()
         mock_client.reqHistoricalData = AsyncMock(return_value=[bar1, bar2])
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
 
             start = datetime(2023, 12, 15, 9, 30, 0, tzinfo=timezone.utc)
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
@@ -376,8 +399,11 @@ class TestGetHistoricalBars:
         mock_client = Mock()
         mock_client.reqHistoricalData = AsyncMock(return_value=[])
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
 
             start = datetime(2023, 12, 15, 9, 30, 0, tzinfo=timezone.utc)
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
@@ -401,8 +427,11 @@ class TestGetHistoricalBars:
         mock_client = Mock()
         mock_client.reqHistoricalData = AsyncMock(return_value=[])
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
 
             start = datetime(2023, 12, 15, 9, 30, 0, tzinfo=timezone.utc)
             end = datetime(2023, 12, 15, 16, 0, 0, tzinfo=timezone.utc)
@@ -433,8 +462,11 @@ class TestGetQuotesSnapshot:
         mock_client = AsyncMock()
         mock_client.reqQuoteSnapshot.return_value = {}
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
             # Use composite ticker format
             results = await provider.get_quotes_snapshot(
                 ["AAPL:NASDAQ:STK-12345", "MSFT:NASDAQ:STK-67890"]
@@ -449,8 +481,11 @@ class TestGetQuotesSnapshot:
         mock_client = AsyncMock()
         mock_client.reqQuoteSnapshot.return_value = {}
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
             # Use composite ticker format
             results = await provider.get_quotes_snapshot(["AAPL:NASDAQ:STK-12345"])
 
@@ -464,8 +499,11 @@ class TestGetQuotesSnapshot:
             "ticker_name": "AAPL:NASDAQ:STK-12345"
         }
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
             results = await provider.get_quotes_snapshot(["AAPL:NASDAQ:STK-12345"])
 
         # Verify the symbol name is the full ticker_name
@@ -480,8 +518,11 @@ class TestSubscriptionMethods:
         mock_client = Mock()
         mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
 
             async def bar_callback(bar: object) -> None:
                 pass
@@ -504,8 +545,11 @@ class TestSubscriptionMethods:
             ]
         )
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
 
             async def quote_callback(quote: object) -> None:
                 pass
@@ -529,8 +573,11 @@ class TestSubscriptionMethods:
         mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
         mock_client.cancelBarDataStream = Mock()
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
 
             async def bar_callback(bar: object) -> None:
                 pass
@@ -551,8 +598,11 @@ class TestSubscriptionMethods:
         mock_client.reqMktDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345")
         mock_client.cancelMktDataStream = Mock()
 
-        with patch("trading_api.providers.tws.TWSClient", return_value=mock_client):
-            provider = TWSProvider()
+        with patch(
+            "trading_api.providers.tws.datafeed_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSDatafeedProvider()
 
             async def quote_callback(quote: object) -> None:
                 pass

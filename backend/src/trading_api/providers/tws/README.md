@@ -8,14 +8,14 @@
 
 ## Quick Reference
 
-| Layer               | File                                  | Responsibility                                    |
-| ------------------- | ------------------------------------- | ------------------------------------------------- |
-| **3 - TWSProvider** | `__init__.py`                         | DatafeedCapability impl, domain conversion        |
-| **2 - TWSClient**   | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket  |
-| **1 - IBSocket**    | `tws_connection.py`                   | Raw TCP, daemon thread, ticker slot registry      |
-| **Mappers**         | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing     |
-| **Models**          | `tws_models.py`                       | `TWSCapability`, `AssetConfig`, tick/msg mappings |
-| **Config**          | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings               |
+| Layer                       | File                                  | Responsibility                                    |
+| --------------------------- | ------------------------------------- | ------------------------------------------------- |
+| **3 - TWSDatafeedProvider** | `__init__.py`                         | DatafeedCapability impl, domain conversion        |
+| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket  |
+| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, ticker slot registry      |
+| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing     |
+| **Models**                  | `tws_models.py`                       | `TWSCapability`, `AssetConfig`, tick/msg mappings |
+| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings               |
 
 **Tests:** `providers/tws/tests/test_{client,mappers,provider}.py`
 
@@ -29,7 +29,7 @@
 DatafeedService (provider-agnostic)
         │ requires capability="datafeed"
         ▼
-TWSProvider (Layer 3) ─── implements DatafeedCapability
+TWSDatafeedProvider (Layer 3) ─── implements DatafeedCapability
         │ domain ↔ TWS conversion, stream key management
         ▼
 TWSClient (Layer 2) ─── owns IBSocket, async facade
@@ -46,7 +46,7 @@ TWS/IB Gateway (localhost:7497)
 ```
 Main Thread (AsyncIO)                    Daemon Thread
 ─────────────────────                    ─────────────
-TWSProvider.subscribe_market_data()      IBSocket._reader_loop()
+TWSDatafeedProvider.subscribe_market_data()      IBSocket._reader_loop()
         │                                        │
 TWSClient.reqMktDataStream()             Decoder.interpret()
         │                                        │
@@ -199,7 +199,7 @@ class DatafeedCapability(Protocol):
 | `QuoteData`              | `n`, `s`, `v` (QuoteValues embedded)                | Tick data       |
 | `Resolution`             | `MIN_1`, `MIN_5`, `HOUR_1`, `DAY_1`, etc.           | Resolution enum |
 
-**TWS Types** (used ONLY in TWSProvider/TWSClient):
+**TWS Types** (used ONLY in TWSDatafeedProvider/TWSClient):
 
 - `Contract`, `ContractDetails`, `ContractDescription` — from `ibapi.contract`
 - `BarData` — from `ibapi.common`
@@ -369,7 +369,7 @@ def reqBarDataStream(self, contract: Contract, bar_size: str, callback) -> str:
     self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, [..., keepUpToDate=1, ...])
     return stream_key
 
-# TWSProvider
+# TWSDatafeedProvider
 def subscribe_realtime_bars(self, ticker: str, resolution: Resolution, callback) -> str:
     bar_size = map_resolution_to_tws_bar_size(resolution)
 
@@ -570,11 +570,11 @@ self._reqId_to_capability.pop(reqId, None)
 
 ### Test Strategy
 
-| Layer       | Mock                  | Focus                              |
-| ----------- | --------------------- | ---------------------------------- |
-| TWSProvider | `AsyncMock` TWSClient | Domain conversion, stream keys     |
-| TWSClient   | Mock `IBSocket`       | Stream management, lazy connection |
-| Integration | Mock TWS Gateway      | End-to-end flow                    |
+| Layer               | Mock                  | Focus                              |
+| ------------------- | --------------------- | ---------------------------------- |
+| TWSDatafeedProvider | `AsyncMock` TWSClient | Domain conversion, stream keys     |
+| TWSClient           | Mock `IBSocket`       | Stream management, lazy connection |
+| Integration         | Mock TWS Gateway      | End-to-end flow                    |
 
 ### Mock Pattern for Async Methods
 

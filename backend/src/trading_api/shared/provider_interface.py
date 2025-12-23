@@ -26,14 +26,13 @@ class Provider(ABC):
         ...
 
     @property
-    @abstractmethod
     def name(self) -> str:
-        """Return the unique name identifier for this provider.
+        """Return the unique name identifier for this module.
 
         Returns:
-            str: Provider name (e.g., "google", "ibkr", "local")
+            str: "broker"
         """
-        ...
+        return self.provider_dir().name
 
     @classmethod
     @abstractmethod

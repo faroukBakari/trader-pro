@@ -37,10 +37,13 @@ class ProviderRegistry:
     def auto_discover(self) -> None:
         """Auto-discover providers from directory.
 
-        Convention: providers/{name}/__init__.py exports {Name}Provider
-        Example: providers/google/__init__.py exports GoogleProvider
+        Scans provider modules for classes that inherit from Provider interface.
+        Uses provider_dir().name for canonical provider name (same pattern as ModuleRegistry).
+
+        Example: providers/tws/__init__.py exports TWSDatafeedProvider(Provider)
+                 → registered as "tws" (from provider_dir().name)
         """
-        discovered_providers = {}
+        discovered_providers: dict[str, type[Provider]] = {}
 
         for provider_path in self._providers_dir.iterdir():
             # Skip non-directories and private modules
@@ -51,21 +54,33 @@ class ProviderRegistry:
             if provider_path.name in ("capabilities", "tests"):
                 continue
 
-            provider_name = provider_path.name
-            class_name = f"{provider_name.title()}Provider"
+            module_name = provider_path.name
 
             try:
-                # Import: trading_api.providers.google
+                # Import: trading_api.providers.tws
                 module_import = importlib.import_module(
-                    f"trading_api.providers.{provider_name}"
+                    f"trading_api.providers.{module_name}"
                 )
-                # Get class: GoogleProvider
-                provider_class = getattr(module_import, class_name)
-                discovered_providers[provider_name] = provider_class
-                logger.info(f"Auto-discovered provider: {provider_name}")
-            except (ImportError, AttributeError) as e:
-                logger.warning(f"Failed to discover provider '{provider_name}': {e}")
+            except ImportError as e:
+                logger.warning(f"Failed to import provider module '{module_name}': {e}")
                 continue
+
+            # Scan __all__ for Provider subclasses (same pattern as ModuleRegistry)
+            for attr_name in getattr(module_import, "__all__", []):
+                obj = getattr(module_import, attr_name, None)
+                if not (
+                    isinstance(obj, type)
+                    and issubclass(obj, Provider)
+                    and obj is not Provider
+                ):
+                    continue
+
+                # Use provider_dir().name for canonical name (mirrors Module.module_dir().name)
+                provider_name = obj.provider_dir().name
+                discovered_providers[provider_name] = obj
+                logger.info(
+                    f"Auto-discovered provider: {provider_name} ({obj.__name__})"
+                )
 
         # Register all discovered providers
         for provider_name, provider_class in discovered_providers.items():

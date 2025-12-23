@@ -100,11 +100,6 @@ class FakebrokerProvider(Provider, BrokerCapability):
         """Return provider directory path."""
         return Path(__file__).parent
 
-    @property
-    def name(self) -> str:
-        """Return provider name."""
-        return "fakebroker"
-
     @classmethod
     def capabilities(cls) -> list[CapabilitySpec]:
         """Return capabilities provided by this provider."""

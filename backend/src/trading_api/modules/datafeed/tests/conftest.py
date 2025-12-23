@@ -1,7 +1,7 @@
 """Test fixtures for datafeed module tests.
 
 Provides MockDatafeedProvider to avoid real TWS Gateway connections during tests.
-Overrides the apps fixture to inject mock provider instead of real TWSProvider.
+Overrides the apps fixture to inject mock provider instead of real TWSDatafeedProvider.
 """
 
 import asyncio
@@ -214,7 +214,7 @@ def mock_datafeed_provider() -> MockDatafeedProvider:
 
 @pytest.fixture(scope="module")
 async def apps(mock_datafeed_provider: MockDatafeedProvider) -> ModularApp:
-    """Override apps fixture to inject mock provider instead of real TWSProvider.
+    """Override apps fixture to inject mock provider instead of real TWSDatafeedProvider.
 
     This prevents tests from connecting to real TWS Gateway.
     Only loads datafeed module to avoid needing mock providers for other modules.

@@ -35,11 +35,6 @@ class GoogleProvider(Provider, AuthCapability):
         """Return provider directory."""
         return Path(__file__).parent
 
-    @property
-    def name(self) -> str:
-        """Provider name."""
-        return "google"
-
     @classmethod
     def capabilities(cls) -> list[CapabilitySpec]:
         """Capabilities provided."""
