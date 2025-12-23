@@ -17,7 +17,7 @@ make dev-fullstack
 # Access the application
 # Frontend: http://localhost:5173
 # Backend API: http://localhost:8000/api/docs
-# Python Debugger: localhost:5678
+# Python Debugger: localhost:4444
 ```
 
 ## Architecture
@@ -160,7 +160,7 @@ make -C frontend clean-generated
 ```bash
 make -C backend dev
   ↓
-poetry run python -m debugpy --listen 0.0.0.0:5678 \
+poetry run python -m debugpy --listen 0.0.0.0:4444 \
   -m uvicorn "trading_api.main:app" \
   --reload \
   --reload-exclude '**/.local/*' \
@@ -171,7 +171,7 @@ poetry run python -m debugpy --listen 0.0.0.0:5678 \
 
 **Features:**
 
-- 🐛 **Debugpy** on port 5678 for VS Code debugging
+- 🐛 **Debugpy** on port 4444 for VS Code debugging
 - 🔄 **Auto-reload** on Python file changes
 - 📋 **Excludes** generated files from reload triggers
 - 🔧 **Auto-generates specs** on startup via lifespan event
@@ -391,7 +391,7 @@ trap cleanup EXIT INT TERM
       "request": "attach",
       "connect": {
         "host": "localhost",
-        "port": 5678
+        "port": 4444
       },
       "pathMappings": [
         {
@@ -709,7 +709,7 @@ wait_for_backend() {
 ### Debug Backend Issue
 
 1. Start dev-fullstack: `make dev-fullstack`
-2. Attach VS Code debugger (port 5678)
+2. Attach VS Code debugger (port 4444)
 3. Set breakpoints
 4. Make request from frontend or API docs
 5. Step through code
