@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
@@ -21,6 +21,17 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
+
+if TYPE_CHECKING:
+    from ibapi.order import Order
+
+    from trading_api.models.broker import (
+        AccountMetainfo,
+        EquityData,
+        PlacedOrder,
+        Position,
+        PreOrder,
+    )
 
 # TWS secType → TradingView-style symbol type
 SEC_TYPE_MAP: dict[str, str] = {
@@ -540,6 +551,339 @@ def calculate_tws_duration(
         return f"{years} Y"
 
 
+# =============================================================================
+# Order Mappers (Broker Capability)
+# =============================================================================
+
+# Domain OrderType → TWS orderType string
+ORDER_TYPE_TO_TWS: dict[int, str] = {
+    1: "LMT",  # LIMIT
+    2: "MKT",  # MARKET
+    3: "STP",  # STOP
+    4: "STP LMT",  # STOP_LIMIT
+}
+
+# TWS orderType string → Domain OrderType
+TWS_TO_ORDER_TYPE: dict[str, int] = {
+    "LMT": 1,  # LIMIT
+    "MKT": 2,  # MARKET
+    "STP": 3,  # STOP
+    "STP LMT": 4,  # STOP_LIMIT
+    "STOP": 3,  # Alias
+    "STOP_LIMIT": 4,  # Alias
+}
+
+# Domain Side → TWS action string
+SIDE_TO_TWS_ACTION: dict[int, str] = {
+    1: "BUY",  # Side.BUY
+    -1: "SELL",  # Side.SELL
+}
+
+# TWS action → Domain Side
+TWS_ACTION_TO_SIDE: dict[str, int] = {
+    "BUY": 1,
+    "SELL": -1,
+    "BOT": 1,  # Historical action
+    "SLD": -1,  # Historical action
+}
+
+# TWS order status → Domain OrderStatus
+TWS_STATUS_TO_ORDER_STATUS: dict[str, int] = {
+    "PendingSubmit": 4,  # PLACING
+    "PendingCancel": 4,  # PLACING (transitional)
+    "PreSubmitted": 4,  # PLACING
+    "Submitted": 6,  # WORKING
+    "ApiPending": 4,  # PLACING
+    "ApiCancelled": 1,  # CANCELED
+    "Cancelled": 1,  # CANCELED
+    "Filled": 2,  # FILLED
+    "Inactive": 3,  # INACTIVE
+}
+
+
+def preorder_to_tws(
+    preorder: "PreOrder", account: str = ""
+) -> tuple[Contract, "Order"]:
+    """Convert domain PreOrder to TWS Contract and Order objects.
+
+    Args:
+        preorder: Domain PreOrder with symbol, type, side, qty, prices
+        account: Optional account ID for order routing
+
+    Returns:
+        Tuple of (Contract, Order) ready for TWSClient.placeOrder()
+    """
+    from ibapi.order import Order as TWSOrder
+
+    from trading_api.models.broker import PreOrder as PreOrderModel
+
+    # Type assertion for IDE
+    _preorder: PreOrderModel = preorder  # noqa: F841
+
+    # Build contract from ticker
+    contract = build_contract(preorder.symbol)
+
+    # Build order
+    order = TWSOrder()
+    order.action = SIDE_TO_TWS_ACTION.get(int(preorder.side), "BUY")
+    order.totalQuantity = Decimal(str(preorder.qty))
+    order.orderType = ORDER_TYPE_TO_TWS.get(int(preorder.type), "MKT")
+
+    # Set prices based on order type
+    if preorder.limitPrice is not None:
+        order.lmtPrice = preorder.limitPrice
+    if preorder.stopPrice is not None:
+        order.auxPrice = preorder.stopPrice
+
+    # Set TIF (Time In Force) - default to GTC
+    order.tif = "GTC"
+
+    # Account
+    if account:
+        order.account = account
+
+    # Transmit immediately
+    order.transmit = True
+
+    # Handle bracket orders (stopLoss, takeProfit)
+    # Note: TWS bracket orders require parent order to be placed first,
+    # then child orders with parentId set. This is handled at provider level.
+
+    return contract, order
+
+
+def tws_order_to_placed_order(order_data: dict[str, Any]) -> "PlacedOrder":
+    """Convert TWS order data dict to domain PlacedOrder.
+
+    Args:
+        order_data: Dict from IBSocket order callbacks containing:
+            - orderId: TWS order ID
+            - contract: TWS Contract object
+            - order: TWS Order object
+            - orderState: TWS OrderState object
+            - status: Current status string
+            - filled: Filled quantity
+            - avgFillPrice: Average fill price
+
+    Returns:
+        Domain PlacedOrder model
+    """
+    from trading_api.models.broker import OrderStatus, OrderType
+    from trading_api.models.broker import PlacedOrder as PlacedOrderModel
+    from trading_api.models.broker import Side
+
+    # Extract from nested objects or flattened dict
+    order_id = str(order_data.get("orderId", ""))
+    contract = order_data.get("contract")
+    order = order_data.get("order")
+    order_state = order_data.get("orderState")
+
+    # Symbol from contract or flattened field
+    if contract is not None:
+        symbol = ticker_name(contract)
+    else:
+        sym = order_data.get("symbol", "")
+        exc = order_data.get("exchange", "")
+        sec = order_data.get("secType", "STK")
+        con = order_data.get("conId", 0)
+        symbol = f"{sym}:{exc}:{sec}-{con}"
+
+    # Order type from order object or flattened
+    if order is not None:
+        order_type_str = order.orderType
+    else:
+        order_type_str = order_data.get("orderType", "MKT")
+    order_type = OrderType(TWS_TO_ORDER_TYPE.get(order_type_str, 2))
+
+    # Side from action
+    if order is not None:
+        action = order.action
+    else:
+        action = order_data.get("action", "BUY")
+    side = Side(TWS_ACTION_TO_SIDE.get(action, 1))
+
+    # Quantity
+    if order is not None:
+        qty = float(order.totalQuantity)
+    else:
+        qty = float(order_data.get("totalQuantity", 0))
+
+    # Status
+    if order_state is not None:
+        status_str = order_state.status
+    else:
+        status_str = order_data.get("status", "Submitted")
+    status = OrderStatus(TWS_STATUS_TO_ORDER_STATUS.get(status_str, 6))
+
+    # Prices
+    limit_price: float | None = None
+    stop_price: float | None = None
+    if order is not None:
+        if order.lmtPrice and order.lmtPrice > 0:
+            limit_price = order.lmtPrice
+        if order.auxPrice and order.auxPrice > 0:
+            stop_price = order.auxPrice
+    else:
+        lmt = order_data.get("lmtPrice")
+        if lmt and float(lmt) > 0:
+            limit_price = float(lmt)
+        aux = order_data.get("auxPrice")
+        if aux and float(aux) > 0:
+            stop_price = float(aux)
+
+    # Filled quantity and avg price
+    filled_qty = float(order_data.get("filled", 0))
+    avg_price = float(order_data.get("avgFillPrice", 0)) if filled_qty > 0 else None
+
+    # Filled quantity from order object (alternative source)
+    if filled_qty == 0 and order is not None:
+        fq = order.filledQuantity
+        if fq:
+            filled_qty = float(fq)
+
+    return PlacedOrderModel(
+        id=order_id,
+        symbol=symbol,
+        type=order_type,
+        side=side,
+        qty=qty if qty > 0 else 1,  # Ensure positive qty
+        status=status,
+        limitPrice=limit_price,
+        stopPrice=stop_price,
+        takeProfit=None,  # Not directly available from TWS
+        stopLoss=None,  # Not directly available from TWS
+        guaranteedStop=None,  # Not supported by TWS
+        trailingStopPips=None,  # Would need separate logic
+        stopType=None,  # Not directly available
+        filledQty=filled_qty if filled_qty > 0 else None,
+        avgPrice=avg_price,
+        updateTime=None,  # Could add timestamp if available
+    )
+
+
+# =============================================================================
+# Position/Account Mappers (Broker Capability)
+# =============================================================================
+
+
+def tws_position_to_domain(position_data: dict[str, Any]) -> "Position":
+    """Convert TWS position data dict to domain Position.
+
+    Args:
+        position_data: Dict from IBSocket position callback containing:
+            - account: Account ID
+            - contract: TWS Contract object
+            - position: Position quantity (Decimal, can be negative for short)
+            - avgCost: Average cost per unit
+            - symbol, exchange, secType, conId: Flattened contract fields
+
+    Returns:
+        Domain Position model
+    """
+    from trading_api.models.broker import Position as PositionModel
+    from trading_api.models.broker import Side
+
+    contract = position_data.get("contract")
+    position_qty = position_data.get("position", 0)
+    avg_cost = position_data.get("avgCost", 0.0)
+
+    # Build symbol ticker from contract or flattened fields
+    if contract is not None:
+        symbol = ticker_name(contract)
+    else:
+        sym = position_data.get("symbol", "")
+        exc = position_data.get("exchange", "")
+        sec = position_data.get("secType", "STK")
+        con = position_data.get("conId", 0)
+        symbol = f"{sym}:{exc}:{sec}-{con}"
+
+    # Determine side from position sign
+    # Positive = long, Negative = short
+    qty_float = float(position_qty)
+    side = Side.BUY if qty_float >= 0 else Side.SELL
+
+    # Position ID is typically the symbol
+    position_id = symbol
+
+    return PositionModel(
+        id=position_id,
+        symbol=symbol,
+        qty=abs(qty_float),  # qty is always positive, side indicates direction
+        side=side,
+        avgPrice=float(avg_cost),
+    )
+
+
+def tws_account_summary_to_equity(
+    summary_data: dict[str, dict[str, Any]],
+) -> "EquityData":
+    """Convert TWS account summary to domain EquityData.
+
+    Args:
+        summary_data: Dict from TWSClient.reqAccountSummary() mapping
+            tag names to their value data:
+            {
+                "NetLiquidation": {"account": "DU123", "tag": "NetLiquidation",
+                                   "value": "100000.00", "currency": "USD"},
+                "TotalCashValue": {...},
+                ...
+            }
+
+    Returns:
+        Domain EquityData model
+
+    Notes:
+        - equity = NetLiquidation (total account value including positions)
+        - balance = TotalCashValue (cash balance)
+        - unrealizedPL = UnrealizedPnL (from account summary)
+        - realizedPL = RealizedPnL (from account summary)
+    """
+    from trading_api.models.broker import EquityData as EquityDataModel
+
+    def get_value(tag: str, default: float = 0.0) -> float:
+        """Extract float value from summary data."""
+        tag_data = summary_data.get(tag, {})
+        value_str = tag_data.get("value", "")
+        try:
+            return float(value_str) if value_str else default
+        except (ValueError, TypeError):
+            return default
+
+    return EquityDataModel(
+        equity=get_value("NetLiquidation"),
+        balance=get_value("TotalCashValue"),
+        unrealizedPL=get_value("UnrealizedPnL"),
+        realizedPL=get_value("RealizedPnL"),
+    )
+
+
+def tws_account_summary_to_account_info(
+    summary_data: dict[str, dict[str, Any]], account_id: str
+) -> "AccountMetainfo":
+    """Convert TWS account summary to domain AccountMetainfo.
+
+    Args:
+        summary_data: Dict from TWSClient.reqAccountSummary()
+        account_id: Account ID (from config or first account in summary)
+
+    Returns:
+        Domain AccountMetainfo model
+    """
+    from trading_api.models.broker import AccountMetainfo as AccountMetainfoModel
+
+    # Try to get account from summary data, fall back to provided account_id
+    account = account_id
+    for tag_data in summary_data.values():
+        if "account" in tag_data:
+            account = tag_data["account"]
+            break
+
+    return AccountMetainfoModel(
+        id=account,
+        name=f"IBKR {account}",  # Simple name format
+    )
+
+
 __all__ = [
     "SEC_TYPE_MAP",
     "DEFAULT_SUPPORTED_RESOLUTIONS",
@@ -554,4 +898,16 @@ __all__ = [
     "build_contract",
     "map_resolution_to_tws_bar_size",
     "calculate_tws_duration",
+    # Order mappers
+    "ORDER_TYPE_TO_TWS",
+    "TWS_TO_ORDER_TYPE",
+    "SIDE_TO_TWS_ACTION",
+    "TWS_ACTION_TO_SIDE",
+    "TWS_STATUS_TO_ORDER_STATUS",
+    "preorder_to_tws",
+    "tws_order_to_placed_order",
+    # Position/Account mappers
+    "tws_position_to_domain",
+    "tws_account_summary_to_equity",
+    "tws_account_summary_to_account_info",
 ]

@@ -1,7 +1,7 @@
 """Test fixtures for broker module tests.
 
-Inherits all fixtures (apps, app, ws_app, client, async_client) from root conftest.
-The full application with all modules is used for broker tests.
+Overrides the root apps fixture to load only broker-related modules and providers.
+Uses FakeBrokerProvider instead of TWS for predictable test behavior.
 
 Provides direct access to BrokerService and BrokerProvider for tests that need
 to manipulate broker state directly (e.g., reset, execute_all_working_orders).
@@ -9,9 +9,23 @@ to manipulate broker state directly (e.g., reset, execute_all_working_orders).
 
 import pytest
 
-from trading_api.app_factory import ModularApp
+from trading_api.app_factory import AppFactory, ModularApp
 from trading_api.capabilities.broker import BrokerCapability
 from trading_api.modules.broker.service import BrokerService
+
+
+@pytest.fixture(scope="module")
+async def apps() -> ModularApp:
+    """Broker-specific app with only broker and auth modules.
+
+    Uses FakeBrokerProvider instead of TWS to avoid external dependencies
+    and ensure tests work with simple symbol formats (e.g., "AAPL").
+    """
+    factory = AppFactory()
+    return await factory.create_app(
+        enabled_module_names=["broker", "auth"],
+        enabled_provider_names=["fakebroker", "google"],
+    )
 
 
 @pytest.fixture(scope="module")

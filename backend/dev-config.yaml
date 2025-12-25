@@ -17,6 +17,8 @@ servers:
     instances: 1
     modules:
       - broker
+    # providers:  # Optional: limit providers for this server (default: all)
+    #   - fakebroker
     reload: true
 
   # Market data server
@@ -25,6 +27,8 @@ servers:
     instances: 1
     modules:
       - datafeed
+    # providers:  # Optional: limit providers for this server (default: all)
+    #   - tws
     reload: true
 
 # WebSocket routing strategy

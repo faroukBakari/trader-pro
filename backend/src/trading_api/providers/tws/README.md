@@ -1,8 +1,8 @@
-# TWS Datafeed Provider
+# TWS Provider
 
-**Status:** Production-Ready (Core Capabilities)  
+**Status:** Production-Ready (Datafeed + Broker Capabilities)  
 **Architecture:** Three-Layer Streaming Pattern  
-**Last Updated:** December 19, 2025
+**Last Updated:** December 25, 2025
 
 ---
 
@@ -10,14 +10,33 @@
 
 | Layer                       | File                                  | Responsibility                                    |
 | --------------------------- | ------------------------------------- | ------------------------------------------------- |
-| **3 - TWSDatafeedProvider** | `__init__.py`                         | DatafeedCapability impl, domain conversion        |
+| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion        |
+| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management  |
 | **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket  |
 | **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, ticker slot registry      |
 | **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing     |
 | **Models**                  | `tws_models.py`                       | `TWSCapability`, `AssetConfig`, tick/msg mappings |
 | **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings               |
 
-**Tests:** `providers/tws/tests/test_{client,mappers,provider}.py`
+**Tests:** `providers/tws/tests/test_{client,mappers,provider,broker_provider}.py`
+
+---
+
+## Capabilities Overview
+
+### Datafeed Capability
+
+- Real-time market data streaming
+- Historical OHLCV bars
+- Symbol search and metadata
+- Quote snapshots
+
+### Broker Capability
+
+- Order placement, modification, cancellation
+- Position management (get, close)
+- Account info and equity data
+- Order/position streaming subscriptions
 
 ---
 
@@ -187,6 +206,81 @@ class DatafeedCapability(Protocol):
 
 ---
 
+## 4.1 BrokerCapability Interface
+
+```python
+class BrokerCapability(Protocol):
+    # Order Management (async)
+    async def place_order(self, order: PreOrder) -> PlaceOrderResult
+    async def modify_order(self, order_id: str, order: PreOrder) -> None
+    async def cancel_order(self, order_id: str) -> None
+    async def get_orders(self) -> list[PlacedOrder]
+    async def preview_order(self, order: PreOrder) -> OrderPreviewResult
+
+    # Position Management (async)
+    async def get_positions(self) -> list[Position]
+    async def close_position(self, position_id: str, amount: float | None = None) -> None
+    async def edit_position_brackets(self, position_id: str, brackets: Brackets) -> None
+
+    # Account Data (async)
+    async def get_account_info(self) -> AccountMetainfo
+    async def get_equity(self) -> EquityData
+    async def get_executions(self, symbol: str) -> list[Execution]
+
+    # Leverage (NOT SUPPORTED by TWS - raises ProviderException)
+    async def preview_leverage(self, params: LeverageSetParams) -> LeveragePreviewResult
+    async def get_leverage_info(self, params: LeverageInfoParams) -> LeverageInfo
+    async def set_leverage(self, params: LeverageSetParams) -> LeverageSetResult
+
+    # Streaming Subscriptions (return subscription IDs)
+    def subscribe_orders(
+        self,
+        callback: Callable[[PlacedOrder], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+    ) -> str
+
+    def subscribe_positions(
+        self,
+        callback: Callable[[Position], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+    ) -> str
+
+    def subscribe_executions(
+        self,
+        symbol: str,
+        callback: Callable[[Execution], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+    ) -> str
+
+    def subscribe_equity(
+        self,
+        callback: Callable[[EquityData], Awaitable[None]],
+        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+    ) -> str
+
+    def unsubscribe(self, subscription_id: str) -> None
+```
+
+**TWS-Specific Notes:**
+
+- **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. These methods raise `ProviderException` with code `PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED`.
+- **Order Preview**: Returns estimated values since TWS doesn't have native preview API.
+- **Bracket Orders**: `edit_position_brackets()` not yet implemented (complex linked orders).
+- **Equity Streaming**: TWS doesn't push account changes; polling via `get_equity()` is required.
+- **Client ID**: Broker uses `client_id=2` (default), separate from datafeed's `client_id=1`.
+
+**Configuration:**
+
+| Env Variable            | Type | Default     | Description                        |
+| ----------------------- | ---- | ----------- | ---------------------------------- |
+| `TWS_BROKER_ENABLED`    | bool | `True`      | Enable broker provider             |
+| `TWS_BROKER_HOST`       | str  | `127.0.0.1` | Gateway host                       |
+| `TWS_BROKER_PORT`       | int  | `7497`      | Gateway port                       |
+| `TWS_BROKER_CLIENT_ID`  | int  | `2`         | Client ID (separate from datafeed) |
+| `TWS_BROKER_ACCOUNT_ID` | str  | `""`        | Account ID for orders              |
+
+---
+
 ## 5. Domain Models
 
 **File:** `models/market.py` — Used by Service and Provider
@@ -199,16 +293,30 @@ class DatafeedCapability(Protocol):
 | `QuoteData`              | `n`, `s`, `v` (QuoteValues embedded)                | Tick data       |
 | `Resolution`             | `MIN_1`, `MIN_5`, `HOUR_1`, `DAY_1`, etc.           | Resolution enum |
 
-**TWS Types** (used ONLY in TWSDatafeedProvider/TWSClient):
+**File:** `models/broker/` — Broker domain models
+
+| Model             | Key Fields                                        | Purpose          |
+| ----------------- | ------------------------------------------------- | ---------------- |
+| `PreOrder`        | `symbol`, `side`, `type`, `qty`, `limitPrice`     | Order request    |
+| `PlacedOrder`     | `id`, `symbol`, `status`, `filledQty`, `avgPrice` | Order status     |
+| `Position`        | `id`, `symbol`, `qty`, `side`, `avgPrice`         | Open position    |
+| `EquityData`      | `equity`, `balance`, `unrealizedPL`, `realizedPL` | Account equity   |
+| `AccountMetainfo` | `id`, `name`                                      | Account metadata |
+| `Execution`       | `id`, `symbol`, `qty`, `price`, `time`            | Trade execution  |
+
+**TWS Types** (used ONLY in TWSDatafeedProvider/TWSClient/TWSBrokerProvider):
 
 - `Contract`, `ContractDetails`, `ContractDescription` — from `ibapi.contract`
 - `BarData` — from `ibapi.common`
+- `Order`, `OrderState` — from `ibapi.order`, `ibapi.order_state`
 
 ---
 
 ## 6. Domain Mappers
 
 **File:** `tws_mappers.py`
+
+### Datafeed Mappers
 
 | Function                                  | Description                                      |
 | ----------------------------------------- | ------------------------------------------------ |
@@ -221,7 +329,17 @@ class DatafeedCapability(Protocol):
 | `parse_ticker()`                          | stream key → (symbol, exchange, secType, conId)  |
 | `build_contract()`                        | ticker string → `Contract`                       |
 | `map_resolution_to_tws_bar_size()`        | `Resolution` → TWS bar size string               |
-| `calculate_tws_duration()`                | time range → TWS duration string                 |
+
+### Broker Mappers
+
+| Function                                | Description                            |
+| --------------------------------------- | -------------------------------------- |
+| `preorder_to_tws()`                     | `PreOrder` → `(Contract, Order)` tuple |
+| `tws_order_to_placed_order()`           | order data dict → `PlacedOrder`        |
+| `tws_position_to_domain()`              | position data dict → `Position`        |
+| `tws_account_summary_to_equity()`       | summary dict → `EquityData`            |
+| `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`       |
+| `calculate_tws_duration()`              | time range → TWS duration string       |
 
 **secType Mapping:**
 

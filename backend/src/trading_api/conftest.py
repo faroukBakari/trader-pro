@@ -61,6 +61,10 @@ async def apps() -> ModularApp:
 
     This fixture is the source for all other app-related fixtures.
     It creates a ModularApp with all discovered modules enabled.
+
+    Note: Module-specific test suites should override this fixture to:
+    - Load only required modules (enabled_module_names)
+    - Use mock/fake providers (enabled_provider_names)
     """
     factory = AppFactory()
     return await factory.create_app()

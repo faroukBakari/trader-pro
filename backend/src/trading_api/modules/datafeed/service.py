@@ -401,7 +401,7 @@ class DatafeedService(WsRouteService):
             # Fallback: use last cached bar as quote (if available) for debugging
             if any(ticker not in self._last_bars for ticker in tickers):
                 raise e  # Reraise if we have no cached data for any ticker
-            logger.exception(e)
+            # logger.exception(e)
             quotes_result: list[QuoteData] = []
             for ticker in tickers:
                 last_bar: Optional[Bar] = self._last_bars.get(ticker)

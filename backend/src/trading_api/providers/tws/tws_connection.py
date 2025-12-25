@@ -43,6 +43,8 @@ from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEG
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.decoder import Decoder
 from ibapi.message import OUT
+from ibapi.order import Order
+from ibapi.order_state import OrderState
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
@@ -237,6 +239,48 @@ class IBSocket(EWrapper):
         self._stream_data: dict[int, dict[str, Any]] = {}
         self._nxt_order_id: int | None = None
         self._reader_accounts: list[str] = []
+
+        # Order tracking - maps orderId → order data for streaming updates
+        self._order_data: dict[int, dict[str, Any]] = {}
+        # Order streaming callbacks - for order subscription
+        self._order_hooks: (
+            tuple[
+                asyncio.AbstractEventLoop,
+                Callable[[dict[str, Any]], Awaitable[None]],
+                Callable[[ProviderException], Awaitable[None]] | None,
+            ]
+            | None
+        ) = None
+        # Future for reqOpenOrders() completion
+        self._open_orders_future: (
+            tuple[asyncio.AbstractEventLoop, asyncio.Future[list[dict[str, Any]]]]
+            | None
+        ) = None
+
+        # Position tracking - maps account → list of position data dicts
+        self._position_data: dict[str, list[dict[str, Any]]] = {}
+        # Position streaming callbacks - for position subscription
+        self._position_hooks: (
+            tuple[
+                asyncio.AbstractEventLoop,
+                Callable[[dict[str, Any]], Awaitable[None]],
+                Callable[[ProviderException], Awaitable[None]] | None,
+            ]
+            | None
+        ) = None
+        # Future for reqPositions() completion
+        self._positions_future: (
+            tuple[asyncio.AbstractEventLoop, asyncio.Future[list[dict[str, Any]]]]
+            | None
+        ) = None
+
+        # Account summary tracking - maps (reqId, tag) → value data
+        self._account_summary_data: dict[int, dict[str, dict[str, Any]]] = {}
+        # Future for reqAccountSummary() completion
+        self._account_summary_future: (
+            tuple[asyncio.AbstractEventLoop, asyncio.Future[dict[str, dict[str, Any]]]]
+            | None
+        ) = None
 
         # for error management on capability basis
         self._reqId_to_capability: dict[int, str] = {}
@@ -551,6 +595,18 @@ class IBSocket(EWrapper):
     @property
     def next_req_id(self) -> int:
         return next(self._req_id_counter)
+
+    @property
+    def next_order_id(self) -> int:
+        """Get next valid order ID (auto-increments).
+
+        Returns the current _nxt_order_id and increments it for the next call.
+        Raises AssertionError if connection not yet ready (nextValidId not received).
+        """
+        assert self._nxt_order_id is not None, "nextValidId not yet received from TWS"
+        order_id = self._nxt_order_id
+        self._nxt_order_id += 1
+        return order_id
 
     @property
     def running(self) -> bool:
@@ -926,6 +982,300 @@ class IBSocket(EWrapper):
         # Signals connection fully established - safe to make requests
         self._nxt_order_id = orderId
         self._ready_event.set()
+
+    # === Order callbacks (broker capability) ===
+
+    def openOrder(
+        self, orderId: int, contract: Contract, order: Order, orderState: OrderState
+    ) -> None:
+        """Callback for open order information.
+
+        TWS sends this callback for:
+        1. Each open order after reqOpenOrders() is called
+        2. Real-time updates when orders are placed/modified
+
+        The callback provides complete order info including contract, order params,
+        and current state. Data is stored and dispatched to registered callbacks.
+
+        Args:
+            orderId: TWS order ID
+            contract: Contract the order is for
+            order: Order parameters (type, qty, price, etc.)
+            orderState: Current order state (status, margin, commission)
+        """
+        if DEBUG_TWS_CALLBACK:
+            debug_log(
+                f"{current_fn_name()}, orderId={orderId}, "
+                f"symbol={contract.symbol}, status={orderState.status}"
+            )
+
+        # Build order data dict for domain conversion
+        order_data: dict[str, Any] = {
+            "orderId": orderId,
+            "contract": contract,
+            "order": order,
+            "orderState": orderState,
+            # Flatten commonly needed fields for easier access
+            "symbol": contract.symbol,
+            "exchange": contract.primaryExchange or contract.exchange,
+            "secType": contract.secType,
+            "conId": contract.conId,
+            "action": order.action,
+            "totalQuantity": order.totalQuantity,
+            "orderType": order.orderType,
+            "lmtPrice": order.lmtPrice,
+            "auxPrice": order.auxPrice,
+            "tif": order.tif,
+            "status": orderState.status,
+            "filledQuantity": order.filledQuantity,
+            "parentId": order.parentId,
+        }
+
+        # Store order data
+        self._order_data[orderId] = order_data
+
+        # For reqOpenOrders() - accumulate in future_data (uses reqId=-1)
+        if self._open_orders_future is not None:
+            # Accumulating for get_orders() request
+            pass  # Will be collected in openOrderEnd
+
+        # Dispatch to streaming callback if registered
+        if self._order_hooks is not None:
+            loop, callback, _ = self._order_hooks
+
+            async def _notify(cb: Callable, data: dict) -> None:
+                await cb(data)
+
+            loop.call_soon_threadsafe(loop.create_task, _notify(callback, order_data))
+
+    def orderStatus(
+        self,
+        orderId: int,
+        status: str,
+        filled: Decimal,
+        remaining: Decimal,
+        avgFillPrice: float,
+        permId: int,
+        parentId: int,
+        lastFillPrice: float,
+        clientId: int,
+        whyHeld: str,
+        mktCapPrice: float,
+    ) -> None:
+        """Callback for order status updates.
+
+        This callback fires whenever an order's status changes. It provides
+        fill information and current status. May be called multiple times
+        for the same order as it progresses through its lifecycle.
+
+        Args:
+            orderId: TWS order ID
+            status: Order status (Submitted, Filled, Cancelled, etc.)
+            filled: Quantity that has been filled
+            remaining: Quantity still remaining
+            avgFillPrice: Average fill price
+            permId: Permanent order ID (persists across sessions)
+            parentId: Parent order ID (for bracket orders)
+            lastFillPrice: Price of last fill
+            clientId: Client ID that placed the order
+            whyHeld: Reason order is held (if applicable)
+            mktCapPrice: Market cap price (for auction orders)
+        """
+        if DEBUG_TWS_CALLBACK:
+            debug_log(
+                f"{current_fn_name()}, orderId={orderId}, status={status}, "
+                f"filled={filled}, remaining={remaining}, avgFillPrice={avgFillPrice}"
+            )
+
+        # Update or create order data
+        order_data: dict[str, Any] | None = self._order_data.get(orderId)
+        if order_data is None:
+            # Create minimal entry if we receive status before openOrder
+            order_data = {"orderId": orderId}
+            self._order_data[orderId] = order_data
+
+        # Update with status info
+        order_data["status"] = status
+        order_data["filled"] = filled
+        order_data["remaining"] = remaining
+        order_data["avgFillPrice"] = avgFillPrice
+        order_data["permId"] = permId
+        order_data["parentId"] = parentId
+        order_data["lastFillPrice"] = lastFillPrice
+        order_data["clientId"] = clientId
+        order_data["whyHeld"] = whyHeld
+        order_data["mktCapPrice"] = mktCapPrice
+
+        # Dispatch to streaming callback if registered
+        if self._order_hooks is not None:
+            loop, callback, _ = self._order_hooks
+
+            async def _notify(cb: Callable, data: dict) -> None:
+                await cb(data)
+
+            loop.call_soon_threadsafe(loop.create_task, _notify(callback, order_data))
+
+    def openOrderEnd(self) -> None:
+        """End signal for open orders request.
+
+        Called after all openOrder callbacks for reqOpenOrders().
+        Resolves the pending future with accumulated order data.
+        """
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}")
+
+        # Resolve the pending open orders future
+        if self._open_orders_future is not None:
+            loop, future = self._open_orders_future
+
+            def resolve(fut: asyncio.Future, orders: list[dict[str, Any]]) -> None:
+                if not fut.done():
+                    fut.set_result(orders)
+
+            # Collect all accumulated order data
+            orders = list(self._order_data.values())
+            loop.call_soon_threadsafe(resolve, future, orders)
+            self._open_orders_future = None
+
+    # === Position callbacks (broker capability) ===
+
+    def position(
+        self, account: str, contract: Contract, position: Decimal, avgCost: float
+    ) -> None:
+        """Callback for position information.
+
+        TWS sends this callback for:
+        1. Each position after reqPositions() is called
+        2. Real-time updates when positions change (if subscribed)
+
+        Args:
+            account: Account ID holding the position
+            contract: Contract the position is for
+            position: Position size (positive=long, negative=short)
+            avgCost: Average cost per unit
+        """
+        if DEBUG_TWS_CALLBACK:
+            debug_log(
+                f"{current_fn_name()}, account={account}, "
+                f"symbol={contract.symbol}, position={position}, avgCost={avgCost}"
+            )
+
+        # Build position data dict for domain conversion
+        position_data: dict[str, Any] = {
+            "account": account,
+            "contract": contract,
+            "position": position,
+            "avgCost": avgCost,
+            # Flatten commonly needed fields
+            "symbol": contract.symbol,
+            "exchange": contract.primaryExchange or contract.exchange,
+            "secType": contract.secType,
+            "conId": contract.conId,
+            "currency": contract.currency,
+        }
+
+        # Accumulate positions by account
+        if account not in self._position_data:
+            self._position_data[account] = []
+        self._position_data[account].append(position_data)
+
+        # Dispatch to streaming callback if registered
+        if self._position_hooks is not None:
+            loop, callback, _ = self._position_hooks
+
+            async def _notify(
+                cb: Callable[[dict[str, Any]], Awaitable[None]], data: dict[str, Any]
+            ) -> None:
+                await cb(data)
+
+            loop.call_soon_threadsafe(
+                loop.create_task, _notify(callback, position_data)
+            )
+
+    def positionEnd(self) -> None:
+        """End signal for positions request.
+
+        Called after all position callbacks for reqPositions().
+        Resolves the pending future with accumulated position data.
+        """
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}")
+
+        # Resolve the pending positions future
+        if self._positions_future is not None:
+            loop, future = self._positions_future
+
+            def resolve(
+                fut: asyncio.Future[list[dict[str, Any]]],
+                positions: list[dict[str, Any]],
+            ) -> None:
+                if not fut.done():
+                    fut.set_result(positions)
+
+            # Flatten all positions from all accounts
+            all_positions: list[dict[str, Any]] = []
+            for account_positions in self._position_data.values():
+                all_positions.extend(account_positions)
+            loop.call_soon_threadsafe(resolve, future, all_positions)
+            self._positions_future = None
+
+    # === Account Summary callbacks (broker capability) ===
+
+    def accountSummary(
+        self, reqId: int, account: str, tag: str, value: str, currency: str
+    ) -> None:
+        """Callback for account summary information.
+
+        TWS sends this callback for each requested tag after reqAccountSummary().
+
+        Args:
+            reqId: Request ID
+            account: Account ID
+            tag: Tag name (e.g., "NetLiquidation", "TotalCashValue")
+            value: Tag value as string
+            currency: Currency of the value
+        """
+        if DEBUG_TWS_CALLBACK:
+            debug_log(
+                f"{current_fn_name()}, reqId={reqId}, account={account}, "
+                f"tag={tag}, value={value}, currency={currency}"
+            )
+
+        # Initialize data structure for this reqId if needed
+        if reqId not in self._account_summary_data:
+            self._account_summary_data[reqId] = {}
+
+        # Store tag value (keyed by tag name)
+        self._account_summary_data[reqId][tag] = {
+            "account": account,
+            "tag": tag,
+            "value": value,
+            "currency": currency,
+        }
+
+    def accountSummaryEnd(self, reqId: int) -> None:
+        """End signal for account summary request.
+
+        Called after all accountSummary callbacks for reqAccountSummary().
+        Resolves the pending future with accumulated summary data.
+        """
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, reqId={reqId}")
+
+        # Resolve the pending account summary future
+        if self._account_summary_future is not None:
+            loop, future = self._account_summary_future
+
+            def resolve(
+                fut: asyncio.Future[dict[str, dict[str, Any]]],
+                summary: dict[str, dict[str, Any]],
+            ) -> None:
+                if not fut.done():
+                    fut.set_result(summary)
+
+            summary_data = self._account_summary_data.pop(reqId, {})
+            loop.call_soon_threadsafe(resolve, future, summary_data)
+            self._account_summary_future = None
 
     # === symbolSamples ===
 
@@ -1627,6 +1977,417 @@ class TWSClient:
                 debug_log(f"cancelled realtime market data for reqId {reqId}")
 
         self.ibsocket.unregister_stream(reqId)
+
+    # === Order methods (broker capability) ===
+
+    @property
+    def next_order_id(self) -> int:
+        """Get next valid order ID from IBSocket."""
+        return self.ibsocket.next_order_id
+
+    async def reqOpenOrders(self, timeout: float | None = None) -> list[dict[str, Any]]:
+        """Request all open orders for this client.
+
+        Returns open orders placed from this client. Each order triggers
+        openOrder() and orderStatus() callbacks, then openOrderEnd().
+
+        Args:
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of order data dicts (one per open order)
+        """
+        # Create future for result
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
+        self.ibsocket._open_orders_future = (loop, future)
+        self.ibsocket._order_data.clear()  # Clear stale order data
+
+        VERSION = 1
+        self.ibsocket.send_message(OUT.REQ_OPEN_ORDERS, [VERSION])
+
+        if DEBUG_TWS_REQUEST:
+            debug_log("requesting open orders")
+
+        return await asyncio.wait_for(future, timeout=timeout or self._timeout)
+
+    def placeOrder(self, order_id: int, contract: Contract, order: Order) -> None:
+        """Place an order via TWS.
+
+        This is a fire-and-forget method. Order status updates are delivered
+        via openOrder() and orderStatus() callbacks.
+
+        Args:
+            order_id: Unique order ID (use next_order_id property)
+            contract: Contract to trade
+            order: Order parameters (type, side, quantity, price, etc.)
+
+        Note:
+            For simplicity, this uses the legacy message format (not protobuf).
+            Full order field support requires ~100+ fields. This implementation
+            covers core order types: Market, Limit, Stop, StopLimit.
+        """
+        # Build message fields for PLACE_ORDER (simplified, core fields only)
+        # Based on ibapi/client.py placeOrder(), minimum required fields
+        fields: list[object] = [
+            order_id,
+            # Contract fields
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier if contract.multiplier else "",
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            contract.secIdType if contract.secIdType else "",
+            contract.secId if contract.secId else "",
+            # Order fields
+            order.action,  # BUY or SELL
+            order.totalQuantity,
+            order.orderType,  # MKT, LMT, STP, STP LMT
+            order.lmtPrice,
+            order.auxPrice,  # Stop price for STP/STP LMT orders
+            order.tif,  # GTC, DAY, IOC, etc.
+            order.ocaGroup,
+            order.account if order.account else "",
+            order.openClose,
+            order.origin,
+            order.orderRef if order.orderRef else "",
+            order.transmit,
+            order.parentId,
+            order.blockOrder,
+            order.sweepToFill,
+            order.displaySize,
+            order.triggerMethod,
+            order.outsideRth,
+            order.hidden,
+            # Combo orders (empty for single-leg)
+            "",  # comboLegsDescrip
+            0,  # comboLegs count
+            # Order combo legs (none)
+            0,  # orderComboLegs count
+            # Smart combo routing (none)
+            0,  # smartComboRoutingParams count
+            # Deprecated share allocation
+            "",  # shareAllocation (deprecated)
+            order.discretionaryAmt,
+            order.goodAfterTime if order.goodAfterTime else "",
+            order.goodTillDate if order.goodTillDate else "",
+            # FA orders
+            order.faGroup if order.faGroup else "",
+            order.faMethod if order.faMethod else "",
+            order.faPercentage if order.faPercentage else "",
+            # Institutional orders
+            "",  # obsoleteOpenClose
+            order.origin,
+            order.shortSaleSlot,
+            order.designatedLocation if order.designatedLocation else "",
+            order.exemptCode,
+            # Remaining order fields
+            order.ocaType,
+            order.rule80A if order.rule80A else "",
+            order.settlingFirm if order.settlingFirm else "",
+            order.allOrNone,
+            order.minQty,
+            order.percentOffset,
+            False,  # obsoleteETradeOnly
+            False,  # obsoleteFirmQuoteOnly
+            "",  # obsoleteNbboPriceCap
+            order.auctionStrategy,
+            order.startingPrice,
+            order.stockRefPrice,
+            order.delta,
+            order.stockRangeLower,
+            order.stockRangeUpper,
+            order.overridePercentageConstraints,
+            # Volatility orders (defaults)
+            order.volatility,
+            order.volatilityType,
+            order.deltaNeutralOrderType if order.deltaNeutralOrderType else "",
+            order.deltaNeutralAuxPrice,
+            # Delta neutral (minimal)
+            order.deltaNeutralConId,
+            order.deltaNeutralSettlingFirm if order.deltaNeutralSettlingFirm else "",
+            (
+                order.deltaNeutralClearingAccount
+                if order.deltaNeutralClearingAccount
+                else ""
+            ),
+            (
+                order.deltaNeutralClearingIntent
+                if order.deltaNeutralClearingIntent
+                else ""
+            ),
+            order.deltaNeutralOpenClose if order.deltaNeutralOpenClose else "",
+            order.deltaNeutralShortSale,
+            order.deltaNeutralShortSaleSlot,
+            (
+                order.deltaNeutralDesignatedLocation
+                if order.deltaNeutralDesignatedLocation
+                else ""
+            ),
+            order.continuousUpdate,
+            order.referencePriceType,
+            order.trailStopPrice,
+            order.trailingPercent,
+            # Scale orders (defaults)
+            order.scaleInitLevelSize,
+            order.scaleSubsLevelSize,
+            order.scalePriceIncrement,
+            # Scale order extended fields
+            order.scalePriceAdjustValue,
+            order.scalePriceAdjustInterval,
+            order.scaleProfitOffset,
+            order.scaleAutoReset,
+            order.scaleInitPosition,
+            order.scaleInitFillQty,
+            order.scaleRandomPercent,
+            order.scaleTable if order.scaleTable else "",
+            # Algo
+            "",  # obsoleteActiveStartTime
+            "",  # obsoleteActiveStopTime
+            # Hedge orders
+            order.hedgeType if order.hedgeType else "",
+            order.hedgeParam if order.hedgeParam else "",
+            # Opt out smart routing
+            order.optOutSmartRouting,
+            # Clearing
+            order.clearingAccount if order.clearingAccount else "",
+            order.clearingIntent if order.clearingIntent else "",
+            # Not held
+            order.notHeld,
+            # Delta neutral combo (minimal)
+            0,  # haveDeltaNeutralContract
+            # Algo
+            order.algoStrategy if order.algoStrategy else "",
+            # Algo params (count only, no params)
+            0 if not order.algoParams else len(order.algoParams),
+            # Algo ID
+            order.algoId if order.algoId else "",
+            # What-if
+            order.whatIf,
+            # Misc options
+            "",  # miscOptionsStr
+            # Solicited
+            order.solicited,
+            # Random size/price
+            order.randomizeSize,
+            order.randomizePrice,
+            # Peg to bench fields (minimal)
+            0,  # referenceContractId
+            0.0,  # peggedChangeAmount
+            False,  # isPeggedChangeAmountDecrease
+            0.0,  # referenceChangeAmount
+            "",  # referenceExchangeId
+            # Conditions (none)
+            0,  # conditions count
+            # Adjusted order type
+            "",  # adjustedOrderType
+            "",  # triggerPrice
+            "",  # lmtPriceOffset
+            "",  # adjustedStopPrice
+            "",  # adjustedStopLimitPrice
+            "",  # adjustedTrailingAmount
+            0,  # adjustableTrailingUnit
+            # Ext operator
+            order.extOperator if order.extOperator else "",
+            # Soft dollar tier
+            "",  # softDollarTier.name
+            "",  # softDollarTier.val
+            # Cash qty
+            order.cashQty,
+            # MiFID
+            order.mifid2DecisionMaker if order.mifid2DecisionMaker else "",
+            order.mifid2DecisionAlgo if order.mifid2DecisionAlgo else "",
+            order.mifid2ExecutionTrader if order.mifid2ExecutionTrader else "",
+            order.mifid2ExecutionAlgo if order.mifid2ExecutionAlgo else "",
+            # Don't use auto price for hedge
+            order.dontUseAutoPriceForHedge,
+            # OMS container
+            order.isOmsContainer,
+            # Discretionary up to limit price
+            order.discretionaryUpToLimitPrice,
+            # Use price mgmt algo
+            order.usePriceMgmtAlgo if order.usePriceMgmtAlgo is not None else "",
+            # Duration
+            order.duration,
+            # Post to ATS
+            order.postToAts,
+            # Auto cancel parent
+            order.autoCancelParent,
+            # Min trade qty / compete params
+            order.minTradeQty,
+            order.minCompeteSize,
+            order.competeAgainstBestOffset,
+            order.midOffsetAtWhole,
+            order.midOffsetAtHalf,
+            # Customer account
+            order.customerAccount if order.customerAccount else "",
+            # Professional customer
+            order.professionalCustomer,
+            # Bond accrued interest
+            order.bondAccruedInterest if order.bondAccruedInterest else "",
+            # Include overnight
+            order.includeOvernight,
+            # Manual order indicator
+            order.manualOrderIndicator,
+        ]
+
+        self.ibsocket.send_message(OUT.PLACE_ORDER, fields)
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"placed order: id={order_id}, symbol={contract.symbol}, "
+                f"action={order.action}, qty={order.totalQuantity}, type={order.orderType}"
+            )
+
+    def cancelOrder(self, order_id: int) -> None:
+        """Cancel an order via TWS.
+
+        Args:
+            order_id: Order ID to cancel
+        """
+        VERSION = 1
+        fields: list[object] = [
+            VERSION,
+            order_id,
+            "",  # manualOrderCancelTime (empty for immediate)
+        ]
+
+        self.ibsocket.send_message(OUT.CANCEL_ORDER, fields)
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"cancelled order: id={order_id}")
+
+    def registerOrderCallback(
+        self,
+        callback: Callable[[dict[str, Any]], Awaitable[None]],
+        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
+    ) -> None:
+        """Register callback for order updates.
+
+        Args:
+            callback: Called for each order update (openOrder/orderStatus)
+            on_error: Optional error callback
+        """
+        loop = asyncio.get_event_loop()
+        self.ibsocket._order_hooks = (loop, callback, on_error)
+
+    def unregisterOrderCallback(self) -> None:
+        """Unregister order update callback."""
+        self.ibsocket._order_hooks = None
+
+    # === Position methods (broker capability) ===
+
+    async def reqPositions(self, timeout: float | None = None) -> list[dict[str, Any]]:
+        """Request all positions for all accounts.
+
+        Returns positions for all managed accounts. Each position triggers
+        position() callback, then positionEnd().
+
+        Args:
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of position data dicts (one per position)
+        """
+        # Create future for result
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
+        self.ibsocket._positions_future = (loop, future)
+        self.ibsocket._position_data.clear()  # Clear stale position data
+
+        VERSION = 1
+        self.ibsocket.send_message(OUT.REQ_POSITIONS, [VERSION])
+
+        if DEBUG_TWS_REQUEST:
+            debug_log("requesting positions")
+
+        return await asyncio.wait_for(future, timeout=timeout or self._timeout)
+
+    def registerPositionCallback(
+        self,
+        callback: Callable[[dict[str, Any]], Awaitable[None]],
+        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
+    ) -> None:
+        """Register callback for position updates.
+
+        Args:
+            callback: Called for each position update
+            on_error: Optional error callback
+        """
+        loop = asyncio.get_event_loop()
+        self.ibsocket._position_hooks = (loop, callback, on_error)
+
+    def unregisterPositionCallback(self) -> None:
+        """Unregister position update callback."""
+        self.ibsocket._position_hooks = None
+
+    def cancelPositions(self) -> None:
+        """Cancel position updates subscription."""
+        VERSION = 1
+        self.ibsocket.send_message(OUT.CANCEL_POSITIONS, [VERSION])
+        if DEBUG_TWS_REQUEST:
+            debug_log("cancelled positions subscription")
+
+    # === Account Summary methods (broker capability) ===
+
+    async def reqAccountSummary(
+        self,
+        group: str = "All",
+        tags: str = "NetLiquidation,TotalCashValue,BuyingPower",
+        timeout: float | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        """Request account summary for specified tags.
+
+        Args:
+            group: Account group ("All" for all accounts)
+            tags: Comma-separated list of tags to request
+            timeout: Request timeout in seconds
+
+        Returns:
+            Dict mapping tag names to their value data
+
+        Available tags:
+            AccountType, NetLiquidation, TotalCashValue, SettledCash,
+            AccruedCash, BuyingPower, EquityWithLoanValue,
+            PreviousEquityWithLoanValue, GrossPositionValue, ReqTEquity,
+            ReqTMargin, SMA, InitMarginReq, MaintMarginReq, AvailableFunds,
+            ExcessLiquidity, Cushion, FullInitMarginReq, FullMaintMarginReq,
+            FullAvailableFunds, FullExcessLiquidity, LookAheadNextChange,
+            LookAheadInitMarginReq, LookAheadMaintMarginReq,
+            LookAheadAvailableFunds, LookAheadExcessLiquidity,
+            HighestSeverity, DayTradesRemaining, Leverage
+        """
+        # Create future for result
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[dict[str, dict[str, Any]]] = loop.create_future()
+        self.ibsocket._account_summary_future = (loop, future)
+
+        reqId = self.next_req_id
+        VERSION = 1
+        self.ibsocket.send_message(
+            OUT.REQ_ACCOUNT_SUMMARY, [VERSION, reqId, group, tags]
+        )
+
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"requesting account summary, reqId={reqId}, tags={tags}")
+
+        return await asyncio.wait_for(future, timeout=timeout or self._timeout)
+
+    def cancelAccountSummary(self, reqId: int) -> None:
+        """Cancel account summary subscription.
+
+        Args:
+            reqId: Request ID from reqAccountSummary
+        """
+        VERSION = 1
+        self.ibsocket.send_message(OUT.CANCEL_ACCOUNT_SUMMARY, [VERSION, reqId])
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"cancelled account summary for reqId={reqId}")
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""

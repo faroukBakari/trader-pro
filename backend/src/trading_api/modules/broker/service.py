@@ -96,7 +96,7 @@ class BrokerService(WsRouteService):
         Raises:
             RuntimeError: If broker provider not available
         """
-        provider = self.get_capability_provider("broker")
+        provider = self.get_capability_provider("broker")  # , "fakebroker"
         # Type assertion: provider must implement BrokerCapability (validated at init)
         assert isinstance(provider, BrokerCapability)
         return provider
