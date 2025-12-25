@@ -266,7 +266,12 @@ class ServerManager:
         return config_path
 
     def _start_server_instance(
-        self, name: str, port: int, modules: list[str], reload: bool = True
+        self,
+        name: str,
+        port: int,
+        modules: list[str],
+        providers: list[str] | None = None,
+        reload: bool = True,
     ) -> subprocess.Popen[bytes]:
         """Start a single uvicorn server instance.
 
@@ -274,6 +279,7 @@ class ServerManager:
             name: Server instance name
             port: Port to bind to
             modules: List of enabled modules (core is always added if not present)
+            providers: List of enabled providers (None = all providers)
             reload: Enable auto-reload
 
         Returns:
@@ -282,6 +288,8 @@ class ServerManager:
         env = os.environ.copy()
 
         env["ENABLED_MODULES"] = ",".join(modules)
+        if providers is not None:
+            env["ENABLED_PROVIDERS"] = ",".join(providers)
 
         # Create log file path and uvicorn logging config
         log_file_path = self.log_dir / f"{name}.log"
@@ -327,6 +335,8 @@ class ServerManager:
         logger.info(
             f"Starting {name} on port {port} with modules: {modules or 'none (core only)'}"
         )
+        if providers is not None:
+            logger.info(f"  Enabled providers: {providers}")
         logger.info(f"Logs: {log_file_path}")
 
         # Start process in detached mode
@@ -681,6 +691,7 @@ class ServerManager:
                         instance_name,
                         port,
                         server_config.modules,
+                        server_config.providers,
                         server_config.reload,
                     )
                     self.processes[instance_name] = process

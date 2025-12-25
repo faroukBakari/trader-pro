@@ -86,4 +86,64 @@ class TWSDatafeedProviderConfig(BaseSettings):
         return v
 
 
-__all__ = ["TWSDatafeedProviderConfig"]
+class TWSBrokerProviderConfig(BaseSettings):
+    """TWS broker provider configuration.
+
+    [AUTO-LOAD]: Reads from environment variables with TWS_BROKER_ prefix.
+    [SEPARATE-CONNECTION]: Uses different client_id from datafeed provider.
+
+    Environment variables:
+        TWS_BROKER_ENABLED: bool = True
+        TWS_BROKER_HOST: str = "127.0.0.1"
+        TWS_BROKER_PORT: int = 7497
+        TWS_BROKER_CLIENT_ID: int = 2 (different from datafeed)
+        TWS_BROKER_CONNECTION_TIMEOUT: float = 10.0
+        TWS_BROKER_ACCOUNT_ID: str = "" (IBKR account ID, e.g., "DU123456")
+    """
+
+    enabled: bool = True
+    host: str = Field(
+        default="127.0.0.1",
+        description="TWS/IB Gateway hostname or IP address",
+    )
+    port: int = Field(
+        default=7497,
+        description="TWS/IB Gateway port (7497=paper TWS, 7496=live TWS, 4002=paper Gateway, 4001=live Gateway)",
+    )
+    client_id: int = Field(
+        default=2,
+        ge=1,
+        le=32,
+        description="Client ID (1-32) - must be unique per connection. Default 2 to avoid conflict with datafeed (1).",
+    )
+    connection_timeout: float = Field(
+        default=10.0,
+        ge=5.0,
+        description="Connection timeout in seconds",
+    )
+    account_id: str = Field(
+        default="",
+        description="IBKR account ID (e.g., 'DU123456' for paper, 'U1234567' for live). Empty = use first account.",
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="TWS_BROKER_",
+        env_file=".env.local",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    @field_validator("port")
+    @classmethod
+    def validate_port(cls, v: int) -> int:
+        """Validate TWS/Gateway port is one of the standard ports."""
+        valid_ports = {7497, 7496, 4002, 4001}  # Paper/Live TWS/Gateway
+        if v not in valid_ports:
+            raise ValueError(
+                f"Port must be one of {valid_ports} "
+                f"(7497=paper TWS, 7496=live TWS, 4002=paper Gateway, 4001=live Gateway)"
+            )
+        return v
+
+
+__all__ = ["TWSDatafeedProviderConfig", "TWSBrokerProviderConfig"]

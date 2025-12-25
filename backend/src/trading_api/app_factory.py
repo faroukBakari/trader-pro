@@ -320,8 +320,14 @@ class AppFactory:
     async def create_app(
         self,
         enabled_module_names: list[str] | None = None,
+        enabled_provider_names: list[str] | None = None,
     ) -> ModularApp:
-        """Create a ModularApp with specified enabled modules.
+        """Create a ModularApp with specified enabled modules and providers.
+
+        Args:
+            enabled_module_names: Module names to enable (None = all)
+            enabled_provider_names: Provider folder names to enable (None = all)
+                                   e.g., ["tws"], ["fakebroker"], ["tws", "google"]
 
         [TWO-PHASE LOADING]: Discover classes, analyze, then instantiate.
         """
@@ -333,7 +339,7 @@ class AppFactory:
 
         # Phase 1: Auto-discover module and provider classes
         self.module_registry.auto_discover()
-        self.provider_registry.auto_discover()
+        self.provider_registry.auto_discover(enabled_names=enabled_provider_names)
 
         # Phase 2: Resolve required capabilities (static analysis)
         required_capabilities = self._resolve_capabilities(enabled_module_names)
