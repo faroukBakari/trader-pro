@@ -38,6 +38,8 @@ from socket import socket
 from socket import timeout as socketTimeout
 from typing import Any
 
+# Protobuf imports for server version >= 203
+from ibapi.client_utils import createPlaceOrderRequestProto
 from ibapi.common import BarData, TickAttrib
 from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.contract import Contract, ContractDescription, ContractDetails
@@ -61,7 +63,8 @@ DEBUG_TWS_SEND = os.environ.get("DEBUG_TWS_SEND") == "true"
 DEBUG_TWS_RECEIVE = os.environ.get("DEBUG_TWS_RECEIVE") == "true"
 DEBUG_TWS_DISPATCH = os.environ.get("DEBUG_TWS_DISPATCH") == "true"
 DEBUG_TWS_CALLBACK = os.environ.get("DEBUG_TWS_CALLBACK") == "true"
-
+DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
+DEBUG_TWS_BROKER = os.environ.get("DEBUG_TWS_BROKER") == "true"
 
 NO_VALID_ID = -1
 MIN_CLIENT_VER = 100
@@ -209,6 +212,9 @@ class IBSocket(EWrapper):
         self._socket = socket()
         self._reader_loop: asyncio.AbstractEventLoop | None = None
 
+        self._server_version: str = ""
+        self._connection_time: str = ""
+
         # callback related attributes
         self._future_hooks: dict[
             int, tuple[asyncio.AbstractEventLoop, asyncio.Future]
@@ -227,7 +233,7 @@ class IBSocket(EWrapper):
 
         # Pending snapshot futures - separate from stream hooks
         # Maps reqId → (event_loop, Future) for quote snapshot resolution
-        self._pending_snapshots: dict[
+        self._snapshot_hooks: dict[
             int, tuple[asyncio.AbstractEventLoop, asyncio.Future]
         ] = {}
 
@@ -487,34 +493,44 @@ class IBSocket(EWrapper):
         future_loop, _ = self._future_hooks.get(reqId, (None, None))
         if future_loop is not None:
 
-            def _resolve_in_loop(reqId: int, error: ProviderException) -> None:
+            def _reject_in_loop(reqId: int, error: ProviderException) -> None:
                 self._future_data.pop(reqId, None)
                 _, future = self._future_hooks.pop(reqId, (None, None))
                 if future is not None and not future.done():
                     future.set_exception(error)
 
-            future_loop.call_soon_threadsafe(_resolve_in_loop, reqId, error)
+            future_loop.call_soon_threadsafe(_reject_in_loop, reqId, error)
 
         # 2. Check for active stream
         stream_loop, _, on_error = self._stream_hooks.get(reqId, (None, None, None))
         if stream_loop is not None and on_error is not None:
-            # Determine if error is non-recoverable from detail suffix
-            is_non_recoverable = error.code.endswith("_NON_RECOVERABLE")
 
-            async def _notify_and_cleanup(
+            async def _notify_in_loop(
                 on_error: Callable[[ProviderException], Awaitable[None]],
                 error: ProviderException,
             ) -> None:
                 await on_error(error)
 
-            if is_non_recoverable:
-                # Clean up first, then notify
-                stream_loop.call_soon_threadsafe(self._cleanup_request, reqId)
-
             stream_loop.call_soon_threadsafe(
                 stream_loop.create_task,
-                _notify_and_cleanup(on_error, error),
+                _notify_in_loop(on_error, error),
             )
+
+        # Determine if error is non-recoverable from detail suffix
+        is_non_recoverable = error.code.endswith("_NON_RECOVERABLE")
+
+        # 3. Orphan error - log warning
+        if future_loop is None and stream_loop is None:
+            logger.error(
+                "Orphan TWS error (no future or stream) for reqId %d",
+                reqId,
+            )
+            logger.exception(error)
+
+        elif is_non_recoverable:
+            loop = stream_loop or future_loop
+            if loop:
+                loop.call_soon_threadsafe(self._cleanup_request, reqId)
 
     # == exposed socket methods ===
 
@@ -548,7 +564,7 @@ class IBSocket(EWrapper):
         self._stream_hooks.pop(reqId, None)
         self._future_hooks.pop(reqId, None)
         self._future_data.pop(reqId, None)
-        self._pending_snapshots.pop(reqId, None)
+        self._snapshot_hooks.pop(reqId, None)
         self._reqId_to_capability.pop(reqId, None)
         # Remove from active streams
         for ticker, rid in list(self._active_streams.items()):
@@ -591,6 +607,18 @@ class IBSocket(EWrapper):
                 return False
         stream[field_name] = value
         return True
+
+    @property
+    def server_version(self) -> str:
+        return self._server_version
+
+    @property
+    def connection_time(self) -> str:
+        return self._connection_time
+
+    @property
+    def account_id(self) -> str:
+        return next(iter(self._reader_accounts), "Not set")
 
     @property
     def next_req_id(self) -> int:
@@ -679,9 +707,11 @@ class IBSocket(EWrapper):
                 f"Invalid handshake response: expected 2 fields, got {len(fields)}"
             )
 
-        server_version, connection_time = [msg.decode("ascii") for msg in fields]
+        self._server_version, self._connection_time = [
+            msg.decode("ascii") for msg in fields
+        ]
         debug_log(
-            f"Server version: {server_version}, Connection time: {connection_time}"
+            f"Server version: {self._server_version}, Connection time: {self._connection_time}"
         )
         text = make_fields([VERSION, client_id, ""])
         msg2 = (
@@ -694,7 +724,7 @@ class IBSocket(EWrapper):
         self._state = IBSocketState.CONNECTED
         threading.Thread(
             target=self._reader_task,
-            args=(int(server_version),),
+            args=(int(self._server_version),),
             daemon=False,
         ).start()
 
@@ -714,6 +744,24 @@ class IBSocket(EWrapper):
         assert self._state == IBSocketState.RUNNING, "Socket is not connected."
         with self._socket_lock:
             self._socket.sendall(msg2)
+
+    def send_message_proto(self, msgId: int, protobuf_data: bytes) -> None:
+        """Send a protobuf-encoded message.
+
+        For server version >= 203, certain messages (PLACE_ORDER, CANCEL_ORDER)
+        require protobuf encoding.
+
+        Message format: [4-byte length][4-byte msgId][protobuf bytes]
+        """
+        byte_array = msgId.to_bytes(4, "big") + protobuf_data
+        msg = len(byte_array).to_bytes(4, "big") + byte_array
+        if DEBUG_TWS_SEND:
+            debug_log(
+                f"Sending protobuf message: msgId={msgId}, size={len(protobuf_data)}"
+            )
+        assert self._state == IBSocketState.RUNNING, "Socket is not connected."
+        with self._socket_lock:
+            self._socket.sendall(msg)
 
     # === Future / Coroutine management ===
 
@@ -750,7 +798,7 @@ class IBSocket(EWrapper):
         self._reqId_to_capability[reqId] = capability
         return asyncio.wait_for(future, timeout)
 
-    def create_tick_future(
+    def create_stream_future(
         self,
         reqId: int,
         ticker_name: str,
@@ -775,7 +823,7 @@ class IBSocket(EWrapper):
         """
         loop = asyncio.get_event_loop()
         future = loop.create_future()
-        self._pending_snapshots[reqId] = (loop, future)
+        self._snapshot_hooks[reqId] = (loop, future)
         self._reqId_to_capability.setdefault(reqId, capability)
         stream = self._stream_data.setdefault(
             reqId,
@@ -791,7 +839,7 @@ class IBSocket(EWrapper):
 
     # === Stream management ===
 
-    def _try_resolve_snapshots(
+    def _resolve_stream_snapshot(
         self, reqId: int, stream: dict[str, Any]
     ) -> asyncio.AbstractEventLoop | None:
         """Try to resolve pending snapshot futures if bid/ask/last complete.
@@ -807,11 +855,12 @@ class IBSocket(EWrapper):
         Returns:
             The event loop used for resolution, or None if no snapshot was resolved.
         """
-        if not all(att in stream for att in ["bid", "ask", "last"]):
+
+        snapshot_loop, _ = self._snapshot_hooks.get(reqId, (None, None))
+        if snapshot_loop is None:
             return None
 
-        snapshot_loop, _ = self._pending_snapshots.get(reqId, (None, None))
-        if snapshot_loop is None:
+        if not stream.get("snapshot_complete"):
             return None
 
         if DEBUG_TWS_CALLBACK:
@@ -822,7 +871,7 @@ class IBSocket(EWrapper):
             )
 
         def resolve_snapshot(reqId: int, stream: dict[str, Any]) -> None:
-            _, future = self._pending_snapshots.pop(reqId, (None, None))
+            _, future = self._snapshot_hooks.pop(reqId, (None, None))
             if future is not None and not future.done():
                 future.set_result(stream)
 
@@ -831,7 +880,7 @@ class IBSocket(EWrapper):
 
     def _dispatch_stream_update(
         self, reqId: int, stream: dict[str, Any], updated_fields: list[str]
-    ) -> bool:
+    ) -> asyncio.AbstractEventLoop | None:
         """Dispatch stream update to registered callback.
 
         Args:
@@ -846,7 +895,7 @@ class IBSocket(EWrapper):
             reqId, (None, None, None)
         )
         if stream_loop is None:
-            return False
+            return None
 
         if DEBUG_TWS_CALLBACK:
             debug_log(
@@ -858,9 +907,8 @@ class IBSocket(EWrapper):
             stream_loop.create_task,  # type: ignore
             stream_callback(stream, updated_fields),  # type: ignore
         )
-        return True
+        return stream_loop
 
-    # called in reader thread
     def _notify_stream(
         self,
         reqId: int,
@@ -882,10 +930,10 @@ class IBSocket(EWrapper):
             return
 
         # Try to resolve pending snapshots
-        snapshot_loop = self._try_resolve_snapshots(reqId, stream)
+        snapshot_loop = self._resolve_stream_snapshot(reqId, stream)
 
         # Dispatch to stream callback
-        if self._dispatch_stream_update(reqId, stream, updated_fields):
+        if self._dispatch_stream_update(reqId, stream, updated_fields) is not None:
             return
 
         # No stream hook - clean up if snapshot was resolved
@@ -971,13 +1019,13 @@ class IBSocket(EWrapper):
     # === Trading / account management ===
 
     def managedAccounts(self, accountsList: str) -> None:
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_BROKER:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # should be sent upon connection
         self._reader_accounts = accountsList.split(",")
 
     def nextValidId(self, orderId: int) -> None:
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_BROKER:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # Signals connection fully established - safe to make requests
         self._nxt_order_id = orderId
@@ -1003,7 +1051,7 @@ class IBSocket(EWrapper):
             order: Order parameters (type, qty, price, etc.)
             orderState: Current order state (status, margin, commission)
         """
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_BROKER:
             debug_log(
                 f"{current_fn_name()}, orderId={orderId}, "
                 f"symbol={contract.symbol}, status={orderState.status}"
@@ -1081,7 +1129,7 @@ class IBSocket(EWrapper):
             whyHeld: Reason order is held (if applicable)
             mktCapPrice: Market cap price (for auction orders)
         """
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_BROKER:
             debug_log(
                 f"{current_fn_name()}, orderId={orderId}, status={status}, "
                 f"filled={filled}, remaining={remaining}, avgFillPrice={avgFillPrice}"
@@ -1121,7 +1169,7 @@ class IBSocket(EWrapper):
         Called after all openOrder callbacks for reqOpenOrders().
         Resolves the pending future with accumulated order data.
         """
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_BROKER:
             debug_log(f"{current_fn_name()}")
 
         # Resolve the pending open orders future
@@ -1154,7 +1202,7 @@ class IBSocket(EWrapper):
             position: Position size (positive=long, negative=short)
             avgCost: Average cost per unit
         """
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_BROKER:
             debug_log(
                 f"{current_fn_name()}, account={account}, "
                 f"symbol={contract.symbol}, position={position}, avgCost={avgCost}"
@@ -1198,7 +1246,7 @@ class IBSocket(EWrapper):
         Called after all position callbacks for reqPositions().
         Resolves the pending future with accumulated position data.
         """
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_BROKER:
             debug_log(f"{current_fn_name()}")
 
         # Resolve the pending positions future
@@ -1235,7 +1283,7 @@ class IBSocket(EWrapper):
             value: Tag value as string
             currency: Currency of the value
         """
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_BROKER:
             debug_log(
                 f"{current_fn_name()}, reqId={reqId}, account={account}, "
                 f"tag={tag}, value={value}, currency={currency}"
@@ -1259,7 +1307,7 @@ class IBSocket(EWrapper):
         Called after all accountSummary callbacks for reqAccountSummary().
         Resolves the pending future with accumulated summary data.
         """
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_BROKER:
             debug_log(f"{current_fn_name()}, reqId={reqId}")
 
         # Resolve the pending account summary future
@@ -1321,7 +1369,7 @@ class IBSocket(EWrapper):
         TWS sends one historicalData callback per bar.
         Results are accumulated until historicalDataEnd is called.
         """
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         accumulator = self._future_data.get(reqId)
         if accumulator is not None:
@@ -1367,7 +1415,7 @@ class IBSocket(EWrapper):
     @error_handler(capability="datafeed")
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
         """End signal for historical data - resolve Future with accumulated results."""
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         if reqId in self._future_data:
             self._resolve_future(reqId)
@@ -1389,6 +1437,12 @@ class IBSocket(EWrapper):
             if field_name in ["last", "close"]:
                 self._update_stream_field(reqId, "bar_close", price)
                 fields.append("bar_close")
+
+            stream = self._stream_data.get(reqId, {})
+            if not stream.get("snapshot_complete"):
+                stream["snapshot_complete"] = all(
+                    att in stream for att in ["bid", "ask", "last"]
+                )
             self._notify_stream(reqId, fields)
 
     @error_handler(capability="datafeed")
@@ -1450,26 +1504,20 @@ class IBSocket(EWrapper):
         snapshot reception is finished."""
 
         # Quote snapshot future resolution (uses _pending_snapshots)
-        snapshot_loop, _ = self._pending_snapshots.get(reqId, (None, None))
+        stream = self._stream_data.get(reqId, {})
+        stream["snapshot_complete"] = True
+
+        snapshot_loop = self._resolve_stream_snapshot(reqId, stream)
+
+        # Dispatch to stream callback
+        if (
+            self._dispatch_stream_update(reqId, stream, ["snapshot_complete"])
+            is not None
+        ):
+            return
+
         if snapshot_loop is not None:
-            # reader thread ownership
-            stream = self._stream_data.get(reqId, {})
-
-            if DEBUG_TWS_CALLBACK:
-                debug_log(
-                    f"tickSnapshotEnd resolving snapshot for reqId {reqId}, stream: {stream}"
-                )
-
-            def resolve_snapshot(reqId: int, stream: dict[str, Any]) -> None:
-                _, future = self._pending_snapshots.pop(reqId, (None, None))
-                if future is not None and not future.done():
-                    future.set_result(stream)
-
-            snapshot_loop.call_soon_threadsafe(resolve_snapshot, reqId, stream)
-
-        stream_loop, _, _ = self._stream_hooks.get(reqId, (None, None, None))
-        if snapshot_loop is not None and stream_loop is None:
-            if DEBUG_TWS_CALLBACK:
+            if DEBUG_TWS_DATAFEED:
                 debug_log(f"tickSnapshotEnd cleanup stream for reqId {reqId}")
 
             snapshot_loop.call_soon_threadsafe(self._cleanup_request, reqId)
@@ -1745,7 +1793,7 @@ class TWSClient:
         if reqId is not None:
             if DEBUG_TWS_REQUEST:
                 debug_log(f"reusing active stream '{stream_key}' for reqQuoteSnapshot")
-            coroutine = self.ibsocket.create_tick_future(
+            coroutine = self.ibsocket.create_stream_future(
                 reqId,
                 stream_key,
                 timeout=timeout or self._timeout,
@@ -1754,7 +1802,7 @@ class TWSClient:
             return await coroutine
 
         reqId = self.next_req_id
-        coroutine = self.ibsocket.create_tick_future(
+        coroutine = self.ibsocket.create_stream_future(
             reqId,
             stream_key,
             timeout=timeout or self._timeout,
@@ -2023,227 +2071,22 @@ class TWSClient:
             order: Order parameters (type, side, quantity, price, etc.)
 
         Note:
-            For simplicity, this uses the legacy message format (not protobuf).
-            Full order field support requires ~100+ fields. This implementation
-            covers core order types: Market, Limit, Stop, StopLimit.
+            For server version >= 203, uses protobuf encoding (required by TWS).
+            For older server versions, uses legacy message format.
         """
-        # Build message fields for PLACE_ORDER (simplified, core fields only)
-        # Based on ibapi/client.py placeOrder(), minimum required fields
-        fields: list[object] = [
-            order_id,
-            # Contract fields
-            contract.conId,
-            contract.symbol,
-            contract.secType,
-            contract.lastTradeDateOrContractMonth,
-            contract.strike if contract.strike else "",
-            contract.right,
-            contract.multiplier if contract.multiplier else "",
-            contract.exchange,
-            contract.primaryExchange,
-            contract.currency,
-            contract.localSymbol,
-            contract.tradingClass,
-            contract.secIdType if contract.secIdType else "",
-            contract.secId if contract.secId else "",
-            # Order fields
-            order.action,  # BUY or SELL
-            order.totalQuantity,
-            order.orderType,  # MKT, LMT, STP, STP LMT
-            order.lmtPrice,
-            order.auxPrice,  # Stop price for STP/STP LMT orders
-            order.tif,  # GTC, DAY, IOC, etc.
-            order.ocaGroup,
-            order.account if order.account else "",
-            order.openClose,
-            order.origin,
-            order.orderRef if order.orderRef else "",
-            order.transmit,
-            order.parentId,
-            order.blockOrder,
-            order.sweepToFill,
-            order.displaySize,
-            order.triggerMethod,
-            order.outsideRth,
-            order.hidden,
-            # Combo orders (empty for single-leg)
-            "",  # comboLegsDescrip
-            0,  # comboLegs count
-            # Order combo legs (none)
-            0,  # orderComboLegs count
-            # Smart combo routing (none)
-            0,  # smartComboRoutingParams count
-            # Deprecated share allocation
-            "",  # shareAllocation (deprecated)
-            order.discretionaryAmt,
-            order.goodAfterTime if order.goodAfterTime else "",
-            order.goodTillDate if order.goodTillDate else "",
-            # FA orders
-            order.faGroup if order.faGroup else "",
-            order.faMethod if order.faMethod else "",
-            order.faPercentage if order.faPercentage else "",
-            # Institutional orders
-            "",  # obsoleteOpenClose
-            order.origin,
-            order.shortSaleSlot,
-            order.designatedLocation if order.designatedLocation else "",
-            order.exemptCode,
-            # Remaining order fields
-            order.ocaType,
-            order.rule80A if order.rule80A else "",
-            order.settlingFirm if order.settlingFirm else "",
-            order.allOrNone,
-            order.minQty,
-            order.percentOffset,
-            False,  # obsoleteETradeOnly
-            False,  # obsoleteFirmQuoteOnly
-            "",  # obsoleteNbboPriceCap
-            order.auctionStrategy,
-            order.startingPrice,
-            order.stockRefPrice,
-            order.delta,
-            order.stockRangeLower,
-            order.stockRangeUpper,
-            order.overridePercentageConstraints,
-            # Volatility orders (defaults)
-            order.volatility,
-            order.volatilityType,
-            order.deltaNeutralOrderType if order.deltaNeutralOrderType else "",
-            order.deltaNeutralAuxPrice,
-            # Delta neutral (minimal)
-            order.deltaNeutralConId,
-            order.deltaNeutralSettlingFirm if order.deltaNeutralSettlingFirm else "",
-            (
-                order.deltaNeutralClearingAccount
-                if order.deltaNeutralClearingAccount
-                else ""
-            ),
-            (
-                order.deltaNeutralClearingIntent
-                if order.deltaNeutralClearingIntent
-                else ""
-            ),
-            order.deltaNeutralOpenClose if order.deltaNeutralOpenClose else "",
-            order.deltaNeutralShortSale,
-            order.deltaNeutralShortSaleSlot,
-            (
-                order.deltaNeutralDesignatedLocation
-                if order.deltaNeutralDesignatedLocation
-                else ""
-            ),
-            order.continuousUpdate,
-            order.referencePriceType,
-            order.trailStopPrice,
-            order.trailingPercent,
-            # Scale orders (defaults)
-            order.scaleInitLevelSize,
-            order.scaleSubsLevelSize,
-            order.scalePriceIncrement,
-            # Scale order extended fields
-            order.scalePriceAdjustValue,
-            order.scalePriceAdjustInterval,
-            order.scaleProfitOffset,
-            order.scaleAutoReset,
-            order.scaleInitPosition,
-            order.scaleInitFillQty,
-            order.scaleRandomPercent,
-            order.scaleTable if order.scaleTable else "",
-            # Algo
-            "",  # obsoleteActiveStartTime
-            "",  # obsoleteActiveStopTime
-            # Hedge orders
-            order.hedgeType if order.hedgeType else "",
-            order.hedgeParam if order.hedgeParam else "",
-            # Opt out smart routing
-            order.optOutSmartRouting,
-            # Clearing
-            order.clearingAccount if order.clearingAccount else "",
-            order.clearingIntent if order.clearingIntent else "",
-            # Not held
-            order.notHeld,
-            # Delta neutral combo (minimal)
-            0,  # haveDeltaNeutralContract
-            # Algo
-            order.algoStrategy if order.algoStrategy else "",
-            # Algo params (count only, no params)
-            0 if not order.algoParams else len(order.algoParams),
-            # Algo ID
-            order.algoId if order.algoId else "",
-            # What-if
-            order.whatIf,
-            # Misc options
-            "",  # miscOptionsStr
-            # Solicited
-            order.solicited,
-            # Random size/price
-            order.randomizeSize,
-            order.randomizePrice,
-            # Peg to bench fields (minimal)
-            0,  # referenceContractId
-            0.0,  # peggedChangeAmount
-            False,  # isPeggedChangeAmountDecrease
-            0.0,  # referenceChangeAmount
-            "",  # referenceExchangeId
-            # Conditions (none)
-            0,  # conditions count
-            # Adjusted order type
-            "",  # adjustedOrderType
-            "",  # triggerPrice
-            "",  # lmtPriceOffset
-            "",  # adjustedStopPrice
-            "",  # adjustedStopLimitPrice
-            "",  # adjustedTrailingAmount
-            0,  # adjustableTrailingUnit
-            # Ext operator
-            order.extOperator if order.extOperator else "",
-            # Soft dollar tier
-            "",  # softDollarTier.name
-            "",  # softDollarTier.val
-            # Cash qty
-            order.cashQty,
-            # MiFID
-            order.mifid2DecisionMaker if order.mifid2DecisionMaker else "",
-            order.mifid2DecisionAlgo if order.mifid2DecisionAlgo else "",
-            order.mifid2ExecutionTrader if order.mifid2ExecutionTrader else "",
-            order.mifid2ExecutionAlgo if order.mifid2ExecutionAlgo else "",
-            # Don't use auto price for hedge
-            order.dontUseAutoPriceForHedge,
-            # OMS container
-            order.isOmsContainer,
-            # Discretionary up to limit price
-            order.discretionaryUpToLimitPrice,
-            # Use price mgmt algo
-            order.usePriceMgmtAlgo if order.usePriceMgmtAlgo is not None else "",
-            # Duration
-            order.duration,
-            # Post to ATS
-            order.postToAts,
-            # Auto cancel parent
-            order.autoCancelParent,
-            # Min trade qty / compete params
-            order.minTradeQty,
-            order.minCompeteSize,
-            order.competeAgainstBestOffset,
-            order.midOffsetAtWhole,
-            order.midOffsetAtHalf,
-            # Customer account
-            order.customerAccount if order.customerAccount else "",
-            # Professional customer
-            order.professionalCustomer,
-            # Bond accrued interest
-            order.bondAccruedInterest if order.bondAccruedInterest else "",
-            # Include overnight
-            order.includeOvernight,
-            # Manual order indicator
-            order.manualOrderIndicator,
-        ]
 
-        self.ibsocket.send_message(OUT.PLACE_ORDER, fields)
+        # Use protobuf encoding for server version >= 203
+        proto_msg = createPlaceOrderRequestProto(order_id, contract, order)
+        serialized = proto_msg.SerializeToString()
+        # Protobuf message ID = OUT.PLACE_ORDER + 200
+        proto_msg_id = OUT.PLACE_ORDER + PROTOBUF_MSG_ID
+        self.ibsocket.send_message_proto(proto_msg_id, serialized)
         if DEBUG_TWS_REQUEST:
             debug_log(
-                f"placed order: id={order_id}, symbol={contract.symbol}, "
+                f"placed order (protobuf): id={order_id}, symbol={contract.symbol}, "
                 f"action={order.action}, qty={order.totalQuantity}, type={order.orderType}"
             )
+        return
 
     def cancelOrder(self, order_id: int) -> None:
         """Cancel an order via TWS.

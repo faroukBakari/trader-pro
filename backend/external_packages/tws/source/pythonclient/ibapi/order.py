@@ -6,7 +6,9 @@ Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is su
 from ibapi.const import DOUBLE_INFINITY, UNSET_DECIMAL, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.contract import Contract
 from ibapi.object_implem import Object
+from ibapi.order_condition import OrderCondition
 from ibapi.softdollartier import SoftDollarTier
+from ibapi.tag_value import TagValue
 from ibapi.utils import decimalMaxString, floatMaxString, intMaxString, longMaxString
 
 # enum Origin
@@ -149,7 +151,7 @@ class Order(Object):
         # ALGO ORDERS ONLY
         self.algoStrategy = ""
 
-        self.algoParams = []  # TagValueList
+        self.algoParams: list[TagValue] = []  # TagValueList
         self.smartComboRoutingParams = []  # TagValueList
 
         self.algoId = ""
@@ -185,7 +187,9 @@ class Order(Object):
         self.adjustableTrailingUnit = 0
         self.lmtPriceOffset = UNSET_DOUBLE
 
-        self.conditions = []  # std::vector<std::shared_ptr<OrderCondition>>
+        self.conditions: list[OrderCondition] = (
+            []
+        )  # std::vector<std::shared_ptr<OrderCondition>>
         self.conditionsCancelOrder = False
         self.conditionsIgnoreRth = False
 

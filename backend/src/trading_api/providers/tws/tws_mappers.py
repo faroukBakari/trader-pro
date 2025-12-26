@@ -447,13 +447,12 @@ def parse_ticker(ticker: str) -> tuple[str, str, str, str, str]:
 
 def build_contract(
     ticker: str,
+    currency: str = "USD",
 ) -> Contract:
     """Build TWS Contract object from domain parameters.
 
     Args:
-        symbol: Symbol name (e.g., "AAPL")
-        exchange: Exchange name (default: "SMART" for smart routing)
-        sec_type: Security type (default: "STK" for stocks)
+        ticker: Ticker string (e.g., "AAPL:NASDAQ:STK-123456")
         currency: Currency code (default: "USD")
 
     Returns:
@@ -466,6 +465,7 @@ def build_contract(
     contract.exchange = exchange if exchange else "SMART"
     contract.primaryExchange = exchange
     contract.conId = int(conId)
+    contract.currency = currency
     return contract
 
 
@@ -638,9 +638,8 @@ def preorder_to_tws(
     # Set TIF (Time In Force) - default to GTC
     order.tif = "GTC"
 
-    # Account
-    if account:
-        order.account = account
+    # Account - required for order routing
+    order.account = account  # Empty string is valid if only one account
 
     # Transmit immediately
     order.transmit = True
