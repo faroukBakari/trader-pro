@@ -206,7 +206,7 @@ class TestIBSocketFutureManagement:
             "last": 150.25,
         }
 
-        awaitable = running_ibsocket.create_stream_future(
+        awaitable = running_ibsocket.create_snapshot(
             reqId, ticker, capability="datafeed", timeout=5
         )
 
@@ -225,7 +225,7 @@ class TestIBSocketFutureManagement:
         reqId = 42
         ticker = "AAPL:NASDAQ:STK-12345"
 
-        awaitable = running_ibsocket.create_stream_future(
+        awaitable = running_ibsocket.create_snapshot(
             reqId, ticker, capability="datafeed", timeout=5
         )
 
@@ -496,7 +496,7 @@ class TestIBSocketNotifyStream:
         reqId = 42
         ticker = "AAPL:NASDAQ:STK-12345"
 
-        awaitable = running_ibsocket.create_stream_future(
+        awaitable = running_ibsocket.create_snapshot(
             reqId, ticker, capability="datafeed", timeout=5
         )
 
@@ -545,7 +545,7 @@ class TestIBSocketNotifyStream:
         reqId = 42
         ticker = "AAPL:NASDAQ:STK-12345"
 
-        awaitable = running_ibsocket.create_stream_future(
+        awaitable = running_ibsocket.create_snapshot(
             reqId, ticker, capability="datafeed", timeout=5
         )
 
@@ -812,7 +812,7 @@ class TestIBSocketSnapshotEnd:
         reqId = 42
         ticker = "AAPL:NASDAQ:STK-12345"
 
-        awaitable = running_ibsocket.create_stream_future(
+        awaitable = running_ibsocket.create_snapshot(
             reqId, ticker, capability="datafeed", timeout=5
         )
         running_ibsocket._stream_data[reqId]["bid"] = 150.0

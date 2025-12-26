@@ -198,6 +198,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             )
 
         # Use first match (most common case is single result)
+        # FIXME: could improve by matching exchange if multiple results
         return contract_details_to_symbol_info(contract_details_list[0])
 
     async def get_historical_bars(

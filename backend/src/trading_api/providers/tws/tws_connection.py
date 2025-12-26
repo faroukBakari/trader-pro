@@ -21,6 +21,7 @@ Architecture:
 """
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -37,6 +38,8 @@ from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
 from typing import Any
+
+from attr import field
 
 # Protobuf imports for server version >= 203
 from ibapi.client_utils import createPlaceOrderRequestProto
@@ -485,7 +488,7 @@ class IBSocket(EWrapper):
             code=f"PROVIDER_TWS_{category}_{detail.upper()}",
             message=f"[reqId={reqId}] {message}",
             provider="tws",
-            capability=self._reqId_to_capability.get(reqId, capability_fallback),
+            capability=self._reqId_to_capability.setdefault(reqId, capability_fallback),
             timestamp=timestamp,
         )
 
@@ -579,7 +582,7 @@ class IBSocket(EWrapper):
         value: float | int | str | Decimal,
         *,
         tolerance: float = 1e-3,
-    ) -> bool:
+    ) -> dict[str, Any] | None:
         """Update stream field if changed.
 
         Args:
@@ -593,7 +596,7 @@ class IBSocket(EWrapper):
         """
         stream = self._stream_data.get(reqId)
         if stream is None:
-            return False
+            return None
         current = stream.get(field_name)
         if current is not None:
             # For numeric types, use tolerance-based comparison
@@ -601,12 +604,12 @@ class IBSocket(EWrapper):
                 current, (float, int, Decimal)
             ):
                 if math.isclose(float(current), float(value), abs_tol=tolerance):
-                    return False
+                    return None
             # For strings and exact matches
             elif current == value:
-                return False
+                return None
         stream[field_name] = value
-        return True
+        return stream
 
     @property
     def server_version(self) -> str:
@@ -775,12 +778,13 @@ class IBSocket(EWrapper):
             return
 
         def resolve_in_loop(reqId: int) -> None:
-            results = self._future_data.pop(reqId, [])
+            result = self._future_data.pop(reqId, None)
+            assert result is not None, "No results found in future resolver."
             _, future = self._future_hooks.pop(reqId, (None, None))
             assert (
                 future is not None and not future.done()
             ), "Future missing or already done in resolver."
-            future.set_result(results)
+            future.set_result(result)
             self._reqId_to_capability.pop(reqId, None)
 
         loop.call_soon_threadsafe(resolve_in_loop, reqId)
@@ -798,7 +802,7 @@ class IBSocket(EWrapper):
         self._reqId_to_capability[reqId] = capability
         return asyncio.wait_for(future, timeout)
 
-    def create_stream_future(
+    def create_snapshot(
         self,
         reqId: int,
         ticker_name: str,
@@ -833,13 +837,13 @@ class IBSocket(EWrapper):
             },
         )
         # If stream already has all required fields, resolve immediately
-        if all(att in stream for att in ["bid", "ask", "last"]):
+        if stream.get("snapshot_complete", False):
             future.set_result(stream)
         return asyncio.wait_for(future, timeout)
 
     # === Stream management ===
 
-    def _resolve_stream_snapshot(
+    def _resolve_snapshot(
         self, reqId: int, stream: dict[str, Any]
     ) -> asyncio.AbstractEventLoop | None:
         """Try to resolve pending snapshot futures if bid/ask/last complete.
@@ -878,7 +882,7 @@ class IBSocket(EWrapper):
         snapshot_loop.call_soon_threadsafe(resolve_snapshot, reqId, stream)
         return snapshot_loop
 
-    def _dispatch_stream_update(
+    def _dispatch_update(
         self, reqId: int, stream: dict[str, Any], updated_fields: list[str]
     ) -> asyncio.AbstractEventLoop | None:
         """Dispatch stream update to registered callback.
@@ -912,6 +916,7 @@ class IBSocket(EWrapper):
     def _notify_stream(
         self,
         reqId: int,
+        stream: dict[str, Any],
         updated_fields: list[str],
     ) -> None:
         """Trigger stream callbacks if registered.
@@ -923,17 +928,11 @@ class IBSocket(EWrapper):
         """
         # TODO: add rate limiting
 
-        # reader thread ownership
-        stream = self._stream_data.get(reqId)
-        if stream is None:
-            logger.warning(f"No stream slot found for reqId {reqId}")
-            return
-
         # Try to resolve pending snapshots
-        snapshot_loop = self._resolve_stream_snapshot(reqId, stream)
+        snapshot_loop = self._resolve_snapshot(reqId, stream)
 
         # Dispatch to stream callback
-        if self._dispatch_stream_update(reqId, stream, updated_fields) is not None:
+        if self._dispatch_update(reqId, stream, updated_fields) is not None:
             return
 
         # No stream hook - clean up if snapshot was resolved
@@ -1290,11 +1289,13 @@ class IBSocket(EWrapper):
             )
 
         # Initialize data structure for this reqId if needed
-        if reqId not in self._account_summary_data:
-            self._account_summary_data[reqId] = {}
+        stream = self._stream_data.get(reqId)
+        assert stream is not None, "Stream data not initialized for accountSummary."
+
+        account_data = stream.setdefault(account, {})
 
         # Store tag value (keyed by tag name)
-        self._account_summary_data[reqId][tag] = {
+        account_data[tag] = {
             "account": account,
             "tag": tag,
             "value": value,
@@ -1310,20 +1311,22 @@ class IBSocket(EWrapper):
         if DEBUG_TWS_BROKER:
             debug_log(f"{current_fn_name()}, reqId={reqId}")
 
-        # Resolve the pending account summary future
-        if self._account_summary_future is not None:
-            loop, future = self._account_summary_future
+        # snapshot future resolution (uses _pending_snapshots)
+        stream = self._stream_data.get(reqId)
+        assert stream is not None, "Stream data not initialized for accountSummaryEnd."
+        stream["snapshot_complete"] = True
 
-            def resolve(
-                fut: asyncio.Future[dict[str, dict[str, Any]]],
-                summary: dict[str, dict[str, Any]],
-            ) -> None:
-                if not fut.done():
-                    fut.set_result(summary)
+        self._resolve_snapshot(reqId, stream)
 
-            summary_data = self._account_summary_data.pop(reqId, {})
-            loop.call_soon_threadsafe(resolve, future, summary_data)
-            self._account_summary_future = None
+        # # Dispatch to stream callback
+        # if self._dispatch_update(reqId, stream, ["snapshot_complete"]) is not None:
+        #     return
+
+        # if snapshot_loop is not None:
+        #     if DEBUG_TWS_DATAFEED:
+        #         debug_log(f"tickSnapshotEnd cleanup stream for reqId {reqId}")
+
+        #     snapshot_loop.call_soon_threadsafe(self._cleanup_request, reqId)
 
     # === symbolSamples ===
 
@@ -1369,6 +1372,7 @@ class IBSocket(EWrapper):
         TWS sends one historicalData callback per bar.
         Results are accumulated until historicalDataEnd is called.
         """
+        # TODO: there is a streaming opportunity here to dispatch bars as they arrive
         if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         accumulator = self._future_data.get(reqId)
@@ -1380,14 +1384,9 @@ class IBSocket(EWrapper):
     @error_handler(capability="datafeed")
     def historicalDataUpdate(self, reqId: int, bar: BarData) -> None:
         """Returns updates in real time when keepUpToDate is set to True."""
-        stream = self._stream_data.get(reqId)
-        if stream is None:
-            return
-
-        updated_fields: list[str] = []
 
         # Field mapping: (stream_attr, bar_attr, transform)
-        field_mappings: list[tuple[str, object]] = [
+        field_mappings: list[tuple[str, float | int | str | Decimal]] = [
             ("bar_date", bar.date),
             ("bar_open", bar.open),
             ("bar_high", bar.high),
@@ -1398,25 +1397,29 @@ class IBSocket(EWrapper):
             ("bar_count", bar.barCount),
         ]
 
+        stream: dict[str, float | int | str | Decimal] | None = None
+        updated_fields: list[str] = []
         for field_name, new_value in field_mappings:
-            current_value = stream.get(field_name)
-            if current_value is None or not (
-                math.isclose(current_value, new_value, abs_tol=1e-3)
-                if isinstance(new_value, float)
-                else current_value == new_value
-            ):
-                stream[field_name] = new_value
+            _stream = self._update_stream_field(reqId, field_name, new_value)
+            if _stream:
+                stream = _stream
                 updated_fields.append(field_name)
 
         # Only notify if at least one field changed
-        if updated_fields:
-            self._notify_stream(reqId, updated_fields)
+        if stream:
+            self._notify_stream(reqId, stream, updated_fields)
 
     @error_handler(capability="datafeed")
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
         """End signal for historical data - resolve Future with accumulated results."""
         if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
+        # Snapshot future resolution (uses _pending_snapshots)
+        stream = self._update_stream_field(reqId, "snapshot_complete", True)
+        if stream:
+            self._notify_stream(reqId, stream, ["snapshot_complete"])
+
         if reqId in self._future_data:
             self._resolve_future(reqId)
 
@@ -1431,19 +1434,18 @@ class IBSocket(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        if self._update_stream_field(reqId, field_name, price):
+        stream = self._update_stream_field(reqId, field_name, price)
+        if stream:
             fields = [field_name]
             # Also update bar_close for last/close prices
             if field_name in ["last", "close"]:
                 self._update_stream_field(reqId, "bar_close", price)
                 fields.append("bar_close")
-
-            stream = self._stream_data.get(reqId, {})
             if not stream.get("snapshot_complete"):
                 stream["snapshot_complete"] = all(
                     att in stream for att in ["bid", "ask", "last"]
                 )
-            self._notify_stream(reqId, fields)
+            self._notify_stream(reqId, stream, fields)
 
     @error_handler(capability="datafeed")
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
@@ -1452,31 +1454,39 @@ class IBSocket(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        if self._update_stream_field(reqId, field_name, size):
-            self._notify_stream(reqId, [field_name])
+        stream = self._update_stream_field(reqId, field_name, size)
+        if stream:
+            self._notify_stream(reqId, stream, [field_name])
 
     @error_handler(capability="datafeed")
     def marketDataType(self, reqId: int, marketDataType: int) -> None:
         """Set market data type for the request."""
-        if self._update_stream_field(reqId, "market_data_type", marketDataType):
-            self._notify_stream(reqId, ["market_data_type"])
+        stream = self._update_stream_field(reqId, "market_data_type", marketDataType)
+        if stream:
+            self._notify_stream(reqId, stream, ["market_data_type"])
 
     @error_handler(capability="datafeed")
     def tickReqParams(
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
     ) -> None:
         """Returns exchange map of a particular contract."""
+        # FIXME: suboptimal performance - need to hardcode field updates
+        # to avoid multiples collections and dict creations
         update_list: list[str] = []
-        if self._update_stream_field(tickerId, "min_tick", minTick):
-            update_list.append("min_tick")
-        if self._update_stream_field(tickerId, "bbo_exchange", bboExchange):
-            update_list.append("bbo_exchange")
-        if self._update_stream_field(
-            tickerId, "snapshot_permissions", snapshotPermissions
-        ):
-            update_list.append("snapshot_permissions")
-        if update_list:
-            self._notify_stream(tickerId, update_list)
+        stream: dict[str, Any] | None = None
+        data: dict[str, float | int | str | Decimal] = {
+            "min_tick": minTick,
+            "bbo_exchange": bboExchange,
+            "snapshot_permissions": snapshotPermissions,
+        }
+        for field_name, field_value in data.items():
+            _stream = self._update_stream_field(tickerId, field_name, field_value)
+            if _stream:
+                update_list.append(field_name)
+                stream = _stream or stream
+
+        if stream:
+            self._notify_stream(tickerId, stream, update_list)
 
     @error_handler(capability="datafeed")
     def tickString(self, reqId: int, tickType: int, value: str) -> None:
@@ -1485,8 +1495,9 @@ class IBSocket(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        if self._update_stream_field(reqId, field_name, value):
-            self._notify_stream(reqId, [field_name])
+        stream = self._update_stream_field(reqId, field_name, value)
+        if stream:
+            self._notify_stream(reqId, stream, [field_name])
 
     @error_handler(capability="datafeed")
     def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
@@ -1495,32 +1506,19 @@ class IBSocket(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        if self._update_stream_field(reqId, field_name, value):
-            self._notify_stream(reqId, [field_name])
+        stream = self._update_stream_field(reqId, field_name, value)
+        if stream:
+            self._notify_stream(reqId, stream, [field_name])
 
     @error_handler(capability="datafeed")
     def tickSnapshotEnd(self, reqId: int) -> None:
         """When requesting market data snapshots, this market will indicate the
         snapshot reception is finished."""
 
-        # Quote snapshot future resolution (uses _pending_snapshots)
-        stream = self._stream_data.get(reqId, {})
-        stream["snapshot_complete"] = True
-
-        snapshot_loop = self._resolve_stream_snapshot(reqId, stream)
-
-        # Dispatch to stream callback
-        if (
-            self._dispatch_stream_update(reqId, stream, ["snapshot_complete"])
-            is not None
-        ):
-            return
-
-        if snapshot_loop is not None:
-            if DEBUG_TWS_DATAFEED:
-                debug_log(f"tickSnapshotEnd cleanup stream for reqId {reqId}")
-
-            snapshot_loop.call_soon_threadsafe(self._cleanup_request, reqId)
+        # Snapshot future resolution (uses _pending_snapshots)
+        stream = self._update_stream_field(reqId, "snapshot_complete", True)
+        if stream:
+            self._notify_stream(reqId, stream, ["snapshot_complete"])
 
     # === error handling ===
 
@@ -1793,7 +1791,7 @@ class TWSClient:
         if reqId is not None:
             if DEBUG_TWS_REQUEST:
                 debug_log(f"reusing active stream '{stream_key}' for reqQuoteSnapshot")
-            coroutine = self.ibsocket.create_stream_future(
+            coroutine = self.ibsocket.create_snapshot(
                 reqId,
                 stream_key,
                 timeout=timeout or self._timeout,
@@ -1802,7 +1800,7 @@ class TWSClient:
             return await coroutine
 
         reqId = self.next_req_id
-        coroutine = self.ibsocket.create_stream_future(
+        coroutine = self.ibsocket.create_snapshot(
             reqId,
             stream_key,
             timeout=timeout or self._timeout,
@@ -2178,7 +2176,7 @@ class TWSClient:
 
     # === Account Summary methods (broker capability) ===
 
-    async def reqAccountSummary(
+    async def reqAccountSummarySnapshot(
         self,
         group: str = "All",
         tags: str = "NetLiquidation,TotalCashValue,BuyingPower",
@@ -2205,12 +2203,31 @@ class TWSClient:
             LookAheadAvailableFunds, LookAheadExcessLiquidity,
             HighestSeverity, DayTradesRemaining, Leverage
         """
-        # Create future for result
-        loop = asyncio.get_event_loop()
-        future: asyncio.Future[dict[str, dict[str, Any]]] = loop.create_future()
-        self.ibsocket._account_summary_future = (loop, future)
+
+        stream_key = f"account_summary_{group}_{tags}"
+        coroutine: Awaitable[dict[str, Any]]
+
+        reqId = self.ibsocket.stream_req_id(stream_key)
+
+        if reqId is not None:
+            if DEBUG_TWS_REQUEST:
+                debug_log(f"reusing active stream '{stream_key}' for reqAccountSummary")
+            coroutine = self.ibsocket.create_snapshot(
+                reqId,
+                stream_key,
+                timeout=timeout or self._timeout,
+                capability="broker",
+            )
+            return await coroutine
 
         reqId = self.next_req_id
+        coroutine = self.ibsocket.create_snapshot(
+            reqId,
+            stream_key,
+            timeout=timeout or self._timeout,
+            capability="broker",
+        )
+
         VERSION = 1
         self.ibsocket.send_message(
             OUT.REQ_ACCOUNT_SUMMARY, [VERSION, reqId, group, tags]
@@ -2219,7 +2236,7 @@ class TWSClient:
         if DEBUG_TWS_REQUEST:
             debug_log(f"requesting account summary, reqId={reqId}, tags={tags}")
 
-        return await asyncio.wait_for(future, timeout=timeout or self._timeout)
+        return await coroutine
 
     def cancelAccountSummary(self, reqId: int) -> None:
         """Cancel account summary subscription.
