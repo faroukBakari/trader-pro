@@ -13,6 +13,7 @@ from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.ticktype import TickTypeEnum
 
+from trading_api.models.broker import AccountMetainfo
 from trading_api.models.market import (
     Bar,
     QuoteData,
@@ -25,13 +26,7 @@ from trading_api.models.market import (
 if TYPE_CHECKING:
     from ibapi.order import Order
 
-    from trading_api.models.broker import (
-        AccountMetainfo,
-        EquityData,
-        PlacedOrder,
-        Position,
-        PreOrder,
-    )
+    from trading_api.models.broker import EquityData, PlacedOrder, Position, PreOrder
 
 # TWS secType → TradingView-style symbol type
 SEC_TYPE_MAP: dict[str, str] = {
@@ -857,8 +852,8 @@ def tws_account_summary_to_equity(
 
 
 def tws_account_summary_to_account_info(
-    summary_data: dict[str, dict[str, Any]], account_id: str
-) -> "AccountMetainfo":
+    summary_data: dict[str, dict[str, dict[str, Any]]], account_id: str
+) -> AccountMetainfo:
     """Convert TWS account summary to domain AccountMetainfo.
 
     Args:
@@ -868,16 +863,25 @@ def tws_account_summary_to_account_info(
     Returns:
         Domain AccountMetainfo model
     """
-    from trading_api.models.broker import AccountMetainfo as AccountMetainfoModel
 
     # Try to get account from summary data, fall back to provided account_id
+    main_account = next(
+        iter(
+            [acc for acc in summary_data.keys() if acc not in ("reqId", "ticker_name")]
+        ),
+        None,
+    )
+    assert main_account is not None, "No account data in summary_data"
+
+    main_account_data = summary_data[main_account]
+
     account = account_id
-    for tag_data in summary_data.values():
+    for tag_data in main_account_data.values():
         if "account" in tag_data:
             account = tag_data["account"]
             break
 
-    return AccountMetainfoModel(
+    return AccountMetainfo(
         id=account,
         name=f"IBKR {account}",  # Simple name format
     )

@@ -276,7 +276,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             AccountMetainfo with account ID and name
         """
         # Request account summary to get account info
-        summary_data = await self._tws_client.reqAccountSummary(
+        summary_data = await self._tws_client.reqAccountSummarySnapshot(
             group="All",
             tags="AccountType",  # Just need account ID
         )
@@ -292,7 +292,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             EquityData with equity, balance, and P&L values
         """
         # Request account summary with equity-related tags
-        summary_data = await self._tws_client.reqAccountSummary(
+        summary_data = await self._tws_client.reqAccountSummarySnapshot(
             group="All",
             tags="NetLiquidation,TotalCashValue,UnrealizedPnL,RealizedPnL",
         )
