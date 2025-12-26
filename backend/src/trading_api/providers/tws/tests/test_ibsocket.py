@@ -206,7 +206,7 @@ class TestIBSocketFutureManagement:
             "last": 150.25,
         }
 
-        awaitable = running_ibsocket.create_tick_future(
+        awaitable = running_ibsocket.create_stream_future(
             reqId, ticker, capability="datafeed", timeout=5
         )
 
@@ -225,7 +225,7 @@ class TestIBSocketFutureManagement:
         reqId = 42
         ticker = "AAPL:NASDAQ:STK-12345"
 
-        awaitable = running_ibsocket.create_tick_future(
+        awaitable = running_ibsocket.create_stream_future(
             reqId, ticker, capability="datafeed", timeout=5
         )
 
@@ -233,7 +233,7 @@ class TestIBSocketFutureManagement:
         assert running_ibsocket._stream_data[reqId]["ticker_name"] == ticker
 
         # Cleanup - resolve and await to avoid warning
-        _, future = running_ibsocket._pending_snapshots[reqId]
+        _, future = running_ibsocket._snapshot_hooks[reqId]
         future.set_result(running_ibsocket._stream_data[reqId])
         await awaitable
 
@@ -496,7 +496,7 @@ class TestIBSocketNotifyStream:
         reqId = 42
         ticker = "AAPL:NASDAQ:STK-12345"
 
-        awaitable = running_ibsocket.create_tick_future(
+        awaitable = running_ibsocket.create_stream_future(
             reqId, ticker, capability="datafeed", timeout=5
         )
 
@@ -545,7 +545,7 @@ class TestIBSocketNotifyStream:
         reqId = 42
         ticker = "AAPL:NASDAQ:STK-12345"
 
-        awaitable = running_ibsocket.create_tick_future(
+        awaitable = running_ibsocket.create_stream_future(
             reqId, ticker, capability="datafeed", timeout=5
         )
 
@@ -812,7 +812,7 @@ class TestIBSocketSnapshotEnd:
         reqId = 42
         ticker = "AAPL:NASDAQ:STK-12345"
 
-        awaitable = running_ibsocket.create_tick_future(
+        awaitable = running_ibsocket.create_stream_future(
             reqId, ticker, capability="datafeed", timeout=5
         )
         running_ibsocket._stream_data[reqId]["bid"] = 150.0
@@ -836,7 +836,7 @@ class TestIBSocketSnapshotEnd:
         # Create pending snapshot (snapshot-only scenario, no stream hook)
         loop = asyncio.get_event_loop()
         future = loop.create_future()
-        running_ibsocket._pending_snapshots[reqId] = (loop, future)
+        running_ibsocket._snapshot_hooks[reqId] = (loop, future)
         running_ibsocket._stream_data[reqId] = {"reqId": reqId, "ticker_name": ticker}
 
         running_ibsocket.tickSnapshotEnd(reqId)
@@ -863,7 +863,7 @@ class TestIBSocketSnapshotEnd:
         # Also add a pending snapshot
         loop = asyncio.get_event_loop()
         future = loop.create_future()
-        running_ibsocket._pending_snapshots[reqId] = (loop, future)
+        running_ibsocket._snapshot_hooks[reqId] = (loop, future)
 
         running_ibsocket.tickSnapshotEnd(reqId)
 

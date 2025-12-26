@@ -14,10 +14,11 @@ Architecture:
 Note: Uses separate client_id from TWSDatafeedProvider (default: 2 vs 1).
 """
 
+import asyncio
 import logging
 from decimal import Decimal
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from trading_api.capabilities.broker import BrokerCapability
 from trading_api.models.broker import (
@@ -377,16 +378,120 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         )
 
     async def get_leverage_info(self, params: LeverageInfoParams) -> LeverageInfo:
-        """Get leverage information.
+        """Get leverage information via WhatIf order margin simulation.
 
-        [NOT-SUPPORTED]: IBKR uses account-level margin, not per-symbol leverage.
+        IBKR doesn't support per-symbol leverage settings, but we can compute
+        implied leverage from the margin requirement using a WhatIf order.
+
+        Formula: impliedLeverage = orderValue / marginRequired
+
+        Args:
+            params: Symbol, order type, and side for leverage query
+
+        Returns:
+            LeverageInfo with computed leverage based on margin requirements
         """
-        raise ProviderException(
-            code="PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED",
-            message="IBKR does not support per-symbol leverage. Use account margin settings.",
-            provider="tws",
-            capability="broker",
+        from ibapi.order import Order as TWSOrder
+
+        contract = build_contract(params.symbol)
+
+        # Build WhatIf order (simulation only, no execution)
+        order = TWSOrder()
+        order.action = "BUY" if params.side == 1 else "SELL"
+        order.totalQuantity = Decimal("1")  # Single unit for margin calc
+        order.orderType = "MKT"
+        order.whatIf = True  # Key flag: margin simulation mode
+        order.account = self._config.account_id
+
+        # Capture response via one-shot callback
+        loop = asyncio.get_event_loop()
+        result_future: asyncio.Future[dict[str, Any]] = loop.create_future()
+        target_order_id = self._tws_client.next_order_id
+
+        async def capture_whatif_response(order_data: dict[str, Any]) -> None:
+            if (
+                order_data.get("orderId") == target_order_id
+                and not result_future.done()
+            ):
+                result_future.set_result(order_data)
+
+        # Save and replace order hooks temporarily
+        original_hooks = self._tws_client.ibsocket._order_hooks
+        self._tws_client.registerOrderCallback(capture_whatif_response)
+
+        try:
+            # Fire-and-forget: TWS responds via openOrder callback
+            self._tws_client.placeOrder(target_order_id, contract, order)
+
+            # Await the callback response
+            order_data = await asyncio.wait_for(result_future, timeout=10.0)
+        finally:
+            # Restore original hooks
+            self._tws_client.ibsocket._order_hooks = original_hooks
+
+        # Extract margin from OrderState
+        order_state = order_data.get("orderState")
+        if order_state is None:
+            raise ProviderException(
+                code="PROVIDER_BROKER_MARGIN_UNAVAILABLE",
+                message="WhatIf order did not return margin information",
+                provider="tws",
+                capability="broker",
+            )
+
+        # Parse margin change (string like "25000.00" or empty)
+        margin_change_str = getattr(order_state, "initMarginChange", "") or "0"
+        try:
+            margin_change = float(margin_change_str.replace(",", ""))
+        except ValueError:
+            margin_change = 0.0
+
+        # Get current price for leverage calculation
+        current_price = await self._get_symbol_price(params.symbol)
+
+        # Compute implied leverage: price / margin_per_share
+        if margin_change > 0 and current_price > 0:
+            implied_leverage = current_price / margin_change
+        else:
+            # Fallback: Reg T default (50% margin = 2x leverage)
+            implied_leverage = 2.0
+
+        symbol_display = params.symbol.split(":")[0]
+        return LeverageInfo(
+            title=f"Margin Info ({symbol_display})",
+            leverage=round(implied_leverage, 2),
+            min=1.0,  # Cash (no margin)
+            max=round(implied_leverage, 2),  # Max = current implied (not adjustable)
+            step=0.0,  # Not adjustable via API
         )
+
+    async def _get_symbol_price(self, symbol: str) -> float:
+        """Get current price for a symbol via quote snapshot.
+
+        Args:
+            symbol: Symbol in format "SYMBOL:EXCHANGE:SECTYPE-CONID"
+
+        Returns:
+            Current price (last trade or mid-price)
+        """
+        contract = build_contract(symbol)
+
+        try:
+            snapshot = await self._tws_client.reqQuoteSnapshot(contract, timeout=5.0)
+            # Prefer last price, fall back to mid of bid/ask
+            last_price = snapshot.get("last", 0.0)
+            if last_price and last_price > 0:
+                return float(last_price)
+
+            bid = snapshot.get("bid", 0.0)
+            ask = snapshot.get("ask", 0.0)
+            if bid and ask and bid > 0 and ask > 0:
+                return float((bid + ask) / 2)
+
+            return 0.0
+        except Exception as e:
+            logger.warning(f"Failed to get price for {symbol}: {e}")
+            return 0.0
 
     async def set_leverage(self, params: LeverageSetParams) -> LeverageSetResult:
         """Set leverage.

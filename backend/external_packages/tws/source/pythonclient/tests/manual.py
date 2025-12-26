@@ -17,7 +17,6 @@ from ibapi.ticktype import TickType, TickTypeEnum
 from ibapi.utils import *
 from ibapi.wrapper import EWrapper
 
-
 # import pdb; pdb.set_trace()
 # import code; code.interact(local=locals())
 # import code; code.interact(local=dict(globals(), **locals()))
@@ -45,7 +44,7 @@ class TestApp(EClient, EWrapper):
         order.action = "BUY"
         order.orderType = "LMT"
         order.tif = "GTC"
-        order.totalQuantity = 3
+        order.totalQuantity = Decimal(3)
         order.lmtPrice = 1.23
         self.placeOrder(self.nextOrderId(), con, order)
 
@@ -53,6 +52,7 @@ class TestApp(EClient, EWrapper):
         pass
 
     def nextOrderId(self):
+        assert self.nextValidOrderId is not None, "nextValidOrderId was not set"
         id_ = self.nextValidOrderId
         self.nextValidOrderId += 1
         return id_
