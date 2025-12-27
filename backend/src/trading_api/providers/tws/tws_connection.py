@@ -237,7 +237,7 @@ class IBSocket(EWrapper):
         # Pending snapshot futures - separate from stream hooks
         # Maps reqId → (event_loop, Future) for quote snapshot resolution
         self._snapshot_hooks: dict[
-            int, tuple[asyncio.AbstractEventLoop, asyncio.Future]
+            int, list[tuple[asyncio.AbstractEventLoop, asyncio.Future]]
         ] = {}
 
         # ticker name to reqId mapping for active streams
@@ -827,7 +827,7 @@ class IBSocket(EWrapper):
         """
         loop = asyncio.get_event_loop()
         future = loop.create_future()
-        self._snapshot_hooks[reqId] = (loop, future)
+        self._snapshot_hooks.setdefault(reqId, []).append((loop, future))
         self._reqId_to_capability.setdefault(reqId, capability)
         stream = self._stream_data.setdefault(
             reqId,
@@ -843,9 +843,9 @@ class IBSocket(EWrapper):
 
     # === Stream management ===
 
-    def _resolve_snapshot(
+    def _resolve_snapshots(
         self, reqId: int, stream: dict[str, Any]
-    ) -> asyncio.AbstractEventLoop | None:
+    ) -> list[tuple[asyncio.AbstractEventLoop, asyncio.Future[Any]]]:
         """Try to resolve pending snapshot futures if bid/ask/last complete.
 
         Called from tick callbacks when data is updated. Checks if the stream
@@ -860,12 +860,12 @@ class IBSocket(EWrapper):
             The event loop used for resolution, or None if no snapshot was resolved.
         """
 
-        snapshot_loop, _ = self._snapshot_hooks.get(reqId, (None, None))
-        if snapshot_loop is None:
-            return None
-
         if not stream.get("snapshot_complete"):
-            return None
+            return []
+
+        snapshot_hooks = self._snapshot_hooks.pop(reqId, None)
+        if not snapshot_hooks:
+            return []
 
         if DEBUG_TWS_CALLBACK:
             debug_log(
@@ -874,17 +874,36 @@ class IBSocket(EWrapper):
                 + f" [reqId {reqId}]"
             )
 
-        def resolve_snapshot(reqId: int, stream: dict[str, Any]) -> None:
-            _, future = self._snapshot_hooks.pop(reqId, (None, None))
-            if future is not None and not future.done():
-                future.set_result(stream)
+        for loop, future in snapshot_hooks:
+            if not future.done():
+                loop.call_soon_threadsafe(future.set_result, stream)
 
-        snapshot_loop.call_soon_threadsafe(resolve_snapshot, reqId, stream)
-        return snapshot_loop
+        # No stream hook - clean up if snapshot was resolved
+        if reqId not in self._stream_hooks:
+            loop, _ = next(iter(snapshot_hooks))
+
+            if DEBUG_TWS_CALLBACK:
+                debug_log(
+                    "_notify_stream cleaning up after snapshot resolution "
+                    + f"[{stream.get('ticker_name', 'UNKNOWN')}]"
+                    + f" [reqId {reqId}]"
+                )
+            loop.call_soon_threadsafe(self._cleanup_request, reqId)
+        return snapshot_hooks
 
     def _dispatch_update(
         self, reqId: int, stream: dict[str, Any], updated_fields: list[str]
-    ) -> asyncio.AbstractEventLoop | None:
+    ) -> (
+        tuple[
+            asyncio.AbstractEventLoop,
+            Callable[
+                [dict[str, Any], list[str]],
+                Awaitable[None],
+            ],
+            Callable[[ProviderException], Awaitable[None]] | None,
+        ]
+        | None
+    ):
         """Dispatch stream update to registered callback.
 
         Args:
@@ -895,11 +914,11 @@ class IBSocket(EWrapper):
         Returns:
             True if update was dispatched, False if no stream hook exists.
         """
-        stream_loop, stream_callback, _ = self._stream_hooks.get(
-            reqId, (None, None, None)
-        )
-        if stream_loop is None:
+        stream_hook = self._stream_hooks.get(reqId)
+        if stream_hook is None:
             return None
+
+        stream_loop, stream_callback, _ = stream_hook
 
         if DEBUG_TWS_CALLBACK:
             debug_log(
@@ -911,7 +930,7 @@ class IBSocket(EWrapper):
             stream_loop.create_task,  # type: ignore
             stream_callback(stream, updated_fields),  # type: ignore
         )
-        return stream_loop
+        return stream_hook
 
     def _notify_stream(
         self,
@@ -928,22 +947,11 @@ class IBSocket(EWrapper):
         """
         # TODO: add rate limiting
 
-        # Try to resolve pending snapshots
-        snapshot_loop = self._resolve_snapshot(reqId, stream)
-
         # Dispatch to stream callback
-        if self._dispatch_update(reqId, stream, updated_fields) is not None:
-            return
+        self._dispatch_update(reqId, stream, updated_fields)
 
-        # No stream hook - clean up if snapshot was resolved
-        if snapshot_loop is not None:
-            if DEBUG_TWS_CALLBACK:
-                debug_log(
-                    "_notify_stream cleaning up after snapshot resolution "
-                    + f"[{stream.get('ticker_name', 'UNKNOWN')}]"
-                    + f" [reqId {reqId}]"
-                )
-            snapshot_loop.call_soon_threadsafe(self._cleanup_request, reqId)
+        # Try to resolve pending snapshots
+        self._resolve_snapshots(reqId, stream)
 
     # =======================
 
@@ -1316,7 +1324,7 @@ class IBSocket(EWrapper):
         assert stream is not None, "Stream data not initialized for accountSummaryEnd."
         stream["snapshot_complete"] = True
 
-        self._resolve_snapshot(reqId, stream)
+        self._resolve_snapshots(reqId, stream)
 
         # # Dispatch to stream callback
         # if self._dispatch_update(reqId, stream, ["snapshot_complete"]) is not None:

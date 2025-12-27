@@ -514,6 +514,44 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         self._subscription_counter += 1
         return f"tws-broker-sub-{self._subscription_counter}"
 
+    async def _on_tws_order_update(self, order_data: dict) -> None:
+        """Internal handler for TWS order updates - dispatches to all subscribers."""
+        placed_order = tws_order_to_placed_order(order_data)
+        for callback in self._order_callbacks.values():
+            try:
+                await callback(placed_order)
+            except Exception as e:
+                logger.error(f"Error in order callback: {e}")
+
+    async def _on_tws_order_error(self, error: ProviderException) -> None:
+        """Internal handler for TWS order errors - dispatches to all error callbacks."""
+        for sub_id in self._order_callbacks:
+            error_cb = self._error_callbacks.get(sub_id)
+            if error_cb:
+                try:
+                    await error_cb(error)
+                except Exception as e:
+                    logger.error(f"Error in order error callback: {e}")
+
+    async def _on_tws_position_update(self, position_data: dict) -> None:
+        """Internal handler for TWS position updates - dispatches to all subscribers."""
+        position = tws_position_to_domain(position_data)
+        for callback in self._position_callbacks.values():
+            try:
+                await callback(position)
+            except Exception as e:
+                logger.error(f"Error in position callback: {e}")
+
+    async def _on_tws_position_error(self, error: ProviderException) -> None:
+        """Internal handler for TWS position errors - dispatches to all error callbacks."""
+        for sub_id in self._position_callbacks:
+            error_cb = self._error_callbacks.get(sub_id)
+            if error_cb:
+                try:
+                    await error_cb(error)
+                except Exception as e:
+                    logger.error(f"Error in position error callback: {e}")
+
     def subscribe_orders(
         self,
         callback: Callable[[PlacedOrder], Awaitable[None]],
@@ -539,25 +577,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         logger.info(f"Subscribed to orders: {sub_id}")
         return sub_id
 
-    async def _on_tws_order_update(self, order_data: dict) -> None:
-        """Internal handler for TWS order updates - dispatches to all subscribers."""
-        placed_order = tws_order_to_placed_order(order_data)
-        for callback in self._order_callbacks.values():
-            try:
-                await callback(placed_order)
-            except Exception as e:
-                logger.error(f"Error in order callback: {e}")
-
-    async def _on_tws_order_error(self, error: ProviderException) -> None:
-        """Internal handler for TWS order errors - dispatches to all error callbacks."""
-        for sub_id in self._order_callbacks:
-            error_cb = self._error_callbacks.get(sub_id)
-            if error_cb:
-                try:
-                    await error_cb(error)
-                except Exception as e:
-                    logger.error(f"Error in order error callback: {e}")
-
     def subscribe_positions(
         self,
         callback: Callable[[Position], Awaitable[None]],
@@ -582,25 +601,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         logger.info(f"Subscribed to positions: {sub_id}")
         return sub_id
-
-    async def _on_tws_position_update(self, position_data: dict) -> None:
-        """Internal handler for TWS position updates - dispatches to all subscribers."""
-        position = tws_position_to_domain(position_data)
-        for callback in self._position_callbacks.values():
-            try:
-                await callback(position)
-            except Exception as e:
-                logger.error(f"Error in position callback: {e}")
-
-    async def _on_tws_position_error(self, error: ProviderException) -> None:
-        """Internal handler for TWS position errors - dispatches to all error callbacks."""
-        for sub_id in self._position_callbacks:
-            error_cb = self._error_callbacks.get(sub_id)
-            if error_cb:
-                try:
-                    await error_cb(error)
-                except Exception as e:
-                    logger.error(f"Error in position error callback: {e}")
 
     def subscribe_executions(
         self,
