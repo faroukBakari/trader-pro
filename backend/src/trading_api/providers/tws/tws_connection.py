@@ -66,8 +66,9 @@ DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
 DEBUG_TWS_SEND = os.environ.get("DEBUG_TWS_SEND") == "true"
 DEBUG_TWS_RECEIVE = os.environ.get("DEBUG_TWS_RECEIVE") == "true"
 DEBUG_TWS_DISPATCH = os.environ.get("DEBUG_TWS_DISPATCH") == "true"
-DEBUG_TWS_CALLBACK = os.environ.get("DEBUG_TWS_CALLBACK") == "true"
-
+DEBUG_TWS_SHARED = os.environ.get("DEBUG_TWS_SHARED") == "true"
+DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
+DEBUG_TWS_BROKER = os.environ.get("DEBUG_TWS_BROKER") == "true"
 
 NO_VALID_ID = -1
 MIN_CLIENT_VER = 100
@@ -223,7 +224,7 @@ class IBSocket(EWrapper):
         # stream data: tws-internal-id -> list of data items
         self._stream_data: dict[str, StreamData] = {}
 
-        # dict of correspondance between tws-internal-id and business-key-id
+        # correspondance dict => business-key-id to tws-internal-id
         # business-key-syntax: "capability:<business-specific-identifier>"
         # tws-internal-id: "(req|order)_${number}"
         self._business_to_tws_key: dict[str, str] = {}
@@ -423,7 +424,9 @@ class IBSocket(EWrapper):
         snapshot_hook = self._snapshot_hooks.get(tws_key, [])
         for snapshot_loop, future in snapshot_hook:
             if tws_key in self._snapshot_hooks:
-                snapshot_loop.call_soon_threadsafe(self._snapshot_hooks.pop, tws_key)
+                snapshot_loop.call_soon_threadsafe(
+                    self._snapshot_hooks.pop, tws_key, None
+                )
             snapshot_loop.call_soon_threadsafe(future.set_exception, error)
 
         # 2. Check for active stream
@@ -434,8 +437,12 @@ class IBSocket(EWrapper):
                 stream_loop.create_task,
                 on_error(error),
             )
-            if error.code.endswith("_NON_RECOVERABLE"):
-                stream_loop.call_soon_threadsafe(self.remove_stream, tws_key)
+            stream = self._stream_data.get(tws_key)
+            if stream and error.code.endswith("_NON_RECOVERABLE"):
+                if stream is not None:
+                    stream_loop.call_soon_threadsafe(
+                        self.remove_stream, stream.business_key
+                    )
 
         # 3. Orphan error - log warning
         if snapshot_hook is None and stream_hook is None:
@@ -444,12 +451,20 @@ class IBSocket(EWrapper):
 
     # == exposed socket methods ===
 
-    def tws_key(self, business_key: str) -> str | None:
+    def _get_tws_key(self, business_key: str) -> str | None:
         return self._business_to_tws_key.get(business_key)
 
     @property
     def server_version(self) -> str:
         return self._server_version
+
+    @property
+    def connection_time(self) -> str:
+        return self._connection_time
+
+    @property
+    def account_id(self) -> str:
+        return next(iter(self._reader_accounts), "Not set")
 
     @property
     def next_req_id(self) -> int:
@@ -577,7 +592,7 @@ class IBSocket(EWrapper):
 
         reqId: int | None = None
 
-        tws_key = self.tws_key(business_key)
+        tws_key = self._get_tws_key(business_key)
         if tws_key is None:
             reqId = self.next_req_id
             tws_key = f"req_{reqId}"
@@ -590,14 +605,15 @@ class IBSocket(EWrapper):
 
         stream = self._stream_data.setdefault(
             tws_key,
-            StreamData(
-                tws_key,
+            self._stream_data.pop(
                 business_key,
-                last_dispatched=int(time.time() * 1000),
-                last_updated=int(time.time() * 1000),
+                StreamData(
+                    business_key,
+                    last_dispatched=int(time.time() * 1000),
+                    last_updated=int(time.time() * 1000),
+                ),
             ),
         )
-        stream.last_updated = stream.last_dispatched = int(time.time() * 1000)
         if stream.snapshot_complete:
             future.set_result(stream)
 
@@ -628,16 +644,18 @@ class IBSocket(EWrapper):
 
         reqId: int | None = None
 
-        tws_key = self.tws_key(business_key)
+        tws_key = self._get_tws_key(business_key)
         if tws_key is None:
             reqId = self.next_req_id
             tws_key = f"req_{reqId}"
             self._business_to_tws_key[business_key] = tws_key
-            self._stream_data[tws_key] = StreamData(
-                tws_key,
+            self._stream_data[tws_key] = self._stream_data.pop(
                 business_key,
-                last_updated=int(time.time() * 1000),
-                last_dispatched=int(time.time() * 1000),
+                StreamData(
+                    business_key,
+                    last_updated=int(time.time() * 1000),
+                    last_dispatched=int(time.time() * 1000),
+                ),
             )
 
         # main thread ownership
@@ -649,20 +667,25 @@ class IBSocket(EWrapper):
 
         return reqId
 
-    def remove_stream(self, tws_key: str) -> None:
+    def remove_stream(self, business_key: str) -> None:
+        tws_key = self._business_to_tws_key.pop(business_key, None)
+        if tws_key is None:
+            return
         cleanup = self._cleanup_hooks.pop(tws_key, None)
         if cleanup is not None:
             loop, cleanup_func = cleanup
             loop.call_soon_threadsafe(cleanup_func)
 
         self._stream_hooks.pop(tws_key, None)
-        stream = self._stream_data.get(tws_key)
+        self._business_to_tws_key.pop(tws_key, None)
+        stream = self._stream_data.pop(tws_key, None)
         if stream is not None:
             stream.snapshot_complete = False
+            self._stream_data[stream.business_key] = stream
 
     # === Stream management ===
 
-    def _resolve_snapshots(self, stream: StreamData) -> None:
+    def _resolve_snapshots(self, tws_key: str, stream: StreamData) -> None:
         """Try to resolve pending snapshot futures if bid/ask/last complete.
 
         Called from tick callbacks when data is updated. Checks if the stream
@@ -680,32 +703,43 @@ class IBSocket(EWrapper):
         if not stream.snapshot_complete:
             return
 
-        if stream.tws_key not in self._snapshot_hooks:
+        snapshot_hooks = self._snapshot_hooks.get(tws_key)
+
+        if snapshot_hooks is None:
             return
 
-        snapshot_hooks = self._snapshot_hooks.pop(stream.tws_key)
-
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DISPATCH:
             debug_log(
-                "_resolve_snapshots "
-                + f"[{stream.business_key}]"
-                + f" [{stream.tws_key}]"
+                "_resolve_snapshots " + f"[{stream.business_key}]" + f" [{tws_key}]"
             )
 
         for loop, future in snapshot_hooks:
             if not future.done():
                 loop.call_soon_threadsafe(future.set_result, stream[:])
 
+        loop.call_soon_threadsafe(self._snapshot_hooks.pop, tws_key, None)
+
         stream.last_dispatched = int(time.time() * 1000)
 
-    def _dispatch_update(self, stream: StreamData) -> None:
+        def cleanup(stream: StreamData) -> None:
+            if int(time.time() * 1000) - stream.last_dispatched > 10_000:
+                # No stream hook registered - snapshot only
+                debug_log(
+                    f"_notify_stream: no stream listeners => canceling "
+                    + f"[{stream.business_key}] [{tws_key}]"
+                )
+                self.remove_stream(stream.business_key)
 
-        stream_hook = self._stream_hooks.get(stream.tws_key)
+        loop.call_later(10, cleanup, stream)
+
+    def _dispatch_update(self, tws_key: str, stream: StreamData) -> None:
+
+        stream_hook = self._stream_hooks.get(tws_key)
         if stream_hook is None:
             return
 
         stream_loop, stream_callback, _ = stream_hook
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DISPATCH:
             debug_log(
                 f"_dispatch_update [{stream.business_key}]"
                 + f" with fields: {stream.updated_fields}"
@@ -718,7 +752,7 @@ class IBSocket(EWrapper):
 
         stream.last_dispatched = int(time.time() * 1000)
 
-    def _notify_stream(self, stream: StreamData) -> None:
+    def _notify_stream(self, tws_key: str, stream: StreamData) -> None:
         """Trigger stream callbacks if registered.
 
         Handles both snapshot resolution and continuous stream updates:
@@ -728,56 +762,39 @@ class IBSocket(EWrapper):
         """
         # TODO: add rate limiting
 
-        # Try to resolve pending snapshots
-        self._resolve_snapshots(stream)
-
         # Dispatch to stream callback
-        self._dispatch_update(stream)
+        self._dispatch_update(tws_key, stream)
 
-        if time.time() * 1000 - stream.last_dispatched > 10_000:
-            # No stream hook registered - snapshot only
-            if DEBUG_TWS_DISPATCH:
-                debug_log(
-                    f"_notify_stream: no stream listeners => canceling "
-                    + f"[{stream.business_key}] [{stream.tws_key}]"
-                )
-            self.remove_stream(stream.tws_key)
+        # Try to resolve pending snapshots
+        self._resolve_snapshots(tws_key, stream)
 
     def _append_stream_data(
         self,
         tws_key: str,
         data: dict[str, Any],
     ) -> None:
-        stream = self._stream_data.setdefault(
+        stream = self._stream_data.get(
             tws_key,
-            StreamData(
-                tws_key,
-                last_dispatched=int(time.time() * 1000),
-                last_updated=int(time.time() * 1000),
-            ),
         )
+        if stream is None:
+            return
         stream.append(data)
         stream.updated_fields.clear()
         stream.last_updated = int(time.time() * 1000)
-        self._notify_stream(stream)
+        self._notify_stream(tws_key, stream)
 
     def _extend_stream_data(
         self,
         tws_key: str,
         data: list[dict[str, Any]],
     ) -> None:
-        stream = self._stream_data.setdefault(
-            tws_key,
-            StreamData(
-                tws_key,
-                last_dispatched=int(time.time() * 1000),
-                last_updated=int(time.time() * 1000),
-            ),
-        )
+        stream = self._stream_data.get(tws_key)
+        if stream is None:
+            return
         stream.extend(data)
         stream.updated_fields.clear()
         stream.last_updated = int(time.time() * 1000)
-        self._notify_stream(stream)
+        self._notify_stream(tws_key, stream)
 
     def _update_stream_data(
         self,
@@ -786,14 +803,9 @@ class IBSocket(EWrapper):
         *,
         tolerance: float = 1e-3,
     ) -> None:
-        stream = self._stream_data.setdefault(
-            tws_key,
-            StreamData(
-                tws_key,
-                last_dispatched=int(time.time() * 1000),
-                last_updated=int(time.time() * 1000),
-            ),
-        )
+        stream = self._stream_data.get(tws_key)
+        if stream is None:
+            return
         if not stream:
             stream.append({})
         last_slot = stream[-1]
@@ -814,19 +826,14 @@ class IBSocket(EWrapper):
             stream.last_updated = int(time.time() * 1000)
             stream.updated_fields.clear()
             stream.updated_fields.extend(updated_fields)
-            self._notify_stream(stream)
+            self._notify_stream(tws_key, stream)
 
     def _flag_snapshot_complete(self, tws_key: str) -> None:
-        stream = self._stream_data.setdefault(
-            tws_key,
-            StreamData(
-                tws_key,
-                last_dispatched=int(time.time() * 1000),
-                last_updated=int(time.time() * 1000),
-            ),
-        )
+        stream = self._stream_data.get(tws_key)
+        if stream is None:
+            return
         stream.snapshot_complete = True
-        self._notify_stream(stream)
+        self._notify_stream(tws_key, stream)
 
     # ================================================
     # =============== Request Methods ================
@@ -834,7 +841,7 @@ class IBSocket(EWrapper):
 
     def reqMatchingSymbols(self, reqId, pattern) -> None:
         self.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
-        debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
+        debug_log(f"requested symbolSamples for reqId {reqId} and pattern '{pattern}'")
 
     def reqContractDetails(self, reqId: int, contract: Contract) -> None:
         VERSION = 8
@@ -862,7 +869,7 @@ class IBSocket(EWrapper):
         self.send_message(OUT.REQ_CONTRACT_DATA, fields)
         if DEBUG_TWS_REQUEST:
             debug_log(
-                f"awaiting contractDetails for reqId {reqId} and symbol '{contract.symbol}'"
+                f"requested contractDetails for reqId {reqId} and symbol '{contract.symbol}'"
             )
 
     def reqBars(
@@ -875,14 +882,6 @@ class IBSocket(EWrapper):
         useRTH: int,
         format_date: int,
     ) -> None:
-
-        def cleanup() -> None:
-            VERSION = 1
-            self.send_message(OUT.CANCEL_HISTORICAL_DATA, [VERSION, reqId])
-            if DEBUG_TWS_REQUEST:
-                debug_log(f"cancelled realtime bars for reqId {reqId}")
-
-        self._cleanup_hooks[f"req_{reqId}"] = (asyncio.get_event_loop(), cleanup)
 
         asset_config = get_asset_config(contract.secType)
         whatToShow = asset_config.what_to_show_live
@@ -913,22 +912,25 @@ class IBSocket(EWrapper):
             [],  # chartOptions (empty list)
         ]
 
+        def cleanup() -> None:
+            VERSION = 1
+            self.send_message(OUT.CANCEL_HISTORICAL_DATA, [VERSION, reqId])
+            if DEBUG_TWS_REQUEST:
+                debug_log(
+                    f"canceled bar data for reqId {reqId}, "
+                    f"symbol='{contract.symbol}', exchange='{contract.exchange}', end_date_time='{end_date_time}', duration='{duration_str}', barSize='{bar_size}'"
+                )
+
+        self._cleanup_hooks[f"req_{reqId}"] = (asyncio.get_event_loop(), cleanup)
+
         self.send_message(OUT.REQ_HISTORICAL_DATA, fields)
         if DEBUG_TWS_REQUEST:
             debug_log(
-                f"awaiting historicalData for reqId {reqId}, "
-                f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{bar_size}'"
+                f"requested bar data for reqId {reqId}, "
+                f"symbol='{contract.symbol}', exchange='{contract.exchange}', end_date_time='{end_date_time}', duration='{duration_str}', barSize='{bar_size}'"
             )
 
     def reqQuote(self, reqId: int, contract: Contract) -> None:
-
-        def cleanup() -> None:
-            VERSION = 2
-            self.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
-            if DEBUG_TWS_REQUEST:
-                debug_log(f"cancelled realtime bars for reqId {reqId}")
-
-        self._cleanup_hooks[f"req_{reqId}"] = (asyncio.get_event_loop(), cleanup)
 
         VERSION = 11
         # Build message fields for REQ_MKT_DATA
@@ -956,10 +958,20 @@ class IBSocket(EWrapper):
             [],  # mktDataOptions (empty list)
         ]
 
+        def cleanup() -> None:
+            VERSION = 2
+            self.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
+            if DEBUG_TWS_REQUEST:
+                debug_log(
+                    f"canceled quote data for reqId {reqId} symbol='{contract.symbol}'"
+                )
+
+        self._cleanup_hooks[f"req_{reqId}"] = (asyncio.get_event_loop(), cleanup)
+
         self.send_message(OUT.REQ_MKT_DATA, mkt_data_fields)
         if DEBUG_TWS_REQUEST:
             debug_log(
-                f"awaiting quote snapshot for reqId {reqId}, symbol='{contract.symbol}'"
+                f"requested quote data for reqId {reqId} symbol='{contract.symbol}'"
             )
 
     # ================================================
@@ -969,13 +981,13 @@ class IBSocket(EWrapper):
     # === Trading / account management ===
 
     def managedAccounts(self, accountsList: str) -> None:
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_SHARED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # should be sent upon connection
         self._reader_accounts = accountsList.split(",")
 
     def nextValidId(self, orderId: int) -> None:
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_SHARED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # Signals connection fully established - safe to make requests
         self._nxt_order_id = orderId
@@ -986,7 +998,7 @@ class IBSocket(EWrapper):
     def symbolSamples(
         self, reqId: int, contractDescriptions: list[ContractDescription]
     ) -> None:
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_SHARED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         tws_key = f"req_{reqId}"
@@ -1003,14 +1015,14 @@ class IBSocket(EWrapper):
         TWS sends one contractDetails callback per matching contract.
         Results are accumulated until contractDetailsEnd is called.
         """
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_SHARED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         self._append_stream_data(f"req_{reqId}", {"contractDetails": contractDetails})
 
     def contractDetailsEnd(self, reqId: int) -> None:
         """End signal for contract details - resolve Future with accumulated results."""
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_SHARED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         self._flag_snapshot_complete(f"req_{reqId}")
@@ -1023,21 +1035,21 @@ class IBSocket(EWrapper):
         TWS sends one historicalData callback per bar.
         Results are accumulated until historicalDataEnd is called.
         """
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         self._append_stream_data(f"req_{reqId}", bar.__dict__)
 
     def historicalDataUpdate(self, reqId: int, bar: BarData) -> None:
         """Returns updates in real time when keepUpToDate is set to True."""
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         self._update_stream_data(f"req_{reqId}", bar.__dict__)
 
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
         """End signal for historical data - resolve Future with accumulated results."""
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         self._flag_snapshot_complete(f"req_{reqId}")
@@ -1048,6 +1060,10 @@ class IBSocket(EWrapper):
         self, reqId: int, tickType: int, price: float, attrib: TickAttrib
     ) -> None:
         """Accumulate price ticks for market data snapshot."""
+
+        if DEBUG_TWS_DATAFEED:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
         tick_name = get_tick_type_name(tickType)
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
@@ -1063,6 +1079,10 @@ class IBSocket(EWrapper):
 
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
         """Accumulate size ticks for market data snapshot."""
+
+        if DEBUG_TWS_DATAFEED:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
         tick_name = get_tick_type_name(tickType)
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
@@ -1071,7 +1091,7 @@ class IBSocket(EWrapper):
 
     def marketDataType(self, reqId: int, marketDataType: int) -> None:
         """Set market data type for the request."""
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         self._update_stream_data(f"req_{reqId}", {"market_data_type": marketDataType})
@@ -1080,7 +1100,8 @@ class IBSocket(EWrapper):
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
     ) -> None:
         """Returns exchange map of a particular contract."""
-        if DEBUG_TWS_CALLBACK:
+
+        if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         self._update_stream_data(
@@ -1094,7 +1115,7 @@ class IBSocket(EWrapper):
 
     def tickString(self, reqId: int, tickType: int, value: str) -> None:
         """Generic string tick for market data snapshot."""
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         tick_name = get_tick_type_name(tickType)
@@ -1106,7 +1127,7 @@ class IBSocket(EWrapper):
 
     def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
         """Generic float tick for market data snapshot."""
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         tick_name = get_tick_type_name(tickType)
@@ -1120,7 +1141,7 @@ class IBSocket(EWrapper):
         """When requesting market data snapshots, this market will indicate the
         snapshot reception is finished."""
 
-        if DEBUG_TWS_CALLBACK:
+        if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         self._flag_snapshot_complete(f"req_{reqId}")
@@ -1246,7 +1267,7 @@ class TWSClient:
     ) -> list[ContractDescription]:
 
         reqId: int | None = None
-        coroutine: Awaitable[list[ContractDescription]]
+        coroutine: Awaitable[list[dict[str, ContractDescription]]]
         business_key = f"shared:reqMatchingSymbols:{pattern}"
 
         reqId, coroutine = self.ibsocket.create_snapshot(
@@ -1257,7 +1278,8 @@ class TWSClient:
         if reqId is not None:
             self.ibsocket.reqMatchingSymbols(reqId, pattern)
 
-        return await coroutine
+        data = await coroutine
+        return [item["contractDescriptions"] for item in data]
 
     async def reqContractDetails(
         self, contract: Contract, timeout: float | None = None
@@ -1391,17 +1413,11 @@ class TWSClient:
 
     def cancelBarDataStream(self, stream_key: str) -> None:
         """Cancel a real-time data subscription."""
-
-        tws_key = self.ibsocket.tws_key(stream_key)
-        assert tws_key is not None, f"No active stream found for key '{stream_key}'"
-        self.ibsocket.remove_stream(tws_key)
+        self.ibsocket.remove_stream(stream_key)
 
     def cancelMktDataStream(self, stream_key: str) -> None:
         """Cancel a real-time data subscription."""
-
-        tws_key = self.ibsocket.tws_key(stream_key)
-        assert tws_key is not None, f"No active stream found for key '{stream_key}'"
-        self.ibsocket.remove_stream(tws_key)
+        self.ibsocket.remove_stream(stream_key)
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""

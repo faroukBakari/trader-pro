@@ -75,7 +75,7 @@ def ticker_name(contract: Contract, bar_size: str | None = None) -> str:
     ticker = (
         contract.symbol
         + ":"
-        + (contract.primaryExchange or contract.exchange)
+        + (contract.exchange or contract.primaryExchange)
         + ":"
         + contract.secType
         + "-"
@@ -100,7 +100,7 @@ def contract_description_to_search_result(
     contract = desc.contract
     symbol = contract.symbol
     description = contract.description or f"{contract.symbol} ({contract.secType})"
-    exchange = contract.primaryExchange or contract.exchange
+    exchange = contract.exchange or contract.primaryExchange
     type = SEC_TYPE_MAP.get(contract.secType, "stock")
     ticker = (
         symbol + ":" + exchange + ":" + contract.secType + "-" + str(contract.conId)
@@ -186,7 +186,7 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     # Determine symbol type
 
     symbol = contract.symbol
-    exchange = contract.primaryExchange or contract.exchange
+    exchange = contract.exchange or contract.primaryExchange
     symbol_type = SEC_TYPE_MAP.get(contract.secType, "stock")
 
     return SymbolInfo(
@@ -199,7 +199,7 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
             symbol + ":" + exchange + ":" + contract.secType + "-" + str(contract.conId)
         ),
         exchange=exchange,
-        listed_exchange=contract.exchange,
+        listed_exchange=contract.primaryExchange,
         format="price",
         pricescale=pricescale,
         minmov=1,
@@ -322,13 +322,15 @@ def tws_ticks_to_bar(rt_data: dict[str, Any]) -> Bar:
         time_ms = rt_data["time"] * 1000
     else:
         time_ms = 0
+    raw_vol = rt_data.get("volume", 0)
+    volume = int(raw_vol) if isinstance(raw_vol, Decimal) else raw_vol
     return Bar(
         time=time_ms,
         open=float(rt_data.get("open", 0.0)),
         high=float(rt_data.get("high", 0.0)),
         low=float(rt_data.get("low", 0.0)),
         close=float(rt_data.get("close", 0.0)),
-        volume=rt_data.get("volume", 0),
+        volume=volume,
         count=rt_data.get("count", 0),
     )
 
