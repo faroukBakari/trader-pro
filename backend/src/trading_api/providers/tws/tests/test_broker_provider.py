@@ -27,6 +27,7 @@ from trading_api.models.broker import (
 )
 from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws import TWSBrokerProvider
+from trading_api.providers.tws.order_tracker import TrackedOrder
 
 
 class TestBrokerProviderInitialization:
@@ -85,8 +86,8 @@ class TestPlaceOrder:
     def mock_client(self) -> Mock:
         """Create mock TWSClient."""
         mock = Mock()
-        mock.next_order_id = 12345
-        mock.placeOrder = Mock()
+        # placeOrder now allocates and returns order ID
+        mock.placeOrder = Mock(return_value=12345)
         return mock
 
     @pytest.fixture
@@ -133,23 +134,22 @@ class TestPlaceOrder:
 
         await provider.place_order(pre_order)
 
-        # Verify placeOrder was called
+        # Verify placeOrder was called (now takes contract, order only)
         mock_client.placeOrder.assert_called_once()
 
-        # Check call args
+        # Check call args - placeOrder(contract, order) -> returns order_id
         call_args = mock_client.placeOrder.call_args
-        assert call_args[0][0] == 12345  # order_id
-        assert isinstance(call_args[0][1], Contract)  # contract
-        assert isinstance(call_args[0][2], Order)  # order
+        assert isinstance(call_args[0][0], Contract)  # contract
+        assert isinstance(call_args[0][1], Order)  # order
 
         # Verify contract fields
-        contract = call_args[0][1]
+        contract = call_args[0][0]
         assert contract.symbol == "AAPL"
         assert contract.secType == "STK"
         assert contract.conId == 265598
 
         # Verify order fields
-        order = call_args[0][2]
+        order = call_args[0][1]
         assert order.action == "BUY"
         assert order.orderType == "LMT"
         assert order.totalQuantity == Decimal("100")
@@ -170,9 +170,9 @@ class TestPlaceOrder:
 
         await provider.place_order(pre_order)
 
-        # Check order type conversion
+        # Check order type conversion - placeOrder(contract, order) now
         call_args = mock_client.placeOrder.call_args
-        order = call_args[0][2]
+        order = call_args[0][1]
         assert order.orderType == "STP"
         assert order.action == "SELL"
         assert order.auxPrice == 140.00
@@ -185,7 +185,7 @@ class TestModifyOrder:
     def mock_client(self) -> Mock:
         """Create mock TWSClient."""
         mock = Mock()
-        mock.placeOrder = Mock()
+        mock.modifyOrder = Mock()
         return mock
 
     @pytest.fixture
@@ -214,9 +214,9 @@ class TestModifyOrder:
 
         await provider.modify_order("12345", pre_order)
 
-        # Verify placeOrder was called with original order ID
-        mock_client.placeOrder.assert_called_once()
-        call_args = mock_client.placeOrder.call_args
+        # Verify modifyOrder was called with original order ID
+        mock_client.modifyOrder.assert_called_once()
+        call_args = mock_client.modifyOrder.call_args
         assert call_args[0][0] == 12345  # Same order_id
 
 
@@ -295,14 +295,13 @@ class TestGetOrders:
         mock_order_state.status = "Submitted"
 
         mock_client.reqOpenOrders.return_value = [
-            {
-                "orderId": 12345,
-                "contract": mock_contract,
-                "order": mock_order,
-                "orderState": mock_order_state,
-                "filled": 0.0,
-                "avgFillPrice": 0.0,
-            }
+            TrackedOrder(
+                orderId=12345,
+                contract=mock_contract,
+                order=mock_order,
+                orderState=mock_order_state,
+                fills=[],
+            )
         ]
 
         result = await provider.get_orders()
@@ -370,22 +369,20 @@ class TestGetOrders:
         order_state2.status = "Filled"
 
         mock_client.reqOpenOrders.return_value = [
-            {
-                "orderId": 12345,
-                "contract": contract1,
-                "order": order1,
-                "orderState": order_state1,
-                "filled": 0.0,
-                "avgFillPrice": 0.0,
-            },
-            {
-                "orderId": 12346,
-                "contract": contract2,
-                "order": order2,
-                "orderState": order_state2,
-                "filled": 50.0,
-                "avgFillPrice": 380.50,
-            },
+            TrackedOrder(
+                orderId=12345,
+                contract=contract1,
+                order=order1,
+                orderState=order_state1,
+                fills=[],
+            ),
+            TrackedOrder(
+                orderId=12346,
+                contract=contract2,
+                order=order2,
+                orderState=order_state2,
+                fills=[],
+            ),
         ]
 
         result = await provider.get_orders()

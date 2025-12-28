@@ -4,7 +4,18 @@ Combines realtime bars and market data (quotes) into a single typed dataclass.
 Handles all TickTypeEnum values with proper typing.
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from h11 import Data
+from more_itertools import last
+
+from trading_api.providers import tws
+
+if TYPE_CHECKING:
+    pass
 
 # =============================================================================
 # Bar Size Constants
@@ -735,3 +746,14 @@ def classify_error(error_code: int) -> tuple[str, bool]:
 
     # Default for unclassified errors (conservative: non-recoverable)
     return (TWSErrorClassification.ERROR, False)
+
+
+@dataclass
+class StreamData(list[dict[str, Any]]):
+    tws_key: str
+    business_key: str = ""
+    snapshot_complete: bool = False
+    index_key: str | None = None
+    updated_fields: list[str] = field(default_factory=list)
+    last_updated: int = 0
+    last_dispatched: int = 0
