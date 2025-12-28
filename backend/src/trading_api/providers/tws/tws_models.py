@@ -750,8 +750,7 @@ def classify_error(error_code: int) -> tuple[str, bool]:
 
 @dataclass
 class StreamData(list[dict[str, Any]]):
-    tws_key: str
-    business_key: str = ""
+    business_key: str
     snapshot_complete: bool = False
     index_key: str | None = None
     updated_fields: list[str] = field(default_factory=list)

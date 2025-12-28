@@ -341,14 +341,14 @@ class TestIBSocketStreamManagement:
 
         running_ibsocket.create_stream(reqId, ticker, callback, capability="datafeed")
 
-        result = running_ibsocket.tws_key(ticker)
+        result = running_ibsocket._get_tws_key(ticker)
         assert result == reqId
 
     def test_stream_req_id_returns_none_for_unknown(
         self, running_ibsocket: IBSocket
     ) -> None:
         """Test stream_req_id returns None for unknown ticker."""
-        result = running_ibsocket.tws_key("UNKNOWN:TICKER")
+        result = running_ibsocket._get_tws_key("UNKNOWN:TICKER")
         assert result is None
 
 

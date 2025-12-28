@@ -952,7 +952,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async formatter(symbol: string, alignToMinMove: boolean): Promise<INumberFormatter> {
-    const timeoutMs = 5000;
+    const timeoutMs = 10000;
     return await Promise.race([
       this._hostAdapter.defaultFormatter(symbol, alignToMinMove),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
