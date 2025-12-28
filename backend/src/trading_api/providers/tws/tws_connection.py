@@ -3,8 +3,8 @@
 Layer 1 of TWS integration:
 - Pure EWrapper implementation (callbacks only)
 - Zero-copy callback dispatch (< 2µs latency target)
-- No connection management (handled by TWSDatafeedProvider)
-- No request ID generation (handled by TWSDatafeedProvider)
+- No connection management (handled by TWSProvider)
+- No request ID generation (handled by TWSProvider)
 - No AsyncIO - pure sync callbacks in TWS reader thread
 - Signals end-of-stream with None parameter
 - Passes Exception objects directly (no re-wrapping)
@@ -17,19 +17,19 @@ Performance Design:
 Architecture:
 - Pure EWrapper inheritance (no EClient)
 - Callback registry for request-based dispatch
-- Used via composition by TWSDatafeedProvider
+- Used via composition by TWSProvider
 """
 
 import asyncio
-import json
 import logging
 import math
 import os
+import re
 import select
 import struct
 import threading
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from decimal import Decimal
 from functools import wraps
 from itertools import count
@@ -39,26 +39,27 @@ from socket import socket
 from socket import timeout as socketTimeout
 from typing import Any
 
-from attr import field
-
-# Protobuf imports for server version >= 203
-from ibapi.client_utils import createPlaceOrderRequestProto
+from httpx import stream
 from ibapi.common import BarData, TickAttrib
 from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.decoder import Decoder
 from ibapi.message import OUT
-from ibapi.order import Order
-from ibapi.order_state import OrderState
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
+from more_itertools import last
 
 from trading_api.models.exceptions import ProviderException
+from trading_api.providers import tws
 from trading_api.providers.tws.tws_mappers import ticker_name
-from trading_api.providers.tws.tws_models import get_bar_duration_seconds
-
-from .tws_models import TICK_TYPE_TO_FIELD, classify_error, get_asset_config
+from trading_api.providers.tws.tws_models import (
+    TICK_TYPE_TO_FIELD,
+    StreamData,
+    classify_error,
+    get_asset_config,
+    get_bar_duration_seconds,
+)
 
 logger = logging.getLogger(__name__)
 DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
@@ -66,8 +67,7 @@ DEBUG_TWS_SEND = os.environ.get("DEBUG_TWS_SEND") == "true"
 DEBUG_TWS_RECEIVE = os.environ.get("DEBUG_TWS_RECEIVE") == "true"
 DEBUG_TWS_DISPATCH = os.environ.get("DEBUG_TWS_DISPATCH") == "true"
 DEBUG_TWS_CALLBACK = os.environ.get("DEBUG_TWS_CALLBACK") == "true"
-DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
-DEBUG_TWS_BROKER = os.environ.get("DEBUG_TWS_BROKER") == "true"
+
 
 NO_VALID_ID = -1
 MIN_CLIENT_VER = 100
@@ -151,7 +151,7 @@ def decode_data(buf: bytearray, buf_siz: int) -> tuple[int, bytes, bytearray, in
         return -1, b"", buf, buf_siz
 
 
-def get_duration_for_bars(bar_size: str, num_bars: int = 2) -> str:
+def least_duration_from_bar_size(bar_size: str, num_bars: int = 2) -> str:
     """Convert bar size to duration string for N bars."""
     # Map bar size to seconds
     secs = get_bar_duration_seconds(bar_size)
@@ -170,33 +170,6 @@ get_tick_type_name = TickTypeEnum.idx2name.get
 debug_log = logger.info
 
 
-def error_handler(capability: str = "shared") -> Callable:
-    """Decorator for TWS callbacks with error handling.
-
-    - Catches exceptions, routes through error handler
-    - Keeps reader thread alive on callback errors
-    - Never re-raises (protects reader thread stability)
-    """
-
-    def decorator(fn: Callable) -> Callable:
-        @wraps(fn)
-        def wrapper(self: "IBSocket", reqId: int, *args: Any, **kwargs: Any) -> Any:
-            try:
-                return fn(self, reqId, *args, **kwargs)
-            except Exception as e:
-                self._handle_request_error(
-                    category=TWSErrorCategory.CALLBACK,
-                    detail=fn.__name__.upper(),
-                    reqId=reqId,
-                    message=f"{fn.__name__}: {e!r}",
-                    capability_fallback=capability,
-                )
-
-        return wrapper
-
-    return decorator
-
-
 class IBSocketState:
     READY = 0
     CONNECTING = 1
@@ -207,6 +180,7 @@ class IBSocketState:
 
 
 class IBSocket(EWrapper):
+
     def __init__(self) -> None:
         # socket related attributes
         self._req_id_counter = count()
@@ -218,86 +192,54 @@ class IBSocket(EWrapper):
         self._server_version: str = ""
         self._connection_time: str = ""
 
-        # callback related attributes
-        self._future_hooks: dict[
-            int, tuple[asyncio.AbstractEventLoop, asyncio.Future]
-        ] = {}
+        # stream hooks: tws-internal-id -> (
+        #   caller-loop,
+        #   on_data(last-item, list-of-updated-fields),
+        #   on_error(tws-error)
+        # )
         self._stream_hooks: dict[
-            int,
+            str,
             tuple[
                 asyncio.AbstractEventLoop,
                 Callable[
                     [dict[str, Any], list[str]],
-                    Awaitable[None],
+                    Coroutine[Any, Any, None],
                 ],
-                Callable[[ProviderException], Awaitable[None]] | None,  # error callback
+                Callable[[ProviderException], Coroutine[Any, Any, None]],
             ],
         ] = {}
 
-        # Pending snapshot futures - separate from stream hooks
-        # Maps reqId → (event_loop, Future) for quote snapshot resolution
+        # snapshot hooks: tws-internal-id -> list of (
+        #   caller-loop,
+        #   list-of-accumulated-data-items
+        # )
         self._snapshot_hooks: dict[
-            int, list[tuple[asyncio.AbstractEventLoop, asyncio.Future]]
+            str,
+            list[
+                tuple[asyncio.AbstractEventLoop, asyncio.Future[list[dict[str, Any]]]]
+            ],
         ] = {}
 
-        # ticker name to reqId mapping for active streams
-        self._active_streams: dict[str, int] = {}
+        # stream data: tws-internal-id -> list of data items
+        self._stream_data: dict[str, StreamData] = {}
+
+        # dict of correspondance between tws-internal-id and business-key-id
+        # business-key-syntax: "capability:<business-specific-identifier>"
+        # tws-internal-id: "(req|order)_${number}"
+        self._business_to_tws_key: dict[str, str] = {}
+
+        self._cleanup_hooks: dict[
+            str, tuple[asyncio.AbstractEventLoop, Callable[[], None]]
+        ] = {}
 
         # Data tracking attributes
-        self._future_data: dict[int, list[Any]] = {}
-        self._stream_data: dict[int, dict[str, Any]] = {}
         self._nxt_order_id: int | None = None
         self._reader_accounts: list[str] = []
+        self._ready_event = (
+            threading.Event()
+        )  # Signals when IBKR connection is fully established
 
-        # Order tracking - maps orderId → order data for streaming updates
-        self._order_data: dict[int, dict[str, Any]] = {}
-        # Order streaming callbacks - for order subscription
-        self._order_hooks: (
-            tuple[
-                asyncio.AbstractEventLoop,
-                Callable[[dict[str, Any]], Awaitable[None]],
-                Callable[[ProviderException], Awaitable[None]] | None,
-            ]
-            | None
-        ) = None
-        # Future for reqOpenOrders() completion
-        self._open_orders_future: (
-            tuple[asyncio.AbstractEventLoop, asyncio.Future[list[dict[str, Any]]]]
-            | None
-        ) = None
-
-        # Position tracking - maps account → list of position data dicts
-        self._position_data: dict[str, list[dict[str, Any]]] = {}
-        # Position streaming callbacks - for position subscription
-        self._position_hooks: (
-            tuple[
-                asyncio.AbstractEventLoop,
-                Callable[[dict[str, Any]], Awaitable[None]],
-                Callable[[ProviderException], Awaitable[None]] | None,
-            ]
-            | None
-        ) = None
-        # Future for reqPositions() completion
-        self._positions_future: (
-            tuple[asyncio.AbstractEventLoop, asyncio.Future[list[dict[str, Any]]]]
-            | None
-        ) = None
-
-        # Account summary tracking - maps (reqId, tag) → value data
-        self._account_summary_data: dict[int, dict[str, dict[str, Any]]] = {}
-        # Future for reqAccountSummary() completion
-        self._account_summary_future: (
-            tuple[asyncio.AbstractEventLoop, asyncio.Future[dict[str, dict[str, Any]]]]
-            | None
-        ) = None
-
-        # for error management on capability basis
-        self._reqId_to_capability: dict[int, str] = {}
-
-        # Signals when IBKR connection is fully established
-        self._ready_event = threading.Event()
-
-    # == default implementation for unimplemented methods ==
+    # == infrastructure methods (internal) ==
 
     def _dispatchMessage(self, fnName: str, fnParams: dict) -> None:
         if DEBUG_TWS_DISPATCH:
@@ -305,8 +247,6 @@ class IBSocket(EWrapper):
                 fnParams = dict(fnParams)
                 del fnParams["self"]
             debug_log(f"!!!WARNING!!!: unimplemented {fnName} --> {fnParams}")
-
-    # == infrastructure methods (internal) ==
 
     def __del__(self) -> None:
         try:
@@ -429,10 +369,11 @@ class IBSocket(EWrapper):
                         code=f"PROVIDER_TWS_{TWSErrorCategory.CONN}_CLOSED",
                         message=f"IBSocket connection closed: {e!r}",
                     )
-                logger.exception(
-                    "Unexpected exception in IBSocket reader loop (running: %d): %s",
-                    running,
-                    e,
+                self._handle_request_error(
+                    TWSErrorCategory.CALLBACK,
+                    str(e),
+                    -1,
+                    f"Exception in IBSocket reader loop: {e!r}",
                 )
                 time.sleep(0.5)
 
@@ -441,8 +382,6 @@ class IBSocket(EWrapper):
     def _reset(self) -> None:
         """Reset internal state - clear futures, accumulators, callbacks."""
         with self._socket_lock:
-            self._future_hooks.clear()
-            self._future_data.clear()
             self._stream_data.clear()
             self._reader_accounts.clear()
             self._ready_event.clear()
@@ -454,190 +393,67 @@ class IBSocket(EWrapper):
         detail: str,
         reqId: int,
         message: str,
-        capability_fallback: str = "shared",
         timestamp: int | None = None,
     ) -> None:
-        """Create a standardized ProviderException for TWS errors.
-            Route error to appropriate handler based on request state.
 
-            Handles three scenarios:
-            1. stream exists → notify stream error callback
-            2. Future exists → reject future with error
-            3. Neither → log warning (orphan error)
-
-            For non-recoverable errors (detail ends with _NON_RECOVERABLE):
-            - Cleans up all associated data structures for the reqId
-            - Removes hooks, data, and capability tracking
-
-            This method never raises - errors are stored/routed, not propagated.
-
-        Args:
-            category: Error category (TWSErrorCategory.CONN, API, CALLBACK)
-            detail: Error detail (e.g., function name or TWS error code)
-            reqId: Request ID (-1 for system errors)
-            message: Human-readable error description
-            capability_fallback: Capability to use if reqId not tracked
-            timestamp: Optional Unix timestamp (defaults to None)
-
-        Returns:
-            ProviderException with consistent code format:
-            PROVIDER_TWS_{CATEGORY}_{DETAIL}
-        """
+        capability = "shared"
+        tws_key = f"req_{reqId}"
+        if reqId != -1:
+            business_key = next(
+                iter(
+                    [
+                        business_key
+                        for business_key, _tws_key in self._business_to_tws_key.items()
+                        if _tws_key == tws_key
+                    ]
+                ),
+                "NOT_FOUND",
+            )
+            capability = next(iter(business_key.split(":", 1)))
 
         error = ProviderException(
             code=f"PROVIDER_TWS_{category}_{detail.upper()}",
             message=f"[reqId={reqId}] {message}",
             provider="tws",
-            capability=self._reqId_to_capability.setdefault(reqId, capability_fallback),
+            capability=capability,
             timestamp=timestamp,
         )
 
-        # 1. Check for pending future
-        future_loop, _ = self._future_hooks.get(reqId, (None, None))
-        if future_loop is not None:
-
-            def _reject_in_loop(reqId: int, error: ProviderException) -> None:
-                self._future_data.pop(reqId, None)
-                _, future = self._future_hooks.pop(reqId, (None, None))
-                if future is not None and not future.done():
-                    future.set_exception(error)
-
-            future_loop.call_soon_threadsafe(_reject_in_loop, reqId, error)
+        # 1. Check for pending _snapshot_hooks
+        snapshot_hook = self._snapshot_hooks.get(tws_key, [])
+        for snapshot_loop, future in snapshot_hook:
+            if tws_key in self._snapshot_hooks:
+                snapshot_loop.call_soon_threadsafe(self._snapshot_hooks.pop, tws_key)
+            snapshot_loop.call_soon_threadsafe(future.set_exception, error)
 
         # 2. Check for active stream
-        stream_loop, _, on_error = self._stream_hooks.get(reqId, (None, None, None))
-        if stream_loop is not None and on_error is not None:
-
-            async def _notify_in_loop(
-                on_error: Callable[[ProviderException], Awaitable[None]],
-                error: ProviderException,
-            ) -> None:
-                await on_error(error)
-
+        stream_hook = self._stream_hooks.get(tws_key)
+        if stream_hook is not None:
+            stream_loop, _, on_error = stream_hook
             stream_loop.call_soon_threadsafe(
                 stream_loop.create_task,
-                _notify_in_loop(on_error, error),
+                on_error(error),
             )
-
-        # Determine if error is non-recoverable from detail suffix
-        is_non_recoverable = error.code.endswith("_NON_RECOVERABLE")
+            if error.code.endswith("_NON_RECOVERABLE"):
+                stream_loop.call_soon_threadsafe(self.remove_stream, tws_key)
 
         # 3. Orphan error - log warning
-        if future_loop is None and stream_loop is None:
-            logger.error(
-                "Orphan TWS error (no future or stream) for reqId %d",
-                reqId,
-            )
+        if snapshot_hook is None and stream_hook is None:
+            logger.error("Orphan TWS error for reqId %s", tws_key)
             logger.exception(error)
-
-        elif is_non_recoverable:
-            loop = stream_loop or future_loop
-            if loop:
-                loop.call_soon_threadsafe(self._cleanup_request, reqId)
 
     # == exposed socket methods ===
 
-    def stream_req_id(self, stream_key: str) -> int | None:
-        """Get the reqId for an active stream by ticker name."""
-        return self._active_streams.get(stream_key)
-
-    def _pop_stream_req_id(self, stream_key: str) -> int | None:
-        """Pop the reqId for an active stream by ticker name."""
-        reqId = self._active_streams.pop(stream_key, None)
-        if DEBUG_TWS_CALLBACK:
-            debug_log(
-                f"_pop_stream_req_id for stream_key: {stream_key} => reqId {reqId}"
-            )
-        return reqId
-
-    def _cleanup_request(self, reqId: int) -> None:
-        """Remove all tracking state for a request.
-
-        Cleans up all internal data structures associated with a reqId:
-        - Stream data and hooks
-        - Future hooks and data
-        - Pending snapshots
-        - Capability tracking
-        - Active stream mapping
-
-        Args:
-            reqId: The request ID to clean up
-        """
-        self._stream_data.pop(reqId, None)
-        self._stream_hooks.pop(reqId, None)
-        self._future_hooks.pop(reqId, None)
-        self._future_data.pop(reqId, None)
-        self._snapshot_hooks.pop(reqId, None)
-        self._reqId_to_capability.pop(reqId, None)
-        # Remove from active streams
-        for ticker, rid in list(self._active_streams.items()):
-            if rid == reqId:
-                self._pop_stream_req_id(ticker)
-                break
-
-    def _update_stream_field(
-        self,
-        reqId: int,
-        field_name: str,
-        value: float | int | str | Decimal,
-        *,
-        tolerance: float = 1e-3,
-    ) -> dict[str, Any] | None:
-        """Update stream field if changed.
-
-        Args:
-            reqId: The request ID for the stream
-            field_name: The field name to update
-            value: The new value
-            tolerance: Absolute tolerance for float comparisons (default 1e-3)
-
-        Returns:
-            True if the field was updated, False if stream not found or value unchanged.
-        """
-        stream = self._stream_data.get(reqId)
-        if stream is None:
-            return None
-        current = stream.get(field_name)
-        if current is not None:
-            # For numeric types, use tolerance-based comparison
-            if isinstance(value, (float, int, Decimal)) and isinstance(
-                current, (float, int, Decimal)
-            ):
-                if math.isclose(float(current), float(value), abs_tol=tolerance):
-                    return None
-            # For strings and exact matches
-            elif current == value:
-                return None
-        stream[field_name] = value
-        return stream
+    def tws_key(self, business_key: str) -> str | None:
+        return self._business_to_tws_key.get(business_key)
 
     @property
     def server_version(self) -> str:
         return self._server_version
 
     @property
-    def connection_time(self) -> str:
-        return self._connection_time
-
-    @property
-    def account_id(self) -> str:
-        return next(iter(self._reader_accounts), "Not set")
-
-    @property
     def next_req_id(self) -> int:
         return next(self._req_id_counter)
-
-    @property
-    def next_order_id(self) -> int:
-        """Get next valid order ID (auto-increments).
-
-        Returns the current _nxt_order_id and increments it for the next call.
-        Raises AssertionError if connection not yet ready (nextValidId not received).
-        """
-        assert self._nxt_order_id is not None, "nextValidId not yet received from TWS"
-        order_id = self._nxt_order_id
-        self._nxt_order_id += 1
-        return order_id
 
     @property
     def running(self) -> bool:
@@ -748,224 +564,54 @@ class IBSocket(EWrapper):
         with self._socket_lock:
             self._socket.sendall(msg2)
 
-    def send_message_proto(self, msgId: int, protobuf_data: bytes) -> None:
-        """Send a protobuf-encoded message.
-
-        For server version >= 203, certain messages (PLACE_ORDER, CANCEL_ORDER)
-        require protobuf encoding.
-
-        Message format: [4-byte length][4-byte msgId][protobuf bytes]
-        """
-        byte_array = msgId.to_bytes(4, "big") + protobuf_data
-        msg = len(byte_array).to_bytes(4, "big") + byte_array
-        if DEBUG_TWS_SEND:
-            debug_log(
-                f"Sending protobuf message: msgId={msgId}, size={len(protobuf_data)}"
-            )
-        assert self._state == IBSocketState.RUNNING, "Socket is not connected."
-        with self._socket_lock:
-            self._socket.sendall(msg)
-
-    # === Future / Coroutine management ===
-
-    # called in reader thread
-    def _resolve_future(self, reqId: int) -> None:
-        """Helper to resolve a future in the asyncio loop."""
-
-        loop, _ = self._future_hooks.get(reqId, (None, None))
-        if loop is None:
-            logger.warning(f"loop not found or already done for reqId {reqId}.")
-            return
-
-        def resolve_in_loop(reqId: int) -> None:
-            result = self._future_data.pop(reqId, None)
-            assert result is not None, "No results found in future resolver."
-            _, future = self._future_hooks.pop(reqId, (None, None))
-            assert (
-                future is not None and not future.done()
-            ), "Future missing or already done in resolver."
-            future.set_result(result)
-            self._reqId_to_capability.pop(reqId, None)
-
-        loop.call_soon_threadsafe(resolve_in_loop, reqId)
-
-    # =======================
-
-    def create_future(
-        self, reqId: int, *, capability: str, timeout: float | None = 5
-    ) -> Awaitable[Any]:
-        """Create a new Future attached to the current event loop."""
-        loop = asyncio.get_event_loop()
-        future: asyncio.Future[Any] = loop.create_future()
-        self._future_hooks[reqId] = (loop, future)
-        self._future_data[reqId] = []
-        self._reqId_to_capability[reqId] = capability
-        return asyncio.wait_for(future, timeout)
-
     def create_snapshot(
         self,
-        reqId: int,
-        ticker_name: str,
+        business_key: str,
         *,
-        capability: str,
         timeout: float | None = 5,
-    ) -> Awaitable[Any]:
-        """Create a new Future for quote snapshot resolution.
+    ) -> tuple[int | None, Awaitable[Any]]:
 
-        Uses _pending_snapshots to track snapshot futures separately from
-        _future_hooks (which are used for request-response patterns like
-        contractDetails).
+        assert re.match(
+            r"^(shared|datafeed|broker):", business_key
+        ), "ticker_name must start with capability prefix."
 
-        Args:
-            reqId: Request ID for the market data request
-            ticker_name: Ticker name for the stream
-            capability: Provider capability for error routing
-            timeout: Timeout in seconds (default 5)
+        reqId: int | None = None
 
-        Returns:
-            Awaitable that resolves with the stream data when bid/ask/last complete.
-        """
+        tws_key = self.tws_key(business_key)
+        if tws_key is None:
+            reqId = self.next_req_id
+            tws_key = f"req_{reqId}"
+            self._business_to_tws_key[business_key] = tws_key
+
         loop = asyncio.get_event_loop()
-        future = loop.create_future()
-        self._snapshot_hooks.setdefault(reqId, []).append((loop, future))
-        self._reqId_to_capability.setdefault(reqId, capability)
+        future: asyncio.Future[Any] = loop.create_future()
+
+        self._snapshot_hooks.setdefault(tws_key, []).append((loop, future))
+
         stream = self._stream_data.setdefault(
-            reqId,
-            {
-                "reqId": reqId,
-                "ticker_name": ticker_name,
-            },
+            tws_key,
+            StreamData(
+                tws_key,
+                business_key,
+                last_dispatched=int(time.time() * 1000),
+                last_updated=int(time.time() * 1000),
+            ),
         )
-        # If stream already has all required fields, resolve immediately
-        if stream.get("snapshot_complete", False):
+        stream.last_updated = stream.last_dispatched = int(time.time() * 1000)
+        if stream.snapshot_complete:
             future.set_result(stream)
-        return asyncio.wait_for(future, timeout)
 
-    # === Stream management ===
+        return reqId, asyncio.wait_for(future, timeout)
 
-    def _resolve_snapshots(
-        self, reqId: int, stream: dict[str, Any]
-    ) -> list[tuple[asyncio.AbstractEventLoop, asyncio.Future[Any]]]:
-        """Try to resolve pending snapshot futures if bid/ask/last complete.
-
-        Called from tick callbacks when data is updated. Checks if the stream
-        has all required quote fields and resolves the pending snapshot future
-        if so.
-
-        Args:
-            reqId: Request ID for the stream
-            stream: Stream data dictionary
-
-        Returns:
-            The event loop used for resolution, or None if no snapshot was resolved.
-        """
-
-        if not stream.get("snapshot_complete"):
-            return []
-
-        snapshot_hooks = self._snapshot_hooks.pop(reqId, None)
-        if not snapshot_hooks:
-            return []
-
-        if DEBUG_TWS_CALLBACK:
-            debug_log(
-                "_try_resolve_snapshots resolving "
-                + f"[{stream.get('ticker_name', 'UNKNOWN')}]"
-                + f" [reqId {reqId}]"
-            )
-
-        for loop, future in snapshot_hooks:
-            if not future.done():
-                loop.call_soon_threadsafe(future.set_result, stream)
-
-        # No stream hook - clean up if snapshot was resolved
-        if reqId not in self._stream_hooks:
-            loop, _ = next(iter(snapshot_hooks))
-
-            if DEBUG_TWS_CALLBACK:
-                debug_log(
-                    "_notify_stream cleaning up after snapshot resolution "
-                    + f"[{stream.get('ticker_name', 'UNKNOWN')}]"
-                    + f" [reqId {reqId}]"
-                )
-            loop.call_soon_threadsafe(self._cleanup_request, reqId)
-        return snapshot_hooks
-
-    def _dispatch_update(
-        self, reqId: int, stream: dict[str, Any], updated_fields: list[str]
-    ) -> (
-        tuple[
-            asyncio.AbstractEventLoop,
-            Callable[
-                [dict[str, Any], list[str]],
-                Awaitable[None],
-            ],
-            Callable[[ProviderException], Awaitable[None]] | None,
-        ]
-        | None
-    ):
-        """Dispatch stream update to registered callback.
-
-        Args:
-            reqId: Request ID for the stream
-            stream: Stream data dictionary
-            updated_fields: List of field names that were updated
-
-        Returns:
-            True if update was dispatched, False if no stream hook exists.
-        """
-        stream_hook = self._stream_hooks.get(reqId)
-        if stream_hook is None:
-            return None
-
-        stream_loop, stream_callback, _ = stream_hook
-
-        if DEBUG_TWS_CALLBACK:
-            debug_log(
-                f"_dispatch_stream_update [{stream.get('ticker_name', 'UNKNOWN')}]"
-                + f" with fields: {updated_fields}"
-            )
-
-        stream_loop.call_soon_threadsafe(
-            stream_loop.create_task,  # type: ignore
-            stream_callback(stream, updated_fields),  # type: ignore
-        )
-        return stream_hook
-
-    def _notify_stream(
+    def create_stream(
         self,
-        reqId: int,
-        stream: dict[str, Any],
-        updated_fields: list[str],
-    ) -> None:
-        """Trigger stream callbacks if registered.
-
-        Handles both snapshot resolution and continuous stream updates:
-        1. Try to resolve pending snapshots (if bid/ask/last complete)
-        2. Dispatch to stream callback if registered
-        3. Clean up if snapshot-only (no stream hook)
-        """
-        # TODO: add rate limiting
-
-        # Dispatch to stream callback
-        self._dispatch_update(reqId, stream, updated_fields)
-
-        # Try to resolve pending snapshots
-        self._resolve_snapshots(reqId, stream)
-
-    # =======================
-
-    def register_stream(
-        self,
-        reqId: int,
-        ticker_name: str,
+        business_key: str,
         callback: Callable[
             [dict[str, Any], list[str]],
-            Awaitable[None],
+            Coroutine[Any, Any, None],
         ],
-        capability: str,
-        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
-    ) -> None:
+        on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
+    ) -> int | None:
         """Create and register a new stream slot for a reqId.
 
         Args:
@@ -975,49 +621,346 @@ class IBSocket(EWrapper):
             capability: Capability name for error routing
             on_error: Optional callback for streaming errors (receives ProviderException)
         """
+
+        assert re.match(
+            r"^(shared|datafeed|broker):", business_key
+        ), "ticker_name must start with capability prefix."
+
+        reqId: int | None = None
+
+        tws_key = self.tws_key(business_key)
+        if tws_key is None:
+            reqId = self.next_req_id
+            tws_key = f"req_{reqId}"
+            self._business_to_tws_key[business_key] = tws_key
+            self._stream_data[tws_key] = StreamData(
+                tws_key,
+                business_key,
+                last_updated=int(time.time() * 1000),
+                last_dispatched=int(time.time() * 1000),
+            )
+
         # main thread ownership
-        self._stream_hooks[reqId] = (
+        self._stream_hooks[tws_key] = (
             asyncio.get_event_loop(),
             callback,
             on_error,
         )
-        # assert self._reader_loop is not None, "Reader loop not initialized."
-        # self._reader_loop.call_soon_threadsafe(
-        #     self._register_stream, reqId, ticker_name
-        # )
-        self._stream_data[reqId] = {
-            "reqId": reqId,
-            "ticker_name": ticker_name,
-        }
-        self._reqId_to_capability[reqId] = capability
-        self._active_streams[ticker_name] = reqId
 
-    def update_stream(
-        self,
-        reqId: int,
-        callback: Callable[
-            [dict[str, Any], list[str]],
-            Awaitable[None],
-        ],
-        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
-    ) -> None:
-        """Update stream callbacks for an existing reqId.
+        return reqId
+
+    def remove_stream(self, tws_key: str) -> None:
+        cleanup = self._cleanup_hooks.pop(tws_key, None)
+        if cleanup is not None:
+            loop, cleanup_func = cleanup
+            loop.call_soon_threadsafe(cleanup_func)
+
+        self._stream_hooks.pop(tws_key, None)
+        stream = self._stream_data.get(tws_key)
+        if stream is not None:
+            stream.snapshot_complete = False
+
+    # === Stream management ===
+
+    def _resolve_snapshots(self, stream: StreamData) -> None:
+        """Try to resolve pending snapshot futures if bid/ask/last complete.
+
+        Called from tick callbacks when data is updated. Checks if the stream
+        has all required quote fields and resolves the pending snapshot future
+        if so.
 
         Args:
-            reqId: Request ID for the stream
-            callback: New callback for data updates
-            on_error: Optional new callback for streaming errors
+            tws_key: Request ID for the stream
+            stream: Stream data dictionary
+
+        Returns:
+            The event loop used for resolution, or None if no snapshot was resolved.
         """
-        # main thread ownership
-        self._stream_hooks[reqId] = (
-            asyncio.get_event_loop(),
-            callback,
-            on_error,
+
+        if not stream.snapshot_complete:
+            return
+
+        if stream.tws_key not in self._snapshot_hooks:
+            return
+
+        snapshot_hooks = self._snapshot_hooks.pop(stream.tws_key)
+
+        if DEBUG_TWS_CALLBACK:
+            debug_log(
+                "_resolve_snapshots "
+                + f"[{stream.business_key}]"
+                + f" [{stream.tws_key}]"
+            )
+
+        for loop, future in snapshot_hooks:
+            if not future.done():
+                loop.call_soon_threadsafe(future.set_result, stream[:])
+
+        stream.last_dispatched = int(time.time() * 1000)
+
+    def _dispatch_update(self, stream: StreamData) -> None:
+
+        stream_hook = self._stream_hooks.get(stream.tws_key)
+        if stream_hook is None:
+            return
+
+        stream_loop, stream_callback, _ = stream_hook
+        if DEBUG_TWS_CALLBACK:
+            debug_log(
+                f"_dispatch_update [{stream.business_key}]"
+                + f" with fields: {stream.updated_fields}"
+            )
+
+        stream_loop.call_soon_threadsafe(
+            stream_loop.create_task,
+            stream_callback(stream[-1], stream.updated_fields),
         )
 
-    def unregister_stream(self, reqId: int) -> None:
-        """Remove stream slot slot and associated reqIds."""
-        self._cleanup_request(reqId)
+        stream.last_dispatched = int(time.time() * 1000)
+
+    def _notify_stream(self, stream: StreamData) -> None:
+        """Trigger stream callbacks if registered.
+
+        Handles both snapshot resolution and continuous stream updates:
+        1. Try to resolve pending snapshots (if bid/ask/last complete)
+        2. Dispatch to stream callback if registered
+        3. Clean up if snapshot-only (no stream hook)
+        """
+        # TODO: add rate limiting
+
+        # Try to resolve pending snapshots
+        self._resolve_snapshots(stream)
+
+        # Dispatch to stream callback
+        self._dispatch_update(stream)
+
+        if time.time() * 1000 - stream.last_dispatched > 10_000:
+            # No stream hook registered - snapshot only
+            if DEBUG_TWS_DISPATCH:
+                debug_log(
+                    f"_notify_stream: no stream listeners => canceling "
+                    + f"[{stream.business_key}] [{stream.tws_key}]"
+                )
+            self.remove_stream(stream.tws_key)
+
+    def _append_stream_data(
+        self,
+        tws_key: str,
+        data: dict[str, Any],
+    ) -> None:
+        stream = self._stream_data.setdefault(
+            tws_key,
+            StreamData(
+                tws_key,
+                last_dispatched=int(time.time() * 1000),
+                last_updated=int(time.time() * 1000),
+            ),
+        )
+        stream.append(data)
+        stream.updated_fields.clear()
+        stream.last_updated = int(time.time() * 1000)
+        self._notify_stream(stream)
+
+    def _extend_stream_data(
+        self,
+        tws_key: str,
+        data: list[dict[str, Any]],
+    ) -> None:
+        stream = self._stream_data.setdefault(
+            tws_key,
+            StreamData(
+                tws_key,
+                last_dispatched=int(time.time() * 1000),
+                last_updated=int(time.time() * 1000),
+            ),
+        )
+        stream.extend(data)
+        stream.updated_fields.clear()
+        stream.last_updated = int(time.time() * 1000)
+        self._notify_stream(stream)
+
+    def _update_stream_data(
+        self,
+        tws_key: str,
+        updates: dict[str, Any],
+        *,
+        tolerance: float = 1e-3,
+    ) -> None:
+        stream = self._stream_data.setdefault(
+            tws_key,
+            StreamData(
+                tws_key,
+                last_dispatched=int(time.time() * 1000),
+                last_updated=int(time.time() * 1000),
+            ),
+        )
+        if not stream:
+            stream.append({})
+        last_slot = stream[-1]
+        updated_fields: list[str] = []
+        for field_name, field_value in updates.items():
+            current_value = last_slot.get(field_name)
+            if current_value == field_value or (
+                isinstance(field_value, (float, int, Decimal))
+                and isinstance(current_value, (float, int, Decimal))
+                and math.isclose(
+                    float(current_value), float(field_value), abs_tol=tolerance
+                )
+            ):
+                continue
+            updated_fields.append(field_name)
+            last_slot[field_name] = field_value
+        if updated_fields:
+            stream.last_updated = int(time.time() * 1000)
+            stream.updated_fields.clear()
+            stream.updated_fields.extend(updated_fields)
+            self._notify_stream(stream)
+
+    def _flag_snapshot_complete(self, tws_key: str) -> None:
+        stream = self._stream_data.setdefault(
+            tws_key,
+            StreamData(
+                tws_key,
+                last_dispatched=int(time.time() * 1000),
+                last_updated=int(time.time() * 1000),
+            ),
+        )
+        stream.snapshot_complete = True
+        self._notify_stream(stream)
+
+    # ================================================
+    # =============== Request Methods ================
+    # ================================================
+
+    def reqMatchingSymbols(self, reqId, pattern) -> None:
+        self.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
+        debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
+
+    def reqContractDetails(self, reqId: int, contract: Contract) -> None:
+        VERSION = 8
+        fields: list[object] = [
+            VERSION,
+            reqId,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            contract.includeExpired,
+            contract.secIdType,
+            contract.secId,
+            contract.issuerId,
+        ]
+
+        self.send_message(OUT.REQ_CONTRACT_DATA, fields)
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"awaiting contractDetails for reqId {reqId} and symbol '{contract.symbol}'"
+            )
+
+    def reqBars(
+        self,
+        reqId: int,
+        contract: Contract,
+        end_date_time: str,
+        duration_str: str,
+        bar_size: str,
+        useRTH: int,
+        format_date: int,
+    ) -> None:
+
+        def cleanup() -> None:
+            VERSION = 1
+            self.send_message(OUT.CANCEL_HISTORICAL_DATA, [VERSION, reqId])
+            if DEBUG_TWS_REQUEST:
+                debug_log(f"cancelled realtime bars for reqId {reqId}")
+
+        self._cleanup_hooks[f"req_{reqId}"] = (asyncio.get_event_loop(), cleanup)
+
+        asset_config = get_asset_config(contract.secType)
+        whatToShow = asset_config.what_to_show_live
+
+        # Build message fields (VERSION=6 per ibapi/client.py)
+        fields: list[object] = [
+            reqId,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            contract.includeExpired,
+            end_date_time,
+            bar_size,
+            duration_str,
+            useRTH,
+            whatToShow,
+            format_date,
+            not end_date_time,  # keepUpToDate only if end_date_time is empty
+            [],  # chartOptions (empty list)
+        ]
+
+        self.send_message(OUT.REQ_HISTORICAL_DATA, fields)
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"awaiting historicalData for reqId {reqId}, "
+                f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{bar_size}'"
+            )
+
+    def reqQuote(self, reqId: int, contract: Contract) -> None:
+
+        def cleanup() -> None:
+            VERSION = 2
+            self.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
+            if DEBUG_TWS_REQUEST:
+                debug_log(f"cancelled realtime bars for reqId {reqId}")
+
+        self._cleanup_hooks[f"req_{reqId}"] = (asyncio.get_event_loop(), cleanup)
+
+        VERSION = 11
+        # Build message fields for REQ_MKT_DATA
+        mkt_data_fields: list[object] = [
+            VERSION,
+            reqId,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            0,  # deltaNeutralContract (False = no delta neutral)
+            get_asset_config(
+                contract.secType
+            ).generic_tick_list_str,  # Asset-type-specific tick list
+            0,  # snapshot
+            0,  # regulatorySnapshot
+            [],  # mktDataOptions (empty list)
+        ]
+
+        self.send_message(OUT.REQ_MKT_DATA, mkt_data_fields)
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"awaiting quote snapshot for reqId {reqId}, symbol='{contract.symbol}'"
+            )
 
     # ================================================
     # == Dispatch handlers for subscription events ===
@@ -1026,332 +969,34 @@ class IBSocket(EWrapper):
     # === Trading / account management ===
 
     def managedAccounts(self, accountsList: str) -> None:
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # should be sent upon connection
         self._reader_accounts = accountsList.split(",")
 
     def nextValidId(self, orderId: int) -> None:
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # Signals connection fully established - safe to make requests
         self._nxt_order_id = orderId
         self._ready_event.set()
 
-    # === Order callbacks (broker capability) ===
-
-    def openOrder(
-        self, orderId: int, contract: Contract, order: Order, orderState: OrderState
-    ) -> None:
-        """Callback for open order information.
-
-        TWS sends this callback for:
-        1. Each open order after reqOpenOrders() is called
-        2. Real-time updates when orders are placed/modified
-
-        The callback provides complete order info including contract, order params,
-        and current state. Data is stored and dispatched to registered callbacks.
-
-        Args:
-            orderId: TWS order ID
-            contract: Contract the order is for
-            order: Order parameters (type, qty, price, etc.)
-            orderState: Current order state (status, margin, commission)
-        """
-        if DEBUG_TWS_BROKER:
-            debug_log(
-                f"{current_fn_name()}, orderId={orderId}, "
-                f"symbol={contract.symbol}, status={orderState.status}"
-            )
-
-        # Build order data dict for domain conversion
-        order_data: dict[str, Any] = {
-            "orderId": orderId,
-            "contract": contract,
-            "order": order,
-            "orderState": orderState,
-            # Flatten commonly needed fields for easier access
-            "symbol": contract.symbol,
-            "exchange": contract.primaryExchange or contract.exchange,
-            "secType": contract.secType,
-            "conId": contract.conId,
-            "action": order.action,
-            "totalQuantity": order.totalQuantity,
-            "orderType": order.orderType,
-            "lmtPrice": order.lmtPrice,
-            "auxPrice": order.auxPrice,
-            "tif": order.tif,
-            "status": orderState.status,
-            "filledQuantity": order.filledQuantity,
-            "parentId": order.parentId,
-        }
-
-        # Store order data
-        self._order_data[orderId] = order_data
-
-        # For reqOpenOrders() - accumulate in future_data (uses reqId=-1)
-        if self._open_orders_future is not None:
-            # Accumulating for get_orders() request
-            pass  # Will be collected in openOrderEnd
-
-        # Dispatch to streaming callback if registered
-        if self._order_hooks is not None:
-            loop, callback, _ = self._order_hooks
-
-            async def _notify(cb: Callable, data: dict) -> None:
-                await cb(data)
-
-            loop.call_soon_threadsafe(loop.create_task, _notify(callback, order_data))
-
-    def orderStatus(
-        self,
-        orderId: int,
-        status: str,
-        filled: Decimal,
-        remaining: Decimal,
-        avgFillPrice: float,
-        permId: int,
-        parentId: int,
-        lastFillPrice: float,
-        clientId: int,
-        whyHeld: str,
-        mktCapPrice: float,
-    ) -> None:
-        """Callback for order status updates.
-
-        This callback fires whenever an order's status changes. It provides
-        fill information and current status. May be called multiple times
-        for the same order as it progresses through its lifecycle.
-
-        Args:
-            orderId: TWS order ID
-            status: Order status (Submitted, Filled, Cancelled, etc.)
-            filled: Quantity that has been filled
-            remaining: Quantity still remaining
-            avgFillPrice: Average fill price
-            permId: Permanent order ID (persists across sessions)
-            parentId: Parent order ID (for bracket orders)
-            lastFillPrice: Price of last fill
-            clientId: Client ID that placed the order
-            whyHeld: Reason order is held (if applicable)
-            mktCapPrice: Market cap price (for auction orders)
-        """
-        if DEBUG_TWS_BROKER:
-            debug_log(
-                f"{current_fn_name()}, orderId={orderId}, status={status}, "
-                f"filled={filled}, remaining={remaining}, avgFillPrice={avgFillPrice}"
-            )
-
-        # Update or create order data
-        order_data: dict[str, Any] | None = self._order_data.get(orderId)
-        if order_data is None:
-            # Create minimal entry if we receive status before openOrder
-            order_data = {"orderId": orderId}
-            self._order_data[orderId] = order_data
-
-        # Update with status info
-        order_data["status"] = status
-        order_data["filled"] = filled
-        order_data["remaining"] = remaining
-        order_data["avgFillPrice"] = avgFillPrice
-        order_data["permId"] = permId
-        order_data["parentId"] = parentId
-        order_data["lastFillPrice"] = lastFillPrice
-        order_data["clientId"] = clientId
-        order_data["whyHeld"] = whyHeld
-        order_data["mktCapPrice"] = mktCapPrice
-
-        # Dispatch to streaming callback if registered
-        if self._order_hooks is not None:
-            loop, callback, _ = self._order_hooks
-
-            async def _notify(cb: Callable, data: dict) -> None:
-                await cb(data)
-
-            loop.call_soon_threadsafe(loop.create_task, _notify(callback, order_data))
-
-    def openOrderEnd(self) -> None:
-        """End signal for open orders request.
-
-        Called after all openOrder callbacks for reqOpenOrders().
-        Resolves the pending future with accumulated order data.
-        """
-        if DEBUG_TWS_BROKER:
-            debug_log(f"{current_fn_name()}")
-
-        # Resolve the pending open orders future
-        if self._open_orders_future is not None:
-            loop, future = self._open_orders_future
-
-            def resolve(fut: asyncio.Future, orders: list[dict[str, Any]]) -> None:
-                if not fut.done():
-                    fut.set_result(orders)
-
-            # Collect all accumulated order data
-            orders = list(self._order_data.values())
-            loop.call_soon_threadsafe(resolve, future, orders)
-            self._open_orders_future = None
-
-    # === Position callbacks (broker capability) ===
-
-    def position(
-        self, account: str, contract: Contract, position: Decimal, avgCost: float
-    ) -> None:
-        """Callback for position information.
-
-        TWS sends this callback for:
-        1. Each position after reqPositions() is called
-        2. Real-time updates when positions change (if subscribed)
-
-        Args:
-            account: Account ID holding the position
-            contract: Contract the position is for
-            position: Position size (positive=long, negative=short)
-            avgCost: Average cost per unit
-        """
-        if DEBUG_TWS_BROKER:
-            debug_log(
-                f"{current_fn_name()}, account={account}, "
-                f"symbol={contract.symbol}, position={position}, avgCost={avgCost}"
-            )
-
-        # Build position data dict for domain conversion
-        position_data: dict[str, Any] = {
-            "account": account,
-            "contract": contract,
-            "position": position,
-            "avgCost": avgCost,
-            # Flatten commonly needed fields
-            "symbol": contract.symbol,
-            "exchange": contract.primaryExchange or contract.exchange,
-            "secType": contract.secType,
-            "conId": contract.conId,
-            "currency": contract.currency,
-        }
-
-        # Accumulate positions by account
-        if account not in self._position_data:
-            self._position_data[account] = []
-        self._position_data[account].append(position_data)
-
-        # Dispatch to streaming callback if registered
-        if self._position_hooks is not None:
-            loop, callback, _ = self._position_hooks
-
-            async def _notify(
-                cb: Callable[[dict[str, Any]], Awaitable[None]], data: dict[str, Any]
-            ) -> None:
-                await cb(data)
-
-            loop.call_soon_threadsafe(
-                loop.create_task, _notify(callback, position_data)
-            )
-
-    def positionEnd(self) -> None:
-        """End signal for positions request.
-
-        Called after all position callbacks for reqPositions().
-        Resolves the pending future with accumulated position data.
-        """
-        if DEBUG_TWS_BROKER:
-            debug_log(f"{current_fn_name()}")
-
-        # Resolve the pending positions future
-        if self._positions_future is not None:
-            loop, future = self._positions_future
-
-            def resolve(
-                fut: asyncio.Future[list[dict[str, Any]]],
-                positions: list[dict[str, Any]],
-            ) -> None:
-                if not fut.done():
-                    fut.set_result(positions)
-
-            # Flatten all positions from all accounts
-            all_positions: list[dict[str, Any]] = []
-            for account_positions in self._position_data.values():
-                all_positions.extend(account_positions)
-            loop.call_soon_threadsafe(resolve, future, all_positions)
-            self._positions_future = None
-
-    # === Account Summary callbacks (broker capability) ===
-
-    def accountSummary(
-        self, reqId: int, account: str, tag: str, value: str, currency: str
-    ) -> None:
-        """Callback for account summary information.
-
-        TWS sends this callback for each requested tag after reqAccountSummary().
-
-        Args:
-            reqId: Request ID
-            account: Account ID
-            tag: Tag name (e.g., "NetLiquidation", "TotalCashValue")
-            value: Tag value as string
-            currency: Currency of the value
-        """
-        if DEBUG_TWS_BROKER:
-            debug_log(
-                f"{current_fn_name()}, reqId={reqId}, account={account}, "
-                f"tag={tag}, value={value}, currency={currency}"
-            )
-
-        # Initialize data structure for this reqId if needed
-        stream = self._stream_data.get(reqId)
-        assert stream is not None, "Stream data not initialized for accountSummary."
-
-        account_data = stream.setdefault(account, {})
-
-        # Store tag value (keyed by tag name)
-        account_data[tag] = {
-            "account": account,
-            "tag": tag,
-            "value": value,
-            "currency": currency,
-        }
-
-    def accountSummaryEnd(self, reqId: int) -> None:
-        """End signal for account summary request.
-
-        Called after all accountSummary callbacks for reqAccountSummary().
-        Resolves the pending future with accumulated summary data.
-        """
-        if DEBUG_TWS_BROKER:
-            debug_log(f"{current_fn_name()}, reqId={reqId}")
-
-        # snapshot future resolution (uses _pending_snapshots)
-        stream = self._stream_data.get(reqId)
-        assert stream is not None, "Stream data not initialized for accountSummaryEnd."
-        stream["snapshot_complete"] = True
-
-        self._resolve_snapshots(reqId, stream)
-
-        # # Dispatch to stream callback
-        # if self._dispatch_update(reqId, stream, ["snapshot_complete"]) is not None:
-        #     return
-
-        # if snapshot_loop is not None:
-        #     if DEBUG_TWS_DATAFEED:
-        #         debug_log(f"tickSnapshotEnd cleanup stream for reqId {reqId}")
-
-        #     snapshot_loop.call_soon_threadsafe(self._cleanup_request, reqId)
-
     # === symbolSamples ===
 
-    @error_handler(capability="shared")
     def symbolSamples(
         self, reqId: int, contractDescriptions: list[ContractDescription]
     ) -> None:
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._future_data.get(reqId)
-        if isinstance(accumulator, list):
-            accumulator.extend(contractDescriptions)
-            self._resolve_future(reqId)
+
+        tws_key = f"req_{reqId}"
+        self._extend_stream_data(
+            tws_key, [{"contractDescriptions": cd} for cd in contractDescriptions]
+        )
+        self._flag_snapshot_complete(tws_key)
 
     # === contractDetails (streaming accumulation pattern) ===
 
-    @error_handler(capability="shared")
     def contractDetails(self, reqId: int, contractDetails: ContractDetails) -> None:
         """Accumulate contract details (may be called multiple times).
 
@@ -1360,80 +1005,45 @@ class IBSocket(EWrapper):
         """
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._future_data.get(reqId)
-        if isinstance(accumulator, list):
-            accumulator.append(contractDetails)
 
-    @error_handler(capability="shared")
+        self._append_stream_data(f"req_{reqId}", {"contractDetails": contractDetails})
+
     def contractDetailsEnd(self, reqId: int) -> None:
         """End signal for contract details - resolve Future with accumulated results."""
         if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        self._resolve_future(reqId)
+
+        self._flag_snapshot_complete(f"req_{reqId}")
 
     # === historicalData (streaming accumulation pattern) ===
 
-    @error_handler(capability="datafeed")
     def historicalData(self, reqId: int, bar: BarData) -> None:
         """Accumulate historical bars (may be called multiple times).
 
         TWS sends one historicalData callback per bar.
         Results are accumulated until historicalDataEnd is called.
         """
-        # TODO: there is a streaming opportunity here to dispatch bars as they arrive
-        if DEBUG_TWS_DATAFEED:
+        if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        accumulator = self._future_data.get(reqId)
-        if accumulator is not None:
-            accumulator.append(bar)
-        elif reqId not in self._stream_data:
-            debug_log(f"No accumulator found for reqId {reqId}")
 
-    @error_handler(capability="datafeed")
+        self._append_stream_data(f"req_{reqId}", bar.__dict__)
+
     def historicalDataUpdate(self, reqId: int, bar: BarData) -> None:
         """Returns updates in real time when keepUpToDate is set to True."""
-
-        # Field mapping: (stream_attr, bar_attr, transform)
-        field_mappings: list[tuple[str, float | int | str | Decimal]] = [
-            ("bar_date", bar.date),
-            ("bar_open", bar.open),
-            ("bar_high", bar.high),
-            ("bar_low", bar.low),
-            ("bar_close", bar.close),
-            ("bar_volume", int(bar.volume)),
-            ("bar_wap", float(bar.wap)),
-            ("bar_count", bar.barCount),
-        ]
-
-        stream: dict[str, float | int | str | Decimal] | None = None
-        updated_fields: list[str] = []
-        for field_name, new_value in field_mappings:
-            _stream = self._update_stream_field(reqId, field_name, new_value)
-            if _stream:
-                stream = _stream
-                updated_fields.append(field_name)
-
-        # Only notify if at least one field changed
-        if stream:
-            self._notify_stream(reqId, stream, updated_fields)
-
-    @error_handler(capability="datafeed")
-    def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
-        """End signal for historical data - resolve Future with accumulated results."""
-        if DEBUG_TWS_DATAFEED:
+        if DEBUG_TWS_CALLBACK:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-        # Snapshot future resolution (uses _pending_snapshots)
-        stream = self._update_stream_field(reqId, "snapshot_complete", True)
-        if stream:
-            self._notify_stream(reqId, stream, ["snapshot_complete"])
+        self._update_stream_data(f"req_{reqId}", bar.__dict__)
 
-        if reqId in self._future_data:
-            self._resolve_future(reqId)
+    def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
+        """End signal for historical data - resolve Future with accumulated results."""
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
+        self._flag_snapshot_complete(f"req_{reqId}")
 
     # === Market data (accumulation pattern) ===
 
-    @error_handler(capability="datafeed")
     def tickPrice(
         self, reqId: int, tickType: int, price: float, attrib: TickAttrib
     ) -> None:
@@ -1442,91 +1052,78 @@ class IBSocket(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        stream = self._update_stream_field(reqId, field_name, price)
-        if stream:
-            fields = [field_name]
-            # Also update bar_close for last/close prices
-            if field_name in ["last", "close"]:
-                self._update_stream_field(reqId, "bar_close", price)
-                fields.append("bar_close")
-            if not stream.get("snapshot_complete"):
-                stream["snapshot_complete"] = all(
-                    att in stream for att in ["bid", "ask", "last"]
-                )
-            self._notify_stream(reqId, stream, fields)
 
-    @error_handler(capability="datafeed")
+        self._update_stream_data(f"req_{reqId}", {field_name: price})
+
+        stream = self._stream_data.get(f"req_{reqId}")
+        if stream and not stream.snapshot_complete:
+            last_item = stream[-1]
+            if all(att in last_item for att in ["bid", "ask", "last"]):
+                self._flag_snapshot_complete(f"req_{reqId}")
+
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
         """Accumulate size ticks for market data snapshot."""
         tick_name = get_tick_type_name(tickType)
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        stream = self._update_stream_field(reqId, field_name, size)
-        if stream:
-            self._notify_stream(reqId, stream, [field_name])
+        self._update_stream_data(f"req_{reqId}", {field_name: size})
 
-    @error_handler(capability="datafeed")
     def marketDataType(self, reqId: int, marketDataType: int) -> None:
         """Set market data type for the request."""
-        stream = self._update_stream_field(reqId, "market_data_type", marketDataType)
-        if stream:
-            self._notify_stream(reqId, stream, ["market_data_type"])
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-    @error_handler(capability="datafeed")
+        self._update_stream_data(f"req_{reqId}", {"market_data_type": marketDataType})
+
     def tickReqParams(
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
     ) -> None:
         """Returns exchange map of a particular contract."""
-        # FIXME: suboptimal performance - need to hardcode field updates
-        # to avoid multiples collections and dict creations
-        update_list: list[str] = []
-        stream: dict[str, Any] | None = None
-        data: dict[str, float | int | str | Decimal] = {
-            "min_tick": minTick,
-            "bbo_exchange": bboExchange,
-            "snapshot_permissions": snapshotPermissions,
-        }
-        for field_name, field_value in data.items():
-            _stream = self._update_stream_field(tickerId, field_name, field_value)
-            if _stream:
-                update_list.append(field_name)
-                stream = _stream or stream
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-        if stream:
-            self._notify_stream(tickerId, stream, update_list)
+        self._update_stream_data(
+            f"req_{tickerId}",
+            {
+                "min_tick": minTick,
+                "bbo_exchange": bboExchange,
+                "snapshot_permissions": snapshotPermissions,
+            },
+        )
 
-    @error_handler(capability="datafeed")
     def tickString(self, reqId: int, tickType: int, value: str) -> None:
         """Generic string tick for market data snapshot."""
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
         tick_name = get_tick_type_name(tickType)
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        stream = self._update_stream_field(reqId, field_name, value)
-        if stream:
-            self._notify_stream(reqId, stream, [field_name])
 
-    @error_handler(capability="datafeed")
+        self._update_stream_data(f"req_{reqId}", {field_name: value})
+
     def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
         """Generic float tick for market data snapshot."""
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
         tick_name = get_tick_type_name(tickType)
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        stream = self._update_stream_field(reqId, field_name, value)
-        if stream:
-            self._notify_stream(reqId, stream, [field_name])
 
-    @error_handler(capability="datafeed")
+        self._update_stream_data(f"req_{reqId}", {field_name: value})
+
     def tickSnapshotEnd(self, reqId: int) -> None:
         """When requesting market data snapshots, this market will indicate the
         snapshot reception is finished."""
 
-        # Snapshot future resolution (uses _pending_snapshots)
-        stream = self._update_stream_field(reqId, "snapshot_complete", True)
-        if stream:
-            self._notify_stream(reqId, stream, ["snapshot_complete"])
+        if DEBUG_TWS_CALLBACK:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
+        self._flag_snapshot_complete(f"req_{reqId}")
 
     # === error handling ===
 
@@ -1644,69 +1241,42 @@ class TWSClient:
                 raise TimeoutError("Timeout waiting for TWS connection ready signal")
         return self.__ibsocket
 
-    @property
-    def next_req_id(self) -> int:
-        return self.ibsocket.next_req_id
-
     async def reqMatchingSymbols(
         self, pattern: str, timeout: float | None = None
     ) -> list[ContractDescription]:
-        reqId = self.next_req_id
 
-        coroutine: Awaitable[list[ContractDescription]] = self.ibsocket.create_future(
-            reqId, timeout=timeout or self._timeout, capability="shared"
+        reqId: int | None = None
+        coroutine: Awaitable[list[ContractDescription]]
+        business_key = f"shared:reqMatchingSymbols:{pattern}"
+
+        reqId, coroutine = self.ibsocket.create_snapshot(
+            business_key,
+            timeout=timeout or self._timeout,
         )
-        self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
-        debug_log(f"awaiting symbolSamples for reqId {reqId} and pattern '{pattern}'")
+
+        if reqId is not None:
+            self.ibsocket.reqMatchingSymbols(reqId, pattern)
 
         return await coroutine
 
     async def reqContractDetails(
         self, contract: Contract, timeout: float | None = None
     ) -> list[ContractDetails]:
-        """Request contract details for a symbol.
 
-        Args:
-            contract: TWS Contract object specifying symbol, secType, exchange, etc.
+        reqId: int | None = None
+        coroutine: Awaitable[list[dict[str, ContractDetails]]]
+        business_key = f"shared:reqContractDetails:{ticker_name(contract)}"
 
-        Returns:
-            List of ContractDetails matching the contract specification.
-            May return multiple results for ambiguous queries.
-        """
-        reqId = self.next_req_id
-        coroutine: Awaitable[list[ContractDetails]] = self.ibsocket.create_future(
-            reqId, timeout=timeout or self._timeout, capability="shared"
+        reqId, coroutine = self.ibsocket.create_snapshot(
+            business_key,
+            timeout=timeout or self._timeout,
         )
 
-        # Build message fields (VERSION=8 per ibapi/client.py)
-        VERSION = 8
-        fields: list[object] = [
-            VERSION,
-            reqId,
-            contract.conId,
-            contract.symbol,
-            contract.secType,
-            contract.lastTradeDateOrContractMonth,
-            contract.strike if contract.strike else "",
-            contract.right,
-            contract.multiplier,
-            contract.exchange,
-            contract.primaryExchange,
-            contract.currency,
-            contract.localSymbol,
-            contract.tradingClass,
-            contract.includeExpired,
-            contract.secIdType,
-            contract.secId,
-            contract.issuerId,
-        ]
+        if reqId is not None:
+            self.ibsocket.reqContractDetails(reqId, contract)
 
-        self.ibsocket.send_message(OUT.REQ_CONTRACT_DATA, fields)
-        if DEBUG_TWS_REQUEST:
-            debug_log(
-                f"awaiting contractDetails for reqId {reqId} and symbol '{contract.symbol}'"
-            )
-        return await coroutine
+        data = await coroutine
+        return [item["contractDetails"] for item in data]
 
     async def reqHistoricalData(
         self,
@@ -1716,136 +1286,53 @@ class TWSClient:
         bar_size: str,
         useRTH: int = 0,
         format_date: int = 1,
-        keepUpToDate: int = 0,
         timeout: float | None = None,
-    ) -> list[BarData]:
-        """Request historical bars from TWS.
+    ) -> list[dict[str, Any]]:
 
-        Args:
-            contract: TWS Contract object
-            end_date_time: End datetime ("20231215 16:00:00" or "" for now)
-            duration_str: Time range ("1 D", "2 W", "1 M", etc.)
-            bar_size: Bar size ("1 min", "5 mins", "1 hour", "1 day")
-            whatToShow: Data type (default: "TRADES")
-            useRTH: 1=regular hours only, 0=all hours (default: 1)
-            format_date: 1=string format, 2=epoch (default: 1)
+        reqId: int | None = None
+        coroutine: Awaitable[list[dict[str, Any]]]
+        business_key = f"shared:reqHistoricalData:{ticker_name(contract, bar_size)}:{duration_str}:{end_date_time}"
 
-        Returns:
-            List of BarData objects (one per bar, in ascending time order)
-        """
-        reqId = self.next_req_id
-        coroutine: Awaitable[list[BarData]] = self.ibsocket.create_future(
-            reqId,
+        reqId, coroutine = self.ibsocket.create_snapshot(
+            business_key,
             timeout=timeout or self._timeout,
-            capability="datafeed",
         )
 
-        asset_config = get_asset_config(contract.secType)
-
-        # Select whatToShow based on keepUpToDate:
-        # - keepUpToDate=True (live): Only TRADES, MIDPOINT, BID, ASK supported
-        # - keepUpToDate=False (historical): All types per product supported
-        whatToShow = (
-            asset_config.what_to_show_live
-            if keepUpToDate
-            else asset_config.what_to_show_hist
-        )
-
-        # Build message fields (VERSION=6 per ibapi/client.py)
-        fields: list[object] = [
-            reqId,
-            contract.conId,
-            contract.symbol,
-            contract.secType,
-            contract.lastTradeDateOrContractMonth,
-            contract.strike if contract.strike else "",
-            contract.right,
-            contract.multiplier,
-            contract.exchange,
-            contract.primaryExchange,
-            contract.currency,
-            contract.localSymbol,
-            contract.tradingClass,
-            contract.includeExpired,
-            end_date_time,
-            bar_size,
-            duration_str,
-            useRTH,
-            whatToShow,
-            format_date,
-            keepUpToDate,
-            [],  # chartOptions (empty list)
-        ]
-
-        self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, fields)
-        if DEBUG_TWS_REQUEST:
-            debug_log(
-                f"awaiting historicalData for reqId {reqId}, "
-                f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{bar_size}'"
+        if reqId is not None:
+            self.ibsocket.reqBars(
+                reqId,
+                contract,
+                end_date_time,
+                duration_str,
+                bar_size,
+                useRTH,
+                format_date,
             )
+
         return await coroutine
 
     async def reqQuoteSnapshot(
         self,
         contract: Contract,
         timeout: float | None = None,
-        **kwargs: Any,
+        # **kwargs: Any,
     ) -> dict[str, Any]:
-        stream_key = ticker_name(contract)
-        coroutine: Awaitable[dict[str, Any]]
 
-        reqId = self.ibsocket.stream_req_id(stream_key)
+        reqId: int | None = None
+        coroutine: Awaitable[list[dict[str, Any]]]
+        business_key = f"shared:Quote:{ticker_name(contract)}"
 
-        if reqId is not None:
-            if DEBUG_TWS_REQUEST:
-                debug_log(f"reusing active stream '{stream_key}' for reqQuoteSnapshot")
-            coroutine = self.ibsocket.create_snapshot(
-                reqId,
-                stream_key,
-                timeout=timeout or self._timeout,
-                capability="datafeed",
-            )
-            return await coroutine
-
-        reqId = self.next_req_id
-        coroutine = self.ibsocket.create_snapshot(
-            reqId,
-            stream_key,
+        reqId, coroutine = self.ibsocket.create_snapshot(
+            business_key,
             timeout=timeout or self._timeout,
-            capability="datafeed",
         )
 
-        VERSION = 11
-        # Build message fields for REQ_MKT_DATA
-        mkt_data_fields: list[object] = [
-            VERSION,
-            reqId,
-            contract.conId,
-            contract.symbol,
-            contract.secType,
-            contract.lastTradeDateOrContractMonth,
-            contract.strike if contract.strike else "",
-            contract.right,
-            contract.multiplier,
-            contract.exchange,
-            contract.primaryExchange,
-            contract.currency,
-            contract.localSymbol,
-            contract.tradingClass,
-            0,  # deltaNeutralContract (False = no delta neutral)
-            [],  # Asset-type-specific tick list
-            1,  # snapshot
-            0,  # regulatorySnapshot
-            [],  # mktDataOptions (empty list)
-        ]
+        if reqId is not None:
+            self.ibsocket.reqQuote(reqId, contract)
 
-        self.ibsocket.send_message(OUT.REQ_MKT_DATA, mkt_data_fields)
-
-        if DEBUG_TWS_REQUEST:
-            debug_log(
-                f"awaiting quote snapshot for reqId {reqId}, symbol='{contract.symbol}'"
-            )
-        return await coroutine
+        acc = await coroutine
+        assert acc, "No data received for quote snapshot"
+        return next(iter(acc))
 
     # === Real-time bar subscriptions (continuous pattern) ===
 
@@ -1855,407 +1342,66 @@ class TWSClient:
         bar_size: str,
         callback: Callable[
             [dict[str, Any], list[str]],
-            Awaitable[None],
+            Coroutine[Any, Any, None],
         ],
-        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
-        **kwargs: Any,
+        on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
+        # **kwargs: Any,
     ) -> str:
-        """Create a real-time bar data subscription.
-
-        Args:
-            contract: TWS Contract for the symbol
-            bar_size: Bar size string (e.g., "1 min", "5 mins")
-            callback: Callback for bar updates
-            on_error: Optional callback for streaming errors
-            **kwargs: Additional options
-
-        Returns:
-            Stream key (for cancellation)
-        """
-
-        stream_key = ticker_name(contract, bar_size)
-        reqId = self.ibsocket.stream_req_id(stream_key)
-
-        if reqId is not None:
-            logger.warning(f"BarDataStream for '{stream_key}' already active!")
-            self.ibsocket.update_stream(reqId, callback, on_error)
-            return stream_key
-
-        reqId = self.next_req_id
-        self.ibsocket.register_stream(
-            reqId,
-            stream_key,
+        business_key = f"shared:reqBarDataStream:{ticker_name(contract, bar_size)}"
+        reqId: int | None = self.ibsocket.create_stream(
+            business_key,
             callback,
-            capability="datafeed",
-            on_error=on_error,
+            on_error,
         )
 
-        asset_config = get_asset_config(contract.secType)
-        end_date_time: str = ""
-        duration_str: str = get_duration_for_bars(bar_size)
-        # Use what_to_show_live since keepUpToDate=True (live data)
-        whatToShow: str = asset_config.what_to_show_live
-        format_date: int = 1
-        useRTH: int = 0
-        keepUpToDate: int = 1
-
-        bar_data_fields: list[object] = [
-            reqId,
-            contract.conId,
-            contract.symbol,
-            contract.secType,
-            contract.lastTradeDateOrContractMonth,
-            contract.strike if contract.strike else "",
-            contract.right,
-            contract.multiplier,
-            contract.exchange,
-            contract.primaryExchange,
-            contract.currency,
-            contract.localSymbol,
-            contract.tradingClass,
-            contract.includeExpired,
-            end_date_time,
-            bar_size,
-            duration_str,
-            useRTH,
-            whatToShow,
-            format_date,
-            keepUpToDate,  # True for live updates
-            [],  # chartOptions (empty list)
-        ]
-
-        self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, bar_data_fields)
-        if DEBUG_TWS_REQUEST:
-            debug_log(
-                f"subscribed to bar data for reqId {reqId}, "
-                f"symbol='{contract.symbol}', duration='{duration_str}', barSize='{bar_size}'"
+        if reqId is not None:
+            self.ibsocket.reqBars(
+                reqId,
+                contract,
+                end_date_time="",
+                duration_str=least_duration_from_bar_size(bar_size),
+                bar_size=bar_size,
+                useRTH=0,
+                format_date=1,
             )
 
-        return stream_key
+        return business_key
 
     def reqMktDataStream(
         self,
         contract: Contract,
         callback: Callable[
             [dict[str, Any], list[str]],
-            Awaitable[None],
+            Coroutine[Any, Any, None],
         ],
-        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
-        **kwargs: Any,
+        on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
+        # **kwargs: Any,
     ) -> str:
-        """Create a real-time market data subscription.
-
-        Args:
-            contract: TWS Contract for the symbol
-            callback: Callback for market data updates
-            on_error: Optional callback for streaming errors
-            **kwargs: Additional options
-
-        Returns:
-            Stream key (for cancellation)
-        """
-
-        stream_key = ticker_name(contract)
-        reqId = self.ibsocket.stream_req_id(stream_key)
-        if reqId is not None:
-            logger.warning(f"MktDataStream for '{stream_key}' already active!")
-            self.ibsocket.update_stream(reqId, callback, on_error)
-            return stream_key
-
-        reqId = self.next_req_id
-        self.ibsocket.register_stream(
-            reqId,
-            stream_key,
+        business_key = f"shared:Quote:{ticker_name(contract)}"
+        reqId: int | None = self.ibsocket.create_stream(
+            business_key,
             callback,
-            capability="datafeed",
-            on_error=on_error,
+            on_error,
         )
 
-        asset_config = get_asset_config(contract.secType)
-        VERSION = 11
-        # Build message fields for REQ_MKT_DATA
-        mkt_data_fields: list[object] = [
-            VERSION,
-            reqId,
-            contract.conId,
-            contract.symbol,
-            contract.secType,
-            contract.lastTradeDateOrContractMonth,
-            contract.strike if contract.strike else "",
-            contract.right,
-            contract.multiplier,
-            contract.exchange,
-            contract.primaryExchange,
-            contract.currency,
-            contract.localSymbol,
-            contract.tradingClass,
-            0,  # deltaNeutralContract (False = no delta neutral)
-            asset_config.generic_tick_list_str,  # Asset-type-specific tick list
-            0,  # snapshot
-            0,  # regulatorySnapshot
-            [],  # mktDataOptions (empty list)
-        ]
+        if reqId is not None:
+            self.ibsocket.reqQuote(reqId, contract)
 
-        self.ibsocket.send_message(OUT.REQ_MKT_DATA, mkt_data_fields)
-        if DEBUG_TWS_REQUEST:
-            debug_log(
-                f"subscribed to realtime reqMktData with reqId {reqId}, symbol='{contract.symbol}'"
-            )
-
-        return stream_key
+        return business_key
 
     def cancelBarDataStream(self, stream_key: str) -> None:
         """Cancel a real-time data subscription."""
 
-        reqId = self.ibsocket.stream_req_id(stream_key)
-        assert reqId is not None, f"No active stream found for key '{stream_key}'"
-
-        VERSION = 1
-        if reqId is not None:
-            self.ibsocket.send_message(OUT.CANCEL_HISTORICAL_DATA, [VERSION, reqId])
-            if DEBUG_TWS_REQUEST:
-                debug_log(f"cancelled realtime bars for reqId {reqId}")
-
-        self.ibsocket.unregister_stream(reqId)
+        tws_key = self.ibsocket.tws_key(stream_key)
+        assert tws_key is not None, f"No active stream found for key '{stream_key}'"
+        self.ibsocket.remove_stream(tws_key)
 
     def cancelMktDataStream(self, stream_key: str) -> None:
         """Cancel a real-time data subscription."""
 
-        reqId = self.ibsocket.stream_req_id(stream_key)
-        assert reqId is not None, f"No active stream found for key '{stream_key}'"
-
-        VERSION = 2
-        if reqId is not None:
-            self.ibsocket.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
-            if DEBUG_TWS_REQUEST:
-                debug_log(f"cancelled realtime market data for reqId {reqId}")
-
-        self.ibsocket.unregister_stream(reqId)
-
-    # === Order methods (broker capability) ===
-
-    @property
-    def next_order_id(self) -> int:
-        """Get next valid order ID from IBSocket."""
-        return self.ibsocket.next_order_id
-
-    async def reqOpenOrders(self, timeout: float | None = None) -> list[dict[str, Any]]:
-        """Request all open orders for this client.
-
-        Returns open orders placed from this client. Each order triggers
-        openOrder() and orderStatus() callbacks, then openOrderEnd().
-
-        Args:
-            timeout: Request timeout in seconds
-
-        Returns:
-            List of order data dicts (one per open order)
-        """
-        # Create future for result
-        loop = asyncio.get_event_loop()
-        future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
-        self.ibsocket._open_orders_future = (loop, future)
-        self.ibsocket._order_data.clear()  # Clear stale order data
-
-        VERSION = 1
-        self.ibsocket.send_message(OUT.REQ_OPEN_ORDERS, [VERSION])
-
-        if DEBUG_TWS_REQUEST:
-            debug_log("requesting open orders")
-
-        return await asyncio.wait_for(future, timeout=timeout or self._timeout)
-
-    def placeOrder(self, order_id: int, contract: Contract, order: Order) -> None:
-        """Place an order via TWS.
-
-        This is a fire-and-forget method. Order status updates are delivered
-        via openOrder() and orderStatus() callbacks.
-
-        Args:
-            order_id: Unique order ID (use next_order_id property)
-            contract: Contract to trade
-            order: Order parameters (type, side, quantity, price, etc.)
-
-        Note:
-            For server version >= 203, uses protobuf encoding (required by TWS).
-            For older server versions, uses legacy message format.
-        """
-
-        # Use protobuf encoding for server version >= 203
-        proto_msg = createPlaceOrderRequestProto(order_id, contract, order)
-        serialized = proto_msg.SerializeToString()
-        # Protobuf message ID = OUT.PLACE_ORDER + 200
-        proto_msg_id = OUT.PLACE_ORDER + PROTOBUF_MSG_ID
-        self.ibsocket.send_message_proto(proto_msg_id, serialized)
-        if DEBUG_TWS_REQUEST:
-            debug_log(
-                f"placed order (protobuf): id={order_id}, symbol={contract.symbol}, "
-                f"action={order.action}, qty={order.totalQuantity}, type={order.orderType}"
-            )
-        return
-
-    def cancelOrder(self, order_id: int) -> None:
-        """Cancel an order via TWS.
-
-        Args:
-            order_id: Order ID to cancel
-        """
-        VERSION = 1
-        fields: list[object] = [
-            VERSION,
-            order_id,
-            "",  # manualOrderCancelTime (empty for immediate)
-        ]
-
-        self.ibsocket.send_message(OUT.CANCEL_ORDER, fields)
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"cancelled order: id={order_id}")
-
-    def registerOrderCallback(
-        self,
-        callback: Callable[[dict[str, Any]], Awaitable[None]],
-        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
-    ) -> None:
-        """Register callback for order updates.
-
-        Args:
-            callback: Called for each order update (openOrder/orderStatus)
-            on_error: Optional error callback
-        """
-        loop = asyncio.get_event_loop()
-        self.ibsocket._order_hooks = (loop, callback, on_error)
-
-    def unregisterOrderCallback(self) -> None:
-        """Unregister order update callback."""
-        self.ibsocket._order_hooks = None
-
-    # === Position methods (broker capability) ===
-
-    async def reqPositions(self, timeout: float | None = None) -> list[dict[str, Any]]:
-        """Request all positions for all accounts.
-
-        Returns positions for all managed accounts. Each position triggers
-        position() callback, then positionEnd().
-
-        Args:
-            timeout: Request timeout in seconds
-
-        Returns:
-            List of position data dicts (one per position)
-        """
-        # Create future for result
-        loop = asyncio.get_event_loop()
-        future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
-        self.ibsocket._positions_future = (loop, future)
-        self.ibsocket._position_data.clear()  # Clear stale position data
-
-        VERSION = 1
-        self.ibsocket.send_message(OUT.REQ_POSITIONS, [VERSION])
-
-        if DEBUG_TWS_REQUEST:
-            debug_log("requesting positions")
-
-        return await asyncio.wait_for(future, timeout=timeout or self._timeout)
-
-    def registerPositionCallback(
-        self,
-        callback: Callable[[dict[str, Any]], Awaitable[None]],
-        on_error: Callable[[ProviderException], Awaitable[None]] | None = None,
-    ) -> None:
-        """Register callback for position updates.
-
-        Args:
-            callback: Called for each position update
-            on_error: Optional error callback
-        """
-        loop = asyncio.get_event_loop()
-        self.ibsocket._position_hooks = (loop, callback, on_error)
-
-    def unregisterPositionCallback(self) -> None:
-        """Unregister position update callback."""
-        self.ibsocket._position_hooks = None
-
-    def cancelPositions(self) -> None:
-        """Cancel position updates subscription."""
-        VERSION = 1
-        self.ibsocket.send_message(OUT.CANCEL_POSITIONS, [VERSION])
-        if DEBUG_TWS_REQUEST:
-            debug_log("cancelled positions subscription")
-
-    # === Account Summary methods (broker capability) ===
-
-    async def reqAccountSummarySnapshot(
-        self,
-        group: str = "All",
-        tags: str = "NetLiquidation,TotalCashValue,BuyingPower",
-        timeout: float | None = None,
-    ) -> dict[str, dict[str, Any]]:
-        """Request account summary for specified tags.
-
-        Args:
-            group: Account group ("All" for all accounts)
-            tags: Comma-separated list of tags to request
-            timeout: Request timeout in seconds
-
-        Returns:
-            Dict mapping tag names to their value data
-
-        Available tags:
-            AccountType, NetLiquidation, TotalCashValue, SettledCash,
-            AccruedCash, BuyingPower, EquityWithLoanValue,
-            PreviousEquityWithLoanValue, GrossPositionValue, ReqTEquity,
-            ReqTMargin, SMA, InitMarginReq, MaintMarginReq, AvailableFunds,
-            ExcessLiquidity, Cushion, FullInitMarginReq, FullMaintMarginReq,
-            FullAvailableFunds, FullExcessLiquidity, LookAheadNextChange,
-            LookAheadInitMarginReq, LookAheadMaintMarginReq,
-            LookAheadAvailableFunds, LookAheadExcessLiquidity,
-            HighestSeverity, DayTradesRemaining, Leverage
-        """
-
-        stream_key = f"account_summary_{group}_{tags}"
-        coroutine: Awaitable[dict[str, Any]]
-
-        reqId = self.ibsocket.stream_req_id(stream_key)
-
-        if reqId is not None:
-            if DEBUG_TWS_REQUEST:
-                debug_log(f"reusing active stream '{stream_key}' for reqAccountSummary")
-            coroutine = self.ibsocket.create_snapshot(
-                reqId,
-                stream_key,
-                timeout=timeout or self._timeout,
-                capability="broker",
-            )
-            return await coroutine
-
-        reqId = self.next_req_id
-        coroutine = self.ibsocket.create_snapshot(
-            reqId,
-            stream_key,
-            timeout=timeout or self._timeout,
-            capability="broker",
-        )
-
-        VERSION = 1
-        self.ibsocket.send_message(
-            OUT.REQ_ACCOUNT_SUMMARY, [VERSION, reqId, group, tags]
-        )
-
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"requesting account summary, reqId={reqId}, tags={tags}")
-
-        return await coroutine
-
-    def cancelAccountSummary(self, reqId: int) -> None:
-        """Cancel account summary subscription.
-
-        Args:
-            reqId: Request ID from reqAccountSummary
-        """
-        VERSION = 1
-        self.ibsocket.send_message(OUT.CANCEL_ACCOUNT_SUMMARY, [VERSION, reqId])
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"cancelled account summary for reqId={reqId}")
+        tws_key = self.ibsocket.tws_key(stream_key)
+        assert tws_key is not None, f"No active stream found for key '{stream_key}'"
+        self.ibsocket.remove_stream(tws_key)
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""

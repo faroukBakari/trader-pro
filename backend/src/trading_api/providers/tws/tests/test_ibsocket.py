@@ -257,13 +257,13 @@ class TestIBSocketStreamManagement:
         async def callback(data: dict, fields: list) -> None:
             pass
 
-        running_ibsocket.register_stream(reqId, ticker, callback, capability="datafeed")
+        running_ibsocket.create_stream(reqId, ticker, callback, capability="datafeed")
 
         assert reqId in running_ibsocket._stream_hooks
         assert reqId in running_ibsocket._stream_data
         assert reqId in running_ibsocket._reqId_to_capability
-        assert ticker in running_ibsocket._active_streams
-        assert running_ibsocket._active_streams[ticker] == reqId
+        assert ticker in running_ibsocket._business_to_tws_keys
+        assert running_ibsocket._business_to_tws_keys[ticker] == reqId
         assert running_ibsocket._stream_data[reqId]["ticker_name"] == ticker
 
     @pytest.mark.asyncio
@@ -280,7 +280,7 @@ class TestIBSocketStreamManagement:
         async def on_error(error: ProviderException) -> None:
             pass
 
-        running_ibsocket.register_stream(
+        running_ibsocket.create_stream(
             reqId, ticker, callback, capability="datafeed", on_error=on_error
         )
 
@@ -301,7 +301,7 @@ class TestIBSocketStreamManagement:
         async def new_callback(data: dict, fields: list) -> None:
             pass
 
-        running_ibsocket.register_stream(
+        running_ibsocket.create_stream(
             reqId, ticker, original_callback, capability="datafeed"
         )
         running_ibsocket.update_stream(reqId, new_callback)
@@ -319,15 +319,15 @@ class TestIBSocketStreamManagement:
         async def callback(data: dict, fields: list) -> None:
             pass
 
-        running_ibsocket.register_stream(reqId, ticker, callback, capability="datafeed")
+        running_ibsocket.create_stream(reqId, ticker, callback, capability="datafeed")
 
         # Unregister
-        running_ibsocket.unregister_stream(reqId)
+        running_ibsocket.remove_stream(reqId)
 
         assert reqId not in running_ibsocket._stream_hooks
         assert reqId not in running_ibsocket._stream_data
         assert reqId not in running_ibsocket._reqId_to_capability
-        assert ticker not in running_ibsocket._active_streams
+        assert ticker not in running_ibsocket._business_to_tws_keys
 
     def test_stream_req_id_returns_reqid_for_active_stream(
         self, running_ibsocket: IBSocket
@@ -339,16 +339,16 @@ class TestIBSocketStreamManagement:
         async def callback(data: dict, fields: list) -> None:
             pass
 
-        running_ibsocket.register_stream(reqId, ticker, callback, capability="datafeed")
+        running_ibsocket.create_stream(reqId, ticker, callback, capability="datafeed")
 
-        result = running_ibsocket.stream_req_id(ticker)
+        result = running_ibsocket.tws_key(ticker)
         assert result == reqId
 
     def test_stream_req_id_returns_none_for_unknown(
         self, running_ibsocket: IBSocket
     ) -> None:
         """Test stream_req_id returns None for unknown ticker."""
-        result = running_ibsocket.stream_req_id("UNKNOWN:TICKER")
+        result = running_ibsocket.tws_key("UNKNOWN:TICKER")
         assert result is None
 
 
@@ -402,7 +402,7 @@ class TestIBSocketErrorHandling:
         async def on_error(error: ProviderException) -> None:
             error_received.append(error)
 
-        running_ibsocket.register_stream(
+        running_ibsocket.create_stream(
             reqId, ticker, callback, capability="datafeed", on_error=on_error
         )
 
@@ -434,7 +434,7 @@ class TestIBSocketErrorHandling:
         async def on_error(error: ProviderException) -> None:
             pass
 
-        running_ibsocket.register_stream(
+        running_ibsocket.create_stream(
             reqId, ticker, callback, capability="datafeed", on_error=on_error
         )
 
@@ -451,7 +451,7 @@ class TestIBSocketErrorHandling:
         # Stream should be cleaned up
         assert reqId not in running_ibsocket._stream_data
         assert reqId not in running_ibsocket._stream_hooks
-        assert ticker not in running_ibsocket._active_streams
+        assert ticker not in running_ibsocket._business_to_tws_keys
 
     @pytest.mark.asyncio
     async def test_handle_error_uses_capability_fallback(
@@ -525,7 +525,7 @@ class TestIBSocketNotifyStream:
         async def callback(data: dict, fields: list) -> None:
             received_data.append((dict(data), list(fields)))
 
-        running_ibsocket.register_stream(reqId, ticker, callback, capability="datafeed")
+        running_ibsocket.create_stream(reqId, ticker, callback, capability="datafeed")
         running_ibsocket._stream_data[reqId]["bid"] = 150.0
 
         # Trigger notification
@@ -774,7 +774,7 @@ class TestIBSocketHistoricalCallbacks:
         async def callback(data: dict, fields: list) -> None:
             received.append((dict(data), list(fields)))
 
-        running_ibsocket.register_stream(reqId, ticker, callback, capability="datafeed")
+        running_ibsocket.create_stream(reqId, ticker, callback, capability="datafeed")
 
         bar = BarData()
         bar.date = "20231215 16:00:00"
@@ -858,7 +858,7 @@ class TestIBSocketSnapshotEnd:
             pass
 
         # Register stream hook (active subscription scenario)
-        running_ibsocket.register_stream(reqId, ticker, callback, capability="datafeed")
+        running_ibsocket.create_stream(reqId, ticker, callback, capability="datafeed")
 
         # Also add a pending snapshot
         loop = asyncio.get_event_loop()
@@ -934,7 +934,7 @@ class TestIBSocketErrorCallback:
         async def on_error(error: ProviderException) -> None:
             errors_received.append(error)
 
-        running_ibsocket.register_stream(
+        running_ibsocket.create_stream(
             reqId, ticker, callback, capability="datafeed", on_error=on_error
         )
 

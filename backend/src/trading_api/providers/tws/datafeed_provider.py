@@ -15,9 +15,10 @@ Architecture:
 import asyncio
 import logging
 import os
+from collections.abc import Coroutine
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from ibapi.common import BarData
@@ -66,7 +67,7 @@ class SubStream:
             asyncio.AbstractEventLoop,
             Callable[
                 [dict[str, Any], list[str] | None],
-                Awaitable[None],
+                Coroutine[Any, Any, None],
             ],
         ]
     ]
@@ -246,7 +247,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         else:
             end_dt_str = end_time_tz.strftime("%Y%m%d %H:%M:%S US/Eastern")
 
-        tws_bars: list[BarData] = []
+        tws_bars: list[dict[str, Any]] = []
 
         contract = build_contract(ticker_name)
         exchanges = [contract.primaryExchange]
@@ -272,7 +273,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             tws_bars.extend(bars)
 
         # Convert TWS BarData → domain Bar
-        domain_bars = [tws_bar_to_domain_bar(bar) for bar in tws_bars]
+        domain_bars = [tws_ticks_to_bar(bar) for bar in tws_bars]
 
         # Sort bars by time (ascending order)
         domain_bars.sort(key=lambda bar: bar.time)
@@ -354,8 +355,8 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         self,
         ticker_name: str,
         resolution: Resolution,
-        callback: Callable[[Bar], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        callback: Callable[[Bar], Coroutine[Any, Any, None]],
+        on_error: Callable[[TradingApiException], Coroutine[Any, Any, None]],
         **kwargs: Any,
     ) -> str:
         """Subscribe to real-time bars.
@@ -420,8 +421,8 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
     def subscribe_market_data(
         self,
         ticker_names: list[str],
-        callback: Callable[[QuoteData], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        callback: Callable[[QuoteData], Coroutine[Any, Any, None]],
+        on_error: Callable[[TradingApiException], Coroutine[Any, Any, None]],
         **kwargs: Any,
     ) -> list[str]:
         """Subscribe to real-time market data.

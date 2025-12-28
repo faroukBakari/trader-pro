@@ -1,8 +1,9 @@
 """Datafeed capability interface."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Coroutine
 from datetime import datetime
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
@@ -126,8 +127,8 @@ class DatafeedCapability(ABC):
         self,
         ticker_name: str,
         resolution: Resolution,
-        callback: Callable[[Bar], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        callback: Callable[[Bar], Coroutine[Any, Any, None]],
+        on_error: Callable[[TradingApiException], Coroutine[Any, Any, None]],
         **kwargs: Any,
     ) -> str:
         """Subscribe to real-time bars.
@@ -155,8 +156,8 @@ class DatafeedCapability(ABC):
     def subscribe_market_data(
         self,
         ticker_names: list[str],
-        callback: Callable[[QuoteData], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        callback: Callable[[QuoteData], Coroutine[Any, Any, None]],
+        on_error: Callable[[TradingApiException], Coroutine[Any, Any, None]],
         **kwargs: Any,
     ) -> list[str]:
         """Subscribe to real-time market data (ticks/quotes).

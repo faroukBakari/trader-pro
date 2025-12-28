@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from ibapi.order import Order
 
     from trading_api.models.broker import EquityData, PlacedOrder, Position, PreOrder
+    from trading_api.providers.tws.order_tracker import TrackedOrder
 
 # TWS secType → TradingView-style symbol type
 SEC_TYPE_MAP: dict[str, str] = {
@@ -315,20 +316,20 @@ def tws_rt_bar_to_domain_bar(
 
 def tws_ticks_to_bar(rt_data: dict[str, Any]) -> Bar:
     # Prefer bar_date (string) over bar_time (legacy int)
-    if rt_data.get("bar_date"):
-        time_ms = parse_tws_bar_date(rt_data["bar_date"])
-    elif rt_data.get("bar_time"):
-        time_ms = rt_data["bar_time"] * 1000
+    if rt_data.get("date"):
+        time_ms = parse_tws_bar_date(rt_data["date"])
+    elif rt_data.get("time"):
+        time_ms = rt_data["time"] * 1000
     else:
         time_ms = 0
     return Bar(
         time=time_ms,
-        open=float(rt_data.get("bar_open", 0.0)),
-        high=float(rt_data.get("bar_high", 0.0)),
-        low=float(rt_data.get("bar_low", 0.0)),
-        close=float(rt_data.get("bar_close", 0.0)),
-        volume=rt_data.get("bar_volume", 0),
-        count=rt_data.get("bar_count", 0),
+        open=float(rt_data.get("open", 0.0)),
+        high=float(rt_data.get("high", 0.0)),
+        low=float(rt_data.get("low", 0.0)),
+        close=float(rt_data.get("close", 0.0)),
+        volume=rt_data.get("volume", 0),
+        count=rt_data.get("count", 0),
     )
 
 
@@ -755,6 +756,78 @@ def tws_order_to_placed_order(order_data: dict[str, Any]) -> "PlacedOrder":
     )
 
 
+def tracked_order_to_placed_order(tracked: "TrackedOrder") -> "PlacedOrder":
+    """Convert TrackedOrder to domain PlacedOrder.
+
+    Extracts data directly from raw TWS objects (Contract, Order, OrderState)
+    stored in TrackedOrder without relying on flattened dict fields.
+
+    Args:
+        tracked: TrackedOrder wrapping raw TWS objects
+
+    Returns:
+        Domain PlacedOrder model
+    """
+    from trading_api.models.broker import OrderStatus, OrderType
+    from trading_api.models.broker import PlacedOrder as PlacedOrderModel
+    from trading_api.models.broker import Side
+
+    contract = tracked.contract
+    order = tracked.order
+    order_state = tracked.orderState
+
+    # Build symbol from contract
+    symbol = ticker_name(contract)
+
+    # Order type
+    order_type_str = order.orderType
+    order_type = OrderType(TWS_TO_ORDER_TYPE.get(order_type_str, 2))
+
+    # Side from action
+    side = Side(TWS_ACTION_TO_SIDE.get(order.action, 1))
+
+    # Quantity
+    qty = float(order.totalQuantity)
+
+    # Status from orderState
+    status = OrderStatus(TWS_STATUS_TO_ORDER_STATUS.get(order_state.status, 6))
+
+    # Prices
+    limit_price: float | None = None
+    stop_price: float | None = None
+    if order.lmtPrice and order.lmtPrice > 0:
+        limit_price = order.lmtPrice
+    if order.auxPrice and order.auxPrice > 0:
+        stop_price = order.auxPrice
+
+    # Filled quantity from order object (mutated by orderStatus callback)
+    filled_qty = float(order.filledQuantity) if order.filledQuantity else 0.0
+
+    # Average fill price from fills history (last fill's avgFillPrice)
+    avg_price: float | None = None
+    if tracked.fills and filled_qty > 0:
+        avg_price = tracked.fills[-1].avgFillPrice
+
+    return PlacedOrderModel(
+        id=str(tracked.orderId),
+        symbol=symbol,
+        type=order_type,
+        side=side,
+        qty=qty if qty > 0 else 1,  # Ensure positive qty
+        status=status,
+        limitPrice=limit_price,
+        stopPrice=stop_price,
+        takeProfit=None,  # Not directly available from TWS
+        stopLoss=None,  # Not directly available from TWS
+        guaranteedStop=None,  # Not supported by TWS
+        trailingStopPips=None,  # Would need separate logic
+        stopType=None,  # Not directly available
+        filledQty=filled_qty if filled_qty > 0 else None,
+        avgPrice=avg_price,
+        updateTime=None,  # Could add timestamp from last fill
+    )
+
+
 # =============================================================================
 # Position/Account Mappers (Broker Capability)
 # =============================================================================
@@ -909,6 +982,7 @@ __all__ = [
     "TWS_STATUS_TO_ORDER_STATUS",
     "preorder_to_tws",
     "tws_order_to_placed_order",
+    "tracked_order_to_placed_order",
     # Position/Account mappers
     "tws_position_to_domain",
     "tws_account_summary_to_equity",
