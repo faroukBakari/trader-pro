@@ -72,15 +72,7 @@ def get_tick_type_name(tick_type: int) -> str:
 
 
 def ticker_name(contract: Contract, bar_size: str | None = None) -> str:
-    ticker = (
-        contract.symbol
-        + ":"
-        + (contract.exchange or contract.primaryExchange)
-        + ":"
-        + contract.secType
-        + "-"
-        + str(contract.conId)
-    )
+    ticker = contract.symbol + ":" + contract.primaryExchange + ":" + contract.secType
     if bar_size:
         ticker += "@" + bar_size
     return ticker
@@ -100,11 +92,9 @@ def contract_description_to_search_result(
     contract = desc.contract
     symbol = contract.symbol
     description = contract.description or f"{contract.symbol} ({contract.secType})"
-    exchange = contract.exchange or contract.primaryExchange
+    exchange = contract.primaryExchange
     type = SEC_TYPE_MAP.get(contract.secType, "stock")
-    ticker = (
-        symbol + ":" + exchange + ":" + contract.secType + "-" + str(contract.conId)
-    )
+    ticker = symbol + ":" + exchange + ":" + contract.secType
     return SearchSymbolResultItem(
         symbol=contract.symbol,
         description=description,
@@ -186,7 +176,6 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     # Determine symbol type
 
     symbol = contract.symbol
-    exchange = contract.exchange or contract.primaryExchange
     symbol_type = SEC_TYPE_MAP.get(contract.secType, "stock")
 
     return SymbolInfo(
@@ -195,10 +184,8 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
         type=symbol_type,
         session=_convert_tws_trading_hours_to_session(details.tradingHours),
         timezone=_normalize_timezone(details.timeZoneId),
-        ticker=(
-            symbol + ":" + exchange + ":" + contract.secType + "-" + str(contract.conId)
-        ),
-        exchange=exchange,
+        ticker=(symbol + ":" + contract.primaryExchange + ":" + contract.secType),
+        exchange=contract.primaryExchange,
         listed_exchange=contract.primaryExchange,
         format="price",
         pricescale=pricescale,
@@ -362,8 +349,9 @@ def _parse_rt_volume(rt_volume_str: str | None) -> tuple[float, float, float]:
 
 
 def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
-    ticker_name = rt_data.get("ticker_name", "UNKNOWN")
-    symbol, exchange, _, _, _ = parse_ticker(ticker_name)
+    business_key = rt_data.get("business_key", "UNKNOWN")
+    ticker_name = business_key.split(":", 3)[-1] or "UNKNOWN"
+    symbol, exchange, _, _ = parse_ticker(ticker_name)
     ticker_name = ticker_name.split("@")[0]
 
     # Parse RT Trade Volume as fallback source (more reliable than rt_volume)
@@ -411,36 +399,32 @@ def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
     return QuoteData(s="ok", n=ticker_name, v=quote_values)
 
 
-def parse_ticker(ticker: str) -> tuple[str, str, str, str, str]:
+def parse_ticker(ticker: str) -> tuple[str, str, str, str]:
     """Parse ticker string into components.
     Args:
         ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE-CONTRACTID"
     Returns:
         Tuple of (symbol_name, exchange, secType, contractId, bar_size)
     Examples:
-        >>> self.parse_ticker('AAPL:NASDAQ:STK-12345@1D')
-        ('AAPL', 'NASDAQ', 'STK', '12345', '1D')
-        >>> self.parse_ticker('GOOGL:NASDAQ')
-        ('GOOGL', 'NASDAQ', '', '', '')
+        >>> self.parse_ticker('AAPL:NASDAQ:STK@1D')
+        ('AAPL', 'NASDAQ', 'STK', '1D')
+        >>> self.parse_ticker('GOOGL:NASDAQ:STK')
+        ('GOOGL', 'NASDAQ', 'STK', '', '')
     """
 
     ticker_parts = ticker.split(":")
     symbol_name = ticker_parts[0].strip()
     exchange = ""
+    secType = ""
+    bar_size = ""
     if len(ticker_parts) > 1:
         exchange = ticker_parts[1].strip()
-    secType = ""
-    contractId = ""
-    bar_size = ""
     if len(ticker_parts) > 2:
-        ticker_parts = ticker_parts[2].split("-")
+        ticker_parts = ticker_parts[2].split("@")
         secType = ticker_parts[0].strip()
         if len(ticker_parts) > 1:
-            ticker_parts = ticker_parts[1].split("@")
-            contractId = ticker_parts[0].strip()
-            if len(ticker_parts) > 1:
-                bar_size = ticker_parts[1].strip()
-    return symbol_name, exchange, secType, contractId, bar_size
+            bar_size = ticker_parts[1].strip()
+    return symbol_name, exchange, secType, bar_size
 
 
 def build_contract(
@@ -456,13 +440,15 @@ def build_contract(
     Returns:
         TWS Contract object ready for API calls
     """
-    symbol, exchange, sec_type, conId, _ = parse_ticker(ticker)
+    symbol, exchange, sec_type, _ = parse_ticker(ticker)
     contract = Contract()
     contract.symbol = symbol
     contract.secType = sec_type
-    contract.exchange = exchange if exchange else "SMART"
     contract.primaryExchange = exchange
-    contract.conId = int(conId)
+
+    # TODO: need to rely on the broker reponse and cache data.
+    # Use the cache to figure out primaryExchange and other details.
+    contract.exchange = exchange
     contract.currency = currency
     return contract
 
@@ -682,8 +668,7 @@ def tws_order_to_placed_order(order_data: dict[str, Any]) -> "PlacedOrder":
         sym = order_data.get("symbol", "")
         exc = order_data.get("exchange", "")
         sec = order_data.get("secType", "STK")
-        con = order_data.get("conId", 0)
-        symbol = f"{sym}:{exc}:{sec}-{con}"
+        symbol = f"{sym}:{exc}:{sec}"
 
     # Order type from order object or flattened
     if order is not None:
@@ -844,7 +829,7 @@ def tws_position_to_domain(position_data: dict[str, Any]) -> "Position":
             - contract: TWS Contract object
             - position: Position quantity (Decimal, can be negative for short)
             - avgCost: Average cost per unit
-            - symbol, exchange, secType, conId: Flattened contract fields
+            - symbol, exchange, secType: Flattened contract fields
 
     Returns:
         Domain Position model
@@ -863,8 +848,7 @@ def tws_position_to_domain(position_data: dict[str, Any]) -> "Position":
         sym = position_data.get("symbol", "")
         exc = position_data.get("exchange", "")
         sec = position_data.get("secType", "STK")
-        con = position_data.get("conId", 0)
-        symbol = f"{sym}:{exc}:{sec}-{con}"
+        symbol = f"{sym}:{exc}:{sec}"
 
     # Determine side from position sign
     # Positive = long, Negative = short
@@ -942,7 +926,7 @@ def tws_account_summary_to_account_info(
     # Try to get account from summary data, fall back to provided account_id
     main_account = next(
         iter(
-            [acc for acc in summary_data.keys() if acc not in ("reqId", "ticker_name")]
+            [acc for acc in summary_data.keys() if acc not in ("reqId", "business_key")]
         ),
         None,
     )

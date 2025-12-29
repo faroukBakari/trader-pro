@@ -437,7 +437,7 @@ class TestTwsTicksToQuoteDataMapper:
         # Simulates STK market data stream where 'last' tick doesn't arrive
         # but rt_trd_volume does (Generic 375)
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "ticker_name": "GOOGL:NASDAQ:STK",
             "bid": 320.55,
             "ask": 320.78,
             # No "last" field - this is the bug we're fixing
@@ -515,7 +515,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
 
         # Real data from api-traces.log - GOOGL market data stream
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "ticker_name": "GOOGL:NASDAQ:STK",
             "bid": 320.55,
             "ask": 320.78,
             # No "last" - this is the actual bug scenario
@@ -546,7 +546,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
 
         # Real data - odd lot update with empty price
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "ticker_name": "GOOGL:NASDAQ:STK",
             "bid": 320.51,
             "ask": 320.88,
             "rt_volume": ";0E-16;1765200320968;4026.0000000000000000;320.95565875;true",
@@ -570,7 +570,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
 
         # Real data - rt_volume with trade
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "ticker_name": "GOOGL:NASDAQ:STK",
             "bid": 320.51,
             "ask": 320.60,
             "rt_volume": "320.58;4.0000000000000000;1765200301083;4015.0000000000000000;320.95659154;false",
@@ -644,7 +644,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
 
         # Real data from snapshot request
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "ticker_name": "GOOGL:NASDAQ:STK",
             "bid": 320.55,
             "ask": 320.6,
             "last": 320.56,
@@ -674,7 +674,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
         from trading_api.models.market import QuoteValues
 
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "ticker_name": "GOOGL:NASDAQ:STK",
             "bid": 320.55,
             "ask": 320.78,
             # Both present - rt_trd_volume should win
@@ -696,7 +696,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
         from trading_api.models.market import QuoteValues
 
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "ticker_name": "GOOGL:NASDAQ:STK",
             "bid": 320.51,
             "ask": 320.60,
             # High precision values from actual logs

@@ -11,7 +11,7 @@ Tests cover:
 - Subscription methods
 
 Note: All tests mock TWSClient to avoid real TWS connections.
-Note: Helper method tests (_build_contract, _map_timeframe, _calculate_duration)
+Note: Helper method tests (_map_timeframe, _calculate_duration)
       have been moved to test_tws_mappers.py since they are now module functions.
 """
 

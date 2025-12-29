@@ -97,7 +97,7 @@ export class WebSocketBase {
       reconnect: true,
       maxReconnectAttempts: 5,
       reconnectDelay: 1000,
-      debug: false,
+      debug: true,
       wsUrl,
     }
     this.logger = this.config.debug

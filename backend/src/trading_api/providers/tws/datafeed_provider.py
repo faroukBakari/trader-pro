@@ -44,7 +44,6 @@ from .tws_mappers import (
     contract_description_to_search_result,
     contract_details_to_symbol_info,
     map_resolution_to_tws_bar_size,
-    tws_bar_to_domain_bar,
     tws_ticks_to_bar,
     tws_ticks_to_quote_data,
 )

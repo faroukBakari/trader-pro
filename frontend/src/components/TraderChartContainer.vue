@@ -33,7 +33,7 @@ function getLanguageFromURL() {
 
 const props = defineProps({
   symbol: {
-    default: 'GOOGL:NASDAQ:STK-208813719',
+    default: 'GOOGL:NASDAQ:STK',
     type: String,
   },
   interval: {

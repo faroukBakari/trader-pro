@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Any, Awaitable, Callable
+from collections.abc import Coroutine
+from typing import Any, Callable
 
 from pydantic import BaseModel
 
@@ -13,13 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 # Type alias for provider update callback (data updates)
-ProviderUpdateCallback = Callable[[Any], Awaitable[None]]
+ProviderUpdateCallback = Callable[[Any], Coroutine[Any, Any, None]]
 
 # Type alias for topic error callback signature
 # Service calls: topic_error(exc, recoverable, retry_after_ms)
 TopicErrorCallback = Callable[
     [TradingApiException, bool, int | None],
-    Awaitable[None],
+    Coroutine[Any, Any, None],
 ]
 
 
