@@ -44,6 +44,7 @@ from .tws_mappers import (
     contract_description_to_search_result,
     contract_details_to_symbol_info,
     map_resolution_to_tws_bar_size,
+    parse_ticker,
     tws_ticks_to_bar,
     tws_ticks_to_quote_data,
 )
@@ -88,6 +89,8 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             config: Provider configuration (auto-loaded from env if None)
         """
         self._config: TWSDatafeedProviderConfig = config or TWSDatafeedProviderConfig()
+
+        self._symbol_info_cache: dict[str, list[SymbolInfo]] = {}
 
         # Layer 1: TWSConnection (callbacks only)
         self._tws_client = TWSClient(
@@ -162,6 +165,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         """
 
         # Build TWS Contract for the request
+        symbol, exchange, _, _ = parse_ticker(ticker_name)
         contract = build_contract(ticker_name)
 
         if contract.primaryExchange in SMART_EXCHANGES:
