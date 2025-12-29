@@ -373,7 +373,7 @@ class IBSocket(EWrapper):
                 self._handle_request_error(
                     TWSErrorCategory.CALLBACK,
                     str(e),
-                    -1,
+                    "COMMON",
                     f"Exception in IBSocket reader loop: {e!r}",
                 )
                 time.sleep(0.5)
@@ -392,29 +392,27 @@ class IBSocket(EWrapper):
         self,
         category: str,
         detail: str,
-        reqId: int,
+        tws_key: str,
         message: str,
         timestamp: int | None = None,
     ) -> None:
 
         capability = "shared"
-        tws_key = f"req_{reqId}"
-        if reqId != -1:
-            business_key = next(
-                iter(
-                    [
-                        business_key
-                        for business_key, _tws_key in self._business_to_tws_key.items()
-                        if _tws_key == tws_key
-                    ]
-                ),
-                "NOT_FOUND",
-            )
-            capability = next(iter(business_key.split(":", 1)))
+        business_key = next(
+            iter(
+                [
+                    business_key
+                    for business_key, _tws_key in self._business_to_tws_key.items()
+                    if _tws_key == tws_key
+                ]
+            ),
+            "NOT_FOUND",
+        )
+        capability = next(iter(business_key.split(":", 1))) or "shared"
 
         error = ProviderException(
             code=f"PROVIDER_TWS_{category}_{detail.upper()}",
-            message=f"[reqId={reqId}] {message}",
+            message=f"[{tws_key}] {message}",
             provider="tws",
             capability=capability,
             timestamp=timestamp,
@@ -714,23 +712,33 @@ class IBSocket(EWrapper):
             )
 
         for loop, future in snapshot_hooks:
-            if not future.done():
-                loop.call_soon_threadsafe(future.set_result, stream[:])
+
+            def set_result(stream) -> None:
+                if not future.done():
+                    future.set_result(stream[:])
+
+            loop.call_soon_threadsafe(set_result, stream)
 
         loop.call_soon_threadsafe(self._snapshot_hooks.pop, tws_key, None)
 
         stream.last_dispatched = int(time.time() * 1000)
 
-        def cleanup(stream: StreamData) -> None:
-            if int(time.time() * 1000) - stream.last_dispatched > 10_000:
+        def cleanup(tws_key: str, main_thread_loop: asyncio.AbstractEventLoop) -> None:
+            stream = self._stream_data.get(tws_key)
+            if stream is not None and (
+                (int(time.time() * 1000)) - stream.last_dispatched > 10_000
+            ):
                 # No stream hook registered - snapshot only
                 debug_log(
                     f"_notify_stream: no stream listeners => canceling "
                     + f"[{stream.business_key}] [{tws_key}]"
                 )
-                self.remove_stream(stream.business_key)
+                main_thread_loop.call_soon_threadsafe(
+                    self.remove_stream, stream.business_key
+                )
 
-        loop.call_later(10, cleanup, stream)
+        reader_loop = asyncio.get_event_loop()
+        reader_loop.call_later(11, cleanup, tws_key, loop)
 
     def _dispatch_update(self, tws_key: str, stream: StreamData) -> None:
 
@@ -778,6 +786,7 @@ class IBSocket(EWrapper):
         )
         if stream is None:
             return
+        data["business_key"] = stream.business_key
         stream.append(data)
         stream.updated_fields.clear()
         stream.last_updated = int(time.time() * 1000)
@@ -791,6 +800,7 @@ class IBSocket(EWrapper):
         stream = self._stream_data.get(tws_key)
         if stream is None:
             return
+        data[-1]["business_key"] = stream.business_key
         stream.extend(data)
         stream.updated_fields.clear()
         stream.last_updated = int(time.time() * 1000)
@@ -826,6 +836,7 @@ class IBSocket(EWrapper):
             stream.last_updated = int(time.time() * 1000)
             stream.updated_fields.clear()
             stream.updated_fields.extend(updated_fields)
+            last_slot["business_key"] = stream.business_key
             self._notify_stream(tws_key, stream)
 
     def _flag_snapshot_complete(self, tws_key: str) -> None:
@@ -1191,7 +1202,7 @@ class IBSocket(EWrapper):
         self._handle_request_error(
             category=TWSErrorCategory.API,
             detail=detail,
-            reqId=reqId,
+            tws_key=f"req_{reqId}",
             message=message,
             timestamp=errorTime // 1000 if errorTime > 10_000_000_000 else errorTime,
         )
@@ -1313,7 +1324,7 @@ class TWSClient:
 
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, Any]]]
-        business_key = f"shared:reqHistoricalData:{ticker_name(contract, bar_size)}:{duration_str}:{end_date_time}"
+        business_key = f"shared:reqHistoricalData:{contract.exchange}:{duration_str}:{end_date_time}:{ticker_name(contract, bar_size)}"
 
         reqId, coroutine = self.ibsocket.create_snapshot(
             business_key,
@@ -1342,7 +1353,7 @@ class TWSClient:
 
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, Any]]]
-        business_key = f"shared:Quote:{ticker_name(contract)}"
+        business_key = f"shared:Quote:{contract.exchange}:{ticker_name(contract)}"
 
         reqId, coroutine = self.ibsocket.create_snapshot(
             business_key,
@@ -1369,7 +1380,7 @@ class TWSClient:
         on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
         # **kwargs: Any,
     ) -> str:
-        business_key = f"shared:reqBarDataStream:{ticker_name(contract, bar_size)}"
+        business_key = f"shared:reqBarDataStream:{contract.exchange}:{ticker_name(contract, bar_size)}"
         reqId: int | None = self.ibsocket.create_stream(
             business_key,
             callback,
@@ -1399,7 +1410,7 @@ class TWSClient:
         on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
         # **kwargs: Any,
     ) -> str:
-        business_key = f"shared:Quote:{ticker_name(contract)}"
+        business_key = f"shared:Quote:{contract.exchange}:{ticker_name(contract)}"
         reqId: int | None = self.ibsocket.create_stream(
             business_key,
             callback,
