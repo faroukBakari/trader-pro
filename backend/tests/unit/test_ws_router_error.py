@@ -61,6 +61,7 @@ class MockWsRouteService(WsRouteService):
         topic: str,
         topic_update: ProviderUpdateCallback,
         topic_error: TopicErrorCallback,
+        user_id: str,
     ) -> None:
         """Store callbacks for testing."""
         self._topics[topic] = (topic_update, topic_error)
@@ -209,7 +210,7 @@ class TestCreateTopicErrorCallback:
     ) -> None:
         """_create_topic registers both update and error callbacks with service."""
         topic = "test:AAPL"
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -229,7 +230,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -267,7 +268,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -303,7 +304,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -335,7 +336,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
         assert topic in router._topics  # Pre-condition
 
         callbacks = mock_service.get_callbacks(topic)
@@ -367,7 +368,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -398,7 +399,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
         assert topic in router._topics  # Pre-condition
 
         callbacks = mock_service.get_callbacks(topic)
@@ -430,7 +431,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -461,7 +462,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -756,7 +757,7 @@ class TestUnsubscribe:
         from trading_api.models import SubscriptionRequest
 
         topic = 'test:{"symbol":"AAPL"}'
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
         # After unsubscribe, client.topics won't contain the topic
         unsubscribe_client.topics = set()
         router._clients = {unsubscribe_client}
@@ -782,7 +783,7 @@ class TestUnsubscribe:
         from trading_api.models import SubscriptionRequest
 
         topic = 'test:{"symbol":"AAPL"}'
-        router._create_topic(topic)
+        router._create_topic(topic, "test-user-123")
 
         # Create another client still subscribed to the topic
         other_client = MagicMock()

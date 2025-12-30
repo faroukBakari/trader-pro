@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from jose import jwt
 
 from trading_api.app_factory import AppFactory, ModularApp
+from trading_api.shared.config import settings
 
 
 @pytest.fixture
@@ -98,7 +99,7 @@ class TestLoginEndpoint:
             assert "expires_in" in data
 
             assert data["token_type"] == "bearer"
-            assert data["expires_in"] == 300  # 5 minutes
+            assert data["expires_in"] == settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
 
             # Verify tokens are non-empty
             assert len(data["access_token"]) > 0
@@ -492,9 +493,12 @@ class TestAccessTokenStructure:
         exp_timestamp = claims["exp"]
         exp_datetime = datetime.fromtimestamp(exp_timestamp, timezone.utc)
 
-        # Verify expiration is ~5 minutes from issue time
+        # Verify expiration matches configured ACCESS_TOKEN_EXPIRE_MINUTES
         time_to_expiry = (exp_datetime - before_login).total_seconds()
-        assert 290 <= time_to_expiry <= 310  # Allow 10s margin for test execution
+        expected_seconds = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        assert (
+            expected_seconds - 10 <= time_to_expiry <= expected_seconds + 10
+        )  # Allow 10s margin
 
 
 class TestIntrospectEndpoint:

@@ -193,7 +193,10 @@ describe('AuthService', () => {
                 data: { status: 'expired', exp: null, error: 'Token expired' },
             })
 
-            mockAuthApi.refreshToken.mockRejectedValue(new Error('Invalid refresh token'))
+            // Mock failed refresh with axios-like error (401 triggers logout)
+            mockAuthApi.refreshToken.mockRejectedValue({
+                response: { status: 401, data: { detail: 'Invalid refresh token' } },
+            })
             mockAuthApi.logout.mockResolvedValue({})
 
             const result = await authService.checkAuthStatus()
@@ -668,7 +671,10 @@ describe('AuthService', () => {
                 data: { status: 'expired', exp: null, error: 'Token expired' },
             })
 
-            mockAuthApi.refreshToken.mockRejectedValue(new Error('Invalid refresh token'))
+            // Mock failed refresh with axios-like error (401 triggers logout)
+            mockAuthApi.refreshToken.mockRejectedValue({
+                response: { status: 401, data: { detail: 'Invalid refresh token' } },
+            })
             mockAuthApi.logout.mockResolvedValue({})
 
             const result = await authService.checkAuthStatus()

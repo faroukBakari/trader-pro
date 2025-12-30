@@ -113,6 +113,7 @@ class DatafeedService(WsRouteService):
         topic: str,
         topic_update: ProviderUpdateCallback,
         topic_error: TopicErrorCallback,
+        user_id: str,
     ) -> None:
         """Parse topic and create appropriate subscription task.
 
@@ -125,6 +126,7 @@ class DatafeedService(WsRouteService):
             topic_update: Callback to broadcast data updates to subscribers
             topic_error: Callback to broadcast errors to subscribers.
                         Service wraps this to determine recoverable/retry_after_ms.
+            user_id: Authenticated user ID (unused - datafeed is not user-scoped).
 
         Raises:
             ValueError: If topic format is invalid or unknown topic type

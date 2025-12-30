@@ -9,7 +9,7 @@ Each test suite can create an app with only the modules it needs for isolation.
 
 import asyncio
 from pathlib import Path
-from typing import Awaitable, Callable, Generator
+from typing import Awaitable, Callable
 
 import pytest
 
@@ -147,33 +147,8 @@ class MockBrokerProvider(Provider, BrokerCapability):
         pass
 
 
-@pytest.fixture(scope="session")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """Create event loop for session-scoped async fixtures.
-
-    Required for pytest-asyncio 0.21.x with session-scoped async fixtures.
-    This is the SINGLE source of event loop for all test suites.
-
-    CRITICAL: Must properly shutdown async generators and close the loop
-    to prevent "Event loop is closed" errors during fixture teardown.
-    """
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield loop
-
-    # Proper cleanup sequence for pytest-asyncio 0.21.x
-    try:
-        # Shutdown async generators before closing loop
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        # Shutdown default executor
-        loop.run_until_complete(loop.shutdown_default_executor())
-    except AttributeError:
-        # shutdown_default_executor added in Python 3.9
-        pass
-    finally:
-        # Close the loop
-        loop.close()
+# Note: event_loop fixture is defined in backend/conftest.py (root level)
+# to be shared across all test directories (tests/, src/trading_api/)
 
 
 def create_test_app(

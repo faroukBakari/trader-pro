@@ -4,7 +4,6 @@ Provides MockDatafeedProvider to avoid real TWS Gateway connections during tests
 Overrides the apps fixture to inject mock provider instead of real TWSDatafeedProvider.
 """
 
-import asyncio
 from collections.abc import Generator
 from datetime import datetime
 from itertools import count
@@ -180,28 +179,6 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
 
 # ============================================================================
-# Event Loop Fixture (Module-Scoped for Async Fixtures)
-# ============================================================================
-
-
-@pytest.fixture(scope="module")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """Create event loop for module-scoped async fixtures."""
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield loop
-
-    try:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.run_until_complete(loop.shutdown_default_executor())
-    except AttributeError:
-        pass
-    finally:
-        loop.close()
-
-
-# ============================================================================
 # Application Fixtures (Override to inject MockDatafeedProvider)
 # ============================================================================
 
@@ -213,7 +190,7 @@ def mock_datafeed_provider() -> MockDatafeedProvider:
 
 
 @pytest.fixture(scope="module")
-async def apps(mock_datafeed_provider: MockDatafeedProvider) -> ModularApp:
+def apps(mock_datafeed_provider: MockDatafeedProvider) -> ModularApp:
     """Override apps fixture to inject mock provider instead of real TWSDatafeedProvider.
 
     This prevents tests from connecting to real TWS Gateway.

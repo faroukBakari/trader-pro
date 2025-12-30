@@ -61,6 +61,7 @@ class WsRouteService(ServiceInterface):
         topic: str,
         topic_update: ProviderUpdateCallback,
         topic_error: TopicErrorCallback,
+        user_id: str,
     ) -> None:
         """Create a new subscription topic.
 
@@ -69,6 +70,7 @@ class WsRouteService(ServiceInterface):
             topic_update: Callback to broadcast data updates to subscribers
             topic_error: Callback to broadcast errors to subscribers.
                         Called with (exception, recoverable, retry_after_ms).
+            user_id: Authenticated user ID for user-scoped data access.
         """
         ...
 
