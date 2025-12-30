@@ -21,7 +21,6 @@ Architecture:
 """
 
 import asyncio
-import json
 import logging
 import math
 import os
@@ -38,8 +37,6 @@ from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
 from typing import Any
-
-from attr import field
 
 # Protobuf imports for server version >= 203
 from ibapi.client_utils import createPlaceOrderRequestProto

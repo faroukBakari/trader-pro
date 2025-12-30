@@ -83,7 +83,21 @@ class AuthServiceImpl implements AuthService {
       return true
     } catch (err: unknown) {
       console.error('Token refresh failed:', err)
-      await this.logout()
+
+      // Only clear token on definitive auth failures, not transient errors
+      const axiosError = err as { response?: { status?: number; data?: { code?: string } } }
+      const status = axiosError.response?.status
+      const code = axiosError.response?.data?.code
+
+      const isAuthFailure = status === 401 ||
+        code === 'SERVICE_AUTH_INVALID_REFRESH_TOKEN' ||
+        code === 'SERVICE_AUTH_USER_NOT_FOUND'
+
+      if (isAuthFailure) {
+        await this.logout()  // Clear token only on auth failure
+      }
+      // Network errors: keep token, let user retry
+
       return false
     }
   }

@@ -31,7 +31,6 @@ import threading
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from decimal import Decimal
-from functools import wraps
 from itertools import count
 from socket import MSG_PEEK
 from socket import error as socketError
@@ -39,7 +38,6 @@ from socket import socket
 from socket import timeout as socketTimeout
 from typing import Any
 
-from httpx import stream
 from ibapi.common import BarData, TickAttrib
 from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.contract import Contract, ContractDescription, ContractDetails
@@ -48,10 +46,8 @@ from ibapi.message import OUT
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
-from more_itertools import last
 
 from trading_api.models.exceptions import ProviderException
-from trading_api.providers import tws
 from trading_api.providers.tws.tws_mappers import ticker_name
 from trading_api.providers.tws.tws_models import (
     TICK_TYPE_TO_FIELD,
@@ -182,7 +178,6 @@ class IBSocketState:
 
 
 class IBSocket(EWrapper):
-
     def __init__(self) -> None:
         # socket related attributes
         self._req_id_counter = count()
@@ -397,7 +392,6 @@ class IBSocket(EWrapper):
         message: str,
         timestamp: int | None = None,
     ) -> None:
-
         capability = "shared"
         business_key = next(
             iter(
@@ -593,7 +587,6 @@ class IBSocket(EWrapper):
         *,
         timeout: float | None = 5,
     ) -> tuple[int | None, Awaitable[StreamData]]:
-
         assert re.match(
             r"^(shared|datafeed|broker):", business_key
         ), "ticker_name must start with capability prefix."
@@ -742,14 +735,13 @@ class IBSocket(EWrapper):
                 # No stream hook registered - snapshot only
                 debug_log(
                     f"_resolve_snapshots::cleanup : no stream listeners => canceling "
-                    + f"[{tws_key} | {stream.business_key}]"
+                    f"[{tws_key} | {stream.business_key}]"
                 )
                 self.remove_stream(stream.business_key)
 
         loop.call_later(11, loop.call_soon_threadsafe, cleanup, tws_key)
 
     def _dispatch_update(self, tws_key: str, stream: StreamData) -> None:
-
         stream_hook = self._stream_hooks.get(tws_key)
         if stream_hook is None:
             return
@@ -907,7 +899,6 @@ class IBSocket(EWrapper):
         useRTH: int,
         format_date: int,
     ) -> None:
-
         asset_config = get_asset_config(contract.secType)
         whatToShow = asset_config.what_to_show_live
 
@@ -943,7 +934,8 @@ class IBSocket(EWrapper):
             if DEBUG_TWS_REQUEST:
                 debug_log(
                     f"canceled bar data for reqId {reqId}, "
-                    f"symbol='{contract.symbol}', exchange='{contract.exchange}', end_date_time='{end_date_time}', duration='{duration_str}', barSize='{bar_size}'"
+                    f"symbol='{contract.symbol}', exchange='{contract.exchange}', "
+                    f"end_date_time='{end_date_time}', duration='{duration_str}', barSize='{bar_size}'"
                 )
 
         self._cleanup_hooks[f"req_{reqId}"] = (asyncio.get_event_loop(), cleanup)
@@ -952,11 +944,11 @@ class IBSocket(EWrapper):
         if DEBUG_TWS_REQUEST:
             debug_log(
                 f"requested bar data for reqId {reqId}, "
-                f"symbol='{contract.symbol}', exchange='{contract.exchange}', end_date_time='{end_date_time}', duration='{duration_str}', barSize='{bar_size}'"
+                f"symbol='{contract.symbol}', exchange='{contract.exchange}', "
+                f"end_date_time='{end_date_time}', duration='{duration_str}', barSize='{bar_size}'"
             )
 
     def reqQuote(self, reqId: int, contract: Contract) -> None:
-
         VERSION = 11
         # Build message fields for REQ_MKT_DATA
         mkt_data_fields: list[object] = [
@@ -1290,7 +1282,6 @@ class TWSClient:
     async def reqMatchingSymbols(
         self, pattern: str, timeout: float | None = None
     ) -> list[ContractDescription]:
-
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, ContractDescription]]]
         business_key = f"shared:reqMatchingSymbols:{pattern}"
@@ -1309,7 +1300,6 @@ class TWSClient:
     async def reqContractDetails(
         self, contract: Contract, timeout: float | None = None
     ) -> list[ContractDetails]:
-
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, ContractDetails]]]
         business_key = f"shared:reqContractDetails:{ticker_name(contract)}"
@@ -1335,10 +1325,12 @@ class TWSClient:
         format_date: int = 1,
         timeout: float | None = None,
     ) -> list[dict[str, Any]]:
-
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, Any]]]
-        business_key = f"datafeed:reqHistoricalData:{contract.exchange}:{duration_str}:{end_date_time}:{ticker_name(contract, bar_size)}"
+        business_key = (
+            f"datafeed:reqHistoricalData:{contract.exchange}:{duration_str}:"
+            f"{end_date_time}:{ticker_name(contract, bar_size)}"
+        )
 
         cached_data = self.ibsocket.get_cached_data(business_key)
         if cached_data is not None and cached_data.snapshot_complete:
@@ -1368,7 +1360,6 @@ class TWSClient:
         timeout: float | None = None,
         # **kwargs: Any,
     ) -> dict[str, Any]:
-
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, Any]]]
         business_key = f"datafeed:Quote:{contract.exchange}:{ticker_name(contract)}"

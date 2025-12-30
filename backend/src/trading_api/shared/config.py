@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "RS256"
     JWT_PRIVATE_KEY_PATH: Path = Path(".local/secrets/jwt_private.pem")
     JWT_PUBLIC_KEY_PATH: Path = Path(".local/secrets/jwt_public.pem")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 5
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     GOOGLE_CLIENT_ID: str = ""
 
     # CORS Configuration
