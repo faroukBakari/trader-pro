@@ -7,6 +7,8 @@ Provides direct access to BrokerService and BrokerProvider for tests that need
 to manipulate broker state directly (e.g., reset, execute_all_working_orders).
 """
 
+import asyncio
+
 import pytest
 
 from trading_api.app_factory import AppFactory, ModularApp
@@ -15,16 +17,18 @@ from trading_api.modules.broker.service import BrokerService
 
 
 @pytest.fixture(scope="module")
-async def apps() -> ModularApp:
+def apps() -> ModularApp:
     """Broker-specific app with only broker and auth modules.
 
     Uses FakeBrokerProvider instead of TWS to avoid external dependencies
     and ensure tests work with simple symbol formats (e.g., "AAPL").
     """
     factory = AppFactory()
-    return await factory.create_app(
-        enabled_module_names=["broker", "auth"],
-        enabled_provider_names=["fakebroker", "google"],
+    return asyncio.get_event_loop().run_until_complete(
+        factory.create_app(
+            enabled_module_names=["broker", "auth"],
+            enabled_provider_names=["fakebroker", "google"],
+        )
     )
 
 

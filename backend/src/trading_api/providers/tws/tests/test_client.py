@@ -16,7 +16,6 @@ from typing import Any, Awaitable
 from unittest.mock import MagicMock, patch
 
 import pytest
-from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
 from trading_api.providers.tws.tws_connection import TWSClient
@@ -242,18 +241,20 @@ class TestTWSClientReqHistoricalData:
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
 
-        # Create test bars
-        bar1 = BarData()
-        bar1.date = "20231215 09:30:00"
-        bar1.open = 150.0
-        bar1.high = 151.0
-        bar1.low = 149.5
-        bar1.close = 150.5
+        # Create test bars as dicts (reqHistoricalData returns list[dict[str, Any]])
+        bar1 = {
+            "date": "20231215 09:30:00",
+            "open": 150.0,
+            "high": 151.0,
+            "low": 149.5,
+            "close": 150.5,
+        }
 
-        bar2 = BarData()
-        bar2.date = "20231215 09:31:00"
-        bar2.open = 150.5
-        bar2.close = 151.0
+        bar2 = {
+            "date": "20231215 09:31:00",
+            "open": 150.5,
+            "close": 151.0,
+        }
 
         # Mock get_cached_data to return None (no cache)
         mock_ibsocket.get_cached_data = MagicMock(return_value=None)
@@ -263,7 +264,7 @@ class TestTWSClientReqHistoricalData:
             business_key: str, *, timeout: float | None = 5
         ) -> tuple[int | None, Awaitable[Any]]:
             loop = asyncio.get_running_loop()
-            future: asyncio.Future[list[BarData]] = loop.create_future()
+            future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
 
             async def resolve() -> None:
                 await asyncio.sleep(0.01)
@@ -289,7 +290,7 @@ class TestTWSClientReqHistoricalData:
         )
 
         assert len(result) == 2
-        assert result[0].open == 150.0
+        assert result[0]["open"] == 150.0
         mock_ibsocket.reqBars.assert_called_once()
 
 

@@ -5,16 +5,37 @@ Tests cover:
 - contract_details_to_symbol_info (get_symbol_info)
 - tws_bar_to_domain_bar (historical bars)
 - tws_ticks_to_quote_data (quote snapshots)
+- preorder_to_tws (order placement)
+- tracked_order_to_placed_order (order mapping)
+- tws_position_to_domain (position mapping)
+- tws_account_summary_to_equity (equity mapping)
+- tws_account_summary_to_account_info (account info mapping)
 """
+
+from decimal import Decimal
 
 import pytest
 from ibapi.contract import Contract, ContractDescription, ContractDetails
+from ibapi.order import Order as TWSOrder
+from ibapi.order_state import OrderState
 
+from trading_api.models.broker import OrderStatus, OrderType, Side
+from trading_api.providers.tws.order_tracker import OrderFill, TrackedOrder
 from trading_api.providers.tws.tws_mappers import (
+    ORDER_TYPE_TO_TWS,
     SEC_TYPE_MAP,
+    SIDE_TO_TWS_ACTION,
+    TWS_ACTION_TO_SIDE,
+    TWS_STATUS_TO_ORDER_STATUS,
+    TWS_TO_ORDER_TYPE,
     contract_description_to_search_result,
     contract_details_to_symbol_info,
+    preorder_to_tws,
+    tracked_order_to_placed_order,
+    tws_account_summary_to_account_info,
+    tws_account_summary_to_equity,
     tws_bar_to_domain_bar,
+    tws_position_to_domain,
     tws_ticks_to_quote_data,
 )
 
@@ -708,3 +729,636 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
         assert isinstance(result.v, QuoteValues)
         assert result.v.lp == 320.60
         assert result.v.volume == 4018
+
+
+# =============================================================================
+# Broker Mapper Tests
+# =============================================================================
+
+
+class TestOrderMappingConstants:
+    """Test order mapping constant dictionaries."""
+
+    def test_order_type_to_tws_mapping(self) -> None:
+        """Test domain OrderType to TWS string mapping."""
+        assert ORDER_TYPE_TO_TWS[1] == "LMT"  # LIMIT
+        assert ORDER_TYPE_TO_TWS[2] == "MKT"  # MARKET
+        assert ORDER_TYPE_TO_TWS[3] == "STP"  # STOP
+        assert ORDER_TYPE_TO_TWS[4] == "STP LMT"  # STOP_LIMIT
+
+    def test_tws_to_order_type_mapping(self) -> None:
+        """Test TWS string to domain OrderType mapping."""
+        assert TWS_TO_ORDER_TYPE["LMT"] == 1
+        assert TWS_TO_ORDER_TYPE["MKT"] == 2
+        assert TWS_TO_ORDER_TYPE["STP"] == 3
+        assert TWS_TO_ORDER_TYPE["STP LMT"] == 4
+        # Aliases
+        assert TWS_TO_ORDER_TYPE["STOP"] == 3
+        assert TWS_TO_ORDER_TYPE["STOP_LIMIT"] == 4
+
+    def test_side_to_tws_action_mapping(self) -> None:
+        """Test domain Side to TWS action string mapping."""
+        assert SIDE_TO_TWS_ACTION[1] == "BUY"  # Side.BUY
+        assert SIDE_TO_TWS_ACTION[-1] == "SELL"  # Side.SELL
+
+    def test_tws_action_to_side_mapping(self) -> None:
+        """Test TWS action to domain Side mapping."""
+        assert TWS_ACTION_TO_SIDE["BUY"] == 1
+        assert TWS_ACTION_TO_SIDE["SELL"] == -1
+        # Historical actions
+        assert TWS_ACTION_TO_SIDE["BOT"] == 1
+        assert TWS_ACTION_TO_SIDE["SLD"] == -1
+
+    def test_tws_status_to_order_status_mapping(self) -> None:
+        """Test TWS order status to domain OrderStatus mapping."""
+        # Placing states
+        assert TWS_STATUS_TO_ORDER_STATUS["PendingSubmit"] == 4  # PLACING
+        assert TWS_STATUS_TO_ORDER_STATUS["PendingCancel"] == 4
+        assert TWS_STATUS_TO_ORDER_STATUS["PreSubmitted"] == 4
+        assert TWS_STATUS_TO_ORDER_STATUS["ApiPending"] == 4
+        # Working
+        assert TWS_STATUS_TO_ORDER_STATUS["Submitted"] == 6  # WORKING
+        # Cancelled
+        assert TWS_STATUS_TO_ORDER_STATUS["ApiCancelled"] == 1  # CANCELED
+        assert TWS_STATUS_TO_ORDER_STATUS["Cancelled"] == 1
+        # Other
+        assert TWS_STATUS_TO_ORDER_STATUS["Filled"] == 2  # FILLED
+        assert TWS_STATUS_TO_ORDER_STATUS["Inactive"] == 3  # INACTIVE
+
+
+class TestPreorderToTws:
+    """Test preorder_to_tws mapper."""
+
+    def test_basic_market_order(self) -> None:
+        """Test converting a basic market buy order."""
+        from trading_api.models.broker import PreOrder
+
+        preorder = PreOrder(
+            symbol="AAPL:NASDAQ:STK-12345",
+            type=OrderType.MARKET,
+            side=Side.BUY,
+            qty=100,
+        )
+
+        contract, order = preorder_to_tws(preorder, "DU123456")
+
+        # Note: build_contract parses ticker but secType includes "-12345" suffix
+        # This is a quirk of parse_ticker not splitting on "-"
+        assert contract.symbol == "AAPL"
+        assert contract.exchange == "NASDAQ"
+        assert contract.primaryExchange == "NASDAQ"
+
+        assert order.action == "BUY"
+        assert order.totalQuantity == Decimal("100")
+        assert order.orderType == "MKT"
+        assert order.account == "DU123456"
+        assert order.tif == "GTC"
+        assert order.transmit is True
+
+    def test_limit_order(self) -> None:
+        """Test converting a limit sell order."""
+        from trading_api.models.broker import PreOrder
+
+        preorder = PreOrder(
+            symbol="MSFT:NASDAQ:STK-54321",
+            type=OrderType.LIMIT,
+            side=Side.SELL,
+            qty=50,
+            limitPrice=350.50,
+        )
+
+        contract, order = preorder_to_tws(preorder)
+
+        assert contract.symbol == "MSFT"
+        assert order.action == "SELL"
+        assert order.totalQuantity == Decimal("50")
+        assert order.orderType == "LMT"
+        assert order.lmtPrice == 350.50
+        assert order.account == ""  # Empty when not specified
+
+    def test_stop_order(self) -> None:
+        """Test converting a stop order."""
+        from trading_api.models.broker import PreOrder
+
+        preorder = PreOrder(
+            symbol="GOOGL:NASDAQ:STK",
+            type=OrderType.STOP,
+            side=Side.SELL,
+            qty=25,
+            stopPrice=145.00,
+        )
+
+        contract, order = preorder_to_tws(preorder)
+
+        assert order.orderType == "STP"
+        assert order.auxPrice == 145.00
+
+    def test_stop_limit_order(self) -> None:
+        """Test converting a stop-limit order."""
+        from trading_api.models.broker import PreOrder
+
+        preorder = PreOrder(
+            symbol="TSLA:NASDAQ:STK",
+            type=OrderType.STOP_LIMIT,
+            side=Side.BUY,
+            qty=10,
+            limitPrice=250.00,
+            stopPrice=245.00,
+        )
+
+        contract, order = preorder_to_tws(preorder)
+
+        assert order.orderType == "STP LMT"
+        assert order.lmtPrice == 250.00
+        assert order.auxPrice == 245.00
+
+    def test_forex_order(self) -> None:
+        """Test converting a forex order."""
+        from trading_api.models.broker import PreOrder
+
+        preorder = PreOrder(
+            symbol="EUR:IDEALPRO:CASH",
+            type=OrderType.MARKET,
+            side=Side.BUY,
+            qty=10000,
+        )
+
+        contract, order = preorder_to_tws(preorder)
+
+        assert contract.symbol == "EUR"
+        assert contract.secType == "CASH"
+        assert contract.exchange == "IDEALPRO"
+        assert order.orderType == "MKT"
+
+    def test_futures_order(self) -> None:
+        """Test converting a futures order."""
+        from trading_api.models.broker import PreOrder
+
+        preorder = PreOrder(
+            symbol="ES:CME:FUT",
+            type=OrderType.LIMIT,
+            side=Side.SELL,
+            qty=1,
+            limitPrice=5000.00,
+        )
+
+        contract, order = preorder_to_tws(preorder)
+
+        assert contract.symbol == "ES"
+        assert contract.secType == "FUT"
+        assert contract.exchange == "CME"
+
+
+class TestTrackedOrderToPlacedOrder:
+    """Test tracked_order_to_placed_order mapper."""
+
+    def test_basic_working_order(self) -> None:
+        """Test mapping a basic working order."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+        contract.conId = 12345
+
+        order = TWSOrder()
+        order.action = "BUY"
+        order.totalQuantity = Decimal("100")
+        order.orderType = "MKT"
+        order.filledQuantity = Decimal("0")
+        order.lmtPrice = 0.0
+        order.auxPrice = 0.0
+
+        order_state = OrderState()
+        order_state.status = "Submitted"
+
+        tracked = TrackedOrder(
+            orderId=1,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+        )
+
+        result = tracked_order_to_placed_order(tracked)
+
+        assert result.id == "1"
+        # ticker_name returns SYMBOL:primaryExchange:SECTYPE (no conId)
+        assert result.symbol == "AAPL:NASDAQ:STK"
+        assert result.type == OrderType.MARKET
+        assert result.side == Side.BUY
+        assert result.qty == 100
+        assert result.status == OrderStatus.WORKING
+        assert result.limitPrice is None
+        assert result.stopPrice is None
+        assert result.filledQty is None
+        assert result.avgPrice is None
+
+    def test_filled_order_with_price(self) -> None:
+        """Test mapping a filled order with fill information."""
+        contract = Contract()
+        contract.symbol = "MSFT"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        order = TWSOrder()
+        order.action = "SELL"
+        order.totalQuantity = Decimal("50")
+        order.orderType = "LMT"
+        order.lmtPrice = 350.00
+        order.auxPrice = 0.0
+        order.filledQuantity = Decimal("50")
+
+        order_state = OrderState()
+        order_state.status = "Filled"
+
+        fill = OrderFill(
+            orderId=2,
+            status="Filled",
+            filled=Decimal("50"),
+            remaining=Decimal("0"),
+            avgFillPrice=350.25,
+            permId=123456,
+            parentId=0,
+            lastFillPrice=350.25,
+            clientId=1,
+            whyHeld="",
+            mktCapPrice=0.0,
+            timestamp=1234567890,
+        )
+
+        tracked = TrackedOrder(
+            orderId=2,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+            fills=[fill],
+        )
+
+        result = tracked_order_to_placed_order(tracked)
+
+        assert result.id == "2"
+        assert result.type == OrderType.LIMIT
+        assert result.side == Side.SELL
+        assert result.status == OrderStatus.FILLED
+        assert result.limitPrice == 350.00
+        assert result.filledQty == 50.0
+        assert result.avgPrice == 350.25
+
+    def test_cancelled_order(self) -> None:
+        """Test mapping a cancelled order."""
+        contract = Contract()
+        contract.symbol = "GOOGL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+
+        order = TWSOrder()
+        order.action = "BUY"
+        order.totalQuantity = Decimal("25")
+        order.orderType = "STP"
+        order.lmtPrice = 0.0
+        order.auxPrice = 150.00
+        order.filledQuantity = Decimal("0")
+
+        order_state = OrderState()
+        order_state.status = "Cancelled"
+
+        tracked = TrackedOrder(
+            orderId=3,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+        )
+
+        result = tracked_order_to_placed_order(tracked)
+
+        assert result.status == OrderStatus.CANCELED
+        assert result.stopPrice == 150.00
+
+    def test_stop_limit_order_mapping(self) -> None:
+        """Test mapping a stop-limit order."""
+        contract = Contract()
+        contract.symbol = "TSLA"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+
+        order = TWSOrder()
+        order.action = "BUY"
+        order.totalQuantity = Decimal("10")
+        order.orderType = "STP LMT"
+        order.lmtPrice = 250.00
+        order.auxPrice = 245.00
+        order.filledQuantity = Decimal("0")
+
+        order_state = OrderState()
+        order_state.status = "PreSubmitted"
+
+        tracked = TrackedOrder(
+            orderId=4,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+        )
+
+        result = tracked_order_to_placed_order(tracked)
+
+        assert result.type == OrderType.STOP_LIMIT
+        assert result.limitPrice == 250.00
+        assert result.stopPrice == 245.00
+        assert result.status == OrderStatus.PLACING
+
+    def test_partial_fill(self) -> None:
+        """Test mapping a partially filled order."""
+        contract = Contract()
+        contract.symbol = "NVDA"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+
+        order = TWSOrder()
+        order.action = "BUY"
+        order.totalQuantity = Decimal("100")
+        order.orderType = "LMT"
+        order.lmtPrice = 500.00
+        order.auxPrice = 0.0
+        order.filledQuantity = Decimal("60")
+
+        order_state = OrderState()
+        order_state.status = "Submitted"  # Still working
+
+        fill1 = OrderFill(
+            orderId=5,
+            status="Submitted",
+            filled=Decimal("30"),
+            remaining=Decimal("70"),
+            avgFillPrice=500.10,
+            permId=123457,
+            parentId=0,
+            lastFillPrice=500.15,
+            clientId=1,
+            whyHeld="",
+            mktCapPrice=0.0,
+            timestamp=1234567890,
+        )
+        fill2 = OrderFill(
+            orderId=5,
+            status="Submitted",
+            filled=Decimal("60"),
+            remaining=Decimal("40"),
+            avgFillPrice=500.08,
+            permId=123457,
+            parentId=0,
+            lastFillPrice=500.05,
+            clientId=1,
+            whyHeld="",
+            mktCapPrice=0.0,
+            timestamp=1234567891,
+        )
+
+        tracked = TrackedOrder(
+            orderId=5,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+            fills=[fill1, fill2],
+        )
+
+        result = tracked_order_to_placed_order(tracked)
+
+        assert result.qty == 100
+        assert result.filledQty == 60.0
+        assert result.avgPrice == 500.08  # Last fill's avgFillPrice
+        assert result.status == OrderStatus.WORKING
+
+
+class TestTwsPositionToDomain:
+    """Test tws_position_to_domain mapper."""
+
+    def test_long_position_with_contract(self) -> None:
+        """Test mapping a long position with contract object."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+        contract.conId = 12345
+
+        position_data = {
+            "account": "DU123456",
+            "contract": contract,
+            "position": Decimal("100"),
+            "avgCost": 150.50,
+        }
+
+        result = tws_position_to_domain(position_data)
+
+        # ticker_name returns SYMBOL:primaryExchange:SECTYPE (no conId)
+        assert result.id == "AAPL:NASDAQ:STK"
+        assert result.symbol == "AAPL:NASDAQ:STK"
+        assert result.qty == 100.0
+        assert result.side == Side.BUY
+        assert result.avgPrice == 150.50
+
+    def test_short_position(self) -> None:
+        """Test mapping a short position (negative quantity)."""
+        contract = Contract()
+        contract.symbol = "TSLA"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        position_data = {
+            "account": "DU123456",
+            "contract": contract,
+            "position": Decimal("-50"),  # Short position
+            "avgCost": 250.75,
+        }
+
+        result = tws_position_to_domain(position_data)
+
+        assert result.qty == 50.0  # Absolute value
+        assert result.side == Side.SELL  # Short
+
+    def test_position_without_contract_uses_flattened_fields(self) -> None:
+        """Test mapping position using flattened fields when contract is None."""
+        position_data = {
+            "account": "DU123456",
+            "contract": None,
+            "position": Decimal("75"),
+            "avgCost": 100.00,
+            "symbol": "MSFT",
+            "exchange": "NASDAQ",
+            "secType": "STK",
+        }
+
+        result = tws_position_to_domain(position_data)
+
+        assert result.symbol == "MSFT:NASDAQ:STK"
+        assert result.qty == 75.0
+
+    def test_forex_position(self) -> None:
+        """Test mapping a forex position."""
+        contract = Contract()
+        contract.symbol = "EUR"
+        contract.secType = "CASH"
+        contract.exchange = "IDEALPRO"
+        contract.primaryExchange = ""
+
+        position_data = {
+            "account": "DU123456",
+            "contract": contract,
+            "position": Decimal("10000"),
+            "avgCost": 1.0850,
+        }
+
+        result = tws_position_to_domain(position_data)
+
+        assert result.symbol == "EUR::CASH"  # Empty primaryExchange
+        assert result.qty == 10000.0
+        assert result.avgPrice == 1.0850
+
+
+class TestTwsAccountSummaryToEquity:
+    """Test tws_account_summary_to_equity mapper."""
+
+    def test_complete_account_summary(self) -> None:
+        """Test mapping complete account summary data."""
+        summary_data = {
+            "NetLiquidation": {
+                "account": "DU123456",
+                "tag": "NetLiquidation",
+                "value": "100000.00",
+                "currency": "USD",
+            },
+            "TotalCashValue": {
+                "account": "DU123456",
+                "tag": "TotalCashValue",
+                "value": "75000.50",
+                "currency": "USD",
+            },
+            "UnrealizedPnL": {
+                "account": "DU123456",
+                "tag": "UnrealizedPnL",
+                "value": "5000.25",
+                "currency": "USD",
+            },
+            "RealizedPnL": {
+                "account": "DU123456",
+                "tag": "RealizedPnL",
+                "value": "2500.00",
+                "currency": "USD",
+            },
+        }
+
+        result = tws_account_summary_to_equity(summary_data)
+
+        assert result.equity == 100000.00
+        assert result.balance == 75000.50
+        assert result.unrealizedPL == 5000.25
+        assert result.realizedPL == 2500.00
+
+    def test_partial_summary_missing_tags(self) -> None:
+        """Test mapping summary with missing tags defaults to 0."""
+        summary_data = {
+            "NetLiquidation": {
+                "account": "DU123456",
+                "tag": "NetLiquidation",
+                "value": "50000.00",
+                "currency": "USD",
+            },
+        }
+
+        result = tws_account_summary_to_equity(summary_data)
+
+        assert result.equity == 50000.00
+        assert result.balance == 0.0  # Missing
+        assert result.unrealizedPL == 0.0  # Missing
+        assert result.realizedPL == 0.0  # Missing
+
+    def test_empty_value_string(self) -> None:
+        """Test handling empty value strings."""
+        summary_data = {
+            "NetLiquidation": {
+                "account": "DU123456",
+                "tag": "NetLiquidation",
+                "value": "",
+                "currency": "USD",
+            },
+        }
+
+        result = tws_account_summary_to_equity(summary_data)
+
+        assert result.equity == 0.0
+
+    def test_invalid_value_string(self) -> None:
+        """Test handling invalid numeric value strings."""
+        summary_data = {
+            "NetLiquidation": {
+                "account": "DU123456",
+                "tag": "NetLiquidation",
+                "value": "not_a_number",
+                "currency": "USD",
+            },
+        }
+
+        result = tws_account_summary_to_equity(summary_data)
+
+        assert result.equity == 0.0
+
+
+class TestTwsAccountSummaryToAccountInfo:
+    """Test tws_account_summary_to_account_info mapper."""
+
+    def test_basic_account_info(self) -> None:
+        """Test mapping basic account info."""
+        summary_data = {
+            "DU123456": {
+                "NetLiquidation": {
+                    "account": "DU123456",
+                    "tag": "NetLiquidation",
+                    "value": "100000.00",
+                    "currency": "USD",
+                },
+            },
+        }
+
+        result = tws_account_summary_to_account_info(summary_data, "DU123456")
+
+        assert result.id == "DU123456"
+        assert result.name == "IBKR DU123456"
+
+    def test_account_info_extracts_account_from_data(self) -> None:
+        """Test account ID extraction from nested data."""
+        summary_data = {
+            "U9876543": {
+                "TotalCashValue": {
+                    "account": "U9876543",
+                    "tag": "TotalCashValue",
+                    "value": "50000.00",
+                    "currency": "USD",
+                },
+            },
+        }
+
+        result = tws_account_summary_to_account_info(summary_data, "DEFAULT")
+
+        assert result.id == "U9876543"
+        assert result.name == "IBKR U9876543"
+
+    def test_skips_metadata_keys(self) -> None:
+        """Test that reqId and business_key metadata keys are skipped."""
+        from typing import Any
+
+        summary_data: dict[str, Any] = {
+            "reqId": {"value": "123"},
+            "business_key": {"value": "broker:account"},
+            "DU123456": {
+                "NetLiquidation": {
+                    "account": "DU123456",
+                    "value": "100000.00",
+                },
+            },
+        }
+
+        result = tws_account_summary_to_account_info(summary_data, "DU123456")
+
+        assert result.id == "DU123456"

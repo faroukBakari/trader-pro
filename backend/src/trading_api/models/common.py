@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any, Generic, Literal, Optional, Protocol, TypeVar
 
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
 
 
 class ExceptionLike(Protocol):
@@ -213,7 +214,7 @@ class CapabilitySpec:
         return f"{self.name}:{self.version}" if self.version else self.name
 
 
-class ProviderConfig(BaseModel):
+class ProviderConfig(BaseSettings):
     """Base configuration for all providers.
 
     [EXTENSIBLE]: Each provider subclasses to add specific config fields.

@@ -262,6 +262,7 @@ class BrokerService(WsRouteService):
         topic: str,
         topic_update: ProviderUpdateCallback,
         topic_error: TopicErrorCallback,
+        user_id: str,
     ) -> None:
         """Parse topic and create appropriate provider subscription.
 
@@ -276,6 +277,7 @@ class BrokerService(WsRouteService):
             topic: Topic string in format "topic_type:{json_params}"
             topic_update: Callback to broadcast data updates to subscribers
             topic_error: Callback to broadcast errors to subscribers.
+            user_id: Authenticated user ID for user-scoped data access (unused for now).
 
         Raises:
             ServiceException: If topic format is invalid or unknown
@@ -352,7 +354,7 @@ class BrokerService(WsRouteService):
                 disconnectType=None,
                 timestamp=int(time.time() * 1000),
             )
-            asyncio.create_task(topic_update(status))  # type: ignore[arg-type]
+            asyncio.create_task(topic_update(status))
             # Use placeholder subscription ID for broker-connection
             self._topic_to_subscription_id[topic] = "broker-connection-placeholder"
 

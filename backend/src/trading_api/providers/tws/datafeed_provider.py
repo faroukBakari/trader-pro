@@ -107,7 +107,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         return [CapabilitySpec(name="datafeed")]
 
     @property
-    def config(self) -> TWSDatafeedProviderConfig:  # type: ignore[override]
+    def config(self) -> TWSDatafeedProviderConfig:
         """Return provider configuration.
 
         [OVERRIDE]: Returns specific TWSDatafeedProviderConfig (not base ProviderConfig).

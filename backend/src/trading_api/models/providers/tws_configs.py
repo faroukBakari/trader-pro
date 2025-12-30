@@ -1,10 +1,12 @@
 """TWS provider configurations."""
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
+
+from ..common import ProviderConfig
 
 
-class TWSDatafeedProviderConfig(BaseSettings):
+class TWSDatafeedProviderConfig(ProviderConfig):
     """TWS provider configuration.
 
     [AUTO-LOAD]: Reads from environment variables with TWS_ prefix.
@@ -86,7 +88,7 @@ class TWSDatafeedProviderConfig(BaseSettings):
         return v
 
 
-class TWSBrokerProviderConfig(BaseSettings):
+class TWSBrokerProviderConfig(ProviderConfig):
     """TWS broker provider configuration.
 
     [AUTO-LOAD]: Reads from environment variables with TWS_BROKER_ prefix.
@@ -121,10 +123,6 @@ class TWSBrokerProviderConfig(BaseSettings):
         ge=5.0,
         description="Connection timeout in seconds",
     )
-    account_id: str = Field(
-        default="",
-        description="IBKR account ID (e.g., 'DU123456' for paper, 'U1234567' for live). Empty = use first account.",
-    )
 
     model_config = SettingsConfigDict(
         env_prefix="TWS_BROKER_",
@@ -146,4 +144,5 @@ class TWSBrokerProviderConfig(BaseSettings):
         return v
 
 
+__all__ = ["TWSDatafeedProviderConfig", "TWSBrokerProviderConfig"]
 __all__ = ["TWSDatafeedProviderConfig", "TWSBrokerProviderConfig"]

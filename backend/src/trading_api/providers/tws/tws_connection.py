@@ -185,6 +185,7 @@ class IBSocket(EWrapper):
         self._state = IBSocketState.READY
         self._socket = socket()
         self._reader_loop: asyncio.AbstractEventLoop | None = None
+        self.stale_delay_ms: int = 10_000
 
         self._server_version: str = ""
         self._connection_time: str = ""
@@ -447,7 +448,7 @@ class IBSocket(EWrapper):
                     )
 
         # 3. Orphan error - log warning
-        if snapshot_hook is None and stream_hook is None:
+        if snapshot_hook and stream_hook is None:
             logger.error("Orphan TWS error for reqId %s", tws_key)
             logger.exception(error)
 
@@ -719,14 +720,18 @@ class IBSocket(EWrapper):
                 + f" with fields: {stream.updated_fields}"
             )
 
+        loop: asyncio.AbstractEventLoop | None = None
         for loop, future in snapshot_hooks:
 
-            def set_result(stream) -> None:
+            def set_result(stream: StreamData) -> None:
                 if not future.done():
-                    future.set_result(stream[:])
+                    future.set_result(stream)
 
             loop.call_soon_threadsafe(set_result, stream)
 
+        assert loop and isinstance(
+            loop, asyncio.AbstractEventLoop
+        ), "Event loop should be set if snapshot_hooks exist."
         loop.call_soon_threadsafe(self._snapshot_hooks.pop, tws_key, None)
 
         stream.last_dispatched = int(time.time() * 1000)
@@ -734,7 +739,7 @@ class IBSocket(EWrapper):
         def cleanup(tws_key: str) -> None:
             stream = self._stream_data.get(tws_key)
             if stream is not None and (
-                (int(time.time() * 1000)) - stream.last_dispatched > 10_000
+                (int(time.time() * 1000)) - stream.last_dispatched > self.stale_delay_ms
             ):
                 # No stream hook registered - snapshot only
                 debug_log(
@@ -860,7 +865,7 @@ class IBSocket(EWrapper):
     # =============== Request Methods ================
     # ================================================
 
-    def reqMatchingSymbols(self, reqId, pattern) -> None:
+    def reqMatchingSymbols(self, reqId: int, pattern: str) -> None:
         self.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
         debug_log(f"requested symbolSamples for reqId {reqId} and pattern '{pattern}'")
 

@@ -36,7 +36,8 @@ from trading_api.models.broker import (
 )
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ProviderException, TradingApiException
-from trading_api.models.providers.fake_broker_configs import FakeBrokerProviderConfig
+from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
+from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.shared import Provider
 
 logger = logging.getLogger(__name__)
@@ -50,13 +51,18 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     [SINGLE-TASK]: One execution simulator loop triggers all update cascades.
     """
 
-    def __init__(self, config: FakeBrokerProviderConfig | None = None) -> None:
+    def __init__(self, config: TWSBrokerProviderConfig | None = None) -> None:
         """Initialize FakeBrokerProvider.
 
         Args:
             config: Provider configuration (auto-loaded from env if None)
         """
-        self._config = config or FakeBrokerProviderConfig()
+        self._config = config or TWSBrokerProviderConfig()
+
+        # Layer 2: TWSClient with separate client_id
+        self._tws_client = TWSClient(
+            self._config.host, self._config.port, self._config.client_id
+        )
 
         # Business state (in-memory)
         self._orders: dict[str, PlacedOrder] = {}
@@ -68,8 +74,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         # P&L tracking
         self._unrealized_pl: dict[str, float] = {}
         self._equity = EquityData(
-            equity=self._config.initial_balance,
-            balance=self._config.initial_balance,
+            equity=100000.0,
+            balance=100000.0,
             unrealizedPL=0.0,
             realizedPL=0.0,
         )
@@ -106,7 +112,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         return [CapabilitySpec(name="broker")]
 
     @property
-    def config(self) -> FakeBrokerProviderConfig:  # type: ignore[override]
+    def config(self) -> TWSBrokerProviderConfig:
         """Return provider configuration."""
         return self._config
 
@@ -349,8 +355,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     async def get_account_info(self) -> AccountMetainfo:
         """Get account metadata."""
         return AccountMetainfo(
-            id=self._config.account_id,
-            name=self._config.account_name,
+            id="NOT-IMPLEMENTED",
+            name="NOT-IMPLEMENTED",
         )
 
     async def get_equity(self) -> EquityData:
@@ -694,8 +700,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         while True:
             try:
                 delay = random.uniform(
-                    self._config.execution_delay_min,
-                    self._config.execution_delay_max,
+                    1.0,
+                    2.0,
                 )
                 await asyncio.sleep(delay)
 
@@ -952,8 +958,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         self._leverage_settings = {}
         self._unrealized_pl = {}
         self._equity = EquityData(
-            equity=self._config.initial_balance,
-            balance=self._config.initial_balance,
+            equity=100000.0,
+            balance=100000.0,
             unrealizedPL=0.0,
             realizedPL=0.0,
         )

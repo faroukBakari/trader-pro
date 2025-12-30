@@ -21,34 +21,6 @@ from trading_api.app_factory import AppFactory, ModularApp
 from trading_api.shared import FastWSAdapter
 
 # ============================================================================
-# Event Loop Fixture (Module-Scoped for Async Fixtures)
-# ============================================================================
-
-
-@pytest.fixture(scope="module")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """Create event loop for module-scoped async fixtures.
-
-    Required for pytest-asyncio with module-scoped async fixtures.
-    Must properly shutdown async generators and close the loop.
-    """
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.new_event_loop()
-    asyncio.set_event_loop(loop)
-    yield loop
-
-    # Proper cleanup sequence
-    try:
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.run_until_complete(loop.shutdown_default_executor())
-    except AttributeError:
-        # shutdown_default_executor added in Python 3.9
-        pass
-    finally:
-        loop.close()
-
-
-# ============================================================================
 # Application Fixtures (Module-Scoped for Compatibility)
 # ============================================================================
 # Note: Module scope avoids event_loop scope conflicts with pytest-asyncio
@@ -56,7 +28,7 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 
 
 @pytest.fixture(scope="module")
-async def apps() -> ModularApp:
+def apps() -> ModularApp:
     """Full application with all modules enabled (shared per test module).
 
     This fixture is the source for all other app-related fixtures.
@@ -65,9 +37,12 @@ async def apps() -> ModularApp:
     Note: Module-specific test suites should override this fixture to:
     - Load only required modules (enabled_module_names)
     - Use mock/fake providers (enabled_provider_names)
+
+    Note: Uses sync wrapper to avoid pytest-asyncio event_loop scope conflicts.
+    The session-scoped event_loop from tests/conftest.py is used.
     """
     factory = AppFactory()
-    return await factory.create_app()
+    return asyncio.get_event_loop().run_until_complete(factory.create_app())
 
 
 @pytest.fixture(scope="module")
