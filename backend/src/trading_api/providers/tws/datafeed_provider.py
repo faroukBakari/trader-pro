@@ -382,12 +382,11 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         async def bar_callback(
             rt_data: dict[str, Any], fields: list[str] | None
         ) -> None:
-            if fields is None or any(f.startswith("bar_") for f in fields):
-                if DEBUG_TWS_PROVIDER:
-                    debug_log(
-                        f"Received real-time bar update for {ticker_name} with fields: {fields}"
-                    )
-                await callback(tws_ticks_to_bar(rt_data))
+            if DEBUG_TWS_PROVIDER:
+                debug_log(
+                    f"Received real-time bar update for {ticker_name} with fields: {fields}"
+                )
+            await callback(tws_ticks_to_bar(rt_data))
 
         contract = build_contract(ticker_name)
         if contract.primaryExchange in SMART_EXCHANGES and resolution in [

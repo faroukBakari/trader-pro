@@ -66,6 +66,7 @@ DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
 DEBUG_TWS_SEND = os.environ.get("DEBUG_TWS_SEND") == "true"
 DEBUG_TWS_RECEIVE = os.environ.get("DEBUG_TWS_RECEIVE") == "true"
 DEBUG_TWS_DISPATCH = os.environ.get("DEBUG_TWS_DISPATCH") == "true"
+DEBUG_TWS_NOTIFY = os.environ.get("DEBUG_TWS_NOTIFY") == "true"
 DEBUG_TWS_SHARED = os.environ.get("DEBUG_TWS_SHARED") == "true"
 DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
 DEBUG_TWS_BROKER = os.environ.get("DEBUG_TWS_BROKER") == "true"
@@ -152,7 +153,7 @@ def decode_data(buf: bytearray, buf_siz: int) -> tuple[int, bytes, bytearray, in
         return -1, b"", buf, buf_siz
 
 
-def least_duration_from_bar_size(bar_size: str, num_bars: int = 2) -> str:
+def least_duration_from_bar_size(bar_size: str, num_bars: int = 1) -> str:
     """Convert bar size to duration string for N bars."""
     # Map bar size to seconds
     secs = get_bar_duration_seconds(bar_size)
@@ -348,13 +349,13 @@ class IBSocket(EWrapper):
 
                 if msgId > PROTOBUF_MSG_ID:
                     msgId -= PROTOBUF_MSG_ID
-                    if DEBUG_TWS_DISPATCH:
+                    if DEBUG_TWS_RECEIVE:
                         debug_log("msgId: %d, protobuf: %s", msgId, data)
                     process_proto(data, msgId)
                 else:
                     # Direct split - no list comprehension wrapper needed
                     fields = data.split(NULL)[:-1]  # Remove trailing empty field
-                    if DEBUG_TWS_DISPATCH:
+                    if DEBUG_TWS_RECEIVE:
                         debug_log("msgId: %d, interpret: %s", msgId, fields)
                     # Remove trailing empty field (split always produces one)
                     interpret(fields, msgId)
@@ -425,7 +426,12 @@ class IBSocket(EWrapper):
                 snapshot_loop.call_soon_threadsafe(
                     self._snapshot_hooks.pop, tws_key, None
                 )
-            snapshot_loop.call_soon_threadsafe(future.set_exception, error)
+
+            def safe_set_exception(future: asyncio.Future, error: Exception) -> None:
+                if not future.done():
+                    future.set_exception(error)
+
+            snapshot_loop.call_soon_threadsafe(safe_set_exception, future, error)
 
         # 2. Check for active stream
         stream_hook = self._stream_hooks.get(tws_key)
@@ -577,12 +583,16 @@ class IBSocket(EWrapper):
         with self._socket_lock:
             self._socket.sendall(msg2)
 
+    def get_cached_data(self, business_key: str) -> StreamData | None:
+        """Get cached stream data for a business key, if available."""
+        return self._stream_data.get(business_key)
+
     def create_snapshot(
         self,
         business_key: str,
         *,
         timeout: float | None = 5,
-    ) -> tuple[int | None, Awaitable[Any]]:
+    ) -> tuple[int | None, Awaitable[StreamData]]:
 
         assert re.match(
             r"^(shared|datafeed|broker):", business_key
@@ -708,7 +718,8 @@ class IBSocket(EWrapper):
 
         if DEBUG_TWS_DISPATCH:
             debug_log(
-                "_resolve_snapshots " + f"[{stream.business_key}]" + f" [{tws_key}]"
+                f"_resolve_snapshots [{tws_key} | {stream.business_key}]"
+                + f" with fields: {stream.updated_fields}"
             )
 
         for loop, future in snapshot_hooks:
@@ -723,22 +734,19 @@ class IBSocket(EWrapper):
 
         stream.last_dispatched = int(time.time() * 1000)
 
-        def cleanup(tws_key: str, main_thread_loop: asyncio.AbstractEventLoop) -> None:
+        def cleanup(tws_key: str) -> None:
             stream = self._stream_data.get(tws_key)
             if stream is not None and (
                 (int(time.time() * 1000)) - stream.last_dispatched > 10_000
             ):
                 # No stream hook registered - snapshot only
                 debug_log(
-                    f"_notify_stream: no stream listeners => canceling "
-                    + f"[{stream.business_key}] [{tws_key}]"
+                    f"_resolve_snapshots::cleanup : no stream listeners => canceling "
+                    + f"[{tws_key} | {stream.business_key}]"
                 )
-                main_thread_loop.call_soon_threadsafe(
-                    self.remove_stream, stream.business_key
-                )
+                self.remove_stream(stream.business_key)
 
-        reader_loop = asyncio.get_event_loop()
-        reader_loop.call_later(11, cleanup, tws_key, loop)
+        loop.call_later(11, loop.call_soon_threadsafe, cleanup, tws_key)
 
     def _dispatch_update(self, tws_key: str, stream: StreamData) -> None:
 
@@ -749,7 +757,7 @@ class IBSocket(EWrapper):
         stream_loop, stream_callback, _ = stream_hook
         if DEBUG_TWS_DISPATCH:
             debug_log(
-                f"_dispatch_update [{stream.business_key}]"
+                f"_dispatch_update [{tws_key} | {stream.business_key}]"
                 + f" with fields: {stream.updated_fields}"
             )
 
@@ -769,6 +777,12 @@ class IBSocket(EWrapper):
         3. Clean up if snapshot-only (no stream hook)
         """
         # TODO: add rate limiting
+
+        if DEBUG_TWS_NOTIFY:
+            debug_log(
+                f"_dispatch_update [{stream.business_key}]"
+                + f" with fields: {stream.updated_fields}"
+            )
 
         # Dispatch to stream callback
         self._dispatch_update(tws_key, stream)
@@ -1046,8 +1060,8 @@ class IBSocket(EWrapper):
         TWS sends one historicalData callback per bar.
         Results are accumulated until historicalDataEnd is called.
         """
-        if DEBUG_TWS_DATAFEED:
-            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        # if DEBUG_TWS_DATAFEED:
+        #     debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         self._append_stream_data(f"req_{reqId}", bar.__dict__)
 
@@ -1324,7 +1338,11 @@ class TWSClient:
 
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, Any]]]
-        business_key = f"shared:reqHistoricalData:{contract.exchange}:{duration_str}:{end_date_time}:{ticker_name(contract, bar_size)}"
+        business_key = f"datafeed:reqHistoricalData:{contract.exchange}:{duration_str}:{end_date_time}:{ticker_name(contract, bar_size)}"
+
+        cached_data = self.ibsocket.get_cached_data(business_key)
+        if cached_data is not None and cached_data.snapshot_complete:
+            return cached_data
 
         reqId, coroutine = self.ibsocket.create_snapshot(
             business_key,
@@ -1353,7 +1371,7 @@ class TWSClient:
 
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, Any]]]
-        business_key = f"shared:Quote:{contract.exchange}:{ticker_name(contract)}"
+        business_key = f"datafeed:Quote:{contract.exchange}:{ticker_name(contract)}"
 
         reqId, coroutine = self.ibsocket.create_snapshot(
             business_key,
@@ -1380,7 +1398,7 @@ class TWSClient:
         on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
         # **kwargs: Any,
     ) -> str:
-        business_key = f"shared:reqBarDataStream:{contract.exchange}:{ticker_name(contract, bar_size)}"
+        business_key = f"datafeed:reqBarDataStream:{contract.exchange}:{ticker_name(contract, bar_size)}"
         reqId: int | None = self.ibsocket.create_stream(
             business_key,
             callback,
@@ -1410,7 +1428,7 @@ class TWSClient:
         on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
         # **kwargs: Any,
     ) -> str:
-        business_key = f"shared:Quote:{contract.exchange}:{ticker_name(contract)}"
+        business_key = f"datafeed:Quote:{contract.exchange}:{ticker_name(contract)}"
         reqId: int | None = self.ibsocket.create_stream(
             business_key,
             callback,

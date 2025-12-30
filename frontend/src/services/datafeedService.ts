@@ -34,15 +34,6 @@ import type {
 // - https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/additional-methods
 
 
-function hashObject(obj: object): string {
-  const str = JSON.stringify(obj, Object.keys(obj).sort()) // Sort keys for consistency
-  let hash = 0
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i)
-    hash |= 0 // Convert to 32-bit integer
-  }
-  return hash.toString(36) // Base36 for shorter string
-}
 
 export class DatafeedMock {
   private mockedBars: Bar[]
@@ -546,40 +537,25 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onRealtimeCallback: QuotesCallback,
     listenerGUID: string,
   ): void {
-    // Combine all symbols for subscription
-    const allSymbols = [...new Set([...symbols, ...fast_symbols])]
 
-    const guid = hashObject({
-      symbols,
-      fast_symbols,
-      listenerGUID,
-    })
+    console.log(`[Datafeed] ${listenerGUID} Subscribing to quotes for symbols : ${symbols}, fast_symbols: ${fast_symbols}`)
 
-    if (allSymbols.length === 0) {
-      if (this.debug_datafeed) console.log('[Datafeed] No symbols to subscribe to for quotes')
-      return
-    }
-
-    console.log(`[Datafeed] ${guid} Subscribing to quotes for ${allSymbols.length} symbols`)
-
-    for (const symbol of allSymbols) {
-      this._getWsAdapter().quotes
-        ?.subscribe(
-          guid,
-          { symbols: [], fast_symbols: [symbol] },
-          (quoteData) => {
-            if (this.debug_datafeed) {
-              const v = quoteData.v as { bid?: number; ask?: number; lp?: number }
-              console.warn(`[${guid}] Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask} / last: ${v?.lp}`)
-            }
-            onRealtimeCallback([quoteData])
+    this._getWsAdapter().quotes
+      ?.subscribe(
+        listenerGUID,
+        { symbols, fast_symbols },
+        (quoteData) => {
+          if (this.debug_datafeed) {
+            const v = quoteData.v as { bid?: number; ask?: number; lp?: number }
+            console.warn(`[${listenerGUID}] Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask} / last: ${v?.lp}`)
           }
-        ).then((topic) => {
-          if (this.debug_datafeed) console.log(
-            `[Datafeed] Quote subscription started : ${topic}`,
-          )
-        })
-    }
+          onRealtimeCallback([quoteData])
+        }
+      ).then((topic) => {
+        if (this.debug_datafeed) console.log(
+          `[Datafeed] ${listenerGUID} Quote subscription started : ${topic}`,
+        )
+      })
   }
   unsubscribeQuotes(listenerGUID: string): void {
     this._getWsAdapter().quotes?.unsubscribe(listenerGUID).then(() => {
