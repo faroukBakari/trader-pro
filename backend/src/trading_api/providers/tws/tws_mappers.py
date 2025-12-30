@@ -92,7 +92,7 @@ def contract_description_to_search_result(
     contract = desc.contract
     symbol = contract.symbol
     description = contract.description or f"{contract.symbol} ({contract.secType})"
-    exchange = contract.primaryExchange
+    exchange = contract.primaryExchange or contract.exchange
     type = SEC_TYPE_MAP.get(contract.secType, "stock")
     ticker = symbol + ":" + exchange + ":" + contract.secType
     return SearchSymbolResultItem(
@@ -258,46 +258,6 @@ def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
             else tws_bar.volume
         ),
         count=tws_bar.barCount,
-    )
-
-
-def tws_rt_bar_to_domain_bar(
-    time: int = 0,
-    open_: float = 0.0,
-    high: float = 0.0,
-    low: float = 0.0,
-    close: float = 0.0,
-    volume: Decimal = Decimal(0),
-    _: Decimal = Decimal(0),
-    count: int = 0,
-) -> Bar:
-    """Map TWS BarData → domain Bar.
-
-    Args:
-        bar.time  - start of bar in unix (or 'epoch') time
-        bar.endTime - for synthetic bars, the end time (requires TWS v964). Otherwise -1.
-        bar.open_  - the bar's open value
-        bar.high  - the bar's high value
-        bar.low   - the bar's low value
-        bar.close - the bar's closing value
-        bar.volume - the bar's traded volume if available
-        bar.WAP   - the bar's Weighted Average Price
-        bar.count - the number of trades during the bar's timespan (only available
-
-    Returns:
-        Domain Bar model
-    """
-    # Parse TWS date format: "yyyyMMdd  HH:mm:ss" or epoch
-    # TWS returns string dates like "20231215  16:00:00" (note: two spaces)
-    time = int(time) * 1000
-    return Bar(
-        time=time,
-        open=float(open_),
-        high=float(high),
-        low=float(low),
-        close=float(close),
-        volume=(int(volume) if isinstance(volume, Decimal) else volume),
-        count=count,
     )
 
 
@@ -635,114 +595,6 @@ def preorder_to_tws(
     return contract, order
 
 
-def tws_order_to_placed_order(order_data: dict[str, Any]) -> "PlacedOrder":
-    """Convert TWS order data dict to domain PlacedOrder.
-
-    Args:
-        order_data: Dict from IBSocket order callbacks containing:
-            - orderId: TWS order ID
-            - contract: TWS Contract object
-            - order: TWS Order object
-            - orderState: TWS OrderState object
-            - status: Current status string
-            - filled: Filled quantity
-            - avgFillPrice: Average fill price
-
-    Returns:
-        Domain PlacedOrder model
-    """
-    from trading_api.models.broker import OrderStatus, OrderType
-    from trading_api.models.broker import PlacedOrder as PlacedOrderModel
-    from trading_api.models.broker import Side
-
-    # Extract from nested objects or flattened dict
-    order_id = str(order_data.get("orderId", ""))
-    contract = order_data.get("contract")
-    order = order_data.get("order")
-    order_state = order_data.get("orderState")
-
-    # Symbol from contract or flattened field
-    if contract is not None:
-        symbol = ticker_name(contract)
-    else:
-        sym = order_data.get("symbol", "")
-        exc = order_data.get("exchange", "")
-        sec = order_data.get("secType", "STK")
-        symbol = f"{sym}:{exc}:{sec}"
-
-    # Order type from order object or flattened
-    if order is not None:
-        order_type_str = order.orderType
-    else:
-        order_type_str = order_data.get("orderType", "MKT")
-    order_type = OrderType(TWS_TO_ORDER_TYPE.get(order_type_str, 2))
-
-    # Side from action
-    if order is not None:
-        action = order.action
-    else:
-        action = order_data.get("action", "BUY")
-    side = Side(TWS_ACTION_TO_SIDE.get(action, 1))
-
-    # Quantity
-    if order is not None:
-        qty = float(order.totalQuantity)
-    else:
-        qty = float(order_data.get("totalQuantity", 0))
-
-    # Status
-    if order_state is not None:
-        status_str = order_state.status
-    else:
-        status_str = order_data.get("status", "Submitted")
-    status = OrderStatus(TWS_STATUS_TO_ORDER_STATUS.get(status_str, 6))
-
-    # Prices
-    limit_price: float | None = None
-    stop_price: float | None = None
-    if order is not None:
-        if order.lmtPrice and order.lmtPrice > 0:
-            limit_price = order.lmtPrice
-        if order.auxPrice and order.auxPrice > 0:
-            stop_price = order.auxPrice
-    else:
-        lmt = order_data.get("lmtPrice")
-        if lmt and float(lmt) > 0:
-            limit_price = float(lmt)
-        aux = order_data.get("auxPrice")
-        if aux and float(aux) > 0:
-            stop_price = float(aux)
-
-    # Filled quantity and avg price
-    filled_qty = float(order_data.get("filled", 0))
-    avg_price = float(order_data.get("avgFillPrice", 0)) if filled_qty > 0 else None
-
-    # Filled quantity from order object (alternative source)
-    if filled_qty == 0 and order is not None:
-        fq = order.filledQuantity
-        if fq:
-            filled_qty = float(fq)
-
-    return PlacedOrderModel(
-        id=order_id,
-        symbol=symbol,
-        type=order_type,
-        side=side,
-        qty=qty if qty > 0 else 1,  # Ensure positive qty
-        status=status,
-        limitPrice=limit_price,
-        stopPrice=stop_price,
-        takeProfit=None,  # Not directly available from TWS
-        stopLoss=None,  # Not directly available from TWS
-        guaranteedStop=None,  # Not supported by TWS
-        trailingStopPips=None,  # Would need separate logic
-        stopType=None,  # Not directly available
-        filledQty=filled_qty if filled_qty > 0 else None,
-        avgPrice=avg_price,
-        updateTime=None,  # Could add timestamp if available
-    )
-
-
 def tracked_order_to_placed_order(tracked: "TrackedOrder") -> "PlacedOrder":
     """Convert TrackedOrder to domain PlacedOrder.
 
@@ -953,7 +805,6 @@ __all__ = [
     "contract_description_to_search_result",
     "contract_details_to_symbol_info",
     "tws_bar_to_domain_bar",
-    "tws_rt_bar_to_domain_bar",
     "tws_ticks_to_bar",
     "tws_ticks_to_quote_data",
     "parse_ticker",
@@ -967,7 +818,6 @@ __all__ = [
     "TWS_ACTION_TO_SIDE",
     "TWS_STATUS_TO_ORDER_STATUS",
     "preorder_to_tws",
-    "tws_order_to_placed_order",
     "tracked_order_to_placed_order",
     # Position/Account mappers
     "tws_position_to_domain",

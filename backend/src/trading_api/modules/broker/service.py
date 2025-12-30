@@ -120,68 +120,139 @@ class BrokerService(WsRouteService):
 
     # ================================ GETTERS (delegate to provider) =========
 
-    async def get_orders(self) -> List[PlacedOrder]:
-        """Get all orders."""
+    async def get_orders(self, user_id: str) -> List[PlacedOrder]:
+        """Get all orders for a user.
+
+        Args:
+            user_id: User ID for scoping (unused for now)
+        """
         return await self.broker_provider.get_orders()
 
-    async def get_positions(self) -> List[Position]:
-        """Get all positions."""
+    async def get_positions(self, user_id: str) -> List[Position]:
+        """Get all positions for a user.
+
+        Args:
+            user_id: User ID for scoping (unused for now)
+        """
         return await self.broker_provider.get_positions()
 
-    async def get_executions(self, symbol: str) -> List[Execution]:
-        """Get execution history for a symbol."""
+    async def get_executions(self, symbol: str, user_id: str) -> List[Execution]:
+        """Get execution history for a symbol.
+
+        Args:
+            symbol: Symbol to get executions for
+            user_id: User ID for scoping (unused for now)
+        """
         return await self.broker_provider.get_executions(symbol)
 
-    async def get_account_info(self) -> AccountMetainfo:
-        """Get account metadata."""
+    async def get_account_info(self, user_id: str) -> AccountMetainfo:
+        """Get account metadata for a user.
+
+        Args:
+            user_id: User ID for scoping (unused for now)
+        """
         return await self.broker_provider.get_account_info()
 
-    async def preview_order(self, order: PreOrder) -> OrderPreviewResult:
-        """Preview order costs and requirements."""
+    async def preview_order(self, order: PreOrder, user_id: str) -> OrderPreviewResult:
+        """Preview order costs and requirements.
+
+        Args:
+            order: Order to preview
+            user_id: User ID for scoping (unused for now)
+        """
         return await self.broker_provider.preview_order(order)
 
     async def preview_leverage(
-        self, params: LeverageSetParams
+        self, params: LeverageSetParams, user_id: str
     ) -> LeveragePreviewResult:
-        """Preview leverage changes."""
+        """Preview leverage changes.
+
+        Args:
+            params: Leverage parameters
+            user_id: User ID for scoping (unused for now)
+        """
         return await self.broker_provider.preview_leverage(params)
 
-    async def leverage_info(self, params: LeverageInfoParams) -> LeverageInfo:
-        """Get leverage information for symbol."""
+    async def leverage_info(
+        self, params: LeverageInfoParams, user_id: str
+    ) -> LeverageInfo:
+        """Get leverage information for symbol.
+
+        Args:
+            params: Leverage info parameters
+            user_id: User ID for scoping (unused for now)
+        """
         return await self.broker_provider.get_leverage_info(params)
 
     # ================================ SETTERS (delegate to provider) =========
 
-    async def place_order(self, order: PreOrder) -> PlaceOrderResult:
-        """Place a new order."""
+    async def place_order(self, order: PreOrder, user_id: str) -> PlaceOrderResult:
+        """Place a new order.
+
+        Args:
+            order: Order to place
+            user_id: User ID for scoping (unused for now)
+        """
         return await self.broker_provider.place_order(order)
 
-    async def modify_order(self, order_id: str, order: PreOrder) -> None:
-        """Modify an existing order."""
+    async def modify_order(self, order_id: str, order: PreOrder, user_id: str) -> None:
+        """Modify an existing order.
+
+        Args:
+            order_id: ID of order to modify
+            order: Updated order details
+            user_id: User ID for scoping (unused for now)
+        """
         await self.broker_provider.modify_order(order_id, order)
 
-    async def cancel_order(self, order_id: str) -> None:
-        """Cancel an order."""
+    async def cancel_order(self, order_id: str, user_id: str) -> None:
+        """Cancel an order.
+
+        Args:
+            order_id: ID of order to cancel
+            user_id: User ID for scoping (unused for now)
+        """
         await self.broker_provider.cancel_order(order_id)
 
     async def close_position(
-        self, position_id: str, amount: Optional[float] = None
+        self, position_id: str, user_id: str, amount: Optional[float] = None
     ) -> None:
-        """Close position (full or partial)."""
+        """Close position (full or partial).
+
+        Args:
+            position_id: ID of position to close
+            user_id: User ID for scoping (unused for now)
+            amount: Amount to close (None for full close)
+        """
         await self.broker_provider.close_position(position_id, amount)
 
     async def edit_position_brackets(
         self,
         position_id: str,
         brackets: Brackets,
+        user_id: str,
         custom_fields: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Update position brackets."""
+        """Update position brackets.
+
+        Args:
+            position_id: ID of position to update
+            brackets: New bracket values
+            user_id: User ID for scoping (unused for now)
+            custom_fields: Optional custom fields (ignored)
+        """
         # custom_fields ignored for now (provider doesn't use it)
         await self.broker_provider.edit_position_brackets(position_id, brackets)
 
-    async def set_leverage(self, params: LeverageSetParams) -> LeverageSetResult:
-        """Set leverage for symbol."""
+    async def set_leverage(
+        self, params: LeverageSetParams, user_id: str
+    ) -> LeverageSetResult:
+        """Set leverage for symbol.
+
+        Args:
+            params: Leverage parameters
+            user_id: User ID for scoping (unused for now)
+        """
         return await self.broker_provider.set_leverage(params)
 
     # ========================== WEBSOCKET STREAMING ==========================#
