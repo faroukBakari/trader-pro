@@ -9,11 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from h11 import Data
-from more_itertools import last
-
-from trading_api.providers import tws
-
 if TYPE_CHECKING:
     pass
 

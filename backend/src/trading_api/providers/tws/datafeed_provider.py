@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from ibapi.common import BarData
 from ibapi.contract import Contract
 
 from trading_api.capabilities.datafeed import DatafeedCapability

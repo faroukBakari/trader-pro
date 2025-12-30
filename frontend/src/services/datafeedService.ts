@@ -538,12 +538,14 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     listenerGUID: string,
   ): void {
 
-    console.log(`[Datafeed] ${listenerGUID} Subscribing to quotes for symbols : ${symbols}, fast_symbols: ${fast_symbols}`)
+    const all_symbols = [...new Set([...symbols, ...fast_symbols])]
+
+    console.log(`[Datafeed] ${listenerGUID} Subscribing to quotes for symbols : ${all_symbols}`)
 
     this._getWsAdapter().quotes
       ?.subscribe(
         listenerGUID,
-        { symbols, fast_symbols },
+        { symbols: all_symbols, fast_symbols: [] },
         (quoteData) => {
           if (this.debug_datafeed) {
             const v = quoteData.v as { bid?: number; ask?: number; lp?: number }
