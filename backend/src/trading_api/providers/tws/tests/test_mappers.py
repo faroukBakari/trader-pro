@@ -40,7 +40,7 @@ class TestContractDescriptionMapper:
         assert result.symbol == "AAPL"
         assert result.description == "Apple Inc"
         assert result.exchange == "NASDAQ"  # Uses primaryExchange
-        assert result.ticker == "AAPL:NASDAQ:STK-0"  # New composite format
+        assert result.ticker == "AAPL:NASDAQ:STK"  # Composite format without conId
         assert result.type == "stock"
 
     def test_fallback_exchange(self) -> None:
@@ -58,7 +58,7 @@ class TestContractDescriptionMapper:
         result = contract_description_to_search_result(desc)
 
         assert result.exchange == "IDEALPRO"
-        assert result.ticker == "EUR:IDEALPRO:CASH-0"  # New composite format
+        assert result.ticker == "EUR:IDEALPRO:CASH"  # Composite format without conId
         assert result.type == "forex"
 
     def test_sec_type_mapping(self) -> None:
@@ -115,8 +115,8 @@ class TestContractDetailsMapper:
         assert result.description == "Microsoft Corporation"
         assert result.type == "stock"
         assert result.exchange == "NASDAQ"
-        assert result.listed_exchange == "SMART"
-        assert result.ticker == "MSFT:NASDAQ:STK-0"  # New composite format
+        assert result.listed_exchange == "NASDAQ"  # Uses primaryExchange
+        assert result.ticker == "MSFT:NASDAQ:STK"  # Composite format without conId
         assert result.pricescale == 100  # 1/0.01 = 100
         assert result.minmov == 1
         assert result.has_intraday is True
@@ -181,8 +181,8 @@ class TestContractDetailsMapper:
         result = contract_details_to_symbol_info(details)
 
         assert result.description == "TEST"  # Falls back to symbol
-        assert result.exchange == "SMART"  # Falls back to exchange
-        assert result.ticker == "TEST:SMART:STK-0"  # New composite format
+        assert result.exchange == ""  # Uses primaryExchange (empty)
+        assert result.ticker == "TEST::STK"  # Composite format with empty exchange
         assert result.session == "0000-2359"  # Default session (24h fallback)
         assert result.timezone == "America/New_York"  # Default timezone
 
@@ -220,7 +220,7 @@ class TestContractDetailsMapper:
         assert result.name == "EUR"
         assert result.type == "forex"
         assert result.pricescale == 20000  # 1/0.00005
-        assert result.ticker == "EUR:IDEALPRO:CASH-0"  # New composite format
+        assert result.ticker == "EUR::CASH"  # Composite format, primaryExchange empty
 
     def test_futures_mapping(self) -> None:
         """Test mapping futures contract details."""
@@ -240,7 +240,7 @@ class TestContractDetailsMapper:
         assert result.name == "ES"
         assert result.type == "futures"
         assert result.pricescale == 4  # 1/0.25
-        assert result.ticker == "ES:CME:FUT-0"  # New composite format
+        assert result.ticker == "ES::FUT"  # Composite format, primaryExchange empty
 
 
 class TestTwsBarMapper:
@@ -336,7 +336,7 @@ class TestTwsTicksToQuoteDataMapper:
         from trading_api.models.market import QuoteValues
 
         rt_data = {
-            "ticker_name": "AAPL:NASDAQ:STK-12345",
+            "business_key": "datafeed:Quote:SMART:AAPL:NASDAQ:STK-12345",
             "bid": 150.25,
             "ask": 150.30,
             "last": 150.28,
@@ -368,7 +368,7 @@ class TestTwsTicksToQuoteDataMapper:
         from trading_api.models.market import QuoteValues
 
         rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
+            "business_key": "datafeed:Quote:SMART:TEST:SMART:STK-0",
             "bid": 100.00,
             "ask": 100.10,
         }
@@ -383,7 +383,7 @@ class TestTwsTicksToQuoteDataMapper:
         from trading_api.models.market import QuoteValues
 
         rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
+            "business_key": "datafeed:Quote:SMART:TEST:SMART:STK-0",
             "last": 105.00,
             "bar_close": 100.00,
         }
@@ -399,7 +399,7 @@ class TestTwsTicksToQuoteDataMapper:
         from trading_api.models.market import QuoteValues
 
         rt_data: dict[str, object] = {
-            "ticker_name": "TEST:SMART:STK-0",
+            "business_key": "datafeed:Quote:SMART:TEST:SMART:STK-0",
         }
 
         result = tws_ticks_to_quote_data(rt_data)
@@ -417,7 +417,7 @@ class TestTwsTicksToQuoteDataMapper:
         from trading_api.models.market import QuoteValues
 
         rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
+            "business_key": "datafeed:Quote:SMART:TEST:SMART:STK-0",
             "last": 150.00,
             "bar_volume": 500000,
         }
@@ -437,7 +437,7 @@ class TestTwsTicksToQuoteDataMapper:
         # Simulates STK market data stream where 'last' tick doesn't arrive
         # but rt_trd_volume does (Generic 375)
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK",
+            "business_key": "datafeed:Quote:SMART:GOOGL:NASDAQ:STK",
             "bid": 320.55,
             "ask": 320.78,
             # No "last" field - this is the bug we're fixing
@@ -457,7 +457,7 @@ class TestTwsTicksToQuoteDataMapper:
         from trading_api.models.market import QuoteValues
 
         rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
+            "business_key": "datafeed:Quote:SMART:TEST:SMART:STK-0",
             "bid": 100.00,
             "ask": 100.05,
             "rt_volume": "99.95;100.0;1765200318856;5000.0;99.90;false",
@@ -475,7 +475,7 @@ class TestTwsTicksToQuoteDataMapper:
 
         # Odd lot trades have empty price field
         rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
+            "business_key": "datafeed:Quote:SMART:TEST:SMART:STK-0",
             "bid": 100.00,
             "ask": 100.05,
             "rt_volume": ";0E-16;1765200320968;4026.0;320.95;true",  # Empty price
@@ -491,7 +491,7 @@ class TestTwsTicksToQuoteDataMapper:
         from trading_api.models.market import QuoteValues
 
         rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
+            "business_key": "datafeed:Quote:SMART:TEST:SMART:STK-0",
             "last": 150.00,  # Direct tick
             "rt_trd_volume": "149.50;1.0;1765200318856;1000.0;149.00;true",  # Different
         }
@@ -515,7 +515,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
 
         # Real data from api-traces.log - GOOGL market data stream
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK",
+            "business_key": "datafeed:Quote:SMART:GOOGL:NASDAQ:STK",
             "bid": 320.55,
             "ask": 320.78,
             # No "last" - this is the actual bug scenario
@@ -546,7 +546,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
 
         # Real data - odd lot update with empty price
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK",
+            "business_key": "datafeed:Quote:SMART:GOOGL:NASDAQ:STK",
             "bid": 320.51,
             "ask": 320.88,
             "rt_volume": ";0E-16;1765200320968;4026.0000000000000000;320.95565875;true",
@@ -570,7 +570,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
 
         # Real data - rt_volume with trade
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK",
+            "business_key": "datafeed:Quote:SMART:GOOGL:NASDAQ:STK",
             "bid": 320.51,
             "ask": 320.60,
             "rt_volume": "320.58;4.0000000000000000;1765200301083;4015.0000000000000000;320.95659154;false",
@@ -591,7 +591,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
 
         # Real data from api-traces.log - BTC complete tick data
         rt_data = {
-            "ticker_name": "BTC:PAXOS:CRYPTO-479624278",
+            "business_key": "datafeed:Quote:PAXOS:BTC:PAXOS:CRYPTO-479624278",
             "bid": 91588.25,
             "ask": 91588.5,
             "last": 91608.75,
@@ -619,7 +619,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
 
         # Real data - initial state with zeros
         rt_data = {
-            "ticker_name": "BTC:PAXOS:CRYPTO-479624278",
+            "business_key": "datafeed:Quote:PAXOS:BTC:PAXOS:CRYPTO-479624278",
             "bid": 0.0,
             "ask": 0.0,
             "high": 0.0,
@@ -644,7 +644,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
 
         # Real data from snapshot request
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK",
+            "business_key": "datafeed:Quote:SMART:GOOGL:NASDAQ:STK",
             "bid": 320.55,
             "ask": 320.6,
             "last": 320.56,
@@ -674,7 +674,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
         from trading_api.models.market import QuoteValues
 
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK",
+            "business_key": "datafeed:Quote:SMART:GOOGL:NASDAQ:STK",
             "bid": 320.55,
             "ask": 320.78,
             # Both present - rt_trd_volume should win
@@ -696,7 +696,7 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
         from trading_api.models.market import QuoteValues
 
         rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK",
+            "business_key": "datafeed:Quote:SMART:GOOGL:NASDAQ:STK",
             "bid": 320.51,
             "ask": 320.60,
             # High precision values from actual logs

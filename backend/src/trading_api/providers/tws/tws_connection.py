@@ -380,8 +380,12 @@ class IBSocket(EWrapper):
         """Reset internal state - clear futures, accumulators, callbacks."""
         with self._socket_lock:
             self._stream_data.clear()
+            self._stream_hooks.clear()
+            self._snapshot_hooks.clear()
+            self._cleanup_hooks.clear()
             self._reader_accounts.clear()
             self._ready_event.clear()
+            self._business_to_tws_key.clear()
             self._nxt_order_id = None
 
     def _handle_request_error(

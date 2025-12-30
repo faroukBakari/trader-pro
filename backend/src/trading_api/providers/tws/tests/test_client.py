@@ -13,7 +13,7 @@ Note: All tests mock IBSocket to avoid real TWS connections.
 
 import asyncio
 from typing import Any, Awaitable
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from ibapi.common import BarData
@@ -113,7 +113,6 @@ class TestTWSClientReqMatchingSymbols:
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.next_req_id = 1
 
         # Create test response
         contract = Contract()
@@ -122,23 +121,22 @@ class TestTWSClientReqMatchingSymbols:
         desc = ContractDescription()
         desc.contract = contract
 
-        # Setup future resolution
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[list[ContractDescription]] = loop.create_future()
+        # Setup create_snapshot mock that returns (reqId, awaitable)
+        def create_snapshot_side_effect(
+            business_key: str, *, timeout: float | None = 5
+        ) -> tuple[int | None, Awaitable[Any]]:
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
 
-        def create_future_side_effect(
-            reqId: int, *, capability: str, timeout: float | None = None
-        ) -> Awaitable[Any]:
-            # Schedule resolution
             async def resolve() -> None:
                 await asyncio.sleep(0.01)
-                future.set_result([desc])
+                future.set_result([{"contractDescriptions": desc}])
 
             asyncio.create_task(resolve())
-            return future
+            return (1, asyncio.wait_for(future, timeout))
 
-        mock_ibsocket.create_future = create_future_side_effect
-        mock_ibsocket.send_message = MagicMock()
+        mock_ibsocket.create_snapshot = create_snapshot_side_effect
+        mock_ibsocket.reqMatchingSymbols = MagicMock()
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
@@ -146,7 +144,7 @@ class TestTWSClientReqMatchingSymbols:
 
         assert len(result) == 1
         assert result[0].contract.symbol == "AAPL"
-        mock_ibsocket.send_message.assert_called_once()
+        mock_ibsocket.reqMatchingSymbols.assert_called_once_with(1, "AAPL")
 
     @pytest.mark.asyncio
     async def test_req_matching_symbols_sends_correct_message(self) -> None:
@@ -156,36 +154,30 @@ class TestTWSClientReqMatchingSymbols:
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.next_req_id = 42
 
-        # Setup future resolution
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[list[Any]] = loop.create_future()
+        # Setup create_snapshot mock
+        def create_snapshot_side_effect(
+            business_key: str, *, timeout: float | None = 5
+        ) -> tuple[int | None, Awaitable[Any]]:
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[list[Any]] = loop.create_future()
 
-        def create_future_side_effect(
-            reqId: int, *, capability: str, timeout: float | None = None
-        ) -> Awaitable[Any]:
             async def resolve() -> None:
                 await asyncio.sleep(0.01)
                 future.set_result([])
 
             asyncio.create_task(resolve())
-            return future
+            return (42, asyncio.wait_for(future, timeout))
 
-        mock_ibsocket.create_future = create_future_side_effect
-        mock_ibsocket.send_message = MagicMock()
+        mock_ibsocket.create_snapshot = create_snapshot_side_effect
+        mock_ibsocket.reqMatchingSymbols = MagicMock()
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
         await client.reqMatchingSymbols("MSFT")
 
-        # Verify message format
-        call_args = mock_ibsocket.send_message.call_args
-        assert call_args is not None
-        # First arg is msgId (REQ_MATCHING_SYMBOLS), second is values
-        values = call_args[0][1]
-        assert 42 in values  # reqId
-        assert "MSFT" in values  # pattern
+        # Verify reqMatchingSymbols was called with correct args
+        mock_ibsocket.reqMatchingSymbols.assert_called_once_with(42, "MSFT")
 
 
 class TestTWSClientReqContractDetails:
@@ -199,7 +191,6 @@ class TestTWSClientReqContractDetails:
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.next_req_id = 1
 
         # Create test response
         contract = Contract()
@@ -208,22 +199,22 @@ class TestTWSClientReqContractDetails:
         details.contract = contract
         details.longName = "Apple Inc"
 
-        # Setup future resolution
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[list[ContractDetails]] = loop.create_future()
+        # Setup create_snapshot mock
+        def create_snapshot_side_effect(
+            business_key: str, *, timeout: float | None = 5
+        ) -> tuple[int | None, Awaitable[Any]]:
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
 
-        def create_future_side_effect(
-            reqId: int, *, capability: str, timeout: float | None = None
-        ) -> Awaitable[Any]:
             async def resolve() -> None:
                 await asyncio.sleep(0.01)
-                future.set_result([details])
+                future.set_result([{"contractDetails": details}])
 
             asyncio.create_task(resolve())
-            return future
+            return (1, asyncio.wait_for(future, timeout))
 
-        mock_ibsocket.create_future = create_future_side_effect
-        mock_ibsocket.send_message = MagicMock()
+        mock_ibsocket.create_snapshot = create_snapshot_side_effect
+        mock_ibsocket.reqContractDetails = MagicMock()
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
@@ -236,6 +227,7 @@ class TestTWSClientReqContractDetails:
 
         assert len(result) == 1
         assert result[0].longName == "Apple Inc"
+        mock_ibsocket.reqContractDetails.assert_called_once()
 
 
 class TestTWSClientReqHistoricalData:
@@ -249,7 +241,6 @@ class TestTWSClientReqHistoricalData:
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.next_req_id = 1
 
         # Create test bars
         bar1 = BarData()
@@ -264,22 +255,25 @@ class TestTWSClientReqHistoricalData:
         bar2.open = 150.5
         bar2.close = 151.0
 
-        # Setup future resolution
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[list[BarData]] = loop.create_future()
+        # Mock get_cached_data to return None (no cache)
+        mock_ibsocket.get_cached_data = MagicMock(return_value=None)
 
-        def create_future_side_effect(
-            reqId: int, *, capability: str, timeout: float | None = None
-        ) -> Awaitable[Any]:
+        # Setup create_snapshot mock
+        def create_snapshot_side_effect(
+            business_key: str, *, timeout: float | None = 5
+        ) -> tuple[int | None, Awaitable[Any]]:
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[list[BarData]] = loop.create_future()
+
             async def resolve() -> None:
                 await asyncio.sleep(0.01)
                 future.set_result([bar1, bar2])
 
             asyncio.create_task(resolve())
-            return future
+            return (1, asyncio.wait_for(future, timeout))
 
-        mock_ibsocket.create_future = create_future_side_effect
-        mock_ibsocket.send_message = MagicMock()
+        mock_ibsocket.create_snapshot = create_snapshot_side_effect
+        mock_ibsocket.reqBars = MagicMock()
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
@@ -296,6 +290,7 @@ class TestTWSClientReqHistoricalData:
 
         assert len(result) == 2
         assert result[0].open == 150.0
+        mock_ibsocket.reqBars.assert_called_once()
 
 
 class TestTWSClientStreamMethods:
@@ -303,15 +298,15 @@ class TestTWSClientStreamMethods:
 
     def test_req_bar_data_stream_registers_callback(self) -> None:
         """Test reqBarDataStream registers stream with callback."""
+        from trading_api.models.exceptions import ProviderException
+
         client = TWSClient("127.0.0.1", 7497, 1)
 
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.next_req_id = 1
-        mock_ibsocket.stream_req_id = MagicMock(return_value=None)  # No existing stream
-        mock_ibsocket.register_stream = MagicMock()
-        mock_ibsocket.send_message = MagicMock()
+        mock_ibsocket.create_stream = MagicMock(return_value=1)  # Returns reqId
+        mock_ibsocket.reqBars = MagicMock()
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
@@ -324,23 +319,26 @@ class TestTWSClientStreamMethods:
         async def callback(data: dict[str, Any], fields: list[str]) -> None:
             pass
 
-        stream_key = client.reqBarDataStream(contract, "5 mins", callback)
+        async def on_error(exc: ProviderException) -> None:
+            pass
+
+        stream_key = client.reqBarDataStream(contract, "5 mins", callback, on_error)
 
         assert isinstance(stream_key, str)
-        mock_ibsocket.register_stream.assert_called_once()
-        mock_ibsocket.send_message.assert_called_once()
+        mock_ibsocket.create_stream.assert_called_once()
+        mock_ibsocket.reqBars.assert_called_once()
 
     def test_req_mkt_data_stream_registers_callback(self) -> None:
         """Test reqMktDataStream registers stream with callback."""
+        from trading_api.models.exceptions import ProviderException
+
         client = TWSClient("127.0.0.1", 7497, 1)
 
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.next_req_id = 1
-        mock_ibsocket.stream_req_id = MagicMock(return_value=None)  # No existing stream
-        mock_ibsocket.register_stream = MagicMock()
-        mock_ibsocket.send_message = MagicMock()
+        mock_ibsocket.create_stream = MagicMock(return_value=1)  # Returns reqId
+        mock_ibsocket.reqQuote = MagicMock()
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
@@ -351,23 +349,27 @@ class TestTWSClientStreamMethods:
         async def callback(data: dict[str, Any], fields: list[str]) -> None:
             pass
 
-        stream_key = client.reqMktDataStream(contract, callback)
+        async def on_error(exc: ProviderException) -> None:
+            pass
+
+        stream_key = client.reqMktDataStream(contract, callback, on_error)
 
         assert isinstance(stream_key, str)
-        mock_ibsocket.register_stream.assert_called_once()
-        mock_ibsocket.send_message.assert_called_once()
+        mock_ibsocket.create_stream.assert_called_once()
+        mock_ibsocket.reqQuote.assert_called_once()
 
     def test_cancel_bar_data_stream_sends_cancel(self) -> None:
         """Test cancelBarDataStream sends cancel message."""
+        from trading_api.models.exceptions import ProviderException
+
         client = TWSClient("127.0.0.1", 7497, 1)
 
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.next_req_id = 1
-        mock_ibsocket.register_stream = MagicMock()
-        mock_ibsocket.unregister_stream = MagicMock()
-        mock_ibsocket.send_message = MagicMock()
+        mock_ibsocket.create_stream = MagicMock(return_value=1)
+        mock_ibsocket.reqBars = MagicMock()
+        mock_ibsocket.remove_stream = MagicMock()
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
@@ -378,29 +380,29 @@ class TestTWSClientStreamMethods:
         async def callback(data: dict[str, Any], fields: list[str]) -> None:
             pass
 
-        # First create a stream
-        stream_key = client.reqBarDataStream(contract, "5 mins", callback)
+        async def on_error(exc: ProviderException) -> None:
+            pass
 
-        # Reset mock to check cancel call
-        mock_ibsocket.send_message.reset_mock()
+        # First create a stream
+        stream_key = client.reqBarDataStream(contract, "5 mins", callback, on_error)
 
         # Cancel the stream
         client.cancelBarDataStream(stream_key)
 
-        mock_ibsocket.send_message.assert_called_once()
-        mock_ibsocket.unregister_stream.assert_called_once()
+        mock_ibsocket.remove_stream.assert_called_once_with(stream_key)
 
     def test_cancel_mkt_data_stream_sends_cancel(self) -> None:
         """Test cancelMktDataStream sends cancel message."""
+        from trading_api.models.exceptions import ProviderException
+
         client = TWSClient("127.0.0.1", 7497, 1)
 
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.next_req_id = 1
-        mock_ibsocket.register_stream = MagicMock()
-        mock_ibsocket.unregister_stream = MagicMock()
-        mock_ibsocket.send_message = MagicMock()
+        mock_ibsocket.create_stream = MagicMock(return_value=1)
+        mock_ibsocket.reqQuote = MagicMock()
+        mock_ibsocket.remove_stream = MagicMock()
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
@@ -411,40 +413,16 @@ class TestTWSClientStreamMethods:
         async def callback(data: dict[str, Any], fields: list[str]) -> None:
             pass
 
-        # First create a stream
-        stream_key = client.reqMktDataStream(contract, callback)
+        async def on_error(exc: ProviderException) -> None:
+            pass
 
-        # Reset mock to check cancel call
-        mock_ibsocket.send_message.reset_mock()
+        # First create a stream
+        stream_key = client.reqMktDataStream(contract, callback, on_error)
 
         # Cancel the stream
         client.cancelMktDataStream(stream_key)
 
-        mock_ibsocket.send_message.assert_called_once()
-        mock_ibsocket.unregister_stream.assert_called_once()
-
-
-class TestTWSClientNextReqId:
-    """Test next_req_id property."""
-
-    def test_next_req_id_delegates_to_ibsocket(self) -> None:
-        """Test next_req_id delegates to ibsocket."""
-        client = TWSClient("127.0.0.1", 7497, 1)
-
-        # Create mock ibsocket
-        mock_ibsocket = MagicMock()
-        mock_ibsocket.running = True
-        type(mock_ibsocket).next_req_id = PropertyMock(side_effect=[1, 2, 3])
-
-        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
-
-        id1 = client.next_req_id
-        id2 = client.next_req_id
-        id3 = client.next_req_id
-
-        assert id1 == 1
-        assert id2 == 2
-        assert id3 == 3
+        mock_ibsocket.remove_stream.assert_called_once_with(stream_key)
 
 
 class TestTWSClientErrorHandling:
@@ -458,19 +436,18 @@ class TestTWSClientErrorHandling:
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.next_req_id = 1
 
-        # Setup future that never resolves
-        def create_future_side_effect(
-            reqId: int, *, capability: str, timeout: float | None = None
-        ) -> Awaitable[Any]:
+        # Setup create_snapshot that returns a future that never resolves
+        def create_snapshot_side_effect(
+            business_key: str, *, timeout: float | None = 5
+        ) -> tuple[int | None, Awaitable[Any]]:
             loop = asyncio.get_running_loop()
             future: asyncio.Future[Any] = loop.create_future()
-            # Return future wrapped with timeout
-            return asyncio.wait_for(future, timeout)
+            # Return future wrapped with timeout - will timeout since never resolved
+            return (1, asyncio.wait_for(future, timeout))
 
-        mock_ibsocket.create_future = create_future_side_effect
-        mock_ibsocket.send_message = MagicMock()
+        mock_ibsocket.create_snapshot = create_snapshot_side_effect
+        mock_ibsocket.reqMatchingSymbols = MagicMock()
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 

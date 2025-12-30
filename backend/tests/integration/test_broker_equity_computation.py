@@ -72,6 +72,7 @@ async def place_and_execute(
     qty: float,
     price: float,
     order_type: OrderType = OrderType.MARKET,
+    user_id: str = "test-user",
 ) -> None:
     """Place order and immediately execute it.
 
@@ -82,6 +83,7 @@ async def place_and_execute(
         qty: Quantity
         price: Execution price (used as limitPrice for price determination)
         order_type: Order type (default MARKET)
+        user_id: User ID for scoping (default "test-user")
     """
     # Place order
     order = PreOrder(
@@ -99,7 +101,7 @@ async def place_and_execute(
         seenPrice=None,
         currentQuotes=None,
     )
-    result = await service.place_order(order)
+    result = await service.place_order(order, user_id)
 
     # Execute immediately via provider
     provider = service.broker_provider

@@ -20,7 +20,6 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
 from trading_api.models.exceptions import ProviderException
@@ -352,21 +351,24 @@ class TestGetHistoricalBars:
     @pytest.mark.asyncio
     async def test_get_historical_bars_returns_bars(self) -> None:
         """Test get_historical_bars returns Bar list."""
-        bar1 = BarData()
-        bar1.date = "1702656000"  # Epoch format
-        bar1.open = 150.0
-        bar1.high = 151.0
-        bar1.low = 149.5
-        bar1.close = 150.5
-        bar1.volume = Decimal("1000000")
+        # Return dicts matching the StreamData format from create_snapshot
+        bar1 = {
+            "date": "1702656000",  # Epoch format
+            "open": 150.0,
+            "high": 151.0,
+            "low": 149.5,
+            "close": 150.5,
+            "volume": Decimal("1000000"),
+        }
 
-        bar2 = BarData()
-        bar2.date = "1702656060"
-        bar2.open = 150.5
-        bar2.high = 152.0
-        bar2.low = 150.0
-        bar2.close = 151.5
-        bar2.volume = Decimal("800000")
+        bar2 = {
+            "date": "1702656060",
+            "open": 150.5,
+            "high": 152.0,
+            "low": 150.0,
+            "close": 151.5,
+            "volume": Decimal("800000"),
+        }
 
         mock_client = Mock()
         mock_client.reqHistoricalData = AsyncMock(return_value=[bar1, bar2])
@@ -495,8 +497,9 @@ class TestGetQuotesSnapshot:
     async def test_get_quotes_snapshot_uses_ticker_name_as_symbol(self) -> None:
         """Test get_quotes_snapshot uses full ticker_name as symbol."""
         mock_client = AsyncMock()
+        # Mock returns dict with business_key field used by tws_ticks_to_quote_data
         mock_client.reqQuoteSnapshot.return_value = {
-            "ticker_name": "AAPL:NASDAQ:STK-12345"
+            "business_key": "datafeed:Quote:NASDAQ:AAPL:NASDAQ:STK-12345"
         }
 
         with patch(
@@ -506,7 +509,7 @@ class TestGetQuotesSnapshot:
             provider = TWSDatafeedProvider()
             results = await provider.get_quotes_snapshot(["AAPL:NASDAQ:STK-12345"])
 
-        # Verify the symbol name is the full ticker_name
+        # Verify the symbol name is the full ticker_name (extracted from business_key)
         assert results[0].n == "AAPL:NASDAQ:STK-12345"
 
 
@@ -515,6 +518,8 @@ class TestSubscriptionMethods:
 
     def test_subscribe_realtime_bars_returns_subscription_id(self) -> None:
         """Test subscribe_realtime_bars returns a subscription ID."""
+        from trading_api.models.exceptions import TradingApiException
+
         mock_client = Mock()
         mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
 
@@ -527,8 +532,11 @@ class TestSubscriptionMethods:
             async def bar_callback(bar: object) -> None:
                 pass
 
+            async def on_error(exc: TradingApiException) -> None:
+                pass
+
             sub_id = provider.subscribe_realtime_bars(
-                "AAPL:NASDAQ:STK-12345", Resolution.MIN_5, bar_callback
+                "AAPL:NASDAQ:STK-12345", Resolution.MIN_5, bar_callback, on_error
             )
 
             assert isinstance(sub_id, str)
@@ -536,6 +544,8 @@ class TestSubscriptionMethods:
 
     def test_subscribe_market_data_returns_subscription_ids(self) -> None:
         """Test subscribe_market_data returns list of subscription IDs."""
+        from trading_api.models.exceptions import TradingApiException
+
         mock_client = Mock()
         mock_client.reqMktDataStream = Mock(
             side_effect=[
@@ -554,6 +564,9 @@ class TestSubscriptionMethods:
             async def quote_callback(quote: object) -> None:
                 pass
 
+            async def on_error(exc: TradingApiException) -> None:
+                pass
+
             sub_ids = provider.subscribe_market_data(
                 [
                     "AAPL:NASDAQ:STK-12345",
@@ -561,6 +574,7 @@ class TestSubscriptionMethods:
                     "GOOGL:NASDAQ:STK-99999",
                 ],
                 quote_callback,
+                on_error,
             )
 
             assert isinstance(sub_ids, list)
@@ -569,6 +583,8 @@ class TestSubscriptionMethods:
 
     def test_unsubscribe_realtime_bars_calls_cancel(self) -> None:
         """Test unsubscribe_realtime_bars calls cancelBarDataStream."""
+        from trading_api.models.exceptions import TradingApiException
+
         mock_client = Mock()
         mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
         mock_client.cancelBarDataStream = Mock()
@@ -582,8 +598,11 @@ class TestSubscriptionMethods:
             async def bar_callback(bar: object) -> None:
                 pass
 
+            async def on_error(exc: TradingApiException) -> None:
+                pass
+
             sub_id = provider.subscribe_realtime_bars(
-                "AAPL:NASDAQ:STK-12345", Resolution.MIN_5, bar_callback
+                "AAPL:NASDAQ:STK-12345", Resolution.MIN_5, bar_callback, on_error
             )
 
             # Unsubscribe
@@ -594,6 +613,8 @@ class TestSubscriptionMethods:
 
     def test_unsubscribe_market_data_calls_cancel(self) -> None:
         """Test unsubscribe_market_data calls cancelMktDataStream."""
+        from trading_api.models.exceptions import TradingApiException
+
         mock_client = Mock()
         mock_client.reqMktDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345")
         mock_client.cancelMktDataStream = Mock()
@@ -607,8 +628,11 @@ class TestSubscriptionMethods:
             async def quote_callback(quote: object) -> None:
                 pass
 
+            async def on_error(exc: TradingApiException) -> None:
+                pass
+
             sub_ids = provider.subscribe_market_data(
-                ["AAPL:NASDAQ:STK-12345"], quote_callback
+                ["AAPL:NASDAQ:STK-12345"], quote_callback, on_error
             )
 
             provider.unsubscribe_market_data(sub_ids)
