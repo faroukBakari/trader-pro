@@ -19,7 +19,7 @@ modules/auth/
 ├── api/v1.py          # REST endpoints (/login, /me, /introspect, etc.)
 ├── repository.py      # UserRepository, RefreshTokenRepository (in-memory)
 ├── service.py         # AuthService (JWT generation, Google OAuth)
-├── tests/             # 56+ tests (repository, service, API)
+├── tests/             # Module tests (see Test Coverage below)
 └── README.md          # This file
 ```
 

@@ -1,6 +1,6 @@
 # Full-Stack Development Mode
 
-**Last Updated:** November 11, 2025
+**Last Updated:** January 2, 2026
 
 ## Overview
 
@@ -57,9 +57,9 @@ make dev-fullstack
        │
        ├─ Process 2: Spec Watcher [PID tracked]
        │   └─ watch_specs() function
-       │       ├─ Watches backend/openapi.json
-       │       └─ Watches backend/asyncapi.json
-       │       └─ Triggers frontend client regeneration
+       │       ├─ Watches backend/src/trading_api/modules/*/specs_generated/*_openapi.json
+       │       ├─ Watches backend/src/trading_api/modules/*/specs_generated/*_asyncapi.json
+       │       └─ Triggers frontend client regeneration on changes
        │
        └─ Process 3: Frontend Dev Server [PID tracked]
            └─ make -C frontend dev
@@ -83,16 +83,14 @@ Backend Python File Change
    ↓
 4. app.gen_module_specs_and_clients() executes
    ↓
-5. Backend regenerates specs:
-   - backend/openapi.json
-   - backend/asyncapi.json
-   - backend/src/trading_api/modules/*/specs_generated/*
+5. Backend regenerates per-module specs:
+   - backend/src/trading_api/modules/*/specs_generated/*_v{N}_openapi.json
+   - backend/src/trading_api/modules/*/specs_generated/*_v{N}_asyncapi.json
    ↓
-6. Spec watcher detects change (content-based)
+6. Spec watcher detects change (checksum-based)
    ↓
 7. Watcher triggers frontend client regeneration:
-   - make generate-openapi-client (if openapi.json changed)
-   - make generate-asyncapi-types (if asyncapi.json changed)
+   - make -C frontend generate (regenerates all clients)
    ↓
 8. Frontend clients updated:
    - frontend/src/clients_generated/*/
@@ -135,9 +133,8 @@ Browser hot-reloads (no full refresh)
 # Clean backend generated files
 make -C backend clean-generated
   └─ Removes all *_generated* files/directories
-     - backend/openapi.json
-     - backend/asyncapi.json
      - backend/src/trading_api/modules/*/specs_generated/
+     - backend/src/trading_api/modules/*/client_generated/
 
 # Clean frontend generated files
 make -C frontend clean-generated
@@ -180,9 +177,8 @@ poetry run python -m debugpy --listen 0.0.0.0:4444 \
 
 1. FastAPI lifespan event triggers
 2. Validates all routes have `response_model`
-3. Calls `app.gen_module_specs_and_clients()`
-4. Generates `backend/openapi.json` and `backend/asyncapi.json`
-5. Starts all modules
+3. Generates per-module specs in `modules/*/specs_generated/`
+4. Starts all modules
 
 **Wait Time:** 5 seconds (allows backend to stabilize and generate specs)
 
@@ -192,44 +188,54 @@ poetry run python -m debugpy --listen 0.0.0.0:4444 \
 watch_specs() {
     # Unified function watching both specs
 
-    # Initialize baseline state
-    OPENAPI_FILE="backend/openapi.json"
-    ASYNCAPI_FILE="backend/asyncapi.json"
-    OPENAPI_LAST_CONTENT=$(cat "$OPENAPI_FILE" 2>/dev/null || echo "")
-    ASYNCAPI_LAST_CONTENT=$(cat "$ASYNCAPI_FILE" 2>/dev/null || echo "")
+    # Per-module spec watching
+    BACKEND_MODULES_DIR="backend/src/trading_api/modules"
+
+    # Initialize baseline checksums for all module specs
+    declare -A OPENAPI_CHECKSUMS
+    declare -A ASYNCAPI_CHECKSUMS
+
+    # Initial scan of all module specs
+    for spec_file in "$BACKEND_MODULES_DIR"/*/specs_generated/*_openapi.json; do
+        if [ -f "$spec_file" ]; then
+            OPENAPI_CHECKSUMS["$spec_file"]=$(md5sum "$spec_file" | cut -d' ' -f1)
+        fi
+    done
+    # ... same for asyncapi specs
 
     # Watch loop (1 second interval)
     while true; do
-        # Check OpenAPI spec
-        if [ -f "$OPENAPI_FILE" ]; then
-            CURRENT_CONTENT=$(cat "$OPENAPI_FILE")
-            if [ "$CURRENT_CONTENT" != "$OPENAPI_LAST_CONTENT" ]; then
-                make -C frontend generate-openapi-client
-                OPENAPI_LAST_CONTENT="$CURRENT_CONTENT"
-            fi
-        fi
-
-        # Check AsyncAPI spec
-        if [ -f "$ASYNCAPI_FILE" ]; then
-            CURRENT_CONTENT=$(cat "$ASYNCAPI_FILE")
-            if [ "$CURRENT_CONTENT" != "$ASYNCAPI_LAST_CONTENT" ]; then
-                make -C frontend generate-asyncapi-types
-                ASYNCAPI_LAST_CONTENT="$CURRENT_CONTENT"
-            fi
-        fi
-
         sleep 1
+        SPECS_CHANGED=false
+
+        # Check all OpenAPI specs for changes (checksum-based)
+        for spec_file in "$BACKEND_MODULES_DIR"/*/specs_generated/*_openapi.json; do
+            if [ -f "$spec_file" ]; then
+                CURRENT_CHECKSUM=$(md5sum "$spec_file" | cut -d' ' -f1)
+                if [ "$CURRENT_CHECKSUM" != "${OPENAPI_CHECKSUMS[$spec_file]}" ]; then
+                    SPECS_CHANGED=true
+                    OPENAPI_CHECKSUMS["$spec_file"]="$CURRENT_CHECKSUM"
+                fi
+            fi
+        done
+        # ... same for asyncapi specs
+
+        # If any specs changed, regenerate all frontend clients
+        if [ "$SPECS_CHANGED" = true ]; then
+            make -C frontend generate
+        fi
     done
 }
 ```
 
 **Features:**
 
-- 📊 **Content-Based Detection** - Prevents false positives from timestamp-only checks
+- 📊 **Checksum-Based Detection** - Uses MD5 checksums for reliable change detection
+- 📁 **Per-Module Watching** - Monitors all `modules/*/specs_generated/` directories
 - ⚡ **1-Second Polling** - Fast enough for dev, simple and portable
 - 🔄 **Triggers Frontend Regeneration** - Only when actual content changes
 
-**Why Content-Based Detection?**
+**Why Checksum-Based Detection?**
 
 - Backend restart may touch files without changing content
 - Prevents unnecessary client regeneration
@@ -441,25 +447,22 @@ The watcher function (`watch_specs`) runs as Process 2 and outputs to the termin
 **Manual Verification:**
 
 ```bash
-# Check if specs exist
-ls -lh backend/openapi.json backend/asyncapi.json
+# Check if per-module specs exist
+ls -lh backend/src/trading_api/modules/*/specs_generated/
 
 # Verify client generation
 ls -lh frontend/src/clients_generated/
 
-# Test watcher function manually
-cd /path/to/trader-pro
-source scripts/dev-fullstack.sh  # Load the watch_specs function
-watch_specs  # Run watcher manually
+# Test watcher function manually (not recommended - use make dev-fullstack)
 ```
 
 **Common Watcher Issues:**
 
-| Issue                               | Cause                           | Solution                                       |
-| ----------------------------------- | ------------------------------- | ---------------------------------------------- |
-| Watcher not detecting changes       | Content hasn't actually changed | Check file hash: `md5sum backend/openapi.json` |
-| False positives (too many triggers) | Using timestamp-only detection  | Verify content-based detection is active       |
-| Watcher exited unexpectedly         | Syntax error in function        | Check terminal output for errors               |
+| Issue                               | Cause                           | Solution                                  |
+| ----------------------------------- | ------------------------------- | ----------------------------------------- |
+| Watcher not detecting changes       | Content hasn't actually changed | Check spec checksums in watcher output    |
+| False positives (too many triggers) | Using timestamp-only detection  | Verify checksum-based detection is active |
+| Watcher exited unexpectedly         | Syntax error in function        | Check terminal output for errors          |
 
 ## Troubleshooting
 
@@ -543,19 +546,22 @@ make generate-asyncapi-types
 
 ```
 backend/
-├── openapi.json              # Merged OpenAPI spec (all modules)
-├── asyncapi.json             # Merged AsyncAPI spec (all WebSockets)
 └── src/trading_api/modules/
     ├── broker/
-    │   └── specs_generated/
-    │       ├── broker_openapi.json
-    │       ├── broker_asyncapi.json
-    │       └── rest_generated/  # Python REST client
-    └── datafeed/
+    │   ├── specs_generated/
+    │   │   ├── broker_v1_openapi.json
+    │   │   └── broker_v1_asyncapi.json
+    │   └── client_generated/
+    │       └── broker_client.py      # Python REST client
+    ├── datafeed/
+    │   ├── specs_generated/
+    │   │   ├── datafeed_v1_openapi.json
+    │   │   └── datafeed_v1_asyncapi.json
+    │   └── client_generated/
+    │       └── datafeed_client.py
+    └── auth/
         └── specs_generated/
-            ├── datafeed_openapi.json
-            ├── datafeed_asyncapi.json
-            └── rest_generated/  # Python REST client
+            └── auth_v1_openapi.json
 
 frontend/
 └── src/
@@ -598,10 +604,10 @@ frontend/
 ```bash
 # Install: sudo apt install inotify-tools
 
-# Replace polling with events
-inotifywait -m -e modify,close_write backend/openapi.json | \
-while read; do
-    make generate-openapi-client
+# Replace polling with events (watch all module specs)
+inotifywait -m -r -e modify,close_write backend/src/trading_api/modules/*/specs_generated/ | \
+while read dir action file; do
+    make -C frontend generate
 done
 ```
 
