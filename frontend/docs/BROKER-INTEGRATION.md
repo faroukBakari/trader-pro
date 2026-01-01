@@ -721,8 +721,7 @@ The broker's capabilities are defined via `broker_config.configFlags`:
 - ✅ **WebSocket Updates**: Real-time position/order updates via WsAdapter
 - ✅ **WebSocket Subscriptions**: 5 broker event subscriptions (orders, positions, executions, equity, connection status)
 - ✅ **Smart Client Selection**: `_getWsAdapter()` method for fallback/real WebSocket switching
-- ⚠️ **Backend Broadcasting**: Phase 5 pending (backend WebSocket implementation)
-- ⚠️ **Optimistic Updates**: UI updates before backend confirmation (planned)
+- ✅ **Backend Broadcasting**: WebSocket event broadcasting implemented
 
 ### ❌ Not Implemented (Future)
 

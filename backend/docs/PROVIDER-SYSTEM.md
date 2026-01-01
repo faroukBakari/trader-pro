@@ -1356,9 +1356,13 @@ class CapabilityNotFoundError(ProviderError):
 See **[TWS Provider Implementation Guide](../src/trading_api/providers/tws/README.md)** for a production-ready provider implementing:
 
 - Three-layer architecture (TWSDatafeedProvider → TWSClient → IBSocket)
-- DatafeedCapability interface
-- Async/await with Future-based threading bridge
+- DatafeedCapability interface (full streaming implementation)
+- Business key tracking system for async request/response correlation
+- StreamData dataclass for typed data accumulation
+- CachedContract for contract caching with lazy upgrade pattern
 - Comprehensive domain mappers
+
+**Note:** `TWSBrokerProvider` exists as a stub inheriting from `FakeBrokerProvider`. The `BrokerCapability` interface is defined but not yet implemented with real TWS order execution.
 
 **File Template:**
 
@@ -1393,5 +1397,5 @@ class MyproviderProvider(Provider, AuthCapability):
 
 ---
 
-**Last Updated**: November 20, 2025  
+**Last Updated**: January 2, 2026  
 **Questions?** Check [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) or raise an issue.

@@ -1,17 +1,22 @@
-# Broker Service Architecture
+# Fakebroker Provider Architecture
 
 **Status**: Implemented
-**Last Updated**: November 30, 2025
+**Last Updated**: January 2, 2026
 **Related Files**:
 
-- `backend/src/trading_api/core/broker_service.py`
-- `backend/src/trading_api/models/broker/`
+- `backend/src/trading_api/providers/fakebroker/__init__.py` - FakeBrokerProvider implementation
+- `backend/src/trading_api/models/broker/` - Broker domain models
+- `backend/src/trading_api/capabilities/broker.py` - BrokerCapability interface
+
+> **Note**: This document describes the **FakebrokerProvider** - a mock broker for development and testing.
+> The actual broker module at `backend/src/trading_api/modules/broker/` is a BFF (Backend-For-Frontend) layer
+> that delegates to this provider. See [broker module README](../backend/src/trading_api/modules/broker/README.md).
 
 ---
 
 ## Overview
 
-The `BrokerService` implements a **realistic trading broker simulation** with automatic order execution, position management, and equity tracking. It follows an **event-driven architecture** using a single execution simulator loop that triggers cascading updates across all business objects.
+The `FakebrokerProvider` implements a **realistic trading broker simulation** with automatic order execution, position management, and equity tracking. It follows an **event-driven architecture** using a single execution simulator loop that triggers cascading updates across all business objects.
 
 **Key Design Principles:**
 
@@ -27,19 +32,21 @@ The `BrokerService` implements a **realistic trading broker simulation** with au
 ### 1. Core Data Structures
 
 ```python
-class BrokerService(WsRouteService):
+class FakebrokerProvider(Provider, BrokerCapability):
     # Business State (In-Memory)
-    _orders: Dict[str, PlacedOrder]           # order_id → PlacedOrder
-    _positions: Dict[str, Position]           # symbol → Position
-    _executions: List[Execution]              # Chronological execution history
+    _orders: dict[str, PlacedOrder]           # order_id → PlacedOrder
+    _positions: dict[str, Position]           # symbol → Position
+    _executions: list[Execution]              # Chronological execution history
     _equity: EquityData                       # Current equity/balance/P&L
 
-    # WebSocket Infrastructure
-    _update_callbacks: Dict[str, Callable]    # topic_type → broadcast_callback
-    _execution_simulator_task: Optional[Task] # Single background task
+    # Subscription Callbacks
+    _order_callbacks: dict[str, Callable]     # subscription_id → callback
+    _position_callbacks: dict[str, Callable]
+    _execution_callbacks: dict[str, Callable]
+    _equity_callbacks: dict[str, Callable]
 
-    # Configuration
-    _execution_delay: float | None            # Delay between executions
+    # Execution Simulator
+    _execution_simulator_task: Task | None    # Single background task
 ```
 
 **Design Rationale:**
@@ -526,17 +533,19 @@ if "equity" in self._update_callbacks:
 ### Configurable Execution Delay
 
 ```python
-# Production: Random 1-2 second intervals
-service = BrokerService()
+from trading_api.models.providers.fake_broker_configs import FakeBrokerProviderConfig
+
+# Production: Random 1-2 second intervals (default)
+config = FakeBrokerProviderConfig()
+provider = FakebrokerProvider(config)
 
 # Fast testing: 100ms intervals
-service = BrokerService(execution_delay=0.1)
+config = FakeBrokerProviderConfig(execution_delay=0.1)
+provider = FakebrokerProvider(config)
 
-# Manual testing: Disable automatic execution
-service = BrokerService(execution_delay=None)
-
-# Custom testing: 5 second intervals
-service = BrokerService(execution_delay=5.0)
+# Disabled automatic execution (manual trigger only)
+config = FakeBrokerProviderConfig(execution_delay=None)
+provider = FakebrokerProvider(config)
 ```
 
 ### Testing Execution Cascade
@@ -544,7 +553,8 @@ service = BrokerService(execution_delay=5.0)
 ```python
 async def test_execution_cascade():
     """Test that execution triggers all updates in correct order"""
-    service = BrokerService(execution_delay=None)  # Manual control
+    config = FakeBrokerProviderConfig(execution_delay=None)  # Manual control
+    provider = FakebrokerProvider(config)
 
     # Track callback invocations
     callbacks = {
@@ -592,21 +602,22 @@ async def test_execution_cascade():
 ```python
 async def test_simulator_lifecycle():
     """Test automatic start/stop of execution simulator"""
-    service = BrokerService(execution_delay=0.1)
+    config = FakeBrokerProviderConfig(execution_delay=0.1)
+    provider = FakebrokerProvider(config)
 
     # Initially no simulator
-    assert service._execution_simulator_task is None
+    assert provider._execution_simulator_task is None
 
-    # First subscription starts simulator
-    await service.create_topic(
-        "orders:{\"accountId\":\"TEST\"}",
-        lambda data: None
+    # First subscription starts simulator (via capability method)
+    sub_id = await provider.subscribe_orders(
+        "TEST-ACCOUNT",
+        callback=lambda data: None
     )
-    assert service._execution_simulator_task is not None
-    assert not service._execution_simulator_task.done()
+    assert provider._execution_simulator_task is not None
+    assert not provider._execution_simulator_task.done()
 
-    # Remove subscription stops simulator
-    service.remove_topic("orders:{\"accountId\":\"TEST\"}")
+    # Unsubscribe stops simulator
+    await provider.unsubscribe_orders(sub_id)
     await asyncio.sleep(0.1)  # Allow cancellation
     assert service._execution_simulator_task is None
 ```
@@ -664,35 +675,37 @@ if "executions" in self._update_callbacks:
 ### Multi-Account Support
 
 ```python
-class BrokerService:
-    def __init__(self):
+class FakebrokerProvider(Provider, BrokerCapability):
+    def __init__(self, config: FakeBrokerProviderConfig | None = None):
         # Multi-account storage
-        self._accounts: Dict[str, BrokerAccount] = {}
+        self._accounts: dict[str, BrokerAccount] = {}
 
-    async def create_topic(self, topic: str, callback: Callable) -> None:
-        topic_type, params_json = topic.split(":", 1)
-        params = json.loads(params_json)
-        account_id = params.get("accountId", "DEMO-ACCOUNT")
-
+    async def subscribe_orders(
+        self, account_id: str, callback: Callable
+    ) -> str:
         # Get or create account
         if account_id not in self._accounts:
             self._accounts[account_id] = BrokerAccount(account_id)
 
         # Register callback with account context
-        self._accounts[account_id].register_callback(topic_type, callback)
+        return self._accounts[account_id].register_callback("orders", callback)
 ```
 
 ### Datafeed Integration
 
 ```python
-class BrokerService:
-    def __init__(self, datafeed_service: DatafeedService):
-        self.datafeed = datafeed_service
+class FakebrokerProvider(Provider, BrokerCapability):
+    def __init__(
+        self,
+        config: FakeBrokerProviderConfig | None = None,
+        datafeed: DatafeedCapability | None = None,
+    ):
+        self._datafeed = datafeed
 
-    def _get_execution_price(self, order: PlacedOrder) -> float:
-        if order.type == OrderType.MARKET:
+    async def _get_execution_price(self, order: PlacedOrder) -> float:
+        if order.type == OrderType.MARKET and self._datafeed:
             # Get real market price from datafeed
-            quotes = await self.datafeed.get_quotes([order.symbol])
+            quotes = await self._datafeed.get_quotes([order.symbol])
             return quotes[0].ask if order.side == Side.BUY else quotes[0].bid
         # ... rest of logic
 ```
@@ -771,5 +784,5 @@ print(len(service._executions))  # Should not grow unbounded
 
 ---
 
-**Last Updated**: November 30, 2025
+**Last Updated**: January 2, 2026
 **Maintained by**: Development Team

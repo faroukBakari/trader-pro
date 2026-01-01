@@ -13,12 +13,14 @@
 | **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion        |
 | **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management  |
 | **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket  |
-| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, ticker slot registry      |
+| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry     |
+| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)     |
+| **OrderTracker**            | `order_tracker.py`                    | Order state tracking for broker callbacks         |
 | **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing     |
-| **Models**                  | `tws_models.py`                       | `TWSCapability`, `AssetConfig`, tick/msg mappings |
+| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification |
 | **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings               |
 
-**Tests:** `providers/tws/tests/test_{client,mappers,provider,broker_provider}.py`
+**Tests:** `providers/tws/tests/test_{client,ibsocket,mappers,models,datafeed_provider,broker_provider,cached_contract,config}.py`
 
 ---
 
@@ -45,17 +47,17 @@
 ### System Flow
 
 ```
-DatafeedService (provider-agnostic)
-        │ requires capability="datafeed"
+DatafeedService / BrokerService (provider-agnostic)
+        │ requires capability="datafeed" / "broker"
         ▼
-TWSDatafeedProvider (Layer 3) ─── implements DatafeedCapability
-        │ domain ↔ TWS conversion, stream key management
+TWSDatafeedProvider / TWSBrokerProvider (Layer 3) ─── implements Capability
+        │ domain ↔ TWS conversion, business key generation
         ▼
-TWSClient (Layer 2) ─── owns IBSocket, async facade
-        │ asyncio.Future bridge, stream subscription API
+TWSClient (Layer 2) ─── owns IBSocket, async facade, contract caching
+        │ create_snapshot() / create_stream() API, CachedContract cache
         ▼
-IBSocket (Layer 1) ─── daemon thread _reader_loop(), _active_streams registry
-        │ ticker slots, stream hooks, stream key ↔ reqId mapping
+IBSocket (Layer 1) ─── daemon thread _reader_task(), business key registry
+        │ StreamData accumulation, snapshot/stream hooks, TWS key mapping
         ▼
 TWS/IB Gateway (localhost:7497)
 ```
@@ -65,27 +67,28 @@ TWS/IB Gateway (localhost:7497)
 ```
 Main Thread (AsyncIO)                    Daemon Thread
 ─────────────────────                    ─────────────
-TWSDatafeedProvider.subscribe_market_data()      IBSocket._reader_loop()
+TWSDatafeedProvider.subscribe_market_data()      IBSocket._reader_task()
         │                                        │
 TWSClient.reqMktDataStream()             Decoder.interpret()
         │                                        │
-register_stream(reqId, callback)         tickPrice(reqId, price)
+ibsocket.create_stream(business_key)     tickPrice(reqId, price)
         │                                        │
-        │                                _stream_data[reqId]["bid"] = price
+        │                                _update_stream_data(tws_key, {"bid": price})
         │                                        │
-callback(data) ◄──────────────────────── _notify_stream(reqId, ["bid"])
+callback(data) ◄──────────────────────── _notify_stream(tws_key, stream)
                                                  │
-                    loop.call_soon_threadsafe(callback, stream_data, fields)
+                    loop.call_soon_threadsafe(callback, stream[-1], updated_fields)
 ```
 
 **Key Patterns:**
 
 - **Lazy Connection**: `TWSClient.ibsocket` connects on first access
-- **Future Bridge**: `asyncio.Future` + `call_soon_threadsafe()` for one-shot requests
-- **Stream Slots**: `_stream_data[reqId]` dict accumulates real-time data
-- **Stream Hooks**: `_stream_hooks[reqId]` holds (loop, callback, on_error) for continuous updates
-- **Active Streams**: `IBSocket._active_streams[stream_key] → reqId` maps stream keys to request IDs
-- **Stream Key Lookup**: `ibsocket.stream_req_id(key)` checks for existing subscription
+- **Business Key System**: External API uses business keys (e.g., `datafeed:Quote:SMART:AAPL:...`)
+- **TWS Key Mapping**: `_business_to_tws_key[business_key] → tws_key` (e.g., `req_123`)
+- **StreamData Accumulation**: `_stream_data[tws_key]` holds `StreamData` dataclass (list of dicts + metadata)
+- **Snapshot Hooks**: `_snapshot_hooks[tws_key]` holds list of (loop, Future) for one-shot requests
+- **Stream Hooks**: `_stream_hooks[tws_key]` holds list of (loop, callback, on_error) for continuous updates
+- **Deduplication**: `create_snapshot()`/`create_stream()` return `None` reqId if reusing existing request
 
 ---
 
@@ -119,9 +122,95 @@ from tws_mappers import ticker_name, parse_ticker, build_contract
 
 **Usage:**
 
-- Subscription tracking: `TWSClient._active_streams[stream_key] = reqId`
-- Ticker slot caching: Reuse existing stream for same contract
-- Unsubscription: Cancel by stream key, not reqId
+- Business key generation: `f"datafeed:Quote:{contract.exchange}:{ticker_name(contract)}"`
+- Contract caching: `TWSClient.__contracts_cache[conId]` stores `CachedContract`
+- Unsubscription: Cancel by business key (maps internally to TWS reqId)
+
+---
+
+## 2.1 Business Key Convention
+
+**Business keys** are the external API for identifying requests and subscriptions. Internal TWS request IDs (`reqId`) are hidden from callers.
+
+**Format:**
+
+```
+{capability}:{operation}:{params}
+```
+
+**Examples:**
+
+| Business Key                                                     | Purpose                     |
+| ---------------------------------------------------------------- | --------------------------- |
+| `shared:reqMatchingSymbols:AAPL`                                 | Symbol search request       |
+| `shared:reqContractDetails:AAPL:NASDAQ:STK-12345`                | Contract details lookup     |
+| `datafeed:Quote:SMART:AAPL:NASDAQ:STK-12345`                     | Quote stream/snapshot       |
+| `datafeed:reqBarDataStream:SMART:AAPL:NASDAQ:STK-12345@5 mins`   | Real-time bar subscription  |
+| `datafeed:reqHistoricalData:SMART:1 D:20251231:AAPL:...:@5 mins` | Historical bars request     |
+| `broker:orders`                                                  | Order subscription (future) |
+
+**Internal Mapping:**
+
+```python
+# IBSocket internal mapping
+_business_to_tws_key: dict[str, str] = {
+    "datafeed:Quote:SMART:AAPL:NASDAQ:STK-12345": "req_42",
+    "broker:orders": "order_subscription",
+}
+```
+
+**Benefits:**
+
+- Callers don't need to track reqIds
+- Deduplication: Same business key reuses existing request
+- Cleanup: `remove_stream(business_key)` handles all internal state
+
+---
+
+## 2.2 Contract Caching
+
+**File:** `cached_contract.py`
+
+The `CachedContract` class provides a unified cache for contract data:
+
+```python
+@dataclass
+class CachedContract(ContractDetails):
+    derivativeSecTypes: list[str]  # From ContractDescription
+    has_full_details: bool         # True if from reqContractDetails
+    _ticker: str                   # Cached ticker_name string
+
+    # Factory methods
+    @staticmethod
+    def from_contract_details(details: ContractDetails) -> CachedContract
+    @staticmethod
+    def from_contract_description(desc: ContractDescription) -> CachedContract
+
+    # Helpers
+    def matches(self, ticker: str) -> bool  # Check if ticker matches this contract
+    def update_from_details(details: ContractDetails) -> None  # Upgrade partial to full
+```
+
+**TWSClient caching strategy:**
+
+```python
+# TWSClient
+__contracts_cache: dict[int, CachedContract] = {}  # conId → CachedContract
+
+def get_qualified_contracts(self, ticker: str, preferred_exchanges: list[str]) -> list[Contract]:
+    # 1. Check cache first
+    cached = [c for c in self.__contracts_cache.values() if c.matches(ticker)]
+    if cached:
+        return [c.contract for c in cached]
+
+    # 2. Build unqualified contract from ticker string
+    return [build_contract(ticker)]
+```
+
+**Cache population:**
+
+- `reqMatchingSymbols()`: Populates cache from `ContractDescription` (partial)
+- `reqContractDetails()`: Upgrades cache entries to full `ContractDetails`
 
 ---
 
@@ -162,7 +251,7 @@ config.generic_tick_list_str  # "165,225,232,233,236,..."
 ## 4. DatafeedCapability Interface
 
 ```python
-class DatafeedCapability(Protocol):
+class DatafeedCapability(ABC):
     # One-shot requests (return data)
     async def search_symbols(self, pattern: str, **kwargs) -> list[SearchSymbolResultItem]
     async def get_symbol_info(self, ticker_name: str, **kwargs) -> SymbolInfo
@@ -170,46 +259,47 @@ class DatafeedCapability(Protocol):
                                    resolution: Resolution, **kwargs) -> list[Bar]
     async def get_quotes_snapshot(self, ticker_names: list[str], **kwargs) -> list[QuoteData]
 
-    # Subscription methods (return stream keys)
+    # Subscription methods (return business keys as subscription IDs)
     def subscribe_realtime_bars(
         self,
         ticker_name: str,
         resolution: Resolution,
-        callback: Callable[[Bar], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        callback: Callable[[Bar], Coroutine[Any, Any, None]],
+        on_error: Callable[[TradingApiException], Coroutine[Any, Any, None]],
         **kwargs,
     ) -> str
 
     def subscribe_market_data(
         self,
-        ticker_names: list[str],
-        callback: Callable[[QuoteData], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        ticker_name: str,  # Single symbol (changed from list)
+        callback: Callable[[QuoteData], Coroutine[Any, Any, None]],
+        on_error: Callable[[TradingApiException], Coroutine[Any, Any, None]],
         **kwargs,
-    ) -> list[str]
+    ) -> str  # Single subscription ID (changed from list)
 
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None
-    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None
+    def unsubscribe_market_data(self, subscription_id: str) -> None  # Single ID (changed from list)
 ```
 
 **Interface Tags:**
 
 - `[CONTINUOUS]`: Callback invoked continuously until unsubscribe
 - `[THREAD-SAFE]`: Callback may be invoked from provider thread
-- `[ERROR-HANDLING]`: If `on_error` is provided, transient errors call it instead of raising
+- `[ERROR-HANDLING]`: `on_error` callback required for subscription-level error notifications
 
 **Key Changes from Previous Version:**
 
-- `ticker` → `ticker_name` parameter rename for consistency
-- `tickers` → `ticker_names` parameter rename
-- Added `on_error` callback for subscription-level error notifications
+- `subscribe_market_data()` now takes single `ticker_name: str`, returns single `str` (was list)
+- `unsubscribe_market_data()` now takes single `subscription_id: str` (was list)
+- `on_error` callback is now **required** (was optional)
+- Callback type uses `Coroutine[Any, Any, None]` for async compatibility
 
 ---
 
 ## 4.1 BrokerCapability Interface
 
 ```python
-class BrokerCapability(Protocol):
+class BrokerCapability(ABC):
     # Order Management (async)
     async def place_order(self, order: PreOrder) -> PlaceOrderResult
     async def modify_order(self, order_id: str, order: PreOrder) -> None
@@ -263,11 +353,18 @@ class BrokerCapability(Protocol):
 
 **TWS-Specific Notes:**
 
+- **Current Implementation**: `TWSBrokerProvider` is currently a **FakeBroker stub** with in-memory state for development/testing. Real TWS order integration is in progress (see `order_tracker.py`).
 - **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. These methods raise `ProviderException` with code `PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED`.
 - **Order Preview**: Returns estimated values since TWS doesn't have native preview API.
 - **Bracket Orders**: `edit_position_brackets()` not yet implemented (complex linked orders).
 - **Equity Streaming**: TWS doesn't push account changes; polling via `get_equity()` is required.
 - **Client ID**: Broker uses `client_id=2` (default), separate from datafeed's `client_id=1`.
+
+**Real TWS Broker Integration (In Progress):**
+
+- `OrderTracker` class in `order_tracker.py` handles TWS order callbacks
+- `TrackedOrder` stores raw TWS objects (Contract, Order, OrderState)
+- `OrderFill` captures each `orderStatus` callback for fill history
 
 **Configuration:**
 
@@ -350,37 +447,41 @@ SEC_TYPE_MAP = {"STK": "stock", "OPT": "option", "FUT": "futures",
 
 ---
 
-## 7. Ticker Slot Pattern (Real-time Data)
+## 7. Stream Data Pattern (Real-time Data)
 
-**Replaces the old `TwsRTData` dataclass.**
+**Replaces the old ticker slot dict with typed `StreamData` dataclass.**
 
-Ticker slots are `dict[str, Any]` managed by IBSocket:
+Stream data is managed by IBSocket using typed `StreamData` instances:
 
 ```python
-# IBSocket internal state
-_reader_tickers: dict[int, dict[str, Any]] = {}   # reqId → ticker data
-_reader_streams: dict[int, tuple[loop, callback]] = {}  # reqId → notification callback
-_active_streams: dict[str, int] = {}  # stream_key → reqId (for duplicate detection)
+# StreamData dataclass (tws_models.py)
+@dataclass
+class StreamData(list[dict[str, Any]]):
+    business_key: str                    # External identifier (e.g., "datafeed:Quote:...")
+    snapshot_complete: bool = False      # Triggers future resolution when True
+    index_key: str | None = None         # Optional key for indexed lookups
+    updated_fields: list[str] = field(default_factory=list)  # Changed fields for selective notification
+    last_updated: int = 0                # Unix timestamp (ms) of last update
+    last_dispatched: int = 0             # Unix timestamp (ms) of last callback dispatch
 
-# Ticker slot structure (example)
-ticker_slot = {
-    "ticker_name": "AAPL:NASDAQ:STK-12345",
-    # Price fields
+# IBSocket internal state
+_stream_data: dict[str, StreamData] = {}           # tws_key → StreamData
+_business_to_tws_key: dict[str, str] = {}          # business_key → tws_key (e.g., "req_123")
+_snapshot_hooks: dict[str, list[tuple[loop, Future]]] = {}  # tws_key → pending futures
+_stream_hooks: dict[str, list[tuple[loop, callback, on_error]]] = {}  # tws_key → stream callbacks
+```
+
+**StreamData inherits from `list[dict[str, Any]]`** - each dict is one data item (tick, bar, etc.):
+
+```python
+# Example: Quote stream data
+stream[-1] = {
+    "business_key": "datafeed:Quote:SMART:AAPL:NASDAQ:STK-12345",
     "bid": 150.25,
     "ask": 150.30,
     "last": 150.27,
-    # Bar fields (for historicalDataUpdate)
-    "bar_date": "20251207 10:30:00",
-    "bar_open": 150.00,
-    "bar_high": 150.50,
-    "bar_low": 149.90,
-    "bar_close": 150.27,
-    "bar_volume": 1000,
-    # Metadata
     "market_data_type": 1,
     "min_tick": 0.01,
-    # Error tracking (set by _handle_request_error)
-    "last_exception": None,  # ProviderException | None
 }
 ```
 
@@ -396,22 +497,31 @@ TICK_TYPE_TO_FIELD = {
 }
 ```
 
-**Notification Pattern:**
+**Update Methods (called from daemon thread):**
 
 ```python
-# In IBSocket callback (daemon thread)
-def tickPrice(self, reqId: int, tickType: int, price: float, attrib) -> None:
-    ticker = self._reader_tickers.get(reqId)
-    if ticker is None:
-        return
+# _update_stream_data: Updates last item in stream (for tick updates)
+def _update_stream_data(self, tws_key: str, updates: dict[str, Any], *, tolerance: float = 1e-3) -> None:
+    stream = self._stream_data.get(tws_key)
+    if not stream:
+        stream.append({})
+    last_slot = stream[-1]
+    # Update fields, track changed fields, notify if any changed
+    ...
+    self._notify_stream(tws_key, stream)
 
-    field_name = TICK_TYPE_TO_FIELD.get(get_tick_type_name(tickType))
-    current_value = ticker.get(field_name)
+# _append_stream_data: Adds new item to stream (for accumulation patterns)
+def _append_stream_data(self, tws_key: str, data: dict[str, Any]) -> None:
+    ...
 
-    # Only notify on actual change
-    if current_value is None or not math.isclose(current_value, price, abs_tol=1e-3):
-        ticker[field_name] = price
-        self._notify_stream(reqId, [field_name])  # Notifies main thread
+# _extend_stream_data: Adds multiple items (for batch responses)
+def _extend_stream_data(self, tws_key: str, data: list[dict[str, Any]]) -> None:
+    ...
+
+# _flag_snapshot_complete: Triggers future resolution
+def _flag_snapshot_complete(self, tws_key: str) -> None:
+    stream.snapshot_complete = True
+    self._notify_stream(tws_key, stream)
 ```
 
 ---
@@ -441,62 +551,74 @@ def tickPrice(self, reqId: int, tickType: int, price: float, attrib) -> None:
 
 ## 9. Implementation Patterns
 
-### One-Shot Request (Future-based)
+### One-Shot Request (Snapshot Pattern)
 
 Used by: `search_symbols()`, `get_historical_bars()`, `get_quotes_snapshot()`
 
 ```python
 # TWSClient
-async def reqMatchingSymbols(self, pattern: str) -> list[ContractDescription]:
-    reqId = self.next_req_id
-    coroutine = self.ibsocket.create_future(
-        reqId, timeout=self._timeout, capability="shared"  # capability for error routing
-    )
-    self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
-    return await coroutine
+async def reqMatchingSymbols(self, pattern: str, timeout: float | None = None) -> list[ContractDescription]:
+    business_key = f"shared:reqMatchingSymbols:{pattern}"
 
-# IBSocket (daemon thread) - decorated with @error_handler
-@error_handler(capability="shared")
-def symbolSamples(self, reqId: int, contractDescriptions: list) -> None:
-    accumulator = self._reader_accumulators.get(reqId)
-    if isinstance(accumulator, list):
-        accumulator.extend(contractDescriptions)
-        self._resolve_future(reqId)  # Resolves Future with accumulated data
+    # Check cache first
+    data = self.ibsocket.get_cached_data(business_key)
+    if data is not None:
+        return [item["contractDescriptions"] for item in data]
+
+    # Create snapshot request
+    reqId, coroutine = self.ibsocket.create_snapshot(
+        business_key,
+        timeout=timeout or self._timeout,
+    )
+
+    # Only send request if new (reqId is None if reusing existing)
+    if reqId is not None:
+        self.ibsocket.reqMatchingSymbols(reqId, pattern)
+
+    data = await coroutine
+    return [item["contractDescriptions"] for item in data]
+
+# IBSocket callback (daemon thread)
+def symbolSamples(self, reqId: int, contractDescriptions: list[ContractDescription]) -> None:
+    tws_key = f"req_{reqId}"
+    self._extend_stream_data(
+        tws_key, [{"contractDescriptions": cd} for cd in contractDescriptions]
+    )
+    self._flag_snapshot_complete(tws_key)  # Resolves pending futures
 ```
 
-### Streaming Subscription (Ticker Slot + Callback)
+### Streaming Subscription (Stream Pattern)
 
 Used by: `subscribe_realtime_bars()`, `subscribe_market_data()`
 
 ```python
 # TWSClient
-def reqBarDataStream(self, contract: Contract, bar_size: str, callback) -> str:
-    stream_key = ticker_name(contract, bar_size)
+def reqBarDataStream(
+    self,
+    contract: Contract,
+    bar_size: str,
+    callback: Callable[[dict, list[str]], Coroutine],
+    on_error: Callable[[ProviderException], Coroutine],
+) -> str:
+    business_key = f"datafeed:reqBarDataStream:{contract.exchange}:{ticker_name(contract, bar_size)}"
 
-    # Check existing subscription via IBSocket registry
-    existing_req_id = self.ibsocket.stream_req_id(stream_key)
-    if existing_req_id is not None:
-        # Reuse existing stream, update callback
-        self.ibsocket.update_stream(existing_req_id, callback)
-        return stream_key
+    # Create stream - returns None reqId if reusing existing
+    reqId = self.ibsocket.create_stream(business_key, callback, on_error)
 
-    reqId = self.next_req_id
-    self.ibsocket.register_stream(reqId, stream_key, callback)  # Registers reqId ↔ stream_key
+    if reqId is not None:
+        self.ibsocket.reqBars(reqId, contract, end_date_time="", ...)
 
-    # Send REQ_HISTORICAL_DATA with keepUpToDate=1
-    self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, [..., keepUpToDate=1, ...])
-    return stream_key
+    return business_key  # Return business key as subscription ID
 
 # TWSDatafeedProvider
-def subscribe_realtime_bars(self, ticker: str, resolution: Resolution, callback) -> str:
+def subscribe_realtime_bars(self, ticker_name: str, resolution: Resolution, callback, on_error) -> str:
     bar_size = map_resolution_to_tws_bar_size(resolution)
 
-    async def bar_callback(rt_data: dict, fields: list[str] | None) -> None:
-        if fields is None or any(f.startswith("bar_") for f in fields):
-            await callback(tws_ticks_to_bar(rt_data))
+    async def bar_callback(rt_data: dict[str, Any], fields: list[str] | None) -> None:
+        await callback(tws_ticks_to_bar(rt_data))
 
-    contract = build_contract(ticker)
-    return self._tws_client.reqBarDataStream(contract, bar_size, bar_callback)
+    contract = next(iter(self._tws_client.get_qualified_contracts(ticker_name, ...)))
+    return self._tws_client.reqBarDataStream(contract, bar_size, bar_callback, on_error=on_error)
 ```
 
 ### Cancellation
@@ -504,10 +626,17 @@ def subscribe_realtime_bars(self, ticker: str, resolution: Resolution, callback)
 ```python
 # TWSClient
 def cancelBarDataStream(self, stream_key: str) -> None:
-    reqId = self.ibsocket._pop_stream_req_id(stream_key)  # Removes from _active_streams
-    if reqId is not None:
-        self.ibsocket.send_message(OUT.CANCEL_HISTORICAL_DATA, [1, reqId])
-        self.ibsocket.unregister_stream(reqId)
+    self.ibsocket.remove_stream(stream_key)  # Triggers cleanup hook → sends cancel message
+
+# IBSocket.remove_stream() cleanup
+def remove_stream(self, business_key: str) -> None:
+    tws_key = self._business_to_tws_key.get(business_key)
+    self._stream_hooks.pop(tws_key, None)
+    # Cleanup hook sends TWS cancel message via call_soon_threadsafe
+    cleanup = self._cleanup_hooks.pop(tws_key, None)
+    if cleanup:
+        loop, cleanup_func = cleanup
+        loop.call_soon_threadsafe(cleanup_func)
 ```
 
 ---
@@ -585,15 +714,15 @@ detail = f"{category}_{code}" if recoverable else f"{category}_{code}_NON_RECOVE
 
 ### Stream Error Callbacks
 
-Subscription methods accept optional `on_error` callback for streaming errors:
+Subscription methods require `on_error` callback for streaming errors:
 
 ```python
 def subscribe_realtime_bars(
     self,
     ticker_name: str,
     resolution: Resolution,
-    callback: Callable[[Bar], Awaitable[None]],
-    on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,  # NEW
+    callback: Callable[[Bar], Coroutine[Any, Any, None]],
+    on_error: Callable[[TradingApiException], Coroutine[Any, Any, None]],  # Required
     **kwargs: Any,
 ) -> str:
     ...
@@ -606,67 +735,52 @@ TWS error() callback
         │
 classify_error(code)  →  (category, is_recoverable)
         │
-_handle_request_error()
+_handle_request_error(category, detail, tws_key, message)
         │
-        ├─► Future exists → reject with ProviderException
+        ├─► Look up business_key from tws_key
+        │   capability = business_key.split(":")[0]  # "datafeed", "broker", "shared"
         │
-        └─► Stream exists + on_error → invoke on_error callback
+        ├─► Snapshot hooks exist → reject future with ProviderException
+        │
+        └─► Stream hooks exist → invoke on_error callbacks
                 │
-                └─► Non-recoverable → cleanup _stream_data, _stream_hooks
-```
-
-### Error Handler Decorator
-
-All IBSocket callbacks use `@error_handler(capability)` to catch exceptions:
-
-```python
-@error_handler(capability="datafeed")
-def tickPrice(self, reqId: int, tickType: int, price: float, attrib) -> None:
-    # Exceptions auto-wrapped as ProviderException
-    # Routes to _handle_request_error() on failure
-    ...
+                └─► Non-recoverable → call remove_stream(business_key)
 ```
 
 ### Centralized Error Routing
 
-`_handle_request_error()` routes errors based on request state:
+`_handle_request_error()` routes errors based on business key and request state:
 
 ```python
-def _handle_request_error(self, category, detail, reqId, message, ...):
-    # Determine recoverability from detail suffix
-    is_non_recoverable = detail.endswith("_NON_RECOVERABLE")
+def _handle_request_error(self, category, detail, tws_key, message, timestamp=None):
+    # Look up business_key and extract capability
+    business_key = next(
+        (bk for bk, tk in self._business_to_tws_key.items() if tk == tws_key),
+        "NOT_FOUND"
+    )
+    capability = business_key.split(":", 1)[0] or "shared"
 
     error = ProviderException(
         code=f"PROVIDER_TWS_{category}_{detail.upper()}",
-        message=f"[reqId={reqId}] {message}",
+        message=f"[{tws_key}] {message}",
         provider="tws",
-        capability=self._reqId_to_capability.pop(reqId, capability_fallback),
+        capability=capability,
+        timestamp=timestamp,
     )
 
-    # 1. Future exists → reject future with error
-    # 2. Stream exists + on_error → invoke error callback via call_soon_threadsafe
-    # 3. Neither → log as orphan error
-    # 4. Non-recoverable → cleanup via call_soon_threadsafe (safe from daemon thread)
+    # 1. Snapshot hooks → reject futures + schedule cleanup
+    # 2. Stream hooks → invoke on_error callbacks
+    # 3. Non-recoverable (_NON_RECOVERABLE suffix) → call remove_stream()
+    # 4. Neither → log as orphan error
 ```
 
-**Thread-Safe Cleanup:** Non-recoverable errors trigger cleanup via `loop.call_soon_threadsafe()`
-to safely remove stream entries from the daemon thread:
+**Thread-Safe Cleanup:** Non-recoverable errors trigger cleanup via `loop.call_soon_threadsafe()`:
 
 ```python
 # Daemon thread schedules cleanup in event loop
-self._loop.call_soon_threadsafe(self._pop_stream_req_id, stream_key)
-```
-
-### Capability Tracking
-
-Request IDs are mapped to capabilities for proper error routing:
-
-```python
-# On create_future() or register_stream()
-self._reqId_to_capability[reqId] = capability  # "datafeed", "broker", "shared"
-
-# On resolve/reject/unregister (or non-recoverable error)
-self._reqId_to_capability.pop(reqId, None)
+for stream_loop, _, on_error in stream_hooks:
+    stream_loop.call_soon_threadsafe(self.remove_stream, business_key)
+    break  # Only need to remove once
 ```
 
 ### Common TWS Error Codes

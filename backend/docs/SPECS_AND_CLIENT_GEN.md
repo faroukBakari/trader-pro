@@ -44,8 +44,8 @@ This unified command handles:
 
 **Per Module**:
 
-- `specs_generated/{module}_openapi.json` - REST API specification
-- `specs_generated/{module}_asyncapi.json` - WebSocket API specification (if WS routers exist)
+- `specs_generated/{module}_v{N}_openapi.json` - REST API specification (N = version number)
+- `specs_generated/{module}_v{N}_asyncapi.json` - WebSocket API specification (if WS routers exist)
 - `client_generated/{module}_client.py` - Python HTTP client
 
 **App Level**:
@@ -197,12 +197,12 @@ make generate [modules=<modules>] [output_dir=<path>]
 
 This unified command generates **all artifacts** for selected modules:
 
-| Artifact          | File Pattern             | Description                                             |
-| ----------------- | ------------------------ | ------------------------------------------------------- |
-| **OpenAPI Spec**  | `{module}_openapi.json`  | REST API specification with all endpoints and models    |
-| **AsyncAPI Spec** | `{module}_asyncapi.json` | WebSocket specification (only if module has WS routers) |
-| **Python Client** | `{module}_client.py`     | Type-safe async HTTP client using httpx                 |
-| **Client Index**  | `__init__.py`            | Global index exporting all available clients            |
+| Artifact          | File Pattern                  | Description                                             |
+| ----------------- | ----------------------------- | ------------------------------------------------------- |
+| **OpenAPI Spec**  | `{module}_v{N}_openapi.json`  | REST API specification with all endpoints and models    |
+| **AsyncAPI Spec** | `{module}_v{N}_asyncapi.json` | WebSocket specification (only if module has WS routers) |
+| **Python Client** | `{module}_client.py`          | Type-safe async HTTP client using httpx                 |
+| **Client Index**  | `__init__.py`                 | Global index exporting all available clients            |
 
 ---
 
@@ -232,7 +232,7 @@ make generate
 🔨 Generating for module: core
 ======================================================================
 📝 Creating new OpenAPI spec for 'core'
-✅ Updated OpenAPI spec: .../core/specs_generated/core_openapi.json
+✅ Updated OpenAPI spec: .../core/specs_generated/core_v1_openapi.json
 ✅ Generated Python client for 'core'
 ✅ Updated clients index: 3 clients
 
@@ -242,7 +242,7 @@ make generate
 🔄 OpenAPI spec changes detected for 'broker':
    • Added endpoints: /orders/{orderId}/brackets
    • Added models: PositionBrackets
-✅ Updated OpenAPI spec: .../broker/specs_generated/broker_openapi.json
+✅ Updated OpenAPI spec: .../broker/specs_generated/broker_v1_openapi.json
 ✅ Generated Python client for 'broker'
 📝 Creating new AsyncAPI spec for 'broker'
 ✅ Updated AsyncAPI spec: .../broker/specs_generated/broker_asyncapi.json
@@ -311,11 +311,11 @@ make generate output_dir=/tmp/specs
 ```
 /tmp/specs/
 ├── specs_generated/
-│   ├── core_openapi.json
-│   ├── broker_openapi.json
-│   ├── broker_asyncapi.json
-│   ├── datafeed_openapi.json
-│   └── datafeed_asyncapi.json
+│   ├── core_v1_openapi.json
+│   ├── broker_v1_openapi.json
+│   ├── broker_v1_asyncapi.json
+│   ├── datafeed_v1_openapi.json
+│   └── datafeed_v1_asyncapi.json
 └── client_generated/
     ├── core_client.py
     ├── broker_client.py
@@ -342,8 +342,8 @@ make generate modules=broker output_dir=/tmp/broker-specs
 ```
 /tmp/broker-specs/
 ├── specs_generated/
-│   ├── broker_openapi.json
-│   └── broker_asyncapi.json
+│   ├── broker_v1_openapi.json
+│   └── broker_v1_asyncapi.json
 └── client_generated/
     ├── broker_client.py
     └── __init__.py
@@ -417,8 +417,8 @@ make generate
 ```
 modules/broker/
 ├── specs_generated/      # Specs go here
-│   ├── broker_openapi.json
-│   └── broker_asyncapi.json
+│   ├── broker_v1_openapi.json
+│   └── broker_v1_asyncapi.json
 └── client_generated/     # Clients go here
     ├── broker_client.py
     └── __init__.py
@@ -429,9 +429,9 @@ modules/broker/
 ```
 /custom/path/
 ├── specs_generated/      # All module specs
-│   ├── core_openapi.json
-│   ├── broker_openapi.json
-│   └── datafeed_openapi.json
+│   ├── core_v1_openapi.json
+│   ├── broker_v1_openapi.json
+│   └── datafeed_v1_openapi.json
 └── client_generated/     # All module clients
     ├── core_client.py
     ├── broker_client.py
@@ -496,7 +496,7 @@ make generate modules=broker output_dir=/tmp/broker
    │  ├─ Extract: api_app.openapi()
    │  ├─ Compare with existing file
    │  ├─ Log differences if detected
-   │  ├─ Write: {module}_openapi.json (if changes)
+   │  ├─ Write: {module}_v{N}_openapi.json (if changes)
    │  └─ Skip if no changes
    │
    ├─ Generate Python HTTP client
@@ -511,7 +511,7 @@ make generate modules=broker output_dir=/tmp/broker
       ├─ Extract: ws_app.asyncapi()
       ├─ Compare with existing file
       ├─ Log differences if detected
-      ├─ Write: {module}_asyncapi.json (if changes)
+      ├─ Write: {module}_v{N}_asyncapi.json (if changes)
       └─ Skip if no changes
 
 4. Update Global Index
@@ -679,13 +679,13 @@ generate:
 - Exit code 1 returned to caller
 - Useful for CI/CD pipelines
 
-1. **OpenAPI Specification** (`specs_generated/{module}_openapi.json`)
+1. **OpenAPI Specification** (`specs_generated/{module}_v{N}_openapi.json`)
 
    - All REST endpoints with full request/response schemas
    - Shared models from `trading_api.models`
    - Tags and metadata
 
-2. **AsyncAPI Specification** (`specs_generated/{module}_asyncapi.json`)
+2. **AsyncAPI Specification** (`specs_generated/{module}_v{N}_asyncapi.json`)
 
    - WebSocket channels and operations
    - Message schemas (subscribe, unsubscribe, data streaming)
@@ -724,7 +724,7 @@ make generate modules=broker
 │  │  ├─ Extract: api_app.openapi()
 │  │  ├─ Compare with existing spec
 │  │  ├─ Log differences if detected
-│  │  └─ Write: broker_openapi.json
+│  │  └─ Write: broker_v1_openapi.json
 │  │
 │  ├─ Generate Python Client
 │  │  ├─ Parse OpenAPI spec
@@ -737,7 +737,7 @@ make generate modules=broker
 │     ├─ Extract: ws_app.asyncapi()
 │     ├─ Compare with existing spec
 │     ├─ Log differences if detected
-│     └─ Write: broker_asyncapi.json
+│     └─ Write: broker_v1_asyncapi.json
 │
 └─ 5. Index Update
    └─ Update src/trading_api/clients/__init__.py
@@ -864,7 +864,7 @@ grep -r "class Something" src/trading_api/models/
 # Error: SyntaxError in broker_client.py
 
 # Solution: Check OpenAPI spec validity
-cat modules/broker/specs_generated/broker_openapi.json | jq .
+cat modules/broker/specs_generated/broker_v1_openapi.json | jq .
 ```
 
 **Issue: Client not in index**
@@ -896,7 +896,7 @@ make list-modules
 
 ```bash
 # After generation
-ls modules/broker/specs_generated/     # broker_openapi.json, broker_asyncapi.json
+ls modules/broker/specs_generated/     # broker_v1_openapi.json, broker_v1_asyncapi.json
 ls modules/broker/client_generated/    # broker_client.py, __init__.py
 ```
 
@@ -1133,8 +1133,8 @@ modules/{module}/
 │       └── __init__.py          # WsRouterBase subclass with WsRouter[T,D] instances
 │
 ├── specs_generated/             # Generated specs
-│   ├── {module}_openapi.json   # REST API spec
-│   └── {module}_asyncapi.json  # WebSocket spec (if WS)
+│   ├── {module}_v{N}_openapi.json   # REST API spec (N = version)
+│   └── {module}_v{N}_asyncapi.json  # WebSocket spec (if WS)
 │
 ├── client_generated/            # Generated Python client
 │   ├── {module}_client.py      # Async HTTP client
@@ -1278,7 +1278,7 @@ make dev
 # Check OpenAPI spec validity
 poetry run python -c "
 import json
-with open('modules/{module}/specs_generated/{module}_openapi.json') as f:
+with open('modules/{module}/specs_generated/{module}_v1_openapi.json') as f:
     spec = json.load(f)
     print('Valid JSON')
 "
@@ -1300,7 +1300,7 @@ poetry run python scripts/module_codegen.py {module}
 
 ```bash
 # Delete existing spec
-rm modules/{module}/specs_generated/{module}_openapi.json
+rm modules/{module}/specs_generated/{module}_v1_openapi.json
 
 # Restart server
 make dev
@@ -1416,8 +1416,8 @@ make test        # All tests
 
 ```
 # Module-level outputs
-modules/{module}/specs_generated/{module}_openapi.json
-modules/{module}/specs_generated/{module}_asyncapi.json
+modules/{module}/specs_generated/{module}_v{N}_openapi.json
+modules/{module}/specs_generated/{module}_v{N}_asyncapi.json
 modules/{module}/client_generated/{module}_client.py
 
 # App-level merged specs (runtime)
@@ -1447,6 +1447,6 @@ ClientGenerationService.update_clients_index()
 
 ---
 
-**Last Updated**: November 30, 2025  
+**Last Updated**: January 2, 2026  
 **Maintainer**: Backend Team  
 **Status**: ✅ Production-ready

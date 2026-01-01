@@ -206,9 +206,9 @@ VITE_API_BASE_URL=http://localhost:8000
 
 ## Pages
 
-- **Home** (`/`) - Welcome page with basic information
-- **About** (`/about`) - Information about the application
-- **API Status** (`/api-status`) - Real-time monitoring of backend API status
+- **Login** (`/login`) - Google OAuth authentication page
+- **Chart** (`/chart`) - TradingView trading terminal with broker integration (redirects from `/`)
+- **Not Found** (`/404`) - Catch-all for invalid routes
 
 ### API Status Component
 
