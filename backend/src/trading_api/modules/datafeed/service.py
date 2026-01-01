@@ -97,7 +97,7 @@ class DatafeedService(WsRouteService):
         super().__init__(module_dir, providers=providers)
         self.configuration = DatafeedConfiguration()
         # Track provider subscription IDs for each topic (for cleanup)
-        self._topic_to_subscription_id: dict[str, str | list[str]] = {}
+        self._topic_to_subs: dict[str, list[str]] = {}
         self._last_bars: dict[str, Bar] = {}
 
     def get_configuration(self) -> DatafeedConfiguration:
@@ -133,7 +133,7 @@ class DatafeedService(WsRouteService):
             json.JSONDecodeError: If JSON params cannot be parsed
         """
 
-        if topic in self._topic_to_subscription_id:
+        if topic in self._topic_to_subs:
             raise ServiceException(
                 code="SERVICE_DATAFEED_TOPIC_EXISTS",
                 message=f"Topic already exists in DatafeedService: {topic}",
@@ -156,7 +156,7 @@ class DatafeedService(WsRouteService):
             recoverable = self._is_error_recoverable(exc)
             if not recoverable:
                 logger.error(f"Non-recoverable error on topic {topic} : {exc!r}")
-                self._topic_to_subscription_id.pop(topic, None)
+                self._topic_to_subs.pop(topic, None)
 
             retry_after_ms = _DEFAULT_RETRY_AFTER_MS if recoverable else None
             await topic_error(exc, recoverable, retry_after_ms)
@@ -178,7 +178,7 @@ class DatafeedService(WsRouteService):
             )
 
             # Track subscription ID for cleanup
-            self._topic_to_subscription_id[topic] = subscription_id
+            self._topic_to_subs[topic] = [subscription_id]
         elif topic_type == "quotes":
             # Parse the JSON params part / Validate model
             params_dict = json.loads(params_json)
@@ -204,14 +204,14 @@ class DatafeedService(WsRouteService):
             logger.info(f"creating new topic : {topic}")
 
             # Subscribe to market data for all symbols via provider (returns list of subscription IDs)
-            subscription_ids = self.datafeed_provider.subscribe_market_data(
-                ticker_names=all_symbols,
-                callback=topic_update,
-                on_error=on_provider_error,
-            )
-
-            # Track subscription IDs for cleanup (list for quotes, int for bars)
-            self._topic_to_subscription_id[topic] = subscription_ids
+            for symbol in all_symbols:
+                subscription_id = self.datafeed_provider.subscribe_market_data(
+                    ticker_name=symbol,
+                    callback=topic_update,
+                    on_error=on_provider_error,
+                )
+                # Track subscription IDs for cleanup (list for quotes, int for bars)
+                self._topic_to_subs.setdefault(topic, []).append(subscription_id)
         else:
             raise ServiceException(
                 code="SERVICE_DATAFEED_UNKNOWN_TOPIC_TYPE",
@@ -261,32 +261,34 @@ class DatafeedService(WsRouteService):
         logger.info(f"removing topic: {topic}")
 
         # Unsubscribe from provider if subscription exists
-        subscription_id = self._topic_to_subscription_id.pop(topic, None)
-        if subscription_id is not None:
+        subscription_ids = self._topic_to_subs.pop(topic, [])
+        if not subscription_ids:
+            logger.error(f"No subscription_id found for topic: {topic}")
+            return
+
+        remaining_subs = list(
+            set([sub for sublist in self._topic_to_subs.values() for sub in sublist])
+        )
+        subscription_ids = [
+            sub for sub in subscription_ids if sub not in remaining_subs
+        ]
+
+        for subscription_id in subscription_ids:
             # Determine topic type from topic string
             if ":" in topic:
                 topic_type = topic.split(":", 1)[0]
 
                 if topic_type == "bars":
-                    # Single subscription ID for bars (always int)
-                    assert isinstance(
-                        subscription_id, str
-                    ), "Expected str subscription ID for bars"
                     logger.info(
                         f"Unsubscribing from bars: subscription ID {subscription_id}"
                     )
                     self.datafeed_provider.unsubscribe_realtime_bars(subscription_id)
                 elif topic_type == "quotes":
                     # Multiple subscription IDs for quotes (one per symbol)
-                    assert isinstance(
-                        subscription_id, list
-                    ), "Expected list[str] subscription ID for quotes"
                     logger.info(
-                        f"Unsubscribing from quotes: subscription IDs {subscription_id}"
+                        f"Unsubscribing from quotes: subscription ID {subscription_id}"
                     )
                     self.datafeed_provider.unsubscribe_market_data(subscription_id)
-        else:
-            logger.error(f"No subscription_id found for topic: {topic}")
 
     async def search_symbols(
         self,

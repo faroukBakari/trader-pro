@@ -282,7 +282,10 @@ class TestIBSocketStreamManagement:
         reqId = running_ibsocket.create_stream(business_key, callback, on_error)
         tws_key = f"req_{reqId}"
 
-        loop, stored_callback, stored_on_error = running_ibsocket._stream_hooks[tws_key]
+        # _stream_hooks now stores a list of tuples to support multiple listeners
+        hooks = running_ibsocket._stream_hooks[tws_key]
+        assert len(hooks) == 1
+        loop, stored_callback, stored_on_error = hooks[0]
         assert stored_callback is callback
         assert stored_on_error is on_error
 
@@ -306,13 +309,15 @@ class TestIBSocketStreamManagement:
         reqId1 = running_ibsocket.create_stream(business_key, callback1, on_error)
         tws_key = f"req_{reqId1}"
 
-        # Second stream with same business_key should reuse
+        # Second stream with same business_key should add to listeners list
         reqId2 = running_ibsocket.create_stream(business_key, callback2, on_error)
 
         assert reqId2 is None  # No new reqId
-        # Callback should be updated
-        _, stored_callback, _ = running_ibsocket._stream_hooks[tws_key]
-        assert stored_callback is callback2
+        # Both callbacks should be in the hooks list
+        hooks = running_ibsocket._stream_hooks[tws_key]
+        assert len(hooks) == 2
+        assert hooks[0][1] is callback1
+        assert hooks[1][1] is callback2
 
     def test_remove_stream_cleans_up_all_tracking(
         self, running_ibsocket: IBSocket
@@ -526,12 +531,14 @@ class TestIBSocketErrorHandling:
         async def capture_error(error: ProviderException) -> None:
             errors_received.append(error)
 
-        # Update the on_error callback
-        running_ibsocket._stream_hooks[tws_key] = (
-            asyncio.get_event_loop(),
-            callback,
-            capture_error,
-        )
+        # Update the on_error callback (now a list of tuples)
+        running_ibsocket._stream_hooks[tws_key] = [
+            (
+                asyncio.get_event_loop(),
+                callback,
+                capture_error,
+            )
+        ]
 
         running_ibsocket._handle_request_error(
             category="API",
@@ -636,12 +643,14 @@ class TestIBSocketNotifyStream:
         )
         tws_key = f"req_{reqId}"
 
-        # Add stream hook (would normally reuse the same tws_key)
-        running_ibsocket._stream_hooks[tws_key] = (
-            asyncio.get_event_loop(),
-            callback,
-            on_error,
-        )
+        # Add stream hook (now a list of tuples)
+        running_ibsocket._stream_hooks[tws_key] = [
+            (
+                asyncio.get_event_loop(),
+                callback,
+                on_error,
+            )
+        ]
 
         # Update data
         running_ibsocket._update_stream_data(
@@ -993,12 +1002,14 @@ class TestIBSocketSnapshotEnd:
         assert reqId is not None, "Expected reqId from create_snapshot"
         tws_key = f"req_{reqId}"
 
-        # Register stream hook (simulates active subscription)
-        running_ibsocket._stream_hooks[tws_key] = (
-            asyncio.get_event_loop(),
-            callback,
-            on_error,
-        )
+        # Register stream hook (simulates active subscription, now a list of tuples)
+        running_ibsocket._stream_hooks[tws_key] = [
+            (
+                asyncio.get_event_loop(),
+                callback,
+                on_error,
+            )
+        ]
 
         # Add data and trigger snapshot end
         running_ibsocket._update_stream_data(tws_key, {"bid": 150.0, "ask": 150.5})

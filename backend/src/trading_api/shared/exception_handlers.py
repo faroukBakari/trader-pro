@@ -248,6 +248,13 @@ def _api_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     elif isinstance(exc, TradingApiException):
         api_exc = exc
         status_code = _get_status_code_from_code(api_exc.code)
+    elif isinstance(exc, TimeoutError):
+        api_exc = TradingApiException(
+            code="REQUEST_TIMEOUT",
+            message="Request timed out waiting for response",
+            backtrace=exc.__traceback__,
+        )
+        status_code = 408  # Request Timeout
     else:
         api_exc = TradingApiException(
             code="UNHANDLED_EXCEPTION",

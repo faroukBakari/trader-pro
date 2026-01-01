@@ -20,6 +20,7 @@ from ibapi.order import Order as TWSOrder
 from ibapi.order_state import OrderState
 
 from trading_api.models.broker import OrderStatus, OrderType, Side
+from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.order_tracker import OrderFill, TrackedOrder
 from trading_api.providers.tws.tws_mappers import (
     ORDER_TYPE_TO_TWS,
@@ -30,6 +31,7 @@ from trading_api.providers.tws.tws_mappers import (
     TWS_TO_ORDER_TYPE,
     contract_description_to_search_result,
     contract_details_to_symbol_info,
+    parse_tws_bar_date,
     preorder_to_tws,
     tracked_order_to_placed_order,
     tws_account_summary_to_account_info,
@@ -202,8 +204,9 @@ class TestContractDetailsMapper:
         result = contract_details_to_symbol_info(details)
 
         assert result.description == "TEST"  # Falls back to symbol
-        assert result.exchange == ""  # Uses primaryExchange (empty)
-        assert result.ticker == "TEST::STK"  # Composite format with empty exchange
+        assert result.exchange == ""  # exchange field uses only primaryExchange
+        # ticker uses primaryExchange or exchange fallback, so SMART is used
+        assert result.ticker == "TEST:SMART:STK"
         assert result.session == "0000-2359"  # Default session (24h fallback)
         assert result.timezone == "America/New_York"  # Default timezone
 
@@ -241,7 +244,8 @@ class TestContractDetailsMapper:
         assert result.name == "EUR"
         assert result.type == "forex"
         assert result.pricescale == 20000  # 1/0.00005
-        assert result.ticker == "EUR::CASH"  # Composite format, primaryExchange empty
+        # ticker_name uses primaryExchange or exchange, so IDEALPRO is used
+        assert result.ticker == "EUR:IDEALPRO:CASH"
 
     def test_futures_mapping(self) -> None:
         """Test mapping futures contract details."""
@@ -261,7 +265,8 @@ class TestContractDetailsMapper:
         assert result.name == "ES"
         assert result.type == "futures"
         assert result.pricescale == 4  # 1/0.25
-        assert result.ticker == "ES::FUT"  # Composite format, primaryExchange empty
+        # ticker_name uses primaryExchange or exchange, so CME is used
+        assert result.ticker == "ES:CME:FUT"
 
 
 class TestTwsBarMapper:
@@ -802,11 +807,10 @@ class TestPreorderToTws:
 
         contract, order = preorder_to_tws(preorder, "DU123456")
 
-        # Note: build_contract parses ticker but secType includes "-12345" suffix
-        # This is a quirk of parse_ticker not splitting on "-"
         assert contract.symbol == "AAPL"
-        assert contract.exchange == "NASDAQ"
-        assert contract.primaryExchange == "NASDAQ"
+        assert (
+            contract.primaryExchange == "NASDAQ"
+        )  # build_contract sets primaryExchange
 
         assert order.action == "BUY"
         assert order.totalQuantity == Decimal("100")
@@ -887,7 +891,9 @@ class TestPreorderToTws:
 
         assert contract.symbol == "EUR"
         assert contract.secType == "CASH"
-        assert contract.exchange == "IDEALPRO"
+        assert (
+            contract.primaryExchange == "IDEALPRO"
+        )  # build_contract sets primaryExchange
         assert order.orderType == "MKT"
 
     def test_futures_order(self) -> None:
@@ -906,7 +912,7 @@ class TestPreorderToTws:
 
         assert contract.symbol == "ES"
         assert contract.secType == "FUT"
-        assert contract.exchange == "CME"
+        assert contract.primaryExchange == "CME"  # build_contract sets primaryExchange
 
 
 class TestTrackedOrderToPlacedOrder:
@@ -1212,7 +1218,8 @@ class TestTwsPositionToDomain:
 
         result = tws_position_to_domain(position_data)
 
-        assert result.symbol == "EUR::CASH"  # Empty primaryExchange
+        # ticker_name uses primaryExchange or exchange, so IDEALPRO is used
+        assert result.symbol == "EUR:IDEALPRO:CASH"
         assert result.qty == 10000.0
         assert result.avgPrice == 1.0850
 
@@ -1362,3 +1369,62 @@ class TestTwsAccountSummaryToAccountInfo:
         result = tws_account_summary_to_account_info(summary_data, "DU123456")
 
         assert result.id == "DU123456"
+
+
+class TestParseTwsBarDate:
+    """Test parse_tws_bar_date function for various TWS date formats."""
+
+    def test_us_central_timezone(self) -> None:
+        """Test parsing US/Central timezone format (the bug case)."""
+        date_str = "20251229 08:30:00 US/Central"
+        result = parse_tws_bar_date(date_str)
+        # 2025-12-29 08:30:00 US/Central = 2025-12-29 14:30:00 UTC
+        assert result > 0
+        assert isinstance(result, int)
+
+    def test_us_eastern_timezone_two_spaces(self) -> None:
+        """Test parsing US/Eastern timezone with two spaces."""
+        date_str = "20251229  08:30:00 US/Eastern"
+        result = parse_tws_bar_date(date_str)
+        assert result > 0
+        assert isinstance(result, int)
+
+    def test_us_eastern_timezone_single_space(self) -> None:
+        """Test parsing US/Eastern timezone with single space."""
+        date_str = "20251229 08:30:00 US/Eastern"
+        result = parse_tws_bar_date(date_str)
+        assert result > 0
+        assert isinstance(result, int)
+
+    def test_utc_timezone(self) -> None:
+        """Test parsing UTC timezone format."""
+        date_str = "20251229 08:30:00 UTC"
+        result = parse_tws_bar_date(date_str)
+        assert result > 0
+        assert isinstance(result, int)
+
+    def test_daily_bar_date_only(self) -> None:
+        """Test parsing daily bar format (date only)."""
+        date_str = "20251229"
+        result = parse_tws_bar_date(date_str)
+        assert result > 0
+        assert isinstance(result, int)
+
+    def test_epoch_format(self) -> None:
+        """Test parsing epoch seconds format."""
+        date_str = "1735500600"  # Some epoch timestamp
+        result = parse_tws_bar_date(date_str)
+        assert result == 1735500600000  # Converted to milliseconds
+
+    def test_invalid_format_raises_exception(self) -> None:
+        """Test that invalid format raises ProviderException."""
+        date_str = "invalid-date-format"
+        with pytest.raises(ProviderException) as exc_info:
+            parse_tws_bar_date(date_str)
+        assert "PROVIDER_TWS_INVALID_DATE_FORMAT" in str(exc_info.value)
+
+    def test_whitespace_stripped(self) -> None:
+        """Test that leading/trailing whitespace is handled."""
+        date_str = "  20251229  "
+        result = parse_tws_bar_date(date_str)
+        assert result > 0

@@ -91,20 +91,20 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     def subscribe_market_data(
         self,
-        ticker_names: list[str],
+        ticker_name: str,
         callback: Callable[[QuoteData], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
-    ) -> list[str]:
+    ) -> str:
         return self._subscribe_market_data_mock(  # type: ignore[no-any-return]
-            ticker_names=ticker_names, callback=callback, **kwargs
+            ticker_name=ticker_name, callback=callback, **kwargs
         )
 
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         self._unsubscribe_realtime_bars_mock(subscription_id)
 
-    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
-        self._unsubscribe_market_data_mock(subscription_ids)
+    def unsubscribe_market_data(self, subscription_id: str) -> None:
+        self._unsubscribe_market_data_mock(subscription_id)
 
     async def get_quotes_snapshot(
         self,

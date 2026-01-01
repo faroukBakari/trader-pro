@@ -35,6 +35,45 @@ from trading_api.providers.tws import TWSDatafeedProvider
 from trading_api.providers.tws.tws_mappers import contract_description_to_search_result
 
 
+def _make_contract(
+    symbol: str = "AAPL",
+    sec_type: str = "STK",
+    exchange: str = "SMART",
+    primary_exchange: str = "NASDAQ",
+    con_id: int = 265598,
+) -> Contract:
+    """Helper to create a Contract with required fields."""
+    contract = Contract()
+    contract.symbol = symbol
+    contract.secType = sec_type
+    contract.exchange = exchange
+    contract.primaryExchange = primary_exchange
+    contract.conId = con_id
+    return contract
+
+
+def _setup_mock_client_with_contracts(
+    mock_client: Mock, ticker: str = "AAPL:NASDAQ:STK"
+) -> None:
+    """Setup mock_client.get_qualified_contracts to return valid contracts.
+
+    This is needed because the implementation now calls get_qualified_contracts
+    which must return an iterable of Contract objects.
+    """
+    parts = ticker.split(":")
+    symbol = parts[0] if len(parts) > 0 else "AAPL"
+    exchange = parts[1] if len(parts) > 1 else "NASDAQ"
+    sec_type = parts[2].split("-")[0] if len(parts) > 2 else "STK"
+
+    contract = _make_contract(
+        symbol=symbol,
+        sec_type=sec_type,
+        exchange="SMART",
+        primary_exchange=exchange,
+    )
+    mock_client.get_qualified_contracts = Mock(return_value=[contract])
+
+
 class TestProviderInitialization:
     """Test TWSDatafeedProvider initialization and configuration."""
 
@@ -229,6 +268,7 @@ class TestGetSymbolInfo:
         contract.primaryExchange = "NASDAQ"
         contract.localSymbol = "MSFT"
         contract.currency = "USD"
+        contract.conId = 272093  # Required for filter check
 
         details = ContractDetails()
         details.contract = contract
@@ -240,6 +280,7 @@ class TestGetSymbolInfo:
         # Mock TWSClient.reqContractDetails to return our test data
         mock_client = Mock()
         mock_client.reqContractDetails = AsyncMock(return_value=[details])
+        _setup_mock_client_with_contracts(mock_client, "MSFT:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -270,8 +311,11 @@ class TestGetSymbolInfo:
         contract = Contract()
         contract.symbol = "AAPL"
         contract.secType = "STK"
-        contract.exchange = "NASDAQ"
+        contract.exchange = (
+            "SMART"  # Must be SMART for STK with primaryExchange in SMART_EXCHANGES
+        )
         contract.primaryExchange = "NASDAQ"
+        contract.conId = 265598  # Required for filter check
 
         details = ContractDetails()
         details.contract = contract
@@ -280,6 +324,7 @@ class TestGetSymbolInfo:
 
         mock_client = Mock()
         mock_client.reqContractDetails = AsyncMock(return_value=[details])
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -298,6 +343,7 @@ class TestGetSymbolInfo:
         """Test get_symbol_info raises ProviderException when symbol not found."""
         mock_client = Mock()
         mock_client.reqContractDetails = AsyncMock(return_value=[])
+        _setup_mock_client_with_contracts(mock_client, "NONEXISTENT:SMART:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -315,7 +361,10 @@ class TestGetSymbolInfo:
         # TWS may return multiple contract details for ambiguous queries
         contract1 = Contract()
         contract1.symbol = "AAPL"
+        contract1.secType = "STK"
+        contract1.exchange = "SMART"
         contract1.primaryExchange = "NASDAQ"
+        contract1.conId = 265598  # Required for filter check
         details1 = ContractDetails()
         details1.contract = contract1
         details1.longName = "Apple Inc NASDAQ"
@@ -323,7 +372,10 @@ class TestGetSymbolInfo:
 
         contract2 = Contract()
         contract2.symbol = "AAPL"
+        contract2.secType = "STK"
+        contract2.exchange = "SMART"
         contract2.primaryExchange = "NYSE"
+        contract2.conId = 265599  # Required for filter check
         details2 = ContractDetails()
         details2.contract = contract2
         details2.longName = "Apple Inc NYSE"
@@ -331,6 +383,7 @@ class TestGetSymbolInfo:
 
         mock_client = Mock()
         mock_client.reqContractDetails = AsyncMock(return_value=[details1, details2])
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -372,6 +425,7 @@ class TestGetHistoricalBars:
 
         mock_client = Mock()
         mock_client.reqHistoricalData = AsyncMock(return_value=[bar1, bar2])
+        _setup_mock_client_with_contracts(mock_client, "AAPL:ARCA:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -400,6 +454,7 @@ class TestGetHistoricalBars:
         """Test get_historical_bars maps timeframe to TWS bar size."""
         mock_client = Mock()
         mock_client.reqHistoricalData = AsyncMock(return_value=[])
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -428,6 +483,7 @@ class TestGetHistoricalBars:
         """Test get_historical_bars passes exchange to contract."""
         mock_client = Mock()
         mock_client.reqHistoricalData = AsyncMock(return_value=[])
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -462,7 +518,12 @@ class TestGetQuotesSnapshot:
         based on ticker names without actual market data.
         """
         mock_client = AsyncMock()
-        mock_client.reqQuoteSnapshot.return_value = {}
+        # Return proper business_key for each call
+        mock_client.reqQuoteSnapshot.side_effect = [
+            {"business_key": "datafeed:Quote:NASDAQ:AAPL:NASDAQ:STK-12345"},
+            {"business_key": "datafeed:Quote:NASDAQ:MSFT:NASDAQ:STK-67890"},
+        ]
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -481,7 +542,10 @@ class TestGetQuotesSnapshot:
     async def test_get_quotes_snapshot_single_symbol(self) -> None:
         """Test get_quotes_snapshot with single symbol."""
         mock_client = AsyncMock()
-        mock_client.reqQuoteSnapshot.return_value = {}
+        mock_client.reqQuoteSnapshot.return_value = {
+            "business_key": "datafeed:Quote:NASDAQ:AAPL:NASDAQ:STK-12345"
+        }
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -501,6 +565,7 @@ class TestGetQuotesSnapshot:
         mock_client.reqQuoteSnapshot.return_value = {
             "business_key": "datafeed:Quote:NASDAQ:AAPL:NASDAQ:STK-12345"
         }
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -522,6 +587,7 @@ class TestSubscriptionMethods:
 
         mock_client = Mock()
         mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -542,18 +608,13 @@ class TestSubscriptionMethods:
             assert isinstance(sub_id, str)
             mock_client.reqBarDataStream.assert_called_once()
 
-    def test_subscribe_market_data_returns_subscription_ids(self) -> None:
-        """Test subscribe_market_data returns list of subscription IDs."""
+    def test_subscribe_market_data_returns_subscription_id(self) -> None:
+        """Test subscribe_market_data returns a single subscription ID."""
         from trading_api.models.exceptions import TradingApiException
 
         mock_client = Mock()
-        mock_client.reqMktDataStream = Mock(
-            side_effect=[
-                "AAPL:NASDAQ:STK-12345",
-                "MSFT:NASDAQ:STK-67890",
-                "GOOGL:NASDAQ:STK-99999",
-            ]
-        )
+        mock_client.reqMktDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345")
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -567,19 +628,15 @@ class TestSubscriptionMethods:
             async def on_error(exc: TradingApiException) -> None:
                 pass
 
-            sub_ids = provider.subscribe_market_data(
-                [
-                    "AAPL:NASDAQ:STK-12345",
-                    "MSFT:NASDAQ:STK-67890",
-                    "GOOGL:NASDAQ:STK-99999",
-                ],
+            sub_id = provider.subscribe_market_data(
+                "AAPL:NASDAQ:STK-12345",
                 quote_callback,
                 on_error,
             )
 
-            assert isinstance(sub_ids, list)
-            assert len(sub_ids) == 3
-            assert mock_client.reqMktDataStream.call_count == 3
+            assert isinstance(sub_id, str)
+            assert sub_id == "AAPL:NASDAQ:STK-12345"
+            mock_client.reqMktDataStream.assert_called_once()
 
     def test_unsubscribe_realtime_bars_calls_cancel(self) -> None:
         """Test unsubscribe_realtime_bars calls cancelBarDataStream."""
@@ -588,6 +645,7 @@ class TestSubscriptionMethods:
         mock_client = Mock()
         mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
         mock_client.cancelBarDataStream = Mock()
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -618,6 +676,7 @@ class TestSubscriptionMethods:
         mock_client = Mock()
         mock_client.reqMktDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345")
         mock_client.cancelMktDataStream = Mock()
+        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -631,10 +690,11 @@ class TestSubscriptionMethods:
             async def on_error(exc: TradingApiException) -> None:
                 pass
 
-            sub_ids = provider.subscribe_market_data(
-                ["AAPL:NASDAQ:STK-12345"], quote_callback, on_error
+            sub_id = provider.subscribe_market_data(
+                "AAPL:NASDAQ:STK-12345", quote_callback, on_error
             )
 
-            provider.unsubscribe_market_data(sub_ids)
+            provider.unsubscribe_market_data(sub_id)
 
-            mock_client.cancelMktDataStream.assert_called_once_with(sub_ids[0])
+            mock_client.cancelMktDataStream.assert_called_once_with(sub_id)
+            mock_client.cancelMktDataStream.assert_called_once_with(sub_id)

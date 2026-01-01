@@ -215,28 +215,24 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     def subscribe_market_data(
         self,
-        ticker_names: list[str],
+        ticker_name: str,
         callback: Callable[[QuoteData], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
-    ) -> list[str]:
+    ) -> str:
         """Subscribe to market data (mock - no actual streaming)."""
-        sub_ids: list[str] = []
-        for ticker_name in ticker_names:
-            sub_id = str(self._next_sub_id)
-            self._next_sub_id += 1
-            self._subscriptions[sub_id] = ticker_name
-            sub_ids.append(sub_id)
-        return sub_ids
+        sub_id = str(self._next_sub_id)
+        self._next_sub_id += 1
+        self._subscriptions[sub_id] = ticker_name
+        return sub_id
 
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         """Unsubscribe from realtime bars."""
         self._subscriptions.pop(subscription_id, None)
 
-    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
+    def unsubscribe_market_data(self, subscription_id: str) -> None:
         """Unsubscribe from market data."""
-        for sub_id in subscription_ids:
-            self._subscriptions.pop(sub_id, None)
+        self._subscriptions.pop(subscription_id, None)
 
 
 # ============================================================================

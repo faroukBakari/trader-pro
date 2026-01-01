@@ -87,17 +87,17 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     def subscribe_market_data(
         self,
-        ticker_names: list[str],
+        ticker_name: str,
         callback: Callable[[QuoteData], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
-    ) -> list[str]:
-        return []
+    ) -> str:
+        return "sub_0"
 
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         pass
 
-    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
+    def unsubscribe_market_data(self, subscription_id: str) -> None:
         pass
 
 

@@ -112,11 +112,14 @@ class TestTWSClientReqMatchingSymbols:
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
+        mock_ibsocket.get_cached_data.return_value = None  # No cache hit
 
         # Create test response
         contract = Contract()
         contract.symbol = "AAPL"
         contract.exchange = "SMART"
+        contract.secType = "STK"
+        contract.conId = 265598  # Valid conId required by filter
         desc = ContractDescription()
         desc.contract = contract
 
@@ -153,6 +156,7 @@ class TestTWSClientReqMatchingSymbols:
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
+        mock_ibsocket.get_cached_data.return_value = None  # No cache hit
 
         # Setup create_snapshot mock
         def create_snapshot_side_effect(
@@ -178,6 +182,141 @@ class TestTWSClientReqMatchingSymbols:
         # Verify reqMatchingSymbols was called with correct args
         mock_ibsocket.reqMatchingSymbols.assert_called_once_with(42, "MSFT")
 
+    @pytest.mark.asyncio
+    async def test_req_matching_symbols_cache_hit_returns_cached_data(self) -> None:
+        """Test reqMatchingSymbols returns cached data when available."""
+        client = TWSClient("127.0.0.1", 7497, 1, timeout=5.0)
+
+        # Create mock ibsocket
+        mock_ibsocket = MagicMock()
+        mock_ibsocket.running = True
+
+        # Create cached response
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.exchange = "SMART"
+        contract.secType = "STK"
+        contract.conId = 265598
+        desc = ContractDescription()
+        desc.contract = contract
+
+        # Mock cache hit
+        mock_ibsocket.get_cached_data.return_value = [{"contractDescriptions": desc}]
+
+        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        result = await client.reqMatchingSymbols("AAPL")
+
+        assert len(result) == 1
+        assert result[0].contract.symbol == "AAPL"
+        # create_snapshot should NOT be called on cache hit
+        mock_ibsocket.create_snapshot.assert_not_called()
+        mock_ibsocket.reqMatchingSymbols.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_req_matching_symbols_populates_contracts_cache(self) -> None:
+        """Test reqMatchingSymbols populates __contracts_cache after API call."""
+        client = TWSClient("127.0.0.1", 7497, 1, timeout=5.0)
+
+        # Create mock ibsocket
+        mock_ibsocket = MagicMock()
+        mock_ibsocket.running = True
+        mock_ibsocket.get_cached_data.return_value = None  # No cache hit
+
+        # Create test response
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.exchange = "SMART"
+        contract.secType = "STK"
+        contract.conId = 265598
+        desc = ContractDescription()
+        desc.contract = contract
+
+        # Setup create_snapshot mock
+        def create_snapshot_side_effect(
+            business_key: str, *, timeout: float | None = 5
+        ) -> tuple[int | None, Awaitable[Any]]:
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
+
+            async def resolve() -> None:
+                await asyncio.sleep(0.01)
+                future.set_result([{"contractDescriptions": desc}])
+
+            asyncio.create_task(resolve())
+            return (1, asyncio.wait_for(future, timeout))
+
+        mock_ibsocket.create_snapshot = create_snapshot_side_effect
+        mock_ibsocket.reqMatchingSymbols = MagicMock()
+
+        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        await client.reqMatchingSymbols("AAPL")
+
+        # Verify contracts cache was populated
+        contracts_cache = client._TWSClient__contracts_cache  # type: ignore[attr-defined]
+        assert 265598 in contracts_cache
+        cached = contracts_cache[265598]
+        assert cached.contract.symbol == "AAPL"
+        assert cached.has_full_details is False  # Partial from description
+
+    @pytest.mark.asyncio
+    async def test_req_matching_symbols_filters_invalid_conids(self) -> None:
+        """Test reqMatchingSymbols filters out contracts with conId <= 0."""
+        client = TWSClient("127.0.0.1", 7497, 1, timeout=5.0)
+
+        # Create mock ibsocket
+        mock_ibsocket = MagicMock()
+        mock_ibsocket.running = True
+        mock_ibsocket.get_cached_data.return_value = None
+
+        # Create contracts - one valid, one invalid
+        valid_contract = Contract()
+        valid_contract.symbol = "AAPL"
+        valid_contract.exchange = "SMART"
+        valid_contract.secType = "STK"
+        valid_contract.conId = 265598
+        valid_desc = ContractDescription()
+        valid_desc.contract = valid_contract
+
+        invalid_contract = Contract()
+        invalid_contract.symbol = "INVALID"
+        invalid_contract.exchange = "SMART"
+        invalid_contract.secType = "STK"
+        invalid_contract.conId = 0  # Invalid
+        invalid_desc = ContractDescription()
+        invalid_desc.contract = invalid_contract
+
+        # Setup create_snapshot mock
+        def create_snapshot_side_effect(
+            business_key: str, *, timeout: float | None = 5
+        ) -> tuple[int | None, Awaitable[Any]]:
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
+
+            async def resolve() -> None:
+                await asyncio.sleep(0.01)
+                future.set_result(
+                    [
+                        {"contractDescriptions": valid_desc},
+                        {"contractDescriptions": invalid_desc},
+                    ]
+                )
+
+            asyncio.create_task(resolve())
+            return (1, asyncio.wait_for(future, timeout))
+
+        mock_ibsocket.create_snapshot = create_snapshot_side_effect
+        mock_ibsocket.reqMatchingSymbols = MagicMock()
+
+        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        result = await client.reqMatchingSymbols("AAPL")
+
+        # Only valid contract should be returned
+        assert len(result) == 1
+        assert result[0].contract.conId == 265598
+
 
 class TestTWSClientReqContractDetails:
     """Test reqContractDetails async method."""
@@ -190,10 +329,14 @@ class TestTWSClientReqContractDetails:
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
+        mock_ibsocket.get_cached_data.return_value = None  # No cache hit
 
         # Create test response
         contract = Contract()
         contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.conId = 265598
         details = ContractDetails()
         details.contract = contract
         details.longName = "Apple Inc"
@@ -227,6 +370,187 @@ class TestTWSClientReqContractDetails:
         assert len(result) == 1
         assert result[0].longName == "Apple Inc"
         mock_ibsocket.reqContractDetails.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_req_contract_details_cache_hit_returns_cached_data(self) -> None:
+        """Test reqContractDetails returns cached data when available (ibsocket level)."""
+        client = TWSClient("127.0.0.1", 7497, 1)
+
+        # Create mock ibsocket
+        mock_ibsocket = MagicMock()
+        mock_ibsocket.running = True
+
+        # Create cached response
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.conId = 265598
+        details = ContractDetails()
+        details.contract = contract
+        details.longName = "Apple Inc (Cached)"
+
+        # Mock ibsocket cache hit
+        mock_ibsocket.get_cached_data.return_value = [{"contractDetails": details}]
+
+        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        query_contract = Contract()
+        query_contract.symbol = "AAPL"
+        query_contract.secType = "STK"
+        query_contract.exchange = "SMART"
+
+        result = await client.reqContractDetails(query_contract)
+
+        assert len(result) == 1
+        assert result[0].longName == "Apple Inc (Cached)"
+        # create_snapshot should NOT be called on cache hit
+        mock_ibsocket.create_snapshot.assert_not_called()
+        mock_ibsocket.reqContractDetails.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_req_contract_details_uses_contracts_cache(self) -> None:
+        """Test reqContractDetails returns from __contracts_cache when has_full_details=True."""
+        from trading_api.providers.tws.cached_contract import CachedContract
+
+        client = TWSClient("127.0.0.1", 7497, 1)
+
+        # Create mock ibsocket
+        mock_ibsocket = MagicMock()
+        mock_ibsocket.running = True
+
+        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        # Pre-populate contracts cache with full details
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "SMART"  # Match query contract's exchange
+        contract.conId = 265598
+        details = ContractDetails()
+        details.contract = contract
+        details.longName = "Apple Inc (From Cache)"
+
+        cached_contract = CachedContract.from_contract_details(details)
+        client._TWSClient__contracts_cache[265598] = cached_contract  # type: ignore[attr-defined]
+
+        # Query with matching ticker (AAPL:SMART:STK)
+        query_contract = Contract()
+        query_contract.symbol = "AAPL"
+        query_contract.secType = "STK"
+        query_contract.exchange = "SMART"
+
+        result = await client.reqContractDetails(query_contract)
+
+        assert len(result) == 1
+        assert result[0].longName == "Apple Inc (From Cache)"
+        # Neither ibsocket cache nor API should be called
+        mock_ibsocket.get_cached_data.assert_not_called()
+        mock_ibsocket.create_snapshot.assert_not_called()
+
+
+class TestTWSClientGetQualifiedContracts:
+    """Test get_qualified_contracts cache lookup method."""
+
+    def test_cache_hit_returns_cached_contracts(self) -> None:
+        """Test get_qualified_contracts returns contracts from cache."""
+        from trading_api.providers.tws.cached_contract import CachedContract
+
+        client = TWSClient("127.0.0.1", 7497, 1)
+
+        # Pre-populate contracts cache
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+        contract.conId = 265598
+        details = ContractDetails()
+        details.contract = contract
+
+        cached_contract = CachedContract.from_contract_details(details)
+        client._TWSClient__contracts_cache[265598] = cached_contract  # type: ignore[attr-defined]
+
+        result = client.get_qualified_contracts("AAPL:NASDAQ:STK")
+
+        assert len(result) == 1
+        assert result[0].symbol == "AAPL"
+        assert result[0].conId == 265598
+
+    def test_cache_miss_returns_unqualified_contracts(self) -> None:
+        """Test get_qualified_contracts builds fallback contracts on cache miss."""
+        client = TWSClient("127.0.0.1", 7497, 1)
+
+        # Empty cache
+        result = client.get_qualified_contracts("AAPL:NASDAQ:STK")
+
+        assert len(result) == 1
+        assert result[0].symbol == "AAPL"
+        assert result[0].secType == "STK"
+        assert result[0].primaryExchange == "NASDAQ"
+        assert result[0].conId == 0  # Not qualified
+
+    def test_cache_hit_fallback_when_exchange_not_matched(self) -> None:
+        """Test get_qualified_contracts falls back to cached when no exchange matches.
+
+        When cached data exists but none match the preferred exchange,
+        the implementation falls back to returning cached data rather than
+        building unqualified contracts.
+        """
+        from trading_api.providers.tws.cached_contract import CachedContract
+
+        client = TWSClient("127.0.0.1", 7497, 1)
+
+        # Pre-populate cache with SMART exchange
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+        contract.conId = 265598
+        details = ContractDetails()
+        details.contract = contract
+
+        cached_contract = CachedContract.from_contract_details(details)
+        client._TWSClient__contracts_cache[265598] = cached_contract  # type: ignore[attr-defined]
+
+        # Request with non-matching exchange - falls back to cached data
+        result = client.get_qualified_contracts(
+            "AAPL:NASDAQ:STK", preferred_exchanges=["NYSE"]
+        )
+
+        # Falls back to cached contract when no exchange matches
+        assert len(result) == 1
+        assert result[0].exchange == "SMART"  # Uses cached exchange
+        assert result[0].conId == 265598  # From cache
+
+    def test_cache_hit_with_matching_exchange(self) -> None:
+        """Test get_qualified_contracts returns cached when exchange matches."""
+        from trading_api.providers.tws.cached_contract import CachedContract
+
+        client = TWSClient("127.0.0.1", 7497, 1)
+
+        # Pre-populate cache with SMART exchange
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+        contract.conId = 265598
+        details = ContractDetails()
+        details.contract = contract
+
+        cached_contract = CachedContract.from_contract_details(details)
+        client._TWSClient__contracts_cache[265598] = cached_contract  # type: ignore[attr-defined]
+
+        # Request with matching exchange
+        result = client.get_qualified_contracts(
+            "AAPL:NASDAQ:STK", preferred_exchanges=["SMART"]
+        )
+
+        assert len(result) == 1
+        assert result[0].conId == 265598  # From cache
 
 
 class TestTWSClientReqHistoricalData:
@@ -281,6 +605,7 @@ class TestTWSClientReqHistoricalData:
         contract = Contract()
         contract.symbol = "AAPL"
         contract.secType = "STK"
+        contract.exchange = "SMART"
 
         result = await client.reqHistoricalData(
             contract=contract,
@@ -346,6 +671,7 @@ class TestTWSClientStreamMethods:
         contract = Contract()
         contract.symbol = "AAPL"
         contract.secType = "STK"
+        contract.exchange = "SMART"
 
         async def callback(data: dict[str, Any], fields: list[str]) -> None:
             pass
@@ -377,6 +703,7 @@ class TestTWSClientStreamMethods:
         contract = Contract()
         contract.symbol = "AAPL"
         contract.secType = "STK"
+        contract.exchange = "SMART"
 
         async def callback(data: dict[str, Any], fields: list[str]) -> None:
             pass
@@ -410,6 +737,7 @@ class TestTWSClientStreamMethods:
         contract = Contract()
         contract.symbol = "AAPL"
         contract.secType = "STK"
+        contract.exchange = "SMART"
 
         async def callback(data: dict[str, Any], fields: list[str]) -> None:
             pass
@@ -437,6 +765,7 @@ class TestTWSClientErrorHandling:
         # Create mock ibsocket
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
+        mock_ibsocket.get_cached_data.return_value = None  # No cache hit
 
         # Setup create_snapshot that returns a future that never resolves
         def create_snapshot_side_effect(
