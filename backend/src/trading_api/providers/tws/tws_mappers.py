@@ -5,15 +5,18 @@ Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.ticktype import TickTypeEnum
 
 from trading_api.models.broker import AccountMetainfo
+from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import (
     Bar,
     QuoteData,
@@ -72,7 +75,24 @@ def get_tick_type_name(tick_type: int) -> str:
 
 
 def ticker_name(contract: Contract, bar_size: str | None = None) -> str:
-    ticker = contract.symbol + ":" + contract.primaryExchange + ":" + contract.secType
+    if not (
+        contract.symbol
+        and contract.secType
+        and (contract.primaryExchange or contract.exchange)
+    ):
+        raise ProviderException(
+            code="TWS_PROVIDER_INVALID_CONTRACT",
+            message=f"Invalid contract for ticker generation: {contract}",
+            provider="tws",
+            capability="shared",
+        )
+    ticker = (
+        contract.symbol
+        + ":"
+        + (contract.primaryExchange or contract.exchange)
+        + ":"
+        + contract.secType
+    )
     if bar_size:
         ticker += "@" + bar_size
     return ticker
@@ -94,6 +114,13 @@ def contract_description_to_search_result(
     description = contract.description or f"{contract.symbol} ({contract.secType})"
     exchange = contract.primaryExchange or contract.exchange
     type = SEC_TYPE_MAP.get(contract.secType, "stock")
+    if not (symbol and exchange and contract.secType):
+        raise ProviderException(
+            code="TWS_PROVIDER_INVALID_TICKER",
+            message=f"Invalid contract description: {desc}",
+            provider="tws",
+            capability="shared",
+        )
     ticker = symbol + ":" + exchange + ":" + contract.secType
     return SearchSymbolResultItem(
         symbol=contract.symbol,
@@ -184,7 +211,13 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
         type=symbol_type,
         session=_convert_tws_trading_hours_to_session(details.tradingHours),
         timezone=_normalize_timezone(details.timeZoneId),
-        ticker=(symbol + ":" + contract.primaryExchange + ":" + contract.secType),
+        ticker=(
+            symbol
+            + ":"
+            + (contract.primaryExchange or contract.exchange)
+            + ":"
+            + contract.secType
+        ),
         exchange=contract.primaryExchange,
         listed_exchange=contract.primaryExchange,
         format="price",
@@ -198,12 +231,15 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     )
 
 
+# Regex: "YYYYMMDD<1-2 spaces>HH:MM:SS <timezone>"
+_TWS_DATE_TZ_PATTERN = re.compile(r"^(\d{8})\s{1,2}(\d{2}:\d{2}:\d{2})\s+(.+)$")
+
+
 def parse_tws_bar_date(date_str: str) -> int:
     """Parse TWS bar date string to milliseconds timestamp.
 
-    Handles multiple TWS date formats:
-    - "yyyyMMdd  HH:mm:ss US/Eastern" (two spaces, timezone)
-    - "yyyyMMdd HH:mm:ss UTC" (single space, UTC)
+    Handles multiple TWS date formats dynamically:
+    - "yyyyMMdd  HH:mm:ss <timezone>" (1-2 spaces, any timezone like US/Eastern, US/Central, UTC)
     - "yyyyMMdd" (daily bars, date only)
     - epoch string (if formatDate=2 was used)
 
@@ -212,29 +248,35 @@ def parse_tws_bar_date(date_str: str) -> int:
 
     Returns:
         Timestamp in milliseconds
+
+    Raises:
+        ProviderException: If date format is unrecognized
     """
     date_str = date_str.strip()
-    time_ms: int = 0
 
-    # Try datetime with timezone (two spaces)
-    try:
-        dt = datetime.strptime(date_str, "%Y%m%d  %H:%M:%S US/Eastern")
-        time_ms = int(dt.timestamp() * 1000)
-    except ValueError:
-        # Try single space UTC format
-        try:
-            dt = datetime.strptime(date_str, "%Y%m%d %H:%M:%S UTC")
-            time_ms = int(dt.timestamp() * 1000)
-        except ValueError:
-            # Try daily bar format (date only, no time)
-            try:
-                dt = datetime.strptime(date_str, "%Y%m%d")
-                time_ms = int(dt.timestamp() * 1000)
-            except ValueError:
-                # Fall back to epoch format (if formatDate=2 was used)
-                time_ms = int(date_str) * 1000
+    # 1. Try datetime with timezone (US/Eastern, US/Central, UTC, etc.)
+    if match := _TWS_DATE_TZ_PATTERN.match(date_str):
+        date_part, time_part, tz_name = match.groups()
+        dt_naive = datetime.strptime(f"{date_part} {time_part}", "%Y%m%d %H:%M:%S")
+        dt = dt_naive.replace(tzinfo=ZoneInfo(tz_name))
+        return int(dt.timestamp() * 1000)
 
-    return time_ms
+    # 2. Try daily bar format (date only, 8 digits)
+    if len(date_str) == 8 and date_str.isdigit():
+        dt = datetime.strptime(date_str, "%Y%m%d")
+        return int(dt.timestamp() * 1000)
+
+    # 3. Try epoch format (formatDate=2)
+    if date_str.isdigit():
+        return int(date_str) * 1000
+
+    # 4. Unrecognized format
+    raise ProviderException(
+        provider="tws",
+        capability="datafeed",
+        code="PROVIDER_TWS_INVALID_DATE_FORMAT",
+        message=f"Cannot parse TWS bar date: '{date_str}'",
+    )
 
 
 def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
@@ -362,9 +404,9 @@ def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
 def parse_ticker(ticker: str) -> tuple[str, str, str, str]:
     """Parse ticker string into components.
     Args:
-        ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE-CONTRACTID"
+        ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE"
     Returns:
-        Tuple of (symbol_name, exchange, secType, contractId, bar_size)
+        Tuple of (symbol_name, exchange, secType, bar_size)
     Examples:
         >>> self.parse_ticker('AAPL:NASDAQ:STK@1D')
         ('AAPL', 'NASDAQ', 'STK', '1D')
@@ -384,12 +426,19 @@ def parse_ticker(ticker: str) -> tuple[str, str, str, str]:
         secType = ticker_parts[0].strip()
         if len(ticker_parts) > 1:
             bar_size = ticker_parts[1].strip()
+
+    if not (symbol_name and exchange and secType):
+        raise ProviderException(
+            code="TWS_PROVIDER_INVALID_TICKER",
+            message=f"Invalid ticker format: {ticker}",
+            provider="tws",
+            capability="shared",
+        )
     return symbol_name, exchange, secType, bar_size
 
 
 def build_contract(
     ticker: str,
-    currency: str = "USD",
 ) -> Contract:
     """Build TWS Contract object from domain parameters.
 
@@ -400,16 +449,11 @@ def build_contract(
     Returns:
         TWS Contract object ready for API calls
     """
-    symbol, exchange, sec_type, _ = parse_ticker(ticker)
+    symbol, primaryExchange, sec_type, _ = parse_ticker(ticker)
     contract = Contract()
     contract.symbol = symbol
     contract.secType = sec_type
-    contract.primaryExchange = exchange
-
-    # TODO: need to rely on the broker reponse and cache data.
-    # Use the cache to figure out primaryExchange and other details.
-    contract.exchange = exchange
-    contract.currency = currency
+    contract.primaryExchange = primaryExchange
     return contract
 
 
@@ -700,6 +744,13 @@ def tws_position_to_domain(position_data: dict[str, Any]) -> "Position":
         sym = position_data.get("symbol", "")
         exc = position_data.get("exchange", "")
         sec = position_data.get("secType", "STK")
+        if not (sym and exc and sec):
+            raise ProviderException(
+                code="TWS_PROVIDER_INVALID_TICKER",
+                message=f"Invalid ticker format: {sym}:{exc}:{sec}",
+                provider="tws",
+                capability="broker",
+            )
         symbol = f"{sym}:{exc}:{sec}"
 
     # Determine side from position sign

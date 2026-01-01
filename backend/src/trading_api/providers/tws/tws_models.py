@@ -7,10 +7,7 @@ Handles all TickTypeEnum values with proper typing.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    pass
+from typing import Any
 
 # =============================================================================
 # Bar Size Constants
@@ -667,6 +664,7 @@ _FATAL_CODES: frozenset[int] = frozenset(
 _NOT_FOUND_CODES: frozenset[int] = frozenset(
     {
         135,  # Can't find order with ID
+        162,  # HMDS query returned no data (valid empty response)
         300,  # Can't find ticker ID
         366,  # No historical data query found
         365,  # No scanner subscription found

@@ -30,13 +30,14 @@ import struct
 import threading
 import time
 from collections.abc import Awaitable, Callable, Coroutine
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from itertools import count
 from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
-from typing import Any
+from typing import Any, ClassVar
 
 from ibapi.common import BarData, TickAttrib
 from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
@@ -48,7 +49,8 @@ from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
 
 from trading_api.models.exceptions import ProviderException
-from trading_api.providers.tws.tws_mappers import ticker_name
+from trading_api.providers.tws.cached_contract import CachedContract
+from trading_api.providers.tws.tws_mappers import build_contract, ticker_name
 from trading_api.providers.tws.tws_models import (
     TICK_TYPE_TO_FIELD,
     StreamData,
@@ -66,6 +68,7 @@ DEBUG_TWS_NOTIFY = os.environ.get("DEBUG_TWS_NOTIFY") == "true"
 DEBUG_TWS_SHARED = os.environ.get("DEBUG_TWS_SHARED") == "true"
 DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
 DEBUG_TWS_BROKER = os.environ.get("DEBUG_TWS_BROKER") == "true"
+DEBUG_TWS_CACHE = os.environ.get("DEBUG_TWS_CACHE") == "true"
 
 NO_VALID_ID = -1
 MIN_CLIENT_VER = 100
@@ -197,13 +200,15 @@ class IBSocket(EWrapper):
         # )
         self._stream_hooks: dict[
             str,
-            tuple[
-                asyncio.AbstractEventLoop,
-                Callable[
-                    [dict[str, Any], list[str]],
-                    Coroutine[Any, Any, None],
-                ],
-                Callable[[ProviderException], Coroutine[Any, Any, None]],
+            list[
+                tuple[
+                    asyncio.AbstractEventLoop,
+                    Callable[
+                        [dict[str, Any], list[str]],
+                        Coroutine[Any, Any, None],
+                    ],
+                    Callable[[ProviderException], Coroutine[Any, Any, None]],
+                ]
             ],
         ] = {}
 
@@ -419,12 +424,8 @@ class IBSocket(EWrapper):
         )
 
         # 1. Check for pending _snapshot_hooks
-        snapshot_hook = self._snapshot_hooks.get(tws_key, [])
-        for snapshot_loop, future in snapshot_hook:
-            if tws_key in self._snapshot_hooks:
-                snapshot_loop.call_soon_threadsafe(
-                    self._snapshot_hooks.pop, tws_key, None
-                )
+        snapshot_hooks = self._snapshot_hooks.get(tws_key, [])
+        for snapshot_loop, future in snapshot_hooks:
 
             def safe_set_exception(future: asyncio.Future, error: Exception) -> None:
                 if not future.done():
@@ -432,23 +433,25 @@ class IBSocket(EWrapper):
 
             snapshot_loop.call_soon_threadsafe(safe_set_exception, future, error)
 
+        for snapshot_loop, _ in snapshot_hooks:
+            snapshot_loop.call_soon_threadsafe(self._clean_snapshot, business_key)
+            break  # Only need to clean once
+
         # 2. Check for active stream
-        stream_hook = self._stream_hooks.get(tws_key)
-        if stream_hook is not None:
-            stream_loop, _, on_error = stream_hook
+        stream_hooks = self._stream_hooks.get(tws_key, [])
+        for stream_loop, _, on_error in stream_hooks:
             stream_loop.call_soon_threadsafe(
                 stream_loop.create_task,
                 on_error(error),
             )
-            stream = self._stream_data.get(tws_key)
-            if stream and error.code.endswith("_NON_RECOVERABLE"):
-                if stream is not None:
-                    stream_loop.call_soon_threadsafe(
-                        self.remove_stream, stream.business_key
-                    )
+
+        if error.code.endswith("_NON_RECOVERABLE"):
+            for stream_loop, _, on_error in stream_hooks:
+                stream_loop.call_soon_threadsafe(self.remove_stream, business_key)
+                break  # Only need to remove once
 
         # 3. Orphan error - log warning
-        if snapshot_hook and stream_hook is None:
+        if not snapshot_hooks and not stream_hooks:
             logger.error("Orphan TWS error for reqId %s", tws_key)
             logger.exception(error)
 
@@ -586,12 +589,33 @@ class IBSocket(EWrapper):
         """Get cached stream data for a business key, if available."""
         return self._stream_data.get(business_key)
 
+    async def _timeout_wrapper(
+        self,
+        tws_key: str,
+        business_key: str,
+        future: asyncio.Future[StreamData],
+        timeout: float | None,
+    ) -> StreamData:
+        """Await snapshot with automatic cleanup on timeout."""
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except TimeoutError:
+            snapshot_hooks = self._snapshot_hooks.get(tws_key, [])
+            current_hook = next(
+                iter([hook for hook in snapshot_hooks if hook[1] == future]), None
+            )
+            if current_hook is not None:
+                snapshot_hooks.remove(current_hook)
+            if not snapshot_hooks:
+                self._clean_snapshot(business_key)
+            raise
+
     def create_snapshot(
         self,
         business_key: str,
         *,
         timeout: float | None = 5,
-    ) -> tuple[int | None, Awaitable[StreamData]]:
+    ) -> tuple[int | None, Coroutine[Any, Any, StreamData]]:
         assert re.match(
             r"^(shared|datafeed|broker):", business_key
         ), "ticker_name must start with capability prefix."
@@ -604,11 +628,6 @@ class IBSocket(EWrapper):
             tws_key = f"req_{reqId}"
             self._business_to_tws_key[business_key] = tws_key
 
-        loop = asyncio.get_event_loop()
-        future: asyncio.Future[Any] = loop.create_future()
-
-        self._snapshot_hooks.setdefault(tws_key, []).append((loop, future))
-
         stream = self._stream_data.setdefault(
             tws_key,
             self._stream_data.pop(
@@ -620,10 +639,15 @@ class IBSocket(EWrapper):
                 ),
             ),
         )
+
+        loop = asyncio.get_event_loop()
+        future: asyncio.Future[Any] = loop.create_future()
+
+        self._snapshot_hooks.setdefault(tws_key, []).append((loop, future))
         if stream.snapshot_complete:
             future.set_result(stream)
 
-        return reqId, asyncio.wait_for(future, timeout)
+        return reqId, self._timeout_wrapper(tws_key, business_key, future, timeout)
 
     def create_stream(
         self,
@@ -665,29 +689,55 @@ class IBSocket(EWrapper):
             )
 
         # main thread ownership
-        self._stream_hooks[tws_key] = (
-            asyncio.get_event_loop(),
-            callback,
-            on_error,
+        self._stream_hooks.setdefault(tws_key, []).append(
+            (
+                asyncio.get_event_loop(),
+                callback,
+                on_error,
+            )
         )
-
         return reqId
 
-    def remove_stream(self, business_key: str) -> None:
-        tws_key = self._business_to_tws_key.pop(business_key, None)
+    def _clean_snapshot(self, business_key: str) -> None:
+        tws_key = self._business_to_tws_key.get(business_key)
         if tws_key is None:
             return
+        self._snapshot_hooks.pop(tws_key, None)
+
+        def stream_cleanup(tws_key: str, business_key: str) -> None:
+            if tws_key not in self._stream_hooks:
+                debug_log(
+                    f"_resolve_snapshots::cleanup : no stream listeners => canceling "
+                    f"[{tws_key} | {business_key}]"
+                )
+                self.remove_stream(business_key)
+
+        asyncio.get_event_loop().call_later(11, stream_cleanup, tws_key, business_key)
+
+    def remove_stream(self, business_key: str) -> None:
+        tws_key = self._business_to_tws_key.get(business_key)
+        if tws_key is None:
+            return
+
+        self._stream_hooks.pop(tws_key, None)
+
+        if tws_key in self._snapshot_hooks:
+            debug_log(
+                f"remove_stream: snapshot hooks still pending for "
+                f"[{tws_key} | {business_key}] => not removing stream data."
+            )
+            return
+
+        self._business_to_tws_key.pop(business_key, None)
+        stream = self._stream_data.pop(tws_key, None)
+        if stream is not None:
+            stream.snapshot_complete = False
+            self._stream_data[business_key] = stream
+
         cleanup = self._cleanup_hooks.pop(tws_key, None)
         if cleanup is not None:
             loop, cleanup_func = cleanup
             loop.call_soon_threadsafe(cleanup_func)
-
-        self._stream_hooks.pop(tws_key, None)
-        self._business_to_tws_key.pop(tws_key, None)
-        stream = self._stream_data.pop(tws_key, None)
-        if stream is not None:
-            stream.snapshot_complete = False
-            self._stream_data[stream.business_key] = stream
 
     # === Stream management ===
 
@@ -729,43 +779,28 @@ class IBSocket(EWrapper):
 
             loop.call_soon_threadsafe(set_result, stream)
 
-        assert loop and isinstance(
-            loop, asyncio.AbstractEventLoop
-        ), "Event loop should be set if snapshot_hooks exist."
-        loop.call_soon_threadsafe(self._snapshot_hooks.pop, tws_key, None)
-
         stream.last_dispatched = int(time.time() * 1000)
 
-        def cleanup(tws_key: str) -> None:
-            stream = self._stream_data.get(tws_key)
-            if stream is not None and (
-                (int(time.time() * 1000)) - stream.last_dispatched > self.stale_delay_ms
-            ):
-                # No stream hook registered - snapshot only
-                debug_log(
-                    f"_resolve_snapshots::cleanup : no stream listeners => canceling "
-                    f"[{tws_key} | {stream.business_key}]"
-                )
-                self.remove_stream(stream.business_key)
-
-        loop.call_later(11, loop.call_soon_threadsafe, cleanup, tws_key)
+        for loop, future in snapshot_hooks:
+            loop.call_soon_threadsafe(self._clean_snapshot, stream.business_key)
+            break  # Only need to clean once
 
     def _dispatch_update(self, tws_key: str, stream: StreamData) -> None:
-        stream_hook = self._stream_hooks.get(tws_key)
-        if stream_hook is None:
+        stream_hooks = self._stream_hooks.get(tws_key)
+        if stream_hooks is None:
             return
 
-        stream_loop, stream_callback, _ = stream_hook
-        if DEBUG_TWS_DISPATCH:
-            debug_log(
-                f"_dispatch_update [{tws_key} | {stream.business_key}]"
-                + f" with fields: {stream.updated_fields}"
-            )
+        for stream_loop, stream_callback, _ in stream_hooks:
+            if DEBUG_TWS_DISPATCH:
+                debug_log(
+                    f"_dispatch_update [{tws_key} | {stream.business_key}]"
+                    + f" with fields: {stream.updated_fields}"
+                )
 
-        stream_loop.call_soon_threadsafe(
-            stream_loop.create_task,
-            stream_callback(stream[-1], stream.updated_fields),
-        )
+            stream_loop.call_soon_threadsafe(
+                stream_loop.create_task,
+                stream_callback(stream[-1], stream.updated_fields),
+            )
 
         stream.last_dispatched = int(time.time() * 1000)
 
@@ -866,10 +901,22 @@ class IBSocket(EWrapper):
     # ================================================
 
     def reqMatchingSymbols(self, reqId: int, pattern: str) -> None:
+        assert (
+            isinstance(reqId, int) and reqId >= 0
+        ), "reqId must be a non-negative integer."
+        assert (
+            isinstance(pattern, str) and pattern
+        ), "Pattern must be a non-empty string."
         self.send_message(OUT.REQ_MATCHING_SYMBOLS, [reqId, pattern])
         debug_log(f"requested symbolSamples for reqId {reqId} and pattern '{pattern}'")
 
     def reqContractDetails(self, reqId: int, contract: Contract) -> None:
+        assert (
+            isinstance(reqId, int) and reqId >= 0
+        ), "reqId must be a non-negative integer."
+        assert (
+            isinstance(contract, Contract) and contract.symbol and contract.secType
+        ), "contract must be an instance of Contract with a non-empty symbol and secType."
         VERSION = 8
         fields: list[object] = [
             VERSION,
@@ -908,6 +955,12 @@ class IBSocket(EWrapper):
         useRTH: int,
         format_date: int,
     ) -> None:
+        assert (
+            isinstance(reqId, int) and reqId >= 0
+        ), "reqId must be a non-negative integer."
+        assert (
+            isinstance(contract, Contract) and contract.conId != 0
+        ), "contract must be an instance of Contract with a non-zero conId."
         asset_config = get_asset_config(contract.secType)
         whatToShow = asset_config.what_to_show_live
 
@@ -937,7 +990,7 @@ class IBSocket(EWrapper):
             [],  # chartOptions (empty list)
         ]
 
-        def cleanup() -> None:
+        def cancelation_task() -> None:
             VERSION = 1
             self.send_message(OUT.CANCEL_HISTORICAL_DATA, [VERSION, reqId])
             if DEBUG_TWS_REQUEST:
@@ -947,7 +1000,10 @@ class IBSocket(EWrapper):
                     f"end_date_time='{end_date_time}', duration='{duration_str}', barSize='{bar_size}'"
                 )
 
-        self._cleanup_hooks[f"req_{reqId}"] = (asyncio.get_event_loop(), cleanup)
+        self._cleanup_hooks[f"req_{reqId}"] = (
+            asyncio.get_event_loop(),
+            cancelation_task,
+        )
 
         self.send_message(OUT.REQ_HISTORICAL_DATA, fields)
         if DEBUG_TWS_REQUEST:
@@ -958,6 +1014,12 @@ class IBSocket(EWrapper):
             )
 
     def reqQuote(self, reqId: int, contract: Contract) -> None:
+        assert (
+            isinstance(reqId, int) and reqId >= 0
+        ), "reqId must be a non-negative integer."
+        assert (
+            isinstance(contract, Contract) and contract.conId != 0
+        ), "contract must be an instance of Contract with a non-zero conId."
         VERSION = 11
         # Build message fields for REQ_MKT_DATA
         mkt_data_fields: list[object] = [
@@ -984,7 +1046,7 @@ class IBSocket(EWrapper):
             [],  # mktDataOptions (empty list)
         ]
 
-        def cleanup() -> None:
+        def cancelation_task() -> None:
             VERSION = 2
             self.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
             if DEBUG_TWS_REQUEST:
@@ -992,7 +1054,10 @@ class IBSocket(EWrapper):
                     f"canceled quote data for reqId {reqId} symbol='{contract.symbol}'"
                 )
 
-        self._cleanup_hooks[f"req_{reqId}"] = (asyncio.get_event_loop(), cleanup)
+        self._cleanup_hooks[f"req_{reqId}"] = (
+            asyncio.get_event_loop(),
+            cancelation_task,
+        )
 
         self.send_message(OUT.REQ_MKT_DATA, mkt_data_fields)
         if DEBUG_TWS_REQUEST:
@@ -1254,6 +1319,8 @@ class IBSocket(EWrapper):
 
 
 class TWSClient:
+    _sync_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=1)
+
     def __init__(
         self,
         host: str,
@@ -1270,8 +1337,10 @@ class TWSClient:
         self._port = port
         self._client_id = client_id
         self._timeout = timeout
-
         self.__ibsocket = IBSocket()
+
+        # conId => CachedContract
+        self.__contracts_cache: dict[int, CachedContract] = {}
 
     @property
     def ibsocket(self) -> IBSocket:
@@ -1291,9 +1360,32 @@ class TWSClient:
     async def reqMatchingSymbols(
         self, pattern: str, timeout: float | None = None
     ) -> list[ContractDescription]:
+        """Search for matching symbols by pattern.
+
+        Uses cache-first strategy: results are cached by conId, and subsequent
+        searches populate the cache for reuse by reqContractDetails.
+
+        Args:
+            pattern: Symbol search pattern (e.g., "AAPL", "MSFT")
+            timeout: Optional timeout override
+
+        Returns:
+            List of ContractDescription matching the pattern
+        """
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, ContractDescription]]]
+        descriptions: list[ContractDescription]
         business_key = f"shared:reqMatchingSymbols:{pattern}"
+
+        data = self.ibsocket.get_cached_data(business_key)
+        if data is not None:
+            if DEBUG_TWS_CACHE:
+                debug_log(
+                    f"reqMatchingSymbols cache hit for pattern '{pattern}' "
+                    f"with {len(data)} items"
+                )
+            descriptions = [item["contractDescriptions"] for item in data]
+            return [desc for desc in descriptions if desc.contract.conId > 0]
 
         reqId, coroutine = self.ibsocket.create_snapshot(
             business_key,
@@ -1304,14 +1396,62 @@ class TWSClient:
             self.ibsocket.reqMatchingSymbols(reqId, pattern)
 
         data = await coroutine
-        return [item["contractDescriptions"] for item in data]
+        descriptions = [item["contractDescriptions"] for item in data]
+        descriptions = [desc for desc in descriptions if desc.contract.conId > 0]
+
+        # Cache results by conId for future lookups
+        for desc in descriptions:
+            con_id = desc.contract.conId
+            if con_id not in self.__contracts_cache:
+                self.__contracts_cache[
+                    con_id
+                ] = CachedContract.from_contract_description(desc)
+
+        return descriptions
 
     async def reqContractDetails(
         self, contract: Contract, timeout: float | None = None
     ) -> list[ContractDetails]:
+        """Get full contract details.
+
+        Uses cache-first strategy:
+        - If cached with full details, returns immediately
+        - Otherwise fetches from TWS and updates cache
+
+        Args:
+            contract: The contract to get details for (must have conId)
+            timeout: Optional timeout override
+
+        Returns:
+            List of ContractDetails (usually 1, but can be multiple for ambiguous contracts)
+        """
+
+        ticker = ticker_name(contract)
+
+        cached = [
+            con
+            for con in self.__contracts_cache.values()
+            if con.has_full_details and con.matches(ticker)
+        ]
+
+        # Cache hit with full details - return immediately
+        if cached:
+            if DEBUG_TWS_CACHE:
+                debug_log(
+                    f"reqContractDetails cache hit for conId {contract.conId} => ({ticker})"
+                )
+            return [con.to_contract_details() for con in cached if con.has_full_details]
+
+        # Cache miss or partial - fetch from TWS
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, ContractDetails]]]
-        business_key = f"shared:reqContractDetails:{ticker_name(contract)}"
+        details_list: list[ContractDetails]
+        business_key = f"shared:reqContractDetails:{ticker}"
+
+        data = self.ibsocket.get_cached_data(business_key)
+        if data is not None:
+            details_list = [item["contractDetails"] for item in data]
+            return details_list
 
         reqId, coroutine = self.ibsocket.create_snapshot(
             business_key,
@@ -1322,7 +1462,55 @@ class TWSClient:
             self.ibsocket.reqContractDetails(reqId, contract)
 
         data = await coroutine
-        return [item["contractDetails"] for item in data]
+        details_list = [item["contractDetails"] for item in data]
+
+        # Update cache with full details
+        for details in details_list:
+            if details.contract.conId > 0 and details.contract.exchange:
+                detail_con_id = details.contract.conId
+                if detail_con_id in self.__contracts_cache:
+                    # Update existing partial cache entry
+                    self.__contracts_cache[detail_con_id].update_from_details(details)
+                else:
+                    # Create new cache entry with full details
+                    self.__contracts_cache[
+                        detail_con_id
+                    ] = CachedContract.from_contract_details(details)
+
+        return details_list
+
+    def get_qualified_contracts(
+        self, ticker: str, preferred_exchanges: list[str] = [""]
+    ) -> list[Contract]:
+        if not preferred_exchanges:
+            preferred_exchanges = [""]
+
+        cached = [con for con in self.__contracts_cache.values() if con.matches(ticker)]
+
+        if cached and preferred_exchanges and preferred_exchanges != [""]:
+            cached = [
+                con for con in cached if con.contract.exchange in preferred_exchanges
+            ] or cached
+
+        # Cache hit with full details - return immediately
+        if cached:
+            if DEBUG_TWS_CACHE:
+                debug_log(f"reqContractDetails cache hit for ticker {ticker}")
+            return [con.contract for con in cached]
+
+        contracts: list[Contract] = []
+        for exchange in preferred_exchanges:
+            contract = build_contract(ticker)
+            contract.exchange = exchange
+            contracts.append(contract)
+
+        if DEBUG_TWS_CACHE:
+            debug_log(
+                f"reqContractDetails cache miss for ticker {ticker} => "
+                f"returning unqualified contracts: {[ticker_name(c) for c in contracts]}"
+            )
+
+        return contracts
 
     async def reqHistoricalData(
         self,

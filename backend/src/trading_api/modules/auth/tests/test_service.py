@@ -336,12 +336,12 @@ class TestAuthServiceTokenExpiration:
     """Tests for token expiration handling"""
 
     @pytest.mark.asyncio
-    async def test_access_token_expires_in_5_minutes(
+    async def test_access_token_expires_per_configured_minutes(
         self,
         auth_service: AuthService,
         mock_google_claims: dict[str, Any],
     ) -> None:
-        """Test that access token expires in 5 minutes"""
+        """Test that access token expires according to configured ACCESS_TOKEN_EXPIRE_MINUTES"""
         device_info = DeviceInfoFactory.build()
 
         with patch.object(
@@ -363,6 +363,10 @@ class TestAuthServiceTokenExpiration:
         now = datetime.now(timezone.utc)
         time_diff = (exp_time - now).total_seconds()
 
-        assert 290 <= time_diff <= 310
-
-        assert 290 <= time_diff <= 310
+        expected_seconds = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        tolerance = 10  # seconds
+        assert (
+            (expected_seconds - tolerance)
+            <= time_diff
+            <= (expected_seconds + tolerance)
+        )

@@ -16,7 +16,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Coroutine
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
@@ -38,7 +38,6 @@ from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.shared import Provider
 
 from .tws_mappers import (
-    build_contract,
     calculate_tws_duration,
     contract_description_to_search_result,
     contract_details_to_symbol_info,
@@ -55,7 +54,7 @@ us_eastern = ZoneInfo("US/Eastern")
 DEBUG_TWS_PROVIDER = os.environ.get("DEBUG_TWS_PROVIDER") == "true"
 debug_log = logger.info
 
-SMART_EXCHANGES = {"SMART", "NYSE", "NASDAQ"}
+SMART_EXCHANGES = {"SMART", "OVERNIGHT", "NYSE", "NASDAQ"}
 
 
 class SubStream:
@@ -139,7 +138,9 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         """
         result = await self._tws_client.reqMatchingSymbols(pattern, **kwargs)
 
-        return [contract_description_to_search_result(cd) for cd in result]
+        return [
+            contract_description_to_search_result(cd) for cd in result
+        ]  # Map to domain models
 
     async def get_symbol_info(
         self,
@@ -163,29 +164,28 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             ProviderException: If symbol not found or request fails
         """
 
-        # Build TWS Contract for the request
-        symbol, exchange, _, _ = parse_ticker(ticker_name)
-        contract = build_contract(ticker_name)
-
-        if contract.primaryExchange in SMART_EXCHANGES:
-            now_us_eastern = datetime.now(us_eastern)
-            smart_exchange = (
-                "OVERNIGHT"
-                if (
-                    now_us_eastern.weekday() < 5
-                    and (
-                        now_us_eastern.time()
-                        >= datetime.strptime("20:00:00", "%H:%M:%S").time()
-                        or now_us_eastern.time()
-                        < datetime.strptime("4:00:00", "%H:%M:%S").time()
-                    )
+        now_us_eastern = datetime.now(us_eastern)
+        smart_exchange = (
+            "OVERNIGHT"
+            if (
+                now_us_eastern.weekday() < 5
+                and (
+                    now_us_eastern.time()
+                    >= datetime.strptime("20:00:00", "%H:%M:%S").time()
+                    or now_us_eastern.time()
+                    < datetime.strptime("4:00:00", "%H:%M:%S").time()
                 )
-                else "SMART"
             )
-        else:
-            smart_exchange = contract.primaryExchange
+            else "SMART"
+        )
 
-        contract.exchange = smart_exchange
+        contract = next(
+            iter(
+                self._tws_client.get_qualified_contracts(
+                    ticker_name, preferred_exchanges=[smart_exchange]
+                )
+            )
+        )
 
         # Get contract details via TWSClient (returns list)
         contract_details_list = await self._tws_client.reqContractDetails(
@@ -200,9 +200,31 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
                 capability="datafeed",
             )
 
+        filtred = [
+            cd
+            for cd in contract_details_list
+            if (
+                cd.contract.conId > 0
+                and cd.contract.exchange
+                and (
+                    cd.contract.secType != "STK"
+                    or cd.contract.primaryExchange not in SMART_EXCHANGES
+                    or cd.contract.exchange in ["SMART", "OVERNIGHT"]
+                )
+            )
+        ]
+
+        if not filtred:
+            raise ProviderException(
+                code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
+                message=f"Symbol not found: {ticker_name}",
+                provider="tws",
+                capability="datafeed",
+            )
+
         # Use first match (most common case is single result)
         # FIXME: could improve by matching exchange if multiple results
-        return contract_details_to_symbol_info(contract_details_list[0])
+        return contract_details_to_symbol_info(next(iter(filtred)))
 
     async def get_historical_bars(
         self,
@@ -237,23 +259,21 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         bar_size = map_resolution_to_tws_bar_size(resolution)
         duration_str = calculate_tws_duration(start_time, end_time, resolution)
 
-        # Format datetime with timezone (TWS requires explicit timezone)
-        # Convert to UTC if naive, otherwise use existing timezone
-        if end_time.tzinfo is None:
-            end_time_tz = end_time.astimezone()
-        end_time_tz = end_time.astimezone(ZoneInfo("US/Eastern"))
+        # Format datetime in UTC (works universally for all exchanges)
+        # TWS accepts: "yyyymmdd hh:mm:ss UTC" format
+        end_time_utc = end_time.astimezone(timezone.utc)
+        now_utc = datetime.now(timezone.utc)
 
-        # Format: yyyymmdd-hh:mm:ss UTC (note hyphen separator and timezone suffix)
-        if end_time_tz > datetime.now().astimezone(ZoneInfo("US/Eastern")):
+        if end_time_utc > now_utc:
             end_dt_str = ""
         else:
-            end_dt_str = end_time_tz.strftime("%Y%m%d %H:%M:%S US/Eastern")
+            end_dt_str = end_time_utc.strftime("%Y%m%d %H:%M:%S UTC")
 
         tws_bars: list[dict[str, Any]] = []
 
-        contract = build_contract(ticker_name)
-        exchanges = [contract.primaryExchange]
-        if contract.primaryExchange in SMART_EXCHANGES and resolution in [
+        _, primary_exchange, _, _ = parse_ticker(ticker_name)
+        exchanges = [""]
+        if primary_exchange in SMART_EXCHANGES and resolution in [
             Resolution.MIN_1,
             Resolution.MIN_5,
             Resolution.MIN_15,
@@ -262,17 +282,33 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             Resolution.HOUR_2,
             Resolution.HOUR_4,
         ]:
-            exchanges.append("OVERNIGHT")
-        for exch in exchanges:
-            contract.exchange = exch
-            bars = await self._tws_client.reqHistoricalData(
-                contract,
-                end_dt_str,
-                duration_str,
-                bar_size,
-                **kwargs,
-            )
-            tws_bars.extend(bars)
+            exchanges = ["SMART", "OVERNIGHT"]
+
+        contracts = self._tws_client.get_qualified_contracts(
+            ticker_name, preferred_exchanges=exchanges
+        )
+        for contract in contracts:
+            if not contract.exchange:
+                raise ProviderException(
+                    code="PROVIDER_DATAFEED_INVALID_SYMBOL",
+                    message=f"Invalid symbol or exchange for ticker: {ticker_name}",
+                    provider="tws",
+                    capability="datafeed",
+                )
+            try:
+                bars = await self._tws_client.reqHistoricalData(
+                    contract,
+                    end_dt_str,
+                    duration_str,
+                    bar_size,
+                    **kwargs,
+                )
+                tws_bars.extend(bars)
+            except ProviderException as e:
+                # Error 162: "HMDS query returned no data" - valid empty response
+                if "_INFO_162" in e.code:
+                    continue
+                raise
 
         # Convert TWS BarData → domain Bar
         domain_bars = [tws_ticks_to_bar(bar) for bar in tws_bars]
@@ -318,12 +354,25 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
 
         contracts: list[Contract] = []
         for ticker_name in ticker_names:
-            contract = build_contract(ticker_name)
-            if contract.primaryExchange in SMART_EXCHANGES:
-                contract.exchange = smart_exchange
+            _, primary_exchange, _, _ = parse_ticker(ticker_name)
+            exchange = smart_exchange if primary_exchange in SMART_EXCHANGES else ""
+            contract = next(
+                iter(
+                    self._tws_client.get_qualified_contracts(
+                        ticker_name, preferred_exchanges=[exchange]
+                    )
+                )
+            )
+            if not contract.exchange:
+                raise ProviderException(
+                    code="PROVIDER_DATAFEED_INVALID_SYMBOL",
+                    message=f"Invalid symbol or exchange for ticker: {ticker_name}",
+                    provider="tws",
+                    capability="datafeed",
+                )
             contracts.append(contract)
             logger.info(
-                f"Getting quotes snapshot for ticker: {ticker_name} for exchange: {contract.exchange}"
+                f"Getting quotes snapshot for ticker: {ticker_name} for exchange: <{exchange}>"
             )
 
         nb_retreis = 2
@@ -387,29 +436,45 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
                 )
             await callback(tws_ticks_to_bar(rt_data))
 
-        contract = build_contract(ticker_name)
-        if contract.primaryExchange in SMART_EXCHANGES and resolution in [
-            Resolution.MIN_1,
-            Resolution.MIN_5,
-            Resolution.MIN_15,
-            Resolution.MIN_30,
-            Resolution.HOUR_1,
-            Resolution.HOUR_2,
-            Resolution.HOUR_4,
-        ]:
-            now_us_eastern = datetime.now(us_eastern)
-            contract.exchange = (
-                "OVERNIGHT"
-                if (
-                    now_us_eastern.weekday() < 5
-                    and (
-                        now_us_eastern.time()
-                        >= datetime.strptime("20:00:00", "%H:%M:%S").time()
-                        or now_us_eastern.time()
-                        < datetime.strptime("4:00:00", "%H:%M:%S").time()
-                    )
+        now_us_eastern = datetime.now(us_eastern)
+        smart_exchange = (
+            "OVERNIGHT"
+            if (
+                now_us_eastern.weekday() < 5
+                and (
+                    now_us_eastern.time()
+                    >= datetime.strptime("20:00:00", "%H:%M:%S").time()
+                    or now_us_eastern.time()
+                    < datetime.strptime("4:00:00", "%H:%M:%S").time()
                 )
-                else "SMART"
+                and resolution
+                in [
+                    Resolution.MIN_1,
+                    Resolution.MIN_5,
+                    Resolution.MIN_15,
+                    Resolution.MIN_30,
+                    Resolution.HOUR_1,
+                    Resolution.HOUR_2,
+                    Resolution.HOUR_4,
+                ]
+            )
+            else "SMART"
+        )
+        _, primary_exchange, _, _ = parse_ticker(ticker_name)
+        exchange = smart_exchange if primary_exchange in SMART_EXCHANGES else ""
+        contract = next(
+            iter(
+                self._tws_client.get_qualified_contracts(
+                    ticker_name, preferred_exchanges=[exchange]
+                )
+            )
+        )
+        if not contract.exchange:
+            raise ProviderException(
+                code="PROVIDER_DATAFEED_INVALID_SYMBOL",
+                message=f"Invalid symbol or exchange for ticker: {ticker_name}",
+                provider="tws",
+                capability="datafeed",
             )
         return self._tws_client.reqBarDataStream(
             contract,
@@ -421,11 +486,11 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
 
     def subscribe_market_data(
         self,
-        ticker_names: list[str],
+        ticker_name: str,
         callback: Callable[[QuoteData], Coroutine[Any, Any, None]],
         on_error: Callable[[TradingApiException], Coroutine[Any, Any, None]],
         **kwargs: Any,
-    ) -> list[str]:
+    ) -> str:
         """Subscribe to real-time market data.
 
         Args:
@@ -448,36 +513,48 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             if fields is not None and any(f in {"bid", "ask", "last"} for f in fields):
                 if DEBUG_TWS_PROVIDER:
                     debug_log(
-                        f"Received market data update for {rt_data.get('ticker_name', 'UNKNOWN')}"
+                        f"Received market data update for {rt_data.get('business_key', 'UNKNOWN')}"
                         f" with fields: {fields}"
                     )
                 await callback(tws_ticks_to_quote_data(rt_data))
 
-        sub_ids = []
-        for ticker_name in ticker_names:
-            contract = build_contract(ticker_name)
-            if contract.primaryExchange in SMART_EXCHANGES:
-                now_us_eastern = datetime.now(us_eastern)
-                contract.exchange = (
-                    "OVERNIGHT"
-                    if (
-                        now_us_eastern.weekday() < 5
-                        and (
-                            now_us_eastern.time()
-                            >= datetime.strptime("20:00:00", "%H:%M:%S").time()
-                            or now_us_eastern.time()
-                            < datetime.strptime("4:00:00", "%H:%M:%S").time()
-                        )
+        now_us_eastern = datetime.now(us_eastern)
+        _, primary_exchange, _, _ = parse_ticker(ticker_name)
+        exchange = (
+            (
+                "OVERNIGHT"
+                if (
+                    now_us_eastern.weekday() < 5
+                    and (
+                        now_us_eastern.time()
+                        >= datetime.strptime("20:00:00", "%H:%M:%S").time()
+                        or now_us_eastern.time()
+                        < datetime.strptime("4:00:00", "%H:%M:%S").time()
                     )
-                    else "SMART"
                 )
-            sub_ids.append(
-                self._tws_client.reqMktDataStream(
-                    contract, quote_callback, on_error=on_error, **kwargs
+                else "SMART"
+            )
+            if primary_exchange in SMART_EXCHANGES
+            else ""
+        )
+        contract = next(
+            iter(
+                self._tws_client.get_qualified_contracts(
+                    ticker_name, preferred_exchanges=[exchange]
                 )
             )
+        )
+        if not contract.exchange:
+            raise ProviderException(
+                code="PROVIDER_DATAFEED_INVALID_SYMBOL",
+                message=f"Invalid symbol or exchange for ticker: {ticker_name}",
+                provider="tws",
+                capability="datafeed",
+            )
 
-        return sub_ids
+        return self._tws_client.reqMktDataStream(
+            contract, quote_callback, on_error=on_error, **kwargs
+        )
 
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         """Unsubscribe from real-time bars.
@@ -491,7 +568,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         # Lookup symbol/exchange from reverse mapping
         self._tws_client.cancelBarDataStream(subscription_id)
 
-    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
+    def unsubscribe_market_data(self, subscription_id: str) -> None:
         """Unsubscribe from market data.
 
         Args:
@@ -500,8 +577,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         Raises:
             ProviderException: If subscription ID not found
         """
-        for sub_id in subscription_ids:
-            self._tws_client.cancelMktDataStream(sub_id)
+        self._tws_client.cancelMktDataStream(subscription_id)
 
     def shutdown(self) -> None:
         """Perform any necessary cleanup on provider shutdown.

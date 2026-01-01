@@ -10,7 +10,7 @@ function serializeParams(obj: unknown): string {
   }
 
   if (Array.isArray(obj)) {
-    return `[${obj.map(serializeParams).join(',')}]`
+    return `[${obj.map(serializeParams).sort().join(',')}]`
   }
 
   const objRecord = obj as Record<string, unknown>
@@ -168,9 +168,7 @@ export class WebSocketBase {
             this.wsCnxPromise = null
           }
         } finally {
-          setTimeout(() => {
-            this.wsCnxPromise = null
-          }, 200)
+          // nothing
         }
       })
     }

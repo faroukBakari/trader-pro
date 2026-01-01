@@ -155,11 +155,11 @@ class DatafeedCapability(ABC):
     @abstractmethod
     def subscribe_market_data(
         self,
-        ticker_names: list[str],
+        ticker_name: str,
         callback: Callable[[QuoteData], Coroutine[Any, Any, None]],
         on_error: Callable[[TradingApiException], Coroutine[Any, Any, None]],
         **kwargs: Any,
-    ) -> list[str]:
+    ) -> str:
         """Subscribe to real-time market data (ticks/quotes).
 
         Args:
@@ -193,7 +193,7 @@ class DatafeedCapability(ABC):
         ...
 
     @abstractmethod
-    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
+    def unsubscribe_market_data(self, subscription_id: str) -> None:
         """Unsubscribe from market data.
 
         Args:
