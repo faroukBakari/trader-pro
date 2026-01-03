@@ -30,30 +30,38 @@ import struct
 import threading
 import time
 from collections.abc import Awaitable, Callable, Coroutine
-from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from itertools import count
 from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
-from typing import Any, ClassVar
+from typing import Any
 
+from ibapi.client_utils import (
+    createCancelOrderRequestProto,
+    createPlaceOrderRequestProto,
+)
 from ibapi.common import BarData, TickAttrib
 from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.decoder import Decoder
 from ibapi.message import OUT
+from ibapi.order import Order
+from ibapi.order_cancel import OrderCancel
+from ibapi.order_state import OrderState
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
 
 from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.cached_contract import CachedContract
+from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
 from trading_api.providers.tws.tws_mappers import build_contract, ticker_name
 from trading_api.providers.tws.tws_models import (
     TICK_TYPE_TO_FIELD,
     StreamData,
+    TWSErrorNature,
     classify_error,
     get_asset_config,
     get_bar_duration_seconds,
@@ -183,7 +191,7 @@ class IBSocketState:
 class IBSocket(EWrapper):
     def __init__(self) -> None:
         # socket related attributes
-        self._req_id_counter = count()
+        self._req_id_count: count[int] = count()
         self._socket_lock = threading.Lock()
         self._state = IBSocketState.READY
         self._socket = socket()
@@ -236,7 +244,7 @@ class IBSocket(EWrapper):
         ] = {}
 
         # Data tracking attributes
-        self._nxt_order_id: int | None = None
+        self.order_tracker: OrderTracker = OrderTracker()
         self._reader_accounts: list[str] = []
         self._ready_event = (
             threading.Event()
@@ -392,7 +400,8 @@ class IBSocket(EWrapper):
             self._reader_accounts.clear()
             self._ready_event.clear()
             self._business_to_tws_key.clear()
-            self._nxt_order_id = None
+            self._req_id_count = count()
+            self.order_tracker.reset()
 
     def _handle_request_error(
         self,
@@ -457,9 +466,6 @@ class IBSocket(EWrapper):
 
     # == exposed socket methods ===
 
-    def _get_tws_key(self, business_key: str) -> str | None:
-        return self._business_to_tws_key.get(business_key)
-
     @property
     def server_version(self) -> str:
         return self._server_version
@@ -474,7 +480,7 @@ class IBSocket(EWrapper):
 
     @property
     def next_req_id(self) -> int:
-        return next(self._req_id_counter)
+        return next(self._req_id_count)
 
     @property
     def running(self) -> bool:
@@ -585,30 +591,27 @@ class IBSocket(EWrapper):
         with self._socket_lock:
             self._socket.sendall(msg2)
 
+    def send_protobuf(self, msgId: int, protobuf_data: bytes) -> None:
+        """Send a protobuf-encoded message.
+
+        For server version >= 203, certain messages (PLACE_ORDER, CANCEL_ORDER)
+        require protobuf encoding.
+
+        Message format: [4-byte length][4-byte msgId][protobuf bytes]
+        """
+        byte_array = msgId.to_bytes(4, "big") + protobuf_data
+        msg = len(byte_array).to_bytes(4, "big") + byte_array
+        if DEBUG_TWS_SEND:
+            debug_log(
+                f"Sending protobuf message: msgId={msgId}, size={len(protobuf_data)}"
+            )
+        assert self._state == IBSocketState.RUNNING, "Socket is not connected."
+        with self._socket_lock:
+            self._socket.sendall(msg)
+
     def get_cached_data(self, business_key: str) -> StreamData | None:
         """Get cached stream data for a business key, if available."""
         return self._stream_data.get(business_key)
-
-    async def _timeout_wrapper(
-        self,
-        tws_key: str,
-        business_key: str,
-        future: asyncio.Future[StreamData],
-        timeout: float | None,
-    ) -> StreamData:
-        """Await snapshot with automatic cleanup on timeout."""
-        try:
-            return await asyncio.wait_for(future, timeout)
-        except TimeoutError:
-            snapshot_hooks = self._snapshot_hooks.get(tws_key, [])
-            current_hook = next(
-                iter([hook for hook in snapshot_hooks if hook[1] == future]), None
-            )
-            if current_hook is not None:
-                snapshot_hooks.remove(current_hook)
-            if not snapshot_hooks:
-                self._clean_snapshot(business_key)
-            raise
 
     def create_snapshot(
         self,
@@ -620,25 +623,11 @@ class IBSocket(EWrapper):
             r"^(shared|datafeed|broker):", business_key
         ), "ticker_name must start with capability prefix."
 
-        reqId: int | None = None
+        req_id: int | None = None
 
-        tws_key = self._get_tws_key(business_key)
-        if tws_key is None:
-            reqId = self.next_req_id
-            tws_key = f"req_{reqId}"
-            self._business_to_tws_key[business_key] = tws_key
-
-        stream = self._stream_data.setdefault(
-            tws_key,
-            self._stream_data.pop(
-                business_key,
-                StreamData(
-                    business_key,
-                    last_dispatched=int(time.time() * 1000),
-                    last_updated=int(time.time() * 1000),
-                ),
-            ),
-        )
+        tws_key, req_id = self._acquire_tws_key(business_key)
+        stream = self._stream_data.get(tws_key)
+        assert stream is not None, "Stream data must be initialized."
 
         loop = asyncio.get_event_loop()
         future: asyncio.Future[Any] = loop.create_future()
@@ -647,7 +636,7 @@ class IBSocket(EWrapper):
         if stream.snapshot_complete:
             future.set_result(stream)
 
-        return reqId, self._timeout_wrapper(tws_key, business_key, future, timeout)
+        return req_id, self._timeout_wrapper(tws_key, business_key, future, timeout)
 
     def create_stream(
         self,
@@ -672,21 +661,7 @@ class IBSocket(EWrapper):
             r"^(shared|datafeed|broker):", business_key
         ), "ticker_name must start with capability prefix."
 
-        reqId: int | None = None
-
-        tws_key = self._get_tws_key(business_key)
-        if tws_key is None:
-            reqId = self.next_req_id
-            tws_key = f"req_{reqId}"
-            self._business_to_tws_key[business_key] = tws_key
-            self._stream_data[tws_key] = self._stream_data.pop(
-                business_key,
-                StreamData(
-                    business_key,
-                    last_updated=int(time.time() * 1000),
-                    last_dispatched=int(time.time() * 1000),
-                ),
-            )
+        tws_key, req_id = self._acquire_tws_key(business_key)
 
         # main thread ownership
         self._stream_hooks.setdefault(tws_key, []).append(
@@ -696,23 +671,7 @@ class IBSocket(EWrapper):
                 on_error,
             )
         )
-        return reqId
-
-    def _clean_snapshot(self, business_key: str) -> None:
-        tws_key = self._business_to_tws_key.get(business_key)
-        if tws_key is None:
-            return
-        self._snapshot_hooks.pop(tws_key, None)
-
-        def stream_cleanup(tws_key: str, business_key: str) -> None:
-            if tws_key not in self._stream_hooks:
-                debug_log(
-                    f"_resolve_snapshots::cleanup : no stream listeners => canceling "
-                    f"[{tws_key} | {business_key}]"
-                )
-                self.remove_stream(business_key)
-
-        asyncio.get_event_loop().call_later(11, stream_cleanup, tws_key, business_key)
+        return req_id
 
     def remove_stream(self, business_key: str) -> None:
         tws_key = self._business_to_tws_key.get(business_key)
@@ -740,6 +699,62 @@ class IBSocket(EWrapper):
             loop.call_soon_threadsafe(cleanup_func)
 
     # === Stream management ===
+
+    def _acquire_tws_key(self, business_key: str) -> tuple[str, int | None]:
+        tws_key = self._business_to_tws_key.get(business_key)
+        if tws_key is not None:
+            return tws_key, None
+
+        req_id = self.next_req_id
+        tws_key = f"req_{req_id}"
+        self._business_to_tws_key[business_key] = tws_key
+        self._stream_data[tws_key] = self._stream_data.pop(
+            business_key,
+            StreamData(
+                business_key,
+                last_updated=int(time.time() * 1000),
+                last_dispatched=int(time.time() * 1000),
+            ),
+        )
+
+        return tws_key, req_id
+
+    async def _timeout_wrapper(
+        self,
+        tws_key: str,
+        business_key: str,
+        future: asyncio.Future[StreamData],
+        timeout: float | None,
+    ) -> StreamData:
+        """Await snapshot with automatic cleanup on timeout."""
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except TimeoutError:
+            snapshot_hooks = self._snapshot_hooks.get(tws_key, [])
+            current_hook = next(
+                iter([hook for hook in snapshot_hooks if hook[1] == future]), None
+            )
+            if current_hook is not None:
+                snapshot_hooks.remove(current_hook)
+            if not snapshot_hooks:
+                self._clean_snapshot(business_key)
+            raise
+
+    def _clean_snapshot(self, business_key: str) -> None:
+        tws_key = self._business_to_tws_key.get(business_key)
+        if tws_key is None:
+            return
+        self._snapshot_hooks.pop(tws_key, None)
+
+        def stream_cleanup(tws_key: str, business_key: str) -> None:
+            if tws_key not in self._stream_hooks:
+                debug_log(
+                    f"_resolve_snapshots::cleanup : no stream listeners => canceling "
+                    f"[{tws_key} | {business_key}]"
+                )
+                self.remove_stream(business_key)
+
+        asyncio.get_event_loop().call_later(11, stream_cleanup, tws_key, business_key)
 
     def _resolve_snapshots(self, tws_key: str, stream: StreamData) -> None:
         """Try to resolve pending snapshot futures if bid/ask/last complete.
@@ -1065,6 +1080,44 @@ class IBSocket(EWrapper):
                 f"requested quote data for reqId {reqId} symbol='{contract.symbol}'"
             )
 
+    def placeOrder(self, order_id: int, contract: Contract, order: Order) -> None:
+        # Use protobuf encoding for server version >= 203
+        assert (
+            isinstance(order_id, int) and order_id >= 0
+        ), "order_id must be a non-negative integer."
+        assert (
+            isinstance(contract, Contract) and contract.conId != 0
+        ), "contract must be an instance of Contract with a non-zero conId."
+        proto_msg = createPlaceOrderRequestProto(order_id, contract, order)
+        serialized = proto_msg.SerializeToString()
+        # Protobuf message ID = OUT.PLACE_ORDER + 200
+        proto_msg_id = OUT.PLACE_ORDER + PROTOBUF_MSG_ID
+        self.send_protobuf(proto_msg_id, serialized)
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"placed order (protobuf): id={order_id}, symbol={contract.symbol}, "
+                f"action={order.action}, qty={order.totalQuantity}, type={order.orderType}"
+            )
+
+    def reqOpenOrders(self) -> None:
+        def request_cb() -> None:
+            VERSION = 1
+            self.send_message(OUT.REQ_OPEN_ORDERS, [VERSION])
+            if DEBUG_TWS_REQUEST:
+                debug_log("requested open orders")
+
+        self.order_tracker.ensure_snapshot_requested(request_cb)
+
+    def cancelOrder(self, order_id: int) -> None:
+        orderCancel = OrderCancel()
+        cancelOrderRequestProto = createCancelOrderRequestProto(order_id, orderCancel)
+        serializedString = cancelOrderRequestProto.SerializeToString()
+
+        self.send_protobuf(OUT.CANCEL_ORDER + PROTOBUF_MSG_ID, serializedString)
+
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"cancelled order: id={order_id}")
+
     # ================================================
     # == Dispatch handlers for subscription events ===
     # ================================================
@@ -1081,8 +1134,9 @@ class IBSocket(EWrapper):
         if DEBUG_TWS_SHARED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # Signals connection fully established - safe to make requests
-        self._nxt_order_id = orderId
+        self.order_tracker.set_next_order_id(orderId)
         self._ready_event.set()
+        debug_log(f"TWS connection ready for requests. Next order ID: {orderId}")
 
     # === symbolSamples ===
 
@@ -1237,6 +1291,107 @@ class IBSocket(EWrapper):
 
         self._flag_snapshot_complete(f"req_{reqId}")
 
+    # === Order management ===
+
+    def openOrder(
+        self, orderId: int, contract: Contract, order: Order, orderState: OrderState
+    ) -> None:
+        """Callback for open order information.
+
+        TWS sends this callback for:
+        1. Each open order after reqOpenOrders() is called
+        2. Real-time updates when orders are placed/modified
+
+        The callback provides complete order info including contract, order params,
+        and current state. Raw TWS objects are stored in OrderTracker without
+        transformation. Domain conversion happens at broker_provider level.
+
+        Args:
+            orderId: TWS order ID
+            contract: Contract the order is for
+            order: Order parameters (type, qty, price, etc.)
+            orderState: Current order state (status, margin, commission)
+        """
+        if DEBUG_TWS_BROKER:
+            debug_log(
+                f"{current_fn_name()}, orderId={orderId}, "
+                f"symbol={contract.symbol}, status={orderState.status}"
+            )
+
+        self.order_tracker.upsert_order(
+            orderId=orderId,
+            contract=contract,
+            order=order,
+            orderState=orderState,
+        )
+
+    def orderStatus(
+        self,
+        orderId: int,
+        status: str,
+        filled: Decimal,
+        remaining: Decimal,
+        avgFillPrice: float,
+        permId: int,
+        parentId: int,
+        lastFillPrice: float,
+        clientId: int,
+        whyHeld: str,
+        mktCapPrice: float,
+    ) -> None:
+        """Callback for order status updates.
+
+        This callback fires whenever an order's status changes. Updates the
+        TrackedOrder's Order and OrderState objects directly and appends an
+        OrderFill record for fill history. May be called multiple times for
+        the same order as it progresses through its lifecycle.
+
+        Args:
+            orderId: TWS order ID
+            status: Order status (Submitted, Filled, Cancelled, etc.)
+            filled: Quantity that has been filled
+            remaining: Quantity still remaining
+            avgFillPrice: Average fill price
+            permId: Permanent order ID (persists across sessions)
+            parentId: Parent order ID (for bracket orders)
+            lastFillPrice: Price of last fill
+            clientId: Client ID that placed the order
+            whyHeld: Reason order is held (if applicable)
+            mktCapPrice: Market cap price (for auction orders)
+        """
+        if DEBUG_TWS_BROKER:
+            debug_log(
+                f"{current_fn_name()}, orderId={orderId}, status={status}, "
+                f"filled={filled}, remaining={remaining}, avgFillPrice={avgFillPrice}"
+            )
+
+        # Update TrackedOrder (mutates Order/OrderState, appends OrderFill)
+        self.order_tracker.update_status(
+            orderId,
+            status,
+            filled,
+            remaining,
+            avgFillPrice,
+            permId,
+            parentId,
+            lastFillPrice,
+            clientId,
+            whyHeld,
+            mktCapPrice,
+        )
+
+    def openOrderEnd(self) -> None:
+        """End signal for open orders request.
+
+        Called after all openOrder callbacks for reqOpenOrders().
+        Marks snapshot as complete and resolves pending futures.
+        """
+        if DEBUG_TWS_BROKER:
+            debug_log(f"{current_fn_name()}")
+
+        # Mark snapshot complete and resolve pending futures
+        self.order_tracker.mark_snapshot_complete()
+
     # === error handling ===
 
     def error(
@@ -1250,14 +1405,14 @@ class IBSocket(EWrapper):
         """Error callback from TWS API - routes through centralized error handling.
 
         Args:
-            reqId: Request ID (-1 for system-wide errors)
+            reqId: Request ID or Order ID (-1 for system-wide errors)
             errorTime: Unix timestamp of error
             errorCode: TWS error code (e.g., 10187, 200, etc.)
             errorString: Error message from TWS
             advancedOrderRejectJson: Advanced order reject details (optional)
         """
-        # Classify error by category and recoverability
-        category, recoverable = classify_error(errorCode)
+        # Classify error by nature, category, and recoverability
+        nature, category, recoverable = classify_error(errorCode)
 
         # Handle system-wide errors (reqId=-1) separately
         if reqId == NO_VALID_ID:
@@ -1279,13 +1434,31 @@ class IBSocket(EWrapper):
             if recoverable
             else f"{category}_{errorCode}_NON_RECOVERABLE"
         )
-        self._handle_request_error(
-            category=TWSErrorCategory.API,
-            detail=detail,
-            tws_key=f"req_{reqId}",
-            message=message,
-            timestamp=errorTime // 1000 if errorTime > 10_000_000_000 else errorTime,
-        )
+
+        # Route based on error nature
+        if nature == TWSErrorNature.ORDER:
+            # Order-related errors use order_{orderId} key format
+            tws_key = f"order_{reqId}"
+            self.order_tracker.raise_error(
+                ProviderException(
+                    provider="tws",
+                    capability="broker",
+                    code=f"PROVIDER_TWS_{errorCode}",
+                    message=message,
+                )
+            )
+        else:
+            # Request-related errors use req_{reqId} key format
+            tws_key = f"req_{reqId}"
+            self._handle_request_error(
+                category=TWSErrorCategory.API,
+                detail=detail,
+                tws_key=tws_key,
+                message=message,
+                timestamp=(
+                    errorTime // 1000 if errorTime > 10_000_000_000 else errorTime
+                ),
+            )
 
     def errorProtoBuf(self, errorMessageProto: ErrorMessageProto) -> None:
         """Error callback using protobuf format (newer TWS API versions).
@@ -1319,8 +1492,6 @@ class IBSocket(EWrapper):
 
 
 class TWSClient:
-    _sync_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=1)
-
     def __init__(
         self,
         host: str,
@@ -1356,6 +1527,41 @@ class TWSClient:
             if not self.__ibsocket._ready_event.wait(timeout=self._timeout):
                 raise TimeoutError("Timeout waiting for TWS connection ready signal")
         return self.__ibsocket
+
+    # === Contract resolution and caching ===
+
+    def get_qualified_contracts(
+        self, ticker: str, preferred_exchanges: list[str] = [""]
+    ) -> list[Contract]:
+        if not preferred_exchanges:
+            preferred_exchanges = [""]
+
+        cached = [con for con in self.__contracts_cache.values() if con.matches(ticker)]
+
+        if cached and preferred_exchanges and preferred_exchanges != [""]:
+            cached = [
+                con for con in cached if con.contract.exchange in preferred_exchanges
+            ] or cached
+
+        # Cache hit with full details - return immediately
+        if cached:
+            if DEBUG_TWS_CACHE:
+                debug_log(f"reqContractDetails cache hit for ticker {ticker}")
+            return [con.contract for con in cached]
+
+        contracts: list[Contract] = []
+        for exchange in preferred_exchanges:
+            contract = build_contract(ticker)
+            contract.exchange = exchange
+            contracts.append(contract)
+
+        if DEBUG_TWS_CACHE:
+            debug_log(
+                f"reqContractDetails cache miss for ticker {ticker} => "
+                f"returning unqualified contracts: {[ticker_name(c) for c in contracts]}"
+            )
+
+        return contracts
 
     async def reqMatchingSymbols(
         self, pattern: str, timeout: float | None = None
@@ -1479,12 +1685,11 @@ class TWSClient:
 
         return details_list
 
-    def get_qualified_contracts(
-        self, ticker: str, preferred_exchanges: list[str] = [""]
-    ) -> list[Contract]:
-        if not preferred_exchanges:
-            preferred_exchanges = [""]
-
+    async def qualify_contract(
+        self,
+        ticker: str,
+        preferred_exchanges: list[str] = [""],
+    ) -> list[CachedContract]:
         cached = [con for con in self.__contracts_cache.values() if con.matches(ticker)]
 
         if cached and preferred_exchanges and preferred_exchanges != [""]:
@@ -1496,21 +1701,44 @@ class TWSClient:
         if cached:
             if DEBUG_TWS_CACHE:
                 debug_log(f"reqContractDetails cache hit for ticker {ticker}")
-            return [con.contract for con in cached]
+            return cached
 
-        contracts: list[Contract] = []
-        for exchange in preferred_exchanges:
-            contract = build_contract(ticker)
-            contract.exchange = exchange
-            contracts.append(contract)
+        # Cache miss or partial - fetch from TWS
+        reqId: int | None = None
+        coroutine: Awaitable[list[dict[str, ContractDetails]]]
+        details_list: list[ContractDetails]
+        business_key = f"shared:reqContractDetails:{ticker}"
 
-        if DEBUG_TWS_CACHE:
-            debug_log(
-                f"reqContractDetails cache miss for ticker {ticker} => "
-                f"returning unqualified contracts: {[ticker_name(c) for c in contracts]}"
-            )
+        reqId, coroutine = self.ibsocket.create_snapshot(
+            business_key,
+            timeout=self._timeout,
+        )
 
-        return contracts
+        contract = build_contract(ticker)
+
+        if reqId is not None:
+            self.ibsocket.reqContractDetails(reqId, contract)
+
+        data = await coroutine
+        details_list = [item["contractDetails"] for item in data]
+
+        # Update cache with full details
+        for details in details_list:
+            if details.contract.conId > 0 and details.contract.exchange:
+                detail_con_id = details.contract.conId
+                if detail_con_id in self.__contracts_cache:
+                    # Update existing partial cache entry
+                    self.__contracts_cache[detail_con_id].update_from_details(details)
+                else:
+                    # Create new cache entry with full details
+                    self.__contracts_cache[
+                        detail_con_id
+                    ] = CachedContract.from_contract_details(details)
+                cached.append(self.__contracts_cache[detail_con_id])
+
+        return cached
+
+    # === Historical data snapshot (one-time pattern) ===
 
     async def reqHistoricalData(
         self,
@@ -1573,7 +1801,7 @@ class TWSClient:
         assert acc, "No data received for quote snapshot"
         return next(iter(acc))
 
-    # === Real-time bar subscriptions (continuous pattern) ===
+    # === Real-time data subscriptions (continuous pattern) ===
 
     def reqBarDataStream(
         self,
@@ -1635,6 +1863,130 @@ class TWSClient:
     def cancelMktDataStream(self, stream_key: str) -> None:
         """Cancel a real-time data subscription."""
         self.ibsocket.remove_stream(stream_key)
+
+    # === Order management ===
+
+    def submit_order(
+        self,
+        contract: Contract,
+        order: Order,
+        parent_id: int = 0,
+        transmit: bool = False,
+    ) -> int:
+        order.parentId = parent_id
+        order_id = order.orderId
+        if order_id > 0:
+            self.ibsocket.order_tracker.ensure_existing_order(order_id)
+        else:
+            order_id = self.ibsocket.order_tracker.next_order_id
+        order.transmit = transmit
+        self.ibsocket.placeOrder(order_id, contract, order)
+        return order_id
+
+    async def placeOrderGroup(
+        self, contract: Contract, parent: Order, children: list[Order]
+    ) -> tuple[TrackedOrder, list[TrackedOrder]]:
+        """Place an order via TWS.
+
+        Allocates a unique order ID and submits the order. Order status updates
+        are delivered via openOrder() and orderStatus() callbacks.
+
+        Args:
+            contract: Contract to trade
+            order: Order parameters (type, side, quantity, price, etc.)
+
+        Returns:
+            The allocated order ID
+
+        Note:
+            For server version >= 203, uses protobuf encoding (required by TWS).
+            For older server versions, uses legacy message format.
+        """
+
+        parent_id = self.submit_order(contract, parent, transmit=(len(children) == 0))
+
+        child_ids: list[int] = []
+        if children:
+            child_ids.extend(
+                self.submit_order(contract, child, parent_id=parent_id, transmit=False)
+                for child in children[:-1]
+            )
+
+            child_ids.append(
+                self.submit_order(
+                    contract, children[-1], parent_id=parent_id, transmit=True
+                )
+            )
+
+        child_tracked = await asyncio.gather(
+            *[
+                self.ibsocket.order_tracker.order_update(child_id)
+                for child_id in child_ids
+            ]
+        )
+        parent_tracked = await self.ibsocket.order_tracker.order_update(parent_id)
+
+        return parent_tracked, child_tracked
+
+    async def placeOrder(self, contract: Contract, order: Order) -> TrackedOrder:
+        """Place an order via TWS.
+
+        Allocates a unique order ID and submits the order. Order status updates
+        are delivered via openOrder() and orderStatus() callbacks.
+
+        Args:
+            contract: Contract to trade
+            order: Order parameters (type, side, quantity, price, etc.)
+
+        Returns:
+            The allocated order ID
+
+        Note:
+            For server version >= 203, uses protobuf encoding (required by TWS).
+            For older server versions, uses legacy message format.
+        """
+
+        order_id = order.orderId
+
+        if order.orderId > 0:
+            self.ibsocket.order_tracker.ensure_existing_order(order.orderId)
+        else:
+            order_id = self.ibsocket.order_tracker.next_order_id
+
+        self.ibsocket.placeOrder(order_id, contract, order)
+
+        return await self.ibsocket.order_tracker.order_update(order_id)
+
+    async def cancelOrder(self, order_id: int) -> TrackedOrder:
+        """Cancel an order via TWS.
+
+        Args:
+            order_id: Order ID to cancel
+        """
+
+        self.ibsocket.order_tracker.ensure_existing_order(order_id)
+        self.ibsocket.cancelOrder(order_id)
+        return await self.ibsocket.order_tracker.order_update(order_id)
+
+    # === Real-time broker subscriptions ===
+
+    async def reqOpenOrders(self, timeout: float | None = None) -> list[TrackedOrder]:
+        """Request all open orders for this client (snapshot).
+
+        Returns open orders placed from this client. Each order triggers
+        openOrder() and orderStatus() callbacks, then openOrderEnd().
+
+        Args:
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of TrackedOrder objects (one per open order)
+        """
+        # Reset tracker and register snapshot hook
+
+        self.ibsocket.reqOpenOrders()
+
+        return await self.ibsocket.order_tracker.all_orders(timeout or self._timeout)
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""

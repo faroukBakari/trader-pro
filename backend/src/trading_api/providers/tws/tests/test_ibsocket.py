@@ -92,16 +92,15 @@ class TestIBSocketStateManagement:
         # Setup some state
         ibsocket._stream_data["test"] = MagicMock()  # New structure uses str keys
         ibsocket._reader_accounts = ["U123"]
-        ibsocket._nxt_order_id = 42
         ibsocket._ready_event.set()
 
         # Reset
         ibsocket._reset()
 
-        # Verify cleared (note: _business_to_tws_key is not cleared by _reset)
+        # Verify cleared
         assert len(ibsocket._stream_data) == 0
         assert len(ibsocket._reader_accounts) == 0
-        assert getattr(ibsocket, "_nxt_order_id") is None
+        assert len(ibsocket._business_to_tws_key) == 0
         assert not ibsocket._ready_event.is_set()
 
 
@@ -351,7 +350,7 @@ class TestIBSocketStreamManagement:
     def test_get_tws_key_returns_key_for_active_stream(
         self, running_ibsocket: IBSocket
     ) -> None:
-        """Test _get_tws_key returns tws_key for active stream."""
+        """Test _acquire_tws_key returns existing tws_key for active stream."""
         business_key = "datafeed:Quote:NASDAQ:AAPL"
 
         async def callback(data: dict, fields: list) -> None:
@@ -361,17 +360,21 @@ class TestIBSocketStreamManagement:
             pass
 
         reqId = running_ibsocket.create_stream(business_key, callback, on_error)
-        tws_key = f"req_{reqId}"
+        expected_tws_key = f"req_{reqId}"
 
-        result = running_ibsocket._get_tws_key(business_key)
-        assert result == tws_key
+        # _acquire_tws_key returns (tws_key, req_id) - req_id is None if already exists
+        tws_key, new_req_id = running_ibsocket._acquire_tws_key(business_key)
+        assert tws_key == expected_tws_key
+        assert new_req_id is None  # Already exists, no new req_id allocated
 
-    def test_get_tws_key_returns_none_for_unknown(
+    def test_acquire_tws_key_creates_new_for_unknown(
         self, running_ibsocket: IBSocket
     ) -> None:
-        """Test _get_tws_key returns None for unknown business_key."""
-        result = running_ibsocket._get_tws_key("unknown:key")
-        assert result is None
+        """Test _acquire_tws_key creates new mapping for unknown business_key."""
+        # _acquire_tws_key allocates a new req_id for unknown keys
+        tws_key, new_req_id = running_ibsocket._acquire_tws_key("unknown:key")
+        assert tws_key == f"req_{new_req_id}"
+        assert new_req_id is not None  # New req_id allocated
 
     @pytest.mark.asyncio
     async def test_dispatch_update_calls_callback(
@@ -1170,12 +1173,13 @@ class TestIBSocketManagedAccounts:
         assert running_ibsocket._reader_accounts == ["U123", "U456", "U789"]
 
     def test_next_valid_id_sets_ready_event(self, running_ibsocket: IBSocket) -> None:
-        """Test nextValidId sets the ready event."""
+        """Test nextValidId sets the ready event and initializes order_tracker."""
         assert not running_ibsocket._ready_event.is_set()
 
         running_ibsocket.nextValidId(100)
 
-        assert running_ibsocket._nxt_order_id == 100
+        # Order ID tracking is now in order_tracker
+        assert running_ibsocket.order_tracker.next_order_id == 100
         assert running_ibsocket._ready_event.is_set()
 
 
@@ -1662,4 +1666,5 @@ class TestIBSocketStreamDataHelpers:
         )
 
         assert "bid" in stream.updated_fields
+        assert "ask" not in stream.updated_fields
         assert "ask" not in stream.updated_fields

@@ -32,7 +32,7 @@ class Order(Object):
     def __init__(self):
         self.softDollarTier = SoftDollarTier("", "", "")
         # order identifier
-        self.orderId = 0
+        self.orderId = -1
         self.clientId = 0
         self.permId = 0
 

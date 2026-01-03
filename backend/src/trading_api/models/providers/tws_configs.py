@@ -124,6 +124,11 @@ class TWSBrokerProviderConfig(ProviderConfig):
         description="Connection timeout in seconds",
     )
 
+    account_id: str = Field(
+        default="",
+        description="IBKR account ID (e.g., 'DU123456')",
+    )
+
     model_config = SettingsConfigDict(
         env_prefix="TWS_BROKER_",
         env_file=".env.local",

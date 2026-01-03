@@ -678,14 +678,22 @@ TWS errors are converted to `ProviderException` and routed through centralized e
 
 ### TWS Error Classification
 
-`classify_error()` in `tws_models.py` classifies TWS error codes by meaning and recoverability:
+`classify_error()` in `tws_models.py` classifies TWS error codes by nature, meaning, and recoverability:
 
 ```python
-from tws_models import classify_error, TWSErrorClassification
+from tws_models import classify_error, TWSErrorClassification, TWSErrorNature
 
-category, is_recoverable = classify_error(error_code)
-# Returns: (TWSErrorClassification.*, bool)
+nature, category, is_recoverable = classify_error(error_code)
+# Returns: (TWSErrorNature.*, TWSErrorClassification.*, bool)
 ```
+
+**Error Nature** (what does the error ID represent?):
+
+| Nature   | Value     | Description                                |
+| -------- | --------- | ------------------------------------------ |
+| `ORDER`  | `"order"` | ID is an order ID (use for order routing)  |
+| `REQUEST`| `"req"`   | ID is a request ID (use for data requests) |
+| `SYSTEM` | `"system"`| System-wide error (no specific ID)         |
 
 **Classification Categories:**
 
@@ -733,18 +741,22 @@ def subscribe_realtime_bars(
 ```
 TWS error() callback
         │
-classify_error(code)  →  (category, is_recoverable)
+classify_error(code)  →  (nature, category, is_recoverable)
         │
-_handle_request_error(category, detail, tws_key, message)
+        ├─► nature == ORDER → _handle_order_error(id, category, detail, message)
+        │           │
+        │           └─► Look up order by order_id, invoke error callback
         │
-        ├─► Look up business_key from tws_key
-        │   capability = business_key.split(":")[0]  # "datafeed", "broker", "shared"
-        │
-        ├─► Snapshot hooks exist → reject future with ProviderException
-        │
-        └─► Stream hooks exist → invoke on_error callbacks
+        └─► nature == REQUEST/SYSTEM → _handle_request_error(...)
                 │
-                └─► Non-recoverable → call remove_stream(business_key)
+                ├─► Look up business_key from tws_key
+                │   capability = business_key.split(":")[0]  # "datafeed", "broker", "shared"
+                │
+                ├─► Snapshot hooks exist → reject future with ProviderException
+                │
+                └─► Stream hooks exist → invoke on_error callbacks
+                        │
+                        └─► Non-recoverable → call remove_stream(business_key)
 ```
 
 ### Centralized Error Routing
