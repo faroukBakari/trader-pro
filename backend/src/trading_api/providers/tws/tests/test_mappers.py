@@ -805,19 +805,16 @@ class TestPreorderToTws:
             qty=100,
         )
 
-        contract, order = preorder_to_tws(preorder, "DU123456")
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "DU123456", 1)
 
-        assert contract.symbol == "AAPL"
-        assert (
-            contract.primaryExchange == "NASDAQ"
-        )  # build_contract sets primaryExchange
-
-        assert order.action == "BUY"
-        assert order.totalQuantity == Decimal("100")
-        assert order.orderType == "MKT"
-        assert order.account == "DU123456"
-        assert order.tif == "GTC"
-        assert order.transmit is True
+        assert parent.action == "BUY"
+        assert parent.totalQuantity == Decimal("100")
+        assert parent.orderType == "MKT"
+        assert parent.account == "DU123456"
+        assert parent.tif == "GTC"
+        assert parent.transmit is True
+        assert stop_loss is None
+        assert take_profit is None
 
     def test_limit_order(self) -> None:
         """Test converting a limit sell order."""
@@ -831,14 +828,15 @@ class TestPreorderToTws:
             limitPrice=350.50,
         )
 
-        contract, order = preorder_to_tws(preorder)
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
 
-        assert contract.symbol == "MSFT"
-        assert order.action == "SELL"
-        assert order.totalQuantity == Decimal("50")
-        assert order.orderType == "LMT"
-        assert order.lmtPrice == 350.50
-        assert order.account == ""  # Empty when not specified
+        assert parent.action == "SELL"
+        assert parent.totalQuantity == Decimal("50")
+        assert parent.orderType == "LMT"
+        assert parent.lmtPrice == 350.50
+        assert parent.account == ""  # Empty when not specified
+        assert stop_loss is None
+        assert take_profit is None
 
     def test_stop_order(self) -> None:
         """Test converting a stop order."""
@@ -852,10 +850,12 @@ class TestPreorderToTws:
             stopPrice=145.00,
         )
 
-        contract, order = preorder_to_tws(preorder)
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
 
-        assert order.orderType == "STP"
-        assert order.auxPrice == 145.00
+        assert parent.orderType == "STP"
+        assert parent.auxPrice == 145.00
+        assert stop_loss is None
+        assert take_profit is None
 
     def test_stop_limit_order(self) -> None:
         """Test converting a stop-limit order."""
@@ -870,11 +870,13 @@ class TestPreorderToTws:
             stopPrice=245.00,
         )
 
-        contract, order = preorder_to_tws(preorder)
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
 
-        assert order.orderType == "STP LMT"
-        assert order.lmtPrice == 250.00
-        assert order.auxPrice == 245.00
+        assert parent.orderType == "STP LMT"
+        assert parent.lmtPrice == 250.00
+        assert parent.auxPrice == 245.00
+        assert stop_loss is None
+        assert take_profit is None
 
     def test_forex_order(self) -> None:
         """Test converting a forex order."""
@@ -887,14 +889,11 @@ class TestPreorderToTws:
             qty=10000,
         )
 
-        contract, order = preorder_to_tws(preorder)
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
 
-        assert contract.symbol == "EUR"
-        assert contract.secType == "CASH"
-        assert (
-            contract.primaryExchange == "IDEALPRO"
-        )  # build_contract sets primaryExchange
-        assert order.orderType == "MKT"
+        assert parent.orderType == "MKT"
+        assert stop_loss is None
+        assert take_profit is None
 
     def test_futures_order(self) -> None:
         """Test converting a futures order."""
@@ -908,11 +907,147 @@ class TestPreorderToTws:
             limitPrice=5000.00,
         )
 
-        contract, order = preorder_to_tws(preorder)
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
 
-        assert contract.symbol == "ES"
-        assert contract.secType == "FUT"
-        assert contract.primaryExchange == "CME"  # build_contract sets primaryExchange
+        assert parent.orderType == "LMT"
+        assert parent.lmtPrice == 5000.00
+        assert stop_loss is None
+        assert take_profit is None
+
+    def test_order_with_take_profit_only(self) -> None:
+        """Test converting order with only take profit bracket."""
+        from trading_api.models.broker import PreOrder
+
+        preorder = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            takeProfit=160.00,
+        )
+
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
+
+        assert parent.orderType == "LMT"
+        assert stop_loss is None
+        assert take_profit is not None
+        assert take_profit.orderType == "LMT"
+        assert take_profit.lmtPrice == 160.00
+        assert take_profit.action == "SELL"  # Opposite side
+        assert take_profit.totalQuantity == Decimal("100")
+
+    def test_order_with_stop_loss_only(self) -> None:
+        """Test converting order with only stop loss bracket."""
+        from trading_api.models.broker import PreOrder
+
+        preorder = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            stopLoss=145.00,
+        )
+
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
+
+        assert parent.orderType == "LMT"
+        assert take_profit is None
+        assert stop_loss is not None
+        assert stop_loss.orderType == "STP"
+        assert stop_loss.auxPrice == 145.00
+        assert stop_loss.action == "SELL"  # Opposite side
+        assert stop_loss.totalQuantity == Decimal("100")
+
+    def test_order_with_full_brackets(self) -> None:
+        """Test converting order with both stop loss and take profit."""
+        from trading_api.models.broker import PreOrder
+
+        preorder = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            stopLoss=145.00,
+            takeProfit=160.00,
+        )
+
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
+
+        assert parent.orderType == "LMT"
+        assert stop_loss is not None
+        assert take_profit is not None
+        # Both should be linked via OCA group
+        assert stop_loss.ocaGroup == take_profit.ocaGroup
+        assert stop_loss.ocaType == 1  # CANCEL_WITH_BLOCK
+        assert take_profit.ocaType == 1
+
+    def test_order_with_trailing_stop(self) -> None:
+        """Test converting order with trailing stop bracket."""
+        from trading_api.models.broker import PreOrder, StopType
+
+        preorder = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            trailingStopPips=5.00,
+            stopType=StopType.TRAILING_STOP,
+        )
+
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
+
+        assert parent.orderType == "LMT"
+        assert take_profit is None
+        assert stop_loss is not None
+        assert stop_loss.orderType == "TRAIL"
+        assert stop_loss.auxPrice == 5.00  # Trail amount
+
+    def test_guaranteed_stop_raises_exception(self) -> None:
+        """Test that guaranteed stop raises ProviderException (not supported)."""
+        from trading_api.models.broker import PreOrder
+        from trading_api.models.exceptions import ProviderException
+
+        preorder = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            guaranteedStop=140.00,
+        )
+
+        with pytest.raises(ProviderException) as exc_info:
+            preorder_to_tws(preorder, "", 1)
+
+        assert "PROVIDER_BROKER_UNSUPPORTED_FEATURE" in str(exc_info.value.code)
+        assert "Guaranteed stop" in str(exc_info.value.message)
+
+    def test_sell_order_brackets_have_buy_children(self) -> None:
+        """Test that sell order brackets create BUY child orders."""
+        from trading_api.models.broker import PreOrder
+
+        preorder = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            type=OrderType.LIMIT,
+            side=Side.SELL,  # Parent is SELL
+            qty=100,
+            limitPrice=150.00,
+            stopLoss=155.00,  # Stop above for short
+            takeProfit=140.00,  # Take profit below for short
+        )
+
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
+
+        assert parent.action == "SELL"
+        assert stop_loss is not None
+        assert take_profit is not None
+        # Children should be BUY (opposite of parent)
+        assert stop_loss.action == "BUY"
+        assert take_profit.action == "BUY"
 
 
 class TestTrackedOrderToPlacedOrder:
@@ -1134,6 +1269,85 @@ class TestTrackedOrderToPlacedOrder:
         assert result.filledQty == 60.0
         assert result.avgPrice == 500.08  # Last fill's avgFillPrice
         assert result.status == OrderStatus.WORKING
+
+    def test_bracket_context_preserved(self) -> None:
+        """Test that BracketContext fields are preserved in PlacedOrder."""
+        from trading_api.models.broker import StopType
+        from trading_api.providers.tws.tws_mappers import BracketContext
+
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        order = TWSOrder()
+        order.action = "BUY"
+        order.totalQuantity = Decimal("100")
+        order.orderType = "LMT"
+        order.lmtPrice = 150.00
+        order.auxPrice = 0.0
+        order.filledQuantity = Decimal("0")
+
+        order_state = OrderState()
+        order_state.status = "Submitted"
+
+        tracked = TrackedOrder(
+            orderId=100,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+        )
+
+        # Create bracket context with all fields
+        bracket_context = BracketContext(
+            take_profit=160.00,
+            stop_loss=145.00,
+            trailing_stop_pips=5.00,
+            stop_type=int(StopType.TRAILING_STOP),
+            child_order_ids=[101, 102],
+        )
+
+        result = tracked_order_to_placed_order(tracked, bracket_context)
+
+        assert result.takeProfit == 160.00
+        assert result.stopLoss == 145.00
+        assert result.trailingStopPips == 5.00
+        assert result.stopType == StopType.TRAILING_STOP
+
+    def test_no_bracket_context_fields_are_none(self) -> None:
+        """Test that bracket fields are None when no context provided."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        order = TWSOrder()
+        order.action = "BUY"
+        order.totalQuantity = Decimal("100")
+        order.orderType = "LMT"
+        order.lmtPrice = 150.00
+        order.auxPrice = 0.0
+        order.filledQuantity = Decimal("0")
+
+        order_state = OrderState()
+        order_state.status = "Submitted"
+
+        tracked = TrackedOrder(
+            orderId=100,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+        )
+
+        result = tracked_order_to_placed_order(tracked, None)
+
+        assert result.takeProfit is None
+        assert result.stopLoss is None
+        assert result.trailingStopPips is None
+        assert result.stopType is None
+        assert result.guaranteedStop is None  # Always None (not supported)
 
 
 class TestTwsPositionToDomain:

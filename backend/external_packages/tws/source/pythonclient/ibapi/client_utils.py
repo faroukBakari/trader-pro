@@ -9,9 +9,9 @@ from ibapi.const import UNSET_DOUBLE
 from ibapi.contract import ComboLeg, Contract, DeltaNeutralContract
 from ibapi.execution import ExecutionFilter
 from ibapi.order import Order
+from ibapi.order_cancel import OrderCancel
 from ibapi.order_condition import (
     ContractCondition,
-    Create,
     ExecutionCondition,
     MarginCondition,
     OperatorCondition,
@@ -645,7 +645,7 @@ def fillTagValueList(tagValueList: list, orderProtoMap: dict):
 
 @staticmethod
 def createCancelOrderRequestProto(
-    orderId: int, orderCancel: OrderCancelProto
+    orderId: int, orderCancel: OrderCancel
 ) -> CancelOrderRequestProto:
     cancelOrderRequestProto = CancelOrderRequestProto()
     if isValidIntValue(orderId):
@@ -658,7 +658,7 @@ def createCancelOrderRequestProto(
 
 @staticmethod
 def createGlobalCancelRequestProto(
-    orderCancel: OrderCancelProto,
+    orderCancel: OrderCancel,
 ) -> GlobalCancelRequestProto:
     globalCancelRequestProto = GlobalCancelRequestProto()
     orderCancelProto = createOrderCancelProto(orderCancel)
@@ -676,5 +676,4 @@ def createOrderCancelProto(orderCancel: OrderCancelProto) -> OrderCancelProto:
         orderCancelProto.extOperator = orderCancel.extOperator
     if isValidIntValue(orderCancel.manualOrderIndicator):
         orderCancelProto.manualOrderIndicator = orderCancel.manualOrderIndicator
-    return orderCancelProto
     return orderCancelProto

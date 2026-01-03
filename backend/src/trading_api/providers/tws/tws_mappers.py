@@ -3,19 +3,29 @@
 Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar, QuoteData, etc.).
 """
 
-from __future__ import annotations
-
 import re
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
+from ibapi.order import Order
 from ibapi.ticktype import TickTypeEnum
 
-from trading_api.models.broker import AccountMetainfo
+from trading_api.models.broker import (
+    AccountMetainfo,
+    EquityData,
+    OrderStatus,
+    OrderType,
+    PlacedOrder,
+    Position,
+    PreOrder,
+    Side,
+    StopType,
+)
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import (
     Bar,
@@ -25,12 +35,7 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-
-if TYPE_CHECKING:
-    from ibapi.order import Order
-
-    from trading_api.models.broker import EquityData, PlacedOrder, Position, PreOrder
-    from trading_api.providers.tws.order_tracker import TrackedOrder
+from trading_api.providers.tws.order_tracker import TrackedOrder
 
 # TWS secType → TradingView-style symbol type
 SEC_TYPE_MAP: dict[str, str] = {
@@ -589,57 +594,129 @@ TWS_STATUS_TO_ORDER_STATUS: dict[str, int] = {
 }
 
 
+@dataclass
+class BracketContext:
+    """Context for bracket order information.
+
+    Preserves original PreOrder bracket fields for PlacedOrder reconstruction.
+    TWS doesn't return bracket prices in order callbacks, so we track them here.
+    """
+
+    take_profit: float | None = None
+    stop_loss: float | None = None
+    trailing_stop_pips: float | None = None
+    stop_type: int | None = None
+    child_order_ids: list[int] = field(default_factory=list)
+
+
 def preorder_to_tws(
-    preorder: "PreOrder", account: str = ""
-) -> tuple[Contract, "Order"]:
-    """Convert domain PreOrder to TWS Contract and Order objects.
+    preorder: PreOrder,
+    account: str,
+    parent_order_id: int = -1,
+) -> tuple[Order, Order | None, Order | None]:
+    """Convert domain PreOrder to TWS Order objects.
+
+    Supports bracket orders (stopLoss, takeProfit, trailingStopPips) by returning
+    multiple orders: parent + child orders linked via parentId and OCA group.
 
     Args:
         preorder: Domain PreOrder with symbol, type, side, qty, prices
-        account: Optional account ID for order routing
+        account: Account ID for order routing (required for multi-account)
+        parent_order_id: Base order ID for parent; children use sequential IDs
 
     Returns:
-        Tuple of (Contract, Order) ready for TWSClient.placeOrder()
+        Tuple of (parent, stop_loss, take_profit) Order objects:
+        - Simple order: (parent, None, None)
+        - Bracket order: (parent, stop_loss, take_profit) with non-None children
+
+    Raises:
+        ProviderException: If guaranteedStop is set (not supported by TWS)
     """
-    from ibapi.order import Order as TWSOrder
 
-    from trading_api.models.broker import PreOrder as PreOrderModel
+    # Validate unsupported features
+    if preorder.guaranteedStop is not None:
+        raise ProviderException(
+            code="PROVIDER_BROKER_UNSUPPORTED_FEATURE",
+            message="Guaranteed stop orders are not supported by TWS/Interactive Brokers",
+            provider="tws",
+            capability="broker",
+        )
 
-    # Type assertion for IDE
-    _preorder: PreOrderModel = preorder  # noqa: F841
+    # Determine if this is a bracket order
+    has_brackets = (
+        preorder.stopLoss is not None
+        or preorder.takeProfit is not None
+        or preorder.trailingStopPips is not None
+    )
 
-    # Build contract from ticker
-    contract = build_contract(preorder.symbol)
-
-    # Build order
-    order = TWSOrder()
-    order.action = SIDE_TO_TWS_ACTION.get(int(preorder.side), "BUY")
-    order.totalQuantity = Decimal(str(preorder.qty))
-    order.orderType = ORDER_TYPE_TO_TWS.get(int(preorder.type), "MKT")
+    # Build parent order
+    parent = Order()
+    parent.orderId = parent_order_id
+    parent.action = SIDE_TO_TWS_ACTION.get(int(preorder.side), "BUY")
+    parent.totalQuantity = Decimal(str(preorder.qty))
+    parent.orderType = ORDER_TYPE_TO_TWS.get(int(preorder.type), "MKT")
+    parent.tif = "GTC"
+    parent.account = account
 
     # Set prices based on order type
     if preorder.limitPrice is not None:
-        order.lmtPrice = preorder.limitPrice
+        parent.lmtPrice = preorder.limitPrice
     if preorder.stopPrice is not None:
-        order.auxPrice = preorder.stopPrice
+        parent.auxPrice = preorder.stopPrice
 
-    # Set TIF (Time In Force) - default to GTC
-    order.tif = "GTC"
+    if not has_brackets:
+        return parent, None, None
 
-    # Account - required for order routing
-    order.account = account  # Empty string is valid if only one account
+    # --- Bracket child orders ---
+    # Child orders have opposite side to parent
+    child_action = "SELL" if preorder.side == 1 else "BUY"  # Side.BUY=1, Side.SELL=-1
+    oca_group = f"bracket_{parent_order_id}"
 
-    # Transmit immediately
-    order.transmit = True
+    stop_loss_order: Order | None = None
+    take_profit_order: Order | None = None
 
-    # Handle bracket orders (stopLoss, takeProfit)
-    # Note: TWS bracket orders require parent order to be placed first,
-    # then child orders with parentId set. This is handled at provider level.
+    # Take-profit order (LIMIT) - created first to get sequential order ID
+    if preorder.takeProfit is not None:
+        take_profit_order = Order()
+        take_profit_order.action = child_action
+        take_profit_order.totalQuantity = Decimal(str(preorder.qty))
+        take_profit_order.orderType = "LMT"
+        take_profit_order.lmtPrice = preorder.takeProfit
+        take_profit_order.tif = "GTC"
+        take_profit_order.account = account
+        take_profit_order.ocaGroup = oca_group
+        take_profit_order.ocaType = 1  # CANCEL_WITH_BLOCK
 
-    return contract, order
+    # Stop-loss or trailing stop order
+    if preorder.stopLoss is not None or preorder.trailingStopPips is not None:
+        stop_loss_order = Order()
+        stop_loss_order.action = child_action
+        stop_loss_order.totalQuantity = Decimal(str(preorder.qty))
+        stop_loss_order.tif = "GTC"
+        stop_loss_order.account = account
+        stop_loss_order.ocaGroup = oca_group
+        stop_loss_order.ocaType = 1  # CANCEL_WITH_BLOCK
+
+        # Determine stop type: trailing vs regular stop
+        use_trailing = preorder.trailingStopPips is not None or (
+            preorder.stopType is not None
+            and preorder.stopType == StopType.TRAILING_STOP
+        )
+
+        if use_trailing and preorder.trailingStopPips is not None:
+            stop_loss_order.orderType = "TRAIL"
+            stop_loss_order.auxPrice = preorder.trailingStopPips  # Trail amount
+        elif preorder.stopLoss is not None:
+            stop_loss_order.orderType = "STP"
+            stop_loss_order.auxPrice = preorder.stopLoss
+
+    return parent, stop_loss_order, take_profit_order
 
 
-def tracked_order_to_placed_order(tracked: "TrackedOrder") -> "PlacedOrder":
+def tracked_order_to_placed_order(
+    tracked: TrackedOrder,
+    bracket_context: BracketContext | None = None,
+) -> PlacedOrder:
     """Convert TrackedOrder to domain PlacedOrder.
 
     Extracts data directly from raw TWS objects (Contract, Order, OrderState)
@@ -647,13 +724,13 @@ def tracked_order_to_placed_order(tracked: "TrackedOrder") -> "PlacedOrder":
 
     Args:
         tracked: TrackedOrder wrapping raw TWS objects
+        bracket_context: Optional bracket info from original PreOrder.
+            TWS doesn't return bracket prices in callbacks, so this
+            preserves the original stopLoss/takeProfit/trailingStopPips.
 
     Returns:
         Domain PlacedOrder model
     """
-    from trading_api.models.broker import OrderStatus, OrderType
-    from trading_api.models.broker import PlacedOrder as PlacedOrderModel
-    from trading_api.models.broker import Side
 
     contract = tracked.contract
     order = tracked.order
@@ -691,7 +768,20 @@ def tracked_order_to_placed_order(tracked: "TrackedOrder") -> "PlacedOrder":
     if tracked.fills and filled_qty > 0:
         avg_price = tracked.fills[-1].avgFillPrice
 
-    return PlacedOrderModel(
+    # Bracket fields from context (TWS doesn't return these in callbacks)
+    take_profit: float | None = None
+    stop_loss: float | None = None
+    trailing_stop_pips: float | None = None
+    stop_type: StopType | None = None
+
+    if bracket_context:
+        take_profit = bracket_context.take_profit
+        stop_loss = bracket_context.stop_loss
+        trailing_stop_pips = bracket_context.trailing_stop_pips
+        if bracket_context.stop_type is not None:
+            stop_type = StopType(bracket_context.stop_type)
+
+    return PlacedOrder(
         id=str(tracked.orderId),
         symbol=symbol,
         type=order_type,
@@ -700,11 +790,11 @@ def tracked_order_to_placed_order(tracked: "TrackedOrder") -> "PlacedOrder":
         status=status,
         limitPrice=limit_price,
         stopPrice=stop_price,
-        takeProfit=None,  # Not directly available from TWS
-        stopLoss=None,  # Not directly available from TWS
+        takeProfit=take_profit,
+        stopLoss=stop_loss,
         guaranteedStop=None,  # Not supported by TWS
-        trailingStopPips=None,  # Would need separate logic
-        stopType=None,  # Not directly available
+        trailingStopPips=trailing_stop_pips,
+        stopType=stop_type,
         filledQty=filled_qty if filled_qty > 0 else None,
         avgPrice=avg_price,
         updateTime=None,  # Could add timestamp from last fill
@@ -863,6 +953,7 @@ __all__ = [
     "map_resolution_to_tws_bar_size",
     "calculate_tws_duration",
     # Order mappers
+    "BracketContext",
     "ORDER_TYPE_TO_TWS",
     "TWS_TO_ORDER_TYPE",
     "SIDE_TO_TWS_ACTION",

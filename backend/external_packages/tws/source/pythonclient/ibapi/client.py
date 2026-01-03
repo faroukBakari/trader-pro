@@ -2276,10 +2276,9 @@ class EClient(object):
             to placeOrder()"""
 
         if self.useProtoBuf(OUT.CANCEL_ORDER):
-            from ibapi.protobuf.OrderCancel_pb2 import OrderCancel as OrderCancelProto
 
             cancelOrderRequestProto = createCancelOrderRequestProto(
-                orderId, OrderCancelProto(orderCancel)
+                orderId, orderCancel
             )
             self.cancelOrderProtoBuf(cancelOrderRequestProto)
             return
@@ -2446,11 +2445,8 @@ class EClient(object):
         was initiated in the API, it also gets canceled."""
 
         if self.useProtoBuf(OUT.REQ_GLOBAL_CANCEL):
-            from ibapi.protobuf.OrderCancel_pb2 import OrderCancel as OrderCancelProto
 
-            globalCancelRequestProto = createGlobalCancelRequestProto(
-                OrderCancelProto(orderCancel)
-            )
+            globalCancelRequestProto = createGlobalCancelRequestProto(orderCancel)
             self.reqGlobalCancelProtoBuf(globalCancelRequestProto)
             return
 

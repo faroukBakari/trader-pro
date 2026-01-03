@@ -9,17 +9,18 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Awaitable, Callable
+import uuid
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from itertools import count
+from typing import Any
 
-if TYPE_CHECKING:
-    from ibapi.contract import Contract
-    from ibapi.order import Order
-    from ibapi.order_state import OrderState
+from ibapi.contract import Contract
+from ibapi.order import Order
+from ibapi.order_state import OrderState
 
-    from trading_api.models.exceptions import ProviderException
+from trading_api.models.exceptions import ProviderException
 
 
 @dataclass
@@ -59,9 +60,9 @@ class TrackedOrder:
     """
 
     orderId: int
-    contract: "Contract"
-    order: "Order"
-    orderState: "OrderState"
+    contract: Contract
+    order: Order
+    orderState: OrderState
     fills: list[OrderFill] = field(default_factory=list)
 
 
@@ -82,41 +83,45 @@ class OrderTracker:
     """
 
     def __init__(self) -> None:
-        self._orders: dict[int, TrackedOrder] = {}
+        self._snapshot_requested: bool = False
         self._snapshot_complete: bool = False
-        self._snapshot_hooks: list[
-            tuple[asyncio.AbstractEventLoop, asyncio.Future[list[TrackedOrder]]]
-        ] = []
-        self._order_hooks: dict[
-            int, tuple[asyncio.AbstractEventLoop, asyncio.Future[list[TrackedOrder]]]
+        self._order_id_count: count[int] = count()
+        self._orders: dict[int, TrackedOrder] = {}
+        self._snapshot_hooks: dict[
+            str, tuple[asyncio.AbstractEventLoop, asyncio.Future[list[TrackedOrder]]]
         ] = {}
-        self._stream_hooks: (
+        self._stream_hooks: dict[
+            str,
             tuple[
                 asyncio.AbstractEventLoop,
-                Callable[[TrackedOrder], Awaitable[None]],
-                Callable[["ProviderException"], Awaitable[None]] | None,
-            ]
-            | None
-        ) = None
+                Callable[[TrackedOrder], Coroutine[Any, Any, None]],
+                Callable[[ProviderException], Coroutine[Any, Any, None]],
+            ],
+        ] = {}
 
-    def reset(self) -> None:
-        """Full reset - like fresh creation.
+        # Per-order hooks for waiting on specific order updates
+        self._order_hooks: dict[
+            int,
+            dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Future[TrackedOrder]]],
+        ] = {}
 
-        Clears all orders, snapshot state, and hooks.
-        Called from main thread before new snapshot request.
-        """
-        self._orders.clear()
-        self._snapshot_complete = False
-        self._snapshot_hooks.clear()
-        self._stream_hooks = None
+    # --- Order management (reader thread) ---
+
+    def ensure_snapshot_requested(self, request_cb: Callable[[], None]) -> None:
+        if not self._snapshot_requested:
+            self._snapshot_requested = True
+            request_cb()
+
+    def set_next_order_id(self, orderId: int) -> None:
+        self._order_id_count = count(orderId)
 
     def upsert_order(
         self,
         orderId: int,
-        contract: "Contract",
-        order: "Order",
-        orderState: "OrderState",
-    ) -> TrackedOrder:
+        contract: Contract,
+        order: Order,
+        orderState: OrderState,
+    ) -> None:
         """Create or replace TrackedOrder from openOrder callback.
 
         Called from reader thread. Stores fresh TWS objects directly.
@@ -138,7 +143,20 @@ class OrderTracker:
             fills=[],
         )
         self._orders[orderId] = tracked
-        return tracked
+
+        for loop, future in self._order_hooks.get(orderId, {}).values():
+
+            def resolve_hook(future: asyncio.Future, tracked: TrackedOrder) -> None:
+                if not future.done():
+                    future.set_result(tracked)
+
+            loop.call_soon_threadsafe(resolve_hook, future, tracked)
+
+        for stream_loop, stream_callback, _ in self._stream_hooks.values():
+            stream_loop.call_soon_threadsafe(
+                stream_loop.create_task,
+                stream_callback(tracked),
+            )
 
     def update_status(
         self,
@@ -153,7 +171,7 @@ class OrderTracker:
         clientId: int,
         whyHeld: str,
         mktCapPrice: float,
-    ) -> TrackedOrder | None:
+    ) -> None:
         """Update TrackedOrder from orderStatus callback.
 
         Mutates the stored Order and OrderState objects directly.
@@ -178,9 +196,7 @@ class OrderTracker:
             The updated TrackedOrder, or None if order not found
         """
         tracked = self._orders.get(orderId)
-        if tracked is None:
-            # Orphan status - openOrder not yet received
-            return None
+        assert tracked is not None, f"Order ID {orderId} not found for status update"
 
         # Mutate TWS objects directly
         tracked.orderState.status = status
@@ -206,27 +222,85 @@ class OrderTracker:
                 timestamp=int(time.time() * 1000),
             )
         )
-        return tracked
+
+        for loop, future in self._order_hooks.get(orderId, {}).values():
+
+            def resolve_hook(future: asyncio.Future, tracked: TrackedOrder) -> None:
+                if not future.done():
+                    future.set_result(tracked)
+
+            loop.call_soon_threadsafe(resolve_hook, future, tracked)
+
+        for stream_loop, stream_callback, _ in self._stream_hooks.values():
+            stream_loop.call_soon_threadsafe(
+                stream_loop.create_task,
+                stream_callback(tracked),
+            )
+
+    def raise_error(self, exception: ProviderException) -> None:
+        """Dispatch error to all stream hooks.
+
+        Called from reader thread.
+        """
+
+        for snapshot_loop, snapshot_future in self._snapshot_hooks.values():
+
+            def resolve_snapshot_error(
+                future: asyncio.Future, exception: ProviderException
+            ) -> None:
+                if not future.done():
+                    future.set_exception(exception)
+
+            snapshot_loop.call_soon_threadsafe(
+                resolve_snapshot_error, snapshot_future, exception
+            )
+
+        for stream_loop, _, on_error in self._stream_hooks.values():
+            stream_loop.call_soon_threadsafe(
+                stream_loop.create_task,
+                on_error(exception),
+            )
+
+        for order_hooks in self._order_hooks.values():
+            for loop, future in order_hooks.values():
+
+                def resolve_order_error(
+                    future: asyncio.Future, exception: ProviderException
+                ) -> None:
+                    if not future.done():
+                        future.set_exception(exception)
+
+                loop.call_soon_threadsafe(resolve_order_error, future, exception)
 
     def mark_snapshot_complete(self) -> None:
         """Mark snapshot as complete. Called from openOrderEnd."""
         self._snapshot_complete = True
+        for loop, future in self._snapshot_hooks.values():
 
-    def get_orders(self) -> list[TrackedOrder]:
-        """Get all tracked orders as a list."""
-        return list(self._orders.values())
+            def resolve_hook(
+                future: asyncio.Future, orders: list[TrackedOrder]
+            ) -> None:
+                if not future.done():
+                    future.set_result(orders)
 
-    def get_order(self, orderId: int) -> TrackedOrder | None:
-        """Get a specific tracked order by ID."""
-        return self._orders.get(orderId)
+            loop.call_soon_threadsafe(resolve_hook, future, list(self._orders.values()))
 
-    # --- Hook management (main thread) ---
+    # --- Order registrations (main thread) ---
 
-    def register_snapshot_hook(
-        self,
-        loop: asyncio.AbstractEventLoop,
-        future: asyncio.Future[list[TrackedOrder]],
-    ) -> None:
+    def reset(self) -> None:
+        """Full reset - like fresh creation.
+
+        Clears all orders, snapshot state, and hooks.
+        Called from main thread before new snapshot request.
+        """
+        self._orders.clear()
+        self._snapshot_complete = False
+        self._snapshot_hooks.clear()
+        self._stream_hooks.clear()
+        self._order_hooks.clear()
+        self._order_id_count = count()
+
+    async def all_orders(self, timeout: float | None = None) -> list[TrackedOrder]:
         """Register a future to be resolved when snapshot completes.
 
         Called from main thread. If snapshot is already complete,
@@ -236,17 +310,66 @@ class OrderTracker:
             loop: Event loop for the future
             future: Future to resolve with order list
         """
-        if self._snapshot_complete:
-            loop.call_soon_threadsafe(future.set_result, self.get_orders())
-        else:
-            self._snapshot_hooks.append((loop, future))
 
-    def register_order_hook(
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[list[TrackedOrder]] = loop.create_future()
+
+        if self._snapshot_complete:
+            loop.call_soon_threadsafe(future.set_result, list(self._orders.values()))
+            return await asyncio.wait_for(future, timeout)
+
+        key = str(uuid.uuid4())
+        self._snapshot_hooks[key] = (loop, future)
+
+        try:
+            return await asyncio.wait_for(future, timeout)
+        finally:
+            self._snapshot_hooks.pop(key, None)
+
+    @property
+    def next_order_id(self) -> int:
+        return next(self._order_id_count)
+
+    def ensure_existing_order(self, orderId: int) -> TrackedOrder:
+        """Raise if orderId not tracked."""
+        if orderId not in self._orders:
+            raise ProviderException(
+                code="SERVICE_TWS_ORDER_NOT_FOUND",
+                message=f"Order ID {orderId} not found in TWS order tracker.",
+                provider="tws",
+                capability="shared",
+            )
+        return self._orders[orderId]
+
+    async def order_update(
+        self, orderId: int, timeout: float | None = None
+    ) -> TrackedOrder:
+        """Register a future to be resolved on next update for orderId.
+
+        Called from main thread.
+
+        Args:
+            orderId: TWS order ID to wait for
+            timeout: Optional timeout in seconds for the update
+        """
+
+        key = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[TrackedOrder] = loop.create_future()
+
+        self._order_hooks.setdefault(orderId, {})[key] = (loop, future)
+
+        try:
+            return await asyncio.wait_for(future, timeout)
+        finally:
+            self._order_hooks.get(orderId, {}).pop(key, None)
+
+    def create_stream_hook(
         self,
         loop: asyncio.AbstractEventLoop,
-        callback: Callable[[TrackedOrder], Awaitable[None]],
-        on_error: Callable[["ProviderException"], Awaitable[None]] | None = None,
-    ) -> None:
+        callback: Callable[[TrackedOrder], Coroutine[Any, Any, None]],
+        on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
+    ) -> str:
         """Register callback for order updates.
 
         Called from main thread.
@@ -256,42 +379,10 @@ class OrderTracker:
             callback: Called for each order update
             on_error: Optional error callback
         """
-        self._stream_hooks = (loop, callback, on_error)
+        key = str(uuid.uuid4())
+        self._stream_hooks[key] = (loop, callback, on_error)
+        return key
 
-    def unregister_order_hook(self) -> None:
+    def remove_stream_hook(self, key: str) -> None:
         """Unregister order update callback."""
-        self._stream_hooks = None
-
-    # --- Dispatch (reader thread) ---
-
-    def resolve_snapshots(self) -> None:
-        """Resolve all pending snapshot futures.
-
-        Called from reader thread after openOrderEnd.
-        Uses call_soon_threadsafe to dispatch to main thread.
-        """
-        if not self._snapshot_complete:
-            return
-        orders = self.get_orders()
-        for loop, future in self._snapshot_hooks:
-            if not future.done():
-                loop.call_soon_threadsafe(future.set_result, orders)
-        self._snapshot_hooks.clear()
-
-    def dispatch_update(self, tracked: TrackedOrder) -> None:
-        """Dispatch order update to streaming callback.
-
-        Called from reader thread. Uses call_soon_threadsafe to
-        schedule callback execution on main thread.
-
-        Args:
-            tracked: The TrackedOrder that was updated
-        """
-        if self._stream_hooks is None:
-            return
-        loop, callback, _ = self._stream_hooks
-
-        async def _notify() -> None:
-            await callback(tracked)
-
-        loop.call_soon_threadsafe(loop.create_task, _notify())
+        self._stream_hooks.pop(key, None)

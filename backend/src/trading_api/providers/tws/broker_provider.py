@@ -6,11 +6,16 @@ All business logic (orders, positions, P&L) is encapsulated here.
 
 import asyncio
 import logging
+import os
 import random
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable
+from zoneinfo import ZoneInfo
+
+from ibapi.contract import Contract
 
 from trading_api.capabilities.broker import BrokerCapability
 from trading_api.models.broker import (
@@ -37,10 +42,18 @@ from trading_api.models.broker import (
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ProviderException, TradingApiException
 from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
+from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.tws_connection import TWSClient
+from trading_api.providers.tws.tws_mappers import (
+    BracketContext,
+    preorder_to_tws,
+    tracked_order_to_placed_order,
+)
 from trading_api.shared import Provider
 
 logger = logging.getLogger(__name__)
+us_eastern = ZoneInfo("US/Eastern")
+DEBUG_TWS_BROKER = os.environ.get("DEBUG_TWS_BROKER") == "true"
 
 
 class TWSBrokerProvider(Provider, BrokerCapability):
@@ -97,6 +110,9 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         # Execution simulator task
         self._execution_simulator_task: asyncio.Task | None = None
 
+        # Shutdown event
+        self._shutdown_event = asyncio.Event()
+
     # =========================================================================
     # Provider Protocol Implementation
     # =========================================================================
@@ -120,110 +136,133 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     # BrokerCapability - Snapshot Methods (async)
     # =========================================================================
 
-    async def place_order(self, order: PreOrder) -> PlaceOrderResult:
-        """Place a new order."""
-        order_id = f"ORDER-{self._order_counter}"
-        self._order_counter += 1
+    def _select_preferred_exchange(self) -> str:
+        """Select preferred exchange based on current time.
 
-        # Determine limit price from available sources
-        limit_price = order.limitPrice
-        if limit_price is None:
-            limit_price = order.seenPrice
-        if limit_price is None and order.currentQuotes is not None:
-            limit_price = (
-                order.currentQuotes.ask
-                if order.side == Side.BUY
-                else order.currentQuotes.bid
-            )
+        Returns OVERNIGHT during extended hours (8PM-4AM US/Eastern on weekdays),
+        otherwise SMART for regular market hours routing.
+        """
+        now_us_eastern = datetime.now(us_eastern)
+        is_weekday = now_us_eastern.weekday() < 5
+        current_time = now_us_eastern.time()
+        after_8pm = current_time >= datetime.strptime("20:00:00", "%H:%M:%S").time()
+        before_4am = current_time < datetime.strptime("4:00:00", "%H:%M:%S").time()
 
-        placed_order = PlacedOrder(
-            id=order_id,
-            symbol=order.symbol,
-            type=order.type,
-            side=order.side,
-            qty=order.qty,
-            status=OrderStatus.WORKING,
-            limitPrice=limit_price,
-            stopPrice=order.stopPrice,
-            takeProfit=order.takeProfit,
-            stopLoss=order.stopLoss,
-            guaranteedStop=order.guaranteedStop,
-            trailingStopPips=order.trailingStopPips,
-            stopType=order.stopType,
-            filledQty=0.0,
-            avgPrice=None,
-            updateTime=int(time.time() * 1000),
+        if is_weekday and (after_8pm or before_4am):
+            return "OVERNIGHT"
+        return "SMART"
+
+    async def _execute_order(
+        self, order: PreOrder, order_id: int | None = None
+    ) -> tuple[TrackedOrder, list[TrackedOrder]]:
+        """Execute order placement or modification via TWS.
+
+        Shared logic for place_order and modify_order:
+        1. Select exchange based on time (OVERNIGHT vs SMART)
+        2. Qualify contract with TWS
+        3. Convert PreOrder to TWS Order objects (with optional brackets)
+        4. Submit via placeOrderGroup
+
+        Args:
+            order: PreOrder with order details and optional brackets
+            order_id: None for new orders, existing ID for modifications
+
+        Returns:
+            Tuple of (parent_tracked_order, child_tracked_orders)
+        """
+        preferred_exchange = self._select_preferred_exchange()
+
+        qualified = await self._tws_client.qualify_contract(
+            order.symbol, [preferred_exchange]
         )
 
-        self._orders[order_id] = placed_order
+        contract: Contract | None = getattr(
+            next(iter(qualified), None), "contract", None
+        )
 
-        return PlaceOrderResult(orderId=order_id)
+        assert (
+            contract is not None and contract.conId > 0
+        ), f"Contract not found for symbol {order.symbol}"
+
+        # Convert domain order to TWS types (may return multiple orders for brackets)
+        # Empty account string is valid for single-account users
+        # order_id=-1 means new order, >0 means modify existing
+        parent_order, stop_loss_order, take_profit_order = preorder_to_tws(
+            order, "", order_id if order_id is not None else -1
+        )
+
+        childs_to_place = [
+            o for o in [stop_loss_order, take_profit_order] if o is not None
+        ]
+
+        return await self._tws_client.placeOrderGroup(
+            contract, parent_order, childs_to_place
+        )
+
+    def _store_order_results(
+        self, order: PreOrder, parent: TrackedOrder, children: list[TrackedOrder]
+    ) -> None:
+        """Store order results in internal state.
+
+        Args:
+            order: Original PreOrder (for bracket context)
+            parent: Parent TrackedOrder from TWS
+            children: Child TrackedOrders (stop loss, take profit)
+        """
+        self._orders[str(parent.orderId)] = tracked_order_to_placed_order(
+            parent,
+            bracket_context=BracketContext(
+                take_profit=order.takeProfit,
+                stop_loss=order.stopLoss,
+                trailing_stop_pips=order.trailingStopPips,
+                stop_type=int(order.stopType) if order.stopType is not None else None,
+                child_order_ids=[child.orderId for child in children],
+            ),
+        )
+
+        self._orders.update(
+            {
+                str(tracked.orderId): tracked_order_to_placed_order(tracked)
+                for tracked in children
+            }
+        )
+
+    async def place_order(self, order: PreOrder) -> PlaceOrderResult:
+        """Place a new order (with optional bracket orders).
+
+        Supports bracket orders (stopLoss, takeProfit, trailingStopPips) by placing
+        multiple linked orders via TWS parent/child mechanism with OCA grouping.
+
+        Args:
+            order: PreOrder from TradingView containing order details and optional brackets
+
+        Returns:
+            PlaceOrderResult with parent order ID
+        """
+        parent_tracked, child_tracked = await self._execute_order(order)
+        self._store_order_results(order, parent_tracked, child_tracked)
+        return PlaceOrderResult(orderId=str(parent_tracked.orderId))
 
     async def modify_order(self, order_id: str, order: PreOrder) -> None:
-        """Modify an existing order."""
-        existing_order = self._orders.get(order_id)
-        if not existing_order:
-            raise ProviderException(
-                code="PROVIDER_BROKER_ORDER_NOT_FOUND",
-                message=f"Order {order_id} not found",
-                provider="fakebroker",
-                capability="broker",
-            )
+        """Modify an existing order (price, quantity, or bracket parameters).
 
-        if existing_order.status not in [OrderStatus.WORKING, OrderStatus.PLACING]:
-            raise ProviderException(
-                code="PROVIDER_BROKER_ORDER_INVALID_STATUS",
-                message=f"Cannot modify order {order_id} with status {existing_order.status}",
-                provider="fakebroker",
-                capability="broker",
-            )
+        Re-submits the order with the same order ID, updating TWS in-place.
+        For bracket modifications, new child orders are created with OCA linkage.
 
-        # Determine limit price
-        limit_price = order.limitPrice
-        if limit_price is None:
-            limit_price = order.seenPrice
-        if limit_price is None and order.currentQuotes is not None:
-            limit_price = (
-                order.currentQuotes.ask
-                if order.side == Side.BUY
-                else order.currentQuotes.bid
-            )
-
-        existing_order.qty = order.qty
-        existing_order.limitPrice = limit_price
-        existing_order.stopPrice = order.stopPrice
-        existing_order.takeProfit = order.takeProfit
-        existing_order.stopLoss = order.stopLoss
-        existing_order.guaranteedStop = order.guaranteedStop
-        existing_order.trailingStopPips = order.trailingStopPips
-        existing_order.stopType = order.stopType
-        existing_order.updateTime = int(time.time() * 1000)
+        Args:
+            order_id: Existing order ID to modify
+            order: Updated PreOrder with new parameters (price, qty, brackets)
+        """
+        parent_tracked, child_tracked = await self._execute_order(order, int(order_id))
+        self._store_order_results(order, parent_tracked, child_tracked)
 
     async def cancel_order(self, order_id: str) -> None:
         """Cancel an order."""
-        order = self._orders.get(order_id)
-        if not order:
-            raise ProviderException(
-                code="PROVIDER_BROKER_ORDER_NOT_FOUND",
-                message=f"Order {order_id} not found",
-                provider="fakebroker",
-                capability="broker",
-            )
-
-        if order.status not in [
-            OrderStatus.WORKING,
-            OrderStatus.PLACING,
-            OrderStatus.FILLED,
-        ]:
-            raise ProviderException(
-                code="PROVIDER_BROKER_ORDER_INVALID_STATUS",
-                message=f"Cannot cancel order {order_id} with status {order.status}",
-                provider="fakebroker",
-                capability="broker",
-            )
-
-        order.status = OrderStatus.CANCELED
-        order.updateTime = int(time.time() * 1000)
+        canceled = await self._tws_client.cancelOrder(int(order_id))
+        placed = tracked_order_to_placed_order(
+            canceled, None
+        )  # Convert to domain model
+        self._orders[str(order_id)] = placed
 
     async def close_position(
         self, position_id: str, amount: float | None = None
@@ -234,7 +273,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             raise ProviderException(
                 code="PROVIDER_BROKER_POSITION_NOT_FOUND",
                 message=f"Position {position_id} not found",
-                provider="fakebroker",
+                provider="tws",
                 capability="broker",
             )
 
@@ -244,14 +283,14 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             raise ProviderException(
                 code="PROVIDER_BROKER_INVALID_AMOUNT",
                 message="Amount must be positive",
-                provider="fakebroker",
+                provider="tws",
                 capability="broker",
             )
         if close_qty > position.qty:
             raise ProviderException(
                 code="PROVIDER_BROKER_INVALID_AMOUNT",
                 message=f"Amount {close_qty} exceeds position quantity {position.qty}",
-                provider="fakebroker",
+                provider="tws",
                 capability="broker",
             )
 
@@ -697,7 +736,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         """Simulate random order executions at configurable intervals."""
         logger.info("Execution simulator started")
 
-        while True:
+        while not self._shutdown_event.is_set():
             try:
                 delay = random.uniform(
                     1.0,
@@ -984,9 +1023,16 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
     def shutdown(self) -> None:
         """Shutdown provider (cancel background tasks)."""
+        self._shutdown_event.set()
         if self._execution_simulator_task:
             self._execution_simulator_task.cancel()
             self._execution_simulator_task = None
+
+        if DEBUG_TWS_BROKER:
+            logger.info("Shutting down TWSBrokerProvider...")
+        self._tws_client.shutdown()
+        if DEBUG_TWS_BROKER:
+            logger.info("TWSBrokerProvider shutdown complete.")
 
 
 # Alias for backward compatibility

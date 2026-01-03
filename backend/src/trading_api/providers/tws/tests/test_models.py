@@ -1,14 +1,19 @@
 """Tests for TWS models and error classification.
 
 Tests cover:
-- classify_error() - TWS error code categorization
+- classify_error() - TWS error code categorization and nature classification
 - TWSErrorClassification constants
+- TWSErrorNature constants
 - Error code recoverability classification
 """
 
 import pytest
 
-from trading_api.providers.tws.tws_models import TWSErrorClassification, classify_error
+from trading_api.providers.tws.tws_models import (
+    TWSErrorClassification,
+    TWSErrorNature,
+    classify_error,
+)
 
 
 class TestClassifyError:
@@ -30,7 +35,7 @@ class TestClassifyError:
     )
     def test_info_codes_are_recoverable(self, error_code: int) -> None:
         """Test INFO status codes are classified correctly."""
-        category, recoverable = classify_error(error_code)
+        nature, category, recoverable = classify_error(error_code)
 
         assert category == TWSErrorClassification.INFO
         assert recoverable is True
@@ -55,7 +60,7 @@ class TestClassifyError:
     )
     def test_connection_codes_are_recoverable(self, error_code: int) -> None:
         """Test CONNECTION codes are classified correctly."""
-        category, recoverable = classify_error(error_code)
+        nature, category, recoverable = classify_error(error_code)
 
         assert category == TWSErrorClassification.CONNECTION
         assert recoverable is True
@@ -73,7 +78,7 @@ class TestClassifyError:
     )
     def test_pacing_codes_are_recoverable(self, error_code: int) -> None:
         """Test PACING codes are classified correctly."""
-        category, recoverable = classify_error(error_code)
+        nature, category, recoverable = classify_error(error_code)
 
         assert category == TWSErrorClassification.PACING
         assert recoverable is True
@@ -95,7 +100,7 @@ class TestClassifyError:
     )
     def test_duplicate_codes_are_recoverable(self, error_code: int) -> None:
         """Test DUPLICATE codes are classified correctly."""
-        category, recoverable = classify_error(error_code)
+        nature, category, recoverable = classify_error(error_code)
 
         assert category == TWSErrorClassification.DUPLICATE
         assert recoverable is True
@@ -116,7 +121,7 @@ class TestClassifyError:
     )
     def test_subscription_codes_not_recoverable(self, error_code: int) -> None:
         """Test SUBSCRIPTION codes are classified correctly."""
-        category, recoverable = classify_error(error_code)
+        nature, category, recoverable = classify_error(error_code)
 
         assert category == TWSErrorClassification.SUBSCRIPTION
         assert recoverable is False
@@ -142,7 +147,7 @@ class TestClassifyError:
     )
     def test_validation_codes_not_recoverable(self, error_code: int) -> None:
         """Test VALIDATION codes are classified correctly."""
-        category, recoverable = classify_error(error_code)
+        nature, category, recoverable = classify_error(error_code)
 
         assert category == TWSErrorClassification.VALIDATION
         assert recoverable is False
@@ -166,7 +171,7 @@ class TestClassifyError:
     )
     def test_fatal_codes_not_recoverable(self, error_code: int) -> None:
         """Test FATAL codes are classified correctly."""
-        category, recoverable = classify_error(error_code)
+        nature, category, recoverable = classify_error(error_code)
 
         assert category == TWSErrorClassification.FATAL
         assert recoverable is False
@@ -186,7 +191,7 @@ class TestClassifyError:
     )
     def test_not_found_codes_are_recoverable(self, error_code: int) -> None:
         """Test NOT_FOUND codes are INFO (already handled)."""
-        category, recoverable = classify_error(error_code)
+        nature, category, recoverable = classify_error(error_code)
 
         assert category == TWSErrorClassification.INFO
         assert recoverable is True
@@ -198,7 +203,7 @@ class TestClassifyError:
     def test_warning_range_2xxx(self) -> None:
         """Test 2xxx range (excluding handled codes) is WARNING."""
         # Pick a code in 2xxx range that's not in INFO or CONNECTION
-        category, recoverable = classify_error(2001)
+        nature, category, recoverable = classify_error(2001)
 
         assert category == TWSErrorClassification.WARNING
         assert recoverable is True
@@ -206,7 +211,7 @@ class TestClassifyError:
     def test_system_range_1xxx(self) -> None:
         """Test 1xxx range (excluding handled codes) is SYSTEM."""
         # Pick a code in 1xxx range that's not in CONNECTION
-        category, recoverable = classify_error(1001)
+        nature, category, recoverable = classify_error(1001)
 
         assert category == TWSErrorClassification.SYSTEM
         assert recoverable is True
@@ -218,17 +223,137 @@ class TestClassifyError:
     def test_unknown_code_defaults_to_error(self) -> None:
         """Test unknown codes default to ERROR, non-recoverable."""
         # Pick a random unknown code
-        category, recoverable = classify_error(99999)
+        nature, category, recoverable = classify_error(99999)
 
         assert category == TWSErrorClassification.ERROR
         assert recoverable is False
 
     def test_negative_code_defaults_to_error(self) -> None:
         """Test negative codes default to ERROR, non-recoverable."""
-        category, recoverable = classify_error(-1)
+        nature, category, recoverable = classify_error(-1)
 
         assert category == TWSErrorClassification.ERROR
         assert recoverable is False
+
+
+class TestClassifyErrorNature:
+    """Test classify_error() returns correct error nature (req/order/system)."""
+
+    # =========================================================================
+    # ORDER Nature - Error ID represents an order ID
+    # =========================================================================
+
+    @pytest.mark.parametrize(
+        "error_code",
+        [
+            103,  # Duplicate order ID
+            104,  # Can't modify a filled order
+            105,  # Order being modified does not match
+            133,  # Submit new order failed
+            134,  # Modify order failed
+            135,  # Can't find order with ID
+            136,  # Order cannot be cancelled
+            161,  # Cancel attempted when not cancellable
+            201,  # Order rejected
+            202,  # Order cancelled
+            399,  # Order message error
+            400,  # Algo order error
+            10006,  # Missing parent order
+            10148,  # Order cannot be cancelled, wrong state
+        ],
+    )
+    def test_order_nature_codes(self, error_code: int) -> None:
+        """Test order-related error codes return ORDER nature."""
+        nature, category, recoverable = classify_error(error_code)
+        assert nature == TWSErrorNature.ORDER
+
+    # =========================================================================
+    # REQUEST Nature - Error ID represents a request ID
+    # =========================================================================
+
+    @pytest.mark.parametrize(
+        "error_code",
+        [
+            100,  # Max rate of messages exceeded
+            101,  # Max number of tickers reached
+            102,  # Duplicate ticker ID
+            162,  # Historical market data service error
+            200,  # No security definition found
+            300,  # Can't find ticker ID
+            309,  # Max market depth requests reached
+            354,  # Not subscribed to market data
+            365,  # No scanner subscription found
+            366,  # No historical data query found
+            385,  # Duplicate ticker ID for scanner
+            386,  # Duplicate ticker ID for historical data
+            420,  # Invalid real-time query (pacing)
+            10090,  # Part of requested market data not subscribed
+            10186,  # Market data not subscribed, delayed not enabled
+            10197,  # No market data during competing session
+        ],
+    )
+    def test_request_nature_codes(self, error_code: int) -> None:
+        """Test request-related error codes return REQUEST nature."""
+        nature, category, recoverable = classify_error(error_code)
+        assert nature == TWSErrorNature.REQUEST
+
+    # =========================================================================
+    # SYSTEM Nature - Error is system-wide (no specific req/order ID)
+    # =========================================================================
+
+    @pytest.mark.parametrize(
+        "error_code",
+        [
+            501,  # Already connected
+            502,  # Couldn't connect to TWS
+            503,  # TWS out of date
+            504,  # Not connected
+            505,  # Unknown message ID
+            506,  # Unsupported version
+            507,  # Bad message length
+            326,  # Client ID already in use
+            1100,  # Connectivity lost
+            1101,  # Connectivity restored, data lost
+            1102,  # Connectivity restored, data maintained
+            2103,  # Market data farm disconnected
+            2104,  # Market data farm connection OK
+            2105,  # Historical data farm disconnected
+            2106,  # Historical data farm connected
+            2158,  # Sec-def data farm connection OK
+        ],
+    )
+    def test_system_nature_codes(self, error_code: int) -> None:
+        """Test system-wide error codes return SYSTEM nature."""
+        nature, category, recoverable = classify_error(error_code)
+        assert nature == TWSErrorNature.SYSTEM
+
+    # =========================================================================
+    # Range-based Nature Heuristics
+    # =========================================================================
+
+    def test_1xxx_range_is_system_nature(self) -> None:
+        """Test 1xxx range defaults to SYSTEM nature."""
+        # Pick a code in 1xxx range that's not explicitly classified
+        nature, category, recoverable = classify_error(1001)
+        assert nature == TWSErrorNature.SYSTEM
+
+    def test_2xxx_range_is_system_nature(self) -> None:
+        """Test 2xxx range defaults to SYSTEM nature."""
+        # Pick a code in 2xxx range that's not explicitly classified
+        nature, category, recoverable = classify_error(2001)
+        assert nature == TWSErrorNature.SYSTEM
+
+    def test_10xxx_range_defaults_to_order_nature(self) -> None:
+        """Test 10xxx range (non-subscription) defaults to ORDER nature."""
+        # Pick a code in 10xxx range that's not in subscription codes
+        nature, category, recoverable = classify_error(10001)
+        assert nature == TWSErrorNature.ORDER
+
+    def test_400_range_is_order_nature(self) -> None:
+        """Test 400-499 range (algo orders) is ORDER nature."""
+        # Pick a code in 400 range
+        nature, category, recoverable = classify_error(401)
+        assert nature == TWSErrorNature.ORDER
 
 
 class TestTWSErrorClassificationConstants:
@@ -246,3 +371,13 @@ class TestTWSErrorClassificationConstants:
         assert TWSErrorClassification.WARNING == "WARNING"
         assert TWSErrorClassification.SYSTEM == "SYSTEM"
         assert TWSErrorClassification.ERROR == "ERROR"
+
+
+class TestTWSErrorNatureConstants:
+    """Test TWSErrorNature constants exist and are strings."""
+
+    def test_all_nature_constants_exist(self) -> None:
+        """Test all nature constants are defined."""
+        assert TWSErrorNature.REQUEST == "req"
+        assert TWSErrorNature.ORDER == "order"
+        assert TWSErrorNature.SYSTEM == "system"
