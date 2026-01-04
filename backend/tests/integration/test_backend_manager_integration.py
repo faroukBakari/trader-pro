@@ -182,6 +182,7 @@ def session_test_config() -> DeploymentConfig:
                 port=base_port + 1,
                 instances=1,
                 modules=["broker"],
+                providers=["fakebroker"],
                 reload=False,
             ),
             "datafeed": ServerConfig(
