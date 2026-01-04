@@ -4,7 +4,6 @@ Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar
 """
 
 import re
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -583,15 +582,18 @@ TWS_ACTION_TO_SIDE: dict[str, int] = {
 
 # TWS order status → Domain OrderStatus
 TWS_STATUS_TO_ORDER_STATUS: dict[str, int] = {
-    "PendingSubmit": 4,  # PLACING
-    "PendingCancel": 4,  # PLACING (transitional)
-    "PreSubmitted": 4,  # PLACING
-    "Submitted": 6,  # WORKING
-    "ApiPending": 4,  # PLACING
+    # Transitional states → PLACING
+    "PendingSubmit": 4,  # Order sent, awaiting exchange ack
+    "PendingCancel": 4,  # Cancel sent, awaiting confirmation
+    "ApiPending": 4,  # Not yet sent to IB server
+    # Working states → WORKING
+    "PreSubmitted": 6,  # ← CHANGE: Simulated order held by IB, will execute
+    "Submitted": 6,  # Active at exchange
+    # Terminal states
     "ApiCancelled": 1,  # CANCELED
     "Cancelled": 1,  # CANCELED
     "Filled": 2,  # FILLED
-    "Inactive": 3,  # INACTIVE
+    "Inactive": 3,  # INACTIVE (error/held)
 }
 
 
@@ -671,9 +673,6 @@ def preorder_to_tws(
     # --- Bracket child orders ---
     # Child orders have opposite side to parent
     child_action = "SELL" if preorder.side == 1 else "BUY"  # Side.BUY=1, Side.SELL=-1
-    oca_group = f"bracket_{uuid.uuid4().hex[:8]}"
-    parent.ocaGroup = oca_group
-    parent.ocaType = 1  # CANCEL_WITH_BLOCK
 
     stop_loss_order: Order | None = None
     take_profit_order: Order | None = None
@@ -687,8 +686,6 @@ def preorder_to_tws(
         take_profit_order.lmtPrice = preorder.takeProfit
         take_profit_order.tif = "GTC"
         take_profit_order.account = account
-        take_profit_order.ocaGroup = oca_group
-        take_profit_order.ocaType = 1  # CANCEL_WITH_BLOCK
 
     # Stop-loss or trailing stop order
     if preorder.stopLoss is not None or preorder.trailingStopPips is not None:
@@ -697,8 +694,6 @@ def preorder_to_tws(
         stop_loss_order.totalQuantity = Decimal(str(preorder.qty))
         stop_loss_order.tif = "GTC"
         stop_loss_order.account = account
-        stop_loss_order.ocaGroup = oca_group
-        stop_loss_order.ocaType = 1  # CANCEL_WITH_BLOCK
 
         # Determine stop type: trailing vs regular stop
         use_trailing = preorder.trailingStopPips is not None or (

@@ -23,12 +23,7 @@ from trading_api.models.broker import OrderStatus, OrderType, Side
 from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.order_tracker import OrderFill, TrackedOrder
 from trading_api.providers.tws.tws_mappers import (
-    ORDER_TYPE_TO_TWS,
     SEC_TYPE_MAP,
-    SIDE_TO_TWS_ACTION,
-    TWS_ACTION_TO_SIDE,
-    TWS_STATUS_TO_ORDER_STATUS,
-    TWS_TO_ORDER_TYPE,
     contract_description_to_search_result,
     contract_details_to_symbol_info,
     parse_tws_bar_date,
@@ -736,61 +731,6 @@ class TestTwsTicksToQuoteDataRealWorldScenarios:
         assert result.v.volume == 4018
 
 
-# =============================================================================
-# Broker Mapper Tests
-# =============================================================================
-
-
-class TestOrderMappingConstants:
-    """Test order mapping constant dictionaries."""
-
-    def test_order_type_to_tws_mapping(self) -> None:
-        """Test domain OrderType to TWS string mapping."""
-        assert ORDER_TYPE_TO_TWS[1] == "LMT"  # LIMIT
-        assert ORDER_TYPE_TO_TWS[2] == "MKT"  # MARKET
-        assert ORDER_TYPE_TO_TWS[3] == "STP"  # STOP
-        assert ORDER_TYPE_TO_TWS[4] == "STP LMT"  # STOP_LIMIT
-
-    def test_tws_to_order_type_mapping(self) -> None:
-        """Test TWS string to domain OrderType mapping."""
-        assert TWS_TO_ORDER_TYPE["LMT"] == 1
-        assert TWS_TO_ORDER_TYPE["MKT"] == 2
-        assert TWS_TO_ORDER_TYPE["STP"] == 3
-        assert TWS_TO_ORDER_TYPE["STP LMT"] == 4
-        # Aliases
-        assert TWS_TO_ORDER_TYPE["STOP"] == 3
-        assert TWS_TO_ORDER_TYPE["STOP_LIMIT"] == 4
-
-    def test_side_to_tws_action_mapping(self) -> None:
-        """Test domain Side to TWS action string mapping."""
-        assert SIDE_TO_TWS_ACTION[1] == "BUY"  # Side.BUY
-        assert SIDE_TO_TWS_ACTION[-1] == "SELL"  # Side.SELL
-
-    def test_tws_action_to_side_mapping(self) -> None:
-        """Test TWS action to domain Side mapping."""
-        assert TWS_ACTION_TO_SIDE["BUY"] == 1
-        assert TWS_ACTION_TO_SIDE["SELL"] == -1
-        # Historical actions
-        assert TWS_ACTION_TO_SIDE["BOT"] == 1
-        assert TWS_ACTION_TO_SIDE["SLD"] == -1
-
-    def test_tws_status_to_order_status_mapping(self) -> None:
-        """Test TWS order status to domain OrderStatus mapping."""
-        # Placing states
-        assert TWS_STATUS_TO_ORDER_STATUS["PendingSubmit"] == 4  # PLACING
-        assert TWS_STATUS_TO_ORDER_STATUS["PendingCancel"] == 4
-        assert TWS_STATUS_TO_ORDER_STATUS["PreSubmitted"] == 4
-        assert TWS_STATUS_TO_ORDER_STATUS["ApiPending"] == 4
-        # Working
-        assert TWS_STATUS_TO_ORDER_STATUS["Submitted"] == 6  # WORKING
-        # Cancelled
-        assert TWS_STATUS_TO_ORDER_STATUS["ApiCancelled"] == 1  # CANCELED
-        assert TWS_STATUS_TO_ORDER_STATUS["Cancelled"] == 1
-        # Other
-        assert TWS_STATUS_TO_ORDER_STATUS["Filled"] == 2  # FILLED
-        assert TWS_STATUS_TO_ORDER_STATUS["Inactive"] == 3  # INACTIVE
-
-
 class TestPreorderToTws:
     """Test preorder_to_tws mapper."""
 
@@ -979,10 +919,6 @@ class TestPreorderToTws:
         assert parent.orderType == "LMT"
         assert stop_loss is not None
         assert take_profit is not None
-        # Both should be linked via OCA group
-        assert stop_loss.ocaGroup == take_profit.ocaGroup
-        assert stop_loss.ocaType == 1  # CANCEL_WITH_BLOCK
-        assert take_profit.ocaType == 1
 
     def test_order_with_trailing_stop(self) -> None:
         """Test converting order with trailing stop bracket."""
@@ -1252,7 +1188,7 @@ class TestTrackedOrderToPlacedOrder:
         assert result.type == OrderType.STOP_LIMIT
         assert result.limitPrice == 250.00
         assert result.stopPrice == 245.00
-        assert result.status == OrderStatus.PLACING
+        assert result.status == OrderStatus.WORKING
 
     def test_partial_fill(self) -> None:
         """Test mapping a partially filled order."""

@@ -47,7 +47,6 @@ from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.providers.tws.tws_mappers import (
-    BracketContext,
     preorder_to_tws,
     tracked_order_to_placed_order,
 )
@@ -154,7 +153,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             return "OVERNIGHT"
         return "SMART"
 
-    async def _execute_order(
+    async def _submit_order(
         self, order: PreOrder, order_id: int | None = None
     ) -> tuple[TrackedOrder, list[TrackedOrder]]:
         """Execute order placement or modification via TWS.
@@ -213,7 +212,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         Returns:
             PlaceOrderResult with parent order ID
         """
-        main_order, _ = await self._execute_order(order)
+        main_order, _ = await self._submit_order(order)
         return PlaceOrderResult(orderId=str(main_order.orderId))
 
     async def modify_order(self, order_id: str, order: PreOrder) -> None:
@@ -226,7 +225,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             order_id: Existing order ID to modify
             order: Updated PreOrder with new parameters (price, qty, brackets)
         """
-        await self._execute_order(order, int(order_id))
+        await self._submit_order(order, int(order_id))
 
     async def cancel_order(self, order_id: str) -> None:
         """Cancel an order."""
