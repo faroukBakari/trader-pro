@@ -47,6 +47,7 @@ from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.providers.tws.tws_mappers import (
+    order_state_to_preview_result,
     preorder_to_tws,
     tracked_order_to_placed_order,
 )
@@ -402,11 +403,84 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         return self._equity
 
     async def preview_order(self, order: PreOrder) -> OrderPreviewResult:
-        """Preview order costs and requirements."""
+        """Preview order costs and margin requirements using TWS whatIf mode.
+
+        Uses TWS order.whatIf=True to get real margin/commission data from
+        Interactive Brokers without actually placing the order.
+
+        Args:
+            order: PreOrder with order details
+
+        Returns:
+            OrderPreviewResult with margin requirements, commission, and warnings
+
+        Note:
+            Only previews the entry order. Bracket orders (stopLoss, takeProfit)
+            are exit orders that release margin, so their preview is not needed.
+        """
+        confirm_id = str(uuid.uuid4())
+
+        try:
+            # Select exchange based on time (OVERNIGHT vs SMART)
+            preferred_exchange = self._select_preferred_exchange()
+
+            # Qualify contract with TWS
+            qualified = await self._tws_client.qualify_contract(
+                order.symbol, [preferred_exchange]
+            )
+
+            contract: Contract | None = getattr(
+                next(iter(qualified), None), "contract", None
+            )
+
+            if contract is None or contract.conId <= 0:
+                raise ProviderException(
+                    code="PROVIDER_BROKER_CONTRACT_NOT_FOUND",
+                    message=f"Contract not found for symbol {order.symbol}",
+                    provider="tws",
+                    capability="broker",
+                )
+
+            # Convert PreOrder to TWS Order (only entry order, no brackets for preview)
+            parent_order, _, _ = preorder_to_tws(order, "", -1)
+
+            # Enable whatIf mode - TWS returns margin/commission without executing
+            parent_order.whatIf = True
+
+            # Place whatIf order - returns TrackedOrder with OrderState containing
+            # margin requirements and commission estimates
+            tracked_order = await self._tws_client.placeOrder(contract, parent_order)
+
+            # Map OrderState to domain OrderPreviewResult
+            return order_state_to_preview_result(
+                tracked_order.orderState, order, confirm_id
+            )
+
+        except ProviderException:
+            # Re-raise provider exceptions as-is
+            raise
+        except Exception as e:
+            # Log and return fallback preview on unexpected errors
+            logger.warning(f"TWS whatIf preview failed, using fallback: {e}")
+            return self._build_fallback_preview(order, confirm_id)
+
+    def _build_fallback_preview(
+        self, order: PreOrder, confirm_id: str
+    ) -> OrderPreviewResult:
+        """Build fallback preview when TWS whatIf fails.
+
+        Provides estimated values based on order details when real
+        TWS margin/commission data is unavailable.
+
+        Args:
+            order: PreOrder with order details
+            confirm_id: UUID for order confirmation
+
+        Returns:
+            OrderPreviewResult with estimated values and warning
+        """
         estimated_price = order.limitPrice or order.stopPrice or 100.0
         order_value = order.qty * estimated_price
-        commission = order_value * 0.001  # 0.1% commission
-        margin_required = order_value * 0.5  # 50% margin (2:1 leverage)
 
         sections = []
 
@@ -446,9 +520,9 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             OrderPreviewSection(header="Order Details", rows=order_details_rows)
         )
 
-        # Cost Analysis section
+        # Estimated Cost section (fallback values)
         cost_section = OrderPreviewSection(
-            header="Cost Analysis",
+            header="Estimated Cost (Offline)",
             rows=[
                 OrderPreviewSectionRow(
                     title="Estimated Price", value=f"${estimated_price:.2f}"
@@ -456,43 +530,25 @@ class TWSBrokerProvider(Provider, BrokerCapability):
                 OrderPreviewSectionRow(
                     title="Order Value", value=f"${order_value:.2f}"
                 ),
-                OrderPreviewSectionRow(title="Commission", value=f"${commission:.2f}"),
-                OrderPreviewSectionRow(
-                    title="Margin Required", value=f"${margin_required:.2f}"
-                ),
-                OrderPreviewSectionRow(
-                    title="Total Cost", value=f"${order_value + commission:.2f}"
-                ),
             ],
         )
         sections.append(cost_section)
 
         # Risk Management section (if brackets)
-        if order.takeProfit or order.stopLoss or order.guaranteedStop:
+        if order.takeProfit or order.stopLoss or order.trailingStopPips:
             bracket_rows = []
 
             if order.takeProfit:
-                potential_profit = abs((order.takeProfit - estimated_price) * order.qty)
                 bracket_rows.append(
                     OrderPreviewSectionRow(
-                        title="Take Profit",
-                        value=f"${order.takeProfit:.2f} (+${potential_profit:.2f})",
+                        title="Take Profit", value=f"${order.takeProfit:.2f}"
                     )
                 )
 
             if order.stopLoss:
-                potential_loss = abs((order.stopLoss - estimated_price) * order.qty)
                 bracket_rows.append(
                     OrderPreviewSectionRow(
-                        title="Stop Loss",
-                        value=f"${order.stopLoss:.2f} (-${potential_loss:.2f})",
-                    )
-                )
-
-            if order.guaranteedStop:
-                bracket_rows.append(
-                    OrderPreviewSectionRow(
-                        title="Guaranteed Stop", value=f"${order.guaranteedStop:.2f}"
+                        title="Stop Loss", value=f"${order.stopLoss:.2f}"
                     )
                 )
 
@@ -509,18 +565,16 @@ class TWSBrokerProvider(Provider, BrokerCapability):
                     OrderPreviewSection(header="Risk Management", rows=bracket_rows)
                 )
 
-        confirm_id = str(uuid.uuid4())
-
-        warnings: list[str] = []
+        warnings: list[str] = [
+            "Preview unavailable from broker - showing estimated values only"
+        ]
         if order.type == OrderType.MARKET:
             warnings.append("Market orders execute immediately at current market price")
-        if order.qty > 1000:
-            warnings.append("Large order size may experience slippage")
 
         return OrderPreviewResult(
             sections=sections,
             confirmId=confirm_id,
-            warnings=warnings if warnings else None,
+            warnings=warnings,
             errors=None,
         )
 
