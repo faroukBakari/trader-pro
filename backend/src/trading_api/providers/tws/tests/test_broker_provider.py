@@ -21,7 +21,6 @@ from trading_api.models.broker import (
     Brackets,
     OrderStatus,
     OrderType,
-    PlacedOrder,
     PlaceOrderResult,
     Position,
     PreOrder,
@@ -477,9 +476,7 @@ class TestModifyOrder:
             order_type="LMT", lmt_price=155.00, total_quantity=Decimal("100")
         )
         modified_tracked = _create_tracked_order(12345, order=modified_order)
-        mock_client.placeOrderGroup = AsyncMock(
-            return_value=(modified_tracked, [])
-        )
+        mock_client.placeOrderGroup = AsyncMock(return_value=(modified_tracked, []))
         # Mock reqOpenOrders to return the modified order
         mock_client.reqOpenOrders = AsyncMock(return_value=[modified_tracked])
 

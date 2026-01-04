@@ -369,12 +369,28 @@ class BrokerCapability(ABC):
 
 **TWS-Specific Notes:**
 
-- **Current Implementation**: `TWSBrokerProvider` is currently a **FakeBroker stub** with in-memory state for development/testing. Real TWS order integration is in progress (see `order_tracker.py`).
+- **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `qualify_contract()`. Some features (execution simulation, P&L tracking) still use in-memory state.
 - **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. These methods raise `ProviderException` with code `PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED`.
 - **Order Preview**: Returns estimated values since TWS doesn't have native preview API.
 - **Bracket Orders**: `edit_position_brackets()` implemented using OCA (One-Cancels-All) groups. Creates stop loss (STP/TRAIL) and take profit (LMT) orders linked so when one fills, TWS cancels the others.
 - **Equity Streaming**: TWS doesn't push account changes; polling via `get_equity()` is required.
 - **Client ID**: Broker uses `client_id=2` (default), separate from datafeed's `client_id=1`.
+
+**Order Status Mapping:**
+
+| TWS Status      | Domain Status | Notes                                        |
+| --------------- | ------------- | -------------------------------------------- |
+| `PendingSubmit` | PLACING (4)   | Order sent, awaiting exchange acknowledgment |
+| `PendingCancel` | PLACING (4)   | Cancel sent, awaiting confirmation           |
+| `ApiPending`    | PLACING (4)   | Not yet sent to IB server                    |
+| `PreSubmitted`  | WORKING (6)   | Simulated order held by IB, will execute     |
+| `Submitted`     | WORKING (6)   | Active at exchange                           |
+| `ApiCancelled`  | CANCELED (1)  | Cancelled via API                            |
+| `Cancelled`     | CANCELED (1)  | Cancelled                                    |
+| `Filled`        | FILLED (2)    | Order fully executed                         |
+| `Inactive`      | INACTIVE (3)  | Error or held state                          |
+
+> **Note:** `PreSubmitted` maps to WORKING because simulated orders (e.g., stop orders held by IB until trigger) are effectively active and should display as working in the UI.
 
 **Real TWS Broker Integration (In Progress):**
 
@@ -494,14 +510,14 @@ tracked_orders = await self._tws_client.placeOcaGroup(
 
 ### Broker Mappers
 
-| Function                                | Description                                                                                                                                                                                                           |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `preorder_to_tws()`                     | `PreOrder` → `(Order, Order \| None, Order \| None)` — parent, stop*loss, take_profit. Generates UUID-based `ocaGroup` (e.g., `bracket*<uuid8>`) when brackets present. Supports `trailStopPrice` for trailing stops. |
-| `tws_order_to_placed_order()`           | order data dict → `PlacedOrder`                                                                                                                                                                                       |
-| `tws_position_to_domain()`              | position data dict → `Position`                                                                                                                                                                                       |
-| `tws_account_summary_to_equity()`       | summary dict → `EquityData`                                                                                                                                                                                           |
-| `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`                                                                                                                                                                                      |
-| `calculate_tws_duration()`              | time range → TWS duration string                                                                                                                                                                                      |
+| Function                                | Description                                                                                                                                                                                                                              |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `preorder_to_tws()`                     | `PreOrder` → `(Order, Order \| None, Order \| None)` — parent, stop_loss, take_profit. Child orders are created without OCA linking (OCA groups managed by `TWSClient.placeOrderGroup()`). Supports `trailStopPrice` for trailing stops. |
+| `tws_order_to_placed_order()`           | order data dict → `PlacedOrder`                                                                                                                                                                                                          |
+| `tws_position_to_domain()`              | position data dict → `Position`                                                                                                                                                                                                          |
+| `tws_account_summary_to_equity()`       | summary dict → `EquityData`                                                                                                                                                                                                              |
+| `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`                                                                                                                                                                                                         |
+| `calculate_tws_duration()`              | time range → TWS duration string                                                                                                                                                                                                         |
 
 **secType Mapping:**
 
