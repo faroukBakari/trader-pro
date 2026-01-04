@@ -584,21 +584,58 @@ TWS_ACTION_TO_SIDE: dict[str, int] = {
     "SLD": -1,  # Historical action
 }
 
-# TWS order status → Domain OrderStatus
-TWS_STATUS_TO_ORDER_STATUS: dict[str, int] = {
-    # Transitional states → PLACING
-    "PendingSubmit": 4,  # Order sent, awaiting exchange ack
-    "ApiPending": 4,  # Not yet sent to IB server
-    # Working states → WORKING
-    "PreSubmitted": 3,  # ← CHANGE: Simulated order held by IB, will execute
-    "Submitted": 6,  # Active at exchange
-    # Terminal states
-    "PendingCancel": 6,  # Cancel sent, awaiting confirmation
-    "ApiCancelled": 1,  # CANCELED
-    "Cancelled": 1,  # CANCELED
-    "Filled": 2,  # FILLED
-    "Inactive": 3,  # INACTIVE (error/held)
+# TWS order status → Domain OrderStatus (direct mappings only)
+# Statuses that have a definitive domain mapping
+_DIRECT_MAPPED_STATUS: dict[str, int] = {
+    "PreSubmitted": 3,  # INACTIVE - simulated order held by IB (stop waiting for trigger)
+    "Submitted": 6,  # WORKING - active at exchange
+    "Cancelled": 1,  # CANCELED - confirmed cancelled
+    "Filled": 2,  # FILLED - confirmed filled
+    "Inactive": 3,  # INACTIVE - error or held
 }
+
+# Statuses requiring history-based resolution (preserve previous confirmed status)
+_HISTORY_RESOLVED_STATUS: set[str] = {
+    "PendingCancel",  # Cancel requested but not confirmed - could still fill
+    "ApiCancelled",  # Cancelled via API before ack - could still fill
+    "PendingSubmit",  # Sent, awaiting exchange ack - use last confirmed
+    "ApiPending",  # Not yet sent to IB server - use last confirmed
+}
+
+
+def tws_to_domain_status(tracked: TrackedOrder) -> OrderStatus:
+    """Convert TWS order status to domain OrderStatus.
+
+    Handles cancel transitions (PendingCancel, ApiCancelled) by preserving
+    the last confirmed status from order history. This prevents misleading
+    users during market halts where orders might still fill after cancel request.
+
+    Args:
+        tracked: TrackedOrder with current status and fills history
+
+    Returns:
+        Domain OrderStatus enum value
+
+    Resolution order:
+        1. Direct mapping for confirmed statuses (Submitted, Filled, Cancelled, etc.)
+        2. History lookup for transitional statuses (PendingCancel, ApiCancelled, etc.)
+        3. Fallback to PLACING (4) if no history available
+    """
+    current_status = tracked.orderState.status
+
+    # 1. Check direct mapping first (confirmed statuses)
+    if current_status in _DIRECT_MAPPED_STATUS:
+        return OrderStatus(_DIRECT_MAPPED_STATUS[current_status])
+
+    # 2. History-based resolution for transitional/cancel statuses
+    if current_status in _HISTORY_RESOLVED_STATUS and tracked.fills:
+        # Walk history backwards to find last confirmed status
+        for fill in reversed(tracked.fills):
+            if fill.status in _DIRECT_MAPPED_STATUS:
+                return OrderStatus(_DIRECT_MAPPED_STATUS[fill.status])
+
+    # 3. Fallback to PLACING for new orders with no history
+    return OrderStatus.PLACING
 
 
 @dataclass
@@ -739,7 +776,7 @@ def tracked_order_to_placed_order(
 
     contract = tracked.contract
     order = tracked.order
-    order_state = tracked.orderState
+    tracked.orderState
 
     # Build symbol from contract
     symbol = ticker_name(contract)
@@ -754,8 +791,8 @@ def tracked_order_to_placed_order(
     # Quantity
     qty = float(order.totalQuantity)
 
-    # Status from orderState
-    status = OrderStatus(TWS_STATUS_TO_ORDER_STATUS.get(order_state.status, 6))
+    # Status with history-aware resolution
+    status = tws_to_domain_status(tracked)
 
     # Prices
     limit_price: float | None = None
@@ -1204,7 +1241,7 @@ __all__ = [
     "TWS_TO_ORDER_TYPE",
     "SIDE_TO_TWS_ACTION",
     "TWS_ACTION_TO_SIDE",
-    "TWS_STATUS_TO_ORDER_STATUS",
+    "tws_to_domain_status",
     "preorder_to_tws",
     "tracked_order_to_placed_order",
     "order_state_to_preview_result",

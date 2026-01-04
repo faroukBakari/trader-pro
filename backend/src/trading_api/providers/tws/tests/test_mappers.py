@@ -41,6 +41,7 @@ from trading_api.providers.tws.tws_mappers import (
     tws_bar_to_domain_bar,
     tws_position_to_domain,
     tws_ticks_to_quote_data,
+    tws_to_domain_status,
 )
 
 # =============================================================================
@@ -708,3 +709,205 @@ class TestOrderStateToPreviewResult:
 
         assert result.errors is not None
         assert any("Insufficient funds" in e for e in result.errors)
+
+
+# =============================================================================
+# TWS Status Mapping
+# =============================================================================
+
+
+class TestTwsToDomainStatus:
+    """Test tws_to_domain_status helper function.
+
+    Covers:
+    - Direct mapping for confirmed statuses
+    - History-based resolution for cancel transitions
+    - Fallback to PLACING for new orders
+    """
+
+    def _make_tracked_order(
+        self,
+        status: str = "Submitted",
+        fills: list[OrderFill] | None = None,
+    ) -> TrackedOrder:
+        """Helper to create TrackedOrder with specific status and fills."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        order = TWSOrder()
+        order.action = "BUY"
+        order.totalQuantity = Decimal("100")
+        order.orderType = "MKT"
+
+        order_state = OrderState()
+        order_state.status = status
+
+        tracked = TrackedOrder(
+            orderId=1,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+        )
+        if fills:
+            tracked.fills = fills
+        return tracked
+
+    def _make_fill(self, status: str) -> OrderFill:
+        """Helper to create OrderFill with specific status."""
+        return OrderFill(
+            orderId=1,
+            status=status,
+            filled=Decimal("0"),
+            remaining=Decimal("100"),
+            avgFillPrice=0.0,
+            permId=12345,
+            parentId=0,
+            lastFillPrice=0.0,
+            clientId=1,
+            whyHeld="",
+            mktCapPrice=0.0,
+            timestamp=1234567890,
+        )
+
+    # --- Direct mapping tests ---
+
+    def test_submitted_maps_to_working(self) -> None:
+        """Submitted (active at exchange) → WORKING."""
+        tracked = self._make_tracked_order(status="Submitted")
+        assert tws_to_domain_status(tracked) == OrderStatus.WORKING
+
+    def test_presubmitted_maps_to_inactive(self) -> None:
+        """PreSubmitted (simulated order held by IB) → INACTIVE."""
+        tracked = self._make_tracked_order(status="PreSubmitted")
+        assert tws_to_domain_status(tracked) == OrderStatus.INACTIVE
+
+    def test_filled_maps_to_filled(self) -> None:
+        """Filled → FILLED."""
+        tracked = self._make_tracked_order(status="Filled")
+        assert tws_to_domain_status(tracked) == OrderStatus.FILLED
+
+    def test_cancelled_maps_to_canceled(self) -> None:
+        """Cancelled (confirmed) → CANCELED."""
+        tracked = self._make_tracked_order(status="Cancelled")
+        assert tws_to_domain_status(tracked) == OrderStatus.CANCELED
+
+    def test_inactive_maps_to_inactive(self) -> None:
+        """Inactive (error/held) → INACTIVE."""
+        tracked = self._make_tracked_order(status="Inactive")
+        assert tws_to_domain_status(tracked) == OrderStatus.INACTIVE
+
+    # --- History-based resolution tests ---
+
+    def test_pending_cancel_preserves_working_status(self) -> None:
+        """PendingCancel with Submitted history → WORKING (not CANCELED).
+
+        Critical for halt scenarios: order might still fill after cancel request.
+        """
+        fills = [self._make_fill("Submitted")]
+        tracked = self._make_tracked_order(status="PendingCancel", fills=fills)
+
+        result = tws_to_domain_status(tracked)
+
+        assert result == OrderStatus.WORKING
+
+    def test_api_cancelled_preserves_working_status(self) -> None:
+        """ApiCancelled with Submitted history → WORKING.
+
+        ApiCancelled means cancelled via API before ack - could still fill.
+        """
+        fills = [self._make_fill("Submitted")]
+        tracked = self._make_tracked_order(status="ApiCancelled", fills=fills)
+
+        result = tws_to_domain_status(tracked)
+
+        assert result == OrderStatus.WORKING
+
+    def test_pending_cancel_preserves_presubmitted_status(self) -> None:
+        """PendingCancel with PreSubmitted history → INACTIVE."""
+        fills = [self._make_fill("PreSubmitted")]
+        tracked = self._make_tracked_order(status="PendingCancel", fills=fills)
+
+        result = tws_to_domain_status(tracked)
+
+        assert result == OrderStatus.INACTIVE
+
+    def test_pending_submit_with_history_uses_last_confirmed(self) -> None:
+        """PendingSubmit with prior Submitted history → WORKING."""
+        fills = [self._make_fill("Submitted")]
+        tracked = self._make_tracked_order(status="PendingSubmit", fills=fills)
+
+        result = tws_to_domain_status(tracked)
+
+        assert result == OrderStatus.WORKING
+
+    def test_api_pending_with_history_uses_last_confirmed(self) -> None:
+        """ApiPending with prior Submitted history → WORKING."""
+        fills = [self._make_fill("Submitted")]
+        tracked = self._make_tracked_order(status="ApiPending", fills=fills)
+
+        result = tws_to_domain_status(tracked)
+
+        assert result == OrderStatus.WORKING
+
+    def test_history_resolution_walks_backwards(self) -> None:
+        """History resolution finds last confirmed status (walks backwards)."""
+        fills = [
+            self._make_fill("PreSubmitted"),  # First
+            self._make_fill("Submitted"),  # Last confirmed
+        ]
+        tracked = self._make_tracked_order(status="PendingCancel", fills=fills)
+
+        result = tws_to_domain_status(tracked)
+
+        # Should use Submitted (last in list), not PreSubmitted
+        assert result == OrderStatus.WORKING
+
+    def test_history_skips_transitional_statuses(self) -> None:
+        """History resolution skips transitional statuses in history."""
+        fills = [
+            self._make_fill("Submitted"),
+            self._make_fill("PendingCancel"),  # Transitional - skip
+        ]
+        tracked = self._make_tracked_order(status="ApiCancelled", fills=fills)
+
+        result = tws_to_domain_status(tracked)
+
+        # Should find Submitted, skipping PendingCancel
+        assert result == OrderStatus.WORKING
+
+    # --- Fallback tests ---
+
+    def test_pending_cancel_no_history_falls_back_to_placing(self) -> None:
+        """PendingCancel with no history → PLACING."""
+        tracked = self._make_tracked_order(status="PendingCancel", fills=[])
+
+        result = tws_to_domain_status(tracked)
+
+        assert result == OrderStatus.PLACING
+
+    def test_api_pending_no_history_falls_back_to_placing(self) -> None:
+        """ApiPending (new order) with no history → PLACING."""
+        tracked = self._make_tracked_order(status="ApiPending", fills=[])
+
+        result = tws_to_domain_status(tracked)
+
+        assert result == OrderStatus.PLACING
+
+    def test_pending_submit_no_history_falls_back_to_placing(self) -> None:
+        """PendingSubmit (new order) with no history → PLACING."""
+        tracked = self._make_tracked_order(status="PendingSubmit", fills=[])
+
+        result = tws_to_domain_status(tracked)
+
+        assert result == OrderStatus.PLACING
+
+    def test_unknown_status_falls_back_to_placing(self) -> None:
+        """Unknown status with no history → PLACING."""
+        tracked = self._make_tracked_order(status="UnknownTwsStatus", fills=[])
+
+        result = tws_to_domain_status(tracked)
+
+        assert result == OrderStatus.PLACING
