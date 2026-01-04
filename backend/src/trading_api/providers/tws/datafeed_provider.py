@@ -566,7 +566,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             ProviderException: If subscription ID not found
         """
         # Lookup symbol/exchange from reverse mapping
-        self._tws_client.cancelBarDataStream(subscription_id)
+        self._tws_client.cancel_data_stream(subscription_id)
 
     def unsubscribe_market_data(self, subscription_id: str) -> None:
         """Unsubscribe from market data.
@@ -577,7 +577,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         Raises:
             ProviderException: If subscription ID not found
         """
-        self._tws_client.cancelMktDataStream(subscription_id)
+        self._tws_client.cancel_data_stream(subscription_id)
 
     def shutdown(self) -> None:
         """Perform any necessary cleanup on provider shutdown.

@@ -1357,12 +1357,13 @@ See **[TWS Provider Implementation Guide](../src/trading_api/providers/tws/READM
 
 - Three-layer architecture (TWSDatafeedProvider → TWSClient → IBSocket)
 - DatafeedCapability interface (full streaming implementation)
+- BrokerCapability interface (order placement, brackets via OCA groups)
 - Business key tracking system for async request/response correlation
 - StreamData dataclass for typed data accumulation
 - CachedContract for contract caching with lazy upgrade pattern
 - Comprehensive domain mappers
 
-**Note:** `TWSBrokerProvider` exists as a stub inheriting from `FakeBrokerProvider`. The `BrokerCapability` interface is defined but not yet implemented with real TWS order execution.
+**Note:** `TWSBrokerProvider` uses in-memory state for position/order tracking while integrating with real TWS for order execution. Features like `edit_position_brackets()` use OCA (One-Cancels-All) groups for proper bracket order linking.
 
 **File Template:**
 
@@ -1397,5 +1398,5 @@ class MyproviderProvider(Provider, AuthCapability):
 
 ---
 
-**Last Updated**: January 2, 2026  
+**Last Updated**: January 4, 2026  
 **Questions?** Check [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) or raise an issue.

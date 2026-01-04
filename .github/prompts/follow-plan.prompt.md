@@ -29,7 +29,7 @@ Follow these phases in strict sequential order.
 ### Phase 1: Setup
 
 1.  **Persist the Plan:**
-    * If the plan is not already saved, save it immediately to `./.cursor/plans/${PLAN_NAME}.md` or a relevant `./docs/` path.
+    * If the plan is not already saved, save it immediately to `./.cursor/plans/${PLAN_NAME}.md` or a relevant `./docs/` path. Do not reuse old plan files. if naming conflicts arise, clear the old file.
     * **Action:** Tell me the path where the file is saved.
 
 2.  **Initialize Progress Tracking:**

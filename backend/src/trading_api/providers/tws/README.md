@@ -2,7 +2,7 @@
 
 **Status:** Production-Ready (Datafeed + Broker Capabilities)  
 **Architecture:** Three-Layer Streaming Pattern  
-**Last Updated:** December 25, 2025
+**Last Updated:** January 4, 2026
 
 ---
 
@@ -194,17 +194,33 @@ class CachedContract(ContractDetails):
 **TWSClient caching strategy:**
 
 ```python
-# TWSClient
+# TWSClient - Internal cache lookup helper
+def _get_cached_contracts(
+    self,
+    ticker: str,
+    preferred_exchanges: list[str] | None = None,
+    require_full_details: bool = False,
+) -> list[CachedContract]:
+    """Get cached contracts with optional exchange filtering."""
+    cached = [
+        con for con in self.__contracts_cache.values()
+        if con.matches(ticker)
+        and (not require_full_details or con.has_full_details)
+    ]
+    # Exchange filtering with fallback to unfiltered if no match
+    if cached and preferred_exchanges and preferred_exchanges != [""]:
+        filtered = [c for c in cached if c.contract.exchange in preferred_exchanges]
+        return filtered or cached
+    return cached
+
+# TWSClient - Public method uses the helper
 __contracts_cache: dict[int, CachedContract] = {}  # conId → CachedContract
 
 def get_qualified_contracts(self, ticker: str, preferred_exchanges: list[str]) -> list[Contract]:
-    # 1. Check cache first
-    cached = [c for c in self.__contracts_cache.values() if c.matches(ticker)]
+    cached = self._get_cached_contracts(ticker, preferred_exchanges)
     if cached:
         return [c.contract for c in cached]
-
-    # 2. Build unqualified contract from ticker string
-    return [build_contract(ticker)]
+    return [build_contract(ticker)]  # Fallback to unqualified
 ```
 
 **Cache population:**
@@ -356,7 +372,7 @@ class BrokerCapability(ABC):
 - **Current Implementation**: `TWSBrokerProvider` is currently a **FakeBroker stub** with in-memory state for development/testing. Real TWS order integration is in progress (see `order_tracker.py`).
 - **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. These methods raise `ProviderException` with code `PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED`.
 - **Order Preview**: Returns estimated values since TWS doesn't have native preview API.
-- **Bracket Orders**: `edit_position_brackets()` not yet implemented (complex linked orders).
+- **Bracket Orders**: `edit_position_brackets()` implemented using OCA (One-Cancels-All) groups. Creates stop loss (STP/TRAIL) and take profit (LMT) orders linked so when one fills, TWS cancels the others.
 - **Equity Streaming**: TWS doesn't push account changes; polling via `get_equity()` is required.
 - **Client ID**: Broker uses `client_id=2` (default), separate from datafeed's `client_id=1`.
 
@@ -375,6 +391,55 @@ class BrokerCapability(ABC):
 | `TWS_BROKER_PORT`       | int  | `7497`      | Gateway port                       |
 | `TWS_BROKER_CLIENT_ID`  | int  | `2`         | Client ID (separate from datafeed) |
 | `TWS_BROKER_ACCOUNT_ID` | str  | `""`        | Account ID for orders              |
+
+### OCA Group Pattern
+
+**OCA (One-Cancels-All)** groups link multiple orders so when one fills, TWS automatically cancels the rest. Used for position brackets where no parent order exists.
+
+**`TWSClient.placeOcaGroup()` Method:**
+
+```python
+async def placeOcaGroup(
+    self,
+    contract: Contract,
+    children: list[Order],
+    oca_group: str,
+    oca_type: int = 1,
+    parent_id: int = 0,
+    timeout: float | None = None,
+) -> list[TrackedOrder]
+```
+
+**Parameters:**
+
+| Parameter   | Type                 | Description                                            |
+| ----------- | -------------------- | ------------------------------------------------------ |
+| `contract`  | `Contract`           | The contract for all orders                            |
+| `children`  | `list[Order]`        | List of Order objects (e.g., stop loss + take profit)  |
+| `oca_group` | `str`                | Unique OCA group identifier (e.g., `bracket_pos123`)   |
+| `oca_type`  | `int`                | OCA behavior type (default: 1)                         |
+| `parent_id` | `int`                | Parent order ID for bracket children (default: 0)      |
+| `timeout`   | `float \| None`      | Timeout for order confirmations (default: client timeout) |
+
+**OCA Type Options:**
+
+| Type | Name              | Description                                                 |
+| ---- | ----------------- | ----------------------------------------------------------- |
+| 1    | CANCEL_WITH_BLOCK | Cancel all remaining with overfill protection (recommended) |
+| 2    | REDUCE_WITH_BLOCK | Proportionally reduce remaining with block                  |
+| 3    | REDUCE_NO_BLOCK   | Proportionally reduce without block                         |
+
+**Usage in `edit_position_brackets()`:**
+
+```python
+# Generate deterministic OCA group for position brackets
+oca_group = f"bracket_{position_id}"
+
+# Place bracket orders atomically via OCA group
+tracked_orders = await self._tws_client.placeOcaGroup(
+    contract, bracket_orders, oca_group, oca_type=1
+)
+```
 
 ---
 
@@ -429,14 +494,14 @@ class BrokerCapability(ABC):
 
 ### Broker Mappers
 
-| Function                                | Description                            |
-| --------------------------------------- | -------------------------------------- |
-| `preorder_to_tws()`                     | `PreOrder` → `(Contract, Order)` tuple |
-| `tws_order_to_placed_order()`           | order data dict → `PlacedOrder`        |
-| `tws_position_to_domain()`              | position data dict → `Position`        |
-| `tws_account_summary_to_equity()`       | summary dict → `EquityData`            |
-| `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`       |
-| `calculate_tws_duration()`              | time range → TWS duration string       |
+| Function                                | Description                                                                                                                                                                                                          |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `preorder_to_tws()`                     | `PreOrder` → `(Order, Order \| None, Order \| None)` — parent, stop_loss, take_profit. Generates UUID-based `ocaGroup` (e.g., `bracket_<uuid8>`) when brackets present. Supports `trailStopPrice` for trailing stops. |
+| `tws_order_to_placed_order()`           | order data dict → `PlacedOrder`                                                                                                                                                                                      |
+| `tws_position_to_domain()`              | position data dict → `Position`                                                                                                                                                                                      |
+| `tws_account_summary_to_equity()`       | summary dict → `EquityData`                                                                                                                                                                                          |
+| `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`                                                                                                                                                                                     |
+| `calculate_tws_duration()`              | time range → TWS duration string                                                                                                                                                                                     |
 
 **secType Mapping:**
 
@@ -587,6 +652,54 @@ def symbolSamples(self, reqId: int, contractDescriptions: list[ContractDescripti
     self._flag_snapshot_complete(tws_key)  # Resolves pending futures
 ```
 
+### Generic Snapshot Executor
+
+TWSClient provides `_exec_snapshot()` to reduce boilerplate in snapshot methods:
+
+```python
+# TWSClient._exec_snapshot() - Generic cache-check → request → await pattern
+async def _exec_snapshot(
+    self,
+    business_key: str,
+    request_fn: Callable[[int], None],  # Called with reqId to issue TWS request
+    transform_fn: Callable[[list[dict[str, Any]]], T],  # Transforms raw data to return type
+    timeout: float | None = None,
+) -> T:
+    # 1. Check cache first
+    cached = self.ibsocket.get_cached_data(business_key)
+    if cached is not None:
+        return transform_fn(cached)
+
+    # 2. Create snapshot request
+    reqId, coroutine = self.ibsocket.create_snapshot(
+        business_key, timeout=timeout or self._timeout
+    )
+
+    # 3. Issue request if new (reqId is None if reusing existing)
+    if reqId is not None:
+        request_fn(reqId)
+
+    # 4. Await and transform result
+    return transform_fn(await coroutine)
+```
+
+**Example Usage (reqQuoteSnapshot):**
+
+```python
+async def reqQuoteSnapshot(self, contract: Contract) -> dict[str, Any]:
+    business_key = f"datafeed:Quote:{contract.exchange}:{ticker_name(contract)}"
+
+    def transform(data: list[dict[str, Any]]) -> dict[str, Any]:
+        assert data, "No data received"
+        return next(iter(data))
+
+    return await self._exec_snapshot(
+        business_key,
+        lambda rid: self.ibsocket.reqQuote(rid, contract),
+        transform,
+    )
+```
+
 ### Streaming Subscription (Stream Pattern)
 
 Used by: `subscribe_realtime_bars()`, `subscribe_market_data()`
@@ -625,7 +738,7 @@ def subscribe_realtime_bars(self, ticker_name: str, resolution: Resolution, call
 
 ```python
 # TWSClient
-def cancelBarDataStream(self, stream_key: str) -> None:
+def cancel_data_stream(self, stream_key: str) -> None:
     self.ibsocket.remove_stream(stream_key)  # Triggers cleanup hook → sends cancel message
 
 # IBSocket.remove_stream() cleanup
@@ -638,6 +751,43 @@ def remove_stream(self, business_key: str) -> None:
         loop, cleanup_func = cleanup
         loop.call_soon_threadsafe(cleanup_func)
 ```
+
+### OCA Group Submission (Atomic Bracket Orders)
+
+Used by: `edit_position_brackets()`, `placeOrderGroup()` with brackets
+
+OCA groups use the **transmit chain pattern** for atomic submission:
+
+```python
+# TWSClient.placeOcaGroup() - Atomic bracket order submission
+async def placeOcaGroup(self, contract, children, oca_group, oca_type=1, parent_id=0, timeout=None):
+    # Assign OCA attributes to all orders
+    for order in children:
+        order.ocaGroup = oca_group
+        order.ocaType = oca_type
+
+    # Transmit chain: all orders except last staged with transmit=False
+    order_ids = [
+        self._submit_order(contract, order, parent_id=parent_id, transmit=False)
+        for order in children[:-1]
+    ]
+    order_ids.append(
+        self._submit_order(contract, children[-1], parent_id=parent_id, transmit=True)
+    )
+
+    # Await all order confirmations with timeout
+    return await asyncio.gather(*[
+        self.ibsocket.order_tracker.order_update(oid, timeout=timeout)
+        for oid in order_ids
+    ])
+```
+
+**Key Points:**
+
+- All orders except last have `transmit=False` (staged but not sent)
+- Last order `transmit=True` triggers atomic submission of entire group
+- TWS processes all orders as a unit, preventing partial fills
+- OCA group ensures when one fills, others are automatically canceled
 
 ---
 
@@ -689,11 +839,11 @@ nature, category, is_recoverable = classify_error(error_code)
 
 **Error Nature** (what does the error ID represent?):
 
-| Nature   | Value     | Description                                |
-| -------- | --------- | ------------------------------------------ |
-| `ORDER`  | `"order"` | ID is an order ID (use for order routing)  |
-| `REQUEST`| `"req"`   | ID is a request ID (use for data requests) |
-| `SYSTEM` | `"system"`| System-wide error (no specific ID)         |
+| Nature    | Value      | Description                                |
+| --------- | ---------- | ------------------------------------------ |
+| `ORDER`   | `"order"`  | ID is an order ID (use for order routing)  |
+| `REQUEST` | `"req"`    | ID is a request ID (use for data requests) |
+| `SYSTEM`  | `"system"` | System-wide error (no specific ID)         |
 
 **Classification Categories:**
 
