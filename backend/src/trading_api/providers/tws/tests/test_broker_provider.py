@@ -249,25 +249,6 @@ class TestPlaceOrder:
         assert order.action == "SELL"
         assert order.auxPrice == 140.00
 
-    @pytest.mark.asyncio
-    async def test_place_order_stores_in_orders_dict(
-        self, provider: TWSBrokerProvider, mock_client: Mock
-    ) -> None:
-        """Test place_order stores result in internal _orders dict."""
-        pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
-            side=Side.BUY,
-            type=OrderType.MARKET,
-            qty=100.0,
-        )
-
-        await provider.place_order(pre_order)
-
-        assert "12345" in provider._orders
-        stored = provider._orders["12345"]
-        assert isinstance(stored, PlacedOrder)
-        assert stored.id == "12345"
-
 
 class TestPlaceOrderWithBrackets:
     """Test TWSBrokerProvider.place_order() with bracket orders."""
@@ -292,6 +273,10 @@ class TestPlaceOrderWithBrackets:
         )
         mock.placeOrderGroup = AsyncMock(
             return_value=(parent_tracked, [sl_tracked, tp_tracked])
+        )
+        # Mock reqOpenOrders to return all tracked orders
+        mock.reqOpenOrders = AsyncMock(
+            return_value=[parent_tracked, sl_tracked, tp_tracked]
         )
         return mock
 
@@ -328,10 +313,10 @@ class TestPlaceOrderWithBrackets:
         assert len(children) == 2
 
     @pytest.mark.asyncio
-    async def test_place_order_with_brackets_stores_all_orders(
+    async def test_place_order_with_brackets_returns_parent_id(
         self, provider: TWSBrokerProvider, mock_client: Mock
     ) -> None:
-        """Test place_order with brackets stores parent and children."""
+        """Test place_order with brackets returns parent order ID."""
         pre_order = PreOrder(
             symbol="AAPL:NASDAQ:STK",
             side=Side.BUY,
@@ -344,16 +329,35 @@ class TestPlaceOrderWithBrackets:
 
         result = await provider.place_order(pre_order)
 
-        # Parent stored with bracket context
+        # Parent order ID returned
         assert result.orderId == "100"
-        assert "100" in provider._orders
-        parent = provider._orders["100"]
-        assert parent.stopLoss == 145.00
-        assert parent.takeProfit == 160.00
 
-        # Children stored
-        assert "101" in provider._orders
-        assert "102" in provider._orders
+    @pytest.mark.asyncio
+    async def test_place_order_with_brackets_orders_retrievable(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test placed bracket orders can be retrieved via get_orders."""
+        pre_order = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            side=Side.BUY,
+            type=OrderType.LIMIT,
+            qty=100.0,
+            limitPrice=150.00,
+            stopLoss=145.00,
+            takeProfit=160.00,
+        )
+
+        await provider.place_order(pre_order)
+
+        # Retrieve orders via public API
+        orders = await provider.get_orders()
+
+        # Should have parent + 2 children (3 total)
+        assert len(orders) == 3
+        order_ids = {o.id for o in orders}
+        assert "100" in order_ids  # Parent
+        assert "101" in order_ids  # Stop loss child
+        assert "102" in order_ids  # Take profit child
 
     @pytest.mark.asyncio
     async def test_place_order_with_stop_loss_only(
@@ -454,10 +458,10 @@ class TestModifyOrder:
         assert parent_order.orderId == 12345
 
     @pytest.mark.asyncio
-    async def test_modify_order_updates_stored_order(
+    async def test_modify_order_updates_order(
         self, provider: TWSBrokerProvider, mock_client: Mock
     ) -> None:
-        """Test modify_order updates the stored order."""
+        """Test modify_order updates the order via TWS."""
         # First place an order
         place_order = PreOrder(
             symbol="AAPL:NASDAQ:STK",
@@ -468,16 +472,16 @@ class TestModifyOrder:
         )
         await provider.place_order(place_order)
 
-        # Reconfigure mock for modify
+        # Reconfigure mock for modify - returns updated tracked order
         modified_order = _create_mock_order(
             order_type="LMT", lmt_price=155.00, total_quantity=Decimal("100")
         )
+        modified_tracked = _create_tracked_order(12345, order=modified_order)
         mock_client.placeOrderGroup = AsyncMock(
-            return_value=(
-                _create_tracked_order(12345, order=modified_order),
-                [],
-            )
+            return_value=(modified_tracked, [])
         )
+        # Mock reqOpenOrders to return the modified order
+        mock_client.reqOpenOrders = AsyncMock(return_value=[modified_tracked])
 
         # Modify with new price
         modify_order = PreOrder(
@@ -489,10 +493,11 @@ class TestModifyOrder:
         )
         await provider.modify_order("12345", modify_order)
 
-        # Check stored order was updated
-        assert "12345" in provider._orders
-        stored = provider._orders["12345"]
-        assert stored.limitPrice == 155.00
+        # Verify order can be retrieved with updated price
+        orders = await provider.get_orders()
+        assert len(orders) == 1
+        assert orders[0].id == "12345"
+        assert orders[0].limitPrice == 155.00
 
 
 class TestModifyOrderWithBrackets:
@@ -511,6 +516,10 @@ class TestModifyOrderWithBrackets:
         tp_tracked = _create_tracked_order(104)
         mock.placeOrderGroup = AsyncMock(
             return_value=(parent_tracked, [sl_tracked, tp_tracked])
+        )
+        # Mock reqOpenOrders to return all tracked orders
+        mock.reqOpenOrders = AsyncMock(
+            return_value=[parent_tracked, sl_tracked, tp_tracked]
         )
         return mock
 
@@ -547,9 +556,11 @@ class TestModifyOrderWithBrackets:
         assert parent.orderId == 100
         assert len(children) == 2
 
-        # New children should be stored
-        assert "103" in provider._orders
-        assert "104" in provider._orders
+        # New children can be retrieved via get_orders
+        orders = await provider.get_orders()
+        order_ids = {o.id for o in orders}
+        assert "103" in order_ids
+        assert "104" in order_ids
 
 
 class TestCancelOrder:
@@ -559,12 +570,13 @@ class TestCancelOrder:
     def mock_client(self) -> Mock:
         """Create mock TWSClient with cancelOrder."""
         mock = Mock()
-        mock.cancelOrder = AsyncMock(
-            return_value=_create_tracked_order(
-                12345,
-                order_state=_create_mock_order_state("Cancelled"),
-            )
+        cancelled_tracked = _create_tracked_order(
+            12345,
+            order_state=_create_mock_order_state("Cancelled"),
         )
+        mock.cancelOrder = AsyncMock(return_value=cancelled_tracked)
+        # Mock reqOpenOrders to return cancelled order
+        mock.reqOpenOrders = AsyncMock(return_value=[cancelled_tracked])
         return mock
 
     @pytest.fixture
@@ -586,15 +598,17 @@ class TestCancelOrder:
         mock_client.cancelOrder.assert_called_once_with(12345)
 
     @pytest.mark.asyncio
-    async def test_cancel_order_updates_stored_order(
+    async def test_cancel_order_returns_cancelled_status(
         self, provider: TWSBrokerProvider, mock_client: Mock
     ) -> None:
-        """Test cancel_order updates the stored order status."""
+        """Test cancelled order has CANCELED status when retrieved."""
         await provider.cancel_order("12345")
 
-        assert "12345" in provider._orders
-        stored = provider._orders["12345"]
-        assert stored.status == OrderStatus.CANCELED
+        # Retrieve orders via public API
+        orders = await provider.get_orders()
+        assert len(orders) == 1
+        assert orders[0].id == "12345"
+        assert orders[0].status == OrderStatus.CANCELED
 
 
 class TestSelectPreferredExchange:
@@ -800,48 +814,21 @@ class TestEditPositionBrackets:
         assert trail_order.trailStopPrice == 145.00  # Initial trigger price
 
     @pytest.mark.asyncio
-    async def test_edit_position_brackets_stores_orders(
+    async def test_edit_position_brackets_orders_retrievable(
         self, provider: TWSBrokerProvider, mock_client: Mock
     ) -> None:
-        """Test bracket orders are stored in provider._orders."""
+        """Test bracket orders can be retrieved via get_orders."""
+        # Setup mock to return the placed OCA orders
+        sl_tracked = _create_tracked_order(200)
+        tp_tracked = _create_tracked_order(201)
+        mock_client.reqOpenOrders = AsyncMock(return_value=[sl_tracked, tp_tracked])
+
         brackets = Brackets(stopLoss=140.00, takeProfit=160.00)
 
         await provider.edit_position_brackets("pos_123", brackets)
 
-        # Should have stored 2 orders (IDs start at 200)
-        assert "200" in provider._orders
-        assert "201" in provider._orders
-
-    @pytest.mark.asyncio
-    async def test_edit_position_brackets_cancels_existing_brackets(
-        self, provider: TWSBrokerProvider, mock_client: Mock
-    ) -> None:
-        """Test existing bracket orders are canceled before placing new ones."""
-        # Add existing bracket order for the position
-        existing_order = PlacedOrder(
-            id="99",
-            symbol="AAPL:NASDAQ:STK",
-            side=Side.SELL,  # Opposite of BUY position
-            type=OrderType.STOP,
-            qty=100.0,
-            stopPrice=138.00,  # Existing stop loss
-            status=OrderStatus.WORKING,
-            limitPrice=None,
-            takeProfit=None,
-            stopLoss=None,
-            guaranteedStop=None,
-            trailingStopPips=None,
-            stopType=None,
-            filledQty=0.0,
-            avgPrice=None,
-            updateTime=None,
-        )
-        provider._orders["99"] = existing_order
-
-        brackets = Brackets(stopLoss=140.00)
-
-        await provider.edit_position_brackets("pos_123", brackets)
-
-        # Existing order should be canceled
-        mock_client.cancelOrder.assert_called_with(99)
-        assert provider._orders["99"].status == OrderStatus.CANCELED
+        # Should be able to retrieve 2 orders via get_orders
+        orders = await provider.get_orders()
+        order_ids = {o.id for o in orders}
+        assert "200" in order_ids
+        assert "201" in order_ids

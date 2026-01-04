@@ -412,14 +412,14 @@ async def placeOcaGroup(
 
 **Parameters:**
 
-| Parameter   | Type                 | Description                                            |
-| ----------- | -------------------- | ------------------------------------------------------ |
-| `contract`  | `Contract`           | The contract for all orders                            |
-| `children`  | `list[Order]`        | List of Order objects (e.g., stop loss + take profit)  |
-| `oca_group` | `str`                | Unique OCA group identifier (e.g., `bracket_pos123`)   |
-| `oca_type`  | `int`                | OCA behavior type (default: 1)                         |
-| `parent_id` | `int`                | Parent order ID for bracket children (default: 0)      |
-| `timeout`   | `float \| None`      | Timeout for order confirmations (default: client timeout) |
+| Parameter   | Type            | Description                                               |
+| ----------- | --------------- | --------------------------------------------------------- |
+| `contract`  | `Contract`      | The contract for all orders                               |
+| `children`  | `list[Order]`   | List of Order objects (e.g., stop loss + take profit)     |
+| `oca_group` | `str`           | Unique OCA group identifier (e.g., `bracket_pos123`)      |
+| `oca_type`  | `int`           | OCA behavior type (default: 1)                            |
+| `parent_id` | `int`           | Parent order ID for bracket children (default: 0)         |
+| `timeout`   | `float \| None` | Timeout for order confirmations (default: client timeout) |
 
 **OCA Type Options:**
 
@@ -494,14 +494,14 @@ tracked_orders = await self._tws_client.placeOcaGroup(
 
 ### Broker Mappers
 
-| Function                                | Description                                                                                                                                                                                                          |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `preorder_to_tws()`                     | `PreOrder` → `(Order, Order \| None, Order \| None)` — parent, stop_loss, take_profit. Generates UUID-based `ocaGroup` (e.g., `bracket_<uuid8>`) when brackets present. Supports `trailStopPrice` for trailing stops. |
-| `tws_order_to_placed_order()`           | order data dict → `PlacedOrder`                                                                                                                                                                                      |
-| `tws_position_to_domain()`              | position data dict → `Position`                                                                                                                                                                                      |
-| `tws_account_summary_to_equity()`       | summary dict → `EquityData`                                                                                                                                                                                          |
-| `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`                                                                                                                                                                                     |
-| `calculate_tws_duration()`              | time range → TWS duration string                                                                                                                                                                                     |
+| Function                                | Description                                                                                                                                                                                                           |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `preorder_to_tws()`                     | `PreOrder` → `(Order, Order \| None, Order \| None)` — parent, stop*loss, take_profit. Generates UUID-based `ocaGroup` (e.g., `bracket*<uuid8>`) when brackets present. Supports `trailStopPrice` for trailing stops. |
+| `tws_order_to_placed_order()`           | order data dict → `PlacedOrder`                                                                                                                                                                                       |
+| `tws_position_to_domain()`              | position data dict → `Position`                                                                                                                                                                                       |
+| `tws_account_summary_to_equity()`       | summary dict → `EquityData`                                                                                                                                                                                           |
+| `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`                                                                                                                                                                                      |
+| `calculate_tws_duration()`              | time range → TWS duration string                                                                                                                                                                                      |
 
 **secType Mapping:**
 
