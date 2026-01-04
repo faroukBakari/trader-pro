@@ -1331,6 +1331,76 @@ class TestTrackedOrderToPlacedOrder:
         assert result.stopType is None
         assert result.guaranteedStop is None  # Always None (not supported)
 
+    def test_child_order_has_parent_id_and_type(self) -> None:
+        """Test that child bracket orders have parentId and parentType set."""
+        from trading_api.models.broker import ParentType
+
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        # Child order (TP or SL) has parentId > 0
+        order = TWSOrder()
+        order.action = "SELL"  # Opposite to parent
+        order.totalQuantity = Decimal("100")
+        order.orderType = "LMT"
+        order.lmtPrice = 160.00  # Take profit price
+        order.auxPrice = 0.0
+        order.filledQuantity = Decimal("0")
+        order.parentId = 100  # Reference to parent order
+
+        order_state = OrderState()
+        order_state.status = "PreSubmitted"
+
+        tracked = TrackedOrder(
+            orderId=101,  # Child order ID
+            contract=contract,
+            order=order,
+            orderState=order_state,
+        )
+
+        result = tracked_order_to_placed_order(tracked, None)
+
+        assert result.id == "101"
+        assert result.parentId == "100"  # Linked to parent
+        assert result.parentType == ParentType.ORDER
+
+    def test_parent_order_has_no_parent_id(self) -> None:
+        """Test that parent orders have parentId=None."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        # Parent order has parentId = 0 (not set)
+        order = TWSOrder()
+        order.action = "BUY"
+        order.totalQuantity = Decimal("100")
+        order.orderType = "LMT"
+        order.lmtPrice = 150.00
+        order.auxPrice = 0.0
+        order.filledQuantity = Decimal("0")
+        order.parentId = 0  # No parent
+
+        order_state = OrderState()
+        order_state.status = "Submitted"
+
+        tracked = TrackedOrder(
+            orderId=100,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+        )
+
+        result = tracked_order_to_placed_order(tracked, None)
+
+        assert result.id == "100"
+        assert result.parentId is None
+        assert result.parentType is None
+
 
 class TestTwsPositionToDomain:
     """Test tws_position_to_domain mapper."""

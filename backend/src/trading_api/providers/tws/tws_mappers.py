@@ -20,6 +20,7 @@ from trading_api.models.broker import (
     EquityData,
     OrderStatus,
     OrderType,
+    ParentType,
     PlacedOrder,
     Position,
     PreOrder,
@@ -782,6 +783,14 @@ def tracked_order_to_placed_order(
         if bracket_context.stop_type is not None:
             stop_type = StopType(bracket_context.stop_type)
 
+    # Parent order linking (for bracket child orders)
+    # TWS sets order.parentId > 0 for child orders (TP/SL)
+    parent_id: str | None = None
+    parent_type: ParentType | None = None
+    if order.parentId and order.parentId > 0:
+        parent_id = str(order.parentId)
+        parent_type = ParentType.ORDER
+
     return PlacedOrder(
         id=str(tracked.orderId),
         symbol=symbol,
@@ -799,6 +808,8 @@ def tracked_order_to_placed_order(
         filledQty=filled_qty if filled_qty > 0 else None,
         avgPrice=avg_price,
         updateTime=None,  # Could add timestamp from last fill
+        parentId=parent_id,
+        parentType=parent_type,
     )
 
 

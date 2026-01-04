@@ -30,6 +30,7 @@ from .orders import (
     OrderStatus,
     OrderSubscriptionRequest,
     OrderType,
+    ParentType,
     PlacedOrder,
     PlaceOrderResult,
     PreOrder,
@@ -42,6 +43,7 @@ __all__ = [
     # Enums
     "OrderStatus",
     "OrderType",
+    "ParentType",
     "Side",
     "StopType",
     # Order models

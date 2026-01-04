@@ -26,6 +26,7 @@ class TestClassifyError:
     @pytest.mark.parametrize(
         "error_code",
         [
+            202,  # Order cancellation acknowledged
             2104,  # Market data farm connection is OK
             2106,  # Historical data farm is connected
             2107,  # Historical data farm connection inactive (dormant)
@@ -135,7 +136,6 @@ class TestClassifyError:
         [
             200,  # No security definition found
             201,  # Order rejected
-            202,  # Order cancelled (may be expected)
             203,  # Security not available for account
             300,  # Can't find ticker ID
             321,  # Server error validating request

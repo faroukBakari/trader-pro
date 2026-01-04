@@ -149,6 +149,9 @@ export function mapOrder(order: PlacedOrder_Ws_Backend): PlacedOrder {
     guaranteedStop: order.guaranteedStop ?? undefined,
     trailingStopPips: order.trailingStopPips ?? undefined,
     stopType: order.stopType ? (order.stopType as unknown as PlacedOrder['stopType']) : undefined,
+    // Bracket order parent linking (links TP/SL orders to parent)
+    parentId: order.parentId ?? undefined,
+    parentType: order.parentType ? (order.parentType as unknown as PlacedOrder['parentType']) : undefined,
   }
 }
 

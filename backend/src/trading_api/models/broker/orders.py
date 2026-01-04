@@ -43,6 +43,17 @@ class StopType(IntEnum):
     GUARANTEED_STOP = 2
 
 
+class ParentType(IntEnum):
+    """Parent type enumeration matching TradingView ParentType.
+
+    Used to identify the type of parent for bracket orders.
+    """
+
+    ORDER = 1
+    POSITION = 2
+    INDIVIDUAL_POSITION = 3
+
+
 class CurrentQuotes(BaseModel):
     """
     Current market quotes (matching TradingView AskBid)
@@ -102,25 +113,37 @@ class PlacedOrder(BaseModel):
     side: Side = Field(..., description="Order side (buy or sell)")
     qty: float = Field(..., description="Order quantity", gt=0)
     status: OrderStatus = Field(..., description="Order status")
-    limitPrice: Optional[float] = Field(None, description="Price for the limit order")
-    stopPrice: Optional[float] = Field(None, description="Price for the stop order")
+    limitPrice: Optional[float] = Field(
+        default=None, description="Price for the limit order"
+    )
+    stopPrice: Optional[float] = Field(
+        default=None, description="Price for the stop order"
+    )
     takeProfit: Optional[float] = Field(
-        None, description="Take profit price (Brackets)"
+        default=None, description="Take profit price (Brackets)"
     )
     stopLoss: Optional[float] = Field(None, description="Stop loss price (Brackets)")
     guaranteedStop: Optional[float] = Field(
-        None, description="Guaranteed stop loss price (Brackets)"
+        default=None, description="Guaranteed stop loss price (Brackets)"
     )
     trailingStopPips: Optional[float] = Field(
-        None, description="Trailing stop pips value (Brackets)"
+        default=None, description="Trailing stop pips value (Brackets)"
     )
-    stopType: Optional[StopType] = Field(None, description="Stop loss type")
-    filledQty: Optional[float] = Field(None, description="Filled order quantity")
+    stopType: Optional[StopType] = Field(default=None, description="Stop loss type")
+    filledQty: Optional[float] = Field(
+        default=None, description="Filled order quantity"
+    )
     avgPrice: Optional[float] = Field(
-        None, description="Average fulfilled price for the order"
+        default=None, description="Average fulfilled price for the order"
     )
     updateTime: Optional[int] = Field(
-        None, description="Last update time (unix timestamp in milliseconds)"
+        default=None, description="Last update time (unix timestamp in milliseconds)"
+    )
+    parentId: Optional[str] = Field(
+        default=None, description="Parent order/position ID for bracket orders"
+    )
+    parentType: Optional[ParentType] = Field(
+        default=None, description="Type of parent (Order=1, Position=2)"
     )
 
     model_config = {"use_enum_values": True}
