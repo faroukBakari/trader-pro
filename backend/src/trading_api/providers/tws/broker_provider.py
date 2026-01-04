@@ -201,34 +201,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             contract, parent_order, childs_to_place
         )
 
-    def _store_order_results(
-        self, order: PreOrder, parent: TrackedOrder, children: list[TrackedOrder]
-    ) -> None:
-        """Store order results in internal state.
-
-        Args:
-            order: Original PreOrder (for bracket context)
-            parent: Parent TrackedOrder from TWS
-            children: Child TrackedOrders (stop loss, take profit)
-        """
-        self._orders[str(parent.orderId)] = tracked_order_to_placed_order(
-            parent,
-            bracket_context=BracketContext(
-                take_profit=order.takeProfit,
-                stop_loss=order.stopLoss,
-                trailing_stop_pips=order.trailingStopPips,
-                stop_type=int(order.stopType) if order.stopType is not None else None,
-                child_order_ids=[child.orderId for child in children],
-            ),
-        )
-
-        self._orders.update(
-            {
-                str(tracked.orderId): tracked_order_to_placed_order(tracked)
-                for tracked in children
-            }
-        )
-
     async def place_order(self, order: PreOrder) -> PlaceOrderResult:
         """Place a new order (with optional bracket orders).
 
@@ -241,8 +213,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         Returns:
             PlaceOrderResult with parent order ID
         """
-        main_order, child_brackets = await self._execute_order(order)
-        self._store_order_results(order, main_order, child_brackets)
+        main_order, _ = await self._execute_order(order)
         return PlaceOrderResult(orderId=str(main_order.orderId))
 
     async def modify_order(self, order_id: str, order: PreOrder) -> None:
@@ -255,16 +226,11 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             order_id: Existing order ID to modify
             order: Updated PreOrder with new parameters (price, qty, brackets)
         """
-        parent_tracked, child_tracked = await self._execute_order(order, int(order_id))
-        self._store_order_results(order, parent_tracked, child_tracked)
+        await self._execute_order(order, int(order_id))
 
     async def cancel_order(self, order_id: str) -> None:
         """Cancel an order."""
-        canceled = await self._tws_client.cancelOrder(int(order_id))
-        placed = tracked_order_to_placed_order(
-            canceled, None
-        )  # Convert to domain model
-        self._orders[str(order_id)] = placed
+        await self._tws_client.cancelOrder(int(order_id))
 
     async def close_position(
         self, position_id: str, amount: float | None = None
@@ -340,22 +306,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
                 capability="broker",
             )
 
-        # Cancel existing bracket orders for this position
-        opposite_side = Side.SELL if position.side == Side.BUY else Side.BUY
-        for order_id, order in list(self._orders.items()):
-            if (
-                order.symbol == position.symbol
-                and order.side == opposite_side
-                and order.status in [OrderStatus.WORKING, OrderStatus.PLACING]
-                and (order.stopPrice is not None or order.limitPrice is not None)
-            ):
-                try:
-                    await self._tws_client.cancelOrder(int(order_id))
-                except Exception:
-                    pass  # Best effort cancellation
-                order.status = OrderStatus.CANCELED
-                order.updateTime = int(time.time() * 1000)
-
         # Build list of bracket orders to place
         bracket_orders: list[Order] = []
         tws_action = "SELL" if position.side == Side.BUY else "BUY"
@@ -414,20 +364,24 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         oca_group = f"bracket_{position_id}"
 
         # Place all bracket orders via OCA group (atomic submission)
-        tracked_orders = await self._tws_client.placeOcaGroup(
+        await self._tws_client.placeOcaGroup(
             contract,
             bracket_orders,
             oca_group,
             oca_type=1,  # CANCEL_WITH_BLOCK (overfill protection)
         )
 
-        # Store bracket orders in internal state
-        for tracked in tracked_orders:
-            self._orders[str(tracked.orderId)] = tracked_order_to_placed_order(tracked)
-
     async def get_orders(self) -> list[PlacedOrder]:
-        """Get all orders."""
-        return list(self._orders.values())
+        """Get all open orders from TWS.
+
+        Requests all open orders and converts them to domain PlacedOrder models.
+        Returns completed snapshot when all orders have been received.
+        """
+        # Request open orders from TWS (returns list of TrackedOrder objects)
+        tws_orders = await self._tws_client.reqOpenOrders()
+
+        # Convert each TrackedOrder to domain PlacedOrder
+        return [tracked_order_to_placed_order(tracked) for tracked in tws_orders]
 
     async def get_positions(self) -> list[Position]:
         """Get all open positions."""
