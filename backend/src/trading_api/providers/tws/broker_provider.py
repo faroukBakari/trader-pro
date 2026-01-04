@@ -11,11 +11,13 @@ import random
 import time
 import uuid
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Awaitable, Callable
 from zoneinfo import ZoneInfo
 
 from ibapi.contract import Contract
+from ibapi.order import Order
 
 from trading_api.capabilities.broker import BrokerCapability
 from trading_api.models.broker import (
@@ -239,9 +241,9 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         Returns:
             PlaceOrderResult with parent order ID
         """
-        parent_tracked, child_tracked = await self._execute_order(order)
-        self._store_order_results(order, parent_tracked, child_tracked)
-        return PlaceOrderResult(orderId=str(parent_tracked.orderId))
+        main_order, child_brackets = await self._execute_order(order)
+        self._store_order_results(order, main_order, child_brackets)
+        return PlaceOrderResult(orderId=str(main_order.orderId))
 
     async def modify_order(self, order_id: str, order: PreOrder) -> None:
         """Modify an existing order (price, quantity, or bracket parameters).
@@ -320,17 +322,25 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         position_id: str,
         brackets: Brackets,
     ) -> None:
-        """Update position brackets (stop-loss, take-profit)."""
+        """Update position brackets (stop-loss, take-profit) using OCA groups.
+
+        Creates bracket orders linked via OCA (One-Cancels-All) so when one
+        fills, TWS automatically cancels the others - preventing double execution.
+
+        Args:
+            position_id: Position to attach brackets to
+            brackets: Bracket configuration (stopLoss, takeProfit, trailingStopPips)
+        """
         position = self._positions.get(position_id)
         if not position:
             raise ProviderException(
                 code="PROVIDER_BROKER_POSITION_NOT_FOUND",
                 message=f"Position {position_id} not found",
-                provider="fakebroker",
+                provider="tws",
                 capability="broker",
             )
 
-        # Cancel existing bracket orders
+        # Cancel existing bracket orders for this position
         opposite_side = Side.SELL if position.side == Side.BUY else Side.BUY
         for order_id, order in list(self._orders.items()):
             if (
@@ -339,45 +349,81 @@ class TWSBrokerProvider(Provider, BrokerCapability):
                 and order.status in [OrderStatus.WORKING, OrderStatus.PLACING]
                 and (order.stopPrice is not None or order.limitPrice is not None)
             ):
+                try:
+                    await self._tws_client.cancelOrder(int(order_id))
+                except Exception:
+                    pass  # Best effort cancellation
                 order.status = OrderStatus.CANCELED
                 order.updateTime = int(time.time() * 1000)
 
-        # Create new bracket orders
-        if brackets.stopLoss is not None:
-            stop_loss_order = PreOrder(
-                symbol=position.symbol,
-                type=OrderType.STOP,
-                side=opposite_side,
-                qty=position.qty,
-                limitPrice=None,
-                stopPrice=brackets.stopLoss,
-                takeProfit=None,
-                stopLoss=None,
-                guaranteedStop=None,
-                trailingStopPips=None,
-                stopType=None,
-                seenPrice=None,
-                currentQuotes=None,
-            )
-            await self.place_order(stop_loss_order)
+        # Build list of bracket orders to place
+        bracket_orders: list[Order] = []
+        tws_action = "SELL" if position.side == Side.BUY else "BUY"
 
+        # Trailing stop or regular stop loss
+        if brackets.trailingStopPips is not None:
+            trailing_order = Order()
+            trailing_order.action = tws_action
+            trailing_order.totalQuantity = Decimal(str(position.qty))
+            trailing_order.orderType = "TRAIL"
+            trailing_order.auxPrice = brackets.trailingStopPips  # Trail amount
+            if brackets.stopLoss is not None:
+                trailing_order.trailStopPrice = brackets.stopLoss  # Initial trigger
+            trailing_order.tif = "GTC"
+            bracket_orders.append(trailing_order)
+        elif brackets.stopLoss is not None:
+            stop_order = Order()
+            stop_order.action = tws_action
+            stop_order.totalQuantity = Decimal(str(position.qty))
+            stop_order.orderType = "STP"
+            stop_order.auxPrice = brackets.stopLoss
+            stop_order.tif = "GTC"
+            bracket_orders.append(stop_order)
+
+        # Take profit limit order
         if brackets.takeProfit is not None:
-            take_profit_order = PreOrder(
-                symbol=position.symbol,
-                type=OrderType.LIMIT,
-                side=opposite_side,
-                qty=position.qty,
-                limitPrice=brackets.takeProfit,
-                stopPrice=None,
-                takeProfit=None,
-                stopLoss=None,
-                guaranteedStop=None,
-                trailingStopPips=None,
-                stopType=None,
-                seenPrice=None,
-                currentQuotes=None,
+            tp_order = Order()
+            tp_order.action = tws_action
+            tp_order.totalQuantity = Decimal(str(position.qty))
+            tp_order.orderType = "LMT"
+            tp_order.lmtPrice = brackets.takeProfit
+            tp_order.tif = "GTC"
+            bracket_orders.append(tp_order)
+
+        # If no bracket orders to place, we're done (just cancelled existing)
+        if not bracket_orders:
+            return
+
+        # Qualify contract for this position's symbol
+        preferred_exchange = self._select_preferred_exchange()
+        qualified = await self._tws_client.qualify_contract(
+            position.symbol, [preferred_exchange]
+        )
+        contract: Contract | None = getattr(
+            next(iter(qualified), None), "contract", None
+        )
+        if contract is None or contract.conId <= 0:
+            raise ProviderException(
+                code="PROVIDER_BROKER_CONTRACT_NOT_FOUND",
+                message=f"Contract not found for symbol {position.symbol}",
+                provider="tws",
+                capability="broker",
             )
-            await self.place_order(take_profit_order)
+
+        # Generate unique OCA group name for this position's brackets
+        oca_group = f"bracket_{position_id}"
+
+        # Place all bracket orders via OCA group (atomic submission)
+        tracked_orders = await self._tws_client.placeOcaGroup(
+            contract,
+            bracket_orders,
+            oca_group,
+            oca_type=1,  # CANCEL_WITH_BLOCK (overfill protection)
+        )
+
+        # Store bracket orders in internal state
+        for tracked in tracked_orders:
+            self._orders[str(tracked.orderId)] = tracked_order_to_placed_order(tracked)
 
     async def get_orders(self) -> list[PlacedOrder]:
         """Get all orders."""

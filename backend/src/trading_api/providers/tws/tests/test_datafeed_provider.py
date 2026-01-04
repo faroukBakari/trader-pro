@@ -639,12 +639,12 @@ class TestSubscriptionMethods:
             mock_client.reqMktDataStream.assert_called_once()
 
     def test_unsubscribe_realtime_bars_calls_cancel(self) -> None:
-        """Test unsubscribe_realtime_bars calls cancelBarDataStream."""
+        """Test unsubscribe_realtime_bars calls cancel_data_stream."""
         from trading_api.models.exceptions import TradingApiException
 
         mock_client = Mock()
         mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
-        mock_client.cancelBarDataStream = Mock()
+        mock_client.cancel_data_stream = Mock()
         _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
@@ -667,15 +667,15 @@ class TestSubscriptionMethods:
             provider.unsubscribe_realtime_bars(sub_id)
 
             # Verify cancel was called
-            mock_client.cancelBarDataStream.assert_called_once_with(sub_id)
+            mock_client.cancel_data_stream.assert_called_once_with(sub_id)
 
     def test_unsubscribe_market_data_calls_cancel(self) -> None:
-        """Test unsubscribe_market_data calls cancelMktDataStream."""
+        """Test unsubscribe_market_data calls cancel_data_stream."""
         from trading_api.models.exceptions import TradingApiException
 
         mock_client = Mock()
         mock_client.reqMktDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345")
-        mock_client.cancelMktDataStream = Mock()
+        mock_client.cancel_data_stream = Mock()
         _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
 
         with patch(
@@ -696,5 +696,4 @@ class TestSubscriptionMethods:
 
             provider.unsubscribe_market_data(sub_id)
 
-            mock_client.cancelMktDataStream.assert_called_once_with(sub_id)
-            mock_client.cancelMktDataStream.assert_called_once_with(sub_id)
+            mock_client.cancel_data_stream.assert_called_once_with(sub_id)

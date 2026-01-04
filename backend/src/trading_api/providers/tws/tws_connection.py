@@ -36,7 +36,7 @@ from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
-from typing import Any
+from typing import Any, TypeVar
 
 from ibapi.client_utils import (
     createCancelOrderRequestProto,
@@ -1528,7 +1528,74 @@ class TWSClient:
                 raise TimeoutError("Timeout waiting for TWS connection ready signal")
         return self.__ibsocket
 
+    # === Generic snapshot executor ===
+
+    _T = TypeVar("_T")
+
+    async def _exec_snapshot(
+        self,
+        business_key: str,
+        request_fn: Callable[[int], None],
+        transform_fn: Callable[[list[dict[str, Any]]], _T],
+        timeout: float | None = None,
+    ) -> _T:
+        """Generic snapshot pattern executor.
+
+        Handles the common cache-check → create-snapshot → request → await pattern.
+
+        Args:
+            business_key: Unique key for caching/deduplication
+            request_fn: Function called with reqId to issue the TWS request
+            transform_fn: Function to transform raw data list to return type
+            timeout: Optional timeout override
+
+        Returns:
+            Transformed result from TWS response
+        """
+        cached = self.ibsocket.get_cached_data(business_key)
+        if cached is not None:
+            return transform_fn(cached)
+
+        reqId, coroutine = self.ibsocket.create_snapshot(
+            business_key, timeout=timeout or self._timeout
+        )
+        if reqId is not None:
+            request_fn(reqId)
+
+        return transform_fn(await coroutine)
+
     # === Contract resolution and caching ===
+
+    def _get_cached_contracts(
+        self,
+        ticker: str,
+        preferred_exchanges: list[str] | None = None,
+        require_full_details: bool = False,
+    ) -> list[CachedContract]:
+        """Get cached contracts matching ticker with optional exchange filtering.
+
+        Args:
+            ticker: Ticker string to match
+            preferred_exchanges: Optional list of exchanges to filter by
+            require_full_details: If True, only return contracts with full details
+
+        Returns:
+            List of CachedContract matching the criteria
+        """
+        cached = [
+            con
+            for con in self.__contracts_cache.values()
+            if con.matches(ticker)
+            and (not require_full_details or con.has_full_details)
+        ]
+
+        if cached and preferred_exchanges and preferred_exchanges != [""]:
+            filtered = [
+                con for con in cached if con.contract.exchange in preferred_exchanges
+            ]
+            return filtered or cached  # Fall back to unfiltered if no exchange match
+
+        return cached
 
     def get_qualified_contracts(
         self, ticker: str, preferred_exchanges: list[str] = [""]
@@ -1536,12 +1603,7 @@ class TWSClient:
         if not preferred_exchanges:
             preferred_exchanges = [""]
 
-        cached = [con for con in self.__contracts_cache.values() if con.matches(ticker)]
-
-        if cached and preferred_exchanges and preferred_exchanges != [""]:
-            cached = [
-                con for con in cached if con.contract.exchange in preferred_exchanges
-            ] or cached
+        cached = self._get_cached_contracts(ticker, preferred_exchanges)
 
         # Cache hit with full details - return immediately
         if cached:
@@ -1634,11 +1696,7 @@ class TWSClient:
 
         ticker = ticker_name(contract)
 
-        cached = [
-            con
-            for con in self.__contracts_cache.values()
-            if con.has_full_details and con.matches(ticker)
-        ]
+        cached = self._get_cached_contracts(ticker, require_full_details=True)
 
         # Cache hit with full details - return immediately
         if cached:
@@ -1646,7 +1704,7 @@ class TWSClient:
                 debug_log(
                     f"reqContractDetails cache hit for conId {contract.conId} => ({ticker})"
                 )
-            return [con.to_contract_details() for con in cached if con.has_full_details]
+            return [con.to_contract_details() for con in cached]
 
         # Cache miss or partial - fetch from TWS
         reqId: int | None = None
@@ -1690,12 +1748,7 @@ class TWSClient:
         ticker: str,
         preferred_exchanges: list[str] = [""],
     ) -> list[CachedContract]:
-        cached = [con for con in self.__contracts_cache.values() if con.matches(ticker)]
-
-        if cached and preferred_exchanges and preferred_exchanges != [""]:
-            cached = [
-                con for con in cached if con.contract.exchange in preferred_exchanges
-            ] or cached
+        cached = self._get_cached_contracts(ticker, preferred_exchanges)
 
         # Cache hit with full details - return immediately
         if cached:
@@ -1783,23 +1836,19 @@ class TWSClient:
         self,
         contract: Contract,
         timeout: float | None = None,
-        # **kwargs: Any,
     ) -> dict[str, Any]:
-        reqId: int | None = None
-        coroutine: Awaitable[list[dict[str, Any]]]
         business_key = f"datafeed:Quote:{contract.exchange}:{ticker_name(contract)}"
 
-        reqId, coroutine = self.ibsocket.create_snapshot(
+        def transform(data: list[dict[str, Any]]) -> dict[str, Any]:
+            assert data, "No data received for quote snapshot"
+            return next(iter(data))
+
+        return await self._exec_snapshot(
             business_key,
-            timeout=timeout or self._timeout,
+            lambda rid: self.ibsocket.reqQuote(rid, contract),
+            transform,
+            timeout,
         )
-
-        if reqId is not None:
-            self.ibsocket.reqQuote(reqId, contract)
-
-        acc = await coroutine
-        assert acc, "No data received for quote snapshot"
-        return next(iter(acc))
 
     # === Real-time data subscriptions (continuous pattern) ===
 
@@ -1856,17 +1905,13 @@ class TWSClient:
 
         return business_key
 
-    def cancelBarDataStream(self, stream_key: str) -> None:
-        """Cancel a real-time data subscription."""
-        self.ibsocket.remove_stream(stream_key)
-
-    def cancelMktDataStream(self, stream_key: str) -> None:
-        """Cancel a real-time data subscription."""
+    def cancel_data_stream(self, stream_key: str) -> None:
+        """Cancel a real-time data subscription (bars or market data)."""
         self.ibsocket.remove_stream(stream_key)
 
     # === Order management ===
 
-    def submit_order(
+    def _submit_order(
         self,
         contract: Contract,
         order: Order,
@@ -1883,52 +1928,100 @@ class TWSClient:
         self.ibsocket.placeOrder(order_id, contract, order)
         return order_id
 
-    async def placeOrderGroup(
-        self, contract: Contract, parent: Order, children: list[Order]
-    ) -> tuple[TrackedOrder, list[TrackedOrder]]:
-        """Place an order via TWS.
+    async def placeOcaGroup(
+        self,
+        contract: Contract,
+        children: list[Order],
+        oca_group: str,
+        oca_type: int = 1,
+        parent_id: int = 0,
+        timeout: float | None = None,
+    ) -> list[TrackedOrder]:
+        """Place multiple orders linked by OCA (One-Cancels-All) group.
 
-        Allocates a unique order ID and submits the order. Order status updates
-        are delivered via openOrder() and orderStatus() callbacks.
+        Used for position brackets where no parent order exists.
+        When one order in the group fills, TWS automatically cancels the rest.
+
+        Args:
+            contract: The contract for all orders
+            orders: List of Order objects (e.g., stop loss + take profit)
+            oca_group: Unique OCA group identifier string
+            oca_type: OCA behavior type:
+                1 = Cancel all remaining with block (overfill protection) - RECOMMENDED
+                2 = Proportional reduce with block
+                3 = Proportional reduce no block
+
+        Returns:
+            List of TrackedOrder for each submitted order
+        """
+        if not children:
+            return []
+
+        # Assign OCA attributes to each order
+        for order in children:
+            order.ocaGroup = oca_group
+            order.ocaType = oca_type
+
+        order_ids = [
+            self._submit_order(contract, order, parent_id=parent_id, transmit=False)
+            for order in children[:-1]
+        ]
+        order_ids.append(
+            self._submit_order(
+                contract, children[-1], parent_id=parent_id, transmit=True
+            )
+        )
+
+        children_tracked = await asyncio.gather(
+            *[
+                self.ibsocket.order_tracker.order_update(oid, timeout=timeout)
+                for oid in order_ids
+            ]
+        )
+
+        return list(children_tracked)
+
+    async def placeOrderGroup(
+        self,
+        contract: Contract,
+        parent: Order,
+        children: list[Order],
+        timeout: float | None = None,
+    ) -> tuple[TrackedOrder, list[TrackedOrder]]:
+        """Place a parent order with optional child orders (bracket).
+
+        Allocates unique order IDs and submits orders atomically.
+        Parent is submitted first, children use transmit chain pattern.
 
         Args:
             contract: Contract to trade
-            order: Order parameters (type, side, quantity, price, etc.)
+            parent: Parent order (entry order)
+            children: Child orders (stop loss, take profit, etc.)
 
         Returns:
-            The allocated order ID
-
-        Note:
-            For server version >= 203, uses protobuf encoding (required by TWS).
-            For older server versions, uses legacy message format.
+            Tuple of (parent TrackedOrder, list of child TrackedOrders)
         """
+        parent_id = self._submit_order(contract, parent, transmit=(not children))
 
-        parent_id = self.submit_order(contract, parent, transmit=(len(children) == 0))
-
-        child_ids: list[int] = []
+        children_tracked: list[TrackedOrder] = []
         if children:
-            child_ids.extend(
-                self.submit_order(contract, child, parent_id=parent_id, transmit=False)
-                for child in children[:-1]
+            children_tracked = await self.placeOcaGroup(
+                contract,
+                children,
+                oca_group=f"brackets_{parent_id}",
+                oca_type=1,
+                parent_id=parent_id,
             )
 
-            child_ids.append(
-                self.submit_order(
-                    contract, children[-1], parent_id=parent_id, transmit=True
-                )
-            )
-
-        child_tracked = await asyncio.gather(
-            *[
-                self.ibsocket.order_tracker.order_update(child_id)
-                for child_id in child_ids
-            ]
+        parent_tracked = await self.ibsocket.order_tracker.order_update(
+            parent_id, timeout or self._timeout
         )
-        parent_tracked = await self.ibsocket.order_tracker.order_update(parent_id)
 
-        return parent_tracked, child_tracked
+        return parent_tracked, children_tracked
 
-    async def placeOrder(self, contract: Contract, order: Order) -> TrackedOrder:
+    async def placeOrder(
+        self, contract: Contract, order: Order, timeout: float | None = None
+    ) -> TrackedOrder:
         """Place an order via TWS.
 
         Allocates a unique order ID and submits the order. Order status updates
@@ -1955,9 +2048,13 @@ class TWSClient:
 
         self.ibsocket.placeOrder(order_id, contract, order)
 
-        return await self.ibsocket.order_tracker.order_update(order_id)
+        return await self.ibsocket.order_tracker.order_update(
+            order_id, timeout or self._timeout
+        )
 
-    async def cancelOrder(self, order_id: int) -> TrackedOrder:
+    async def cancelOrder(
+        self, order_id: int, timeout: float | None = None
+    ) -> TrackedOrder:
         """Cancel an order via TWS.
 
         Args:
@@ -1966,7 +2063,9 @@ class TWSClient:
 
         self.ibsocket.order_tracker.ensure_existing_order(order_id)
         self.ibsocket.cancelOrder(order_id)
-        return await self.ibsocket.order_tracker.order_update(order_id)
+        return await self.ibsocket.order_tracker.order_update(
+            order_id, timeout or self._timeout
+        )
 
     # === Real-time broker subscriptions ===
 

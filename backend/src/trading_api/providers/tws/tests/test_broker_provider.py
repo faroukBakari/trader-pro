@@ -18,13 +18,16 @@ from ibapi.order import Order
 from ibapi.order_state import OrderState
 
 from trading_api.models.broker import (
+    Brackets,
     OrderStatus,
     OrderType,
     PlacedOrder,
     PlaceOrderResult,
+    Position,
     PreOrder,
     Side,
 )
+from trading_api.models.exceptions import ProviderException
 from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.broker_provider import TWSBrokerProvider
 from trading_api.providers.tws.order_tracker import TrackedOrder
@@ -655,3 +658,190 @@ class TestSelectPreferredExchange:
             result = provider._select_preferred_exchange()
 
         assert result == "OVERNIGHT"
+
+
+class TestEditPositionBrackets:
+    """Test TWSBrokerProvider.edit_position_brackets() with OCA groups."""
+
+    @pytest.fixture
+    def mock_client(self) -> Mock:
+        """Create mock TWSClient for edit_position_brackets."""
+        mock = Mock()
+
+        # Mock qualify_contract
+        mock_qualified = Mock()
+        mock_qualified.contract = _create_mock_contract()
+        mock.qualify_contract = AsyncMock(return_value=[mock_qualified])
+
+        # Mock placeOcaGroup to return tracked orders with unique IDs
+        def create_oca_result(
+            contract: Contract,
+            orders: list[Order],
+            oca_group: str,
+            oca_type: int = 1,
+        ) -> list[TrackedOrder]:
+            """Create TrackedOrder for each order with sequential IDs."""
+            result = []
+            for i, order in enumerate(orders):
+                tracked = _create_tracked_order(200 + i, order=order)
+                result.append(tracked)
+            return result
+
+        mock.placeOcaGroup = AsyncMock(side_effect=create_oca_result)
+        mock.cancelOrder = AsyncMock()
+        return mock
+
+    @pytest.fixture
+    def provider(self, mock_client: Mock) -> TWSBrokerProvider:
+        """Create provider with mocked TWSClient and a test position."""
+        with patch(
+            "trading_api.providers.tws.broker_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            provider = TWSBrokerProvider()
+            # Add a test position for bracket operations
+            provider._positions["pos_123"] = Position(
+                id="pos_123",
+                symbol="AAPL:NASDAQ:STK",
+                side=Side.BUY,
+                qty=100.0,
+                avgPrice=150.00,
+            )
+            return provider
+
+    @pytest.mark.asyncio
+    async def test_edit_position_brackets_raises_for_unknown_position(
+        self, provider: TWSBrokerProvider
+    ) -> None:
+        """Test raises ProviderException when position not found."""
+        brackets = Brackets(stopLoss=140.00, takeProfit=160.00)
+
+        with pytest.raises(ProviderException) as exc_info:
+            await provider.edit_position_brackets("unknown_pos", brackets)
+
+        assert "PROVIDER_BROKER_POSITION_NOT_FOUND" in str(exc_info.value.code)
+
+    @pytest.mark.asyncio
+    async def test_edit_position_brackets_calls_place_oca_group(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test edit_position_brackets calls placeOcaGroup with brackets."""
+        brackets = Brackets(stopLoss=140.00, takeProfit=160.00)
+
+        await provider.edit_position_brackets("pos_123", brackets)
+
+        mock_client.placeOcaGroup.assert_called_once()
+        call_args = mock_client.placeOcaGroup.call_args
+        orders = call_args[0][1]
+        oca_group = call_args[0][2]
+        oca_type = call_args[1].get(
+            "oca_type", call_args[0][3] if len(call_args[0]) > 3 else 1
+        )
+
+        # Should have 2 orders: stop loss + take profit
+        assert len(orders) == 2
+        # OCA group should contain position ID
+        assert oca_group == "bracket_pos_123"
+        # OCA type should be CANCEL_WITH_BLOCK (1)
+        assert oca_type == 1
+
+    @pytest.mark.asyncio
+    async def test_edit_position_brackets_creates_correct_stop_order(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test stop loss order has correct type and price."""
+        brackets = Brackets(stopLoss=140.00)
+
+        await provider.edit_position_brackets("pos_123", brackets)
+
+        call_args = mock_client.placeOcaGroup.call_args
+        orders = call_args[0][1]
+
+        assert len(orders) == 1
+        stop_order = orders[0]
+        assert stop_order.orderType == "STP"
+        assert stop_order.auxPrice == 140.00
+        assert stop_order.action == "SELL"  # Opposite of BUY position
+
+    @pytest.mark.asyncio
+    async def test_edit_position_brackets_creates_correct_tp_order(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test take profit order has correct type and price."""
+        brackets = Brackets(takeProfit=165.00)
+
+        await provider.edit_position_brackets("pos_123", brackets)
+
+        call_args = mock_client.placeOcaGroup.call_args
+        orders = call_args[0][1]
+
+        assert len(orders) == 1
+        tp_order = orders[0]
+        assert tp_order.orderType == "LMT"
+        assert tp_order.lmtPrice == 165.00
+        assert tp_order.action == "SELL"  # Opposite of BUY position
+
+    @pytest.mark.asyncio
+    async def test_edit_position_brackets_trailing_stop_sets_trail_stop_price(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test trailing stop sets trailStopPrice when stopLoss provided."""
+        brackets = Brackets(stopLoss=145.00, trailingStopPips=2.50)
+
+        await provider.edit_position_brackets("pos_123", brackets)
+
+        call_args = mock_client.placeOcaGroup.call_args
+        orders = call_args[0][1]
+
+        assert len(orders) == 1
+        trail_order = orders[0]
+        assert trail_order.orderType == "TRAIL"
+        assert trail_order.auxPrice == 2.50  # Trail amount
+        assert trail_order.trailStopPrice == 145.00  # Initial trigger price
+
+    @pytest.mark.asyncio
+    async def test_edit_position_brackets_stores_orders(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test bracket orders are stored in provider._orders."""
+        brackets = Brackets(stopLoss=140.00, takeProfit=160.00)
+
+        await provider.edit_position_brackets("pos_123", brackets)
+
+        # Should have stored 2 orders (IDs start at 200)
+        assert "200" in provider._orders
+        assert "201" in provider._orders
+
+    @pytest.mark.asyncio
+    async def test_edit_position_brackets_cancels_existing_brackets(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test existing bracket orders are canceled before placing new ones."""
+        # Add existing bracket order for the position
+        existing_order = PlacedOrder(
+            id="99",
+            symbol="AAPL:NASDAQ:STK",
+            side=Side.SELL,  # Opposite of BUY position
+            type=OrderType.STOP,
+            qty=100.0,
+            stopPrice=138.00,  # Existing stop loss
+            status=OrderStatus.WORKING,
+            limitPrice=None,
+            takeProfit=None,
+            stopLoss=None,
+            guaranteedStop=None,
+            trailingStopPips=None,
+            stopType=None,
+            filledQty=0.0,
+            avgPrice=None,
+            updateTime=None,
+        )
+        provider._orders["99"] = existing_order
+
+        brackets = Brackets(stopLoss=140.00)
+
+        await provider.edit_position_brackets("pos_123", brackets)
+
+        # Existing order should be canceled
+        mock_client.cancelOrder.assert_called_with(99)
+        assert provider._orders["99"].status == OrderStatus.CANCELED

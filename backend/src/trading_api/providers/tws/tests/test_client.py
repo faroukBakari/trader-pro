@@ -686,7 +686,7 @@ class TestTWSClientStreamMethods:
         mock_ibsocket.reqQuote.assert_called_once()
 
     def test_cancel_bar_data_stream_sends_cancel(self) -> None:
-        """Test cancelBarDataStream sends cancel message."""
+        """Test cancel_data_stream sends cancel message."""
         from trading_api.models.exceptions import ProviderException
 
         client = TWSClient("127.0.0.1", 7497, 1)
@@ -715,12 +715,12 @@ class TestTWSClientStreamMethods:
         stream_key = client.reqBarDataStream(contract, "5 mins", callback, on_error)
 
         # Cancel the stream
-        client.cancelBarDataStream(stream_key)
+        client.cancel_data_stream(stream_key)
 
         mock_ibsocket.remove_stream.assert_called_once_with(stream_key)
 
     def test_cancel_mkt_data_stream_sends_cancel(self) -> None:
-        """Test cancelMktDataStream sends cancel message."""
+        """Test cancel_data_stream sends cancel message."""
         from trading_api.models.exceptions import ProviderException
 
         client = TWSClient("127.0.0.1", 7497, 1)
@@ -749,7 +749,7 @@ class TestTWSClientStreamMethods:
         stream_key = client.reqMktDataStream(contract, callback, on_error)
 
         # Cancel the stream
-        client.cancelMktDataStream(stream_key)
+        client.cancel_data_stream(stream_key)
 
         mock_ibsocket.remove_stream.assert_called_once_with(stream_key)
 
@@ -803,3 +803,146 @@ class TestTWSClientShutdown:
         client.shutdown()
 
         mock_ibsocket.disconnect.assert_called_once()
+
+
+class TestTWSClientPlaceOcaGroup:
+    """Test placeOcaGroup method for OCA order groups."""
+
+    @pytest.mark.asyncio
+    async def test_place_oca_group_empty_orders_returns_empty(self) -> None:
+        """Test placeOcaGroup with empty orders returns empty list."""
+        client = TWSClient("127.0.0.1", 7497, 1)
+
+        contract = Contract()
+        contract.symbol = "AAPL"
+
+        result = await client.placeOcaGroup(contract, [], "test_oca")
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_place_oca_group_sets_oca_attributes(self) -> None:
+        """Test placeOcaGroup sets ocaGroup and ocaType on all orders."""
+        from decimal import Decimal
+
+        from ibapi.order import Order
+
+        client = TWSClient("127.0.0.1", 7497, 1)
+
+        # Create mock ibsocket
+        mock_ibsocket = MagicMock()
+        mock_ibsocket.running = True
+
+        # Mock order_tracker with next_order_id
+        mock_order_tracker = MagicMock()
+        mock_order_tracker.next_order_id = 100
+
+        # Mock order_update to return immediately
+        async def mock_order_update(
+            order_id: int, timeout: float | None = None
+        ) -> MagicMock:
+            tracked = MagicMock()
+            tracked.orderId = order_id
+            return tracked
+
+        mock_order_tracker.order_update = mock_order_update
+        mock_ibsocket.order_tracker = mock_order_tracker
+
+        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        # Create test orders
+        order1 = Order()
+        order1.action = "SELL"
+        order1.totalQuantity = Decimal("100")
+        order1.orderType = "STP"
+        order1.auxPrice = 145.00
+
+        order2 = Order()
+        order2.action = "SELL"
+        order2.totalQuantity = Decimal("100")
+        order2.orderType = "LMT"
+        order2.lmtPrice = 160.00
+
+        contract = Contract()
+        contract.symbol = "AAPL"
+
+        # Execute
+        await client.placeOcaGroup(
+            contract, [order1, order2], "test_oca_group", oca_type=1
+        )
+
+        # Verify OCA attributes were set
+        assert order1.ocaGroup == "test_oca_group"
+        assert order1.ocaType == 1
+        assert order2.ocaGroup == "test_oca_group"
+        assert order2.ocaType == 1
+
+    @pytest.mark.asyncio
+    async def test_place_oca_group_uses_transmit_chain(self) -> None:
+        """Test placeOcaGroup uses transmit=False for all but last order."""
+        from decimal import Decimal
+        from unittest.mock import PropertyMock
+
+        from ibapi.order import Order
+
+        client = TWSClient("127.0.0.1", 7497, 1)
+
+        # Track placeOrder calls
+        place_order_calls: list[tuple[int, Contract, Order]] = []
+
+        # Create mock ibsocket
+        mock_ibsocket = MagicMock()
+        mock_ibsocket.running = True
+
+        # Mock order_tracker
+        mock_order_tracker = MagicMock()
+        order_id_counter = [100]
+
+        def get_next_order_id() -> int:
+            current = order_id_counter[0]
+            order_id_counter[0] += 1
+            return current
+
+        type(mock_order_tracker).next_order_id = PropertyMock(
+            side_effect=get_next_order_id
+        )
+
+        async def mock_order_update(
+            order_id: int, timeout: float | None = None
+        ) -> MagicMock:
+            tracked = MagicMock()
+            tracked.orderId = order_id
+            return tracked
+
+        mock_order_tracker.order_update = mock_order_update
+        mock_ibsocket.order_tracker = mock_order_tracker
+
+        # Capture placeOrder calls
+        def mock_place_order(order_id: int, contract: Contract, order: Order) -> None:
+            place_order_calls.append((order_id, contract, order))
+
+        mock_ibsocket.placeOrder = mock_place_order
+
+        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        # Create three test orders
+        orders = []
+        for i in range(3):
+            order = Order()
+            order.action = "SELL"
+            order.totalQuantity = Decimal("100")
+            order.orderType = "LMT"
+            order.lmtPrice = 150.00 + i * 5
+            orders.append(order)
+
+        contract = Contract()
+        contract.symbol = "AAPL"
+
+        # Execute
+        await client.placeOcaGroup(contract, orders, "oca_test", oca_type=1)
+
+        # Verify transmit chain pattern: all False except last
+        assert len(place_order_calls) == 3
+        assert place_order_calls[0][2].transmit is False  # First order
+        assert place_order_calls[1][2].transmit is False  # Second order
+        assert place_order_calls[2][2].transmit is True  # Last order triggers all

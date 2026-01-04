@@ -1006,6 +1006,52 @@ class TestPreorderToTws:
         assert stop_loss.orderType == "TRAIL"
         assert stop_loss.auxPrice == 5.00  # Trail amount
 
+    def test_trailing_stop_with_initial_trigger_price(self) -> None:
+        """Test that trailStopPrice is set when stopLoss is provided with trailing."""
+        from trading_api.models.broker import PreOrder, StopType
+
+        preorder = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            stopLoss=145.00,  # Initial trigger price
+            trailingStopPips=5.00,  # Trail amount
+            stopType=StopType.TRAILING_STOP,
+        )
+
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "TRAIL"
+        assert stop_loss.auxPrice == 5.00  # Trail amount
+        assert stop_loss.trailStopPrice == 145.00  # Initial trigger price
+
+    def test_trailing_stop_without_initial_trigger_price(self) -> None:
+        """Test trailing stop without stopLoss (TWS uses market price as initial)."""
+        from trading_api.models.broker import PreOrder, StopType
+
+        preorder = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            trailingStopPips=5.00,  # Trail amount only
+            stopType=StopType.TRAILING_STOP,
+        )
+
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "TRAIL"
+        assert stop_loss.auxPrice == 5.00
+        # trailStopPrice should not be set (uses TWS UNSET_DOUBLE default)
+        from ibapi.const import UNSET_DOUBLE
+
+        assert stop_loss.trailStopPrice == UNSET_DOUBLE
+
     def test_guaranteed_stop_raises_exception(self) -> None:
         """Test that guaranteed stop raises ProviderException (not supported)."""
         from trading_api.models.broker import PreOrder

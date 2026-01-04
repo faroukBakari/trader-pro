@@ -4,6 +4,7 @@ Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar
 """
 
 import re
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -670,7 +671,9 @@ def preorder_to_tws(
     # --- Bracket child orders ---
     # Child orders have opposite side to parent
     child_action = "SELL" if preorder.side == 1 else "BUY"  # Side.BUY=1, Side.SELL=-1
-    oca_group = f"bracket_{parent_order_id}"
+    oca_group = f"bracket_{uuid.uuid4().hex[:8]}"
+    parent.ocaGroup = oca_group
+    parent.ocaType = 1  # CANCEL_WITH_BLOCK
 
     stop_loss_order: Order | None = None
     take_profit_order: Order | None = None
@@ -706,6 +709,9 @@ def preorder_to_tws(
         if use_trailing and preorder.trailingStopPips is not None:
             stop_loss_order.orderType = "TRAIL"
             stop_loss_order.auxPrice = preorder.trailingStopPips  # Trail amount
+            # Set initial stop trigger price if stopLoss provided (IB recommended)
+            if preorder.stopLoss is not None:
+                stop_loss_order.trailStopPrice = preorder.stopLoss
         elif preorder.stopLoss is not None:
             stop_loss_order.orderType = "STP"
             stop_loss_order.auxPrice = preorder.stopLoss
