@@ -61,6 +61,7 @@ from trading_api.providers.tws.tws_mappers import build_contract, ticker_name
 from trading_api.providers.tws.tws_models import (
     TICK_TYPE_TO_FIELD,
     StreamData,
+    TWSErrorClassification,
     TWSErrorNature,
     classify_error,
     get_asset_config,
@@ -1434,6 +1435,11 @@ class IBSocket(EWrapper):
             if recoverable
             else f"{category}_{errorCode}_NON_RECOVERABLE"
         )
+
+        # Info-level errors are logged but not raised
+        if category == TWSErrorClassification.INFO:
+            logger.info(f"TWS {nature} [code=PROVIDER_TWS_{errorCode}]: {message}")
+            return
 
         # Route based on error nature
         if nature == TWSErrorNature.ORDER:

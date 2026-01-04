@@ -829,3 +829,250 @@ class TestEditPositionBrackets:
         order_ids = {o.id for o in orders}
         assert "200" in order_ids
         assert "201" in order_ids
+
+
+class TestPreviewOrder:
+    """Test TWSBrokerProvider.preview_order() with TWS whatIf mode."""
+
+    def _create_whatif_order_state(
+        self,
+        init_margin_change: str = "5000.00",
+        maint_margin_change: str = "2500.00",
+        commission: float = 1.50,
+        warning_text: str = "",
+    ) -> OrderState:
+        """Create an OrderState with whatIf data."""
+        order_state = OrderState()
+        order_state.status = "PreSubmitted"
+        order_state.initMarginChange = init_margin_change
+        order_state.maintMarginChange = maint_margin_change
+        order_state.equityWithLoanChange = "-5000.00"
+        order_state.initMarginAfter = "10000.00"
+        order_state.commissionAndFees = commission
+        order_state.minCommissionAndFees = commission
+        order_state.maxCommissionAndFees = commission
+        order_state.marginCurrency = "USD"
+        order_state.commissionAndFeesCurrency = "USD"
+        order_state.warningText = warning_text
+        order_state.rejectReason = ""
+        return order_state
+
+    @pytest.fixture
+    def mock_client(self) -> Mock:
+        """Create mock TWSClient with whatIf support."""
+        mock = Mock()
+
+        # Mock qualify_contract
+        mock_qualified = Mock()
+        mock_qualified.contract = _create_mock_contract()
+        mock.qualify_contract = AsyncMock(return_value=[mock_qualified])
+
+        return mock
+
+    @pytest.fixture
+    def provider(self, mock_client: Mock) -> TWSBrokerProvider:
+        """Create provider with mocked TWSClient."""
+        with patch(
+            "trading_api.providers.tws.broker_provider.TWSClient",
+            return_value=mock_client,
+        ):
+            return TWSBrokerProvider()
+
+    @pytest.mark.asyncio
+    async def test_preview_order_calls_place_order_with_what_if(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test preview_order calls placeOrder with whatIf=True."""
+        # Setup mock to return TrackedOrder with whatIf data
+        whatif_order_state = self._create_whatif_order_state()
+        tracked = _create_tracked_order(999, order_state=whatif_order_state)
+        mock_client.placeOrder = AsyncMock(return_value=tracked)
+
+        pre_order = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            side=Side.BUY,
+            type=OrderType.LIMIT,
+            qty=100.0,
+            limitPrice=150.00,
+        )
+
+        await provider.preview_order(pre_order)
+
+        # Verify placeOrder was called
+        mock_client.placeOrder.assert_called_once()
+        call_args = mock_client.placeOrder.call_args
+
+        # Second arg is order
+        order = call_args[0][1]
+        assert order.whatIf is True
+
+    @pytest.mark.asyncio
+    async def test_preview_order_returns_preview_result(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test preview_order returns OrderPreviewResult with TWS data."""
+        whatif_order_state = self._create_whatif_order_state(
+            init_margin_change="7500.00",
+            commission=2.50,
+        )
+        tracked = _create_tracked_order(999, order_state=whatif_order_state)
+        mock_client.placeOrder = AsyncMock(return_value=tracked)
+
+        pre_order = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            side=Side.BUY,
+            type=OrderType.LIMIT,
+            qty=100.0,
+            limitPrice=150.00,
+        )
+
+        result = await provider.preview_order(pre_order)
+
+        # Verify result structure
+        assert result.confirmId is not None
+        assert len(result.sections) >= 2
+
+        # Check margin section has TWS data
+        margin_section = next(
+            (s for s in result.sections if s.header == "Margin Requirements"), None
+        )
+        assert margin_section is not None
+        row_dict = {row.title: row.value for row in margin_section.rows}
+        assert "Initial Margin Required" in row_dict
+        assert "7,500.00" in row_dict["Initial Margin Required"]
+
+    @pytest.mark.asyncio
+    async def test_preview_order_with_tws_warning(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test preview_order includes TWS warning text."""
+        whatif_order_state = self._create_whatif_order_state(
+            warning_text="Order will be held until market opens"
+        )
+        tracked = _create_tracked_order(999, order_state=whatif_order_state)
+        mock_client.placeOrder = AsyncMock(return_value=tracked)
+
+        pre_order = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            side=Side.BUY,
+            type=OrderType.MARKET,
+            qty=100.0,
+        )
+
+        result = await provider.preview_order(pre_order)
+
+        assert result.warnings is not None
+        assert any("market opens" in w for w in result.warnings)
+
+    @pytest.mark.asyncio
+    async def test_preview_order_fallback_on_tws_error(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test preview_order uses fallback when TWS fails."""
+        # Simulate TWS error
+        mock_client.placeOrder = AsyncMock(side_effect=Exception("TWS connection lost"))
+
+        pre_order = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            side=Side.BUY,
+            type=OrderType.LIMIT,
+            qty=100.0,
+            limitPrice=150.00,
+        )
+
+        result = await provider.preview_order(pre_order)
+
+        # Should return fallback result instead of raising
+        assert result.confirmId is not None
+        assert len(result.sections) >= 2
+
+        # Fallback should indicate it's estimated
+        section_headers = [s.header for s in result.sections]
+        assert any("Estimated" in h or "Offline" in h for h in section_headers if h)
+
+        # Should have warning about fallback
+        assert result.warnings is not None
+        assert any(
+            "estimated" in w.lower() or "unavailable" in w.lower()
+            for w in result.warnings
+        )
+
+    @pytest.mark.asyncio
+    async def test_preview_order_fallback_on_contract_not_found(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test preview_order raises ProviderException when contract not found."""
+        # Mock qualify_contract to return empty result
+        mock_client.qualify_contract = AsyncMock(return_value=[])
+
+        pre_order = PreOrder(
+            symbol="INVALID:EXCHANGE:STK",
+            side=Side.BUY,
+            type=OrderType.MARKET,
+            qty=100.0,
+        )
+
+        with pytest.raises(ProviderException) as exc_info:
+            await provider.preview_order(pre_order)
+
+        assert "CONTRACT_NOT_FOUND" in str(exc_info.value.code)
+
+    @pytest.mark.asyncio
+    async def test_preview_order_with_brackets(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test preview_order includes bracket info in result."""
+        whatif_order_state = self._create_whatif_order_state()
+        tracked = _create_tracked_order(999, order_state=whatif_order_state)
+        mock_client.placeOrder = AsyncMock(return_value=tracked)
+
+        pre_order = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            side=Side.BUY,
+            type=OrderType.LIMIT,
+            qty=100.0,
+            limitPrice=150.00,
+            stopLoss=145.00,
+            takeProfit=160.00,
+        )
+
+        result = await provider.preview_order(pre_order)
+
+        # Should have Risk Management section
+        risk_section = next(
+            (s for s in result.sections if s.header == "Risk Management"), None
+        )
+        assert risk_section is not None
+        row_dict = {row.title: row.value for row in risk_section.rows}
+        assert "Stop Loss" in row_dict
+        assert "Take Profit" in row_dict
+
+    @pytest.mark.asyncio
+    async def test_preview_order_does_not_place_bracket_orders(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test preview_order only previews entry order, not brackets."""
+        whatif_order_state = self._create_whatif_order_state()
+        tracked = _create_tracked_order(999, order_state=whatif_order_state)
+        mock_client.placeOrder = AsyncMock(return_value=tracked)
+
+        pre_order = PreOrder(
+            symbol="AAPL:NASDAQ:STK",
+            side=Side.BUY,
+            type=OrderType.LIMIT,
+            qty=100.0,
+            limitPrice=150.00,
+            stopLoss=145.00,
+            takeProfit=160.00,
+        )
+
+        await provider.preview_order(pre_order)
+
+        # placeOrder should only be called once (for entry order)
+        assert mock_client.placeOrder.call_count == 1
+
+        # placeOrderGroup should NOT be called (no actual bracket placement)
+        assert not hasattr(mock_client, "placeOrderGroup") or (
+            hasattr(mock_client.placeOrderGroup, "call_count")
+            and mock_client.placeOrderGroup.call_count == 0
+        )

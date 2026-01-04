@@ -18,6 +18,9 @@ from ibapi.ticktype import TickTypeEnum
 from trading_api.models.broker import (
     AccountMetainfo,
     EquityData,
+    OrderPreviewResult,
+    OrderPreviewSection,
+    OrderPreviewSectionRow,
     OrderStatus,
     OrderType,
     ParentType,
@@ -585,12 +588,12 @@ TWS_ACTION_TO_SIDE: dict[str, int] = {
 TWS_STATUS_TO_ORDER_STATUS: dict[str, int] = {
     # Transitional states → PLACING
     "PendingSubmit": 4,  # Order sent, awaiting exchange ack
-    "PendingCancel": 4,  # Cancel sent, awaiting confirmation
     "ApiPending": 4,  # Not yet sent to IB server
     # Working states → WORKING
-    "PreSubmitted": 6,  # ← CHANGE: Simulated order held by IB, will execute
+    "PreSubmitted": 3,  # ← CHANGE: Simulated order held by IB, will execute
     "Submitted": 6,  # Active at exchange
     # Terminal states
+    "PendingCancel": 6,  # Cancel sent, awaiting confirmation
     "ApiCancelled": 1,  # CANCELED
     "Cancelled": 1,  # CANCELED
     "Filled": 2,  # FILLED
@@ -813,6 +816,237 @@ def tracked_order_to_placed_order(
     )
 
 
+# UNSET_DOUBLE sentinel from ibapi (~1.7976931348623157e+308)
+_UNSET_DOUBLE = 1.7976931348623157e308
+
+
+def _parse_margin_value(value: str) -> float | None:
+    """Parse TWS margin string to float.
+
+    TWS returns margin values as strings (e.g., "1234.56" or empty string).
+
+    Args:
+        value: Margin string from OrderState
+
+    Returns:
+        Float value or None if empty/invalid
+    """
+    if not value or not value.strip():
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_currency(value: float | None, currency: str = "USD") -> str:
+    """Format currency value for display.
+
+    Args:
+        value: Numeric value
+        currency: Currency code
+
+    Returns:
+        Formatted string (e.g., "$1,234.56 USD")
+    """
+    if value is None:
+        return "N/A"
+    return f"${value:,.2f} {currency}"
+
+
+def _is_valid_commission(value: float) -> bool:
+    """Check if commission value is valid (not UNSET_DOUBLE sentinel)."""
+    return value < _UNSET_DOUBLE / 2  # Safe comparison for sentinel
+
+
+def order_state_to_preview_result(
+    order_state: Any,
+    preorder: PreOrder,
+    confirm_id: str,
+) -> OrderPreviewResult:
+    """Convert TWS OrderState (whatIf=True response) to domain OrderPreviewResult.
+
+    Extracts margin and commission data from OrderState returned by TWS
+    when order.whatIf=True is set.
+
+    Args:
+        order_state: TWS OrderState object with margin/commission fields
+        preorder: Original PreOrder for order details display
+        confirm_id: UUID for order confirmation
+
+    Returns:
+        Domain OrderPreviewResult with sections for Order Details,
+        Margin Requirements, and Commission/Fees
+    """
+    sections: list[OrderPreviewSection] = []
+
+    # --- Section 1: Order Details ---
+    order_type_map = {
+        OrderType.MARKET: "Market",
+        OrderType.LIMIT: "Limit",
+        OrderType.STOP: "Stop",
+        OrderType.STOP_LIMIT: "Stop Limit",
+    }
+
+    order_details_rows = [
+        OrderPreviewSectionRow(title="Symbol", value=preorder.symbol),
+        OrderPreviewSectionRow(
+            title="Side", value="Buy" if preorder.side == Side.BUY else "Sell"
+        ),
+        OrderPreviewSectionRow(title="Quantity", value=f"{preorder.qty:.2f}"),
+        OrderPreviewSectionRow(
+            title="Order Type", value=order_type_map.get(preorder.type, "Unknown")
+        ),
+    ]
+
+    if preorder.limitPrice is not None:
+        order_details_rows.append(
+            OrderPreviewSectionRow(
+                title="Limit Price", value=f"${preorder.limitPrice:.2f}"
+            )
+        )
+    if preorder.stopPrice is not None:
+        order_details_rows.append(
+            OrderPreviewSectionRow(
+                title="Stop Price", value=f"${preorder.stopPrice:.2f}"
+            )
+        )
+
+    sections.append(
+        OrderPreviewSection(header="Order Details", rows=order_details_rows)
+    )
+
+    # --- Section 2: Margin Requirements ---
+    margin_currency = order_state.marginCurrency or "USD"
+    margin_rows: list[OrderPreviewSectionRow] = []
+
+    # Initial margin change (additional margin required for this order)
+    init_margin_change = _parse_margin_value(order_state.initMarginChange)
+    if init_margin_change is not None:
+        margin_rows.append(
+            OrderPreviewSectionRow(
+                title="Initial Margin Required",
+                value=_format_currency(init_margin_change, margin_currency),
+            )
+        )
+
+    # Maintenance margin change
+    maint_margin_change = _parse_margin_value(order_state.maintMarginChange)
+    if maint_margin_change is not None:
+        margin_rows.append(
+            OrderPreviewSectionRow(
+                title="Maintenance Margin",
+                value=_format_currency(maint_margin_change, margin_currency),
+            )
+        )
+
+    # Equity with loan change
+    equity_change = _parse_margin_value(order_state.equityWithLoanChange)
+    if equity_change is not None:
+        margin_rows.append(
+            OrderPreviewSectionRow(
+                title="Equity Impact",
+                value=_format_currency(equity_change, margin_currency),
+            )
+        )
+
+    # Post-order margin state
+    init_margin_after = _parse_margin_value(order_state.initMarginAfter)
+    if init_margin_after is not None:
+        margin_rows.append(
+            OrderPreviewSectionRow(
+                title="Initial Margin (After)",
+                value=_format_currency(init_margin_after, margin_currency),
+            )
+        )
+
+    if margin_rows:
+        sections.append(
+            OrderPreviewSection(header="Margin Requirements", rows=margin_rows)
+        )
+
+    # --- Section 3: Commission & Fees ---
+    comm_currency = order_state.commissionAndFeesCurrency or "USD"
+    fee_rows: list[OrderPreviewSectionRow] = []
+
+    # Commission (may have min/max range)
+    commission = order_state.commissionAndFees
+    min_comm = order_state.minCommissionAndFees
+    max_comm = order_state.maxCommissionAndFees
+
+    if _is_valid_commission(commission):
+        fee_rows.append(
+            OrderPreviewSectionRow(
+                title="Commission",
+                value=_format_currency(commission, comm_currency),
+            )
+        )
+    elif _is_valid_commission(min_comm) and _is_valid_commission(max_comm):
+        # Show range if exact commission unknown
+        fee_rows.append(
+            OrderPreviewSectionRow(
+                title="Commission (Est.)",
+                value=f"${min_comm:,.2f} - ${max_comm:,.2f} {comm_currency}",
+            )
+        )
+
+    if fee_rows:
+        sections.append(OrderPreviewSection(header="Commission & Fees", rows=fee_rows))
+
+    # --- Section 4: Risk Management (brackets from PreOrder) ---
+    if preorder.takeProfit or preorder.stopLoss or preorder.trailingStopPips:
+        bracket_rows: list[OrderPreviewSectionRow] = []
+
+        if preorder.takeProfit is not None:
+            bracket_rows.append(
+                OrderPreviewSectionRow(
+                    title="Take Profit", value=f"${preorder.takeProfit:.2f}"
+                )
+            )
+
+        if preorder.stopLoss is not None:
+            bracket_rows.append(
+                OrderPreviewSectionRow(
+                    title="Stop Loss", value=f"${preorder.stopLoss:.2f}"
+                )
+            )
+
+        if preorder.trailingStopPips is not None:
+            bracket_rows.append(
+                OrderPreviewSectionRow(
+                    title="Trailing Stop", value=f"{preorder.trailingStopPips:.1f} pips"
+                )
+            )
+
+        if bracket_rows:
+            sections.append(
+                OrderPreviewSection(header="Risk Management", rows=bracket_rows)
+            )
+
+    # --- Warnings and Errors ---
+    warnings: list[str] = []
+    errors: list[str] = []
+
+    # TWS warning text
+    if order_state.warningText:
+        warnings.append(order_state.warningText)
+
+    # TWS reject reason (would indicate preview failure)
+    if order_state.rejectReason:
+        errors.append(order_state.rejectReason)
+
+    # Market order warning
+    if preorder.type == OrderType.MARKET:
+        warnings.append("Market orders execute immediately at current market price")
+
+    return OrderPreviewResult(
+        sections=sections,
+        confirmId=confirm_id,
+        warnings=warnings if warnings else None,
+        errors=errors if errors else None,
+    )
+
+
 # =============================================================================
 # Position/Account Mappers (Broker Capability)
 # =============================================================================
@@ -973,6 +1207,7 @@ __all__ = [
     "TWS_STATUS_TO_ORDER_STATUS",
     "preorder_to_tws",
     "tracked_order_to_placed_order",
+    "order_state_to_preview_result",
     # Position/Account mappers
     "tws_position_to_domain",
     "tws_account_summary_to_equity",

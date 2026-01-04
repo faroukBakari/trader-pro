@@ -371,10 +371,79 @@ class BrokerCapability(ABC):
 
 - **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `qualify_contract()`. Some features (execution simulation, P&L tracking) still use in-memory state.
 - **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. These methods raise `ProviderException` with code `PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED`.
-- **Order Preview**: Returns estimated values since TWS doesn't have native preview API.
+- **Order Preview**: Uses TWS `whatIf` mode for real margin/commission data (see section below).
 - **Bracket Orders**: `edit_position_brackets()` implemented using OCA (One-Cancels-All) groups. Creates stop loss (STP/TRAIL) and take profit (LMT) orders linked so when one fills, TWS cancels the others.
 - **Equity Streaming**: TWS doesn't push account changes; polling via `get_equity()` is required.
 - **Client ID**: Broker uses `client_id=2` (default), separate from datafeed's `client_id=1`.
+
+### Order Preview (whatIf Mode)
+
+The `preview_order()` method uses TWS's native `whatIf` mode to obtain real margin requirements and commission estimates without actually placing the order.
+
+**Implementation Flow:**
+
+```
+preview_order(PreOrder)
+        │
+        ├── 1. qualify_contract(symbol)  →  Contract
+        │
+        ├── 2. preorder_to_tws(order)  →  TWS Order (entry only, no brackets)
+        │
+        ├── 3. order.whatIf = True  ← Enable preview mode
+        │
+        ├── 4. TWSClient.placeOrder(contract, order)
+        │       └── Returns TrackedOrder with OrderState containing:
+        │           - initMarginChange (additional margin required)
+        │           - maintMarginChange (maintenance margin)
+        │           - commissionAndFees / min/max estimates
+        │           - warningText (TWS warnings)
+        │
+        └── 5. order_state_to_preview_result()  →  OrderPreviewResult
+```
+
+**Key Design Decisions:**
+
+1. **Entry Order Only**: Only the entry order is previewed. Bracket orders (stop loss, take profit) are exit orders that release margin, not consume it, so their preview is not needed.
+
+2. **Fallback Mode**: If TWS connection fails or contract qualification fails, the method returns a fallback preview with estimated values and a warning message.
+
+3. **Reuses Existing Methods**: Uses the existing `placeOrder()` method with `whatIf=True` flag rather than a dedicated preview method (DRY principle).
+
+**OrderState Fields Used:**
+
+| TWS Field              | Domain Field            | Description                         |
+| ---------------------- | ----------------------- | ----------------------------------- |
+| `initMarginChange`     | Initial Margin Required | Additional margin needed for order  |
+| `maintMarginChange`    | Maintenance Margin      | Post-order maintenance requirement  |
+| `equityWithLoanChange` | Equity Impact           | Change in equity with loan value    |
+| `initMarginAfter`      | Initial Margin (After)  | Total initial margin after order    |
+| `commissionAndFees`    | Commission              | Exact commission (if known)         |
+| `minCommissionAndFees` | Commission (Est.) min   | Min estimate when exact unknown     |
+| `maxCommissionAndFees` | Commission (Est.) max   | Max estimate when exact unknown     |
+| `warningText`          | warnings[]              | TWS-provided warning messages       |
+| `rejectReason`         | errors[]                | Rejection reason (preview failures) |
+
+**Example Response:**
+
+```python
+OrderPreviewResult(
+    sections=[
+        OrderPreviewSection(header="Order Details", rows=[...]),
+        OrderPreviewSection(header="Margin Requirements", rows=[
+            OrderPreviewSectionRow(title="Initial Margin Required", value="$5,000.00 USD"),
+            OrderPreviewSectionRow(title="Maintenance Margin", value="$2,500.00 USD"),
+        ]),
+        OrderPreviewSection(header="Commission & Fees", rows=[
+            OrderPreviewSectionRow(title="Commission", value="$1.50 USD"),
+        ]),
+    ],
+    confirmId="abc123-...",
+    warnings=["Market orders execute immediately at current market price"],
+    errors=None,
+)
+```
+
+**Mapper:** `order_state_to_preview_result()` in `tws_mappers.py` handles the OrderState → OrderPreviewResult conversion.
 
 **Order Status Mapping:**
 
@@ -518,6 +587,7 @@ tracked_orders = await self._tws_client.placeOcaGroup(
 | `tws_account_summary_to_equity()`       | summary dict → `EquityData`                                                                                                                                                                                                              |
 | `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`                                                                                                                                                                                                         |
 | `calculate_tws_duration()`              | time range → TWS duration string                                                                                                                                                                                                         |
+| `order_state_to_preview_result()`       | `OrderState` + `PreOrder` → `OrderPreviewResult` — converts TWS whatIf response to domain preview with margin, commission, and warnings sections.                                                                                        |
 
 **secType Mapping:**
 
