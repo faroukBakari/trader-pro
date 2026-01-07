@@ -37,6 +37,7 @@ from trading_api.models.market import (
     QuoteValues,
     Resolution,
     SearchSymbolResultItem,
+    SubsessionInfo,
     SymbolInfo,
 )
 from trading_api.providers.tws.order_tracker import TrackedOrder
@@ -193,6 +194,71 @@ def _normalize_timezone(tws_timezone: str) -> str:
     return TWS_TIMEZONE_MAP.get(tws_timezone, tws_timezone) or "America/New_York"
 
 
+def _build_subsessions(
+    liquid_hours: str, trading_hours: str
+) -> list[SubsessionInfo] | None:
+    """Build TradingView subsessions array from TWS liquidHours and tradingHours.
+
+    Derives pre-market and post-market sessions by comparing regular (liquidHours)
+    and extended (tradingHours) trading hours.
+
+    Args:
+        liquid_hours: TWS liquidHours (regular session, e.g., "20260107:0930-20260107:1600")
+        trading_hours: TWS tradingHours (extended session, e.g., "20260107:0400-20260107:2000")
+
+    Returns:
+        List of SubsessionInfo objects, or None if no extended session (equal hours)
+    """
+    regular_session = _convert_tws_trading_hours_to_session(liquid_hours)
+    extended_session = _convert_tws_trading_hours_to_session(trading_hours)
+
+    # If sessions are equal, no extended hours available
+    if regular_session == extended_session or not trading_hours:
+        return None
+
+    # Parse time boundaries
+    try:
+        reg_start, reg_end = regular_session.split("-")
+        ext_start, ext_end = extended_session.split("-")
+    except ValueError:
+        return None
+
+    subsessions = [
+        SubsessionInfo(
+            id="regular",
+            session=regular_session,
+            description="Regular Trading Hours",
+        ),
+        SubsessionInfo(
+            id="extended",
+            session=extended_session,
+            description="Extended Trading Hours",
+        ),
+    ]
+
+    # Add premarket if extended starts before regular
+    if ext_start < reg_start:
+        subsessions.append(
+            SubsessionInfo(
+                id="premarket",
+                session=f"{ext_start}-{reg_start}",
+                description="Pre-market",
+            )
+        )
+
+    # Add postmarket if extended ends after regular
+    if ext_end > reg_end:
+        subsessions.append(
+            SubsessionInfo(
+                id="postmarket",
+                session=f"{reg_end}-{ext_end}",
+                description="Post-market",
+            )
+        )
+
+    return subsessions
+
+
 def _parse_expiration_date(expiration_str: str) -> int | None:
     """Parse TWS expiration date string to milliseconds timestamp.
 
@@ -256,6 +322,9 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
         if expiration_date:
             expired = expiration_date < int(datetime.now().timestamp() * 1000)
 
+    # Build subsessions from liquidHours (regular) and tradingHours (extended)
+    subsessions = _build_subsessions(details.liquidHours, details.tradingHours)
+
     return SymbolInfo(
         name=symbol,
         description=details.longName or symbol,
@@ -290,6 +359,9 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
         con_id=contract.conId if contract.conId > 0 else None,
         expired=expired,
         expiration_date=expiration_date,
+        # Extended session support
+        subsession_id="regular" if subsessions else None,
+        subsessions=subsessions,
     )
 
 

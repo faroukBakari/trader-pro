@@ -23,6 +23,7 @@ import type {
   SearchSymbolsCallback,
   SeriesFormat,
   SubscribeBarsCallback,
+  SymbolResolveExtension,
   Timezone
 } from '@public/trading_terminal/charting_library';
 
@@ -453,8 +454,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     symbolName: string,
     onResolve: ResolveCallback,
     onError: DatafeedErrorCallback,
+    extension?: SymbolResolveExtension,
   ): void {
-    console.log('[Datafeed] Resolving symbol:', symbolName)
+    console.log('[Datafeed] Resolving symbol:', symbolName, extension ? `with session: ${extension.session}` : '')
     this.coalesce(`resolveSymbol`, () =>
       this._getApiAdapter().resolveSymbol(symbolName)
     ).then((response) => {
@@ -462,8 +464,30 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         `[Datafeed] resolveSymbol found ${response.data ? 'a' : 'no'} symbol for input "${symbolName}"`,
       )
       if (response.data) {
-        if (this.debug_datafeed) console.log('[Datafeed] Symbol resolved:', response.data)
-        onResolve(response.data)
+        let symbolInfo = response.data
+
+        // Handle session switching via SymbolResolveExtension
+        // When user selects a different session (e.g., "extended"), TradingView calls
+        // resolveSymbol again with extension.session set to the requested session ID
+        if (extension?.session && symbolInfo.subsessions) {
+          const requestedSession = symbolInfo.subsessions.find(
+            s => s.id === extension.session
+          )
+          if (requestedSession) {
+            // Create modified symbol info with requested session
+            symbolInfo = {
+              ...symbolInfo,
+              session: requestedSession.session,
+              subsession_id: extension.session,
+            }
+            if (this.debug_datafeed) console.log(
+              `[Datafeed] Session switched to ${extension.session}: ${requestedSession.session}`
+            )
+          }
+        }
+
+        if (this.debug_datafeed) console.log('[Datafeed] Symbol resolved:', symbolInfo)
+        onResolve(symbolInfo)
       } else {
         if (this.debug_datafeed) console.log('[Datafeed] Symbol not found:', symbolName)
         onError('unknown_symbol')

@@ -271,6 +271,155 @@ class TestContractDetailsMapper:
         assert result.expiration_date is None
 
 
+class TestSubsessionsMapping:
+    """Test subsession building from liquidHours and tradingHours."""
+
+    def test_subsessions_built_from_liquid_and_trading_hours(self) -> None:
+        """Test standard US equity with pre/post market hours."""
+        contract = Contract()
+        contract.symbol = "SPY"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "ARCA"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        # Regular session: 9:30 AM - 4:00 PM
+        details.liquidHours = "20260107:0930-20260107:1600"
+        # Extended hours: 4:00 AM - 8:00 PM
+        details.tradingHours = "20260107:0400-20260107:2000"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsession_id == "regular"
+        assert result.subsessions is not None
+        assert len(result.subsessions) == 4
+
+        # Check regular session
+        regular = next((s for s in result.subsessions if s.id == "regular"), None)
+        assert regular is not None
+        assert regular.session == "0930-1600"
+        assert regular.description == "Regular Trading Hours"
+
+        # Check extended session
+        extended = next((s for s in result.subsessions if s.id == "extended"), None)
+        assert extended is not None
+        assert extended.session == "0400-2000"
+        assert extended.description == "Extended Trading Hours"
+
+        # Check premarket (4:00 AM - 9:30 AM)
+        premarket = next((s for s in result.subsessions if s.id == "premarket"), None)
+        assert premarket is not None
+        assert premarket.session == "0400-0930"
+        assert premarket.description == "Pre-market"
+
+        # Check postmarket (4:00 PM - 8:00 PM)
+        postmarket = next((s for s in result.subsessions if s.id == "postmarket"), None)
+        assert postmarket is not None
+        assert postmarket.session == "1600-2000"
+        assert postmarket.description == "Post-market"
+
+    def test_subsessions_none_when_hours_equal(self) -> None:
+        """Test 24h futures (CME) - no extended hours distinction."""
+        contract = Contract()
+        contract.symbol = "ES"
+        contract.secType = "FUT"
+        contract.exchange = "CME"
+        contract.primaryExchange = "CME"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.25
+        # Same hours for both = no extended session concept
+        details.liquidHours = "20260107:1800-20260108:1700"
+        details.tradingHours = "20260107:1800-20260108:1700"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsession_id is None
+        assert result.subsessions is None
+
+    def test_subsessions_none_when_trading_hours_empty(self) -> None:
+        """Test fallback when tradingHours is empty."""
+        contract = Contract()
+        contract.symbol = "TEST"
+        contract.secType = "STK"
+        contract.exchange = "TEST"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = ""  # Empty extended hours
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsession_id is None
+        assert result.subsessions is None
+
+    def test_subsession_id_defaults_to_regular(self) -> None:
+        """Test subsession_id is 'regular' when subsessions exist."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = "20260107:0400-20260107:2000"
+
+        result = contract_details_to_symbol_info(details)
+
+        # Should default to regular (user hasn't selected extended yet)
+        assert result.subsession_id == "regular"
+
+    def test_premarket_only_when_extended_starts_earlier(self) -> None:
+        """Test premarket created only when extended starts before regular."""
+        contract = Contract()
+        contract.symbol = "TEST"
+        contract.secType = "STK"
+        contract.exchange = "TEST"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        # Regular: 9:30-16:00, Extended: 9:30-20:00 (same start, later end)
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = "20260107:0930-20260107:2000"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsessions is not None
+        ids = [s.id for s in result.subsessions]
+        assert "premarket" not in ids  # No premarket
+        assert "postmarket" in ids  # Has postmarket
+
+    def test_postmarket_only_when_extended_ends_later(self) -> None:
+        """Test postmarket created only when extended ends after regular."""
+        contract = Contract()
+        contract.symbol = "TEST"
+        contract.secType = "STK"
+        contract.exchange = "TEST"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        # Regular: 9:30-16:00, Extended: 4:00-16:00 (earlier start, same end)
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = "20260107:0400-20260107:1600"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsessions is not None
+        ids = [s.id for s in result.subsessions]
+        assert "premarket" in ids  # Has premarket
+        assert "postmarket" not in ids  # No postmarket
+
+
 # =============================================================================
 # Bar/Quote Mappers
 # =============================================================================

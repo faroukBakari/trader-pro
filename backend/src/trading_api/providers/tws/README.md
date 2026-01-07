@@ -532,13 +532,13 @@ tracked_orders = await self._tws_client.placeOcaGroup(
 
 **File:** `models/market.py` — Used by Service and Provider
 
-| Model                    | Key Fields                                          | Purpose         |
-| ------------------------ | --------------------------------------------------- | --------------- |
-| `Bar`                    | `time`, `open`, `high`, `low`, `close`, `volume`    | OHLCV data      |
-| `SearchSymbolResultItem` | `symbol`, `exchange`, `type`, `ticker`              | Search results  |
+| Model                    | Key Fields                                                                                                                                                    | Purpose         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| `Bar`                    | `time`, `open`, `high`, `low`, `close`, `volume`                                                                                                              | OHLCV data      |
+| `SearchSymbolResultItem` | `symbol`, `exchange`, `type`, `ticker`                                                                                                                        | Search results  |
 | `SymbolInfo`             | Core: `name`, `type`, `session`, `timezone`, `pricescale`; P0: `currency_code`; P1: `expired`, `expiration_date`, `industry`, `sector`; P2: `con_id`, `delay` | Symbol metadata |
-| `QuoteData`              | `n`, `s`, `v` (QuoteValues embedded)                | Tick data       |
-| `Resolution`             | `MIN_1`, `MIN_5`, `HOUR_1`, `DAY_1`, etc.           | Resolution enum |
+| `QuoteData`              | `n`, `s`, `v` (QuoteValues embedded)                                                                                                                          | Tick data       |
+| `Resolution`             | `MIN_1`, `MIN_5`, `HOUR_1`, `DAY_1`, etc.                                                                                                                     | Resolution enum |
 
 **File:** `models/broker/` — Broker domain models
 
@@ -579,15 +579,15 @@ tracked_orders = await self._tws_client.placeOcaGroup(
 
 **`contract_details_to_symbol_info()` Field Mappings:**
 
-| SymbolInfo Field         | TWS Source                              | Notes                                    |
-| ------------------------ | --------------------------------------- | ---------------------------------------- |
-| `currency_code`          | `contract.currency`                     | P0: Trading currency (USD, EUR, etc.)    |
-| `original_currency_code` | `contract.currency`                     | P0: Original currency for conversion     |
-| `expired`                | `lastTradeDateOrContractMonth` (parsed) | P1: True if expiration < now             |
+| SymbolInfo Field         | TWS Source                              | Notes                                            |
+| ------------------------ | --------------------------------------- | ------------------------------------------------ |
+| `currency_code`          | `contract.currency`                     | P0: Trading currency (USD, EUR, etc.)            |
+| `original_currency_code` | `contract.currency`                     | P0: Original currency for conversion             |
+| `expired`                | `lastTradeDateOrContractMonth` (parsed) | P1: True if expiration < now                     |
 | `expiration_date`        | `lastTradeDateOrContractMonth` (parsed) | P1: Timestamp in ms (`_parse_expiration_date()`) |
-| `industry`               | `ContractDetails.industry`              | P1: Industry classification              |
-| `sector`                 | `ContractDetails.category`              | P1: Sector/category                      |
-| `con_id`                 | `contract.conId`                        | P2: IB unique contract ID                |
+| `industry`               | `ContractDetails.industry`              | P1: Industry classification                      |
+| `sector`                 | `ContractDetails.category`              | P1: Sector/category                              |
+| `con_id`                 | `contract.conId`                        | P2: IB unique contract ID                        |
 
 ### Broker Mappers
 
