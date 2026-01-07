@@ -154,7 +154,7 @@ class DatafeedService(WsRouteService):
 
         return callback_wrapper, on_provider_error
 
-    def create_topic(
+    async def create_topic(
         self,
         topic: str,
         topic_update: ProviderUpdateCallback,
@@ -216,7 +216,7 @@ class DatafeedService(WsRouteService):
                 retry_after_ms = _DEFAULT_RETRY_AFTER_MS if recoverable else None
                 await topic_error(exc, recoverable, retry_after_ms)
 
-            subscription_id = self.datafeed_provider.subscribe_realtime_bars(
+            subscription_id = await self.datafeed_provider.subscribe_realtime_bars(
                 ticker_name=subscription_request.symbol,
                 resolution=subscription_request.resolution,
                 callback=topic_update,
@@ -254,10 +254,12 @@ class DatafeedService(WsRouteService):
                 # Only subscribe once per symbol (multiple topics may share same symbol)
                 if symbol not in self._quote_callbacks:
                     callback_wrapper, on_provider_error = self.quote_cb_wapper(symbol)
-                    subscription_id = self.datafeed_provider.subscribe_market_data(
-                        ticker_name=symbol,
-                        callback=callback_wrapper,
-                        on_error=on_provider_error,
+                    subscription_id = (
+                        await self.datafeed_provider.subscribe_market_data(
+                            ticker_name=symbol,
+                            callback=callback_wrapper,
+                            on_error=on_provider_error,
+                        )
                     )
                     self._quote_symbol_to_sub_id[symbol] = subscription_id
                     self._topic_to_subs.setdefault(topic, []).append(subscription_id)

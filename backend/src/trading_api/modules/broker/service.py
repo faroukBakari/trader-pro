@@ -257,7 +257,7 @@ class BrokerService(WsRouteService):
 
     # ========================== WEBSOCKET STREAMING ==========================#
 
-    def create_topic(
+    async def create_topic(
         self,
         topic: str,
         topic_update: ProviderUpdateCallback,
@@ -312,14 +312,14 @@ class BrokerService(WsRouteService):
         logger.info(f"Creating topic: {topic}")
 
         if topic_type == "orders":
-            subscription_id = self.broker_provider.subscribe_orders(
+            subscription_id = await self.broker_provider.subscribe_orders(
                 callback=topic_update,
                 on_error=on_provider_error,
             )
             self._topic_to_subscription_id[topic] = subscription_id
 
         elif topic_type == "positions":
-            subscription_id = self.broker_provider.subscribe_positions(
+            subscription_id = await self.broker_provider.subscribe_positions(
                 callback=topic_update,
                 on_error=on_provider_error,
             )
@@ -329,7 +329,7 @@ class BrokerService(WsRouteService):
             params_dict = json.loads(params_json)
             symbol = params_dict.get("symbol", "")  # Empty = all symbols
 
-            subscription_id = self.broker_provider.subscribe_executions(
+            subscription_id = await self.broker_provider.subscribe_executions(
                 symbol=symbol,
                 callback=topic_update,
                 on_error=on_provider_error,
@@ -337,7 +337,7 @@ class BrokerService(WsRouteService):
             self._topic_to_subscription_id[topic] = subscription_id
 
         elif topic_type == "equity":
-            subscription_id = self.broker_provider.subscribe_equity(
+            subscription_id = await self.broker_provider.subscribe_equity(
                 callback=topic_update,
                 on_error=on_provider_error,
             )

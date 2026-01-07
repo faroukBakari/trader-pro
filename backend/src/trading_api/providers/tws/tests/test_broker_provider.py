@@ -13,7 +13,7 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from ibapi.contract import Contract
+from ibapi.contract import Contract, ContractDetails
 from ibapi.order import Order
 from ibapi.order_state import OrderState
 
@@ -91,6 +91,34 @@ def _create_tracked_order(
     )
 
 
+def _create_mock_contract_details(
+    contract: Contract | None = None,
+    trading_hours: str | None = None,
+) -> ContractDetails:
+    """Create a mock ContractDetails for cache_contracts return value.
+
+    Args:
+        contract: Contract to embed (uses default if None)
+        trading_hours: Trading hours string (defaults to 24h open market)
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    details = ContractDetails()
+    details.contract = contract or _create_mock_contract()
+    details.validExchanges = "SMART,NASDAQ"
+    details.timeZoneId = "US/Eastern"
+
+    # Default to 24h trading (market open) unless specified
+    if trading_hours is None:
+        now = datetime.now(ZoneInfo("US/Eastern"))
+        today_str = now.strftime("%Y%m%d")
+        trading_hours = f"{today_str}:0000-{today_str}:2359"
+    details.tradingHours = trading_hours
+
+    return details
+
+
 class TestBrokerProviderInitialization:
     """Test TWSBrokerProvider initialization and configuration."""
 
@@ -137,10 +165,9 @@ class TestPlaceOrder:
     def mock_client(self) -> Mock:
         """Create mock TWSClient with AsyncMock methods."""
         mock = Mock()
-        # qualify_contract returns list with contract details
-        mock_qualified = Mock()
-        mock_qualified.contract = _create_mock_contract()
-        mock.qualify_contract = AsyncMock(return_value=[mock_qualified])
+        # cache_contracts returns tuple[ContractDetails, ContractDetails | None]
+        contract_details = _create_mock_contract_details()
+        mock.cache_contracts = AsyncMock(return_value=(contract_details, None))
         # placeOrderGroup returns (parent_tracked, children_tracked)
         mock.placeOrderGroup = AsyncMock(
             return_value=(_create_tracked_order(12345), [])
@@ -176,10 +203,10 @@ class TestPlaceOrder:
         assert result.orderId == "12345"
 
     @pytest.mark.asyncio
-    async def test_place_order_calls_qualify_contract(
+    async def test_place_order_calls_cache_contracts(
         self, provider: TWSBrokerProvider, mock_client: Mock
     ) -> None:
-        """Test place_order calls qualify_contract with symbol."""
+        """Test place_order calls cache_contracts with symbol."""
         pre_order = PreOrder(
             symbol="AAPL:NASDAQ:STK",
             side=Side.BUY,
@@ -189,8 +216,8 @@ class TestPlaceOrder:
 
         await provider.place_order(pre_order)
 
-        mock_client.qualify_contract.assert_called_once()
-        call_args = mock_client.qualify_contract.call_args
+        mock_client.cache_contracts.assert_called_once()
+        call_args = mock_client.cache_contracts.call_args
         assert call_args[0][0] == "AAPL:NASDAQ:STK"
 
     @pytest.mark.asyncio
@@ -256,9 +283,8 @@ class TestPlaceOrderWithBrackets:
     def mock_client(self) -> Mock:
         """Create mock TWSClient with bracket order support."""
         mock = Mock()
-        mock_qualified = Mock()
-        mock_qualified.contract = _create_mock_contract()
-        mock.qualify_contract = AsyncMock(return_value=[mock_qualified])
+        contract_details = _create_mock_contract_details()
+        mock.cache_contracts = AsyncMock(return_value=(contract_details, None))
 
         # Parent + 2 children for full bracket
         parent_tracked = _create_tracked_order(100)
@@ -417,9 +443,8 @@ class TestModifyOrder:
     def mock_client(self) -> Mock:
         """Create mock TWSClient with AsyncMock methods."""
         mock = Mock()
-        mock_qualified = Mock()
-        mock_qualified.contract = _create_mock_contract()
-        mock.qualify_contract = AsyncMock(return_value=[mock_qualified])
+        contract_details = _create_mock_contract_details()
+        mock.cache_contracts = AsyncMock(return_value=(contract_details, None))
         mock.placeOrderGroup = AsyncMock(
             return_value=(_create_tracked_order(12345), [])
         )
@@ -504,9 +529,8 @@ class TestModifyOrderWithBrackets:
     def mock_client(self) -> Mock:
         """Create mock TWSClient for bracket modification."""
         mock = Mock()
-        mock_qualified = Mock()
-        mock_qualified.contract = _create_mock_contract()
-        mock.qualify_contract = AsyncMock(return_value=[mock_qualified])
+        contract_details = _create_mock_contract_details()
+        mock.cache_contracts = AsyncMock(return_value=(contract_details, None))
 
         parent_tracked = _create_tracked_order(100)
         sl_tracked = _create_tracked_order(103)  # New child IDs
@@ -608,67 +632,108 @@ class TestCancelOrder:
         assert orders[0].status == OrderStatus.CANCELED
 
 
-class TestSelectPreferredExchange:
-    """Test TWSBrokerProvider._select_preferred_exchange() helper."""
+class TestResolveTradingContract:
+    """Test TWSBrokerProvider._resolve_trading_contract() session/darkpool selection."""
 
     @pytest.fixture
-    def provider(self) -> TWSBrokerProvider:
+    def mock_client(self) -> Mock:
+        """Create mock TWSClient."""
+        return Mock()
+
+    @pytest.fixture
+    def provider(self, mock_client: Mock) -> TWSBrokerProvider:
         """Create provider with mocked TWSClient."""
-        with patch("trading_api.providers.tws.broker_provider.TWSClient"):
+        with patch(
+            "trading_api.providers.tws.broker_provider.TWSClient",
+            return_value=mock_client,
+        ):
             return TWSBrokerProvider()
 
-    def test_returns_smart_during_market_hours(
-        self, provider: TWSBrokerProvider
+    @pytest.mark.asyncio
+    async def test_uses_session_when_market_open(
+        self, provider: TWSBrokerProvider, mock_client: Mock
     ) -> None:
-        """Test returns SMART during regular market hours."""
+        """Test uses session contract when market is open."""
         from datetime import datetime
-        from unittest.mock import patch as mock_patch
+        from zoneinfo import ZoneInfo
 
-        # Mock to 10:00 AM US/Eastern on a weekday
-        mock_now = datetime(2026, 1, 5, 10, 0, 0)  # Monday
-        with mock_patch(
-            "trading_api.providers.tws.broker_provider.datetime"
-        ) as mock_dt:
-            mock_dt.now.return_value = mock_now
-            mock_dt.strptime = datetime.strptime
+        # Create session contract with market open (24h trading)
+        session_contract = _create_mock_contract(exchange="SMART")
+        now = datetime.now(ZoneInfo("US/Eastern"))
+        today_str = now.strftime("%Y%m%d")
+        session_details = _create_mock_contract_details(
+            contract=session_contract,
+            trading_hours=f"{today_str}:0000-{today_str}:2359",
+        )
 
-            result = provider._select_preferred_exchange()
+        darkpool_contract = _create_mock_contract(exchange="OVERNIGHT")
+        darkpool_details = _create_mock_contract_details(contract=darkpool_contract)
 
-        assert result == "SMART"
+        mock_client.cache_contracts = AsyncMock(
+            return_value=(session_details, darkpool_details)
+        )
 
-    def test_returns_overnight_after_8pm(self, provider: TWSBrokerProvider) -> None:
-        """Test returns OVERNIGHT after 8 PM on weekdays."""
-        from datetime import datetime
-        from unittest.mock import patch as mock_patch
+        contract = await provider._resolve_trading_contract("AAPL:NASDAQ:STK")
 
-        # Mock to 9:00 PM US/Eastern on a weekday
-        mock_now = datetime(2026, 1, 5, 21, 0, 0)  # Monday 9 PM
-        with mock_patch(
-            "trading_api.providers.tws.broker_provider.datetime"
-        ) as mock_dt:
-            mock_dt.now.return_value = mock_now
-            mock_dt.strptime = datetime.strptime
+        assert contract.exchange == "SMART"
 
-            result = provider._select_preferred_exchange()
+    @pytest.mark.asyncio
+    async def test_uses_darkpool_when_closed_and_available(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test uses darkpool contract when market closed and darkpool available."""
+        # Create session contract with market CLOSED
+        session_contract = _create_mock_contract(exchange="SMART")
+        session_details = _create_mock_contract_details(
+            contract=session_contract,
+            trading_hours="20260109:CLOSED",
+        )
 
-        assert result == "OVERNIGHT"
+        darkpool_contract = _create_mock_contract(exchange="OVERNIGHT")
+        darkpool_details = _create_mock_contract_details(contract=darkpool_contract)
 
-    def test_returns_overnight_before_4am(self, provider: TWSBrokerProvider) -> None:
-        """Test returns OVERNIGHT before 4 AM on weekdays."""
-        from datetime import datetime
-        from unittest.mock import patch as mock_patch
+        mock_client.cache_contracts = AsyncMock(
+            return_value=(session_details, darkpool_details)
+        )
 
-        # Mock to 3:00 AM US/Eastern on a weekday
-        mock_now = datetime(2026, 1, 6, 3, 0, 0)  # Tuesday 3 AM
-        with mock_patch(
-            "trading_api.providers.tws.broker_provider.datetime"
-        ) as mock_dt:
-            mock_dt.now.return_value = mock_now
-            mock_dt.strptime = datetime.strptime
+        contract = await provider._resolve_trading_contract("AAPL:NASDAQ:STK")
 
-            result = provider._select_preferred_exchange()
+        assert contract.exchange == "OVERNIGHT"
 
-        assert result == "OVERNIGHT"
+    @pytest.mark.asyncio
+    async def test_uses_session_when_closed_but_no_darkpool(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test uses session contract when market closed but no darkpool."""
+        # Create session contract with market CLOSED, no darkpool
+        session_contract = _create_mock_contract(exchange="SMART")
+        session_details = _create_mock_contract_details(
+            contract=session_contract,
+            trading_hours="20260109:CLOSED",
+        )
+
+        mock_client.cache_contracts = AsyncMock(return_value=(session_details, None))
+
+        contract = await provider._resolve_trading_contract("AAPL:NASDAQ:STK")
+
+        # Should fall back to session contract
+        assert contract.exchange == "SMART"
+
+    @pytest.mark.asyncio
+    async def test_raises_when_contract_not_found(
+        self, provider: TWSBrokerProvider, mock_client: Mock
+    ) -> None:
+        """Test raises ProviderException when contract has invalid conId."""
+        # Create contract with invalid conId
+        invalid_contract = _create_mock_contract(con_id=0)
+        invalid_details = _create_mock_contract_details(contract=invalid_contract)
+
+        mock_client.cache_contracts = AsyncMock(return_value=(invalid_details, None))
+
+        with pytest.raises(ProviderException) as exc_info:
+            await provider._resolve_trading_contract("INVALID:EXCHANGE:STK")
+
+        assert "CONTRACT_NOT_FOUND" in str(exc_info.value.code)
 
 
 class TestEditPositionBrackets:
@@ -679,10 +744,9 @@ class TestEditPositionBrackets:
         """Create mock TWSClient for edit_position_brackets."""
         mock = Mock()
 
-        # Mock qualify_contract
-        mock_qualified = Mock()
-        mock_qualified.contract = _create_mock_contract()
-        mock.qualify_contract = AsyncMock(return_value=[mock_qualified])
+        # Mock cache_contracts
+        contract_details = _create_mock_contract_details()
+        mock.cache_contracts = AsyncMock(return_value=(contract_details, None))
 
         # Mock placeOcaGroup to return tracked orders with unique IDs
         def create_oca_result(
@@ -862,10 +926,9 @@ class TestPreviewOrder:
         """Create mock TWSClient with whatIf support."""
         mock = Mock()
 
-        # Mock qualify_contract
-        mock_qualified = Mock()
-        mock_qualified.contract = _create_mock_contract()
-        mock.qualify_contract = AsyncMock(return_value=[mock_qualified])
+        # Mock cache_contracts
+        contract_details = _create_mock_contract_details()
+        mock.cache_contracts = AsyncMock(return_value=(contract_details, None))
 
         return mock
 
@@ -1002,8 +1065,10 @@ class TestPreviewOrder:
         self, provider: TWSBrokerProvider, mock_client: Mock
     ) -> None:
         """Test preview_order raises ProviderException when contract not found."""
-        # Mock qualify_contract to return empty result
-        mock_client.qualify_contract = AsyncMock(return_value=[])
+        # Mock cache_contracts to return contract with invalid conId
+        invalid_contract = _create_mock_contract(con_id=0)
+        invalid_details = _create_mock_contract_details(contract=invalid_contract)
+        mock_client.cache_contracts = AsyncMock(return_value=(invalid_details, None))
 
         pre_order = PreOrder(
             symbol="INVALID:EXCHANGE:STK",

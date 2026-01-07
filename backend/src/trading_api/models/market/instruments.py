@@ -16,10 +16,10 @@ class SubsessionInfo(BaseModel):
     """Subsession information for TradingView extended sessions.
 
     Matches TradingView's LibrarySubsessionInfo interface.
-    Used to define regular, extended, premarket, and postmarket sessions.
+    Used to define regular, extended, premarket, postmarket, and overnight sessions.
     """
 
-    id: Literal["regular", "extended", "premarket", "postmarket"] = Field(
+    id: Literal["regular", "extended", "premarket", "postmarket", "overnight"] = Field(
         ..., description="Subsession identifier"
     )
     session: str = Field(..., description="Session hours (e.g., '0930-1600')")

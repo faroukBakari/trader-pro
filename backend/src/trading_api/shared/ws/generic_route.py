@@ -62,7 +62,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             if topic not in self._topics:
                 # user_data is guaranteed to be set by get_current_user_ws dependency
                 user_data = cast("UserData", client.user_data)
-                self._create_topic(topic, user_data.user_id)
+                await self._create_topic(topic, user_data.user_id)
             client.subscribe(topic)
             if DEBUG_WS_ROUTER:
                 debug_log(f"Client {client.uid} subscribed to topic: {topic}")
@@ -190,7 +190,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         """
         await self._broadcast_payload(update.topic, update, "update")
 
-    def _create_topic(self, topic: str, user_id: str) -> None:
+    async def _create_topic(self, topic: str, user_id: str) -> None:
         """Create a new topic and register callbacks with the service.
 
         Args:
@@ -255,7 +255,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         if DEBUG_WS_ROUTER:
             debug_log(f"Creating new topic in {self.route} service: {topic}")
 
-        self.service.create_topic(topic, topic_update, topic_error, user_id)
+        await self.service.create_topic(topic, topic_update, topic_error, user_id)
         self._topics.add(topic)
 
     def _remove_topic(self, topic: str) -> None:

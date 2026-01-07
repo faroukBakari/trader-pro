@@ -114,21 +114,21 @@ class MockBrokerProvider(Provider, BrokerCapability):
     async def set_leverage(self, params: LeverageSetParams) -> LeverageSetResult:
         return LeverageSetResult(leverage=params.leverage)
 
-    def subscribe_orders(
+    async def subscribe_orders(
         self,
         callback: Callable[[PlacedOrder], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
     ) -> str:
         return "sub_orders"
 
-    def subscribe_positions(
+    async def subscribe_positions(
         self,
         callback: Callable[[Position], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
     ) -> str:
         return "sub_positions"
 
-    def subscribe_executions(
+    async def subscribe_executions(
         self,
         symbol: str,
         callback: Callable[[Execution], Awaitable[None]],
@@ -136,7 +136,7 @@ class MockBrokerProvider(Provider, BrokerCapability):
     ) -> str:
         return "sub_executions"
 
-    def subscribe_equity(
+    async def subscribe_equity(
         self,
         callback: Callable[[EquityData], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,

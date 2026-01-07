@@ -57,7 +57,11 @@ from ibapi.wrapper import EWrapper, current_fn_name
 from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
-from trading_api.providers.tws.tws_mappers import build_contract, ticker_name
+from trading_api.providers.tws.tws_mappers import (
+    build_contract,
+    parse_ticker,
+    ticker_name,
+)
 from trading_api.providers.tws.tws_models import (
     TICK_TYPE_TO_FIELD,
     StreamData,
@@ -1586,44 +1590,13 @@ class TWSClient:
             con
             for con in self.__contracts_cache.values()
             if con.matches(ticker)
+            and (
+                not preferred_exchanges or con.contract.exchange in preferred_exchanges
+            )
             and (not require_full_details or con.has_full_details)
         ]
 
-        if cached and preferred_exchanges and preferred_exchanges != [""]:
-            filtered = [
-                con for con in cached if con.contract.exchange in preferred_exchanges
-            ]
-            return filtered or cached  # Fall back to unfiltered if no exchange match
-
         return cached
-
-    def get_qualified_contracts(
-        self, ticker: str, preferred_exchanges: list[str] = [""]
-    ) -> list[Contract]:
-        if not preferred_exchanges:
-            preferred_exchanges = [""]
-
-        cached = self._get_cached_contracts(ticker, preferred_exchanges)
-
-        # Cache hit with full details - return immediately
-        if cached:
-            if DEBUG_TWS_CACHE:
-                debug_log(f"reqContractDetails cache hit for ticker {ticker}")
-            return [con.contract for con in cached]
-
-        contracts: list[Contract] = []
-        for exchange in preferred_exchanges:
-            contract = build_contract(ticker)
-            contract.exchange = exchange
-            contracts.append(contract)
-
-        if DEBUG_TWS_CACHE:
-            debug_log(
-                f"reqContractDetails cache miss for ticker {ticker} => "
-                f"returning unqualified contracts: {[ticker_name(c) for c in contracts]}"
-            )
-
-        return contracts
 
     async def reqMatchingSymbols(
         self, pattern: str, timeout: float | None = None
@@ -1695,8 +1668,11 @@ class TWSClient:
         """
 
         ticker = ticker_name(contract)
+        preferred_exachanges = [contract.exchange] if contract.exchange else [""]
 
-        cached = self._get_cached_contracts(ticker, require_full_details=True)
+        cached = self._get_cached_contracts(
+            ticker, preferred_exachanges, require_full_details=True
+        )
 
         # Cache hit with full details - return immediately
         if cached:
@@ -1710,7 +1686,9 @@ class TWSClient:
         reqId: int | None = None
         coroutine: Awaitable[list[dict[str, ContractDetails]]]
         details_list: list[ContractDetails]
-        business_key = f"shared:reqContractDetails:{ticker}"
+        business_key = (
+            f"shared:reqContractDetails:{contract.exchange or 'ANY'}:{ticker}"
+        )
 
         data = self.ibsocket.get_cached_data(business_key)
         if data is not None:
@@ -1790,6 +1768,67 @@ class TWSClient:
                 cached.append(self.__contracts_cache[detail_con_id])
 
         return cached
+
+    async def cache_contracts(
+        self,
+        ticker_name: str,
+        **kwargs: Any,
+    ) -> tuple[ContractDetails, ContractDetails | None]:
+        """Get detailed symbol information.
+
+        [ASYNC-BRIDGE]: Wraps sync TWS callback with async Future.
+        [ACCUMULATION]: TWS may return multiple ContractDetails, we use first match.
+        [DOMAIN-ONLY]: Returns domain SymbolInfo (no TWS types).
+
+        Args:
+            symbol: Symbol name (e.g., "AAPL")
+            exchange: Optional exchange filter (default: "SMART" for smart routing)
+
+        Returns:
+            Detailed symbol metadata (SymbolInfo)
+
+        Raises:
+            ProviderException: If symbol not found or request fails
+        """
+
+        symbol, primaryExchange, sec_type, _ = parse_ticker(ticker_name)
+        contract = Contract()
+        contract.symbol = symbol
+        contract.secType = sec_type
+        contract.primaryExchange = primaryExchange
+
+        # Get contract details via TWSClient (returns list)
+        details_list = await self.reqContractDetails(contract, **kwargs)
+
+        if not details_list:
+            raise ProviderException(
+                code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
+                message=f"Symbol not found: {ticker_name}",
+                provider="tws",
+                capability="datafeed",
+            )
+
+        all_valid_exchanges = [
+            exch for cd in details_list for exch in cd.validExchanges.split(",")
+        ]
+
+        session_contract = next(iter(details_list))
+        if "SMART" in all_valid_exchanges and all(
+            cd.contract.exchange != "SMART" for cd in details_list
+        ):
+            contract.exchange = "SMART"
+            smart_ = await self.reqContractDetails(contract, **kwargs)
+            session_contract = next(iter(smart_), session_contract)
+
+        darkpool_contract = None
+        if "OVERNIGHT" in all_valid_exchanges and all(
+            cd.contract.exchange != "OVERNIGHT" for cd in details_list
+        ):
+            contract.exchange = "OVERNIGHT"
+            overnight_ = await self.reqContractDetails(contract, **kwargs)
+            darkpool_contract = next(iter(overnight_), None)
+
+        return session_contract, darkpool_contract
 
     # === Historical data snapshot (one-time pattern) ===
 

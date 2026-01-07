@@ -194,17 +194,102 @@ def _normalize_timezone(tws_timezone: str) -> str:
     return TWS_TIMEZONE_MAP.get(tws_timezone, tws_timezone) or "America/New_York"
 
 
+def is_trading_session_closed(
+    contract_details: ContractDetails,
+    *,
+    reference_time: datetime | None = None,
+) -> bool:
+    """Check if trading session is currently closed.
+
+    Parses TWS tradingHours string and compares against current time
+    in the instrument's timezone to determine if market is closed.
+
+    Args:
+        trading_hours: TWS tradingHours or liquidHours string
+            Format: "YYYYMMDD:HHMM-YYYYMMDDHHMM;YYYYMMDD:CLOSED;..."
+        timezone_id: TWS timeZoneId (e.g., "US/Eastern")
+        reference_time: Override current time (for testing)
+
+    Returns:
+        True if market is closed, False if open
+
+    Examples:
+        >>> is_trading_session_closed("20260109:0930-20260109:1600", "US/Eastern")
+        False  # During market hours
+        >>> is_trading_session_closed("20260109:CLOSED", "US/Eastern")
+        True   # Holiday
+    """
+    trading_hours = contract_details.tradingHours
+    timezone_id = contract_details.timeZoneId
+    if not trading_hours:
+        return True  # No hours = assume closed
+
+    # Get current time in instrument's timezone
+    tz = ZoneInfo(_normalize_timezone(timezone_id))
+    now = reference_time or datetime.now(tz)
+    today_str = now.strftime("%Y%m%d")
+
+    # Find today's segment in tradingHours
+    for segment in trading_hours.split(";"):
+        segment = segment.strip()
+        if not segment:
+            continue
+
+        # Check if this segment is for today
+        if not segment.startswith(today_str):
+            continue
+
+        # Today is explicitly CLOSED
+        if "CLOSED" in segment:
+            return True
+
+        # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" or "YYYYMMDD:HHMM-HHMM"
+        if "-" not in segment:
+            continue
+
+        try:
+            start_part, end_part = segment.split("-", 1)
+            # Extract time: "YYYYMMDD:HHMM" → "HHMM"
+            start_time_str = (
+                start_part.split(":", 1)[1] if ":" in start_part else start_part
+            )
+            end_time_str = end_part.split(":", 1)[1] if ":" in end_part else end_part
+
+            # Parse to time objects
+            start_time = datetime.strptime(start_time_str, "%H%M").time()
+            end_time = datetime.strptime(end_time_str, "%H%M").time()
+            current_time = now.time()
+
+            # Handle overnight session (end < start means crosses midnight)
+            if end_time < start_time:
+                # Open if: current >= start OR current < end
+                return not (current_time >= start_time or current_time < end_time)
+            else:
+                # Normal session: open if start <= current < end
+                return not (start_time <= current_time < end_time)
+
+        except (ValueError, IndexError):
+            continue
+
+    # No matching segment for today = closed
+    return True
+
+
 def _build_subsessions(
-    liquid_hours: str, trading_hours: str
+    liquid_hours: str,
+    trading_hours: str,
+    valid_exchanges: str | None = None,
 ) -> list[SubsessionInfo] | None:
     """Build TradingView subsessions array from TWS liquidHours and tradingHours.
 
-    Derives pre-market and post-market sessions by comparing regular (liquidHours)
-    and extended (tradingHours) trading hours.
+    Derives pre-market, post-market, and overnight sessions by comparing regular
+    (liquidHours) and extended (tradingHours) trading hours, and checking for
+    overnight exchange availability.
 
     Args:
         liquid_hours: TWS liquidHours (regular session, e.g., "20260107:0930-20260107:1600")
         trading_hours: TWS tradingHours (extended session, e.g., "20260107:0400-20260107:2000")
+        valid_exchanges: TWS validExchanges comma-separated string (e.g., "SMART,NASDAQ,OVERNIGHT")
 
     Returns:
         List of SubsessionInfo objects, or None if no extended session (equal hours)
@@ -253,6 +338,17 @@ def _build_subsessions(
                 id="postmarket",
                 session=f"{reg_end}-{ext_end}",
                 description="Post-market",
+            )
+        )
+
+    # Add overnight if OVERNIGHT exchange is available (Blue Ocean ATS)
+    # Split session: 20:00-23:50 (evening) + 00:00-04:00 (early morning)
+    if valid_exchanges and "OVERNIGHT" in valid_exchanges.upper():
+        subsessions.append(
+            SubsessionInfo(
+                id="overnight",
+                session="0000-2350",
+                description="Overnight Trading (Blue Ocean)",
             )
         )
 
@@ -322,8 +418,10 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
         if expiration_date:
             expired = expiration_date < int(datetime.now().timestamp() * 1000)
 
-    # Build subsessions from liquidHours (regular) and tradingHours (extended)
-    subsessions = _build_subsessions(details.liquidHours, details.tradingHours)
+    # Build subsessions from liquidHours (regular), tradingHours (extended), and validExchanges
+    subsessions = _build_subsessions(
+        details.liquidHours, details.tradingHours, details.validExchanges
+    )
 
     return SymbolInfo(
         name=symbol,
@@ -1360,6 +1458,7 @@ __all__ = [
     "build_contract",
     "map_resolution_to_tws_bar_size",
     "calculate_tws_duration",
+    "is_trading_session_closed",
     # Order mappers
     "BracketContext",
     "ORDER_TYPE_TO_TWS",

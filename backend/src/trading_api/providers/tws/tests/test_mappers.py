@@ -419,6 +419,61 @@ class TestSubsessionsMapping:
         assert "premarket" in ids  # Has premarket
         assert "postmarket" not in ids  # No postmarket
 
+    def test_overnight_subsession_added_when_overnight_exchange_available(self) -> None:
+        """Test overnight subsession is added when OVERNIGHT in validExchanges."""
+        contract = Contract()
+        contract.symbol = "GOOGL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = "20260107:0400-20260107:2000"
+        # Include OVERNIGHT exchange (Blue Ocean ATS)
+        details.validExchanges = "SMART,AMEX,NYSE,NASDAQ,OVERNIGHT,ARCA"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsessions is not None
+        assert (
+            len(result.subsessions) == 5
+        )  # regular, extended, premarket, postmarket, overnight
+
+        # Check overnight session
+        overnight = next((s for s in result.subsessions if s.id == "overnight"), None)
+        assert overnight is not None
+        assert overnight.session == "0000-2350"
+        assert overnight.description == "Overnight Trading (Blue Ocean)"
+
+    def test_overnight_subsession_not_added_when_no_overnight_exchange(self) -> None:
+        """Test overnight subsession is NOT added when OVERNIGHT not in validExchanges."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = "20260107:0400-20260107:2000"
+        # No OVERNIGHT exchange
+        details.validExchanges = "SMART,AMEX,NYSE,NASDAQ,ARCA"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsessions is not None
+        assert (
+            len(result.subsessions) == 4
+        )  # regular, extended, premarket, postmarket (no overnight)
+
+        ids = [s.id for s in result.subsessions]
+        assert "overnight" not in ids
+
 
 # =============================================================================
 # Bar/Quote Mappers
