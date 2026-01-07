@@ -44,6 +44,32 @@ class DatafeedConfiguration(BaseModel):
         description="Available symbol types",
     )
 
+    currency_codes: List[str] = Field(
+        default_factory=lambda: [
+            "USD",  # US Dollar
+            "EUR",  # Euro
+            "GBP",  # British Pound
+            "JPY",  # Japanese Yen
+            "CNH",  # Chinese Yuan (offshore)
+            "CHF",  # Swiss Franc
+            "CAD",  # Canadian Dollar
+            "AUD",  # Australian Dollar
+            "HKD",  # Hong Kong Dollar
+            "SGD",  # Singapore Dollar
+            "KRW",  # South Korean Won
+            "INR",  # Indian Rupee
+            "MXN",  # Mexican Peso
+            "BRL",  # Brazilian Real
+            "SEK",  # Swedish Krona
+            "NOK",  # Norwegian Krone
+            "DKK",  # Danish Krone
+            "NZD",  # New Zealand Dollar
+            "ZAR",  # South African Rand
+            "RUB",  # Russian Ruble
+        ],
+        description="Supported currencies for price conversion",
+    )
+
 
 __all__ = [
     "DatafeedConfiguration",

@@ -1,7 +1,7 @@
 # Datafeed Module
 
 **Status**: ✅ Production Ready  
-**Last Updated**: January 1, 2026  
+**Last Updated**: January 7, 2026  
 **Related Files**: `backend/src/trading_api/modules/datafeed/`
 
 ---
@@ -115,39 +115,69 @@ quotes:{"symbols":["AAPL","GOOGL"],"fast_symbols":["MSFT"]}
 
 ### Topic Lifecycle
 
+**Bars Subscription** - Direct 1:1 mapping between topic and provider subscription:
+
 ```python
-# In DatafeedService
-def create_topic(self, topic: str, topic_update: Callback, topic_error: Callback, user_id: str):
-    """Parse topic, create provider subscription, track subscription IDs."""
-    topic_type, params_json = topic.split(":", 1)
+# In DatafeedService.create_topic()
+if topic_type == "bars":
+    subscription_id = self.datafeed_provider.subscribe_realtime_bars(
+        ticker_name=request.symbol,
+        resolution=request.resolution,
+        callback=topic_update,
+        on_error=on_sub_error,
+    )
+    self._topic_to_subs[topic] = [subscription_id]
+```
 
-    if topic_type == "bars":
-        subscription_id = self.datafeed_provider.subscribe_realtime_bars(
-            ticker_name=request.symbol,
-            resolution=request.resolution,
-            callback=topic_update,
-            on_error=on_provider_error,
-        )
-        self._topic_to_subs[topic] = [subscription_id]
+**Quotes Subscription** - Deduplication pattern shares provider subscriptions across topics:
 
-    elif topic_type == "quotes":
-        # Multiple subscriptions for quotes (one per symbol)
-        for symbol in all_symbols:
+```python
+# Internal state for quote deduplication
+_quote_callbacks: dict[str, dict[str, tuple[UpdateCallback, ErrorCallback]]]  # symbol → {topic → callbacks}
+_quote_symbol_to_sub_id: dict[str, str]  # symbol → subscription_id
+
+# In DatafeedService.create_topic()
+elif topic_type == "quotes":
+    for symbol in all_symbols:
+        # Only subscribe once per symbol (multiple topics may share same symbol)
+        if symbol not in self._quote_callbacks:
+            callback_wrapper, on_provider_error = self.quote_cb_wapper(symbol)
             subscription_id = self.datafeed_provider.subscribe_market_data(
                 ticker_name=symbol,
-                callback=topic_update,
+                callback=callback_wrapper,
                 on_error=on_provider_error,
             )
-            self._topic_to_subs.setdefault(topic, []).append(subscription_id)
+            self._quote_symbol_to_sub_id[symbol] = subscription_id
 
+        # Register the topic's callbacks for this symbol
+        self._quote_callbacks.setdefault(symbol, {})[topic] = (topic_update, topic_error)
+```
+
+**Quote Callback Wrapper** - Multiplexes provider updates to all subscribed topics:
+
+```python
+def quote_cb_wapper(self, symbol: str):
+    """Wrap provider callbacks to fan out to all topics subscribed to this symbol."""
+    async def callback_wrapper(data: QuoteData) -> None:
+        await asyncio.gather(
+            *[cb(data) for cb, _ in self._quote_callbacks.get(symbol, {}).values()]
+        )
+    return callback_wrapper, on_provider_error
+```
+
+**Cleanup** - Unsubscribes from provider only when last topic for a symbol is removed:
+
+```python
 def remove_topic(self, topic: str):
-    """Cleanup provider subscriptions on topic removal."""
-    subscription_ids = self._topic_to_subs.pop(topic, [])
-    for subscription_id in subscription_ids:
-        if topic_type == "bars":
-            self.datafeed_provider.unsubscribe_realtime_bars(subscription_id)
-        elif topic_type == "quotes":
-            self.datafeed_provider.unsubscribe_market_data(subscription_id)
+    if topic_type == "quotes":
+        for symbol in all_symbols:
+            symbol_callbacks = self._quote_callbacks.get(symbol, {})
+            symbol_callbacks.pop(topic, None)
+            if not symbol_callbacks:  # Last topic for this symbol
+                self._quote_callbacks.pop(symbol, None)
+                subscription_id = self._quote_symbol_to_sub_id.pop(symbol, None)
+                if subscription_id:
+                    self.datafeed_provider.unsubscribe_market_data(subscription_id)
 ```
 
 ---
@@ -191,6 +221,27 @@ def _is_error_recoverable(self, exc: TradingApiException) -> bool:
 2. `DatafeedService.on_provider_error()` wraps with recoverable/retry_after_ms
 3. For recoverable: `SubscriptionError` sent, connection stays open, retry after 5 seconds
 4. For non-recoverable: `SubscriptionError` sent, connection closes
+
+### Quote-Specific Error Handling
+
+Quote errors are multiplexed to all topics subscribed to the affected symbol:
+
+```python
+async def on_provider_error(exc: TradingApiException) -> None:
+    recoverable = self._is_error_recoverable(exc)
+    if not recoverable:
+        # Clean up all topics for this symbol
+        self._quote_symbol_to_sub_id.pop(symbol, None)
+        for topic in self._quote_callbacks.get(symbol, {}).keys():
+            self._topic_to_subs.pop(topic, None)
+
+    # Fan out error to all affected topics
+    retry_after_ms = _DEFAULT_RETRY_AFTER_MS if recoverable else None
+    await asyncio.gather(
+        *[err(exc, recoverable, retry_after_ms)
+          for _, err in self._quote_callbacks.get(symbol, {}).values()]
+    )
+```
 
 ---
 
@@ -285,6 +336,25 @@ Key Pydantic models used by this module (defined in `trading_api/models/`):
 | `GetBarsResponse`              | Historical bars response wrapper        |
 | `Resolution`                   | Type-safe TradingView resolution enum   |
 
+### SymbolInfo Fields (TradingView LibrarySymbolInfo)
+
+| Priority | Fields                                                     | Notes                              |
+| -------- | ---------------------------------------------------------- | ---------------------------------- |
+| Core     | `name`, `ticker`, `type`, `exchange`, `session`, `timezone` | Required TradingView fields        |
+| P0       | `currency_code`, `original_currency_code`                  | Currency handling for trading      |
+| P1       | `expired`, `expiration_date`                               | Derivatives support (FUT/OPT)      |
+| P1       | `industry`, `sector`                                       | Categorization for search/filter   |
+| P2       | `con_id`, `has_weekly_and_monthly`, `delay`                | TWS-specific metadata              |
+
+### DatafeedConfiguration Fields
+
+| Field                    | Type         | Description                                        |
+| ------------------------ | ------------ | -------------------------------------------------- |
+| `supported_resolutions`  | `list[str]`  | Available bar resolutions ("1", "5", "D", etc.)    |
+| `exchanges`              | `list[dict]` | Available exchanges for symbol filtering           |
+| `symbols_types`          | `list[dict]` | Available symbol types (stock, forex, etc.)        |
+| `currency_codes`         | `list[str]`  | Supported currencies for price conversion (20+)    |
+
 ---
 
 ## TradingView Integration
@@ -310,4 +380,4 @@ This module powers the TradingView charting library datafeed:
 
 ---
 
-**Last Updated**: January 1, 2026
+**Last Updated**: January 7, 2026

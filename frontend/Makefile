@@ -210,7 +210,7 @@ build:
 	$(call ensure-node-version,npm run build)
 
 # Development server
-dev:
+dev: clean-generated generate
 	@echo "Starting frontend development server..."
 	@echo "🔍 Checking if frontend port is available..."
 	@if lsof -Pi :5173 -sTCP:LISTEN -t >/dev/null 2>&1; then \

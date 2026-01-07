@@ -5,7 +5,7 @@ Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -157,24 +157,24 @@ def _convert_tws_trading_hours_to_session(trading_hours: str) -> str:
     if not trading_hours:
         return "0000-2359"  # Default US equity hours
 
-    # for segment in trading_hours.split(";"):
-    #     if "CLOSED" in segment:
-    #         continue
-    #     # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" → "HHMM-HHMM"
-    #     if "-" in segment:
-    #         start, end = segment.split("-", 1)
-    #         start_time = start.split(":", 1)[1] if ":" in start else start
-    #         end_time = end.split(":", 1)[1] if ":" in end else end
-    #         if int(end_time) < int(start_time):
-    #             current_hour = (
-    #                 datetime.now().astimezone(ZoneInfo("US/Eastern")).time().hour
-    #             )
-    #             if int(end_time) / 100 < current_hour:
-    #                 end_time = "2359"
-    #             else:
-    #                 start_time = "0000"
+    for segment in trading_hours.split(";"):
+        if "CLOSED" in segment:
+            continue
+        # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" → "HHMM-HHMM"
+        if "-" in segment:
+            start, end = segment.split("-", 1)
+            start_time = start.split(":", 1)[1] if ":" in start else start
+            end_time = end.split(":", 1)[1] if ":" in end else end
+            if int(end_time) < int(start_time):
+                current_hour = (
+                    datetime.now().astimezone(ZoneInfo("US/Eastern")).time().hour
+                )
+                if int(end_time) / 100 < current_hour:
+                    end_time = "2359"
+                else:
+                    start_time = "0000"
 
-    #         return start_time + "-" + end_time
+            return start_time + "-" + end_time
 
     return "0000-2359"  # Fallback
 
@@ -191,6 +191,41 @@ TWS_TIMEZONE_MAP: dict[str, str] = {
 def _normalize_timezone(tws_timezone: str) -> str:
     """Convert TWS timeZoneId to TradingView-compatible timezone."""
     return TWS_TIMEZONE_MAP.get(tws_timezone, tws_timezone) or "America/New_York"
+
+
+def _parse_expiration_date(expiration_str: str) -> int | None:
+    """Parse TWS expiration date string to milliseconds timestamp.
+
+    TWS format: "YYYYMMDD" or "YYYYMM" (for monthly contracts)
+
+    Args:
+        expiration_str: TWS lastTradeDateOrContractMonth string
+
+    Returns:
+        Timestamp in milliseconds, or None if parsing fails
+    """
+    if not expiration_str:
+        return None
+
+    try:
+        # Full date format: YYYYMMDD
+        if len(expiration_str) == 8:
+            dt = datetime.strptime(expiration_str, "%Y%m%d")
+            return int(dt.timestamp() * 1000)
+        # Monthly format: YYYYMM (assume last day of month)
+        elif len(expiration_str) == 6:
+            dt = datetime.strptime(expiration_str + "01", "%Y%m%d")
+            # Move to last day of month
+            if dt.month == 12:
+                next_month = dt.replace(year=dt.year + 1, month=1, day=1)
+            else:
+                next_month = dt.replace(month=dt.month + 1, day=1)
+            last_day = next_month - timedelta(days=1)
+            return int(last_day.timestamp() * 1000)
+    except ValueError:
+        return None
+
+    return None
 
 
 def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
@@ -210,15 +245,25 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     )
 
     # Determine symbol type
-
     symbol = contract.symbol
     symbol_type = SEC_TYPE_MAP.get(contract.secType, "stock")
+
+    # Parse expiration for derivatives (FUT/OPT)
+    expiration_date: int | None = None
+    expired: bool | None = None
+    if contract.lastTradeDateOrContractMonth:
+        expiration_date = _parse_expiration_date(contract.lastTradeDateOrContractMonth)
+        if expiration_date:
+            expired = expiration_date < int(datetime.now().timestamp() * 1000)
 
     return SymbolInfo(
         name=symbol,
         description=details.longName or symbol,
         type=symbol_type,
-        session=_convert_tws_trading_hours_to_session(details.tradingHours),
+        # Use liquidHours for regular session, fallback to tradingHours (extended)
+        session=_convert_tws_trading_hours_to_session(
+            details.liquidHours or details.tradingHours
+        ),
         timezone=_normalize_timezone(details.timeZoneId),
         ticker=(
             symbol
@@ -237,6 +282,14 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
         supported_resolutions=DEFAULT_SUPPORTED_RESOLUTIONS,
         volume_precision=0,
         data_status="streaming",
+        # New fields from ContractDetails
+        currency_code=contract.currency or None,
+        original_currency_code=contract.currency or None,
+        industry=details.industry or None,
+        sector=details.category or None,
+        con_id=contract.conId if contract.conId > 0 else None,
+        expired=expired,
+        expiration_date=expiration_date,
     )
 
 

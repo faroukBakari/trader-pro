@@ -407,13 +407,22 @@ export class ApiAdapter {
   @ApiErrorHandler((...args) => `/symbols/${args[0]}`)
   async resolveSymbol(symbol: string): ApiPromise<LibrarySymbolInfo> {
     const response = await this.datafeedApi.resolveSymbol(symbol)
+    // Destructure to exclude backend-only fields (con_id) not in TradingView's LibrarySymbolInfo
+    const { con_id: _, expired: __, ...symbolData } = response.data
     return {
       status: response.status,
       data: {
-        ...response.data,
+        ...symbolData,
         timezone: response.data.timezone as unknown as LibrarySymbolInfo['timezone'],
         format: response.data.format as unknown as LibrarySymbolInfo['format'],
         supported_resolutions: response.data.supported_resolutions as unknown as TradingViewDatafeedConfiguration['supported_resolutions'],
+        // Convert null → undefined for optional TradingView fields
+        currency_code: response.data.currency_code ?? undefined,
+        original_currency_code: response.data.original_currency_code ?? undefined,
+        // expired: response.data.expired ?? false,
+        expiration_date: response.data.expiration_date ?? undefined,
+        industry: response.data.industry ?? undefined,
+        sector: response.data.sector ?? undefined,
       }
     }
   }
