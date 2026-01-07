@@ -55,11 +55,17 @@ def _make_contract(
 def _setup_mock_client_with_contracts(
     mock_client: Mock, ticker: str = "AAPL:NASDAQ:STK"
 ) -> None:
-    """Setup mock_client.get_qualified_contracts to return valid contracts.
+    """Setup mock_client methods to return valid contracts.
 
-    This is needed because the implementation now calls get_qualified_contracts
-    which must return an iterable of Contract objects.
+    Sets up cache_contracts and reqContractDetails since the implementation
+    calls cache_contracts which is now on TWSClient.
+
+    Note: Does NOT overwrite cache_contracts or reqContractDetails if already
+    explicitly configured with a tuple/list return_value (for custom test cases).
     """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
     parts = ticker.split(":")
     symbol = parts[0] if len(parts) > 0 else "AAPL"
     exchange = parts[1] if len(parts) > 1 else "NASDAQ"
@@ -71,7 +77,40 @@ def _setup_mock_client_with_contracts(
         exchange="SMART",
         primary_exchange=exchange,
     )
-    mock_client.get_qualified_contracts = Mock(return_value=[contract])
+
+    # Build default contract_details
+    contract_details = ContractDetails()
+    contract_details.contract = contract
+    contract_details.validExchanges = "SMART,NASDAQ"
+    # Generate trading hours for today that cover 24 hours to ensure market is "open"
+    now = datetime.now(ZoneInfo("US/Eastern"))
+    today_str = now.strftime("%Y%m%d")
+    contract_details.tradingHours = f"{today_str}:0000-{today_str}:2359"
+    contract_details.timeZoneId = "US/Eastern"
+
+    # Setup cache_contracts (returns tuple[ContractDetails, ContractDetails | None])
+    # Only if not already configured with an explicit tuple return_value
+    existing_cache_mock = getattr(mock_client, "cache_contracts", None)
+    should_setup_cache = True
+    if existing_cache_mock is not None and isinstance(existing_cache_mock, AsyncMock):
+        if isinstance(existing_cache_mock.return_value, tuple):
+            should_setup_cache = False
+
+    if should_setup_cache:
+        mock_client.cache_contracts = AsyncMock(return_value=(contract_details, None))
+
+    # Setup reqContractDetails for any direct calls
+    # Only if not already configured with an explicit list return_value
+    existing_mock = getattr(mock_client, "reqContractDetails", None)
+    should_setup = True
+    if existing_mock is not None and isinstance(existing_mock, AsyncMock):
+        # Check if it has been explicitly configured with a list return_value
+        # (AsyncMock default return_value is a new AsyncMock, not a list)
+        if isinstance(existing_mock.return_value, list):
+            should_setup = False
+
+    if should_setup:
+        mock_client.reqContractDetails = AsyncMock(return_value=[contract_details])
 
 
 class TestProviderInitialization:
@@ -277,10 +316,9 @@ class TestGetSymbolInfo:
         details.tradingHours = "20231120:0930-20231120:1600"
         details.timeZoneId = "America/New_York"
 
-        # Mock TWSClient.reqContractDetails to return our test data
+        # Mock TWSClient.cache_contracts to return our test data
         mock_client = Mock()
-        mock_client.reqContractDetails = AsyncMock(return_value=[details])
-        _setup_mock_client_with_contracts(mock_client, "MSFT:NASDAQ:STK")
+        mock_client.cache_contracts = AsyncMock(return_value=(details, None))
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -291,11 +329,8 @@ class TestGetSymbolInfo:
             # Execute get_symbol_info with composite ticker format
             result = await provider.get_symbol_info("MSFT:NASDAQ:STK-12345")
 
-        # Verify async method was called with contract
-        mock_client.reqContractDetails.assert_called_once()
-        call_args = mock_client.reqContractDetails.call_args[0][0]
-        assert call_args.symbol == "MSFT"
-        assert call_args.primaryExchange == "NASDAQ"
+        # Verify async method was called with ticker
+        mock_client.cache_contracts.assert_called_once_with("MSFT:NASDAQ:STK-12345")
 
         # Verify domain model returned
         assert isinstance(result, SymbolInfo)
@@ -323,8 +358,7 @@ class TestGetSymbolInfo:
         details.minTick = 0.01
 
         mock_client = Mock()
-        mock_client.reqContractDetails = AsyncMock(return_value=[details])
-        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
+        mock_client.cache_contracts = AsyncMock(return_value=(details, None))
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -334,16 +368,22 @@ class TestGetSymbolInfo:
             # Use composite ticker format (exchange already in ticker)
             await provider.get_symbol_info("AAPL:NASDAQ:STK-12345")
 
-        # Verify contract has correct exchange (from ticker)
-        call_args = mock_client.reqContractDetails.call_args[0][0]
-        assert call_args.primaryExchange == "NASDAQ"
+        # Verify cache_contracts was called with correct ticker
+        mock_client.cache_contracts.assert_called_once_with("AAPL:NASDAQ:STK-12345")
 
     @pytest.mark.asyncio
     async def test_get_symbol_info_not_found_raises_error(self) -> None:
         """Test get_symbol_info raises ProviderException when symbol not found."""
         mock_client = Mock()
-        mock_client.reqContractDetails = AsyncMock(return_value=[])
-        _setup_mock_client_with_contracts(mock_client, "NONEXISTENT:SMART:STK")
+        # cache_contracts raises ProviderException when symbol not found
+        mock_client.cache_contracts = AsyncMock(
+            side_effect=ProviderException(
+                code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
+                message="Symbol not found: NONEXISTENT:SMART:STK-0",
+                provider="tws",
+                capability="datafeed",
+            )
+        )
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -357,8 +397,9 @@ class TestGetSymbolInfo:
 
     @pytest.mark.asyncio
     async def test_get_symbol_info_uses_first_result(self) -> None:
-        """Test get_symbol_info uses first result when multiple returned."""
-        # TWS may return multiple contract details for ambiguous queries
+        """Test get_symbol_info uses first (session) result from cache_contracts."""
+        # cache_contracts returns (session_details, darkpool_details)
+        # get_symbol_info uses session_details for the result
         contract1 = Contract()
         contract1.symbol = "AAPL"
         contract1.secType = "STK"
@@ -370,20 +411,9 @@ class TestGetSymbolInfo:
         details1.longName = "Apple Inc NASDAQ"
         details1.minTick = 0.01
 
-        contract2 = Contract()
-        contract2.symbol = "AAPL"
-        contract2.secType = "STK"
-        contract2.exchange = "SMART"
-        contract2.primaryExchange = "NYSE"
-        contract2.conId = 265599  # Required for filter check
-        details2 = ContractDetails()
-        details2.contract = contract2
-        details2.longName = "Apple Inc NYSE"
-        details2.minTick = 0.01
-
         mock_client = Mock()
-        mock_client.reqContractDetails = AsyncMock(return_value=[details1, details2])
-        _setup_mock_client_with_contracts(mock_client, "AAPL:NASDAQ:STK")
+        # cache_contracts returns tuple (session_details, darkpool_details)
+        mock_client.cache_contracts = AsyncMock(return_value=(details1, None))
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
@@ -393,7 +423,7 @@ class TestGetSymbolInfo:
             # Use composite ticker format
             result = await provider.get_symbol_info("AAPL:NASDAQ:STK-12345")
 
-        # Should use first result
+        # Should use session_details (first in tuple)
         assert result.description == "Apple Inc NASDAQ"
         assert result.exchange == "NASDAQ"
 
@@ -581,7 +611,8 @@ class TestGetQuotesSnapshot:
 class TestSubscriptionMethods:
     """Test subscription methods using TWSClient stream APIs."""
 
-    def test_subscribe_realtime_bars_returns_subscription_id(self) -> None:
+    @pytest.mark.asyncio
+    async def test_subscribe_realtime_bars_returns_subscription_id(self) -> None:
         """Test subscribe_realtime_bars returns a subscription ID."""
         from trading_api.models.exceptions import TradingApiException
 
@@ -601,14 +632,15 @@ class TestSubscriptionMethods:
             async def on_error(exc: TradingApiException) -> None:
                 pass
 
-            sub_id = provider.subscribe_realtime_bars(
+            sub_id = await provider.subscribe_realtime_bars(
                 "AAPL:NASDAQ:STK-12345", Resolution.MIN_5, bar_callback, on_error
             )
 
             assert isinstance(sub_id, str)
             mock_client.reqBarDataStream.assert_called_once()
 
-    def test_subscribe_market_data_returns_subscription_id(self) -> None:
+    @pytest.mark.asyncio
+    async def test_subscribe_market_data_returns_subscription_id(self) -> None:
         """Test subscribe_market_data returns a single subscription ID."""
         from trading_api.models.exceptions import TradingApiException
 
@@ -628,7 +660,7 @@ class TestSubscriptionMethods:
             async def on_error(exc: TradingApiException) -> None:
                 pass
 
-            sub_id = provider.subscribe_market_data(
+            sub_id = await provider.subscribe_market_data(
                 "AAPL:NASDAQ:STK-12345",
                 quote_callback,
                 on_error,
@@ -638,7 +670,8 @@ class TestSubscriptionMethods:
             assert sub_id == "AAPL:NASDAQ:STK-12345"
             mock_client.reqMktDataStream.assert_called_once()
 
-    def test_unsubscribe_realtime_bars_calls_cancel(self) -> None:
+    @pytest.mark.asyncio
+    async def test_unsubscribe_realtime_bars_calls_cancel(self) -> None:
         """Test unsubscribe_realtime_bars calls cancel_data_stream."""
         from trading_api.models.exceptions import TradingApiException
 
@@ -659,7 +692,7 @@ class TestSubscriptionMethods:
             async def on_error(exc: TradingApiException) -> None:
                 pass
 
-            sub_id = provider.subscribe_realtime_bars(
+            sub_id = await provider.subscribe_realtime_bars(
                 "AAPL:NASDAQ:STK-12345", Resolution.MIN_5, bar_callback, on_error
             )
 
@@ -669,7 +702,8 @@ class TestSubscriptionMethods:
             # Verify cancel was called
             mock_client.cancel_data_stream.assert_called_once_with(sub_id)
 
-    def test_unsubscribe_market_data_calls_cancel(self) -> None:
+    @pytest.mark.asyncio
+    async def test_unsubscribe_market_data_calls_cancel(self) -> None:
         """Test unsubscribe_market_data calls cancel_data_stream."""
         from trading_api.models.exceptions import TradingApiException
 
@@ -690,7 +724,7 @@ class TestSubscriptionMethods:
             async def on_error(exc: TradingApiException) -> None:
                 pass
 
-            sub_id = provider.subscribe_market_data(
+            sub_id = await provider.subscribe_market_data(
                 "AAPL:NASDAQ:STK-12345", quote_callback, on_error
             )
 

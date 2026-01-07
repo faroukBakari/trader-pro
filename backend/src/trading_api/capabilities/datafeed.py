@@ -123,7 +123,7 @@ class DatafeedCapability(ABC):
         ...
 
     @abstractmethod
-    def subscribe_realtime_bars(
+    async def subscribe_realtime_bars(
         self,
         ticker_name: str,
         resolution: Resolution,
@@ -153,7 +153,7 @@ class DatafeedCapability(ABC):
         ...
 
     @abstractmethod
-    def subscribe_market_data(
+    async def subscribe_market_data(
         self,
         ticker_name: str,
         callback: Callable[[QuoteData], Coroutine[Any, Any, None]],

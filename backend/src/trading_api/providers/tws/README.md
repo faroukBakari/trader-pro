@@ -213,14 +213,17 @@ def _get_cached_contracts(
         return filtered or cached
     return cached
 
-# TWSClient - Public method uses the helper
-__contracts_cache: dict[int, CachedContract] = {}  # conId → CachedContract
-
-def get_qualified_contracts(self, ticker: str, preferred_exchanges: list[str]) -> list[Contract]:
+# TWSClient - Public method to qualify contracts (async, fetches from TWS if needed)
+async def qualify_contract(
+    self,
+    ticker: str,
+    preferred_exchanges: list[str] = [""],
+) -> list[CachedContract]:
     cached = self._get_cached_contracts(ticker, preferred_exchanges)
     if cached:
-        return [c.contract for c in cached]
-    return [build_contract(ticker)]  # Fallback to unqualified
+        return cached
+    # Cache miss - fetch from TWS via reqContractDetails
+    # ... (populates cache and returns qualified contracts)
 ```
 
 **Cache population:**
@@ -822,13 +825,14 @@ def reqBarDataStream(
     return business_key  # Return business key as subscription ID
 
 # TWSDatafeedProvider
-def subscribe_realtime_bars(self, ticker_name: str, resolution: Resolution, callback, on_error) -> str:
+async def subscribe_realtime_bars(self, ticker_name: str, resolution: Resolution, callback, on_error) -> str:
     bar_size = map_resolution_to_tws_bar_size(resolution)
 
     async def bar_callback(rt_data: dict[str, Any], fields: list[str] | None) -> None:
         await callback(tws_ticks_to_bar(rt_data))
 
-    contract = next(iter(self._tws_client.get_qualified_contracts(ticker_name, ...)))
+    cached = await self._tws_client.qualify_contract(ticker_name)
+    contract = cached[0].contract
     return self._tws_client.reqBarDataStream(contract, bar_size, bar_callback, on_error=on_error)
 ```
 

@@ -199,7 +199,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
             for ticker_name in ticker_names
         ]
 
-    def subscribe_realtime_bars(
+    async def subscribe_realtime_bars(
         self,
         ticker_name: str,
         resolution: Resolution,
@@ -213,7 +213,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
         self._subscriptions[sub_id] = ticker_name
         return sub_id
 
-    def subscribe_market_data(
+    async def subscribe_market_data(
         self,
         ticker_name: str,
         callback: Callable[[QuoteData], Awaitable[None]],

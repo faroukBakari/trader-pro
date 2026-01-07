@@ -10,7 +10,6 @@ import os
 import random
 import time
 import uuid
-from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -47,6 +46,7 @@ from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.providers.tws.tws_mappers import (
+    is_trading_session_closed,
     order_state_to_preview_result,
     preorder_to_tws,
     tracked_order_to_placed_order,
@@ -138,21 +138,37 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     # BrokerCapability - Snapshot Methods (async)
     # =========================================================================
 
-    def _select_preferred_exchange(self) -> str:
-        """Select preferred exchange based on current time.
+    async def _resolve_trading_contract(self, ticker: str) -> Contract:
+        """Resolve contract for current trading session.
 
-        Returns OVERNIGHT during extended hours (8PM-4AM US/Eastern on weekdays),
-        otherwise SMART for regular market hours routing.
+        Uses session contract by default. If market closed AND darkpool
+        available, opportunistically routes to OVERNIGHT exchange.
+
+        Args:
+            ticker: Symbol ticker (e.g., "AAPL:SMART:STK")
+
+        Returns:
+            Contract suitable for current trading session
+
+        Raises:
+            ProviderException: If contract not found
         """
-        now_us_eastern = datetime.now(us_eastern)
-        is_weekday = now_us_eastern.weekday() < 5
-        current_time = now_us_eastern.time()
-        after_8pm = current_time >= datetime.strptime("20:00:00", "%H:%M:%S").time()
-        before_4am = current_time < datetime.strptime("4:00:00", "%H:%M:%S").time()
+        session_details, darkpool_details = await self._tws_client.cache_contracts(
+            ticker
+        )
+        target_details = session_details
 
-        if is_weekday and (after_8pm or before_4am):
-            return "OVERNIGHT"
-        return "SMART"
+        if is_trading_session_closed(session_details) and darkpool_details is not None:
+            target_details = darkpool_details
+
+        if target_details.contract.conId <= 0:
+            raise ProviderException(
+                code="PROVIDER_BROKER_CONTRACT_NOT_FOUND",
+                message=f"Contract not found for symbol {ticker}",
+                provider="tws",
+                capability="broker",
+            )
+        return target_details.contract
 
     async def _submit_order(
         self, order: PreOrder, order_id: int | None = None
@@ -160,10 +176,9 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         """Execute order placement or modification via TWS.
 
         Shared logic for place_order and modify_order:
-        1. Select exchange based on time (OVERNIGHT vs SMART)
-        2. Qualify contract with TWS
-        3. Convert PreOrder to TWS Order objects (with optional brackets)
-        4. Submit via placeOrderGroup
+        1. Resolve contract for current session (uses darkpool if market closed)
+        2. Convert PreOrder to TWS Order objects (with optional brackets)
+        3. Submit via placeOrderGroup
 
         Args:
             order: PreOrder with order details and optional brackets
@@ -172,19 +187,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         Returns:
             Tuple of (parent_tracked_order, child_tracked_orders)
         """
-        preferred_exchange = self._select_preferred_exchange()
-
-        qualified = await self._tws_client.qualify_contract(
-            order.symbol, [preferred_exchange]
-        )
-
-        contract: Contract | None = getattr(
-            next(iter(qualified), None), "contract", None
-        )
-
-        assert (
-            contract is not None and contract.conId > 0
-        ), f"Contract not found for symbol {order.symbol}"
+        contract = await self._resolve_trading_contract(order.symbol)
 
         # Convert domain order to TWS types (may return multiple orders for brackets)
         # Empty account string is valid for single-account users
@@ -344,21 +347,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         if not bracket_orders:
             return
 
-        # Qualify contract for this position's symbol
-        preferred_exchange = self._select_preferred_exchange()
-        qualified = await self._tws_client.qualify_contract(
-            position.symbol, [preferred_exchange]
-        )
-        contract: Contract | None = getattr(
-            next(iter(qualified), None), "contract", None
-        )
-        if contract is None or contract.conId <= 0:
-            raise ProviderException(
-                code="PROVIDER_BROKER_CONTRACT_NOT_FOUND",
-                message=f"Contract not found for symbol {position.symbol}",
-                provider="tws",
-                capability="broker",
-            )
+        # Resolve contract for this position's symbol
+        contract = await self._resolve_trading_contract(position.symbol)
 
         # Generate unique OCA group name for this position's brackets
         oca_group = f"bracket_{position_id}"
@@ -421,25 +411,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         confirm_id = str(uuid.uuid4())
 
         try:
-            # Select exchange based on time (OVERNIGHT vs SMART)
-            preferred_exchange = self._select_preferred_exchange()
-
-            # Qualify contract with TWS
-            qualified = await self._tws_client.qualify_contract(
-                order.symbol, [preferred_exchange]
-            )
-
-            contract: Contract | None = getattr(
-                next(iter(qualified), None), "contract", None
-            )
-
-            if contract is None or contract.conId <= 0:
-                raise ProviderException(
-                    code="PROVIDER_BROKER_CONTRACT_NOT_FOUND",
-                    message=f"Contract not found for symbol {order.symbol}",
-                    provider="tws",
-                    capability="broker",
-                )
+            # Resolve contract for current session (uses darkpool if market closed)
+            contract = await self._resolve_trading_contract(order.symbol)
 
             # Convert PreOrder to TWS Order (only entry order, no brackets for preview)
             parent_order, _, _ = preorder_to_tws(order, "", -1)
@@ -689,7 +662,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             self._execution_simulator_task.cancel()
             self._execution_simulator_task = None
 
-    def subscribe_orders(
+    async def subscribe_orders(
         self,
         callback: Callable[[PlacedOrder], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
@@ -705,7 +678,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         return sub_id
 
-    def subscribe_positions(
+    async def subscribe_positions(
         self,
         callback: Callable[[Position], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
@@ -721,7 +694,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         return sub_id
 
-    def subscribe_executions(
+    async def subscribe_executions(
         self,
         symbol: str,
         callback: Callable[[Execution], Awaitable[None]],
@@ -738,7 +711,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         return sub_id
 
-    def subscribe_equity(
+    async def subscribe_equity(
         self,
         callback: Callable[[EquityData], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,

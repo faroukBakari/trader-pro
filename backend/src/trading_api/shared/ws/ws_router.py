@@ -56,7 +56,7 @@ class WsRouteService(ServiceInterface):
         remove_topic: Called when last client unsubscribes from a topic.
     """
 
-    def create_topic(
+    async def create_topic(
         self,
         topic: str,
         topic_update: ProviderUpdateCallback,

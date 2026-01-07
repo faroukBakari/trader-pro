@@ -214,11 +214,11 @@ class BrokerCapability(ABC):
         ...
 
     # =========================================================================
-    # Streaming Methods (sync, callback-based) - matches DatafeedCapability
+    # Streaming Methods (async, callback-based) - matches DatafeedCapability
     # =========================================================================
 
     @abstractmethod
-    def subscribe_orders(
+    async def subscribe_orders(
         self,
         callback: Callable[[PlacedOrder], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
@@ -241,7 +241,7 @@ class BrokerCapability(ABC):
         ...
 
     @abstractmethod
-    def subscribe_positions(
+    async def subscribe_positions(
         self,
         callback: Callable[[Position], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
@@ -264,7 +264,7 @@ class BrokerCapability(ABC):
         ...
 
     @abstractmethod
-    def subscribe_executions(
+    async def subscribe_executions(
         self,
         symbol: str,
         callback: Callable[[Execution], Awaitable[None]],
@@ -288,7 +288,7 @@ class BrokerCapability(ABC):
         ...
 
     @abstractmethod
-    def subscribe_equity(
+    async def subscribe_equity(
         self,
         callback: Callable[[EquityData], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,

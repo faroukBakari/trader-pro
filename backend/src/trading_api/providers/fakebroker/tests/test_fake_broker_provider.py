@@ -393,7 +393,7 @@ class TestSubscriptions:
         async def callback(order: PlacedOrder) -> None:
             received_orders.append(order)
 
-        sub_id = provider.subscribe_orders(callback)
+        sub_id = await provider.subscribe_orders(callback)
         assert sub_id.startswith("sub-")
 
         # Place and execute order
@@ -422,7 +422,7 @@ class TestSubscriptions:
         async def callback(position: Position) -> None:
             received_positions.append(position)
 
-        sub_id = provider.subscribe_positions(callback)
+        sub_id = await provider.subscribe_positions(callback)
 
         order = PreOrder(
             symbol="AAPL",
@@ -447,7 +447,7 @@ class TestSubscriptions:
         async def callback(order: PlacedOrder) -> None:
             received_orders.append(order)
 
-        sub_id = provider.subscribe_orders(callback)
+        sub_id = await provider.subscribe_orders(callback)
         provider.unsubscribe(sub_id)
 
         # Place and execute order
@@ -475,7 +475,7 @@ class TestSubscriptions:
             received_executions.append(execution)
 
         # Empty string = all symbols
-        sub_id = provider.subscribe_executions("", callback)
+        sub_id = await provider.subscribe_executions("", callback)
 
         # Place orders for different symbols
         order1 = PreOrder(
@@ -514,7 +514,7 @@ class TestSubscriptions:
             received_executions.append(execution)
 
         # Subscribe only to AAPL
-        sub_id = provider.subscribe_executions("AAPL", callback)
+        sub_id = await provider.subscribe_executions("AAPL", callback)
 
         # Place orders for different symbols
         order1 = PreOrder(

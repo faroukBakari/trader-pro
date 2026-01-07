@@ -194,7 +194,8 @@ async def test_get_quotes_reraises_when_no_cached_data(
 # ============================================================================
 
 
-def test_create_topic_quotes_subscribes_to_provider(
+@pytest.mark.asyncio
+async def test_create_topic_quotes_subscribes_to_provider(
     service: DatafeedService, mock_provider: MockDatafeedProvider
 ) -> None:
     """Test create_topic for quotes subscribes to market data via provider."""
@@ -202,7 +203,7 @@ def test_create_topic_quotes_subscribes_to_provider(
     topic_update = AsyncMock()
     topic_error = AsyncMock()
 
-    service.create_topic(topic, topic_update, topic_error, user_id="test-user")
+    await service.create_topic(topic, topic_update, topic_error, user_id="test-user")
 
     # Verify provider was called for each symbol
     assert len(mock_provider.calls["subscribe_market_data"]) == 2
@@ -212,31 +213,33 @@ def test_create_topic_quotes_subscribes_to_provider(
     assert set(subscribed_tickers) == {"AAPL", "GOOGL"}
 
 
-def test_create_topic_quotes_shares_symbol_subscription(
+@pytest.mark.asyncio
+async def test_create_topic_quotes_shares_symbol_subscription(
     service: DatafeedService, mock_provider: MockDatafeedProvider
 ) -> None:
     """Test multiple topics share the same symbol subscription."""
     # Create first topic with AAPL
     topic1 = 'quotes:{"fast_symbols":[],"symbols":["AAPL"]}'
-    service.create_topic(topic1, AsyncMock(), AsyncMock(), user_id="test-user")
+    await service.create_topic(topic1, AsyncMock(), AsyncMock(), user_id="test-user")
 
     # Create second topic also with AAPL
     topic2 = 'quotes:{"fast_symbols":["AAPL"],"symbols":[]}'
-    service.create_topic(topic2, AsyncMock(), AsyncMock(), user_id="test-user")
+    await service.create_topic(topic2, AsyncMock(), AsyncMock(), user_id="test-user")
 
     # Provider should only be called once for AAPL (shared subscription)
     assert len(mock_provider.calls["subscribe_market_data"]) == 1
     assert mock_provider.calls["subscribe_market_data"][0]["ticker_name"] == "AAPL"
 
 
-def test_create_topic_quotes_no_symbols_raises_error(
+@pytest.mark.asyncio
+async def test_create_topic_quotes_no_symbols_raises_error(
     service: DatafeedService, mock_provider: MockDatafeedProvider
 ) -> None:
     """Test create_topic raises error when no symbols provided."""
     topic = 'quotes:{"fast_symbols":[],"symbols":[]}'
 
     with pytest.raises(ServiceException) as exc_info:
-        service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
+        await service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
 
     assert exc_info.value.code == "SERVICE_DATAFEED_NO_SYMBOLS"
 
@@ -246,12 +249,13 @@ def test_create_topic_quotes_no_symbols_raises_error(
 # ============================================================================
 
 
-def test_remove_topic_quotes_unsubscribes_from_provider(
+@pytest.mark.asyncio
+async def test_remove_topic_quotes_unsubscribes_from_provider(
     service: DatafeedService, mock_provider: MockDatafeedProvider
 ) -> None:
     """Test remove_topic for quotes unsubscribes from provider."""
     topic = 'quotes:{"fast_symbols":[],"symbols":["AAPL"]}'
-    service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
+    await service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
 
     # Verify subscribed
     assert len(mock_provider.calls["subscribe_market_data"]) == 1
@@ -263,15 +267,16 @@ def test_remove_topic_quotes_unsubscribes_from_provider(
     assert len(mock_provider.calls["unsubscribe_market_data"]) == 1
 
 
-def test_remove_topic_quotes_keeps_shared_subscription(
+@pytest.mark.asyncio
+async def test_remove_topic_quotes_keeps_shared_subscription(
     service: DatafeedService, mock_provider: MockDatafeedProvider
 ) -> None:
     """Test remove_topic keeps subscription if other topics still use symbol."""
     # Create two topics sharing AAPL
     topic1 = 'quotes:{"fast_symbols":[],"symbols":["AAPL"]}'
     topic2 = 'quotes:{"fast_symbols":["AAPL"],"symbols":[]}'
-    service.create_topic(topic1, AsyncMock(), AsyncMock(), user_id="test-user")
-    service.create_topic(topic2, AsyncMock(), AsyncMock(), user_id="test-user")
+    await service.create_topic(topic1, AsyncMock(), AsyncMock(), user_id="test-user")
+    await service.create_topic(topic2, AsyncMock(), AsyncMock(), user_id="test-user")
 
     # Remove first topic - should NOT unsubscribe (topic2 still uses AAPL)
     service.remove_topic(topic1)
@@ -291,21 +296,23 @@ def test_remove_topic_quotes_keeps_shared_subscription(
 # ============================================================================
 
 
-def test_create_topic_duplicate_raises_error(
+@pytest.mark.asyncio
+async def test_create_topic_duplicate_raises_error(
     service: DatafeedService, mock_provider: MockDatafeedProvider
 ) -> None:
     """Test create_topic raises error for duplicate topic."""
     topic = 'bars:{"resolution":"1","symbol":"AAPL"}'
-    service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
+    await service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
 
     # Try to create same topic again
     with pytest.raises(ServiceException) as exc_info:
-        service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
+        await service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
 
     assert exc_info.value.code == "SERVICE_DATAFEED_TOPIC_EXISTS"
 
 
-def test_create_topic_invalid_format_raises_error(
+@pytest.mark.asyncio
+async def test_create_topic_invalid_format_raises_error(
     service: DatafeedService, mock_provider: MockDatafeedProvider
 ) -> None:
     """Test create_topic raises error for invalid topic format."""
@@ -313,19 +320,20 @@ def test_create_topic_invalid_format_raises_error(
     topic = "bars_invalid_no_colon"
 
     with pytest.raises(ServiceException) as exc_info:
-        service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
+        await service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
 
     assert exc_info.value.code == "SERVICE_DATAFEED_INVALID_TOPIC_FORMAT"
 
 
-def test_create_topic_unknown_type_raises_error(
+@pytest.mark.asyncio
+async def test_create_topic_unknown_type_raises_error(
     service: DatafeedService, mock_provider: MockDatafeedProvider
 ) -> None:
     """Test create_topic raises error for unknown topic type."""
     topic = 'unknown:{"symbol":"AAPL"}'
 
     with pytest.raises(ServiceException) as exc_info:
-        service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
+        await service.create_topic(topic, AsyncMock(), AsyncMock(), user_id="test-user")
 
     assert exc_info.value.code == "SERVICE_DATAFEED_UNKNOWN_TOPIC_TYPE"
 
@@ -343,7 +351,7 @@ async def test_error_recoverable_explicit_codes(
     topic = 'bars:{"resolution":"1","symbol":"AAPL"}'
     topic_error = AsyncMock()
 
-    service.create_topic(topic, AsyncMock(), topic_error, user_id="test-user")
+    await service.create_topic(topic, AsyncMock(), topic_error, user_id="test-user")
 
     # Get subscription ID from mock
     sub_id = mock_provider.calls["subscribe_realtime_bars"][0]["sub_id"]
@@ -373,7 +381,7 @@ async def test_error_non_recoverable_unknown_code(
     topic = 'bars:{"resolution":"1","symbol":"AAPL"}'
     topic_error = AsyncMock()
 
-    service.create_topic(topic, AsyncMock(), topic_error, user_id="test-user")
+    await service.create_topic(topic, AsyncMock(), topic_error, user_id="test-user")
 
     # Get subscription ID from mock
     sub_id = mock_provider.calls["subscribe_realtime_bars"][0]["sub_id"]
@@ -403,7 +411,7 @@ async def test_tws_api_error_suffix_classification(
     topic = 'bars:{"resolution":"1","symbol":"AAPL"}'
     topic_error = AsyncMock()
 
-    service.create_topic(topic, AsyncMock(), topic_error, user_id="test-user")
+    await service.create_topic(topic, AsyncMock(), topic_error, user_id="test-user")
     sub_id = mock_provider.calls["subscribe_realtime_bars"][0]["sub_id"]
 
     # Test 1: TWS API error without _NON_RECOVERABLE suffix → recoverable

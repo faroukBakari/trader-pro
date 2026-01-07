@@ -591,7 +591,7 @@ class FakebrokerProvider(Provider, BrokerCapability):
             self._execution_simulator_task.cancel()
             self._execution_simulator_task = None
 
-    def subscribe_orders(
+    async def subscribe_orders(
         self,
         callback: Callable[[PlacedOrder], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
@@ -607,7 +607,7 @@ class FakebrokerProvider(Provider, BrokerCapability):
 
         return sub_id
 
-    def subscribe_positions(
+    async def subscribe_positions(
         self,
         callback: Callable[[Position], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
@@ -623,7 +623,7 @@ class FakebrokerProvider(Provider, BrokerCapability):
 
         return sub_id
 
-    def subscribe_executions(
+    async def subscribe_executions(
         self,
         symbol: str,
         callback: Callable[[Execution], Awaitable[None]],
@@ -640,7 +640,7 @@ class FakebrokerProvider(Provider, BrokerCapability):
 
         return sub_id
 
-    def subscribe_equity(
+    async def subscribe_equity(
         self,
         callback: Callable[[EquityData], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,

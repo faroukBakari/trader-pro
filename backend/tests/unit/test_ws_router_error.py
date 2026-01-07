@@ -56,7 +56,7 @@ class MockWsRouteService(WsRouteService):
         """No capabilities required for mock service."""
         return []
 
-    def create_topic(
+    async def create_topic(
         self,
         topic: str,
         topic_update: ProviderUpdateCallback,
@@ -205,12 +205,13 @@ class TestBroadcastPayload:
 class TestCreateTopicErrorCallback:
     """Tests for error callback created in _create_topic()."""
 
-    def test_create_topic_registers_both_callbacks(
+    @pytest.mark.asyncio
+    async def test_create_topic_registers_both_callbacks(
         self, router: MockRouter, mock_service: MockWsRouteService
     ) -> None:
         """_create_topic registers both update and error callbacks with service."""
         topic = "test:AAPL"
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -230,7 +231,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -268,7 +269,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -304,7 +305,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -336,7 +337,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
         assert topic in router._topics  # Pre-condition
 
         callbacks = mock_service.get_callbacks(topic)
@@ -368,7 +369,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -399,7 +400,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
         assert topic in router._topics  # Pre-condition
 
         callbacks = mock_service.get_callbacks(topic)
@@ -431,7 +432,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -462,7 +463,7 @@ class TestCreateTopicErrorCallback:
         mock_client.topics = {topic}
         router._clients = {mock_client}
 
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
 
         callbacks = mock_service.get_callbacks(topic)
         assert callbacks is not None
@@ -509,7 +510,7 @@ class TestServiceValidation:
         """Service without remove_topic raises TypeError."""
 
         class BadService:
-            def create_topic(
+            async def create_topic(
                 self,
                 topic: str,
                 topic_update: ProviderUpdateCallback,
@@ -747,7 +748,8 @@ class TestUnsubscribe:
 
         unsubscribe_client.unsubscribe.assert_called_once_with(topic)
 
-    def test_unsubscribe_removes_topic_when_last_client(
+    @pytest.mark.asyncio
+    async def test_unsubscribe_removes_topic_when_last_client(
         self,
         router: MockRouter,
         mock_service: MockWsRouteService,
@@ -757,7 +759,7 @@ class TestUnsubscribe:
         from trading_api.models import SubscriptionRequest
 
         topic = 'test:{"symbol":"AAPL"}'
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
         # After unsubscribe, client.topics won't contain the topic
         unsubscribe_client.topics = set()
         router._clients = {unsubscribe_client}
@@ -773,7 +775,8 @@ class TestUnsubscribe:
         # Topic should be removed (no remaining clients)
         assert topic not in router._topics
 
-    def test_unsubscribe_keeps_topic_when_other_clients(
+    @pytest.mark.asyncio
+    async def test_unsubscribe_keeps_topic_when_other_clients(
         self,
         router: MockRouter,
         mock_service: MockWsRouteService,
@@ -783,7 +786,7 @@ class TestUnsubscribe:
         from trading_api.models import SubscriptionRequest
 
         topic = 'test:{"symbol":"AAPL"}'
-        router._create_topic(topic, "test-user-123")
+        await router._create_topic(topic, "test-user-123")
 
         # Create another client still subscribed to the topic
         other_client = MagicMock()
