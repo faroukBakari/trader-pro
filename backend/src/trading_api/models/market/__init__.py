@@ -17,6 +17,7 @@ from .instruments import (
     DatafeedSymbolType,
     Exchange,
     SearchSymbolResultItem,
+    SubsessionInfo,
     SymbolInfo,
 )
 from .quotes import (
@@ -30,6 +31,7 @@ from .search import SearchSymbolsRequest
 __all__: list[str] = [
     # Instruments and symbols
     "SymbolInfo",
+    "SubsessionInfo",
     "SearchSymbolResultItem",
     "Exchange",
     "DatafeedSymbolType",

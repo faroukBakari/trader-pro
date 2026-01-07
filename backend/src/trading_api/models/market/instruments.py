@@ -12,6 +12,20 @@ from pydantic import BaseModel, Field
 from .bars import Resolution
 
 
+class SubsessionInfo(BaseModel):
+    """Subsession information for TradingView extended sessions.
+
+    Matches TradingView's LibrarySubsessionInfo interface.
+    Used to define regular, extended, premarket, and postmarket sessions.
+    """
+
+    id: Literal["regular", "extended", "premarket", "postmarket"] = Field(
+        ..., description="Subsession identifier"
+    )
+    session: str = Field(..., description="Session hours (e.g., '0930-1600')")
+    description: str = Field(..., description="Human-readable description")
+
+
 class SymbolInfo(BaseModel):
     """Symbol information model matching LibrarySymbolInfo interface.
 
@@ -69,6 +83,14 @@ class SymbolInfo(BaseModel):
     )
     delay: int = Field(default=0, description="Data delay in minutes (0=realtime)")
 
+    # P2 - Extended session support (TradingView subsessions)
+    subsession_id: Optional[Literal["regular", "extended"]] = Field(
+        default=None, description="Active subsession type (regular or extended)"
+    )
+    subsessions: Optional[List["SubsessionInfo"]] = Field(
+        default=None, description="Subsession definitions for extended hours"
+    )
+
 
 class SearchSymbolResultItem(BaseModel):
     """Search result item model matching SearchSymbolResultItem interface"""
@@ -100,6 +122,7 @@ class DatafeedSymbolType(BaseModel):
 
 
 __all__ = [
+    "SubsessionInfo",
     "SymbolInfo",
     "SearchSymbolResultItem",
     "Exchange",

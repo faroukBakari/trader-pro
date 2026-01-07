@@ -423,6 +423,9 @@ export class ApiAdapter {
         expiration_date: response.data.expiration_date ?? undefined,
         industry: response.data.industry ?? undefined,
         sector: response.data.sector ?? undefined,
+        // Extended sessions support (subsessions)
+        subsession_id: response.data.subsession_id ?? undefined,
+        subsessions: response.data.subsessions as unknown as LibrarySymbolInfo['subsessions'] ?? undefined,
       }
     }
   }

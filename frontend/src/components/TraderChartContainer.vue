@@ -147,7 +147,7 @@ onMounted(() => {
 
       locale: getLanguageFromURL() || 'en',
       theme: 'dark',
-      // enabled_features: ['use_localstorage_for_settings'],
+      enabled_features: ['pre_post_market_sessions'], // Extended sessions support
       disabled_features: ['study_templates', 'adaptive_logo'], // , 'use_localstorage_for_settings'
 
       // System color scheme overrides

@@ -338,22 +338,22 @@ Key Pydantic models used by this module (defined in `trading_api/models/`):
 
 ### SymbolInfo Fields (TradingView LibrarySymbolInfo)
 
-| Priority | Fields                                                     | Notes                              |
-| -------- | ---------------------------------------------------------- | ---------------------------------- |
-| Core     | `name`, `ticker`, `type`, `exchange`, `session`, `timezone` | Required TradingView fields        |
-| P0       | `currency_code`, `original_currency_code`                  | Currency handling for trading      |
-| P1       | `expired`, `expiration_date`                               | Derivatives support (FUT/OPT)      |
-| P1       | `industry`, `sector`                                       | Categorization for search/filter   |
-| P2       | `con_id`, `has_weekly_and_monthly`, `delay`                | TWS-specific metadata              |
+| Priority | Fields                                                      | Notes                            |
+| -------- | ----------------------------------------------------------- | -------------------------------- |
+| Core     | `name`, `ticker`, `type`, `exchange`, `session`, `timezone` | Required TradingView fields      |
+| P0       | `currency_code`, `original_currency_code`                   | Currency handling for trading    |
+| P1       | `expired`, `expiration_date`                                | Derivatives support (FUT/OPT)    |
+| P1       | `industry`, `sector`                                        | Categorization for search/filter |
+| P2       | `con_id`, `has_weekly_and_monthly`, `delay`                 | TWS-specific metadata            |
 
 ### DatafeedConfiguration Fields
 
-| Field                    | Type         | Description                                        |
-| ------------------------ | ------------ | -------------------------------------------------- |
-| `supported_resolutions`  | `list[str]`  | Available bar resolutions ("1", "5", "D", etc.)    |
-| `exchanges`              | `list[dict]` | Available exchanges for symbol filtering           |
-| `symbols_types`          | `list[dict]` | Available symbol types (stock, forex, etc.)        |
-| `currency_codes`         | `list[str]`  | Supported currencies for price conversion (20+)    |
+| Field                   | Type         | Description                                     |
+| ----------------------- | ------------ | ----------------------------------------------- |
+| `supported_resolutions` | `list[str]`  | Available bar resolutions ("1", "5", "D", etc.) |
+| `exchanges`             | `list[dict]` | Available exchanges for symbol filtering        |
+| `symbols_types`         | `list[dict]` | Available symbol types (stock, forex, etc.)     |
+| `currency_codes`        | `list[str]`  | Supported currencies for price conversion (20+) |
 
 ---
 
