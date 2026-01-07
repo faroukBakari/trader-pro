@@ -209,15 +209,13 @@ class IBSocket(EWrapper):
         # )
         self._stream_hooks: dict[
             str,
-            list[
-                tuple[
-                    asyncio.AbstractEventLoop,
-                    Callable[
-                        [dict[str, Any], list[str]],
-                        Coroutine[Any, Any, None],
-                    ],
-                    Callable[[ProviderException], Coroutine[Any, Any, None]],
-                ]
+            tuple[
+                asyncio.AbstractEventLoop,
+                Callable[
+                    [dict[str, Any], list[str]],
+                    Coroutine[Any, Any, None],
+                ],
+                Callable[[ProviderException], Coroutine[Any, Any, None]],
             ],
         ] = {}
 
@@ -448,20 +446,18 @@ class IBSocket(EWrapper):
             break  # Only need to clean once
 
         # 2. Check for active stream
-        stream_hooks = self._stream_hooks.get(tws_key, [])
-        for stream_loop, _, on_error in stream_hooks:
+        stream_loop, _, on_error = self._stream_hooks.get(tws_key, (None, None, None))
+        if stream_loop is not None and on_error is not None:
             stream_loop.call_soon_threadsafe(
                 stream_loop.create_task,
                 on_error(error),
             )
 
-        if error.code.endswith("_NON_RECOVERABLE"):
-            for stream_loop, _, on_error in stream_hooks:
+            if error.code.endswith("_NON_RECOVERABLE"):
                 stream_loop.call_soon_threadsafe(self.remove_stream, business_key)
-                break  # Only need to remove once
 
         # 3. Orphan error - log warning
-        if not snapshot_hooks and not stream_hooks:
+        if not snapshot_hooks and not stream_loop:
             logger.error("Orphan TWS error for reqId %s", tws_key)
             logger.exception(error)
 
@@ -665,12 +661,10 @@ class IBSocket(EWrapper):
         tws_key, req_id = self._acquire_tws_key(business_key)
 
         # main thread ownership
-        self._stream_hooks.setdefault(tws_key, []).append(
-            (
-                asyncio.get_event_loop(),
-                callback,
-                on_error,
-            )
+        self._stream_hooks[tws_key] = (
+            asyncio.get_event_loop(),
+            callback,
+            on_error,
         )
         return req_id
 
@@ -806,17 +800,17 @@ class IBSocket(EWrapper):
         if stream_hooks is None:
             return
 
-        for stream_loop, stream_callback, _ in stream_hooks:
-            if DEBUG_TWS_DISPATCH:
-                debug_log(
-                    f"_dispatch_update [{tws_key} | {stream.business_key}]"
-                    + f" with fields: {stream.updated_fields}"
-                )
-
-            stream_loop.call_soon_threadsafe(
-                stream_loop.create_task,
-                stream_callback(stream[-1], stream.updated_fields),
+        stream_loop, stream_callback, _ = stream_hooks
+        if DEBUG_TWS_DISPATCH:
+            debug_log(
+                f"_dispatch_update [{tws_key} | {stream.business_key}]"
+                + f" with fields: {stream.updated_fields}"
             )
+
+        stream_loop.call_soon_threadsafe(
+            stream_loop.create_task,
+            stream_callback(stream[-1], stream.updated_fields),
+        )
 
         stream.last_dispatched = int(time.time() * 1000)
 

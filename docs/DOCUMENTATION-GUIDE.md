@@ -471,7 +471,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TradingView Integration
 
-**Keywords**: TradingView, broker API, Trading Host, charting library, order execution, broker adapter, UDF
+**Keywords**: TradingView, broker API, Trading Host, charting library, order execution, broker adapter, UDF, LibrarySymbolInfo, SymbolInfo, currency_code, original_currency_code, expired, expiration_date, industry, sector, con_id, symbol metadata, DatafeedConfiguration, quote deduplication, subscribeQuotes
 
 **Scope**: TradingView Trading Terminal integration  
 **Out of Scope**: Custom charting solutions, alternative charting libraries
@@ -589,6 +589,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2026-01-07**: SymbolInfo/DatafeedConfiguration enhancement - Updated datafeed README.md (quote deduplication pattern, enhanced SymbolInfo fields table, quote-specific error handling), TWS README.md (contract_details_to_symbol_info() field mappings, SymbolInfo priority fields), DOCUMENTATION-GUIDE.md (TradingView keywords)
 - **2026-01-02**: Documentation assessment wave execution - Created broker/README.md and datafeed/README.md (BFF pattern, WebSocket topics, provider delegation), fixed BROKER-ARCHITECTURE.md (renamed to Fakebroker, updated class names), updated SPECS_AND_CLIENT_GEN.md (versioned file naming), FULLSTACK-DEV-MODE.md (per-module watching), CLIENT-GENERATION.md (deprecated commands), TESTING.md (provider testing section), frontend README.md (routes), BROKER-INTEGRATION.md (Phase 5 status), MODULAR_BACKEND_ARCHITECTURE.md (get_capability_provider method)
 - **2026-01-02**: TWS Provider major refactoring documentation - Updated TWS README.md (business key system, StreamData dataclass, CachedContract caching, snapshot/stream pattern separation, error routing with tws_key), PROVIDER-SYSTEM.md (BrokerCapability stub notes), DOCUMENTATION-GUIDE.md (keywords, dependencies)
 - **2025-12-19**: Frontend error management documentation - Created frontend/docs/ERROR-MANAGEMENT.md (error classes, errorService, toast notifications, philosophy emphasis), expanded backend ERROR-MANAGEMENT.md philosophy section (decision matrix, anti-patterns), updated WEBSOCKET-ARCHITECTURE.md v3.3.0 (globalErrorHandler integration), added error handling section to services README
@@ -621,5 +622,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: January 2, 2026  
+**Last Updated**: January 7, 2026  
 **Maintained by**: Development Team

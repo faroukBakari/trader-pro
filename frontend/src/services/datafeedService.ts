@@ -367,7 +367,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private wsAdapter: WsAdapterType
   private wsFallback?: Partial<WsAdapterType>
 
-  debug_datafeed: boolean = false
+  debug_datafeed: boolean = true
 
   private pendingRequests = new Map<string, {
     promise: Promise<unknown>
@@ -454,6 +454,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onResolve: ResolveCallback,
     onError: DatafeedErrorCallback,
   ): void {
+    console.log('[Datafeed] Resolving symbol:', symbolName)
     this.coalesce(`resolveSymbol`, () =>
       this._getApiAdapter().resolveSymbol(symbolName)
     ).then((response) => {
@@ -521,6 +522,7 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onDataCallback: QuotesCallback,
     // onErrorCallback: QuotesErrorCallback,
   ): void {
+    console.log(`[Datafeed] getQuotes called for symbols : ${symbols}`)
     this.coalesce(`getQuotes`, () =>
       this._getApiAdapter()
         .getQuotes({ symbols }))
@@ -539,6 +541,10 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   ): void {
 
     const all_symbols = [...new Set([...symbols, ...fast_symbols])]
+
+    if (all_symbols.length === 0) {
+      throw new Error('No symbols provided for quote subscription')
+    }
 
     console.log(`[Datafeed] ${listenerGUID} Subscribing to quotes for symbols : ${all_symbols}`)
 

@@ -148,6 +148,128 @@ class TestContractDetailsMapper:
         result = contract_details_to_symbol_info(details)
         assert result.pricescale == expected_pricescale
 
+    def test_new_fields_from_contract_details(self) -> None:
+        """Test new fields: currency_code, industry, sector, con_id."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+        contract.currency = "USD"
+        contract.conId = 265598
+
+        details = ContractDetails()
+        details.contract = contract
+        details.longName = "Apple Inc"
+        details.minTick = 0.01
+        details.industry = "Technology"
+        details.category = "Computers"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.currency_code == "USD"
+        assert result.industry == "Technology"
+        assert result.sector == "Computers"
+        assert result.con_id == 265598
+
+    def test_liquidhours_preferred_over_tradinghours(self) -> None:
+        """Test session uses liquidHours (regular session) over tradingHours (extended)."""
+        contract = Contract()
+        contract.symbol = "SPY"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "ARCA"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        # liquidHours = regular session (9:30-4:00)
+        details.liquidHours = "20260105:0930-20260105:1600"
+        # tradingHours = extended hours (4:00-8:00)
+        details.tradingHours = "20260105:0400-20260105:2000"
+
+        result = contract_details_to_symbol_info(details)
+
+        # Should use liquidHours, not tradingHours
+        assert result.session == "0930-1600"
+
+    def test_fallback_to_tradinghours_when_liquidhours_empty(self) -> None:
+        """Test session falls back to tradingHours when liquidHours is empty."""
+        contract = Contract()
+        contract.symbol = "TEST"
+        contract.secType = "STK"
+        contract.exchange = "TEST"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        details.liquidHours = ""
+        details.tradingHours = "20260105:0800-20260105:1700"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.session == "0800-1700"
+
+    def test_expiration_date_for_futures(self) -> None:
+        """Test expiration_date and expired fields for FUT contracts."""
+        contract = Contract()
+        contract.symbol = "ES"
+        contract.secType = "FUT"
+        contract.exchange = "CME"
+        contract.primaryExchange = "CME"
+        # Past expiration date
+        contract.lastTradeDateOrContractMonth = "20200320"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.25
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.expiration_date is not None
+        assert result.expired is True  # Past date should be expired
+
+    def test_expiration_date_for_active_option(self) -> None:
+        """Test expiration_date for active OPT contract (future date)."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "OPT"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "CBOE"
+        # Future expiration date
+        contract.lastTradeDateOrContractMonth = "20301220"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.expiration_date is not None
+        assert result.expired is False  # Future date should not be expired
+
+    def test_empty_optional_fields_return_none(self) -> None:
+        """Test backward compatibility: empty ContractDetails → None values."""
+        contract = Contract()
+        contract.symbol = "TEST"
+        contract.secType = "STK"
+        contract.exchange = "TEST"
+        # No currency, conId, industry, category set
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+
+        result = contract_details_to_symbol_info(details)
+
+        # Empty strings/zero values should map to None
+        assert result.currency_code is None
+        assert result.industry is None
+        assert result.sector is None
+        assert result.con_id is None
+        assert result.expired is None
+        assert result.expiration_date is None
+
 
 # =============================================================================
 # Bar/Quote Mappers

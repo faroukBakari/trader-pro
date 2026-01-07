@@ -554,7 +554,7 @@ describe('DatafeedService', () => {
       // Should not throw
       expect(() => {
         datafeedService.subscribeQuotes([], [], () => { }, listenerGuid)
-      }).not.toThrow()
+      }).toThrow('No symbols provided for quote subscription')
 
       // Clean up
       datafeedService.unsubscribeQuotes(listenerGuid)
