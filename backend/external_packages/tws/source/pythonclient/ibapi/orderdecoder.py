@@ -8,7 +8,7 @@ import logging
 from _decimal import Decimal
 from ibapi import order_condition
 from ibapi.const import UNSET_DOUBLE
-from ibapi.contract import ComboLeg
+from ibapi.contract import ComboLeg, DeltaNeutralContract
 from ibapi.object_implem import Object
 from ibapi.order import OrderComboLeg
 from ibapi.order_state import OrderAllocation
@@ -39,7 +39,6 @@ from ibapi.server_versions import (
 from ibapi.softdollartier import SoftDollarTier
 from ibapi.tag_value import TagValue
 from ibapi.utils import SHOW_UNSET, decode, isPegBenchOrder
-from ibapi.wrapper import DeltaNeutralContract
 
 logger = logging.getLogger(__name__)
 
