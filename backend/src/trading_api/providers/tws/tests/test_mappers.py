@@ -824,7 +824,7 @@ class TestTrackedOrderToPlacedOrder:
             stop_type=int(StopType.TRAILING_STOP),
         )
 
-        result = tracked_order_to_placed_order(tracked, bracket_context)
+        result = tracked_order_to_placed_order(tracked, bracket_context=bracket_context)
 
         assert result.takeProfit == 160.00
         assert result.stopLoss == 145.00

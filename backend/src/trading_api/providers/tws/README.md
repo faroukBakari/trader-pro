@@ -214,7 +214,7 @@ def _get_cached_contracts(
     return cached
 
 # TWSClient - Public method to qualify contracts (async, fetches from TWS if needed)
-async def qualify_contract(
+async def cache_contracts(
     self,
     ticker: str,
     preferred_exchanges: list[str] = [""],
@@ -372,7 +372,7 @@ class BrokerCapability(ABC):
 
 **TWS-Specific Notes:**
 
-- **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `qualify_contract()`. Some features (execution simulation, P&L tracking) still use in-memory state.
+- **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `cache_contracts()`. Some features (execution simulation, P&L tracking) still use in-memory state.
 - **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. These methods raise `ProviderException` with code `PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED`.
 - **Order Preview**: Uses TWS `whatIf` mode for real margin/commission data (see section below).
 - **Bracket Orders**: `edit_position_brackets()` implemented using OCA (One-Cancels-All) groups. Creates stop loss (STP/TRAIL) and take profit (LMT) orders linked so when one fills, TWS cancels the others.
@@ -388,7 +388,7 @@ The `preview_order()` method uses TWS's native `whatIf` mode to obtain real marg
 ```
 preview_order(PreOrder)
         │
-        ├── 1. qualify_contract(symbol)  →  Contract
+        ├── 1. cache_contracts(symbol)  →  Contract
         │
         ├── 2. preorder_to_tws(order)  →  TWS Order (entry only, no brackets)
         │
@@ -831,7 +831,7 @@ async def subscribe_realtime_bars(self, ticker_name: str, resolution: Resolution
     async def bar_callback(rt_data: dict[str, Any], fields: list[str] | None) -> None:
         await callback(tws_ticks_to_bar(rt_data))
 
-    cached = await self._tws_client.qualify_contract(ticker_name)
+    cached = await self._tws_client.cache_contracts(ticker_name)
     contract = cached[0].contract
     return self._tws_client.reqBarDataStream(contract, bar_size, bar_callback, on_error=on_error)
 ```

@@ -5,6 +5,7 @@ All business logic (orders, positions, P&L) is encapsulated here.
 """
 
 import asyncio
+import itertools
 import logging
 import os
 import random
@@ -370,8 +371,30 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         # Request open orders from TWS (returns list of TrackedOrder objects)
         tws_orders = await self._tws_client.reqOpenOrders()
 
+        details_map = {
+            d.contract.conId: d.contract
+            for d in itertools.chain.from_iterable(
+                await asyncio.gather(
+                    *[
+                        self._tws_client.reqContractDetails(c)
+                        for c in {
+                            o.contract.conId: o.contract
+                            for o in tws_orders
+                            if not o.order.whatIf
+                        }.values()
+                    ]
+                )
+            )
+        }
+
         # Convert each TrackedOrder to domain PlacedOrder
-        return [tracked_order_to_placed_order(tracked) for tracked in tws_orders]
+        return [
+            tracked_order_to_placed_order(
+                tracked, details_map.get(tracked.contract.conId, tracked.contract)
+            )
+            for tracked in tws_orders
+            if not tracked.order.whatIf
+        ]
 
     async def get_positions(self) -> list[Position]:
         """Get all open positions."""

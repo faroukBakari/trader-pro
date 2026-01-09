@@ -57,11 +57,7 @@ from ibapi.wrapper import EWrapper, current_fn_name
 from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
-from trading_api.providers.tws.tws_mappers import (
-    build_contract,
-    parse_ticker,
-    ticker_name,
-)
+from trading_api.providers.tws.tws_mappers import parse_ticker, ticker_name
 from trading_api.providers.tws.tws_models import (
     TICK_TYPE_TO_FIELD,
     StreamData,
@@ -1095,7 +1091,8 @@ class IBSocket(EWrapper):
         if DEBUG_TWS_REQUEST:
             debug_log(
                 f"placed order (protobuf): id={order_id}, symbol={contract.symbol}, "
-                f"action={order.action}, qty={order.totalQuantity}, type={order.orderType}"
+                f"action={order.action}, type={order.orderType} "
+                f"qty={order.totalQuantity}, type={order.lmtPrice or order.auxPrice} "
             )
 
     def reqOpenOrders(self) -> None:
@@ -1668,19 +1665,26 @@ class TWSClient:
         """
 
         ticker = ticker_name(contract)
-        preferred_exachanges = [contract.exchange] if contract.exchange else [""]
 
-        cached = self._get_cached_contracts(
-            ticker, preferred_exachanges, require_full_details=True
-        )
-
-        # Cache hit with full details - return immediately
-        if cached:
-            if DEBUG_TWS_CACHE:
-                debug_log(
-                    f"reqContractDetails cache hit for conId {contract.conId} => ({ticker})"
-                )
-            return [con.to_contract_details() for con in cached]
+        if not contract.conId or contract.conId <= 0:
+            preferred_exachanges = [contract.exchange] if contract.exchange else [""]
+            cached = self._get_cached_contracts(
+                ticker, preferred_exachanges, require_full_details=True
+            )
+            if cached:
+                if DEBUG_TWS_CACHE:
+                    debug_log(
+                        f"reqContractDetails cache hit for conId {contract.conId} => ({ticker})"
+                    )
+                return [con.to_contract_details() for con in cached]
+        else:
+            cached_contract = self.__contracts_cache.get(contract.conId)
+            if cached_contract and cached_contract.has_full_details:
+                if DEBUG_TWS_CACHE:
+                    debug_log(
+                        f"reqContractDetails cache hit for conId {contract.conId}"
+                    )
+                return [cached_contract.to_contract_details()]
 
         # Cache miss or partial - fetch from TWS
         reqId: int | None = None
@@ -1720,54 +1724,6 @@ class TWSClient:
                     ] = CachedContract.from_contract_details(details)
 
         return details_list
-
-    async def qualify_contract(
-        self,
-        ticker: str,
-        preferred_exchanges: list[str] = [""],
-    ) -> list[CachedContract]:
-        cached = self._get_cached_contracts(ticker, preferred_exchanges)
-
-        # Cache hit with full details - return immediately
-        if cached:
-            if DEBUG_TWS_CACHE:
-                debug_log(f"reqContractDetails cache hit for ticker {ticker}")
-            return cached
-
-        # Cache miss or partial - fetch from TWS
-        reqId: int | None = None
-        coroutine: Awaitable[list[dict[str, ContractDetails]]]
-        details_list: list[ContractDetails]
-        business_key = f"shared:reqContractDetails:{ticker}"
-
-        reqId, coroutine = self.ibsocket.create_snapshot(
-            business_key,
-            timeout=self._timeout,
-        )
-
-        contract = build_contract(ticker)
-
-        if reqId is not None:
-            self.ibsocket.reqContractDetails(reqId, contract)
-
-        data = await coroutine
-        details_list = [item["contractDetails"] for item in data]
-
-        # Update cache with full details
-        for details in details_list:
-            if details.contract.conId > 0 and details.contract.exchange:
-                detail_con_id = details.contract.conId
-                if detail_con_id in self.__contracts_cache:
-                    # Update existing partial cache entry
-                    self.__contracts_cache[detail_con_id].update_from_details(details)
-                else:
-                    # Create new cache entry with full details
-                    self.__contracts_cache[
-                        detail_con_id
-                    ] = CachedContract.from_contract_details(details)
-                cached.append(self.__contracts_cache[detail_con_id])
-
-        return cached
 
     async def cache_contracts(
         self,

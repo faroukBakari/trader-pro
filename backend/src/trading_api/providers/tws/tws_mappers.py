@@ -980,6 +980,7 @@ def preorder_to_tws(
 
 def tracked_order_to_placed_order(
     tracked: TrackedOrder,
+    contract: Contract | None = None,
     bracket_context: BracketContext | None = None,
 ) -> PlacedOrder:
     """Convert TrackedOrder to domain PlacedOrder.
@@ -997,7 +998,7 @@ def tracked_order_to_placed_order(
         Domain PlacedOrder model
     """
 
-    contract = tracked.contract
+    contract = contract or tracked.contract
     order = tracked.order
     tracked.orderState
 

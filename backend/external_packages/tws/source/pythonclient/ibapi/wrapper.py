@@ -20,7 +20,6 @@ import logging
 import sys
 from abc import ABC, abstractmethod
 from decimal import Decimal
-from typing import Callable
 
 from ibapi.commission_and_fees_report import CommissionAndFeesReport
 from ibapi.common import (
