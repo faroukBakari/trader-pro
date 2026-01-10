@@ -109,7 +109,7 @@ callback(data) ◄────────────────────�
 
 ```python
 # Build stream key from contract
-from tws_mappers import ticker_name, parse_ticker, build_contract
+from tws_mappers import ticker_name, parse_ticker, build_smart_contract
 
 # ticker_name(contract) → "AAPL:NASDAQ:STK-12345"
 # ticker_name(contract, "5 mins") → "AAPL:NASDAQ:STK-12345@5 mins"
@@ -117,7 +117,7 @@ from tws_mappers import ticker_name, parse_ticker, build_contract
 # parse_ticker("AAPL:NASDAQ:STK-12345") → ("AAPL", "NASDAQ", "STK", 12345, None)
 # parse_ticker("AAPL:NASDAQ:STK-12345@5 mins") → ("AAPL", "NASDAQ", "STK", 12345, "5 mins")
 
-# build_contract("AAPL:NASDAQ:STK-12345") → Contract(symbol="AAPL", ...)
+# build_smart_contract("AAPL:NASDAQ:STK-12345") → Contract(symbol="AAPL", ...)
 ```
 
 **Usage:**
@@ -214,7 +214,7 @@ def _get_cached_contracts(
     return cached
 
 # TWSClient - Public method to qualify contracts (async, fetches from TWS if needed)
-async def cache_contracts(
+async def req_ticker_details(
     self,
     ticker: str,
     preferred_exchanges: list[str] = [""],
@@ -388,7 +388,7 @@ The `preview_order()` method uses TWS's native `whatIf` mode to obtain real marg
 ```
 preview_order(PreOrder)
         │
-        ├── 1. cache_contracts(symbol)  →  Contract
+        ├── 1. req_ticker_details(symbol)  →  Contract
         │
         ├── 2. preorder_to_tws(order)  →  TWS Order (entry only, no brackets)
         │
@@ -577,7 +577,7 @@ tracked_orders = await self._tws_client.placeOcaGroup(
 | `tws_ticks_to_quote_data()`               | `dict[str, Any]` → `QuoteData`                   |
 | `ticker_name()`                           | `Contract` → stream key string                   |
 | `parse_ticker()`                          | stream key → (symbol, exchange, secType, conId)  |
-| `build_contract()`                        | ticker string → `Contract`                       |
+| `build_smart_contract()`                  | ticker string → `Contract`                       |
 | `map_resolution_to_tws_bar_size()`        | `Resolution` → TWS bar size string               |
 
 **`contract_details_to_symbol_info()` Field Mappings:**
@@ -831,7 +831,7 @@ async def subscribe_realtime_bars(self, ticker_name: str, resolution: Resolution
     async def bar_callback(rt_data: dict[str, Any], fields: list[str] | None) -> None:
         await callback(tws_ticks_to_bar(rt_data))
 
-    cached = await self._tws_client.cache_contracts(ticker_name)
+    cached = await self._tws_client.req_ticker_details(ticker_name)
     contract = cached[0].contract
     return self._tws_client.reqBarDataStream(contract, bar_size, bar_callback, on_error=on_error)
 ```

@@ -546,6 +546,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onDataCallback: QuotesCallback,
     // onErrorCallback: QuotesErrorCallback,
   ): void {
+    if (symbols.length === 0) {
+      throw new Error('No symbols provided for quote subscription')
+    }
     console.log(`[Datafeed] getQuotes called for symbols : ${symbols}`)
     this.coalesce(`getQuotes`, () =>
       this._getApiAdapter()

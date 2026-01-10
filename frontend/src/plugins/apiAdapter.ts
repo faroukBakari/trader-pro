@@ -104,6 +104,10 @@ export class ApiError extends Error {
     super(message)
     this.name = 'ApiError'
   }
+
+  toJSON(): string {
+    return this.message  // Only serialize the message
+  }
 }
 
 function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
@@ -132,13 +136,13 @@ function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
           if (error.response) {
             const status = error.response.status
             const data = error.response.data as { detail?: string; message?: string }
-            const message = data?.detail || data?.message || error.message
+            const message = (error.code ? `[${error.code}] ` : '') + (data?.detail || data?.message || error.message)
 
             throw new ApiError(
               `API error (${status}): ${message}`,
               status,
               endpointStr,
-              error,
+              // error,
             )
           }
 

@@ -41,7 +41,6 @@ from .tws_mappers import (
     calculate_tws_duration,
     contract_description_to_search_result,
     contract_details_to_symbol_info,
-    is_trading_session_closed,
     map_resolution_to_tws_bar_size,
     tws_ticks_to_bar,
     tws_ticks_to_quote_data,
@@ -69,23 +68,6 @@ class SubStream:
             ],
         ]
     ]
-
-
-def pick_smart_exchange() -> str:
-    now_us_eastern = datetime.now(us_eastern)
-    return (
-        "OVERNIGHT"
-        if (
-            now_us_eastern.weekday() < 5
-            and (
-                now_us_eastern.time()
-                >= datetime.strptime("20:00:00", "%H:%M:%S").time()
-                or now_us_eastern.time()
-                < datetime.strptime("4:00:00", "%H:%M:%S").time()
-            )
-        )
-        else "SMART"
-    )
 
 
 class TWSDatafeedProvider(Provider, DatafeedCapability):
@@ -181,16 +163,11 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             ProviderException: If symbol not found or request fails
         """
 
-        session_details, darkpool_details = await self._tws_client.cache_contracts(
-            ticker_name
-        )
-        contract_details = session_details
-        if is_trading_session_closed(session_details):
-            contract_details = darkpool_details or session_details
+        session_details = await self._tws_client.req_ticker_details(ticker_name)
 
         # Use first match (most common case is single result)
         # FIXME: could improve by matching exchange if multiple results
-        return contract_details_to_symbol_info(contract_details)
+        return contract_details_to_symbol_info(session_details)
 
     async def get_historical_bars(
         self,
@@ -237,15 +214,22 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
 
         tws_bars: list[dict[str, Any]] = []
 
-        details = await self._tws_client.cache_contracts(ticker_name)
+        details = await self._tws_client.req_ticker_details(ticker_name)
+        contracts = [
+            con
+            for con in [
+                details.build_smart_contract(),
+                details.build_darkpool_contract(),
+            ]
+            if con is not None
+        ]
 
         results = await asyncio.gather(
             *[
                 self._tws_client.reqHistoricalData(
-                    d.contract, end_dt_str, duration_str, bar_size, **kwargs
+                    contract, end_dt_str, duration_str, bar_size, **kwargs
                 )
-                for d in details
-                if d is not None
+                for contract in contracts
             ],
             return_exceptions=True,
         )
@@ -282,23 +266,13 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
 
         details = await asyncio.gather(
             *[
-                self._tws_client.cache_contracts(ticker_name)
+                self._tws_client.req_ticker_details(ticker_name)
                 for ticker_name in ticker_names
             ]
         )
-        contracts: list[Contract] = []
-        for session_contract_details, darkpool_contract_details in details:
-            target_details = session_contract_details
-            if is_trading_session_closed(target_details):
-                if darkpool_contract_details is None:
-                    raise ProviderException(
-                        code="PROVIDER_DATAFEED_MARKET_CLOSED_NO_DARKPOOL",
-                        message=f"Market closed and no dark pool available for ticker: {ticker_names}",
-                        provider="tws",
-                        capability="datafeed",
-                    )
-                target_details = darkpool_contract_details
-            contracts.append(target_details.contract)
+        contracts: list[Contract] = [
+            session_details.build_best_contract() for session_details in details
+        ]
 
         nb_retreis = 2
         while True:
@@ -361,19 +335,8 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
                 )
             await callback(tws_ticks_to_bar(rt_data))
 
-        session_details, darkpool_details = await self._tws_client.cache_contracts(
-            ticker_name
-        )
-        contract = session_details.contract
-        if is_trading_session_closed(session_details):
-            if darkpool_details is None:
-                raise ProviderException(
-                    code="PROVIDER_DATAFEED_MARKET_CLOSED_NO_DARKPOOL",
-                    message=f"Market closed and no dark pool available for ticker: {ticker_name}",
-                    provider="tws",
-                    capability="datafeed",
-                )
-            contract = darkpool_details.contract
+        details = await self._tws_client.req_ticker_details(ticker_name)
+        contract = details.build_best_contract()
 
         return self._tws_client.reqBarDataStream(
             contract,
@@ -417,19 +380,8 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
                     )
                 await callback(tws_ticks_to_quote_data(rt_data))
 
-        session_details, darkpool_details = await self._tws_client.cache_contracts(
-            ticker_name
-        )
-        contract = session_details.contract
-        if is_trading_session_closed(session_details):
-            if darkpool_details is None:
-                raise ProviderException(
-                    code="PROVIDER_DATAFEED_MARKET_CLOSED_NO_DARKPOOL",
-                    message=f"Market closed and no dark pool available for ticker: {ticker_name}",
-                    provider="tws",
-                    capability="datafeed",
-                )
-            contract = darkpool_details.contract
+        details = await self._tws_client.req_ticker_details(ticker_name)
+        contract = details.build_best_contract()
 
         return self._tws_client.reqMktDataStream(
             contract, quote_callback, on_error=on_error, **kwargs
