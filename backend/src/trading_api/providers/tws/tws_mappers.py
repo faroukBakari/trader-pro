@@ -11,7 +11,12 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ibapi.common import BarData
-from ibapi.contract import Contract, ContractDescription, ContractDetails
+from ibapi.contract import (
+    Contract,
+    ContractDescription,
+    ContractDetails,
+    DeltaNeutralContract,
+)
 from ibapi.order import Order
 from ibapi.ticktype import TickTypeEnum
 
@@ -108,6 +113,56 @@ def ticker_name(contract: Contract, bar_size: str | None = None) -> str:
     return ticker
 
 
+def clone_contract(contract: Contract) -> Contract:
+    """Create a deep copy of a TWS Contract object.
+
+    Args:
+        contract: The Contract to clone
+
+    Returns:
+        A new Contract instance with the same attributes
+    """
+    contract_copy = Contract()
+    contract_copy.__dict__.update(contract.__dict__)
+    contract_copy.comboLegs = contract.comboLegs[:]
+    if contract.deltaNeutralContract:
+        contract_copy.deltaNeutralContract = DeltaNeutralContract()
+        contract_copy.deltaNeutralContract.__dict__.update(
+            contract.deltaNeutralContract.__dict__
+        )
+    return contract_copy
+
+
+def build_best_contract(session_details: ContractDetails) -> Contract:
+    contract = clone_contract(session_details.contract)
+    if (
+        is_trading_session_closed(session_details)
+        and "OVERNIGHT" in session_details.validExchanges
+    ):
+        contract.exchange = "OVERNIGHT"
+    elif "SMART" in session_details.validExchanges:
+        contract.exchange = "SMART"
+    else:
+        contract.exchange = contract.exchange or contract.primaryExchange
+    return contract
+
+
+def build_smart_contract(session_details: ContractDetails) -> Contract | None:
+    contract = None
+    if "SMART" in session_details.validExchanges:
+        contract = clone_contract(session_details.contract)
+        contract.exchange = "SMART"
+    return contract
+
+
+def build_darkpool_contract(session_details: ContractDetails) -> Contract | None:
+    contract = None
+    if "OVERNIGHT" in session_details.validExchanges:
+        contract = clone_contract(session_details.contract)
+        contract.exchange = "OVERNIGHT"
+    return contract
+
+
 def contract_description_to_search_result(
     desc: ContractDescription,
 ) -> SearchSymbolResultItem:
@@ -189,7 +244,7 @@ TWS_TIMEZONE_MAP: dict[str, str] = {
 }
 
 
-def _normalize_timezone(tws_timezone: str) -> str:
+def normalize_timezone(tws_timezone: str) -> str:
     """Convert TWS timeZoneId to TradingView-compatible timezone."""
     return TWS_TIMEZONE_MAP.get(tws_timezone, tws_timezone) or "America/New_York"
 
@@ -225,7 +280,7 @@ def is_trading_session_closed(
         return True  # No hours = assume closed
 
     # Get current time in instrument's timezone
-    tz = ZoneInfo(_normalize_timezone(timezone_id))
+    tz = ZoneInfo(normalize_timezone(timezone_id))
     now = reference_time or datetime.now(tz)
     today_str = now.strftime("%Y%m%d")
 
@@ -431,7 +486,7 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
         session=_convert_tws_trading_hours_to_session(
             details.liquidHours or details.tradingHours
         ),
-        timezone=_normalize_timezone(details.timeZoneId),
+        timezone=normalize_timezone(details.timeZoneId),
         ticker=(
             symbol
             + ":"
@@ -667,26 +722,6 @@ def parse_ticker(ticker: str) -> tuple[str, str, str, str]:
             capability="shared",
         )
     return symbol_name, exchange, secType, bar_size
-
-
-def build_contract(
-    ticker: str,
-) -> Contract:
-    """Build TWS Contract object from domain parameters.
-
-    Args:
-        ticker: Ticker string (e.g., "AAPL:NASDAQ:STK-123456")
-        currency: Currency code (default: "USD")
-
-    Returns:
-        TWS Contract object ready for API calls
-    """
-    symbol, primaryExchange, sec_type, _ = parse_ticker(ticker)
-    contract = Contract()
-    contract.symbol = symbol
-    contract.secType = sec_type
-    contract.primaryExchange = primaryExchange
-    return contract
 
 
 def map_resolution_to_tws_bar_size(resolution: Resolution) -> str:
@@ -1456,10 +1491,11 @@ __all__ = [
     "tws_ticks_to_bar",
     "tws_ticks_to_quote_data",
     "parse_ticker",
-    "build_contract",
+    "build_best_contract",
     "map_resolution_to_tws_bar_size",
     "calculate_tws_duration",
     "is_trading_session_closed",
+    "normalize_timezone",
     # Order mappers
     "BracketContext",
     "ORDER_TYPE_TO_TWS",

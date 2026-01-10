@@ -57,7 +57,12 @@ from ibapi.wrapper import EWrapper, current_fn_name
 from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
-from trading_api.providers.tws.tws_mappers import parse_ticker, ticker_name
+from trading_api.providers.tws.tws_mappers import (
+    build_darkpool_contract,
+    build_smart_contract,
+    parse_ticker,
+    ticker_name,
+)
 from trading_api.providers.tws.tws_models import (
     TICK_TYPE_TO_FIELD,
     StreamData,
@@ -1088,9 +1093,10 @@ class IBSocket(EWrapper):
         # Protobuf message ID = OUT.PLACE_ORDER + 200
         proto_msg_id = OUT.PLACE_ORDER + PROTOBUF_MSG_ID
         self.send_protobuf(proto_msg_id, serialized)
+        ticker = ticker_name(contract)
         if DEBUG_TWS_REQUEST:
             debug_log(
-                f"placed order (protobuf): id={order_id}, symbol={contract.symbol}, "
+                f"placed order (protobuf): id={order_id}, ticker={ticker}, Exchange={contract.exchange} "
                 f"action={order.action}, type={order.orderType} "
                 f"qty={order.totalQuantity}, type={order.lmtPrice or order.auxPrice} "
             )
@@ -1143,9 +1149,10 @@ class IBSocket(EWrapper):
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
         tws_key = f"req_{reqId}"
-        self._extend_stream_data(
-            tws_key, [{"contractDescriptions": cd} for cd in contractDescriptions]
-        )
+        if contractDescriptions:
+            self._extend_stream_data(
+                tws_key, [{"contractDescriptions": cd} for cd in contractDescriptions]
+            )
         self._flag_snapshot_complete(tws_key)
 
     # === contractDetails (streaming accumulation pattern) ===
@@ -1554,7 +1561,7 @@ class TWSClient:
             Transformed result from TWS response
         """
         cached = self.ibsocket.get_cached_data(business_key)
-        if cached is not None:
+        if cached and cached.snapshot_complete:
             return transform_fn(cached)
 
         reqId, coroutine = self.ibsocket.create_snapshot(
@@ -1570,7 +1577,7 @@ class TWSClient:
     def _get_cached_contracts(
         self,
         ticker: str,
-        preferred_exchanges: list[str] | None = None,
+        exchange: str | None = None,
         require_full_details: bool = False,
     ) -> list[CachedContract]:
         """Get cached contracts matching ticker with optional exchange filtering.
@@ -1587,9 +1594,7 @@ class TWSClient:
             con
             for con in self.__contracts_cache.values()
             if con.matches(ticker)
-            and (
-                not preferred_exchanges or con.contract.exchange in preferred_exchanges
-            )
+            and (not exchange or con.contract.exchange == exchange)
             and (not require_full_details or con.has_full_details)
         ]
 
@@ -1647,7 +1652,7 @@ class TWSClient:
 
         return descriptions
 
-    async def reqContractDetails(
+    async def _reqContractDetails(
         self, contract: Contract, timeout: float | None = None
     ) -> list[ContractDetails]:
         """Get full contract details.
@@ -1663,77 +1668,130 @@ class TWSClient:
         Returns:
             List of ContractDetails (usually 1, but can be multiple for ambiguous contracts)
         """
-
-        ticker = ticker_name(contract)
-
-        if not contract.conId or contract.conId <= 0:
-            preferred_exachanges = [contract.exchange] if contract.exchange else [""]
-            cached = self._get_cached_contracts(
-                ticker, preferred_exachanges, require_full_details=True
-            )
-            if cached:
-                if DEBUG_TWS_CACHE:
-                    debug_log(
-                        f"reqContractDetails cache hit for conId {contract.conId} => ({ticker})"
-                    )
-                return [con.to_contract_details() for con in cached]
-        else:
-            cached_contract = self.__contracts_cache.get(contract.conId)
-            if cached_contract and cached_contract.has_full_details:
-                if DEBUG_TWS_CACHE:
-                    debug_log(
-                        f"reqContractDetails cache hit for conId {contract.conId}"
-                    )
-                return [cached_contract.to_contract_details()]
-
-        # Cache miss or partial - fetch from TWS
-        reqId: int | None = None
-        coroutine: Awaitable[list[dict[str, ContractDetails]]]
-        details_list: list[ContractDetails]
-        business_key = (
-            f"shared:reqContractDetails:{contract.exchange or 'ANY'}:{ticker}"
-        )
-
+        business_key = f"shared:reqContractDetails:{contract.exchange or 'ANY'}:{ticker_name(contract)}"
         data = self.ibsocket.get_cached_data(business_key)
-        if data is not None:
-            details_list = [item["contractDetails"] for item in data]
-            return details_list
+        if not data:
+            reqId, coroutine = self.ibsocket.create_snapshot(
+                business_key,
+                timeout=timeout or self._timeout,
+            )
+            if reqId is not None:
+                self.ibsocket.reqContractDetails(reqId, contract)
+            data = await coroutine
 
-        reqId, coroutine = self.ibsocket.create_snapshot(
-            business_key,
-            timeout=timeout or self._timeout,
-        )
-
-        if reqId is not None:
-            self.ibsocket.reqContractDetails(reqId, contract)
-
-        data = await coroutine
-        details_list = [item["contractDetails"] for item in data]
-
-        # Update cache with full details
-        for details in details_list:
-            if details.contract.conId > 0 and details.contract.exchange:
-                detail_con_id = details.contract.conId
-                if detail_con_id in self.__contracts_cache:
-                    # Update existing partial cache entry
-                    self.__contracts_cache[detail_con_id].update_from_details(details)
-                else:
-                    # Create new cache entry with full details
-                    self.__contracts_cache[
-                        detail_con_id
-                    ] = CachedContract.from_contract_details(details)
-
+        details_list: list[ContractDetails] = [item["contractDetails"] for item in data]
         return details_list
 
-    async def cache_contracts(
+    async def _cache_details(
+        self,
+        details: ContractDetails,
+        overnight_hours: str | None = None,
+    ) -> None:
+        """Cache contract details by conId."""
+        detail_con_id = details.contract.conId
+        if detail_con_id in self.__contracts_cache:
+            # Update existing partial cache entry
+            self.__contracts_cache[detail_con_id].update_from_details(
+                details, overnight_hours=overnight_hours
+            )
+        else:
+            # Create new cache entry with full details
+            self.__contracts_cache[
+                detail_con_id
+            ] = CachedContract.from_contract_details(
+                details, overnight_hours=overnight_hours
+            )
+
+    async def reqContractDetails(
+        self, contract: Contract, timeout: float | None = None
+    ) -> list[CachedContract]:
+        """Get full contract details.
+
+        Uses cache-first strategy:
+        - If cached with full details, returns immediately
+        - Otherwise fetches from TWS and updates cache
+
+        Args:
+            contract: The contract to get details for (must have conId)
+            timeout: Optional timeout override
+
+        Returns:
+            List of ContractDetails (usually 1, but can be multiple for ambiguous contracts)
+        """
+
+        ticker = ticker_name(contract)
+        cached_list = [
+            cached_contract
+            for cached_contract in (
+                [self.__contracts_cache.get(contract.conId)]
+                if (contract.conId and contract.conId > 0)
+                else self._get_cached_contracts(
+                    ticker, contract.exchange, require_full_details=True
+                )
+            )
+            if cached_contract is not None
+        ]
+
+        if cached_list:
+            if DEBUG_TWS_CACHE:
+                debug_log(
+                    f"reqContractDetails cache hit for conId {contract.conId} => ({ticker})"
+                )
+            return cached_list
+
+        details_list: list[ContractDetails] = await self._reqContractDetails(
+            contract, timeout=timeout
+        )
+
+        if not details_list:
+            return []
+
+        overnight_hours: str | None = None
+        first_details = next(iter(details_list))
+        smart_contract = build_smart_contract(first_details)
+        if smart_contract is not None:
+            smart_details_list = [
+                details
+                for details in details_list
+                if details.contract.exchange == "SMART"
+            ] or await self._reqContractDetails(smart_contract, timeout=timeout)
+            if smart_details_list:
+                first_details = next(iter(smart_details_list))
+                darkpool_contract = build_darkpool_contract(first_details)
+                if darkpool_contract is not None:
+                    darkpool_details_list = [
+                        details
+                        for details in details_list
+                        if details.contract.exchange == "SMART"
+                    ] or await self._reqContractDetails(
+                        darkpool_contract, timeout=timeout
+                    )
+                    if darkpool_details_list:
+                        overnight_hours = next(iter(darkpool_details_list)).tradingHours
+                        details_list = (
+                            [first_details] if not contract.exchange else details_list
+                        )
+
+        for details in details_list:
+            await self._cache_details(
+                details,
+                overnight_hours=overnight_hours,
+            )
+
+        # return cached data
+        return self._get_cached_contracts(
+            ticker, contract.exchange, require_full_details=True
+        )
+
+    async def req_ticker_details(
         self,
         ticker_name: str,
         **kwargs: Any,
-    ) -> tuple[ContractDetails, ContractDetails | None]:
+    ) -> CachedContract:
         """Get detailed symbol information.
 
         [ASYNC-BRIDGE]: Wraps sync TWS callback with async Future.
-        [ACCUMULATION]: TWS may return multiple ContractDetails, we use first match.
+        [ACCUMULATION]: TWS may return multiple CachedContract, we use first match.
         [DOMAIN-ONLY]: Returns domain SymbolInfo (no TWS types).
 
         Args:
@@ -1764,27 +1822,7 @@ class TWSClient:
                 capability="datafeed",
             )
 
-        all_valid_exchanges = [
-            exch for cd in details_list for exch in cd.validExchanges.split(",")
-        ]
-
-        session_contract = next(iter(details_list))
-        if "SMART" in all_valid_exchanges and all(
-            cd.contract.exchange != "SMART" for cd in details_list
-        ):
-            contract.exchange = "SMART"
-            smart_ = await self.reqContractDetails(contract, **kwargs)
-            session_contract = next(iter(smart_), session_contract)
-
-        darkpool_contract = None
-        if "OVERNIGHT" in all_valid_exchanges and all(
-            cd.contract.exchange != "OVERNIGHT" for cd in details_list
-        ):
-            contract.exchange = "OVERNIGHT"
-            overnight_ = await self.reqContractDetails(contract, **kwargs)
-            darkpool_contract = next(iter(overnight_), None)
-
-        return session_contract, darkpool_contract
+        return next(iter(details_list))
 
     # === Historical data snapshot (one-time pattern) ===
 

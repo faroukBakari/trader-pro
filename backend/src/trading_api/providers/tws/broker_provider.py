@@ -47,7 +47,6 @@ from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.providers.tws.tws_mappers import (
-    is_trading_session_closed,
     order_state_to_preview_result,
     preorder_to_tws,
     tracked_order_to_placed_order,
@@ -154,22 +153,9 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         Raises:
             ProviderException: If contract not found
         """
-        session_details, darkpool_details = await self._tws_client.cache_contracts(
-            ticker
-        )
-        target_details = session_details
+        details = await self._tws_client.req_ticker_details(ticker)
 
-        if is_trading_session_closed(session_details) and darkpool_details is not None:
-            target_details = darkpool_details
-
-        if target_details.contract.conId <= 0:
-            raise ProviderException(
-                code="PROVIDER_BROKER_CONTRACT_NOT_FOUND",
-                message=f"Contract not found for symbol {ticker}",
-                provider="tws",
-                capability="broker",
-            )
-        return target_details.contract
+        return details.build_best_contract()
 
     async def _submit_order(
         self, order: PreOrder, order_id: int | None = None

@@ -323,7 +323,7 @@ class TestTWSClientReqContractDetails:
 
     @pytest.mark.asyncio
     async def test_req_contract_details_returns_list(self) -> None:
-        """Test reqContractDetails returns ContractDetails list."""
+        """Test reqContractDetails returns CachedContract list."""
         client = TWSClient("127.0.0.1", 7497, 1)
 
         # Create mock ibsocket
