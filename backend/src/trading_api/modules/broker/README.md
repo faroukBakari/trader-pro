@@ -122,12 +122,13 @@ broker-connection:{"accountId":"DEMO-ACCOUNT"}
 
 ```python
 # In BrokerService
-def create_topic(self, topic: str, topic_update: Callback, topic_error: Callback, user_id: str):
+async def create_topic(self, topic: str, topic_update: Callback, topic_error: Callback, user_id: str):
     """Parse topic, create provider subscription, track subscription ID."""
     topic_type, params_json = topic.split(":", 1)
 
     if topic_type == "orders":
-        subscription_id = self.broker_provider.subscribe_orders(
+        # For TWS provider: delegates to TWSClient.reqOrdersStream() → OrderTracker
+        subscription_id = await self.broker_provider.subscribe_orders(
             callback=topic_update,
             on_error=on_provider_error,
         )

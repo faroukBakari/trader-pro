@@ -536,7 +536,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TWS API Integration
 
-**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, order modification, modifiable fields, lmtPrice, auxPrice, totalQuantity, tif, type stubs, .pyi files, Pylance, ibapi, TWSDatafeedProvider, TWSBrokerProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, business key, stream data, StreamData, CachedContract, OrderTracker, AssetConfig, Resolution enum, ticker naming convention, snapshot pattern, stream pattern, overnight_hours, darkpool, Blue Ocean ATS, build_best_contract, is_session_closed, is_darkpool_closed, infer_sec_type, FOREX_CURRENCIES, req_ticker_details, \_resolve_trading_contract, session-aware routing, bracket grouping, OCA pattern, parse_bracket_oca, \_group_orders_by_bracket, ParentType, BracketContext, tracked_order_to_placed_order
+**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, order modification, modifiable fields, lmtPrice, auxPrice, totalQuantity, tif, type stubs, .pyi files, Pylance, ibapi, TWSDatafeedProvider, TWSBrokerProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, business key, stream data, StreamData, CachedContract, OrderTracker, AssetConfig, Resolution enum, ticker naming convention, snapshot pattern, stream pattern, overnight_hours, darkpool, Blue Ocean ATS, build_best_contract, is_session_closed, is_darkpool_closed, infer_sec_type, FOREX_CURRENCIES, req_ticker_details, \_resolve_trading_contract, session-aware routing, bracket grouping, OCA pattern, parse_bracket_oca, \_group_orders_by_bracket, ParentType, BracketContext, tracked_order_to_placed_order, reqOrdersStream, create_stream_hook, remove_stream_hook, isUnset, PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED
 
 **Scope**: Interactive Brokers TWS API integration  
 **Out of Scope**: Other broker APIs, custom trading protocols
@@ -591,6 +591,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2026-01-12**: TWS Order streaming integration - Updated TWS README.md (`subscribe_orders()` → `reqOrdersStream()` flow, OrderTracker stream hooks, `set_leverage()` exception, `isUnset()` helper), broker module README.md (async topic lifecycle), DOCUMENTATION-GUIDE.md (keywords)
 - **2026-01-11**: Inter-module HTTP client factory - Updated SPECS_AND_CLIENT_GEN.md (InterModuleClients singleton, smart URL defaults, env overrides), TWS README.md (`_get_symbol_price()` inter-module pattern), DOCUMENTATION-GUIDE.md (keywords)
 - **2026-01-11**: Order modification constraints - Updated TWS README.md (order modification field restrictions, `clone_order()` deep copy pattern, `placeWhatifOrder()` method separation, leverage info via WhatIf margin simulation), broker module README.md (`confirmId` parameter for audit trail), `02-API-REFERENCE-CONTRACTS-ORDERS.md` (Section 3.2 Order Modification guidelines), DOCUMENTATION-GUIDE.md (TWS keywords)
 - **2026-01-11**: TWS Bracket order grouping - Updated TWS README.md (bracket order grouping helpers, OCA naming convention, get_orders enrichment, parse_bracket_oca utility, preview_order error propagation), broker module README.md (bracket relationship handling), DOCUMENTATION-GUIDE.md (TWS keywords)
@@ -627,5 +628,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: January 11, 2026  
+**Last Updated**: January 12, 2026  
 **Maintained by**: Development Team

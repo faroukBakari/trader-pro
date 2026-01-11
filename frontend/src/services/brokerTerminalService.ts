@@ -611,7 +611,6 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   private readonly accountId: string
   private brokerConnectionStatus: ConnectionStatusType = ConnectionStatus.Disconnected
-  private subscriptionTopics: string[] = []
 
   constructor(
     host: IBrokerConnectionAdapterHost,
@@ -677,7 +676,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         'orders',
         { accountId: this.accountId },
         (order: Order) => {
-          console.log('Received order update via WebSocket:', order)
+          console.warn('Received order update via WebSocket:', JSON.stringify(order))
           this._hostAdapter.orderUpdate(order)
 
           // Show notification on fill

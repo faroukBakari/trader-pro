@@ -1724,7 +1724,6 @@ class TWSClient:
         Returns:
             List of ContractDetails (usually 1, but can be multiple for ambiguous contracts)
         """
-
         ticker = ticker_name(contract)
         cached_list = [
             cached_contract
@@ -2122,8 +2121,6 @@ class TWSClient:
             order_id, timeout or self._timeout
         )
 
-    # === Real-time broker subscriptions ===
-
     async def reqOpenOrders(self, timeout: float | None = None) -> list[TrackedOrder]:
         """Request all open orders for this client (snapshot).
 
@@ -2141,6 +2138,33 @@ class TWSClient:
         self.ibsocket.reqOpenOrders()
 
         return await self.ibsocket.order_tracker.all_orders(timeout or self._timeout)
+
+    # === Real-time broker subscriptions ===
+
+    def reqOrdersStream(
+        self,
+        callback: Callable[[TrackedOrder], Coroutine[Any, Any, None]],
+        on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
+    ) -> str:
+        """Create order stream subscription.
+
+        Returns stream_key for later unsubscription.
+        """
+        # 1. Register with OrderTracker
+        stream_key = self.ibsocket.order_tracker.create_stream_hook(
+            asyncio.get_event_loop(),
+            callback,
+            on_error,
+        )
+
+        # 2. Trigger initial snapshot (existing orders)
+        self.ibsocket.reqOpenOrders()
+
+        return stream_key
+
+    def canced_broker_stream(self, stream_key: str) -> None:
+        """Cancel a real-time broker subscription."""
+        self.ibsocket.order_tracker.remove_stream_hook(stream_key)
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""
