@@ -15,10 +15,8 @@ from pathlib import Path
 from typing import Awaitable, Callable
 from zoneinfo import ZoneInfo
 
-from ibapi import contract
 from ibapi.contract import Contract
 from ibapi.order import Order
-from pytest import Cache
 
 from trading_api.capabilities.broker import BrokerCapability
 from trading_api.models.broker import (
@@ -45,6 +43,7 @@ from trading_api.models.broker import (
 )
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ProviderException, TradingApiException
+from trading_api.models.market.quotes import GetQuotesRequest
 from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.tws_connection import TWSClient
@@ -53,10 +52,10 @@ from trading_api.providers.tws.tws_mappers import (
     order_state_to_preview_result,
     parse_bracket_oca,
     preorder_to_tws,
-    ticker_name,
     tracked_order_to_placed_order,
 )
 from trading_api.shared import Provider
+from trading_api.shared.client_factory import InterModuleClients
 
 logger = logging.getLogger(__name__)
 us_eastern = ZoneInfo("US/Eastern")
@@ -733,31 +732,34 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             capability="broker",
         )
 
-    async def _get_symbol_price(self, contract: Contract) -> float:
-        """Get current price for a symbol via quote snapshot.
+    async def _get_symbol_price(self, symbol: str) -> float:
+        """Get current price for a symbol via inter-module Datafeed API.
+
+        Uses DatafeedClient to fetch quotes through the datafeed module's
+        HTTP API, maintaining proper module isolation.
 
         Args:
-            symbol: Symbol in format "SYMBOL:EXCHANGE:SECTYPE-CONID"
+            symbol: Symbol in ticker format (e.g., "AAPL:NASDAQ:STK")
 
         Returns:
-            Current price (last trade or mid-price)
+            Current price (last price from quote), or 0.0 on error
         """
-
         try:
-            snapshot = await self._tws_client.reqQuoteSnapshot(contract, timeout=1.0)
-            # Prefer last price, fall back to mid of bid/ask
-            last_price = snapshot.get("last", 0.0)
-            if last_price and last_price > 0:
-                return float(last_price)
+            clients = InterModuleClients()
+            quotes = await clients.datafeed.getQuotes(
+                body=GetQuotesRequest(symbols=[symbol])
+            )
+            if not quotes or quotes[0].s != "ok":
+                logger.warning(f"No quote data for {symbol}")
+                return 0.0
 
-            bid = snapshot.get("bid", 0.0)
-            ask = snapshot.get("ask", 0.0)
-            if bid and ask and bid > 0 and ask > 0:
-                return float((bid + ask) / 2)
-
-            return 0.0
+            # Extract last price from quote values
+            quote_values = quotes[0].v
+            if isinstance(quote_values, dict):
+                return float(quote_values.get("lp", 0.0))
+            return float(quote_values.lp)
         except Exception as e:
-            logger.warning(f"Failed to get price for {ticker_name(contract)}: {e}")
+            logger.warning(f"Failed to get price for {symbol}: {e}")
             return 0.0
 
     async def get_leverage_info(self, params: LeverageInfoParams) -> LeverageInfo:
@@ -806,8 +808,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         except ValueError:
             margin_change = 0.0
 
-        # Get current price for leverage calculation
-        current_price = await self._get_symbol_price(contract)
+        # Get current price for leverage calculation via inter-module API
+        current_price = await self._get_symbol_price(params.symbol)
 
         # Compute implied leverage: price / margin_per_share
         if margin_change > 0 and current_price > 0:

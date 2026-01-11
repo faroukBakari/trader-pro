@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     # Cookie Configuration
     COOKIE_SECURE: bool = False  # Set to True in production (HTTPS only)
 
+    # API Configuration (used by app_factory and client generation)
+    API_PREFIX: str = "/api"
+    API_PORT: int = 8000
+    DEFAULT_TIMEOUT: float = 30.0
+
     model_config = SettingsConfigDict(env_file=".env.local", env_file_encoding="utf-8")
 
     @model_validator(mode="after")

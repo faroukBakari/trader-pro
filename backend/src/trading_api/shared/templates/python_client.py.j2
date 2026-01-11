@@ -26,16 +26,17 @@ class {{ class_name }}:
     All models are imported from trading_api.models to maintain consistency.
     
     Example:
-        >>> client = {{ class_name }}(base_url="http://{{ module_name }}-service:8000")
+        >>> client = {{ class_name }}()  # Uses default URL
+        >>> client = {{ class_name }}(base_url="http://{{ module_name }}-service:8000")  # Custom URL
         >>> result = await client.some_operation()
     """
     
-    def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
+    def __init__(self, base_url: str = "http://localhost:{{ default_port }}{{ api_prefix }}/{{ version }}/{{ module_name }}", timeout: float = {{ default_timeout }}):
         """
         Initialize the client.
         
         Args:
-            base_url: Base URL of the {{ module_name }} service
+            base_url: Base URL of the {{ module_name }} service (default: http://localhost:{{ default_port }}{{ api_prefix }}/{{ version }}/{{ module_name }})
             timeout: Request timeout in seconds
         """
         self.base_url = base_url.rstrip("/")

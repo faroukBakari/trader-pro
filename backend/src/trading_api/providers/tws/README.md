@@ -8,17 +8,17 @@
 
 ## Quick Reference
 
-| Layer                       | File                                  | Responsibility                                    |
-| --------------------------- | ------------------------------------- | ------------------------------------------------- |
-| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion        |
-| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management  |
-| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket  |
-| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry     |
-| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)     |
+| Layer                       | File                                  | Responsibility                                              |
+| --------------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion                  |
+| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management            |
+| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket            |
+| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry               |
+| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)               |
 | **OrderTracker**            | `order_tracker.py`                    | Order state tracking, `clone_order()` for safe modification |
-| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing     |
-| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification |
-| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings               |
+| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing               |
+| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification           |
+| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                         |
 
 **Tests:** `providers/tws/tests/test_{client,ibsocket,mappers,models,datafeed_provider,broker_provider,cached_contract,config}.py`
 
@@ -423,6 +423,7 @@ class BrokerCapability(ABC):
 - **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `req_ticker_details()`. Some features (execution simulation, P&L tracking) still use in-memory state.
 - **Session-Aware Routing**: Orders are routed via `_resolve_trading_contract()` which uses `CachedContract.build_best_contract()` to select SMART or OVERNIGHT exchange based on market hours.
 - **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. `preview_leverage()` raises `ProviderException`, but `get_leverage_info()` computes implied leverage via WhatIf margin simulation.
+- **Inter-Module Price Fetch**: `_get_symbol_price()` uses `DatafeedClient` (inter-module HTTP) instead of direct TWS calls to maintain capability isolation. Uses `shared/client_factory.py` for typed access.
 - **Order Preview**: Uses TWS `whatIf` mode for real margin/commission data (see section below).
 - **Bracket Orders**: `edit_position_brackets()` implemented using OCA (One-Cancels-All) groups. Creates stop loss (STP/TRAIL) and take profit (LMT) orders linked so when one fills, TWS cancels the others.
 - **Equity Streaming**: TWS doesn't push account changes; polling via `get_equity()` is required.
@@ -532,6 +533,7 @@ OrderPreviewResult(
 **Implementation in `TWSClient._submit_order()`:**
 
 When modifying (orderId > 0), the method:
+
 1. Retrieves existing order via `OrderTracker.ensure_existing_order(orderId)`
 2. Clones original via `TrackedOrder.clone_order()` for thread safety
 3. Copies ONLY allowed fields from new order to clone
@@ -556,6 +558,7 @@ if order_id > 0:
 **`TrackedOrder.clone_order()` Method:**
 
 Deep copies the Order object to avoid shared mutable state between threads:
+
 - Shallow copies primitive fields via `__dict__.update()`
 - Recreates nested objects (`SoftDollarTier`, `OrderComboLeg`)
 - Uses `deepcopy()` for complex hierarchies (`conditions`)

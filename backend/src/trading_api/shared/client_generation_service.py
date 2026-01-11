@@ -12,6 +12,8 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader
 
+from trading_api.shared.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -317,6 +319,10 @@ class ClientGenerationService:
 
             client_code = template.render(
                 module_name=module_name,
+                version=module_version,
+                api_prefix=settings.API_PREFIX,
+                default_port=settings.API_PORT,
+                default_timeout=settings.DEFAULT_TIMEOUT,
                 class_name=f"{module_name.capitalize()}Client",
                 operations=operations,
                 models=sorted(models),
