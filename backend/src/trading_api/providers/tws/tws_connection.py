@@ -43,7 +43,13 @@ from ibapi.client_utils import (
     createPlaceOrderRequestProto,
 )
 from ibapi.common import BarData, TickAttrib
-from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
+from ibapi.const import (
+    DOUBLE_INFINITY,
+    INFINITY_STR,
+    UNSET_DECIMAL,
+    UNSET_DOUBLE,
+    UNSET_INTEGER,
+)
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.decoder import Decoder
 from ibapi.message import OUT
@@ -1646,9 +1652,9 @@ class TWSClient:
         for desc in descriptions:
             con_id = desc.contract.conId
             if con_id not in self.__contracts_cache:
-                self.__contracts_cache[
-                    con_id
-                ] = CachedContract.from_contract_description(desc)
+                self.__contracts_cache[con_id] = (
+                    CachedContract.from_contract_description(desc)
+                )
 
         return descriptions
 
@@ -1696,10 +1702,10 @@ class TWSClient:
             )
         else:
             # Create new cache entry with full details
-            self.__contracts_cache[
-                detail_con_id
-            ] = CachedContract.from_contract_details(
-                details, overnight_hours=overnight_hours
+            self.__contracts_cache[detail_con_id] = (
+                CachedContract.from_contract_details(
+                    details, overnight_hours=overnight_hours
+                )
             )
 
     async def reqContractDetails(
@@ -1951,12 +1957,23 @@ class TWSClient:
         parent_id: int = 0,
         transmit: bool = False,
     ) -> int:
-        order.parentId = parent_id
         order_id = order.orderId
         if order_id > 0:
-            self.ibsocket.order_tracker.ensure_existing_order(order_id)
+            tracked = self.ibsocket.order_tracker.ensure_existing_order(order_id)
+            order_ori = tracked.clone_order()
+            # we only modify allowed fields. for more infos
+            # check 02-API-REFERENCE-CONTRACTS-ORDERS.md
+            if order.lmtPrice != UNSET_DOUBLE:
+                order_ori.lmtPrice = order.lmtPrice
+            if order.auxPrice != UNSET_DOUBLE:
+                order_ori.auxPrice = order.auxPrice
+            if order.totalQuantity != UNSET_DECIMAL:
+                order_ori.totalQuantity = order.totalQuantity
+            order_ori.tif = order.tif or order_ori.tif
+            order = order_ori
         else:
             order_id = self.ibsocket.order_tracker.next_order_id
+            order.parentId = parent_id
         order.transmit = transmit
         self.ibsocket.placeOrder(order_id, contract, order)
         return order_id
@@ -2052,7 +2069,7 @@ class TWSClient:
 
         return parent_tracked, children_tracked
 
-    async def placeOrder(
+    async def placeWhatifOrder(
         self, contract: Contract, order: Order, timeout: float | None = None
     ) -> TrackedOrder:
         """Place an order via TWS.
@@ -2072,15 +2089,20 @@ class TWSClient:
             For older server versions, uses legacy message format.
         """
 
-        order_id = order.orderId
-
-        if order.orderId > 0:
-            self.ibsocket.order_tracker.ensure_existing_order(order.orderId)
-        else:
-            order_id = self.ibsocket.order_tracker.next_order_id
-
+        if order.orderId != -1:
+            logger.warning(
+                "placeWhatifOrder called with pre-set order.orderId; "
+                "this may cause unexpected behavior"
+            )
+            order.orderId = -1
+        if not order.whatIf:
+            logger.warning(
+                "placeWhatifOrder called with order.whatIf=False; "
+                "proceeding to place a regular order"
+            )
+            order.whatIf = True
+        order_id = self.ibsocket.order_tracker.next_order_id
         self.ibsocket.placeOrder(order_id, contract, order)
-
         return await self.ibsocket.order_tracker.order_update(
             order_id, timeout or self._timeout
         )

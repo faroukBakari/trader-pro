@@ -973,7 +973,7 @@ class TestPreviewOrder:
         # Setup mock to return TrackedOrder with whatIf data
         whatif_order_state = self._create_whatif_order_state()
         tracked = _create_tracked_order(999, order_state=whatif_order_state)
-        mock_client.placeOrder = AsyncMock(return_value=tracked)
+        mock_client.placeWhatifOrder = AsyncMock(return_value=tracked)
 
         pre_order = PreOrder(
             symbol="NASDAQ:AAPL",
@@ -985,9 +985,9 @@ class TestPreviewOrder:
 
         await provider.preview_order(pre_order)
 
-        # Verify placeOrder was called
-        mock_client.placeOrder.assert_called_once()
-        call_args = mock_client.placeOrder.call_args
+        # Verify placeWhatifOrder was called
+        mock_client.placeWhatifOrder.assert_called_once()
+        call_args = mock_client.placeWhatifOrder.call_args
 
         # Second arg is order
         order = call_args[0][1]
@@ -1003,7 +1003,7 @@ class TestPreviewOrder:
             commission=2.50,
         )
         tracked = _create_tracked_order(999, order_state=whatif_order_state)
-        mock_client.placeOrder = AsyncMock(return_value=tracked)
+        mock_client.placeWhatifOrder = AsyncMock(return_value=tracked)
 
         pre_order = PreOrder(
             symbol="NASDAQ:AAPL",
@@ -1037,7 +1037,7 @@ class TestPreviewOrder:
             warning_text="Order will be held until market opens"
         )
         tracked = _create_tracked_order(999, order_state=whatif_order_state)
-        mock_client.placeOrder = AsyncMock(return_value=tracked)
+        mock_client.placeWhatifOrder = AsyncMock(return_value=tracked)
 
         pre_order = PreOrder(
             symbol="NASDAQ:AAPL",
@@ -1062,7 +1062,9 @@ class TestPreviewOrder:
         how to handle the error.
         """
         # Simulate TWS connection error during whatIf order
-        mock_client.placeOrder = AsyncMock(side_effect=Exception("TWS connection lost"))
+        mock_client.placeWhatifOrder = AsyncMock(
+            side_effect=Exception("TWS connection lost")
+        )
 
         pre_order = PreOrder(
             symbol="NASDAQ:AAPL",
@@ -1110,7 +1112,7 @@ class TestPreviewOrder:
         """Test preview_order includes bracket info in result."""
         whatif_order_state = self._create_whatif_order_state()
         tracked = _create_tracked_order(999, order_state=whatif_order_state)
-        mock_client.placeOrder = AsyncMock(return_value=tracked)
+        mock_client.placeWhatifOrder = AsyncMock(return_value=tracked)
 
         pre_order = PreOrder(
             symbol="NASDAQ:AAPL",
@@ -1140,7 +1142,7 @@ class TestPreviewOrder:
         """Test preview_order only previews entry order, not brackets."""
         whatif_order_state = self._create_whatif_order_state()
         tracked = _create_tracked_order(999, order_state=whatif_order_state)
-        mock_client.placeOrder = AsyncMock(return_value=tracked)
+        mock_client.placeWhatifOrder = AsyncMock(return_value=tracked)
 
         pre_order = PreOrder(
             symbol="NASDAQ:AAPL",
@@ -1154,8 +1156,8 @@ class TestPreviewOrder:
 
         await provider.preview_order(pre_order)
 
-        # placeOrder should only be called once (for entry order)
-        assert mock_client.placeOrder.call_count == 1
+        # placeWhatifOrder should only be called once (for entry order)
+        assert mock_client.placeWhatifOrder.call_count == 1
 
         # placeOrderGroup should NOT be called (no actual bracket placement)
         assert not hasattr(mock_client, "placeOrderGroup") or (

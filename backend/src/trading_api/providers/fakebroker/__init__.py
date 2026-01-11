@@ -114,10 +114,21 @@ class FakebrokerProvider(Provider, BrokerCapability):
     # BrokerCapability - Snapshot Methods (async)
     # =========================================================================
 
-    async def place_order(self, order: PreOrder) -> PlaceOrderResult:
-        """Place a new order."""
-        order_id = f"ORDER-{self._order_counter}"
-        self._order_counter += 1
+    async def place_order(
+        self, order: PreOrder, confirm_id: str | None = None
+    ) -> PlaceOrderResult:
+        """Place a new order.
+
+        Args:
+            order: Order request with symbol, type, side, qty, prices
+            confirm_id: Optional confirmation ID from preview (used as order ID if provided)
+        """
+        # Use confirm_id as order ID if provided, otherwise generate one
+        if confirm_id:
+            order_id = confirm_id
+        else:
+            order_id = f"ORDER-{self._order_counter}"
+            self._order_counter += 1
 
         # Determine limit price from available sources
         limit_price = order.limitPrice

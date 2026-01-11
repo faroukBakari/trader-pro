@@ -68,6 +68,7 @@ class TestPlaceOrder:
 
         result = await provider.place_order(order)
 
+        assert result.orderId is not None
         assert result.orderId.startswith("ORDER-")
         orders = await provider.get_orders()
         assert len(orders) == 1
@@ -108,6 +109,7 @@ class TestModifyOrder:
             limitPrice=150.0,
         )
         result = await provider.place_order(order)
+        assert result.orderId is not None
 
         # Modify it
         modified = PreOrder(
@@ -154,6 +156,7 @@ class TestCancelOrder:
             limitPrice=150.0,
         )
         result = await provider.place_order(order)
+        assert result.orderId is not None
 
         await provider.cancel_order(result.orderId)
 

@@ -465,8 +465,8 @@ export class ApiAdapter {
 
   // Broker module endpoints
   @ApiErrorHandler('/orders')
-  async placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult> {
-    const response = await this.brokerApi.placeOrder(mapPreOrder(order))
+  async placeOrder(order: PreOrder, confirmId?: string): ApiPromise<PlaceOrderResult> {
+    const response = await this.brokerApi.placeOrder(mapPreOrder(order), confirmId)
 
     return {
       status: response.status,
@@ -485,7 +485,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler((...args) => `/orders/${(args[1] as string | undefined) ?? (args[0] as Order).id}`)
   async modifyOrder(order: Order, confirmId?: string): ApiPromise<void> {
-    const orderId = confirmId ?? order.id
+    const orderId = order.id ?? confirmId
     const response = await this.brokerApi.modifyOrder(mapPreOrder(order), orderId)
 
     return {

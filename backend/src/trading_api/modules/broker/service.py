@@ -186,14 +186,17 @@ class BrokerService(WsRouteService):
 
     # ================================ SETTERS (delegate to provider) =========
 
-    async def place_order(self, order: PreOrder, user_id: str) -> PlaceOrderResult:
+    async def place_order(
+        self, order: PreOrder, user_id: str, confirm_id: str | None = None
+    ) -> PlaceOrderResult:
         """Place a new order.
 
         Args:
             order: Order to place
             user_id: User ID for scoping (unused for now)
+            confirm_id: Optional confirmation ID from preview_order (for audit trail)
         """
-        return await self.broker_provider.place_order(order)
+        return await self.broker_provider.place_order(order, confirm_id=confirm_id)
 
     async def modify_order(self, order_id: str, order: PreOrder, user_id: str) -> None:
         """Modify an existing order.

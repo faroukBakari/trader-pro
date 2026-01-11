@@ -536,7 +536,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TWS API Integration
 
-**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSDatafeedProvider, TWSBrokerProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, business key, stream data, StreamData, CachedContract, OrderTracker, AssetConfig, Resolution enum, ticker naming convention, snapshot pattern, stream pattern, overnight_hours, darkpool, Blue Ocean ATS, build_best_contract, is_session_closed, is_darkpool_closed, infer_sec_type, FOREX_CURRENCIES, req_ticker_details, \_resolve_trading_contract, session-aware routing, bracket grouping, OCA pattern, parse_bracket_oca, \_group_orders_by_bracket, ParentType, BracketContext, tracked_order_to_placed_order
+**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, order modification, modifiable fields, lmtPrice, auxPrice, totalQuantity, tif, type stubs, .pyi files, Pylance, ibapi, TWSDatafeedProvider, TWSBrokerProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, business key, stream data, StreamData, CachedContract, OrderTracker, AssetConfig, Resolution enum, ticker naming convention, snapshot pattern, stream pattern, overnight_hours, darkpool, Blue Ocean ATS, build_best_contract, is_session_closed, is_darkpool_closed, infer_sec_type, FOREX_CURRENCIES, req_ticker_details, \_resolve_trading_contract, session-aware routing, bracket grouping, OCA pattern, parse_bracket_oca, \_group_orders_by_bracket, ParentType, BracketContext, tracked_order_to_placed_order
 
 **Scope**: Interactive Brokers TWS API integration  
 **Out of Scope**: Other broker APIs, custom trading protocols
@@ -553,7 +553,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **backend/external_packages/tws/docs/06-SETUP-GUIDE.md** - TWS/Gateway installation and configuration
 - **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md** - Connection management, threading, error handling
 - **backend/external_packages/tws/docs/01-API-REFERENCE-CLASSES.md** - Core API classes (EClient, EWrapper, Contract)
-- **backend/external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md** - Order placement and execution
+- **backend/external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md** - Order placement, execution, and **order modification guidelines**
 - **backend/external_packages/tws/docs/04-API-REFERENCE-CONDITIONS.md** - Advanced conditional orders
 - **Type Stubs**: 15 `.pyi` files in `backend/external_packages/tws/source/pythonclient/ibapi/` for Pylance/Pyright support
 - **backend/external_packages/tws/docs/TWS-GENERIC-TICK-LIST.md** - `genericTickList` parameter complete reference
@@ -591,6 +591,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2026-01-11**: Order modification constraints - Updated TWS README.md (order modification field restrictions, `clone_order()` deep copy pattern, `placeWhatifOrder()` method separation, leverage info via WhatIf margin simulation), broker module README.md (`confirmId` parameter for audit trail), `02-API-REFERENCE-CONTRACTS-ORDERS.md` (Section 3.2 Order Modification guidelines), DOCUMENTATION-GUIDE.md (TWS keywords)
 - **2026-01-11**: TWS Bracket order grouping - Updated TWS README.md (bracket order grouping helpers, OCA naming convention, get_orders enrichment, parse_bracket_oca utility, preview_order error propagation), broker module README.md (bracket relationship handling), DOCUMENTATION-GUIDE.md (TWS keywords)
 - **2026-01-07**: SymbolInfo/DatafeedConfiguration enhancement - Updated datafeed README.md (quote deduplication pattern, enhanced SymbolInfo fields table, quote-specific error handling), TWS README.md (contract_details_to_symbol_info() field mappings, SymbolInfo priority fields), DOCUMENTATION-GUIDE.md (TradingView keywords)
 - **2026-01-02**: Documentation assessment wave execution - Created broker/README.md and datafeed/README.md (BFF pattern, WebSocket topics, provider delegation), fixed BROKER-ARCHITECTURE.md (renamed to Fakebroker, updated class names), updated SPECS_AND_CLIENT_GEN.md (versioned file naming), FULLSTACK-DEV-MODE.md (per-module watching), CLIENT-GENERATION.md (deprecated commands), TESTING.md (provider testing section), frontend README.md (routes), BROKER-INTEGRATION.md (Phase 5 status), MODULAR_BACKEND_ARCHITECTURE.md (get_capability_provider method)

@@ -1,7 +1,7 @@
 # Broker Module
 
 **Status**: ✅ Production Ready  
-**Last Updated**: January 1, 2026  
+**Last Updated**: January 11, 2026  
 **Related Files**: `backend/src/trading_api/modules/broker/`
 
 ---
@@ -74,9 +74,9 @@ class BrokerService(WsRouteService):
 
 All endpoints require authentication via JWT in HttpOnly cookie.
 
-| Method | Path                                     | Operation ID           | Description                   |
-| ------ | ---------------------------------------- | ---------------------- | ----------------------------- |
-| POST   | `/api/broker/v1/orders`                  | `placeOrder`           | Place a new order             |
+| Method | Path                                     | Operation ID           | Description                               |
+| ------ | ---------------------------------------- | ---------------------- | ----------------------------------------- |
+| POST   | `/api/broker/v1/orders`                  | `placeOrder`           | Place a new order (accepts `confirmId`¹)  |
 | POST   | `/api/broker/v1/orders/preview`          | `previewOrder`         | Preview order costs/margin    |
 | PUT    | `/api/broker/v1/orders/{id}`             | `modifyOrder`          | Modify existing order         |
 | DELETE | `/api/broker/v1/orders/{id}`             | `cancelOrder`          | Cancel an order               |
@@ -88,7 +88,9 @@ All endpoints require authentication via JWT in HttpOnly cookie.
 | GET    | `/api/broker/v1/account`                 | `getAccountInfo`       | Get account metadata          |
 | GET    | `/api/broker/v1/leverage/info`           | `leverageInfo`         | Get leverage constraints      |
 | PUT    | `/api/broker/v1/leverage/set`            | `setLeverage`          | Set leverage for symbol       |
-| POST   | `/api/broker/v1/leverage/preview`        | `previewLeverage`      | Preview leverage changes      |
+| POST   | `/api/broker/v1/leverage/preview`        | `previewLeverage`      | Preview leverage changes                  |
+
+¹ **Preview-to-Place Flow:** The `confirmId` returned by `previewOrder` can be passed as a query parameter to `placeOrder` for audit trail correlation. This links the preview and execution for logging/compliance purposes.
 
 ---
 
