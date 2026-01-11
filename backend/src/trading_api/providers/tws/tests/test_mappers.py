@@ -53,7 +53,7 @@ class TestContractDescriptionMapper:
     """Test contract_description_to_search_result mapper."""
 
     def test_stock_mapping_and_ticker_format(self) -> None:
-        """Test stock mapping with correct ticker format (SYMBOL:EXCHANGE:SECTYPE)."""
+        """Test stock mapping with correct ticker format (EXCHANGE:SYMBOL)."""
         contract = Contract()
         contract.symbol = "AAPL"
         contract.secType = "STK"
@@ -69,7 +69,7 @@ class TestContractDescriptionMapper:
         assert result.symbol == "AAPL"
         assert result.description == "Apple Inc"
         assert result.exchange == "NASDAQ"
-        assert result.ticker == "AAPL:NASDAQ:STK"
+        assert result.ticker == "NASDAQ:AAPL"
         assert result.type == "stock"
 
     def test_fallback_to_exchange_when_primaryexchange_empty(self) -> None:
@@ -86,7 +86,7 @@ class TestContractDescriptionMapper:
         result = contract_description_to_search_result(desc)
 
         assert result.exchange == "IDEALPRO"
-        assert result.ticker == "EUR:IDEALPRO:CASH"
+        assert result.ticker == "IDEALPRO:EUR"
         assert result.type == "forex"
 
     def test_all_sec_type_mappings(self) -> None:
@@ -125,7 +125,7 @@ class TestContractDetailsMapper:
         assert result.name == "MSFT"
         assert result.description == "Microsoft Corporation"
         assert result.type == "stock"
-        assert result.ticker == "MSFT:NASDAQ:STK"
+        assert result.ticker == "NASDAQ:MSFT"
         assert result.pricescale == 100  # 1/0.01
 
     @pytest.mark.parametrize(
@@ -768,7 +768,7 @@ class TestTrackedOrderToPlacedOrder:
         result = tracked_order_to_placed_order(tracked)
 
         assert result.id == "1"
-        assert result.symbol == "AAPL:NASDAQ:STK"
+        assert result.symbol == "NASDAQ:AAPL"
         assert result.type == OrderType.MARKET
         assert result.side == Side.BUY
         assert result.qty == 100
@@ -873,7 +873,7 @@ class TestTwsPositionToDomain:
 
         result = tws_position_to_domain(position_data)
 
-        assert result.symbol == "AAPL:NASDAQ:STK"
+        assert result.symbol == "NASDAQ:AAPL"
         assert result.qty == 100.0
         assert result.side == Side.BUY
         assert result.avgPrice == 150.50
