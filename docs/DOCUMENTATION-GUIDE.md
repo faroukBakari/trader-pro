@@ -484,14 +484,14 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### Authentication & Security
 
-**Keywords**: authentication, authorization, JWT, OAuth, Google login, cookies, security, stateless auth, middleware
+**Keywords**: authentication, authorization, JWT, OAuth, Google login, cookies, security, stateless auth, middleware, HMAC, inter-module auth, X-Internal-Signature, replay protection, request signing
 
 **Scope**: Complete authentication system (backend + frontend)  
 **Out of Scope**: User management, permissions/roles system
 
-- **backend/docs/AUTHENTICATION.md** - ⭐ Complete authentication system (Google OAuth, JWT, cookies, security)
+- **backend/docs/AUTHENTICATION.md** - ⭐ Complete authentication system (Google OAuth, JWT, cookies, security, inter-module HMAC)
 - **backend/src/trading_api/modules/auth/README.md** - Auth module implementation
-- **backend/src/trading_api/shared/middleware/auth.py** - Stateless middleware (public key validation)
+- **backend/src/trading_api/shared/middleware/auth.py** - Stateless middleware (public key validation, HMAC verification)
 - **frontend/src/services/README.md** - Auth service architecture
 - **frontend/src/router/README.md** - Router authentication guards
 - **frontend/src/views/LoginView.vue** - Google OAuth login UI

@@ -916,36 +916,55 @@ print(BrokerClient.__doc__)
 
 ### Client Structure
 
-Generated clients are async HTTP clients using `httpx`:
+Generated clients are async HTTP clients using `httpx` with automatic HMAC request signing:
 
 ```python
 # Generated: client_generated/broker_client.py
+import hashlib
+import hmac
+import time
+from pathlib import Path
 from typing import Any
+
 import httpx
 from trading_api.models import PlacedOrder, PreOrder  # Shared models
 
 class BrokerClient:
-    """Auto-generated async HTTP client for broker module."""
+    """Auto-generated async HTTP client for broker module.
+
+    Requests are automatically signed with HMAC-SHA256.
+    """
 
     def __init__(
         self,
-        base_url: str = "http://localhost:8000",
-        timeout: float = 30.0
+        caller_id: str,  # Required: identifies the calling module
+        base_url: str = "http://localhost:8000/api/v1/broker",
+        key_path: str = ".local/secrets/hmac_internal.key",
+        timeout: float = 30.0,
     ):
-        self._base_url = base_url
+        assert caller_id, "caller_id parameter is required"
+        self.base_url = base_url
+        self.caller_id = caller_id
+        self._hmac_key = self._load_hmac_key()
         self._client = httpx.AsyncClient(
             base_url=base_url,
-            timeout=timeout
+            timeout=timeout,
+            event_hooks={"request": [self._sign_request]},
         )
 
-    async def placeOrder(self, order: PreOrder) -> PlacedOrder:
+    def _sign_request(self, request: httpx.Request) -> httpx.Request:
+        """Sign request with HMAC-SHA256 signature."""
+        # Adds X-Internal-Signature, X-Internal-Timestamp, X-Internal-Caller headers
+        ...
+
+    async def placeOrder(self, body: PreOrder) -> PlacedOrder:
         """POST /api/v1/broker/orders"""
         response = await self._client.post(
-            "/api/v1/broker/orders",
-            json=order.model_dump(mode="json")
+            "/orders",
+            json=body.model_dump() if hasattr(body, 'model_dump') else body,
         )
         response.raise_for_status()
-        return PlacedOrder.model_validate(response.json())
+        return PlacedOrder(**response.json())
 
     async def close(self) -> None:
         """Close HTTP client."""
@@ -971,6 +990,8 @@ class BrokerClient:
 - Async/await support with `httpx.AsyncClient`
 - Context manager support for cleanup
 - Configurable base URL and timeout
+- **Automatic HMAC request signing** for inter-module authentication
+- Required `caller_id` for request tracing
 
 ### Usage Patterns
 
@@ -979,7 +1000,7 @@ class BrokerClient:
 ```python
 from trading_api.clients import BrokerClient
 
-async with BrokerClient(base_url="http://broker:8000") as client:
+async with BrokerClient(caller_id="my-service", base_url="http://broker:8000") as client:
     health = await client.getHealthStatus()
     positions = await client.getPositions()
 # Client automatically closed
@@ -988,9 +1009,9 @@ async with BrokerClient(base_url="http://broker:8000") as client:
 **Manual Lifecycle**:
 
 ```python
-client = BrokerClient(base_url="http://broker:8000")
+client = BrokerClient(caller_id="my-service", base_url="http://broker:8000")
 try:
-    result = await client.placeOrder(order=PreOrder(...))
+    result = await client.placeOrder(body=PreOrder(...))
 finally:
     await client.close()
 ```
@@ -1478,10 +1499,11 @@ This ensures:
 from trading_api.shared.client_factory import InterModuleClients
 from trading_api.models.market.quotes import GetQuotesRequest
 
-# Singleton - safe to instantiate anywhere
-clients = InterModuleClients()
+# Create instance with caller_id for request signing
+clients = InterModuleClients(caller_id="my-provider")
 
 # Type-safe access with full IDE autocomplete
+# Requests are automatically HMAC-signed
 quotes = await clients.datafeed.getQuotes(
     body=GetQuotesRequest(symbols=["AAPL:NASDAQ:STK"])
 )
@@ -1504,19 +1526,30 @@ quotes = await clients.datafeed.getQuotes(
 
 **Note**: Environment overrides are for multi-process deployments where modules run on different hosts/ports.
 
-### Singleton Pattern
+### HMAC Request Signing
 
-`InterModuleClients` uses singleton pattern for connection pooling efficiency:
+Generated clients automatically sign all requests using HMAC-SHA256 for secure inter-module authentication:
 
-```python
-from trading_api.shared.client_factory import InterModuleClients
+**Request Headers Added:**
 
-# Safe to instantiate anywhere - always returns same instance
-clients = InterModuleClients()
+| Header                 | Description                |
+| ---------------------- | -------------------------- |
+| `X-Internal-Signature` | HMAC-SHA256 hex signature  |
+| `X-Internal-Timestamp` | Unix timestamp when signed |
+| `X-Internal-Caller`    | Module identifier          |
 
-# Reset for testing
-InterModuleClients.reset()
-```
+**Key File:** `backend/.local/secrets/hmac_internal.key`
+
+**Automatic Generation:** The key is auto-generated by Makefile targets (`make check-generate-hmac-key`) if missing.
+
+**Security Features:**
+
+- 30-second replay protection window
+- Body hash included in signature (tamper detection)
+- Timing-safe comparison prevents timing attacks
+- Safe fallback to cookie auth if key missing
+
+See [AUTHENTICATION.md](AUTHENTICATION.md#inter-module-hmac-authentication) for full details on signature format and verification.
 
 ---
 

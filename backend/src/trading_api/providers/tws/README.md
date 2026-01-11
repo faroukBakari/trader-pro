@@ -423,7 +423,7 @@ class BrokerCapability(ABC):
 - **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `req_ticker_details()`. Some features (execution simulation, P&L tracking) still use in-memory state.
 - **Session-Aware Routing**: Orders are routed via `_resolve_trading_contract()` which uses `CachedContract.build_best_contract()` to select SMART or OVERNIGHT exchange based on market hours.
 - **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. `preview_leverage()` raises `ProviderException`, but `get_leverage_info()` computes implied leverage via WhatIf margin simulation.
-- **Inter-Module Price Fetch**: `_get_symbol_price()` uses `DatafeedClient` (inter-module HTTP) instead of direct TWS calls to maintain capability isolation. Uses `shared/client_factory.py` for typed access.
+- **Inter-Module Price Fetch**: `_get_symbol_price()` uses `DatafeedClient` (inter-module HTTP) instead of direct TWS calls to maintain capability isolation. The client is instantiated once per provider with `InterModuleClients(caller_id="tws-broker-provider")` and requests are automatically HMAC-signed. See [AUTHENTICATION.md](../../../../docs/AUTHENTICATION.md#inter-module-hmac-authentication).
 - **Order Preview**: Uses TWS `whatIf` mode for real margin/commission data (see section below).
 - **Bracket Orders**: `edit_position_brackets()` implemented using OCA (One-Cancels-All) groups. Creates stop loss (STP/TRAIL) and take profit (LMT) orders linked so when one fills, TWS cancels the others.
 - **Equity Streaming**: TWS doesn't push account changes; polling via `get_equity()` is required.

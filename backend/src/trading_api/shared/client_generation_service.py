@@ -323,6 +323,7 @@ class ClientGenerationService:
                 api_prefix=settings.API_PREFIX,
                 default_port=settings.API_PORT,
                 default_timeout=settings.DEFAULT_TIMEOUT,
+                hmac_key_path=str(settings.INTERNAL_HMAC_KEY_PATH),
                 class_name=f"{module_name.capitalize()}Client",
                 operations=operations,
                 models=sorted(models),

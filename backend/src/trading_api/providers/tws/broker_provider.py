@@ -241,6 +241,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         """
         self._config = config or TWSBrokerProviderConfig()
 
+        self.inter_module_clients = InterModuleClients(caller_id="tws-broker-provider")
+
         # Layer 2: TWSClient with separate client_id
         self._tws_client = TWSClient(
             self._config.host, self._config.port, self._config.client_id
@@ -732,6 +734,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             capability="broker",
         )
 
+    # Dead code - POC for inter-module client usage
     async def _get_symbol_price(self, symbol: str) -> float:
         """Get current price for a symbol via inter-module Datafeed API.
 
@@ -745,8 +748,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             Current price (last price from quote), or 0.0 on error
         """
         try:
-            clients = InterModuleClients()
-            quotes = await clients.datafeed.getQuotes(
+            quotes = await self.inter_module_clients.datafeed.getQuotes(
                 body=GetQuotesRequest(symbols=[symbol])
             )
             if not quotes or quotes[0].s != "ok":
@@ -809,13 +811,15 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             margin_change = 0.0
 
         # Get current price for leverage calculation via inter-module API
-        current_price = await self._get_symbol_price(params.symbol)
+        current_price = (
+            tracked.order.lmtPrice
+        )  # await self._get_symbol_price(params.symbol)
 
         # Compute implied leverage: price / margin_per_share
         if margin_change > 0 and current_price > 0:
             implied_leverage = current_price / margin_change
         else:
-            implied_leverage = 2.0  # Reg T default (50% margin = 2x)
+            implied_leverage = 1.0  # Reg T default (50% margin = 2x)
 
         symbol_display = params.symbol.split(":")[0]
         return LeverageInfo(
