@@ -52,6 +52,9 @@ class BrokerApi(APIRouterInterface):
         async def placeOrder(
             order: PreOrder,
             user_data: Annotated[UserData, Depends(get_current_user)],
+            confirmId: Optional[str] = Query(
+                None, description="Confirmation ID from preview_order (for audit trail)"
+            ),
         ) -> PlaceOrderResult:
             """
             Place a new order in the trading system.
@@ -61,12 +64,15 @@ class BrokerApi(APIRouterInterface):
             Args:
                 order: Order request with symbol, type, side, quantity, and optional prices
                 user_data: Authenticated user data (injected by middleware)
+                confirmId: Optional confirmation ID from preview_order (for audit trail)
 
             Returns:
                 PlaceOrderResult: Result containing the generated order ID
             """
             # ServiceException will be handled by global exception handler
-            return await self.service.place_order(order, user_data.user_id)
+            return await self.service.place_order(
+                order, user_data.user_id, confirm_id=confirmId
+            )
 
         @self.post(
             "/orders/preview",

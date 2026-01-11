@@ -508,7 +508,6 @@ class TestApp(TestWrapper, TestClient):
         if order.whatIf:
             print(orderState)
 
-        order.contract = contract
         self.permId2ord[order.permId] = order
 
     # ! [openorder]

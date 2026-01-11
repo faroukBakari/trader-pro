@@ -15,7 +15,7 @@
 | **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket  |
 | **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry     |
 | **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)     |
-| **OrderTracker**            | `order_tracker.py`                    | Order state tracking for broker callbacks         |
+| **OrderTracker**            | `order_tracker.py`                    | Order state tracking, `clone_order()` for safe modification |
 | **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing     |
 | **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification |
 | **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings               |
@@ -422,7 +422,7 @@ class BrokerCapability(ABC):
 
 - **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `req_ticker_details()`. Some features (execution simulation, P&L tracking) still use in-memory state.
 - **Session-Aware Routing**: Orders are routed via `_resolve_trading_contract()` which uses `CachedContract.build_best_contract()` to select SMART or OVERNIGHT exchange based on market hours.
-- **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. These methods raise `ProviderException` with code `PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED`.
+- **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. `preview_leverage()` raises `ProviderException`, but `get_leverage_info()` computes implied leverage via WhatIf margin simulation.
 - **Order Preview**: Uses TWS `whatIf` mode for real margin/commission data (see section below).
 - **Bracket Orders**: `edit_position_brackets()` implemented using OCA (One-Cancels-All) groups. Creates stop loss (STP/TRAIL) and take profit (LMT) orders linked so when one fills, TWS cancels the others.
 - **Equity Streaming**: TWS doesn't push account changes; polling via `get_equity()` is required.
@@ -445,7 +445,7 @@ preview_order(PreOrder)
         │
         ├── 3. order.whatIf = True  ← Enable preview mode
         │
-        ├── 4. TWSClient.placeOrder(contract, order)
+        ├── 4. TWSClient.placeWhatifOrder(contract, order)
         │       └── Returns TrackedOrder with OrderState containing:
         │           - initMarginChange (additional margin required)
         │           - maintMarginChange (maintenance margin)
@@ -515,6 +515,52 @@ OrderPreviewResult(
 ```
 
 **Mapper:** `order_state_to_preview_result()` in `tws_mappers.py` handles the OrderState → OrderPreviewResult conversion.
+
+### Order Modification Constraints
+
+**[CRITICAL]** TWS only allows modification of specific order fields. Attempting to change other fields results in rejection.
+
+**Modifiable Fields Only:**
+
+| Field           | Type    | Notes                              |
+| --------------- | ------- | ---------------------------------- |
+| `lmtPrice`      | double  | For LMT, STP LMT, TRAIL orders     |
+| `auxPrice`      | double  | Stop/trailing price for STP, TRAIL |
+| `totalQuantity` | decimal | Can increase or decrease           |
+| `tif`           | string  | **Only DAY → IOC** is recommended  |
+
+**Implementation in `TWSClient._submit_order()`:**
+
+When modifying (orderId > 0), the method:
+1. Retrieves existing order via `OrderTracker.ensure_existing_order(orderId)`
+2. Clones original via `TrackedOrder.clone_order()` for thread safety
+3. Copies ONLY allowed fields from new order to clone
+4. Submits clone (preserving all other original fields)
+
+```python
+# In tws_connection.py - _submit_order()
+if order_id > 0:
+    tracked = self.ibsocket.order_tracker.ensure_existing_order(order_id)
+    order_ori = tracked.clone_order()  # Deep copy for thread safety
+    # Only copy allowed fields
+    if order.lmtPrice != UNSET_DOUBLE:
+        order_ori.lmtPrice = order.lmtPrice
+    if order.auxPrice != UNSET_DOUBLE:
+        order_ori.auxPrice = order.auxPrice
+    if order.totalQuantity != UNSET_DECIMAL:
+        order_ori.totalQuantity = order.totalQuantity
+    order_ori.tif = order.tif or order_ori.tif
+    order = order_ori  # Use modified clone
+```
+
+**`TrackedOrder.clone_order()` Method:**
+
+Deep copies the Order object to avoid shared mutable state between threads:
+- Shallow copies primitive fields via `__dict__.update()`
+- Recreates nested objects (`SoftDollarTier`, `OrderComboLeg`)
+- Uses `deepcopy()` for complex hierarchies (`conditions`)
+
+**Reference:** See [02-API-REFERENCE-CONTRACTS-ORDERS.md](../../external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md#32-order-modification) for official IB guidance.
 
 **Order Status Mapping:**
 

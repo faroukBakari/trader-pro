@@ -74,7 +74,6 @@ class TestApp(EClient, EWrapper):
         super().openOrder(orderId, contract, order, orderState)
         print(current_fn_name(), vars())
 
-        order.contract = contract
         self.permId2ord[order.permId] = order
 
     @iswrapper

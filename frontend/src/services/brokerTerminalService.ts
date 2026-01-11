@@ -38,7 +38,7 @@ import { ConnectionStatus, NotificationType, OrderStatus, Side, StandardFormatte
 export interface ApiInterface {
   // Order operations
   previewOrder(order: PreOrder): ApiPromise<OrderPreviewResult>
-  placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult>
+  placeOrder(order: PreOrder, confirmId?: string): ApiPromise<PlaceOrderResult>
   modifyOrder(order: Order, confirmId?: string): ApiPromise<void>
   cancelOrder(orderId: string): ApiPromise<void>
   getOrders(): ApiPromise<Order[]>
@@ -381,8 +381,8 @@ class ApiFallback implements ApiInterface {
     }
   }
 
-  async placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult> {
-    const orderId = `ORDER-${this.brokerMock.getOrders().length + 1}`
+  async placeOrder(order: PreOrder, confirmId?: string): ApiPromise<PlaceOrderResult> {
+    const orderId = confirmId ?? `ORDER-${this.brokerMock.getOrders().length + 1}`
 
     const newOrder: Order = {
       id: orderId,
@@ -921,9 +921,9 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     return response.data
   }
 
-  async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
-    const response = await this._getApiAdapter().placeOrder(order)
-    console.log(`BrokerTerminalService.placeOrder[${JSON.stringify(order)}] => `, response.data)
+  async placeOrder(order: PreOrder, confirmId?: string): Promise<PlaceOrderResult> {
+    const response = await this._getApiAdapter().placeOrder(order, confirmId)
+    console.log(`BrokerTerminalService.placeOrder[${JSON.stringify(order)}, confirmId: ${confirmId}] => `, response.data)
     return response.data
   }
 

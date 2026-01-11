@@ -41,11 +41,14 @@ class BrokerCapability(ABC):
     # =========================================================================
 
     @abstractmethod
-    async def place_order(self, order: PreOrder) -> PlaceOrderResult:
+    async def place_order(
+        self, order: PreOrder, confirm_id: str | None = None
+    ) -> PlaceOrderResult:
         """Place a new order.
 
         Args:
             order: Order request with symbol, type, side, qty, prices
+            confirm_id: Optional confirmation ID from preview (for correlation/audit)
 
         Returns:
             PlaceOrderResult with generated order ID

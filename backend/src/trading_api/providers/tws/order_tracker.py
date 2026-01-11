@@ -11,14 +11,16 @@ import asyncio
 import time
 import uuid
 from collections.abc import Callable, Coroutine
+from copy import deepcopy
 from dataclasses import dataclass, field
 from decimal import Decimal
 from itertools import count
 from typing import Any
 
 from ibapi.contract import Contract
-from ibapi.order import Order
+from ibapi.order import Order, OrderComboLeg
 from ibapi.order_state import OrderState
+from ibapi.softdollartier import SoftDollarTier
 
 from trading_api.models.exceptions import ProviderException
 
@@ -64,6 +66,35 @@ class TrackedOrder:
     order: Order
     orderState: OrderState
     fills: list[OrderFill] = field(default_factory=list)
+
+    def clone_order(self) -> Order:
+        """Deep copy Order to avoid shared references."""
+        order_copy = Order()
+        order_copy.__dict__.update(self.order.__dict__)
+
+        # Nested objects
+        order_copy.softDollarTier = SoftDollarTier(
+            self.order.softDollarTier.name,
+            self.order.softDollarTier.val,
+            self.order.softDollarTier.displayName,
+        )
+
+        # Lists (shallow copy sufficient for TagValue)
+        order_copy.algoParams = self.order.algoParams[:]
+        order_copy.smartComboRoutingParams = self.order.smartComboRoutingParams[:]
+        order_copy.orderMiscOptions = self.order.orderMiscOptions[:]
+
+        # Copy each OrderComboLeg
+        order_copy.orderComboLegs = []
+        for leg in self.order.orderComboLegs:
+            leg_copy = OrderComboLeg()
+            leg_copy.price = leg.price
+            order_copy.orderComboLegs.append(leg_copy)
+
+        # Complex hierarchy - deepcopy
+        order_copy.conditions = deepcopy(self.order.conditions)
+
+        return order_copy
 
 
 class OrderTracker:
@@ -385,4 +416,5 @@ class OrderTracker:
 
     def remove_stream_hook(self, key: str) -> None:
         """Unregister order update callback."""
+        self._stream_hooks.pop(key, None)
         self._stream_hooks.pop(key, None)
