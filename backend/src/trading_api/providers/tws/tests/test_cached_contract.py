@@ -53,7 +53,7 @@ class TestCachedContractFromContractDetails:
 
         cached = CachedContract.from_contract_details(details)
 
-        assert cached.ticker == "AAPL:NASDAQ:STK"
+        assert cached.ticker == "NASDAQ:AAPL"
 
     def test_con_id_property_returns_contract_conid(self) -> None:
         """Test con_id property returns contract.conId."""
@@ -199,7 +199,7 @@ class TestCachedContractMatches:
 
         cached = CachedContract.from_contract_details(details)
 
-        assert cached.matches("AAPL:NASDAQ:STK") is True
+        assert cached.matches("NASDAQ:AAPL") is True
 
     def test_matches_ticker_prefix(self) -> None:
         """Test matches returns True when ticker starts with cached ticker."""
@@ -209,7 +209,7 @@ class TestCachedContractMatches:
         cached = CachedContract.from_contract_details(details)
 
         # With bar size suffix
-        assert cached.matches("AAPL:NASDAQ:STK@5 mins") is True
+        assert cached.matches("NASDAQ:AAPL@5 mins") is True
 
     def test_no_match_different_symbol(self) -> None:
         """Test matches returns False for different symbol."""
@@ -218,7 +218,7 @@ class TestCachedContractMatches:
 
         cached = CachedContract.from_contract_details(details)
 
-        assert cached.matches("MSFT:NASDAQ:STK") is False
+        assert cached.matches("NASDAQ:MSFT") is False
 
     def test_no_match_different_exchange(self) -> None:
         """Test matches returns False for different exchange."""
@@ -227,4 +227,4 @@ class TestCachedContractMatches:
 
         cached = CachedContract.from_contract_details(details)
 
-        assert cached.matches("AAPL:NYSE:STK") is False
+        assert cached.matches("NYSE:AAPL") is False

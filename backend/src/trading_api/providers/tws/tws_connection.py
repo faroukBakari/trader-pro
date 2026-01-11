@@ -623,7 +623,7 @@ class IBSocket(EWrapper):
     ) -> tuple[int | None, Coroutine[Any, Any, StreamData]]:
         assert re.match(
             r"^(shared|datafeed|broker):", business_key
-        ), "ticker_name must start with capability prefix."
+        ), "business_key must start with capability prefix."
 
         req_id: int | None = None
 
@@ -653,7 +653,7 @@ class IBSocket(EWrapper):
 
         Args:
             reqId: Request ID for the stream
-            ticker_name: Human-readable ticker_name
+            business_key: Human-readable business_key
             callback: Callback for data updates (receives stream dict and updated fields)
             capability: Capability name for error routing
             on_error: Optional callback for streaming errors (receives ProviderException)
@@ -661,7 +661,7 @@ class IBSocket(EWrapper):
 
         assert re.match(
             r"^(shared|datafeed|broker):", business_key
-        ), "ticker_name must start with capability prefix."
+        ), "business_key must start with capability prefix."
 
         tws_key, req_id = self._acquire_tws_key(business_key)
 
@@ -1785,7 +1785,7 @@ class TWSClient:
 
     async def req_ticker_details(
         self,
-        ticker_name: str,
+        ticker: str,
         **kwargs: Any,
     ) -> CachedContract:
         """Get detailed symbol information.
@@ -1805,7 +1805,7 @@ class TWSClient:
             ProviderException: If symbol not found or request fails
         """
 
-        symbol, primaryExchange, sec_type, _ = parse_ticker(ticker_name)
+        symbol, primaryExchange, sec_type, _ = parse_ticker(ticker)
         contract = Contract()
         contract.symbol = symbol
         contract.secType = sec_type
@@ -1817,7 +1817,7 @@ class TWSClient:
         if not details_list:
             raise ProviderException(
                 code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
-                message=f"Symbol not found: {ticker_name}",
+                message=f"Symbol not found: {ticker}",
                 provider="tws",
                 capability="datafeed",
             )

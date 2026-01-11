@@ -18,6 +18,7 @@ from ibapi.contract import (
     DeltaNeutralContract,
 )
 from ibapi.order import Order
+from ibapi.order_state import OrderState
 from ibapi.ticktype import TickTypeEnum
 
 from trading_api.models.broker import (
@@ -90,24 +91,14 @@ def get_tick_type_name(tick_type: int) -> str:
 
 
 def ticker_name(contract: Contract, bar_size: str | None = None) -> str:
-    if not (
-        contract.symbol
-        and contract.secType
-        and (contract.primaryExchange or contract.exchange)
-    ):
+    if not (contract.symbol and (contract.primaryExchange or contract.exchange)):
         raise ProviderException(
             code="TWS_PROVIDER_INVALID_CONTRACT",
             message=f"Invalid contract for ticker generation: {contract}",
             provider="tws",
             capability="shared",
         )
-    ticker = (
-        contract.symbol
-        + ":"
-        + (contract.primaryExchange or contract.exchange)
-        + ":"
-        + contract.secType
-    )
+    ticker = (contract.primaryExchange or contract.exchange) + ":" + contract.symbol
     if bar_size:
         ticker += "@" + bar_size
     return ticker
@@ -186,7 +177,7 @@ def contract_description_to_search_result(
             provider="tws",
             capability="shared",
         )
-    ticker = symbol + ":" + exchange + ":" + contract.secType
+    ticker = ticker_name(contract)
     return SearchSymbolResultItem(
         symbol=contract.symbol,
         description=description,
@@ -487,13 +478,7 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
             details.liquidHours or details.tradingHours
         ),
         timezone=normalize_timezone(details.timeZoneId),
-        ticker=(
-            symbol
-            + ":"
-            + (contract.primaryExchange or contract.exchange)
-            + ":"
-            + contract.secType
-        ),
+        ticker=ticker_name(contract),
         exchange=contract.primaryExchange,
         listed_exchange=contract.primaryExchange,
         format="price",
@@ -639,6 +624,7 @@ def _parse_rt_volume(rt_volume_str: str | None) -> tuple[float, float, float]:
 
 def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
     business_key = rt_data.get("business_key", "UNKNOWN")
+    # FIXME: Improve ticker name extraction
     ticker_name = business_key.split(":", 3)[-1] or "UNKNOWN"
     symbol, exchange, _, _ = parse_ticker(ticker_name)
     ticker_name = ticker_name.split("@")[0]
@@ -688,31 +674,39 @@ def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
     return QuoteData(s="ok", n=ticker_name, v=quote_values)
 
 
+FOREX_CURRENCIES = {"USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD"}
+
+
+def infer_sec_type(exchange: str, symbol: str) -> str:
+    if symbol.endswith("1!"):
+        return "CONTFUT"
+    if exchange in ("IDEALPRO", "FX"):
+        return "CASH"
+    if exchange in ("PAXOS", "ZEROHASH"):
+        return "CRYPTO"
+    if len(symbol) == 6 and symbol[:3].upper() in FOREX_CURRENCIES:
+        return "CASH"  # EURUSD
+    if symbol[-3:] in ("USD", "EUR", "GBP"):
+        return "CRYPTO"
+
+    return "STK"  # Default
+
+
 def parse_ticker(ticker: str) -> tuple[str, str, str, str]:
     """Parse ticker string into components.
     Args:
         ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE"
     Returns:
         Tuple of (symbol_name, exchange, secType, bar_size)
-    Examples:
-        >>> self.parse_ticker('AAPL:NASDAQ:STK@1D')
-        ('AAPL', 'NASDAQ', 'STK', '1D')
-        >>> self.parse_ticker('GOOGL:NASDAQ:STK')
-        ('GOOGL', 'NASDAQ', 'STK', '', '')
     """
-
     ticker_parts = ticker.split(":")
+    symbol_with_bar = ticker_parts[-1].strip()
+    exchange = ticker_parts[0].strip() if len(ticker_parts) > 1 else ""
+    ticker_parts = symbol_with_bar.split("@")
     symbol_name = ticker_parts[0].strip()
-    exchange = ""
-    secType = ""
-    bar_size = ""
-    if len(ticker_parts) > 1:
-        exchange = ticker_parts[1].strip()
-    if len(ticker_parts) > 2:
-        ticker_parts = ticker_parts[2].split("@")
-        secType = ticker_parts[0].strip()
-        if len(ticker_parts) > 1:
-            bar_size = ticker_parts[1].strip()
+    bar_size = ticker_parts[1].strip() if len(ticker_parts) > 1 else ""
+
+    secType = infer_sec_type(exchange, symbol_name)
 
     if not (symbol_name and exchange and secType):
         raise ProviderException(
@@ -1156,7 +1150,7 @@ def _is_valid_commission(value: float) -> bool:
 
 
 def order_state_to_preview_result(
-    order_state: Any,
+    order_state: OrderState,
     preorder: PreOrder,
     confirm_id: str,
 ) -> OrderPreviewResult:
@@ -1348,7 +1342,7 @@ def order_state_to_preview_result(
 # =============================================================================
 
 
-def tws_position_to_domain(position_data: dict[str, Any]) -> "Position":
+def tws_position_to_domain(position_data: dict[str, Any]) -> Position:
     """Convert TWS position data dict to domain Position.
 
     Args:
@@ -1362,29 +1356,19 @@ def tws_position_to_domain(position_data: dict[str, Any]) -> "Position":
     Returns:
         Domain Position model
     """
-    from trading_api.models.broker import Position as PositionModel
-    from trading_api.models.broker import Side
 
     contract = position_data.get("contract")
     position_qty = position_data.get("position", 0)
     avg_cost = position_data.get("avgCost", 0.0)
 
     # Build symbol ticker from contract or flattened fields
-    if contract is not None:
-        symbol = ticker_name(contract)
-    else:
-        sym = position_data.get("symbol", "")
-        exc = position_data.get("exchange", "")
-        sec = position_data.get("secType", "STK")
-        if not (sym and exc and sec):
-            raise ProviderException(
-                code="TWS_PROVIDER_INVALID_TICKER",
-                message=f"Invalid ticker format: {sym}:{exc}:{sec}",
-                provider="tws",
-                capability="broker",
-            )
-        symbol = f"{sym}:{exc}:{sec}"
+    if contract is None:
+        contract = Contract()
+        contract.symbol = position_data.get("symbol", "")
+        contract.primaryExchange = position_data.get("exchange", "")
+        contract.secType = position_data.get("secType", "")
 
+    symbol = ticker_name(contract)
     # Determine side from position sign
     # Positive = long, Negative = short
     qty_float = float(position_qty)
@@ -1393,7 +1377,7 @@ def tws_position_to_domain(position_data: dict[str, Any]) -> "Position":
     # Position ID is typically the symbol
     position_id = symbol
 
-    return PositionModel(
+    return Position(
         id=position_id,
         symbol=symbol,
         qty=abs(qty_float),  # qty is always positive, side indicates direction
@@ -1404,7 +1388,7 @@ def tws_position_to_domain(position_data: dict[str, Any]) -> "Position":
 
 def tws_account_summary_to_equity(
     summary_data: dict[str, dict[str, Any]],
-) -> "EquityData":
+) -> EquityData:
     """Convert TWS account summary to domain EquityData.
 
     Args:
@@ -1426,7 +1410,6 @@ def tws_account_summary_to_equity(
         - unrealizedPL = UnrealizedPnL (from account summary)
         - realizedPL = RealizedPnL (from account summary)
     """
-    from trading_api.models.broker import EquityData as EquityDataModel
 
     def get_value(tag: str, default: float = 0.0) -> float:
         """Extract float value from summary data."""
@@ -1437,7 +1420,7 @@ def tws_account_summary_to_equity(
         except (ValueError, TypeError):
             return default
 
-    return EquityDataModel(
+    return EquityData(
         equity=get_value("NetLiquidation"),
         balance=get_value("TotalCashValue"),
         unrealizedPL=get_value("UnrealizedPnL"),

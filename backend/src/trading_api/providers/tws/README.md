@@ -94,30 +94,31 @@ callback(data) ◄────────────────────�
 
 ## 2. Ticker Naming Convention
 
-**Composite Ticker Format:**
+**Ticker Format:**
 
 ```
-{symbol}:{exchange}:{secType}-{conId}[@{bar_size}]
+{exchange}:{symbol}[@{bar_size}]
 ```
 
 **Examples:**
 
-- `"AAPL:NASDAQ:STK-12345"` - Stock ticker
-- `"AAPL:NASDAQ:STK-12345@5 mins"` - Stream key with bar size
+- `"NASDAQ:AAPL"` - Stock ticker
+- `"NASDAQ:AAPL@5 mins"` - Stream key with bar size
 
 **Functions:**
 
 ```python
-# Build stream key from contract
-from tws_mappers import ticker_name, parse_ticker, build_smart_contract
+from tws_mappers import ticker_name, parse_ticker, infer_sec_type
 
-# ticker_name(contract) → "AAPL:NASDAQ:STK-12345"
-# ticker_name(contract, "5 mins") → "AAPL:NASDAQ:STK-12345@5 mins"
+# ticker_name(contract) → "NASDAQ:AAPL"
+# ticker_name(contract, "5 mins") → "NASDAQ:AAPL@5 mins"
 
-# parse_ticker("AAPL:NASDAQ:STK-12345") → ("AAPL", "NASDAQ", "STK", 12345, None)
-# parse_ticker("AAPL:NASDAQ:STK-12345@5 mins") → ("AAPL", "NASDAQ", "STK", 12345, "5 mins")
+# parse_ticker("NASDAQ:AAPL") → ("AAPL", "NASDAQ", "STK", "")
+# parse_ticker("NASDAQ:AAPL@5 mins") → ("AAPL", "NASDAQ", "STK", "5 mins")
+# Returns: (symbol, exchange, secType, bar_size) - secType is inferred
 
-# build_smart_contract("AAPL:NASDAQ:STK-12345") → Contract(symbol="AAPL", ...)
+# infer_sec_type("NASDAQ", "AAPL") → "STK"
+# infer_sec_type("IDEALPRO", "EURUSD") → "CASH"
 ```
 
 **Usage:**
@@ -128,7 +129,35 @@ from tws_mappers import ticker_name, parse_ticker, build_smart_contract
 
 ---
 
-## 2.1 Business Key Convention
+## 2.1 Security Type Inference
+
+The `infer_sec_type()` function dynamically determines security type from exchange and symbol:
+
+```python
+from tws_mappers import infer_sec_type, FOREX_CURRENCIES
+
+# FOREX_CURRENCIES = {"USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD"}
+
+infer_sec_type("NASDAQ", "AAPL")      # → "STK" (default)
+infer_sec_type("IDEALPRO", "EURUSD")  # → "CASH" (forex exchange)
+infer_sec_type("PAXOS", "BTCUSD")     # → "CRYPTO" (crypto exchange)
+infer_sec_type("CME", "ES1!")         # → "CONTFUT" (continuous future)
+```
+
+**Detection Rules:**
+
+| Condition                              | Returns   | Example                     |
+| -------------------------------------- | --------- | --------------------------- |
+| `symbol.endswith("1!")`                | `CONTFUT` | `ES1!` → Continuous futures |
+| `exchange in ("IDEALPRO", "FX")`       | `CASH`    | Forex exchanges             |
+| `exchange in ("PAXOS", "ZEROHASH")`    | `CRYPTO`  | Crypto exchanges            |
+| 6-char symbol with forex prefix        | `CASH`    | `EURUSD`                    |
+| `symbol[-3:] in ("USD", "EUR", "GBP")` | `CRYPTO`  | `BTCUSD`                    |
+| Default                                | `STK`     | Stocks                      |
+
+---
+
+## 2.2 Business Key Convention
 
 **Business keys** are the external API for identifying requests and subscriptions. Internal TWS request IDs (`reqId`) are hidden from callers.
 
@@ -140,21 +169,21 @@ from tws_mappers import ticker_name, parse_ticker, build_smart_contract
 
 **Examples:**
 
-| Business Key                                                     | Purpose                     |
-| ---------------------------------------------------------------- | --------------------------- |
-| `shared:reqMatchingSymbols:AAPL`                                 | Symbol search request       |
-| `shared:reqContractDetails:AAPL:NASDAQ:STK-12345`                | Contract details lookup     |
-| `datafeed:Quote:SMART:AAPL:NASDAQ:STK-12345`                     | Quote stream/snapshot       |
-| `datafeed:reqBarDataStream:SMART:AAPL:NASDAQ:STK-12345@5 mins`   | Real-time bar subscription  |
-| `datafeed:reqHistoricalData:SMART:1 D:20251231:AAPL:...:@5 mins` | Historical bars request     |
-| `broker:orders`                                                  | Order subscription (future) |
+| Business Key                                                       | Purpose                     |
+| ------------------------------------------------------------------ | --------------------------- |
+| `shared:reqMatchingSymbols:AAPL`                                   | Symbol search request       |
+| `shared:reqContractDetails:ANY:NASDAQ:AAPL`                        | Contract details lookup     |
+| `datafeed:Quote:SMART:NASDAQ:AAPL`                                 | Quote stream/snapshot       |
+| `datafeed:reqBarDataStream:SMART:NASDAQ:AAPL@5 mins`               | Real-time bar subscription  |
+| `datafeed:reqHistoricalData:SMART:1 D:20251231:NASDAQ:AAPL@5 mins` | Historical bars request     |
+| `broker:orders`                                                    | Order subscription (future) |
 
 **Internal Mapping:**
 
 ```python
 # IBSocket internal mapping
 _business_to_tws_key: dict[str, str] = {
-    "datafeed:Quote:SMART:AAPL:NASDAQ:STK-12345": "req_42",
+    "datafeed:Quote:SMART:NASDAQ:AAPL": "req_42",
     "broker:orders": "order_subscription",
 }
 ```
@@ -167,69 +196,88 @@ _business_to_tws_key: dict[str, str] = {
 
 ---
 
-## 2.2 Contract Caching
+## 2.3 Contract Caching
 
 **File:** `cached_contract.py`
 
-The `CachedContract` class provides a unified cache for contract data:
+The `CachedContract` class provides a unified cache for contract data with session-aware routing:
 
 ```python
 @dataclass
 class CachedContract(ContractDetails):
-    derivativeSecTypes: list[str]  # From ContractDescription
-    has_full_details: bool         # True if from reqContractDetails
-    _ticker: str                   # Cached ticker_name string
+    derivativeSecTypes: list[str]       # From ContractDescription
+    has_full_details: bool              # True if from reqContractDetails
+    _ticker: str                        # Cached ticker_name string
+    overnight_hours: str | None = None  # Darkpool trading hours (from OVERNIGHT exchange)
 
     # Factory methods
     @staticmethod
-    def from_contract_details(details: ContractDetails) -> CachedContract
+    def from_contract_details(details: ContractDetails, overnight_hours: str | None = None) -> CachedContract
     @staticmethod
     def from_contract_description(desc: ContractDescription) -> CachedContract
 
     # Helpers
     def matches(self, ticker: str) -> bool  # Check if ticker matches this contract
-    def update_from_details(details: ContractDetails) -> None  # Upgrade partial to full
+    def update_from_details(details: ContractDetails, overnight_hours: str | None = None) -> None
+
+    # Session-aware contract builders
+    def build_best_contract(self) -> Contract      # SMART or OVERNIGHT based on session
+    def build_smart_contract(self) -> Contract | None   # Contract with SMART exchange
+    def build_darkpool_contract(self) -> Contract | None  # Contract with OVERNIGHT exchange
+
+    # Session status checks
+    def is_session_closed(self, *, reference_time=None) -> bool   # Regular session closed?
+    def is_darkpool_closed(self, *, reference_time=None) -> bool  # Overnight session closed?
 ```
 
-**TWSClient caching strategy:**
+**Session-Aware Methods:**
+
+| Method                      | Returns            | Description                                                       |
+| --------------------------- | ------------------ | ----------------------------------------------------------------- |
+| `build_best_contract()`     | `Contract`         | Returns OVERNIGHT if session closed and darkpool open, else SMART |
+| `build_smart_contract()`    | `Contract \| None` | Contract with exchange="SMART" if available in validExchanges     |
+| `build_darkpool_contract()` | `Contract \| None` | Contract with exchange="OVERNIGHT" if available (Blue Ocean ATS)  |
+| `is_session_closed()`       | `bool`             | True if regular trading hours closed (parses `tradingHours`)      |
+| `is_darkpool_closed()`      | `bool`             | True if `overnight_hours` is None or darkpool session closed      |
+
+**TWSClient Contract Resolution:**
 
 ```python
-# TWSClient - Internal cache lookup helper
-def _get_cached_contracts(
-    self,
-    ticker: str,
-    preferred_exchanges: list[str] | None = None,
-    require_full_details: bool = False,
-) -> list[CachedContract]:
-    """Get cached contracts with optional exchange filtering."""
-    cached = [
-        con for con in self.__contracts_cache.values()
-        if con.matches(ticker)
-        and (not require_full_details or con.has_full_details)
-    ]
-    # Exchange filtering with fallback to unfiltered if no match
-    if cached and preferred_exchanges and preferred_exchanges != [""]:
-        filtered = [c for c in cached if c.contract.exchange in preferred_exchanges]
-        return filtered or cached
-    return cached
+# TWSClient.reqContractDetails() - Multi-exchange resolution flow
+async def reqContractDetails(self, contract: Contract) -> list[CachedContract]:
+    # 1. Check cache by conId or ticker match
+    #    → Return immediately if has_full_details=True
 
-# TWSClient - Public method to qualify contracts (async, fetches from TWS if needed)
-async def req_ticker_details(
-    self,
-    ticker: str,
-    preferred_exchanges: list[str] = [""],
-) -> list[CachedContract]:
-    cached = self._get_cached_contracts(ticker, preferred_exchanges)
-    if cached:
-        return cached
-    # Cache miss - fetch from TWS via reqContractDetails
-    # ... (populates cache and returns qualified contracts)
+    # 2. Fetch primary details via _reqContractDetails()
+
+    # 3. If SMART available in validExchanges:
+    #    → Fetch SMART contract details
+
+    # 4. If OVERNIGHT available in validExchanges:
+    #    → Fetch OVERNIGHT contract details
+    #    → Extract overnight_hours = darkpool.tradingHours
+
+    # 5. Cache all details with overnight_hours
+    #    → _cache_details(details, overnight_hours=...)
+
+# TWSClient.req_ticker_details() - Simplified public API
+async def req_ticker_details(self, ticker: str, **kwargs) -> CachedContract:
+    """Get single CachedContract for ticker (uses parse_ticker internally)."""
+    symbol, primaryExchange, sec_type, _ = parse_ticker(ticker)
+    # ... builds Contract and delegates to reqContractDetails()
+    return next(iter(details_list))  # Returns first/best match
 ```
 
-**Cache population:**
+**Internal Methods:**
 
-- `reqMatchingSymbols()`: Populates cache from `ContractDescription` (partial)
-- `reqContractDetails()`: Upgrades cache entries to full `ContractDetails`
+- `_reqContractDetails(contract)` - Low-level TWS request (no caching logic)
+- `_cache_details(details, overnight_hours)` - Cache with overnight hours metadata
+- `_get_cached_contracts(ticker, exchange, require_full_details)` - Cache lookup helper
+
+**Cache Population:**
+
+- `reqMatchingSymbols()`: Populates cache from `ContractDescription` (partial, `has_full_details=False`)
+- `reqContractDetails()`: Upgrades cache entries to full details with overnight_hours
 
 ---
 
@@ -372,7 +420,8 @@ class BrokerCapability(ABC):
 
 **TWS-Specific Notes:**
 
-- **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `cache_contracts()`. Some features (execution simulation, P&L tracking) still use in-memory state.
+- **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `req_ticker_details()`. Some features (execution simulation, P&L tracking) still use in-memory state.
+- **Session-Aware Routing**: Orders are routed via `_resolve_trading_contract()` which uses `CachedContract.build_best_contract()` to select SMART or OVERNIGHT exchange based on market hours.
 - **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. These methods raise `ProviderException` with code `PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED`.
 - **Order Preview**: Uses TWS `whatIf` mode for real margin/commission data (see section below).
 - **Bracket Orders**: `edit_position_brackets()` implemented using OCA (One-Cancels-All) groups. Creates stop loss (STP/TRAIL) and take profit (LMT) orders linked so when one fills, TWS cancels the others.
@@ -388,7 +437,9 @@ The `preview_order()` method uses TWS's native `whatIf` mode to obtain real marg
 ```
 preview_order(PreOrder)
         │
-        ├── 1. req_ticker_details(symbol)  →  Contract
+        ├── 1. _resolve_trading_contract(symbol)
+        │       └── req_ticker_details(ticker) → CachedContract
+        │       └── cached.build_best_contract() → Contract (SMART or OVERNIGHT)
         │
         ├── 2. preorder_to_tws(order)  →  TWS Order (entry only, no brackets)
         │
@@ -402,6 +453,21 @@ preview_order(PreOrder)
         │           - warningText (TWS warnings)
         │
         └── 5. order_state_to_preview_result()  →  OrderPreviewResult
+```
+
+**Session-Aware Contract Resolution:**
+
+The `_resolve_trading_contract()` method provides automatic darkpool routing:
+
+```python
+async def _resolve_trading_contract(self, ticker: str) -> Contract:
+    """Resolve contract for current trading session.
+
+    Uses SMART by default. If regular session closed AND darkpool
+    available, opportunistically routes to OVERNIGHT exchange (Blue Ocean ATS).
+    """
+    details = await self._tws_client.req_ticker_details(ticker)
+    return details.build_best_contract()  # SMART or OVERNIGHT
 ```
 
 **Key Design Decisions:**
@@ -568,17 +634,19 @@ tracked_orders = await self._tws_client.placeOcaGroup(
 
 ### Datafeed Mappers
 
-| Function                                  | Description                                      |
-| ----------------------------------------- | ------------------------------------------------ |
-| `contract_description_to_search_result()` | `ContractDescription` → `SearchSymbolResultItem` |
-| `contract_details_to_symbol_info()`       | `ContractDetails` → `SymbolInfo`                 |
-| `tws_bar_to_domain_bar()`                 | `BarData` → `Bar` (historical)                   |
-| `tws_ticks_to_bar()`                      | `dict[str, Any]` → `Bar` (real-time)             |
-| `tws_ticks_to_quote_data()`               | `dict[str, Any]` → `QuoteData`                   |
-| `ticker_name()`                           | `Contract` → stream key string                   |
-| `parse_ticker()`                          | stream key → (symbol, exchange, secType, conId)  |
-| `build_smart_contract()`                  | ticker string → `Contract`                       |
-| `map_resolution_to_tws_bar_size()`        | `Resolution` → TWS bar size string               |
+| Function                                  | Description                                                                      |
+| ----------------------------------------- | -------------------------------------------------------------------------------- |
+| `contract_description_to_search_result()` | `ContractDescription` → `SearchSymbolResultItem`                                 |
+| `contract_details_to_symbol_info()`       | `ContractDetails` → `SymbolInfo`                                                 |
+| `tws_bar_to_domain_bar()`                 | `BarData` → `Bar` (historical)                                                   |
+| `tws_ticks_to_bar()`                      | `dict[str, Any]` → `Bar` (real-time)                                             |
+| `tws_ticks_to_quote_data()`               | `dict[str, Any]` → `QuoteData`                                                   |
+| `ticker_name()`                           | `Contract` → stream key string (`{exchange}:{symbol}[@{bar_size}]`)              |
+| `parse_ticker()`                          | stream key → `tuple[symbol, exchange, bar_size \| None]`                         |
+| `infer_sec_type()`                        | `(exchange, symbol)` → `str` (security type: STK, CASH, CRYPTO)                  |
+| `build_smart_contract()`                  | ticker string → `Contract` with `exchange="SMART"`, secType inferred dynamically |
+| `build_darkpool_contract()`               | ticker string → `Contract` with `exchange="OVERNIGHT"` for Blue Ocean ATS        |
+| `map_resolution_to_tws_bar_size()`        | `Resolution` → TWS bar size string                                               |
 
 **`contract_details_to_symbol_info()` Field Mappings:**
 
