@@ -266,7 +266,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         # Subscription management
         self._subscription_counter = 0
-        self._order_callbacks: dict[str, Callable[[PlacedOrder], Awaitable[None]]] = {}
         self._position_callbacks: dict[str, Callable[[Position], Awaitable[None]]] = {}
         self._execution_callbacks: dict[
             str, tuple[str, Callable[[Execution], Awaitable[None]]]
@@ -821,9 +820,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         else:
             implied_leverage = 1.0  # Reg T default (50% margin = 2x)
 
-        symbol_display = params.symbol.split(":")[0]
         return LeverageInfo(
-            title=f"Margin Info ({symbol_display})",
+            title=f"Margin Info ({params.symbol})",
             leverage=round(implied_leverage, 2),
             min=1.0,
             max=round(implied_leverage, 2),
@@ -831,24 +829,16 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         )
 
     async def set_leverage(self, params: LeverageSetParams) -> LeverageSetResult:
-        """Set leverage for symbol."""
-        if params.leverage < 1.0:
-            raise ProviderException(
-                code="PROVIDER_BROKER_INVALID_LEVERAGE",
-                message="Leverage must be at least 1.0",
-                provider="fakebroker",
-                capability="broker",
-            )
-        if params.leverage > 100.0:
-            raise ProviderException(
-                code="PROVIDER_BROKER_INVALID_LEVERAGE",
-                message="Leverage cannot exceed 100.0",
-                provider="fakebroker",
-                capability="broker",
-            )
+        """Set leverage.
 
-        self._leverage_settings[params.symbol] = params.leverage
-        return LeverageSetResult(leverage=params.leverage)
+        [NOT-SUPPORTED]: IBKR uses account-level margin, not per-symbol leverage.
+        """
+        raise ProviderException(
+            code="PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED",
+            message="IBKR does not support per-symbol leverage. Use account margin settings.",
+            provider="tws",
+            capability="broker",
+        )
 
     # =========================================================================
     # BrokerCapability - Streaming Methods (callback-based)
@@ -862,8 +852,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     def _start_execution_simulator_if_needed(self) -> None:
         """Start execution simulator if not running and has subscribers."""
         has_subscribers = (
-            len(self._order_callbacks) > 0
-            or len(self._position_callbacks) > 0
+            len(self._position_callbacks) > 0
             or len(self._execution_callbacks) > 0
             or len(self._equity_callbacks) > 0
         )
@@ -877,8 +866,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     def _stop_execution_simulator_if_empty(self) -> None:
         """Stop execution simulator if no more subscribers."""
         has_subscribers = (
-            len(self._order_callbacks) > 0
-            or len(self._position_callbacks) > 0
+            len(self._position_callbacks) > 0
             or len(self._execution_callbacks) > 0
             or len(self._equity_callbacks) > 0
         )
@@ -893,14 +881,21 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         callback: Callable[[PlacedOrder], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
     ) -> str:
-        """Subscribe to order updates."""
-        sub_id = self._generate_subscription_id()
-        self._order_callbacks[sub_id] = callback
-        if on_error:
-            self._error_callbacks[sub_id] = on_error
+        # Domain callback wrapper
+        async def tws_callback(tracked: TrackedOrder) -> None:
+            # Resolve contract for full symbol info
+            if tracked.order.whatIf or not tracked.order.transmit:
+                return  # Ignore whatIf orders
+            details = await self._tws_client.reqContractDetails(tracked.contract)
+            contract = next(iter(details)).contract
+            placed = tracked_order_to_placed_order(tracked, contract)
+            await callback(placed)
 
-        logger.info(f"Registered order subscription: {sub_id}")
-        self._start_execution_simulator_if_needed()
+        async def tws_on_error(exc: ProviderException) -> None:
+            if on_error:
+                await on_error(exc)
+
+        sub_id = self._tws_client.reqOrdersStream(tws_callback, tws_on_error)
 
         return sub_id
 
@@ -956,26 +951,11 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     def unsubscribe(self, subscription_id: str) -> None:
         """Unsubscribe from a stream."""
         # Remove from all callback registries
-        removed = False
 
-        if subscription_id in self._order_callbacks:
-            del self._order_callbacks[subscription_id]
-            removed = True
-        if subscription_id in self._position_callbacks:
-            del self._position_callbacks[subscription_id]
-            removed = True
-        if subscription_id in self._execution_callbacks:
-            del self._execution_callbacks[subscription_id]
-            removed = True
-        if subscription_id in self._equity_callbacks:
-            del self._equity_callbacks[subscription_id]
-            removed = True
+        self._tws_client.canced_broker_stream(subscription_id)
 
         # Remove error callback
         self._error_callbacks.pop(subscription_id, None)
-
-        if not removed:
-            logger.warning(f"Subscription ID not found: {subscription_id}")
 
         logger.info(f"Unsubscribed: {subscription_id}")
         self._stop_execution_simulator_if_empty()
@@ -1061,19 +1041,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         order.avgPrice = execution_price
         order.updateTime = execution.time
 
-        # Broadcast order update
-        await self._broadcast_order(order)
-
         # 3. Update equity (triggers position update)
         await self._update_equity(execution)
-
-    async def _broadcast_order(self, order: PlacedOrder) -> None:
-        """Broadcast order update to all subscribers."""
-        for callback in list(self._order_callbacks.values()):
-            try:
-                await callback(order)
-            except Exception as e:
-                logger.exception(f"Error in order callback: {e}")
 
     async def _broadcast_position(self, position: Position) -> None:
         """Broadcast position update to all subscribers."""
@@ -1256,7 +1225,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         )
 
         # Clear subscriptions
-        self._order_callbacks = {}
         self._position_callbacks = {}
         self._execution_callbacks = {}
         self._equity_callbacks = {}

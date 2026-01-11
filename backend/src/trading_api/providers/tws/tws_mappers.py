@@ -11,6 +11,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ibapi.common import BarData
+from ibapi.const import UNSET_DECIMAL, UNSET_DOUBLE
 from ibapi.contract import (
     Contract,
     ContractDescription,
@@ -76,6 +77,20 @@ DEFAULT_SUPPORTED_RESOLUTIONS: list[Resolution] = [
     Resolution.WEEK_1,
     Resolution.MONTH_1,
 ]
+
+
+def isUnset(value: Any) -> bool:
+    """Check if a TWS value is considered 'unset' (default/placeholder)."""
+    if value is None:
+        return True
+    if isinstance(value, (int, float)) and value == UNSET_DOUBLE:
+        return True
+    if isinstance(value, Decimal) and value == UNSET_DECIMAL:
+        return True
+    if isinstance(value, str) and value == "":
+        return True
+    return False
+
 
 get_tick_type_name_ = TickTypeEnum.idx2name.get
 
@@ -1098,7 +1113,7 @@ def tracked_order_to_placed_order(
         stop_price = order.auxPrice
 
     # Filled quantity from order object (mutated by orderStatus callback)
-    filled_qty = float(order.filledQuantity) if order.filledQuantity else 0.0
+    filled_qty = 0.0 if isUnset(order.filledQuantity) else float(order.filledQuantity)
 
     # Average fill price from fills history (last fill's avgFillPrice)
     avg_price: float | None = None
