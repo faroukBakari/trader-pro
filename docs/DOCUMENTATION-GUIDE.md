@@ -536,7 +536,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TWS API Integration
 
-**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSDatafeedProvider, TWSBrokerProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, business key, stream data, StreamData, CachedContract, OrderTracker, AssetConfig, Resolution enum, ticker naming convention, snapshot pattern, stream pattern, overnight_hours, darkpool, Blue Ocean ATS, build_best_contract, is_session_closed, is_darkpool_closed, infer_sec_type, FOREX_CURRENCIES, req_ticker_details, \_resolve_trading_contract, session-aware routing
+**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSDatafeedProvider, TWSBrokerProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, business key, stream data, StreamData, CachedContract, OrderTracker, AssetConfig, Resolution enum, ticker naming convention, snapshot pattern, stream pattern, overnight_hours, darkpool, Blue Ocean ATS, build_best_contract, is_session_closed, is_darkpool_closed, infer_sec_type, FOREX_CURRENCIES, req_ticker_details, \_resolve_trading_contract, session-aware routing, bracket grouping, OCA pattern, parse_bracket_oca, \_group_orders_by_bracket, ParentType, BracketContext, tracked_order_to_placed_order
 
 **Scope**: Interactive Brokers TWS API integration  
 **Out of Scope**: Other broker APIs, custom trading protocols
@@ -548,6 +548,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
   - CachedContract for contract caching with lazy upgrade pattern and session-aware methods
   - Snapshot/stream pattern separation, domain mappers, testing patterns
   - Session-aware routing: `build_best_contract()`, `overnight_hours`, darkpool support
+  - Bracket order grouping: `_group_orders_by_bracket()`, OCA pattern parsing, parent/child enrichment
 - **backend/external_packages/tws/docs/README.md** - TWS API documentation index (includes local modifications)
 - **backend/external_packages/tws/docs/06-SETUP-GUIDE.md** - TWS/Gateway installation and configuration
 - **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md** - Connection management, threading, error handling
@@ -590,6 +591,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2026-01-11**: TWS Bracket order grouping - Updated TWS README.md (bracket order grouping helpers, OCA naming convention, get_orders enrichment, parse_bracket_oca utility, preview_order error propagation), broker module README.md (bracket relationship handling), DOCUMENTATION-GUIDE.md (TWS keywords)
 - **2026-01-07**: SymbolInfo/DatafeedConfiguration enhancement - Updated datafeed README.md (quote deduplication pattern, enhanced SymbolInfo fields table, quote-specific error handling), TWS README.md (contract_details_to_symbol_info() field mappings, SymbolInfo priority fields), DOCUMENTATION-GUIDE.md (TradingView keywords)
 - **2026-01-02**: Documentation assessment wave execution - Created broker/README.md and datafeed/README.md (BFF pattern, WebSocket topics, provider delegation), fixed BROKER-ARCHITECTURE.md (renamed to Fakebroker, updated class names), updated SPECS_AND_CLIENT_GEN.md (versioned file naming), FULLSTACK-DEV-MODE.md (per-module watching), CLIENT-GENERATION.md (deprecated commands), TESTING.md (provider testing section), frontend README.md (routes), BROKER-INTEGRATION.md (Phase 5 status), MODULAR_BACKEND_ARCHITECTURE.md (get_capability_provider method)
 - **2026-01-02**: TWS Provider major refactoring documentation - Updated TWS README.md (business key system, StreamData dataclass, CachedContract caching, snapshot/stream pattern separation, error routing with tws_key), PROVIDER-SYSTEM.md (BrokerCapability stub notes), DOCUMENTATION-GUIDE.md (keywords, dependencies)
@@ -623,5 +625,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: January 7, 2026  
+**Last Updated**: January 11, 2026  
 **Maintained by**: Development Team
