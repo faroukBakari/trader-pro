@@ -145,7 +145,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         available, opportunistically routes to OVERNIGHT exchange.
 
         Args:
-            ticker: Symbol ticker (e.g., "AAPL:SMART:STK")
+            ticker: Symbol ticker (e.g., "NASDAQ:AAPL")
 
         Returns:
             Contract suitable for current trading session
@@ -338,7 +338,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         contract = await self._resolve_trading_contract(position.symbol)
 
         # Generate unique OCA group name for this position's brackets
-        oca_group = f"bracket_{position_id}"
+        oca_group = f"brackets_{position_id}"
 
         # Place all bracket orders via OCA group (atomic submission)
         await self._tws_client.placeOcaGroup(

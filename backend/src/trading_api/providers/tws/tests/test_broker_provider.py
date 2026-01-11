@@ -6,7 +6,7 @@ Tests cover:
 - Order operations: place_order, cancel_order, modify_order
 
 Note: All tests mock TWSClient to avoid real TWS connections.
-Note: PreOrder.symbol uses composite ticker format (e.g., "AAPL:NASDAQ:STK").
+Note: PreOrder.symbol uses composite ticker format (e.g., "NASDAQ:AAPL").
 """
 
 from decimal import Decimal
@@ -198,7 +198,7 @@ class TestPlaceOrder:
     ) -> None:
         """Test place_order returns PlaceOrderResult with order ID."""
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.MARKET,
             qty=100.0,
@@ -215,7 +215,7 @@ class TestPlaceOrder:
     ) -> None:
         """Test place_order calls req_ticker_details with symbol."""
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.MARKET,
             qty=100.0,
@@ -225,7 +225,7 @@ class TestPlaceOrder:
 
         mock_client.req_ticker_details.assert_called_once()
         call_args = mock_client.req_ticker_details.call_args
-        assert call_args[0][0] == "AAPL:NASDAQ:STK"
+        assert call_args[0][0] == "NASDAQ:AAPL"
 
     @pytest.mark.asyncio
     async def test_place_order_calls_place_order_group(
@@ -233,7 +233,7 @@ class TestPlaceOrder:
     ) -> None:
         """Test place_order calls placeOrderGroup with correct args."""
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -267,7 +267,7 @@ class TestPlaceOrder:
     ) -> None:
         """Test place_order correctly converts stop order."""
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.SELL,
             type=OrderType.STOP,
             qty=50.0,
@@ -328,7 +328,7 @@ class TestPlaceOrderWithBrackets:
     ) -> None:
         """Test place_order with brackets passes child orders to placeOrderGroup."""
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -351,7 +351,7 @@ class TestPlaceOrderWithBrackets:
     ) -> None:
         """Test place_order with brackets returns parent order ID."""
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -371,7 +371,7 @@ class TestPlaceOrderWithBrackets:
     ) -> None:
         """Test placed bracket orders can be retrieved via get_orders."""
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -405,7 +405,7 @@ class TestPlaceOrderWithBrackets:
         )
 
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.MARKET,
             qty=100.0,
@@ -430,7 +430,7 @@ class TestPlaceOrderWithBrackets:
         )
 
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.MARKET,
             qty=100.0,
@@ -476,7 +476,7 @@ class TestModifyOrder:
     ) -> None:
         """Test modify_order passes existing order ID to placeOrderGroup."""
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -497,7 +497,7 @@ class TestModifyOrder:
         """Test modify_order updates the order via TWS."""
         # First place an order
         place_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -516,7 +516,7 @@ class TestModifyOrder:
 
         # Modify with new price
         modify_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -569,7 +569,7 @@ class TestModifyOrderWithBrackets:
     ) -> None:
         """Test modify_order with brackets creates new child orders."""
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -682,7 +682,7 @@ class TestResolveTradingContract:
 
         mock_client.req_ticker_details = AsyncMock(return_value=session_details)
 
-        result = await provider._resolve_trading_contract("AAPL:NASDAQ:STK")
+        result = await provider._resolve_trading_contract("NASDAQ:AAPL")
 
         assert result.exchange == "SMART"
 
@@ -707,7 +707,7 @@ class TestResolveTradingContract:
 
         mock_client.req_ticker_details = AsyncMock(return_value=session_details)
 
-        result = await provider._resolve_trading_contract("AAPL:NASDAQ:STK")
+        result = await provider._resolve_trading_contract("NASDAQ:AAPL")
 
         assert result.exchange == "OVERNIGHT"
 
@@ -726,7 +726,7 @@ class TestResolveTradingContract:
 
         mock_client.req_ticker_details = AsyncMock(return_value=session_details)
 
-        result = await provider._resolve_trading_contract("AAPL:NASDAQ:STK")
+        result = await provider._resolve_trading_contract("NASDAQ:AAPL")
 
         # Should fall back to SMART
         assert result.exchange == "SMART"
@@ -740,14 +740,14 @@ class TestResolveTradingContract:
         mock_client.req_ticker_details = AsyncMock(
             side_effect=ProviderException(
                 code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
-                message="Symbol not found: INVALID:EXCHANGE:STK",
+                message="Symbol not found: EXCHANGE:INVALID",
                 provider="tws",
                 capability="datafeed",
             )
         )
 
         with pytest.raises(ProviderException) as exc_info:
-            await provider._resolve_trading_contract("INVALID:EXCHANGE:STK")
+            await provider._resolve_trading_contract("EXCHANGE:INVALID")
 
         assert "SYMBOL_NOT_FOUND" in str(exc_info.value.code)
 
@@ -795,7 +795,7 @@ class TestEditPositionBrackets:
             # Add a test position for bracket operations
             provider._positions["pos_123"] = Position(
                 id="pos_123",
-                symbol="AAPL:NASDAQ:STK",
+                symbol="NASDAQ:AAPL",
                 side=Side.BUY,
                 qty=100.0,
                 avgPrice=150.00,
@@ -834,7 +834,7 @@ class TestEditPositionBrackets:
         # Should have 2 orders: stop loss + take profit
         assert len(orders) == 2
         # OCA group should contain position ID
-        assert oca_group == "bracket_pos_123"
+        assert oca_group == "brackets_pos_123"
         # OCA type should be CANCEL_WITH_BLOCK (1)
         assert oca_type == 1
 
@@ -970,7 +970,7 @@ class TestPreviewOrder:
         mock_client.placeOrder = AsyncMock(return_value=tracked)
 
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -1000,7 +1000,7 @@ class TestPreviewOrder:
         mock_client.placeOrder = AsyncMock(return_value=tracked)
 
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -1034,7 +1034,7 @@ class TestPreviewOrder:
         mock_client.placeOrder = AsyncMock(return_value=tracked)
 
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.MARKET,
             qty=100.0,
@@ -1054,7 +1054,7 @@ class TestPreviewOrder:
         mock_client.placeOrder = AsyncMock(side_effect=Exception("TWS connection lost"))
 
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -1087,14 +1087,14 @@ class TestPreviewOrder:
         mock_client.req_ticker_details = AsyncMock(
             side_effect=ProviderException(
                 code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
-                message="Symbol not found: INVALID:EXCHANGE:STK",
+                message="Symbol not found: EXCHANGE:INVALID",
                 provider="tws",
                 capability="datafeed",
             )
         )
 
         pre_order = PreOrder(
-            symbol="INVALID:EXCHANGE:STK",
+            symbol="EXCHANGE:INVALID",
             side=Side.BUY,
             type=OrderType.MARKET,
             qty=100.0,
@@ -1115,7 +1115,7 @@ class TestPreviewOrder:
         mock_client.placeOrder = AsyncMock(return_value=tracked)
 
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,
@@ -1145,7 +1145,7 @@ class TestPreviewOrder:
         mock_client.placeOrder = AsyncMock(return_value=tracked)
 
         pre_order = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             side=Side.BUY,
             type=OrderType.LIMIT,
             qty=100.0,

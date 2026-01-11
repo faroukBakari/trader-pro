@@ -435,7 +435,7 @@ class TestTWSClientReqContractDetails:
         cached_contract = CachedContract.from_contract_details(details)
         client._TWSClient__contracts_cache[265598] = cached_contract  # type: ignore[attr-defined]
 
-        # Query with matching ticker (AAPL:SMART:STK)
+        # Query with matching ticker (SMART:AAPL)
         query_contract = Contract()
         query_contract.symbol = "AAPL"
         query_contract.secType = "STK"

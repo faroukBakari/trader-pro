@@ -523,7 +523,7 @@ class TestTwsTicksToQuoteData:
     def test_complete_quote_mapping(self) -> None:
         """Test mapping complete tick data to QuoteData."""
         rt_data = {
-            "business_key": "datafeed:Quote:SMART:AAPL:NASDAQ:STK-12345",
+            "business_key": "datafeed:Quote:SMART:NASDAQ:AAPL",
             "bid": 150.25,
             "ask": 150.30,
             "last": 150.28,
@@ -537,7 +537,7 @@ class TestTwsTicksToQuoteData:
         result = tws_ticks_to_quote_data(rt_data)
 
         assert result.s == "ok"
-        assert result.n == "AAPL:NASDAQ:STK-12345"
+        assert result.n == "NASDAQ:AAPL"
         assert isinstance(result.v, QuoteValues)
         assert result.v.bid == 150.25
         assert result.v.ask == 150.30
@@ -548,7 +548,7 @@ class TestTwsTicksToQuoteData:
     def test_rt_volume_fallback_for_last_price(self) -> None:
         """Test rt_trd_volume provides fallback when 'last' tick missing."""
         rt_data = {
-            "business_key": "datafeed:Quote:SMART:GOOGL:NASDAQ:STK",
+            "business_key": "datafeed:Quote:SMART:NASDAQ:GOOGL",
             "bid": 320.55,
             "ask": 320.78,
             "rt_trd_volume": "320.64;1.0;1765200318856;4027.0;320.359;true",
@@ -564,7 +564,7 @@ class TestTwsTicksToQuoteData:
     def test_missing_values_default_to_zero(self) -> None:
         """Test missing tick values default to zero."""
         rt_data: dict[str, object] = {
-            "business_key": "datafeed:Quote:SMART:TEST:SMART:STK-0",
+            "business_key": "datafeed:Quote:SMART:SMART:TEST",
         }
 
         result = tws_ticks_to_quote_data(rt_data)
@@ -613,7 +613,7 @@ class TestPreorderToTws:
     def test_market_order(self) -> None:
         """Test converting a market buy order."""
         preorder = PreOrder(
-            symbol="AAPL:NASDAQ:STK-12345",
+            symbol="NASDAQ:AAPL",
             type=OrderType.MARKET,
             side=Side.BUY,
             qty=100,
@@ -631,7 +631,7 @@ class TestPreorderToTws:
     def test_limit_order_with_price(self) -> None:
         """Test converting a limit sell order."""
         preorder = PreOrder(
-            symbol="MSFT:NASDAQ:STK",
+            symbol="NASDAQ:MSFT",
             type=OrderType.LIMIT,
             side=Side.SELL,
             qty=50,
@@ -647,7 +647,7 @@ class TestPreorderToTws:
     def test_stop_limit_order(self) -> None:
         """Test converting a stop-limit order."""
         preorder = PreOrder(
-            symbol="TSLA:NASDAQ:STK",
+            symbol="NASDAQ:TSLA",
             type=OrderType.STOP_LIMIT,
             side=Side.BUY,
             qty=10,
@@ -664,7 +664,7 @@ class TestPreorderToTws:
     def test_bracket_order_with_stop_and_take_profit(self) -> None:
         """Test converting order with both stop loss and take profit."""
         preorder = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             type=OrderType.LIMIT,
             side=Side.BUY,
             qty=100,
@@ -688,7 +688,7 @@ class TestPreorderToTws:
     def test_trailing_stop_orde(self) -> None:
         """Test converting order with trailing stop."""
         preorder = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             type=OrderType.LIMIT,
             side=Side.BUY,
             qty=100,
@@ -706,7 +706,7 @@ class TestPreorderToTws:
     def test_guaranteed_stop_raises_exception(self) -> None:
         """Test that guaranteed stop raises ProviderException."""
         preorder = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             type=OrderType.LIMIT,
             side=Side.BUY,
             qty=100,
@@ -979,7 +979,7 @@ class TestOrderStateToPreviewResult:
         """Test OrderPreviewResult has required sections."""
         order_state = self._make_order_state()
         preorder = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             type=OrderType.LIMIT,
             side=Side.BUY,
             qty=100,
@@ -998,7 +998,7 @@ class TestOrderStateToPreviewResult:
         """Test Risk Management section included for bracket orders."""
         order_state = self._make_order_state()
         preorder = PreOrder(
-            symbol="AAPL:NASDAQ:STK",
+            symbol="NASDAQ:AAPL",
             type=OrderType.LIMIT,
             side=Side.BUY,
             qty=100,
@@ -1016,7 +1016,7 @@ class TestOrderStateToPreviewResult:
         """Test TWS warnings are included."""
         order_state = self._make_order_state(warning_text="Order requires margin")
         preorder = PreOrder(
-            symbol="AAPL:NASDAQ:STK", type=OrderType.MARKET, side=Side.BUY, qty=100
+            symbol="NASDAQ:AAPL", type=OrderType.MARKET, side=Side.BUY, qty=100
         )
 
         result = order_state_to_preview_result(order_state, preorder, "test-123")
@@ -1028,7 +1028,7 @@ class TestOrderStateToPreviewResult:
         """Test TWS reject reasons are included as errors."""
         order_state = self._make_order_state(reject_reason="Insufficient funds")
         preorder = PreOrder(
-            symbol="AAPL:NASDAQ:STK", type=OrderType.MARKET, side=Side.BUY, qty=100
+            symbol="NASDAQ:AAPL", type=OrderType.MARKET, side=Side.BUY, qty=100
         )
 
         result = order_state_to_preview_result(order_state, preorder, "test-123")

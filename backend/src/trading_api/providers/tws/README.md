@@ -710,7 +710,7 @@ _stream_hooks: dict[str, list[tuple[loop, callback, on_error]]] = {}  # tws_key 
 ```python
 # Example: Quote stream data
 stream[-1] = {
-    "business_key": "datafeed:Quote:SMART:AAPL:NASDAQ:STK-12345",
+    "business_key": "datafeed:Quote:SMART:NASDAQ:AAPL",
     "bid": 150.25,
     "ask": 150.30,
     "last": 150.27,
@@ -1145,11 +1145,11 @@ for stream_loop, _, on_error in stream_hooks:
 ```python
 # For async methods like reqQuoteSnapshot
 mock_client = AsyncMock()
-mock_client.reqQuoteSnapshot.return_value = {"ticker_name": "AAPL:NASDAQ:STK-12345"}
+mock_client.reqQuoteSnapshot.return_value = {"ticker_name": "NASDAQ:AAPL"}
 
 # For sync methods that return stream keys
 mock_client = Mock()
-mock_client.reqBarDataStream = Mock(return_value="AAPL:NASDAQ:STK-12345@5 mins")
+mock_client.reqBarDataStream = Mock(return_value="NASDAQ:AAPL@5 mins")
 
 # Mock IBSocket for TWSClient tests
 mock_ibsocket = Mock()
