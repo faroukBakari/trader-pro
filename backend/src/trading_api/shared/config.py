@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     DEFAULT_TIMEOUT: float = 30.0
 
+    # Inter-module HMAC authentication
+    INTERNAL_HMAC_KEY_PATH: Path = Path(".local/secrets/hmac_internal.key")
+    INTERNAL_SIGNATURE_TTL_SECONDS: int = 30  # Replay protection window
+
     model_config = SettingsConfigDict(env_file=".env.local", env_file_encoding="utf-8")
 
     @model_validator(mode="after")
@@ -32,6 +36,7 @@ class Settings(BaseSettings):
             project_root = Path(__file__).resolve().parent.parent.parent.parent
             self.JWT_PRIVATE_KEY_PATH = project_root / self.JWT_PRIVATE_KEY_PATH
             self.JWT_PUBLIC_KEY_PATH = project_root / self.JWT_PUBLIC_KEY_PATH
+            self.INTERNAL_HMAC_KEY_PATH = project_root / self.INTERNAL_HMAC_KEY_PATH
         return self
 
     @property
@@ -41,6 +46,13 @@ class Settings(BaseSettings):
     @property
     def jwt_public_key(self) -> str:
         return self.JWT_PUBLIC_KEY_PATH.read_text()
+
+    @property
+    def internal_hmac_key(self) -> bytes:
+        """Load HMAC key for inter-module auth. Empty bytes if file missing."""
+        if self.INTERNAL_HMAC_KEY_PATH.exists():
+            return self.INTERNAL_HMAC_KEY_PATH.read_bytes()
+        return b""  # Empty = feature disabled
 
 
 settings = Settings()

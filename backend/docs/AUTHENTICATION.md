@@ -19,10 +19,11 @@
 7. [Shared Middleware](#shared-middleware)
 8. [Frontend Integration](#frontend-integration)
 9. [WebSocket Authentication](#websocket-authentication)
-10. [Security Considerations](#security-considerations)
-11. [Testing](#testing)
-12. [Production Migration](#production-migration)
-13. [Troubleshooting](#troubleshooting)
+10. [Inter-Module HMAC Authentication](#inter-module-hmac-authentication)
+11. [Security Considerations](#security-considerations)
+12. [Testing](#testing)
+13. [Production Migration](#production-migration)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -451,6 +452,116 @@ const ws = new WebSocket("ws://localhost:8000/api/v1/broker/ws");
 - No manual handling (browser manages cookies)
 - Same security as REST (HttpOnly cookies)
 - Auto-reconnection uses same mechanism
+
+---
+
+## Inter-Module HMAC Authentication
+
+**Added:** January 2026
+
+For secure inter-module HTTP calls (when modules run as separate processes), requests are signed using HMAC-SHA256 with replay protection.
+
+### Overview
+
+| Feature               | Description                                   |
+| --------------------- | --------------------------------------------- |
+| **Algorithm**         | HMAC-SHA256                                   |
+| **Replay Protection** | 30-second TTL window                          |
+| **Key Storage**       | `backend/.local/secrets/hmac_internal.key`    |
+| **Fallback**          | Cookie-based JWT if signature invalid/missing |
+
+### Signature Format
+
+```
+HMAC-SHA256(timestamp|caller_id|method|url|body_hash)
+```
+
+Where:
+
+- `timestamp`: Unix timestamp (seconds)
+- `caller_id`: Module identifier (e.g., "broker", "datafeed")
+- `method`: HTTP method (GET, POST, etc.)
+- `url`: Full request URL
+- `body_hash`: SHA256 hex digest of request body (or empty body)
+
+### Request Headers
+
+| Header                 | Description                |
+| ---------------------- | -------------------------- |
+| `X-Internal-Signature` | HMAC-SHA256 hex signature  |
+| `X-Internal-Timestamp` | Unix timestamp when signed |
+| `X-Internal-Caller`    | Module identifier          |
+
+### Generated Client Usage
+
+Auto-generated clients automatically sign all requests:
+
+```python
+from trading_api.modules.datafeed.client_generated import DatafeedClient
+
+# caller_id is required - identifies the calling module
+client = DatafeedClient(caller_id="broker")
+
+# Requests are automatically signed with HMAC
+symbols = await client.get_symbols()
+```
+
+### Middleware Integration
+
+The `get_current_user()` middleware checks for HMAC signatures **before** cookie auth:
+
+```python
+async def get_current_user(request: Request) -> UserData:
+    # 1. Check internal signature headers
+    signature = request.headers.get("X-Internal-Signature")
+    timestamp = request.headers.get("X-Internal-Timestamp")
+    caller_id = request.headers.get("X-Internal-Caller")
+
+    if signature and timestamp and caller_id and settings.internal_hmac_key:
+        if verify_signature(...):
+            return INTERNAL_USER  # Pre-defined service account
+
+    # 2. Fall back to cookie-based JWT auth
+    token = request.cookies.get("access_token")
+    ...
+```
+
+### Key Generation
+
+```bash
+# Automatic (via Makefile dependency)
+make -C backend check-generate-hmac-key
+
+# Manual
+mkdir -p backend/.local/secrets
+openssl rand -hex 32 > backend/.local/secrets/hmac_internal.key
+chmod 600 backend/.local/secrets/hmac_internal.key
+```
+
+### Configuration
+
+```python
+# backend/src/trading_api/shared/config.py
+INTERNAL_HMAC_KEY_PATH: Path = Path(".local/secrets/hmac_internal.key")
+INTERNAL_SIGNATURE_TTL_SECONDS: int = 30  # Replay protection window
+```
+
+### Security Notes
+
+1. **Replay Protection**: Requests older than 30 seconds are rejected
+2. **Timing-Safe Comparison**: Uses `hmac.compare_digest()` to prevent timing attacks
+3. **Body Integrity**: Body hash prevents request tampering
+4. **Safe Fallback**: Missing/empty key file disables feature (falls back to JWT)
+5. **Shared Secret**: Key must be available on all service instances
+
+### Behavior Matrix
+
+| HMAC Key   | Signature Headers | Signature Valid | Result                    |
+| ---------- | ----------------- | --------------- | ------------------------- |
+| ✅ Present | ✅ Present        | ✅ Valid        | Returns `INTERNAL_USER`   |
+| ✅ Present | ✅ Present        | ❌ Invalid      | Falls back to cookie auth |
+| ✅ Present | ❌ Missing        | -               | Falls back to cookie auth |
+| ❌ Missing | Any               | -               | Falls back to cookie auth |
 
 ---
 

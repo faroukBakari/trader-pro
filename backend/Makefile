@@ -421,12 +421,12 @@ install-ci:
 	@bash ./scripts/regenerate_tws_protobufs.sh
 	@echo "✅ CI installation complete!"
 
-test-boundaries: check-generate-keypair
+test-boundaries: check-generate-keypair check-generate-hmac-key
 	@echo "Running root-level tests..."
 	poetry run pytest tests/ -v --ignore=tests/integration/ $(ARGS)
 
 # Provider core tests (registry, capability spec)
-test-providers-core: check-generate-keypair
+test-providers-core: check-generate-keypair check-generate-hmac-key
 	@echo "Running provider core tests..."
 	poetry run pytest src/trading_api/providers/tests/ -v $(ARGS)
 
@@ -453,7 +453,7 @@ test-providers: test-providers-core
 		done; \
 	fi
 
-test-modules: check-generate-keypair
+test-modules: check-generate-keypair check-generate-hmac-key
 	@echo "Running module tests..."
 	@if [ -z "$(SELECTED_MODULES)" ]; then \
 		echo "⚠️  No modules selected or found"; \
@@ -505,7 +505,7 @@ $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)): test-provider-%:
 		echo "⚠️  No tests found for provider: $*"; \
 	fi
 
-test-integration: check-generate-keypair
+test-integration: check-generate-keypair check-generate-hmac-key
 	@echo "Running integration tests..."
 	poetry run pytest tests/integration/ -v -x -m integration $(ARGS)
 
@@ -513,7 +513,7 @@ test: test-boundaries test-providers test-modules test-integration
 	@echo "✅ All tests passed (boundaries + providers + modules + integration)"
 
 # Coverage targets
-test-cov: check-generate-keypair test-boundaries
+test-cov: check-generate-keypair check-generate-hmac-key test-boundaries
 	@echo "Running all tests with coverage..."
 	@poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
 	@echo ""
@@ -864,4 +864,17 @@ check-generate-keypair: ## Check and generate JWT key pair if missing
 		echo "  JWT_PRIVATE_KEY_PATH=backend/.local/secrets/jwt_private.pem"; \
 		echo "  JWT_PUBLIC_KEY_PATH=backend/.local/secrets/jwt_public.pem"; \
 		echo "  ACCESS_TOKEN_EXPIRE_MINUTES=5"; \
+	fi
+
+# HMAC Key Management (for inter-module authentication)
+HMAC_KEY_PATH := $(SECRETS_DIR)/hmac_internal.key
+
+.PHONY: check-generate-hmac-key
+check-generate-hmac-key: ## Check and generate HMAC key if missing
+	@if [ ! -f "$(HMAC_KEY_PATH)" ]; then \
+		echo "🔐 Generating HMAC key for inter-module auth..."; \
+		mkdir -p $(SECRETS_DIR); \
+		openssl rand -hex 32 > "$(HMAC_KEY_PATH)"; \
+		chmod 600 "$(HMAC_KEY_PATH)"; \
+		echo "✓ HMAC key generated at $(HMAC_KEY_PATH)"; \
 	fi

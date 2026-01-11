@@ -6,8 +6,9 @@ Cookie-only authentication for REST endpoints.
 Follows strict typing rules - no type: ignore comments.
 """
 
+import time
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -16,8 +17,11 @@ from starlette.datastructures import Address, Headers, QueryParams
 
 from trading_api.shared import settings
 from trading_api.shared.middleware.auth import (
+    INTERNAL_USER,
+    compute_signature,
     extract_device_fingerprint,
     get_current_user,
+    verify_signature,
 )
 
 
@@ -321,3 +325,217 @@ class TestTokenValidationEdgeCases:
 
         assert exc_info.value.status_code == 401
         assert "Invalid token payload" in exc_info.value.detail
+
+
+class TestComputeSignature:
+    """Tests for HMAC signature computation"""
+
+    def test_compute_signature_deterministic(self) -> None:
+        """Test that same inputs produce same signature"""
+        hmac_key = b"test-secret-key"
+        timestamp = "1234567890"
+        caller_id = "broker"
+        method = "POST"
+        url = "http://localhost:8000/api/v1/datafeed/symbols"
+        body = b'{"symbol": "AAPL"}'
+
+        sig1 = compute_signature(hmac_key, timestamp, caller_id, method, url, body)
+        sig2 = compute_signature(hmac_key, timestamp, caller_id, method, url, body)
+
+        assert sig1 == sig2
+        assert len(sig1) == 64  # SHA256 hex = 64 chars
+
+    def test_compute_signature_different_body_produces_different_signature(
+        self,
+    ) -> None:
+        """Test that different body produces different signature"""
+        hmac_key = b"test-secret-key"
+        timestamp = "1234567890"
+        caller_id = "broker"
+        method = "POST"
+        url = "http://localhost:8000/api/v1/datafeed/symbols"
+
+        sig1 = compute_signature(
+            hmac_key, timestamp, caller_id, method, url, b'{"symbol": "AAPL"}'
+        )
+        sig2 = compute_signature(
+            hmac_key, timestamp, caller_id, method, url, b'{"symbol": "GOOGL"}'
+        )
+
+        assert sig1 != sig2
+
+    def test_compute_signature_handles_none_body(self) -> None:
+        """Test that None body is handled correctly"""
+        hmac_key = b"test-secret-key"
+        sig = compute_signature(
+            hmac_key, "1234567890", "broker", "GET", "http://localhost/", None
+        )
+        assert len(sig) == 64
+
+
+class TestVerifySignature:
+    """Tests for HMAC signature verification"""
+
+    def test_verify_signature_valid(self) -> None:
+        """Test that valid signature verifies successfully"""
+        hmac_key = b"test-secret-key"
+        timestamp = str(int(time.time()))
+        caller_id = "broker"
+        method = "POST"
+        url = "http://localhost:8000/api/v1/datafeed/symbols"
+        body = b'{"symbol": "AAPL"}'
+
+        signature = compute_signature(hmac_key, timestamp, caller_id, method, url, body)
+        result = verify_signature(
+            hmac_key, signature, timestamp, caller_id, method, url, body, ttl_seconds=30
+        )
+
+        assert result is True
+
+    def test_verify_signature_invalid_tampered(self) -> None:
+        """Test that tampered signature fails verification"""
+        hmac_key = b"test-secret-key"
+        timestamp = str(int(time.time()))
+        caller_id = "broker"
+        method = "POST"
+        url = "http://localhost:8000/api/v1/datafeed/symbols"
+        body = b'{"symbol": "AAPL"}'
+
+        signature = compute_signature(hmac_key, timestamp, caller_id, method, url, body)
+        # Tamper with signature
+        tampered_sig = signature[:-4] + "0000"
+
+        result = verify_signature(
+            hmac_key,
+            tampered_sig,
+            timestamp,
+            caller_id,
+            method,
+            url,
+            body,
+            ttl_seconds=30,
+        )
+
+        assert result is False
+
+    def test_verify_signature_expired_timestamp(self) -> None:
+        """Test that expired timestamp fails verification (replay protection)"""
+        hmac_key = b"test-secret-key"
+        old_timestamp = str(int(time.time()) - 60)  # 60 seconds ago
+        caller_id = "broker"
+        method = "GET"
+        url = "http://localhost:8000/api/v1/datafeed/symbols"
+        body = None
+
+        signature = compute_signature(
+            hmac_key, old_timestamp, caller_id, method, url, body
+        )
+        result = verify_signature(
+            hmac_key,
+            signature,
+            old_timestamp,
+            caller_id,
+            method,
+            url,
+            body,
+            ttl_seconds=30,
+        )
+
+        assert result is False
+
+    def test_verify_signature_invalid_timestamp_format(self) -> None:
+        """Test that invalid timestamp format fails verification"""
+        hmac_key = b"test-secret-key"
+        result = verify_signature(
+            hmac_key,
+            "somesignature",
+            "not-a-number",
+            "broker",
+            "GET",
+            "http://localhost/",
+            None,
+            ttl_seconds=30,
+        )
+
+        assert result is False
+
+
+class TestInternalSignatureAuth:
+    """Tests for internal HMAC signature authentication in get_current_user"""
+
+    @pytest.fixture
+    def hmac_key(self) -> bytes:
+        """HMAC key for testing"""
+        return settings.internal_hmac_key
+
+    def _create_signed_request(
+        self,
+        hmac_key: bytes,
+        method: str = "GET",
+        url: str = "http://localhost:8000/api/v1/broker/orders",
+        body: bytes = b"",
+        timestamp: str | None = None,
+    ) -> MagicMock:
+        """Create a mock request with valid HMAC signature headers"""
+        if timestamp is None:
+            timestamp = str(int(time.time()))
+        caller_id = "broker"
+
+        signature = compute_signature(hmac_key, timestamp, caller_id, method, url, body)
+
+        mock = MagicMock()
+        mock.client = Address(host="127.0.0.1", port=443)
+        mock.headers = Headers(
+            {
+                "x-internal-signature": signature,
+                "x-internal-timestamp": timestamp,
+                "x-internal-caller": caller_id,
+            }
+        )
+        mock.cookies = {}
+        mock.method = method
+        mock.url = url
+        mock.body = AsyncMock(return_value=body)
+        return mock
+
+    @pytest.mark.asyncio
+    async def test_internal_signature_valid_returns_internal_user(
+        self, hmac_key: bytes
+    ) -> None:
+        """Test that valid internal signature returns INTERNAL_USER"""
+        if not hmac_key:
+            pytest.skip("HMAC key not configured")
+
+        mock_request = self._create_signed_request(hmac_key)
+
+        result = await get_current_user(mock_request)
+
+        assert result.user_id == INTERNAL_USER.user_id
+        assert result.email == INTERNAL_USER.email
+        assert result.device_fingerprint == "internal"
+
+    @pytest.mark.asyncio
+    async def test_internal_signature_missing_key_disables_feature(self) -> None:
+        """Test that missing HMAC key falls back to cookie auth (401 without cookie)"""
+        # Create request with signature headers but assume empty HMAC key
+        mock = MagicMock()
+        mock.client = Address(host="127.0.0.1", port=443)
+        mock.headers = Headers(
+            {
+                "x-internal-signature": "somesig",
+                "x-internal-timestamp": str(int(time.time())),
+                "x-internal-caller": "broker",
+            }
+        )
+        mock.cookies = {}  # No cookie = should fail
+        mock.method = "GET"
+        mock.url = "http://localhost/"
+        mock.body = AsyncMock(return_value=b"")
+
+        # If HMAC key exists, signature will fail (invalid), falling back to cookie
+        # If HMAC key is empty, feature is disabled, falls back to cookie
+        # Either way, no cookie = 401
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(mock)
+
+        assert exc_info.value.status_code == 401
