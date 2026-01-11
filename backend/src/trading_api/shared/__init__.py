@@ -1,5 +1,6 @@
 """Shared infrastructure - Module interface, registry, and plugins."""
 
+from .client_factory import InterModuleClients
 from .config import Settings, settings
 from .module_interface import Module, ModuleApp
 from .module_registry import ModuleRegistry
@@ -16,4 +17,5 @@ __all__ = [
     "FastWSAdapter",
     "settings",
     "Settings",
+    "InterModuleClients",
 ]

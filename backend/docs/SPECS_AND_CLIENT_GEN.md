@@ -1447,6 +1447,79 @@ ClientGenerationService.update_clients_index()
 
 ---
 
-**Last Updated**: January 2, 2026  
+## Inter-Module Communication
+
+When modules run as separate processes (multi-process deployment), they communicate via HTTP using the generated Python clients. The `shared/client_factory.py` provides a typed factory for these clients.
+
+### Smart Default URLs
+
+Generated clients have their correct base URL **baked in at generation time**:
+
+```python
+# Generated client (auto-generated, DO NOT EDIT):
+class DatafeedClient:
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8000/api/v1/datafeed",  # Smart default
+        timeout: float = 30.0,
+    ):
+        ...
+```
+
+This ensures:
+
+- Standalone client usage works out-of-the-box
+- URL pattern matches actual route mounting (`/api/{version}/{module}`)
+- Single source of truth via `shared/config.py` Settings class
+
+### Client Factory Usage
+
+```python
+from trading_api.shared.client_factory import InterModuleClients
+from trading_api.models.market.quotes import GetQuotesRequest
+
+# Singleton - safe to instantiate anywhere
+clients = InterModuleClients()
+
+# Type-safe access with full IDE autocomplete
+quotes = await clients.datafeed.getQuotes(
+    body=GetQuotesRequest(symbols=["AAPL:NASDAQ:STK"])
+)
+```
+
+### Available Clients
+
+| Property           | Client Type      | Module   | Default URL                             |
+| ------------------ | ---------------- | -------- | --------------------------------------- |
+| `clients.datafeed` | `DatafeedClient` | datafeed | `http://localhost:8000/api/v1/datafeed` |
+| `clients.broker`   | `BrokerClient`   | broker   | `http://localhost:8000/api/v1/broker`   |
+
+### Environment Configuration
+
+| Variable               | Default                          | Description                  |
+| ---------------------- | -------------------------------- | ---------------------------- |
+| `DATAFEED_SERVICE_URL` | (uses client's baked-in default) | Override datafeed module URL |
+| `BROKER_SERVICE_URL`   | (uses client's baked-in default) | Override broker module URL   |
+| `INTER_MODULE_TIMEOUT` | `5.0`                            | Request timeout in seconds   |
+
+**Note**: Environment overrides are for multi-process deployments where modules run on different hosts/ports.
+
+### Singleton Pattern
+
+`InterModuleClients` uses singleton pattern for connection pooling efficiency:
+
+```python
+from trading_api.shared.client_factory import InterModuleClients
+
+# Safe to instantiate anywhere - always returns same instance
+clients = InterModuleClients()
+
+# Reset for testing
+InterModuleClients.reset()
+```
+
+---
+
+**Last Updated**: January 11, 2026  
 **Maintainer**: Backend Team  
 **Status**: ✅ Production-ready

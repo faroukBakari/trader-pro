@@ -428,12 +428,12 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### API & Client Generation
 
-**Keywords**: OpenAPI, AsyncAPI, code generation, client generation, REST clients, WebSocket types, auto-generation
+**Keywords**: OpenAPI, AsyncAPI, code generation, client generation, REST clients, WebSocket types, auto-generation, InterModuleClients, inter-module HTTP, client_factory, smart URL defaults
 
 **Scope**: Automated client and type generation from specs  
 **Out of Scope**: Manual API implementation, custom client code
 
-- **backend/docs/SPECS_AND_CLIENT_GEN.md** - ⭐ Complete generation guide (OpenAPI/AsyncAPI/Python clients)
+- **backend/docs/SPECS_AND_CLIENT_GEN.md** - ⭐ Complete generation guide (OpenAPI/AsyncAPI/Python clients, inter-module communication)
 - **docs/CLIENT-GENERATION.md** - Client auto-generation overview and frontend integration
 - **frontend/src/clients_generated/** - Per-module generated clients (REST + WebSocket types)
 
@@ -591,6 +591,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2026-01-11**: Inter-module HTTP client factory - Updated SPECS_AND_CLIENT_GEN.md (InterModuleClients singleton, smart URL defaults, env overrides), TWS README.md (`_get_symbol_price()` inter-module pattern), DOCUMENTATION-GUIDE.md (keywords)
 - **2026-01-11**: Order modification constraints - Updated TWS README.md (order modification field restrictions, `clone_order()` deep copy pattern, `placeWhatifOrder()` method separation, leverage info via WhatIf margin simulation), broker module README.md (`confirmId` parameter for audit trail), `02-API-REFERENCE-CONTRACTS-ORDERS.md` (Section 3.2 Order Modification guidelines), DOCUMENTATION-GUIDE.md (TWS keywords)
 - **2026-01-11**: TWS Bracket order grouping - Updated TWS README.md (bracket order grouping helpers, OCA naming convention, get_orders enrichment, parse_bracket_oca utility, preview_order error propagation), broker module README.md (bracket relationship handling), DOCUMENTATION-GUIDE.md (TWS keywords)
 - **2026-01-07**: SymbolInfo/DatafeedConfiguration enhancement - Updated datafeed README.md (quote deduplication pattern, enhanced SymbolInfo fields table, quote-specific error handling), TWS README.md (contract_details_to_symbol_info() field mappings, SymbolInfo priority fields), DOCUMENTATION-GUIDE.md (TradingView keywords)

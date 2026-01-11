@@ -354,8 +354,8 @@ class AppFactory:
             module_names=enabled_module_names, providers=required_providers
         )
 
-        # Create base URL
-        base_url = "/api"
+        # Use shared API prefix constant
+        base_url = settings.API_PREFIX
 
         @asynccontextmanager
         async def lifespan(app: ModularApp) -> AsyncGenerator[None, None]:
