@@ -2,7 +2,7 @@
 Broker order models matching TradingView broker API types
 """
 
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -43,6 +43,14 @@ class StopType(IntEnum):
     GUARANTEED_STOP = 2
 
 
+class OrderOrPositionMessageType(str, Enum):
+    """Message type for order/position state messages (matching TradingView)."""
+
+    INFORMATION = "information"
+    WARNING = "warning"
+    ERROR = "error"
+
+
 class ParentType(IntEnum):
     """Parent type enumeration matching TradingView ParentType.
 
@@ -62,6 +70,26 @@ class CurrentQuotes(BaseModel):
 
     ask: float = Field(..., description="Current ask price")
     bid: float = Field(..., description="Current bid price")
+
+    model_config = {"use_enum_values": True}
+
+
+class OrderDuration(BaseModel):
+    """Order duration/expiration (matching TradingView OrderDuration)."""
+
+    type: str = Field(..., description="Duration type (e.g., 'DAY', 'GTC', 'GTD')")
+    datetime: Optional[int] = Field(
+        default=None, description="Expiration timestamp for GTD orders"
+    )
+
+    model_config = {"use_enum_values": True}
+
+
+class OrderOrPositionMessage(BaseModel):
+    """Message describing order/position state (matching TradingView)."""
+
+    type: OrderOrPositionMessageType = Field(..., description="Message type")
+    text: str = Field(..., description="Message content")
 
     model_config = {"use_enum_values": True}
 
@@ -96,6 +124,12 @@ class PreOrder(BaseModel):
     )
     currentQuotes: Optional[CurrentQuotes] = Field(
         default=None, description="Current market quotes (ask and bid)"
+    )
+    duration: Optional[OrderDuration] = Field(
+        default=None, description="Order duration/expiration"
+    )
+    isClose: Optional[bool] = Field(
+        default=None, description="True if order closes a position"
     )
 
     model_config = {"use_enum_values": True}
@@ -145,6 +179,12 @@ class PlacedOrder(BaseModel):
     parentType: Optional[ParentType] = Field(
         default=None, description="Type of parent (Order=1, Position=2)"
     )
+    duration: Optional[OrderDuration] = Field(
+        default=None, description="Order duration/expiration"
+    )
+    message: Optional[OrderOrPositionMessage] = Field(
+        default=None, description="Order state message"
+    )
 
     model_config = {"use_enum_values": True}
 
@@ -154,7 +194,9 @@ class PlaceOrderResult(BaseModel):
     Result of placing an order (matching TradingView PlaceOrderResult)
     """
 
-    orderId: str = Field(..., description="Order ID (mainly for debugging)")
+    orderId: Optional[str] = Field(
+        default=None, description="Order ID (mainly for debugging)"
+    )
 
     model_config = {"use_enum_values": True}
 

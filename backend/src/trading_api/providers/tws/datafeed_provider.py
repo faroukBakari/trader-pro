@@ -222,7 +222,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
                 details.build_darkpool_contract(),
             ]
             if con is not None
-        ]
+        ] or [details.build_best_contract()]
 
         results = await asyncio.gather(
             *[
@@ -312,7 +312,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         """Subscribe to real-time bars.
 
         Args:
-            ticker: Ticker chain (e.g., "AAPL:SMART:STK")
+            ticker: Ticker string (e.g., "NASDAQ:AAPL")
             resolution: Bar resolution
             callback: Callback for each new bar
             on_error: Optional callback for streaming errors (ProviderException)

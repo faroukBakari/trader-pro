@@ -856,7 +856,7 @@ class TestIBSocketHistoricalCallbacks:
         self, running_ibsocket: IBSocket
     ) -> None:
         """Test historicalData accumulates bars in stream_data."""
-        business_key = "datafeed:reqHistoricalData:SMART:1 D::AAPL:NASDAQ:STK"
+        business_key = "datafeed:reqHistoricalData:SMART:1 D::NASDAQ:AAPL"
 
         reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
         assert reqId is not None, "Expected reqId from create_snapshot"
@@ -893,7 +893,7 @@ class TestIBSocketHistoricalCallbacks:
         self, running_ibsocket: IBSocket
     ) -> None:
         """Test historicalDataEnd resolves snapshot with accumulated bars."""
-        business_key = "datafeed:reqHistoricalData:SMART:1 D::AAPL:NASDAQ:STK"
+        business_key = "datafeed:reqHistoricalData:SMART:1 D::NASDAQ:AAPL"
 
         reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
         assert reqId is not None, "Expected reqId from create_snapshot"
@@ -916,7 +916,7 @@ class TestIBSocketHistoricalCallbacks:
         self, running_ibsocket: IBSocket
     ) -> None:
         """Test historicalDataUpdate updates existing bar in stream."""
-        business_key = "datafeed:reqBarDataStream:SMART:AAPL:NASDAQ:STK@5 mins"
+        business_key = "datafeed:reqBarDataStream:SMART:NASDAQ:AAPL@5 mins"
         received: list[tuple[dict, list]] = []
 
         async def callback(data: dict, fields: list) -> None:
@@ -1435,7 +1435,7 @@ class TestIBSocketContractDetailsCallback:
         self, running_ibsocket: IBSocket
     ) -> None:
         """Test contractDetails accumulates ContractDetails in stream_data."""
-        business_key = "shared:reqContractDetails:AAPL:NASDAQ:STK"
+        business_key = "shared:reqContractDetails:NASDAQ:AAPL"
 
         reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
         assert reqId is not None, "Expected reqId from create_snapshot"
@@ -1469,7 +1469,7 @@ class TestIBSocketContractDetailsCallback:
         self, running_ibsocket: IBSocket
     ) -> None:
         """Test contractDetailsEnd resolves snapshot with accumulated results."""
-        business_key = "shared:reqContractDetails:AAPL:NASDAQ:STK"
+        business_key = "shared:reqContractDetails:NASDAQ:AAPL"
 
         reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
         assert reqId is not None, "Expected reqId from create_snapshot"
@@ -1496,7 +1496,7 @@ class TestIBSocketContractDetailsCallback:
         self, running_ibsocket: IBSocket
     ) -> None:
         """Test contractDetails handles multiple matching contracts."""
-        business_key = "shared:reqContractDetails:ES:CME:FUT"
+        business_key = "shared:reqContractDetails:CME:ES"
 
         reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
         assert reqId is not None, "Expected reqId from create_snapshot"

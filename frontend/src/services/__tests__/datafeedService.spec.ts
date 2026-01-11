@@ -722,7 +722,7 @@ describe('DatafeedService', () => {
           status: 200,
           data: {
             name: 'SPY',
-            ticker: 'SPY:ARCA:STK',
+            ticker: 'ARCA:SPY',
             description: 'SPDR S&P 500 ETF',
             type: 'stock',
             exchange: 'ARCA',
@@ -768,7 +768,7 @@ describe('DatafeedService', () => {
           status: 200,
           data: {
             name: 'SPY',
-            ticker: 'SPY:ARCA:STK',
+            ticker: 'ARCA:SPY',
             description: 'SPDR S&P 500 ETF',
             type: 'stock',
             exchange: 'ARCA',
@@ -811,7 +811,7 @@ describe('DatafeedService', () => {
           status: 200,
           data: {
             name: 'AAPL',
-            ticker: 'AAPL:NASDAQ:STK',
+            ticker: 'NASDAQ:AAPL',
             session: '0930-1600',
             timezone: 'America/New_York',
             format: 'price',
@@ -848,7 +848,7 @@ describe('DatafeedService', () => {
           status: 200,
           data: {
             name: 'ES',
-            ticker: 'ES:CME:FUT',
+            ticker: 'CME:ES',
             session: '1800-1700',
             timezone: 'America/Chicago',
             format: 'price',
@@ -885,7 +885,7 @@ describe('DatafeedService', () => {
           status: 200,
           data: {
             name: 'EURUSD',
-            ticker: 'EURUSD:IDEALPRO:CASH',
+            ticker: 'IDEALPRO:EURUSD',
             session: '1715-1700',
             timezone: 'America/New_York',
             format: 'price',

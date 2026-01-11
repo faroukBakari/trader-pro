@@ -115,6 +115,7 @@ def clone_contract(contract: Contract) -> Contract:
     """
     contract_copy = Contract()
     contract_copy.__dict__.update(contract.__dict__)
+    contract_copy.primaryExchange = contract.primaryExchange or contract.exchange
     contract_copy.comboLegs = contract.comboLegs[:]
     if contract.deltaNeutralContract:
         contract_copy.deltaNeutralContract = DeltaNeutralContract()
@@ -695,7 +696,7 @@ def infer_sec_type(exchange: str, symbol: str) -> str:
 def parse_ticker(ticker: str) -> tuple[str, str, str, str]:
     """Parse ticker string into components.
     Args:
-        ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE"
+        ticker: Ticker string in format "EXCHANGE:SYMBOL[@bar_size]"
     Returns:
         Tuple of (symbol_name, exchange, secType, bar_size)
     """
