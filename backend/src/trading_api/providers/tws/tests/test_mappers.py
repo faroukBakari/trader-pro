@@ -33,6 +33,7 @@ from trading_api.providers.tws.tws_mappers import (
     contract_description_to_search_result,
     contract_details_to_symbol_info,
     order_state_to_preview_result,
+    parse_bracket_oca,
     parse_tws_bar_date,
     preorder_to_tws,
     tracked_order_to_placed_order,
@@ -1237,3 +1238,75 @@ class TestTwsToDomainStatus:
         result = tws_to_domain_status(tracked)
 
         assert result == OrderStatus.PLACING
+
+
+# =============================================================================
+# Bracket OCA Pattern Utilities
+# =============================================================================
+
+
+class TestParseBracketOca:
+    """Tests for parse_bracket_oca utility function."""
+
+    def test_order_bracket_numeric_parent(self) -> None:
+        """Order brackets with numeric parent_id return ParentType.ORDER."""
+        parent_id, parent_type = parse_bracket_oca("brackets_100")
+
+        assert parent_id == "100"
+        assert parent_type == ParentType.ORDER
+
+    def test_order_bracket_large_numeric_parent(self) -> None:
+        """Order brackets with large numeric ID work correctly."""
+        parent_id, parent_type = parse_bracket_oca("brackets_9999999")
+
+        assert parent_id == "9999999"
+        assert parent_type == ParentType.ORDER
+
+    def test_position_bracket_symbol_string(self) -> None:
+        """Position brackets with symbol string return ParentType.POSITION."""
+        parent_id, parent_type = parse_bracket_oca("brackets_AAPL:NASDAQ:STK")
+
+        assert parent_id == "AAPL:NASDAQ:STK"
+        assert parent_type == ParentType.POSITION
+
+    def test_position_bracket_complex_symbol(self) -> None:
+        """Position brackets with complex symbols (special chars) work."""
+        parent_id, parent_type = parse_bracket_oca("brackets_ES:CME:FUT:20250321")
+
+        assert parent_id == "ES:CME:FUT:20250321"
+        assert parent_type == ParentType.POSITION
+
+    def test_none_oca_group_returns_none(self) -> None:
+        """None OCA group returns (None, None)."""
+        parent_id, parent_type = parse_bracket_oca(None)
+
+        assert parent_id is None
+        assert parent_type is None
+
+    def test_empty_string_returns_none(self) -> None:
+        """Empty string OCA group returns (None, None)."""
+        parent_id, parent_type = parse_bracket_oca("")
+
+        assert parent_id is None
+        assert parent_type is None
+
+    def test_non_bracket_oca_returns_none(self) -> None:
+        """OCA groups not matching bracket pattern return (None, None)."""
+        parent_id, parent_type = parse_bracket_oca("some_other_oca_group")
+
+        assert parent_id is None
+        assert parent_type is None
+
+    def test_partial_match_no_brackets_prefix(self) -> None:
+        """OCA groups without 'brackets_' prefix return (None, None)."""
+        parent_id, parent_type = parse_bracket_oca("100")
+
+        assert parent_id is None
+        assert parent_type is None
+
+    def test_bracket_prefix_case_sensitive(self) -> None:
+        """Bracket pattern is case-sensitive (BRACKETS_ doesn't match)."""
+        parent_id, parent_type = parse_bracket_oca("BRACKETS_100")
+
+        assert parent_id is None
+        assert parent_type is None

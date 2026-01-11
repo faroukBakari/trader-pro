@@ -2,7 +2,7 @@
 
 **Status:** Production-Ready (Datafeed + Broker Capabilities)  
 **Architecture:** Three-Layer Streaming Pattern  
-**Last Updated:** January 7, 2026
+**Last Updated:** January 11, 2026
 
 ---
 
@@ -474,9 +474,11 @@ async def _resolve_trading_contract(self, ticker: str) -> Contract:
 
 1. **Entry Order Only**: Only the entry order is previewed. Bracket orders (stop loss, take profit) are exit orders that release margin, not consume it, so their preview is not needed.
 
-2. **Fallback Mode**: If TWS connection fails or contract qualification fails, the method returns a fallback preview with estimated values and a warning message.
+2. **Error Propagation**: TWS errors propagate directly to the caller (BFF layer). The provider does not swallow errors with fallback responses—the BFF decides error handling strategy. This aligns with the "let it throw" philosophy in [ERROR-MANAGEMENT.md](../../../docs/ERROR-MANAGEMENT.md).
 
 3. **Reuses Existing Methods**: Uses the existing `placeOrder()` method with `whatIf=True` flag rather than a dedicated preview method (DRY principle).
+
+4. **Contract Not Found Fallback**: If the contract cannot be resolved (e.g., invalid ticker), a fallback preview with estimated values is returned. This is distinct from TWS connection errors which propagate.
 
 **OrderState Fields Used:**
 
@@ -587,13 +589,97 @@ async def placeOcaGroup(
 
 ```python
 # Generate deterministic OCA group for position brackets
-oca_group = f"bracket_{position_id}"
+oca_group = f"brackets_{position_id}"  # e.g., "brackets_AAPL:NASDAQ:STK"
 
 # Place bracket orders atomically via OCA group
 tracked_orders = await self._tws_client.placeOcaGroup(
     contract, bracket_orders, oca_group, oca_type=1
 )
 ```
+
+### OCA Group Naming Convention
+
+The codebase uses deterministic OCA naming to enable bracket relationship reconstruction:
+
+| Pattern                           | Example                    | `parse_bracket_oca()` Returns              |
+| --------------------------------- | -------------------------- | ------------------------------------------ |
+| `brackets_{order_id}` (numeric)   | `brackets_100`             | `("100", ParentType.ORDER)`                |
+| `brackets_{position_id}` (string) | `brackets_AAPL:NASDAQ:STK` | `("AAPL:NASDAQ:STK", ParentType.POSITION)` |
+| Other patterns                    | `some_other_oca`           | `(None, None)`                             |
+
+**Usage:** `get_orders()` uses this pattern to reconstruct bracket relationships from TWS open orders.
+
+---
+
+### Order Retrieval with Bracket Grouping
+
+`get_orders()` returns enriched `PlacedOrder` objects with bracket relationships populated for TradingView UI display.
+
+**Processing Flow:**
+
+```
+get_orders()
+      │
+      ├── 1. reqOpenOrders()  →  list[TrackedOrder]
+      │
+      ├── 2. _group_orders_by_bracket(orders)
+      │       ├── parents_map: standalone/parent orders
+      │       ├── order_children: {"parent_id": [child orders]}  (parentId > 0 or OCA numeric)
+      │       └── position_children: {"symbol": [child orders]}  (OCA symbol string)
+      │
+      ├── 3. For each parent with children:
+      │       └── _build_bracket_context_from_children(children)
+      │           └── Extract stopLoss/takeProfit from LMT/STP/TRAIL orders
+      │
+      └── 4. _group_and_map_tws_orders(orders, contracts_map)
+              ├── Parent orders enriched with stopLoss/takeProfit
+              └── Child orders linked with parentId/parentType
+```
+
+**Detection Priority:**
+
+1. `order.parentId > 0` → Child of ORDER bracket (TWS native linking)
+2. `order.ocaGroup` matches `brackets_{numeric}` → Child of ORDER bracket (via OCA)
+3. `order.ocaGroup` matches `brackets_{symbol}` → Child of POSITION bracket
+4. Otherwise → Standalone or parent order
+
+**Result Structure:**
+
+```python
+# Parent order (enriched with bracket prices from children)
+PlacedOrder(
+    id="100",
+    symbol="AAPL",
+    stopLoss=145.0,      # From STP child order
+    takeProfit=160.0,    # From LMT child order
+    parentId=None,
+    parentType=None,
+)
+
+# Order bracket child
+PlacedOrder(
+    id="101",
+    symbol="AAPL",
+    parentId="100",
+    parentType=ParentType.ORDER,
+)
+
+# Position bracket child (no parent order exists)
+PlacedOrder(
+    id="200",
+    symbol="AAPL",
+    parentId="AAPL:NASDAQ:STK",
+    parentType=ParentType.POSITION,
+)
+```
+
+**Helper Functions in `broker_provider.py`:**
+
+| Function                                 | Description                                                          |
+| ---------------------------------------- | -------------------------------------------------------------------- |
+| `_group_orders_by_bracket()`             | Partitions orders into parents, order_children, position_children    |
+| `_build_bracket_context_from_children()` | Extracts stopLoss/takeProfit/trailingStopPips from child order types |
+| `_group_and_map_tws_orders()`            | Orchestrates grouping and mapping with bracket enrichment            |
 
 ---
 
@@ -665,7 +751,8 @@ tracked_orders = await self._tws_client.placeOcaGroup(
 | Function                                | Description                                                                                                                                                                                                                              |
 | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `preorder_to_tws()`                     | `PreOrder` → `(Order, Order \| None, Order \| None)` — parent, stop_loss, take_profit. Child orders are created without OCA linking (OCA groups managed by `TWSClient.placeOrderGroup()`). Supports `trailStopPrice` for trailing stops. |
-| `tws_order_to_placed_order()`           | order data dict → `PlacedOrder`                                                                                                                                                                                                          |
+| `tracked_order_to_placed_order()`       | `TrackedOrder` → `PlacedOrder`. Accepts optional `BracketContext` to enrich parent orders with `stopLoss`/`takeProfit` prices from children.                                                                                             |
+| `parse_bracket_oca()`                   | `str \| None` → `(parent_id, ParentType)`. Parses OCA group strings to determine bracket type: ORDER (numeric ID) or POSITION (symbol string).                                                                                           |
 | `tws_position_to_domain()`              | position data dict → `Position`                                                                                                                                                                                                          |
 | `tws_account_summary_to_equity()`       | summary dict → `EquityData`                                                                                                                                                                                                              |
 | `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`                                                                                                                                                                                                         |

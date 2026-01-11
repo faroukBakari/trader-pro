@@ -906,6 +906,47 @@ class BracketContext:
     child_order_ids: list[int] = field(default_factory=list)
 
 
+# =============================================================================
+# Bracket Order OCA Pattern Utilities
+# =============================================================================
+
+# Order brackets: "brackets_{order_id}" where order_id is numeric
+# Position brackets: "brackets_{position_id}" where position_id is a symbol string
+ORDER_BRACKET_PATTERN = re.compile(r"^brackets_(\d+)$")
+
+
+def parse_bracket_oca(oca_group: str | None) -> tuple[str | None, ParentType | None]:
+    """Parse OCA group to extract parent ID and determine parent type.
+
+    The codebase uses deterministic OCA naming:
+    - Order brackets: "brackets_{order_id}" (numeric) → parentType=ORDER
+    - Position brackets: "brackets_{position_id}" (symbol string) → parentType=POSITION
+
+    Args:
+        oca_group: OCA group string (e.g., "brackets_100" or "brackets_AAPL:NASDAQ:STK")
+
+    Returns:
+        (parent_id, parent_type):
+        - ("100", ParentType.ORDER) for order brackets (numeric)
+        - ("AAPL:NASDAQ:STK", ParentType.POSITION) for position brackets (non-numeric)
+        - (None, None) if not a bracket OCA group
+    """
+    if not oca_group:
+        return None, None
+
+    # Check for order bracket (numeric parent_id)
+    match = ORDER_BRACKET_PATTERN.match(oca_group)
+    if match:
+        return match.group(1), ParentType.ORDER
+
+    # Check for position bracket (non-numeric, starts with "brackets_")
+    if oca_group.startswith("brackets_"):
+        position_id = oca_group[9:]  # Strip "brackets_" prefix
+        return position_id, ParentType.POSITION
+
+    return None, None
+
+
 def preorder_to_tws(
     preorder: PreOrder,
     account: str,
@@ -1480,6 +1521,9 @@ __all__ = [
     "calculate_tws_duration",
     "is_trading_session_closed",
     "normalize_timezone",
+    # Bracket OCA utilities
+    "ORDER_BRACKET_PATTERN",
+    "parse_bracket_oca",
     # Order mappers
     "BracketContext",
     "ORDER_TYPE_TO_TWS",

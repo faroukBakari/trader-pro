@@ -35,6 +35,7 @@ from trading_api.models.broker import (
     OrderPreviewSectionRow,
     OrderStatus,
     OrderType,
+    ParentType,
     PlacedOrder,
     PlaceOrderResult,
     Position,
@@ -47,7 +48,9 @@ from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.providers.tws.tws_mappers import (
+    BracketContext,
     order_state_to_preview_result,
+    parse_bracket_oca,
     preorder_to_tws,
     tracked_order_to_placed_order,
 )
@@ -56,6 +59,169 @@ from trading_api.shared import Provider
 logger = logging.getLogger(__name__)
 us_eastern = ZoneInfo("US/Eastern")
 DEBUG_TWS_BROKER = os.environ.get("DEBUG_TWS_BROKER") == "true"
+
+
+# =============================================================================
+# Bracket Order Grouping Helpers
+# =============================================================================
+
+
+def _group_orders_by_bracket(
+    orders: list[TrackedOrder],
+) -> tuple[
+    dict[int, TrackedOrder],  # parents_map: {order_id: parent}
+    dict[str, list[TrackedOrder]],  # order_children: {"100": [SL, TP]}
+    dict[str, list[TrackedOrder]],  # position_children: {"AAPL:NASDAQ:STK": [SL, TP]}
+]:
+    """Partition orders into parents and children by bracket relationship.
+
+    Detection priority:
+    1. order.parentId > 0 → child of ORDER bracket
+    2. order.ocaGroup matches "brackets_{numeric}" → child of ORDER bracket (via OCA)
+    3. order.ocaGroup starts with "brackets_" (non-numeric) → child of POSITION bracket
+    4. Otherwise → standalone or parent order
+
+    Args:
+        orders: List of TrackedOrder from TWS
+
+    Returns:
+        Tuple of (parents_map, order_children, position_children)
+    """
+    parents_map: dict[int, TrackedOrder] = {}
+    order_children: dict[str, list[TrackedOrder]] = {}
+    position_children: dict[str, list[TrackedOrder]] = {}
+
+    for tracked in orders:
+        order = tracked.order
+
+        # 1. Check TWS native parent linking (order brackets)
+        if order.parentId and order.parentId > 0:
+            parent_id_str = str(order.parentId)
+            order_children.setdefault(parent_id_str, []).append(tracked)
+            continue
+
+        # 2. Check OCA group pattern
+        parent_id, parent_type = parse_bracket_oca(order.ocaGroup)
+
+        if parent_id is not None and parent_type == ParentType.ORDER:
+            # Order bracket via OCA (numeric parent)
+            order_children.setdefault(parent_id, []).append(tracked)
+        elif parent_id is not None and parent_type == ParentType.POSITION:
+            # Position bracket via OCA (symbol string parent)
+            position_children.setdefault(parent_id, []).append(tracked)
+        else:
+            # Standalone or parent order
+            parents_map[tracked.orderId] = tracked
+
+    return parents_map, order_children, position_children
+
+
+def _build_bracket_context_from_children(
+    children: list[TrackedOrder],
+) -> BracketContext:
+    """Build BracketContext by inspecting child order types and prices.
+
+    Child order type mapping:
+    - LMT → takeProfit (order.lmtPrice)
+    - STP → stopLoss (order.auxPrice)
+    - TRAIL → trailingStopPips (order.auxPrice) + stopLoss (order.trailStopPrice)
+
+    Args:
+        children: List of child TrackedOrders
+
+    Returns:
+        BracketContext with extracted prices
+    """
+    context = BracketContext()
+
+    for child in children:
+        order = child.order
+        order_type = order.orderType
+
+        if order_type == "LMT":
+            # Take profit limit order
+            context.take_profit = float(order.lmtPrice) if order.lmtPrice else None
+        elif order_type == "STP":
+            # Stop loss order
+            context.stop_loss = float(order.auxPrice) if order.auxPrice else None
+            context.stop_type = 0  # StopType.STOP_LOSS
+        elif order_type == "TRAIL":
+            # Trailing stop order
+            context.trailing_stop_pips = (
+                float(order.auxPrice) if order.auxPrice else None
+            )
+            context.stop_loss = (
+                float(order.trailStopPrice) if order.trailStopPrice else None
+            )
+            context.stop_type = 1  # StopType.TRAILING_STOP
+
+        context.child_order_ids.append(child.orderId)
+
+    return context
+
+
+def _group_and_map_tws_orders(
+    orders: list[TrackedOrder],
+    contracts_map: dict[int, Contract],
+) -> list[PlacedOrder]:
+    """Group bracket orders and map to domain PlacedOrder with enrichment.
+
+    Processing:
+    1. Partition orders: parents, order_children, position_children
+    2. For parents with order_children:
+       - Build BracketContext from children
+       - Map parent with enriched stopLoss/takeProfit
+    3. For order_children:
+       - Map with parentId=parent_order_id, parentType=ORDER
+    4. For position_children:
+       - Map with parentId=position_id (symbol), parentType=POSITION
+
+    Args:
+        orders: Raw TrackedOrder list from TWS
+        contracts_map: {conId: Contract} for symbol resolution
+
+    Returns:
+        List of PlacedOrder with bracket relationships populated
+    """
+    parents_map, order_children, position_children = _group_orders_by_bracket(orders)
+    result: list[PlacedOrder] = []
+
+    # Process parent/standalone orders (with optional bracket enrichment)
+    for order_id, tracked in parents_map.items():
+        contract = contracts_map.get(tracked.contract.conId, tracked.contract)
+        parent_id_str = str(order_id)
+
+        # Check if this parent has bracket children
+        children = order_children.get(parent_id_str, [])
+        bracket_context = (
+            _build_bracket_context_from_children(children) if children else None
+        )
+
+        # Map to PlacedOrder with optional bracket context
+        placed = tracked_order_to_placed_order(tracked, contract, bracket_context)
+        result.append(placed)
+
+    # Process order bracket children (parentType=ORDER)
+    for parent_id_str, children in order_children.items():
+        for child in children:
+            contract = contracts_map.get(child.contract.conId, child.contract)
+            placed = tracked_order_to_placed_order(child, contract)
+            # Set bracket parent link
+            placed.parentId = parent_id_str
+            placed.parentType = ParentType.ORDER
+            result.append(placed)
+
+    # Process position bracket children (parentType=POSITION)
+    for position_id, children in position_children.items():
+        for child in children:
+            contract = contracts_map.get(child.contract.conId, child.contract)
+            placed = tracked_order_to_placed_order(child, contract)
+            # Set bracket parent link (position_id is the symbol string)
+            placed.parentId = position_id
+            placed.parentType = ParentType.POSITION
+            result.append(placed)
+
+    return result
 
 
 class TWSBrokerProvider(Provider, BrokerCapability):
@@ -352,35 +518,32 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         """Get all open orders from TWS.
 
         Requests all open orders and converts them to domain PlacedOrder models.
-        Returns completed snapshot when all orders have been received.
+        Groups bracket orders and enriches parent orders with stopLoss/takeProfit.
+        Child orders are linked with parentId/parentType for TradingView UI.
         """
         # Request open orders from TWS (returns list of TrackedOrder objects)
         tws_orders = await self._tws_client.reqOpenOrders()
 
-        details_map = {
+        # Filter out whatIf orders
+        real_orders = [o for o in tws_orders if not o.order.whatIf]
+
+        # Build contract details map for symbol resolution
+        details_map: dict[int, Contract] = {
             d.contract.conId: d.contract
             for d in itertools.chain.from_iterable(
                 await asyncio.gather(
                     *[
                         self._tws_client.reqContractDetails(c)
                         for c in {
-                            o.contract.conId: o.contract
-                            for o in tws_orders
-                            if not o.order.whatIf
+                            o.contract.conId: o.contract for o in real_orders
                         }.values()
                     ]
                 )
             )
         }
 
-        # Convert each TrackedOrder to domain PlacedOrder
-        return [
-            tracked_order_to_placed_order(
-                tracked, details_map.get(tracked.contract.conId, tracked.contract)
-            )
-            for tracked in tws_orders
-            if not tracked.order.whatIf
-        ]
+        # Group bracket orders and map to domain PlacedOrder with enrichment
+        return _group_and_map_tws_orders(real_orders, details_map)
 
     async def get_positions(self) -> list[Position]:
         """Get all open positions."""
@@ -417,34 +580,23 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             Only previews the entry order. Bracket orders (stopLoss, takeProfit)
             are exit orders that release margin, so their preview is not needed.
         """
-        confirm_id = str(uuid.uuid4())
+        # Resolve contract for current session (uses darkpool if market closed)
+        contract = await self._resolve_trading_contract(order.symbol)
 
-        try:
-            # Resolve contract for current session (uses darkpool if market closed)
-            contract = await self._resolve_trading_contract(order.symbol)
+        # Convert PreOrder to TWS Order (only entry order, no brackets for preview)
+        parent_order, _, _ = preorder_to_tws(order, "", -1)
 
-            # Convert PreOrder to TWS Order (only entry order, no brackets for preview)
-            parent_order, _, _ = preorder_to_tws(order, "", -1)
+        # Enable whatIf mode - TWS returns margin/commission without executing
+        parent_order.whatIf = True
 
-            # Enable whatIf mode - TWS returns margin/commission without executing
-            parent_order.whatIf = True
+        # Place whatIf order - returns TrackedOrder with OrderState containing
+        # margin requirements and commission estimates
+        tracked_order = await self._tws_client.placeOrder(contract, parent_order)
 
-            # Place whatIf order - returns TrackedOrder with OrderState containing
-            # margin requirements and commission estimates
-            tracked_order = await self._tws_client.placeOrder(contract, parent_order)
-
-            # Map OrderState to domain OrderPreviewResult
-            return order_state_to_preview_result(
-                tracked_order.orderState, order, confirm_id
-            )
-
-        except ProviderException:
-            # Re-raise provider exceptions as-is
-            raise
-        except Exception as e:
-            # Log and return fallback preview on unexpected errors
-            logger.warning(f"TWS whatIf preview failed, using fallback: {e}")
-            return self._build_fallback_preview(order, confirm_id)
+        # Map OrderState to domain OrderPreviewResult
+        return order_state_to_preview_result(
+            tracked_order.orderState, order, str(tracked_order.orderId)
+        )
 
     def _build_fallback_preview(
         self, order: PreOrder, confirm_id: str

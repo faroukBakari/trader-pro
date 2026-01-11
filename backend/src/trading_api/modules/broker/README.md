@@ -16,6 +16,7 @@ BFF (Backend-For-Frontend) module for trading operations. Provides REST API and 
 - Route WebSocket topics to appropriate `BrokerCapability` provider methods
 - Handle error classification (recoverable vs non-recoverable)
 - Delegate all business logic to the broker provider
+- Pass enriched order data (with bracket relationships) to frontend for TradingView UI display
 
 ---
 
