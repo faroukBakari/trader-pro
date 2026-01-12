@@ -9,7 +9,6 @@ import itertools
 import logging
 import os
 import random
-import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -32,9 +31,7 @@ from trading_api.models.broker import (
     OrderPreviewResult,
     OrderPreviewSection,
     OrderPreviewSectionRow,
-    OrderStatus,
     OrderType,
-    ParentType,
     PlacedOrder,
     PlaceOrderResult,
     Position,
@@ -48,9 +45,7 @@ from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.providers.tws.tws_mappers import (
-    BracketContext,
     order_state_to_preview_result,
-    parse_bracket_oca,
     preorder_to_tws,
     tracked_order_to_placed_order,
 )
@@ -65,164 +60,6 @@ DEBUG_TWS_BROKER = os.environ.get("DEBUG_TWS_BROKER") == "true"
 # =============================================================================
 # Bracket Order Grouping Helpers
 # =============================================================================
-
-
-def _group_orders_by_bracket(
-    orders: list[TrackedOrder],
-) -> tuple[
-    dict[int, TrackedOrder],  # parents_map: {order_id: parent}
-    dict[str, list[TrackedOrder]],  # order_children: {"100": [SL, TP]}
-    dict[str, list[TrackedOrder]],  # position_children: {"AAPL:NASDAQ:STK": [SL, TP]}
-]:
-    """Partition orders into parents and children by bracket relationship.
-
-    Detection priority:
-    1. order.parentId > 0 → child of ORDER bracket
-    2. order.ocaGroup matches "brackets_{numeric}" → child of ORDER bracket (via OCA)
-    3. order.ocaGroup starts with "brackets_" (non-numeric) → child of POSITION bracket
-    4. Otherwise → standalone or parent order
-
-    Args:
-        orders: List of TrackedOrder from TWS
-
-    Returns:
-        Tuple of (parents_map, order_children, position_children)
-    """
-    parents_map: dict[int, TrackedOrder] = {}
-    order_children: dict[str, list[TrackedOrder]] = {}
-    position_children: dict[str, list[TrackedOrder]] = {}
-
-    for tracked in orders:
-        order = tracked.order
-
-        # 1. Check TWS native parent linking (order brackets)
-        if order.parentId and order.parentId > 0:
-            parent_id_str = str(order.parentId)
-            order_children.setdefault(parent_id_str, []).append(tracked)
-            continue
-
-        # 2. Check OCA group pattern
-        parent_id, parent_type = parse_bracket_oca(order.ocaGroup)
-
-        if parent_id is not None and parent_type == ParentType.ORDER:
-            # Order bracket via OCA (numeric parent)
-            order_children.setdefault(parent_id, []).append(tracked)
-        elif parent_id is not None and parent_type == ParentType.POSITION:
-            # Position bracket via OCA (symbol string parent)
-            position_children.setdefault(parent_id, []).append(tracked)
-        else:
-            # Standalone or parent order
-            parents_map[tracked.orderId] = tracked
-
-    return parents_map, order_children, position_children
-
-
-def _build_bracket_context_from_children(
-    children: list[TrackedOrder],
-) -> BracketContext:
-    """Build BracketContext by inspecting child order types and prices.
-
-    Child order type mapping:
-    - LMT → takeProfit (order.lmtPrice)
-    - STP → stopLoss (order.auxPrice)
-    - TRAIL → trailingStopPips (order.auxPrice) + stopLoss (order.trailStopPrice)
-
-    Args:
-        children: List of child TrackedOrders
-
-    Returns:
-        BracketContext with extracted prices
-    """
-    context = BracketContext()
-
-    for child in children:
-        order = child.order
-        order_type = order.orderType
-
-        if order_type == "LMT":
-            # Take profit limit order
-            context.take_profit = float(order.lmtPrice) if order.lmtPrice else None
-        elif order_type == "STP":
-            # Stop loss order
-            context.stop_loss = float(order.auxPrice) if order.auxPrice else None
-            context.stop_type = 0  # StopType.STOP_LOSS
-        elif order_type == "TRAIL":
-            # Trailing stop order
-            context.trailing_stop_pips = (
-                float(order.auxPrice) if order.auxPrice else None
-            )
-            context.stop_loss = (
-                float(order.trailStopPrice) if order.trailStopPrice else None
-            )
-            context.stop_type = 1  # StopType.TRAILING_STOP
-
-        context.child_order_ids.append(child.orderId)
-
-    return context
-
-
-def _group_and_map_tws_orders(
-    orders: list[TrackedOrder],
-    contracts_map: dict[int, Contract],
-) -> list[PlacedOrder]:
-    """Group bracket orders and map to domain PlacedOrder with enrichment.
-
-    Processing:
-    1. Partition orders: parents, order_children, position_children
-    2. For parents with order_children:
-       - Build BracketContext from children
-       - Map parent with enriched stopLoss/takeProfit
-    3. For order_children:
-       - Map with parentId=parent_order_id, parentType=ORDER
-    4. For position_children:
-       - Map with parentId=position_id (symbol), parentType=POSITION
-
-    Args:
-        orders: Raw TrackedOrder list from TWS
-        contracts_map: {conId: Contract} for symbol resolution
-
-    Returns:
-        List of PlacedOrder with bracket relationships populated
-    """
-    parents_map, order_children, position_children = _group_orders_by_bracket(orders)
-    result: list[PlacedOrder] = []
-
-    # Process parent/standalone orders (with optional bracket enrichment)
-    for order_id, tracked in parents_map.items():
-        contract = contracts_map.get(tracked.contract.conId, tracked.contract)
-        parent_id_str = str(order_id)
-
-        # Check if this parent has bracket children
-        children = order_children.get(parent_id_str, [])
-        bracket_context = (
-            _build_bracket_context_from_children(children) if children else None
-        )
-
-        # Map to PlacedOrder with optional bracket context
-        placed = tracked_order_to_placed_order(tracked, contract, bracket_context)
-        result.append(placed)
-
-    # Process order bracket children (parentType=ORDER)
-    for parent_id_str, children in order_children.items():
-        for child in children:
-            contract = contracts_map.get(child.contract.conId, child.contract)
-            placed = tracked_order_to_placed_order(child, contract)
-            # Set bracket parent link
-            placed.parentId = parent_id_str
-            placed.parentType = ParentType.ORDER
-            result.append(placed)
-
-    # Process position bracket children (parentType=POSITION)
-    for position_id, children in position_children.items():
-        for child in children:
-            contract = contracts_map.get(child.contract.conId, child.contract)
-            placed = tracked_order_to_placed_order(child, contract)
-            # Set bracket parent link (position_id is the symbol string)
-            placed.parentId = position_id
-            placed.parentType = ParentType.POSITION
-            result.append(placed)
-
-    return result
 
 
 class TWSBrokerProvider(Provider, BrokerCapability):
@@ -348,8 +185,10 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         # Empty account string is valid for single-account users
         # order_id=-1 means new order, >0 means modify existing
         parent_order, stop_loss_order, take_profit_order = preorder_to_tws(
-            order, "", order_id if order_id is not None else -1
+            order, contract, order_id=order_id
         )
+
+        parent_order.tif = "DAY" if contract.exchange == "OVERNIGHT" else "GTC"
 
         childs_to_place = [
             o for o in [stop_loss_order, take_profit_order] if o is not None
@@ -532,7 +371,9 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         tws_orders = await self._tws_client.reqOpenOrders()
 
         # Filter out whatIf orders
-        real_orders = [o for o in tws_orders if not o.order.whatIf]
+        real_orders = [
+            o for o in tws_orders if (o.order.transmit and not o.order.whatIf)
+        ]
 
         # Build contract details map for symbol resolution
         details_map: dict[int, Contract] = {
@@ -549,8 +390,12 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             )
         }
 
-        # Group bracket orders and map to domain PlacedOrder with enrichment
-        return _group_and_map_tws_orders(real_orders, details_map)
+        return [
+            tracked_order_to_placed_order(
+                o, details_map.get(o.contract.conId, o.contract)
+            )
+            for o in real_orders
+        ]
 
     async def get_positions(self) -> list[Position]:
         """Get all open positions."""
@@ -591,7 +436,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         contract = await self._resolve_trading_contract(order.symbol)
 
         # Convert PreOrder to TWS Order (only entry order, no brackets for preview)
-        parent_order, _, _ = preorder_to_tws(order, "", -1)
+        parent_order, _, _ = preorder_to_tws(order, contract)
 
         # Enable whatIf mode - TWS returns margin/commission without executing
         parent_order.whatIf = True
@@ -630,7 +475,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             OrderType.MARKET: "Market",
             OrderType.LIMIT: "Limit",
             OrderType.STOP: "Stop",
-            OrderType.STOP_LIMIT: "Stop Limit",
+            OrderType.TRAIL: "Trailing Stop",
         }
 
         order_details_rows = [
@@ -887,9 +732,10 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             if tracked.order.whatIf or not tracked.order.transmit:
                 return  # Ignore whatIf orders
             details = await self._tws_client.reqContractDetails(tracked.contract)
-            contract = next(iter(details)).contract
-            placed = tracked_order_to_placed_order(tracked, contract)
-            await callback(placed)
+            if details:
+                contract = next(iter(details)).contract
+                placed = tracked_order_to_placed_order(tracked, contract)
+                await callback(placed)
 
         async def tws_on_error(exc: ProviderException) -> None:
             if on_error:
@@ -976,19 +822,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
                 )
                 await asyncio.sleep(delay)
 
-                # Find all WORKING orders
-                working_orders = [
-                    order_id
-                    for order_id, order in self._orders.items()
-                    if order.status == OrderStatus.WORKING
-                ]
-
-                if working_orders:
-                    order_id = random.choice(working_orders)
-                    logger.info(f"Simulating execution for order: {order_id}")
-                    await self._simulate_execution(order_id)
-                else:
-                    logger.debug("No working orders to execute")
+                logger.debug("No working orders to execute")
 
             except asyncio.CancelledError:
                 logger.info("Execution simulator cancelled")
@@ -996,53 +830,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             except Exception as e:
                 logger.exception(f"Error in execution simulator: {e}")
                 # Continue running despite errors
-
-    def _get_execution_price(self, order: PlacedOrder) -> float:
-        """Determine execution price based on order type."""
-        if order.type == OrderType.MARKET:
-            return order.limitPrice if order.limitPrice is not None else 100.0
-        elif order.type == OrderType.LIMIT and order.limitPrice is not None:
-            return order.limitPrice
-        elif order.type == OrderType.STOP and order.stopPrice is not None:
-            return order.stopPrice
-        elif order.type == OrderType.STOP_LIMIT:
-            if order.limitPrice is not None:
-                return order.limitPrice
-            elif order.stopPrice is not None:
-                return order.stopPrice
-        return 100.0
-
-    async def _simulate_execution(self, order_id: str) -> None:
-        """Simulate order execution and trigger update cascade."""
-        await asyncio.sleep(0.2)  # Small delay for realism
-
-        order = self._orders.get(order_id)
-        if not order or order.status != OrderStatus.WORKING:
-            return
-
-        execution_price = self._get_execution_price(order)
-
-        # Create execution
-        execution = Execution(
-            symbol=order.symbol,
-            price=execution_price,
-            qty=order.qty,
-            side=order.side,
-            time=int(time.time() * 1000),
-        )
-        self._executions.append(execution)
-
-        # 1. Broadcast execution update
-        await self._broadcast_execution(execution)
-
-        # 2. Update order status
-        order.status = OrderStatus.FILLED
-        order.filledQty = order.qty
-        order.avgPrice = execution_price
-        order.updateTime = execution.time
-
-        # 3. Update equity (triggers position update)
-        await self._update_equity(execution)
 
     async def _broadcast_position(self, position: Position) -> None:
         """Broadcast position update to all subscribers."""
@@ -1229,17 +1016,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         self._execution_callbacks = {}
         self._equity_callbacks = {}
         self._error_callbacks = {}
-
-    async def execute_all_working_orders(self) -> None:
-        """Execute all working orders immediately (for testing)."""
-        working_order_ids = [
-            order_id
-            for order_id, order in self._orders.items()
-            if order.status == OrderStatus.WORKING
-        ]
-
-        for order_id in working_order_ids:
-            await self._simulate_execution(order_id)
 
     def shutdown(self) -> None:
         """Shutdown provider (cancel background tasks)."""

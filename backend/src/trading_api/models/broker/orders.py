@@ -25,7 +25,7 @@ class OrderType(IntEnum):
     LIMIT = 1
     MARKET = 2
     STOP = 3
-    STOP_LIMIT = 4
+    TRAIL = 4
 
 
 class Side(IntEnum):

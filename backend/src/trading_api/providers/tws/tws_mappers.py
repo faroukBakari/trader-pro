@@ -825,7 +825,7 @@ ORDER_TYPE_TO_TWS: dict[int, str] = {
     1: "LMT",  # LIMIT
     2: "MKT",  # MARKET
     3: "STP",  # STOP
-    4: "STP LMT",  # STOP_LIMIT
+    4: "TRAIL",  # TRAIL
 }
 
 # TWS orderType string → Domain OrderType
@@ -833,9 +833,7 @@ TWS_TO_ORDER_TYPE: dict[str, int] = {
     "LMT": 1,  # LIMIT
     "MKT": 2,  # MARKET
     "STP": 3,  # STOP
-    "STP LMT": 4,  # STOP_LIMIT
-    "STOP": 3,  # Alias
-    "STOP_LIMIT": 4,  # Alias
+    "TRAIL": 4,  # Alias
 }
 
 # Domain Side → TWS action string
@@ -962,10 +960,42 @@ def parse_bracket_oca(oca_group: str | None) -> tuple[str | None, ParentType | N
     return None, None
 
 
+def prebuild_tws_order(
+    contract: Contract,
+    quantity: float,
+    side: int,
+    order_type: int,
+    *,
+    price: float | None = None,
+    account: str | None = None,
+) -> Order:
+    """Build a basic TWS Order object with default settings.
+
+    Returns:
+        A new TWS Order object with default values.
+    """
+    order = Order()
+    order.tif = "DAY" if contract.exchange == "OVERNIGHT" else "GTC"
+    order.outsideRth = True  # Allow execution outside regular trading hours
+    order.totalQuantity = Decimal(str(quantity))
+    order.action = SIDE_TO_TWS_ACTION.get(side, "BUY")
+    order.orderType = ORDER_TYPE_TO_TWS.get(order_type, "MKT")
+    if price is not None:
+        if order.orderType == "LMT":
+            order.lmtPrice = price
+        else:
+            order.auxPrice = price
+    if account is not None:
+        order.account = account
+    return order
+
+
 def preorder_to_tws(
     preorder: PreOrder,
-    account: str,
-    parent_order_id: int = -1,
+    contract: Contract,
+    *,
+    order_id: int | None = None,
+    account: str | None = None,
 ) -> tuple[Order, Order | None, Order | None]:
     """Convert domain PreOrder to TWS Order objects.
 
@@ -975,7 +1005,7 @@ def preorder_to_tws(
     Args:
         preorder: Domain PreOrder with symbol, type, side, qty, prices
         account: Account ID for order routing (required for multi-account)
-        parent_order_id: Base order ID for parent; children use sequential IDs
+        order_id: Base order ID for parent; children use sequential IDs
 
     Returns:
         Tuple of (parent, stop_loss, take_profit) Order objects:
@@ -1003,63 +1033,54 @@ def preorder_to_tws(
     )
 
     # Build parent order
-    parent = Order()
-    parent.orderId = parent_order_id
-    parent.action = SIDE_TO_TWS_ACTION.get(int(preorder.side), "BUY")
-    parent.totalQuantity = Decimal(str(preorder.qty))
-    parent.orderType = ORDER_TYPE_TO_TWS.get(int(preorder.type), "MKT")
-    parent.tif = "GTC"
-    parent.account = account
+    parent = prebuild_tws_order(
+        contract=contract,
+        quantity=preorder.qty,
+        side=preorder.side,
+        order_type=preorder.type,
+        price=preorder.limitPrice or preorder.stopPrice,
+        account=account,
+    )
 
-    # Set prices based on order type
-    if preorder.limitPrice is not None:
-        parent.lmtPrice = preorder.limitPrice
-    if preorder.stopPrice is not None:
-        parent.auxPrice = preorder.stopPrice
+    if order_id:
+        parent.orderId = order_id
 
     if not has_brackets:
         return parent, None, None
-
-    # --- Bracket child orders ---
-    # Child orders have opposite side to parent
-    child_action = "SELL" if preorder.side == 1 else "BUY"  # Side.BUY=1, Side.SELL=-1
 
     stop_loss_order: Order | None = None
     take_profit_order: Order | None = None
 
     # Take-profit order (LIMIT) - created first to get sequential order ID
     if preorder.takeProfit is not None:
-        take_profit_order = Order()
-        take_profit_order.action = child_action
-        take_profit_order.totalQuantity = Decimal(str(preorder.qty))
-        take_profit_order.orderType = "LMT"
-        take_profit_order.lmtPrice = preorder.takeProfit
-        take_profit_order.tif = "GTC"
-        take_profit_order.account = account
+        take_profit_order = prebuild_tws_order(
+            contract=contract,
+            quantity=preorder.qty,
+            side=(-preorder.side),
+            order_type=OrderType.LIMIT,
+            price=preorder.takeProfit,
+            account=account,
+        )
 
     # Stop-loss or trailing stop order
     if preorder.stopLoss is not None or preorder.trailingStopPips is not None:
-        stop_loss_order = Order()
-        stop_loss_order.action = child_action
-        stop_loss_order.totalQuantity = Decimal(str(preorder.qty))
-        stop_loss_order.tif = "GTC"
-        stop_loss_order.account = account
-
         # Determine stop type: trailing vs regular stop
-        use_trailing = preorder.trailingStopPips is not None or (
-            preorder.stopType is not None
-            and preorder.stopType == StopType.TRAILING_STOP
+        use_trailing = (
+            preorder.stopType == StopType.TRAILING_STOP
+            or preorder.trailingStopPips is not None
+        )
+        stop_loss_order = prebuild_tws_order(
+            contract=contract,
+            quantity=preorder.qty,
+            side=(-preorder.side),
+            order_type=OrderType.TRAIL if use_trailing else OrderType.STOP,
+            price=preorder.trailingStopPips or preorder.stopLoss,
+            account=account,
         )
 
-        if use_trailing and preorder.trailingStopPips is not None:
-            stop_loss_order.orderType = "TRAIL"
-            stop_loss_order.auxPrice = preorder.trailingStopPips  # Trail amount
+        if preorder.trailingStopPips and preorder.stopLoss:
             # Set initial stop trigger price if stopLoss provided (IB recommended)
-            if preorder.stopLoss is not None:
-                stop_loss_order.trailStopPrice = preorder.stopLoss
-        elif preorder.stopLoss is not None:
-            stop_loss_order.orderType = "STP"
-            stop_loss_order.auxPrice = preorder.stopLoss
+            stop_loss_order.trailStopPrice = preorder.stopLoss
 
     return parent, stop_loss_order, take_profit_order
 
@@ -1232,7 +1253,7 @@ def order_state_to_preview_result(
         OrderType.MARKET: "Market",
         OrderType.LIMIT: "Limit",
         OrderType.STOP: "Stop",
-        OrderType.STOP_LIMIT: "Stop Limit",
+        OrderType.TRAIL: "Trailing Stop",
     }
 
     order_details_rows = [

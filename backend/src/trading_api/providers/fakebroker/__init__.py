@@ -382,7 +382,7 @@ class FakebrokerProvider(Provider, BrokerCapability):
             OrderType.MARKET: "Market",
             OrderType.LIMIT: "Limit",
             OrderType.STOP: "Stop",
-            OrderType.STOP_LIMIT: "Stop Limit",
+            OrderType.TRAIL: "Trailing Stop",
         }
 
         order_details_rows = [
@@ -739,11 +739,8 @@ class FakebrokerProvider(Provider, BrokerCapability):
             return order.limitPrice
         elif order.type == OrderType.STOP and order.stopPrice is not None:
             return order.stopPrice
-        elif order.type == OrderType.STOP_LIMIT:
-            if order.limitPrice is not None:
-                return order.limitPrice
-            elif order.stopPrice is not None:
-                return order.stopPrice
+        elif order.type == OrderType.TRAIL and order.stopPrice is not None:
+            return order.stopPrice
         return 100.0
 
     async def _simulate_execution(self, order_id: str) -> None:

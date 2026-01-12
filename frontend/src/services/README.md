@@ -779,6 +779,26 @@ The API service automatically handles different scenarios:
 
 This ensures your app works regardless of whether the generated client is available, and provides realistic data for development and testing.
 
+### Test Environment Auto-Detection
+
+`ApiService` automatically uses mock data in test environments:
+
+```typescript
+// ApiService constructor auto-detects Vitest
+constructor(mock: boolean = !!process.env.VITEST) {
+  this.adapter = new ApiAdapter()
+  this.fallback = new ApiFallback()
+  this.mock = mock
+}
+```
+
+**How it works:**
+
+- Vitest automatically sets `process.env.VITEST = 'true'`
+- Components using `new ApiService()` automatically get `ApiFallback` in tests
+- No manual mocking or `vi.mock()` needed for component tests
+- Same code paths tested with realistic mock data
+
 ### Mock Data Features
 
 When using the fallback (mock) implementation:

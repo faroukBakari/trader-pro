@@ -152,7 +152,7 @@ export class ApiService {
   private adapter: ApiInterface
   private fallback: ApiInterface
   private mock: boolean
-  constructor(mock: boolean = false) {
+  constructor(mock: boolean = !!process.env.VITEST) {
     this.adapter = new ApiAdapter()
     this.fallback = new ApiFallback()
     this.mock = mock

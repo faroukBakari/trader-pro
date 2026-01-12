@@ -773,7 +773,7 @@ accountManagerInfo(): AccountManagerInfo {
       },
     ],
     orderColumns: [...],  // Order panel column configuration
-    positionColumns: [...], // Position panel column configuration
+    positionColumns: [...], // Position panel: Symbol, Side, Qty, AvgPrice, Limit, Stop, PnL
     pages: [],            // Custom account pages (empty)
   }
 }
@@ -829,10 +829,14 @@ async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
 async modifyOrder(order: Order): Promise<void> {
   if (this._orders.has(order.id)) {
     this._orders.set(order.id, { ...order, updateTime: Date.now() })
+    // Notify TradingView UI of the update
+    this._hostAdapter.orderUpdate(order)
     console.log(`Order modified: ${order.id}`)
   }
 }
 ```
+
+**Critical:** The `orderUpdate()` call notifies TradingView's Trading Terminal to refresh the Order Panel UI. Without this, the UI won't reflect modifications until the next WebSocket event.
 
 #### Cancel Order
 
@@ -960,7 +964,7 @@ Places a new order.
 
 ###### `modifyOrder(order: Order): Promise<void>`
 
-Modifies an existing order.
+Modifies an existing order. **Must call `_hostAdapter.orderUpdate(order)`** after modification to sync TradingView UI.
 
 ###### `cancelOrder(orderId: string): Promise<void>`
 
@@ -1375,6 +1379,38 @@ debug_broker: 'all' // Logs all broker API calls and responses
 **Priority**: High - Blocks Account Manager functionality
 
 **Last Encountered**: October 22, 2025
+
+### TradingView Order Type Discrimination: Nullish Fields Break Union Typing
+
+**Issue**: After page refresh, bracket orders display incorrectly - parent orders appear disconnected from children, phantom orders appear with no price labels, and duplicate price labels on correct orders.
+
+**Root Cause**: TradingView's `Order` type is a discriminated union: `type Order = PlacedOrder | BracketOrder`. The discrimination relies on **key presence**, not value truthiness:
+
+- `PlacedOrder`: Does NOT have `parentId` or `parentType` fields
+- `BracketOrder`: Has **required** `parentId: string` and `parentType: ParentType`
+
+When backend sends `{ parentId: null, parentType: null }`, TypeScript structural typing sees the **presence** of these keys and treats the object as `BracketOrder`. But `null` is not a valid `string` or `ParentType`, causing TradingView's internal type guards to fail silently.
+
+**Solution**: Use `omitNullish()` utility on frontend mappers to **remove** null/undefined fields entirely before passing orders to TradingView:
+
+```typescript
+// ❌ WRONG - TradingView sees parentId key, treats as BracketOrder
+return { id: '123', parentId: null, parentType: null, ... }
+
+// ✅ CORRECT - No parentId key, TradingView treats as PlacedOrder
+return omitNullish({ id: '123', parentId: null, parentType: null, ... })
+// Result: { id: '123', ... }
+```
+
+**Affected Areas**:
+
+- `frontend/src/plugins/mappers.ts` - Order mapping functions
+- `frontend/src/plugins/wsAdapter.ts` - WebSocket order event handlers
+- Any code path that converts backend `PlacedOrder` to TradingView `Order`
+
+**Priority**: High - Causes visual corruption in order display after refresh
+
+**Date Identified**: January 12, 2026
 
 ---
 

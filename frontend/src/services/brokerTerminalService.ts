@@ -34,6 +34,10 @@ import { WsAdapter, WsFallback, type BrokerConnectionStatus, type EquityData, ty
 import type { SubscriptionError } from '@/plugins/wsClientBase'
 import { ConnectionStatus, NotificationType, OrderStatus, Side, StandardFormatterName } from '@public/trading_terminal'
 
+const omitNullish = <T extends Record<string, unknown>>(obj: T): Partial<T> =>
+  Object.fromEntries(
+    Object.entries(obj).filter(([_, v]) => v != null)
+  ) as Partial<T>
 
 export interface ApiInterface {
   // Order operations
@@ -676,8 +680,8 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         'orders',
         { accountId: this.accountId },
         (order: Order) => {
-          console.warn('Received order update via WebSocket:', JSON.stringify(order))
-          this._hostAdapter.orderUpdate(order)
+          console.warn('Received order update via WebSocket: ' + JSON.stringify(order))
+          this._hostAdapter.orderUpdate(omitNullish(order) as Order)
 
           // Show notification on fill
           if (order.status === OrderStatus.Filled) {
@@ -832,6 +836,18 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
           formatter: StandardFormatterName.FormatQuantity,
         },
         {
+          label: 'Limit',
+          id: 'limitPrice',
+          dataFields: ['limitPrice'],
+          formatter: StandardFormatterName.FormatPrice,
+        },
+        {
+          label: 'Stop',
+          id: 'stopPrice',
+          dataFields: ['stopPrice'],
+          formatter: StandardFormatterName.FormatPrice,
+        },
+        {
           label: 'Status',
           id: 'status',
           dataFields: ['status'],
@@ -878,7 +894,8 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   async orders(): Promise<Order[]> {
     const response = await this._getApiAdapter().getOrders()
     console.log(`BrokerTerminalService.orders() => `, response.data)
-    return response.data
+    const orders = response.data.map(order => omitNullish(order)) as Order[]
+    return orders
   }
 
   async positions(): Promise<Position[]> {
@@ -928,6 +945,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   async modifyOrder(order: Order, confirmId?: string): Promise<void> {
     await this._getApiAdapter().modifyOrder(order, confirmId)
+    this._hostAdapter.orderUpdate(order)
     console.log(`BrokerTerminalService.modifyOrder[order: ${JSON.stringify(order)}, confirmId: ${confirmId}] => completed`)
   }
 

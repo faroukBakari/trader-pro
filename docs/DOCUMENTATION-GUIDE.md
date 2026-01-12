@@ -459,7 +459,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### Testing
 
-**Keywords**: testing strategy, unit tests, integration tests, E2E tests, test automation, Playwright, pytest, vitest
+**Keywords**: testing strategy, unit tests, integration tests, E2E tests, test automation, Playwright, pytest, vitest, process.env.VITEST, ApiFallback, test auto-detection, mock auto-detection
 
 **Scope**: All testing strategies (unit, integration, E2E)  
 **Out of Scope**: Production monitoring, observability
@@ -471,7 +471,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TradingView Integration
 
-**Keywords**: TradingView, broker API, Trading Host, charting library, order execution, broker adapter, UDF, LibrarySymbolInfo, SymbolInfo, currency_code, original_currency_code, expired, expiration_date, industry, sector, con_id, symbol metadata, DatafeedConfiguration, quote deduplication, subscribeQuotes
+**Keywords**: TradingView, broker API, Trading Host, charting library, order execution, broker adapter, UDF, LibrarySymbolInfo, SymbolInfo, currency_code, original_currency_code, expired, expiration_date, industry, sector, con_id, symbol metadata, DatafeedConfiguration, quote deduplication, subscribeQuotes, omitNullish, discriminated union, structural typing, nullish fields, PlacedOrder, BracketOrder
 
 **Scope**: TradingView Trading Terminal integration  
 **Out of Scope**: Custom charting solutions, alternative charting libraries

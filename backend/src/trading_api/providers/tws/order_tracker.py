@@ -146,6 +146,39 @@ class OrderTracker:
     def set_next_order_id(self, orderId: int) -> None:
         self._order_id_count = count(orderId)
 
+    def notify_hooks(self, orderId: int, tracked: TrackedOrder) -> None:
+        """Notify all registered hooks with current orders.
+
+        Called from reader thread after reconnect snapshot.
+        """
+
+        def resolve_hook(future: asyncio.Future, tracked: TrackedOrder) -> None:
+            if not future.done():
+                future.set_result(tracked)
+
+        for loop, future in self._order_hooks.get(orderId, {}).values():
+            loop.call_soon_threadsafe(resolve_hook, future, tracked)
+
+        for stream_loop, stream_callback, _ in self._stream_hooks.values():
+            stream_loop.call_soon_threadsafe(
+                stream_loop.create_task,
+                stream_callback(tracked),
+            )
+
+        # parent_tracked = tracked.order.parentId and self._orders.get(
+        #     tracked.order.parentId
+        # )
+        # if parent_tracked:
+        #     for loop, future in self._order_hooks.get(
+        #         tracked.order.parentId, {}
+        #     ).values():
+        #         loop.call_soon_threadsafe(resolve_hook, future, parent_tracked)
+        #     for stream_loop, stream_callback, _ in self._stream_hooks.values():
+        #         stream_loop.call_soon_threadsafe(
+        #             stream_loop.create_task,
+        #             stream_callback(parent_tracked),
+        #         )
+
     def upsert_order(
         self,
         orderId: int,
@@ -175,19 +208,7 @@ class OrderTracker:
         )
         self._orders[orderId] = tracked
 
-        for loop, future in self._order_hooks.get(orderId, {}).values():
-
-            def resolve_hook(future: asyncio.Future, tracked: TrackedOrder) -> None:
-                if not future.done():
-                    future.set_result(tracked)
-
-            loop.call_soon_threadsafe(resolve_hook, future, tracked)
-
-        for stream_loop, stream_callback, _ in self._stream_hooks.values():
-            stream_loop.call_soon_threadsafe(
-                stream_loop.create_task,
-                stream_callback(tracked),
-            )
+        self.notify_hooks(orderId, tracked)
 
     def update_status(
         self,
@@ -254,19 +275,7 @@ class OrderTracker:
             )
         )
 
-        for loop, future in self._order_hooks.get(orderId, {}).values():
-
-            def resolve_hook(future: asyncio.Future, tracked: TrackedOrder) -> None:
-                if not future.done():
-                    future.set_result(tracked)
-
-            loop.call_soon_threadsafe(resolve_hook, future, tracked)
-
-        for stream_loop, stream_callback, _ in self._stream_hooks.values():
-            stream_loop.call_soon_threadsafe(
-                stream_loop.create_task,
-                stream_callback(tracked),
-            )
+        self.notify_hooks(orderId, tracked)
 
     def raise_error(self, exception: ProviderException) -> None:
         """Dispatch error to all stream hooks.
