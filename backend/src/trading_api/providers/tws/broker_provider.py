@@ -398,8 +398,16 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         ]
 
     async def get_positions(self) -> list[Position]:
-        """Get all open positions."""
-        return list(self._positions.values())
+        """Get all open positions from TWS.
+
+        Returns:
+            List of Position objects for all open positions
+        """
+        # Request positions from TWS
+        tracked_positions = await self._tws_client.reqPositions()
+
+        # Convert each TrackedPosition to domain Position using to_domain()
+        return [p.to_domain() for p in tracked_positions]
 
     async def get_executions(self, symbol: str) -> list[Execution]:
         """Get execution history for a symbol."""
@@ -798,7 +806,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         """Unsubscribe from a stream."""
         # Remove from all callback registries
 
-        self._tws_client.canced_broker_stream(subscription_id)
+        self._tws_client.cancel_broker_stream(subscription_id)
 
         # Remove error callback
         self._error_callbacks.pop(subscription_id, None)

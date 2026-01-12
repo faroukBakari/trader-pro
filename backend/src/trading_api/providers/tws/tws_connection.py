@@ -63,6 +63,7 @@ from ibapi.wrapper import EWrapper, current_fn_name
 from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
+from trading_api.providers.tws.position_tracker import PositionTracker, TrackedPosition
 from trading_api.providers.tws.tws_mappers import (
     build_darkpool_contract,
     build_smart_contract,
@@ -255,6 +256,7 @@ class IBSocket(EWrapper):
 
         # Data tracking attributes
         self.order_tracker: OrderTracker = OrderTracker()
+        self.position_tracker: PositionTracker = PositionTracker()
         self._reader_accounts: list[str] = []
         self._ready_event = (
             threading.Event()
@@ -412,6 +414,7 @@ class IBSocket(EWrapper):
             self._business_to_tws_key.clear()
             self._req_id_count = count()
             self.order_tracker.reset()
+            self.position_tracker.reset()
 
     def _handle_request_error(
         self,
@@ -1116,6 +1119,15 @@ class IBSocket(EWrapper):
 
         self.order_tracker.ensure_snapshot_requested(request_cb)
 
+    def reqPositions(self) -> None:
+        def request_cb() -> None:
+            VERSION = 1
+            self.send_message(OUT.REQ_POSITIONS, [VERSION])
+            if DEBUG_TWS_REQUEST:
+                debug_log("requested positions")
+
+        self.position_tracker.ensure_snapshot_requested(request_cb)
+
     def cancelOrder(self, order_id: int) -> None:
         orderCancel = OrderCancel()
         cancelOrderRequestProto = createCancelOrderRequestProto(order_id, orderCancel)
@@ -1400,6 +1412,47 @@ class IBSocket(EWrapper):
 
         # Mark snapshot complete and resolve pending futures
         self.order_tracker.mark_snapshot_complete()
+
+    def position(
+        self, account: str, contract: Contract, position: Decimal, avgCost: float
+    ) -> None:
+        """Callback for position information.
+
+        TWS sends this callback for:
+        1. Each position after reqPositions() is called
+        2. Real-time updates when positions change (if subscribed)
+
+        Args:
+            account: Account ID holding the position
+            contract: Contract the position is for
+            position: Position size (positive=long, negative=short)
+            avgCost: Average cost per unit
+        """
+        if DEBUG_TWS_BROKER:
+            debug_log(
+                f"{current_fn_name()}, account={account}, "
+                f"symbol={contract.symbol}, position={position}, avgCost={avgCost}"
+            )
+
+        # Build position data dict for domain conversion
+        self.position_tracker.upsert_position(
+            account=account,
+            contract=contract,
+            position=position,
+            avgCost=avgCost,
+        )
+
+    def positionEnd(self) -> None:
+        """End signal for positions request.
+
+        Called after all position callbacks for reqPositions().
+        Resolves the pending future with accumulated position data.
+        """
+        if DEBUG_TWS_BROKER:
+            debug_log(f"{current_fn_name()}")
+
+        # Mark snapshot complete and resolve pending futures
+        self.position_tracker.mark_snapshot_complete()
 
     # === error handling ===
 
@@ -2181,6 +2234,24 @@ class TWSClient:
             timeout=timeout or self._timeout
         )
 
+    async def reqPositions(self, timeout: float | None = None) -> list[TrackedPosition]:
+        """Request all positions for this client (snapshot).
+
+        Returns positions for all accounts. Each position triggers
+        position() callback, then positionEnd().
+
+        Args:
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of TrackedPosition objects (one per position)
+        """
+        self.ibsocket.reqPositions()
+
+        return await self.ibsocket.position_tracker.all_positions(
+            timeout=timeout or self._timeout
+        )
+
     # === Real-time broker subscriptions ===
 
     def reqOrdersStream(
@@ -2204,9 +2275,31 @@ class TWSClient:
 
         return stream_key
 
-    def canced_broker_stream(self, stream_key: str) -> None:
-        """Cancel a real-time broker subscription."""
+    def reqPositionsStream(
+        self,
+        callback: Callable[[TrackedPosition], Coroutine[Any, Any, None]],
+        on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
+    ) -> str:
+        """Create position stream subscription.
+
+        Returns stream_key for later unsubscription.
+        """
+        # 1. Register with PositionTracker
+        stream_key = self.ibsocket.position_tracker.create_stream_hook(
+            asyncio.get_event_loop(),
+            callback,
+            on_error,
+        )
+
+        # 2. Trigger initial snapshot (existing orders)
+        self.ibsocket.reqPositions()
+
+        return stream_key
+
+    def cancel_broker_stream(self, stream_key: str) -> None:
+        """Cancel a real-time broker subscription (orders or positions)."""
         self.ibsocket.order_tracker.remove_stream_hook(stream_key)
+        self.ibsocket.position_tracker.remove_stream_hook(stream_key)
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""

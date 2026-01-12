@@ -27,6 +27,7 @@ from trading_api.models.broker import (
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import QuoteValues
 from trading_api.providers.tws.order_tracker import OrderFill, TrackedOrder
+from trading_api.providers.tws.position_tracker import TrackedPosition
 from trading_api.providers.tws.tws_mappers import (
     SEC_TYPE_MAP,
     BracketContext,
@@ -40,7 +41,6 @@ from trading_api.providers.tws.tws_mappers import (
     tws_account_summary_to_account_info,
     tws_account_summary_to_equity,
     tws_bar_to_domain_bar,
-    tws_position_to_domain,
     tws_ticks_to_quote_data,
     tws_to_domain_status,
 )
@@ -872,7 +872,7 @@ class TestTrackedOrderToPlacedOrder:
 
 
 class TestTwsPositionToDomain:
-    """Test tws_position_to_domain mapper."""
+    """Test TrackedPosition.to_domain() method."""
 
     def test_long_position(self) -> None:
         """Test mapping a long position."""
@@ -882,14 +882,14 @@ class TestTwsPositionToDomain:
         contract.exchange = "SMART"
         contract.primaryExchange = "NASDAQ"
 
-        position_data = {
-            "account": "DU123456",
-            "contract": contract,
-            "position": Decimal("100"),
-            "avgCost": 150.50,
-        }
+        tracked = TrackedPosition(
+            account="DU123456",
+            contract=contract,
+            position=Decimal("100"),
+            avgCost=150.50,
+        )
 
-        result = tws_position_to_domain(position_data)
+        result = tracked.to_domain()
 
         assert result.symbol == "NASDAQ:AAPL"
         assert result.qty == 100.0
@@ -904,14 +904,14 @@ class TestTwsPositionToDomain:
         contract.exchange = "SMART"
         contract.primaryExchange = "NASDAQ"
 
-        position_data = {
-            "account": "DU123456",
-            "contract": contract,
-            "position": Decimal("-50"),
-            "avgCost": 250.75,
-        }
+        tracked = TrackedPosition(
+            account="DU123456",
+            contract=contract,
+            position=Decimal("-50"),
+            avgCost=250.75,
+        )
 
-        result = tws_position_to_domain(position_data)
+        result = tracked.to_domain()
 
         assert result.qty == 50.0
         assert result.side == Side.SELL

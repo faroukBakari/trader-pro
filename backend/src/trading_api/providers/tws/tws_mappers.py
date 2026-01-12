@@ -32,7 +32,6 @@ from trading_api.models.broker import (
     OrderType,
     ParentType,
     PlacedOrder,
-    Position,
     PreOrder,
     Side,
     StopType,
@@ -1420,50 +1419,6 @@ def order_state_to_preview_result(
 # =============================================================================
 
 
-def tws_position_to_domain(position_data: dict[str, Any]) -> Position:
-    """Convert TWS position data dict to domain Position.
-
-    Args:
-        position_data: Dict from IBSocket position callback containing:
-            - account: Account ID
-            - contract: TWS Contract object
-            - position: Position quantity (Decimal, can be negative for short)
-            - avgCost: Average cost per unit
-            - symbol, exchange, secType: Flattened contract fields
-
-    Returns:
-        Domain Position model
-    """
-
-    contract = position_data.get("contract")
-    position_qty = position_data.get("position", 0)
-    avg_cost = position_data.get("avgCost", 0.0)
-
-    # Build symbol ticker from contract or flattened fields
-    if contract is None:
-        contract = Contract()
-        contract.symbol = position_data.get("symbol", "")
-        contract.primaryExchange = position_data.get("exchange", "")
-        contract.secType = position_data.get("secType", "")
-
-    symbol = ticker_name(contract)
-    # Determine side from position sign
-    # Positive = long, Negative = short
-    qty_float = float(position_qty)
-    side = Side.BUY if qty_float >= 0 else Side.SELL
-
-    # Position ID is typically the symbol
-    position_id = symbol
-
-    return Position(
-        id=position_id,
-        symbol=symbol,
-        qty=abs(qty_float),  # qty is always positive, side indicates direction
-        side=side,
-        avgPrice=float(avg_cost),
-    )
-
-
 def tws_account_summary_to_equity(
     summary_data: dict[str, dict[str, Any]],
 ) -> EquityData:
@@ -1571,7 +1526,6 @@ __all__ = [
     "tracked_order_to_placed_order",
     "order_state_to_preview_result",
     # Position/Account mappers
-    "tws_position_to_domain",
     "tws_account_summary_to_equity",
     "tws_account_summary_to_account_info",
 ]

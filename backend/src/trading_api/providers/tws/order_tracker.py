@@ -140,8 +140,8 @@ class OrderTracker:
 
     def ensure_snapshot_requested(self, request_cb: Callable[[], None]) -> None:
         if not self._snapshot_requested:
-            self._snapshot_requested = True
             request_cb()
+            self._snapshot_requested = True
 
     def set_next_order_id(self, orderId: int) -> None:
         self._order_id_count = count(orderId)
@@ -355,7 +355,7 @@ class OrderTracker:
         future: asyncio.Future[list[TrackedOrder]] = loop.create_future()
 
         if self._snapshot_complete:
-            loop.call_soon_threadsafe(future.set_result, list(self._orders.values()))
+            future.set_result(list(self._orders.values()))
             return await asyncio.wait_for(future, timeout)
 
         key = str(uuid.uuid4())
