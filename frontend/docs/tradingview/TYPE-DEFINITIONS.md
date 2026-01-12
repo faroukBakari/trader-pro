@@ -319,6 +319,48 @@ const symbolInfo: LibrarySymbolInfo = {
 }
 ```
 
+### ❌ Wrong: Nullish fields in discriminated unions
+
+TradingView uses **structural typing** for discriminated unions like `type Order = PlacedOrder | BracketOrder`. Type discrimination relies on **key presence**, not value truthiness.
+
+```typescript
+// WRONG - TradingView sees parentId key, treats as BracketOrder
+const order = {
+  id: '123',
+  symbol: 'AAPL',
+  parentId: null, // Key EXISTS → BracketOrder discrimination
+  parentType: null, // But null is invalid for required string/enum!
+}
+host.orderUpdate(order) // Silent failure or visual corruption
+```
+
+### ✅ Correct: Omit nullish fields before passing to TradingView
+
+Use `omitNullish()` to **remove** null/undefined fields entirely:
+
+```typescript
+// Utility function (see brokerTerminalService.ts)
+const omitNullish = <T extends Record<string, unknown>>(obj: T): Partial<T> =>
+  Object.fromEntries(Object.entries(obj).filter(([_, v]) => v != null)) as Partial<T>
+
+// CORRECT - No parentId key → PlacedOrder discrimination
+const order = omitNullish({
+  id: '123',
+  symbol: 'AAPL',
+  parentId: null,
+  parentType: null,
+})
+// Result: { id: '123', symbol: 'AAPL' }
+host.orderUpdate(order as Order)
+```
+
+**Affected union types**:
+
+- `Order = PlacedOrder | BracketOrder` (parentId, parentType)
+- Any TradingView type with optional discriminator fields
+
+**See also**: [BROKER-INTEGRATION.md Known Issues](../BROKER-INTEGRATION.md#known-issues) for specific Order case.
+
 ## Type Sources
 
 These type definitions are based on:

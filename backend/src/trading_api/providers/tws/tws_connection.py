@@ -1955,32 +1955,57 @@ class TWSClient:
         order: Order,
         parent_id: int = 0,
         transmit: bool = False,
-    ) -> int:
+    ) -> tuple[int, bool]:
         order_id = order.orderId
+        place_flag = True
         if order_id > 0:
             tracked = self.ibsocket.order_tracker.ensure_existing_order(order_id)
             order_ori = tracked.clone_order()
             # we only modify allowed fields. for more infos
             # check 02-API-REFERENCE-CONTRACTS-ORDERS.md
-            if order.lmtPrice != UNSET_DOUBLE:
+            assert (
+                tracked.contract.conId == contract.conId
+            ), "Cannot change contract of an existing order"
+            assert (
+                not contract.exchange or tracked.contract.exchange == contract.exchange
+            ), "Cannot change exchange of an existing order"
+            assert (
+                not parent_id or order_ori.parentId == parent_id
+            ), "Cannot change parentId of an existing order"
+            place_flag = False
+            if order.lmtPrice != UNSET_DOUBLE and order_ori.lmtPrice != order.lmtPrice:
                 order_ori.lmtPrice = order.lmtPrice
-            if order.auxPrice != UNSET_DOUBLE:
+                place_flag = True
+            if order.auxPrice != UNSET_DOUBLE and order_ori.auxPrice != order.auxPrice:
                 order_ori.auxPrice = order.auxPrice
-            if order.totalQuantity != UNSET_DECIMAL:
+                place_flag = True
+            if (
+                order.totalQuantity != UNSET_DECIMAL
+                and order_ori.totalQuantity != order.totalQuantity
+            ):
                 order_ori.totalQuantity = order.totalQuantity
-            order_ori.tif = order.tif or order_ori.tif
+                place_flag = True
+            if order.tif != "" and order_ori.tif != order.tif:
+                order_ori.tif = order.tif
+                place_flag = True
+            assert (
+                not place_flag or order_ori.transmit == transmit
+            ), "Cannot change transmit flag of an existing order"
             order = order_ori
         else:
             order_id = self.ibsocket.order_tracker.next_order_id
             order.parentId = parent_id
-        order.transmit = transmit
-        self.ibsocket.placeOrder(order_id, contract, order)
-        return order_id
+            order.transmit = transmit
+
+        if place_flag:
+            self.ibsocket.placeOrder(order_id, contract, order)
+
+        return order_id, place_flag
 
     async def placeOcaGroup(
         self,
         contract: Contract,
-        children: list[Order],
+        order_list: list[Order],
         oca_group: str,
         oca_type: int = 1,
         parent_id: int = 0,
@@ -2003,32 +2028,39 @@ class TWSClient:
         Returns:
             List of TrackedOrder for each submitted order
         """
-        if not children:
+        if not order_list:
             return []
 
         # Assign OCA attributes to each order
-        for order in children:
+        for order in order_list:
             order.ocaGroup = oca_group
             order.ocaType = oca_type
 
-        order_ids = [
+        submit_results = [
             self._submit_order(contract, order, parent_id=parent_id, transmit=False)
-            for order in children[:-1]
+            for order in order_list[:-1]
         ]
-        order_ids.append(
+        submit_results.append(
             self._submit_order(
-                contract, children[-1], parent_id=parent_id, transmit=True
+                contract, order_list[-1], parent_id=parent_id, transmit=True
             )
         )
 
-        children_tracked = await asyncio.gather(
+        tracked_list = await asyncio.gather(
             *[
-                self.ibsocket.order_tracker.order_update(oid, timeout=timeout)
-                for oid in order_ids
+                self.ibsocket.order_tracker.order_update(
+                    oid, timeout=timeout or self._timeout
+                )
+                for oid, placed in submit_results
+                if placed
             ]
-        )
+        ) + [
+            self.ibsocket.order_tracker.ensure_existing_order(oid)
+            for oid, placed in submit_results
+            if not placed
+        ]
 
-        return list(children_tracked)
+        return list(tracked_list)
 
     async def placeOrderGroup(
         self,
@@ -2050,7 +2082,9 @@ class TWSClient:
         Returns:
             Tuple of (parent TrackedOrder, list of child TrackedOrders)
         """
-        parent_id = self._submit_order(contract, parent, transmit=(not children))
+        parent_id, placed = self._submit_order(
+            contract, parent, transmit=(not children)
+        )
 
         children_tracked: list[TrackedOrder] = []
         if children:
@@ -2062,8 +2096,14 @@ class TWSClient:
                 parent_id=parent_id,
             )
 
-        parent_tracked = await self.ibsocket.order_tracker.order_update(
-            parent_id, timeout or self._timeout
+        parent_tracked = (
+            (
+                await self.ibsocket.order_tracker.order_update(
+                    parent_id, timeout=timeout or self._timeout
+                )
+            )
+            if placed
+            else self.ibsocket.order_tracker.ensure_existing_order(parent_id)
         )
 
         return parent_tracked, children_tracked
@@ -2103,7 +2143,7 @@ class TWSClient:
         order_id = self.ibsocket.order_tracker.next_order_id
         self.ibsocket.placeOrder(order_id, contract, order)
         return await self.ibsocket.order_tracker.order_update(
-            order_id, timeout or self._timeout
+            order_id, timeout=timeout or self._timeout
         )
 
     async def cancelOrder(
@@ -2118,7 +2158,7 @@ class TWSClient:
         self.ibsocket.order_tracker.ensure_existing_order(order_id)
         self.ibsocket.cancelOrder(order_id)
         return await self.ibsocket.order_tracker.order_update(
-            order_id, timeout or self._timeout
+            order_id, timeout=timeout or self._timeout
         )
 
     async def reqOpenOrders(self, timeout: float | None = None) -> list[TrackedOrder]:
@@ -2137,7 +2177,9 @@ class TWSClient:
 
         self.ibsocket.reqOpenOrders()
 
-        return await self.ibsocket.order_tracker.all_orders(timeout or self._timeout)
+        return await self.ibsocket.order_tracker.all_orders(
+            timeout=timeout or self._timeout
+        )
 
     # === Real-time broker subscriptions ===
 

@@ -160,6 +160,26 @@ Frontend uses mock data when:
 - Backend not running
 - During unit tests
 
+### Test Environment Auto-Detection
+
+Services can detect test environment via `process.env.VITEST`:
+
+```typescript
+// Pattern: Auto-detect Vitest in constructor
+constructor(mock: boolean = !!process.env.VITEST) {
+  this.mock = mock
+}
+```
+
+**Benefits:**
+
+- ✅ No `vi.mock()` boilerplate needed
+- ✅ Same code paths tested as production
+- ✅ Realistic mock data with network delays
+- ✅ Component tests work without backend
+
+**Reference:** See `apiService.ts` for implementation example.
+
 ## Integration Testing
 
 ### Prerequisites

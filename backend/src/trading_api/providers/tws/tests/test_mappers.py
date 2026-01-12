@@ -611,6 +611,17 @@ class TestParseTwsBarDate:
 class TestPreorderToTws:
     """Test preorder_to_tws mapper."""
 
+    @staticmethod
+    def _make_contract() -> Contract:
+        """Create a minimal test contract."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+        contract.currency = "USD"
+        return contract
+
     def test_market_order(self) -> None:
         """Test converting a market buy order."""
         preorder = PreOrder(
@@ -619,8 +630,11 @@ class TestPreorderToTws:
             side=Side.BUY,
             qty=100,
         )
+        contract = self._make_contract()
 
-        parent, stop_loss, take_profit = preorder_to_tws(preorder, "DU123456", 1)
+        parent, stop_loss, take_profit = preorder_to_tws(
+            preorder, contract, account="DU123456", order_id=1
+        )
 
         assert parent.action == "BUY"
         assert parent.totalQuantity == Decimal("100")
@@ -638,28 +652,28 @@ class TestPreorderToTws:
             qty=50,
             limitPrice=350.50,
         )
+        contract = self._make_contract()
 
-        parent, _, _ = preorder_to_tws(preorder, "", 1)
+        parent, _, _ = preorder_to_tws(preorder, contract, order_id=1)
 
         assert parent.action == "SELL"
         assert parent.orderType == "LMT"
         assert parent.lmtPrice == 350.50
 
-    def test_stop_limit_order(self) -> None:
-        """Test converting a stop-limit order."""
+    def test_stop_order(self) -> None:
+        """Test converting a stop order."""
         preorder = PreOrder(
             symbol="NASDAQ:TSLA",
-            type=OrderType.STOP_LIMIT,
+            type=OrderType.STOP,
             side=Side.BUY,
             qty=10,
-            limitPrice=250.00,
             stopPrice=245.00,
         )
+        contract = self._make_contract()
 
-        parent, _, _ = preorder_to_tws(preorder, "", 1)
+        parent, _, _ = preorder_to_tws(preorder, contract, order_id=1)
 
-        assert parent.orderType == "STP LMT"
-        assert parent.lmtPrice == 250.00
+        assert parent.orderType == "STP"
         assert parent.auxPrice == 245.00
 
     def test_bracket_order_with_stop_and_take_profit(self) -> None:
@@ -673,8 +687,9 @@ class TestPreorderToTws:
             stopLoss=145.00,
             takeProfit=160.00,
         )
+        contract = self._make_contract()
 
-        parent, stop_loss, take_profit = preorder_to_tws(preorder, "", 1)
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, contract, order_id=1)
 
         assert parent.orderType == "LMT"
         assert stop_loss is not None
@@ -686,7 +701,7 @@ class TestPreorderToTws:
         assert take_profit.lmtPrice == 160.00
         assert take_profit.action == "SELL"
 
-    def test_trailing_stop_orde(self) -> None:
+    def test_trailing_stop_order(self) -> None:
         """Test converting order with trailing stop."""
         preorder = PreOrder(
             symbol="NASDAQ:AAPL",
@@ -697,8 +712,9 @@ class TestPreorderToTws:
             trailingStopPips=5.00,
             stopType=StopType.TRAILING_STOP,
         )
+        contract = self._make_contract()
 
-        parent, stop_loss, _ = preorder_to_tws(preorder, "", 1)
+        parent, stop_loss, _ = preorder_to_tws(preorder, contract, order_id=1)
 
         assert stop_loss is not None
         assert stop_loss.orderType == "TRAIL"
@@ -714,9 +730,10 @@ class TestPreorderToTws:
             limitPrice=150.00,
             guaranteedStop=140.00,
         )
+        contract = self._make_contract()
 
         with pytest.raises(ProviderException) as exc_info:
-            preorder_to_tws(preorder, "", 1)
+            preorder_to_tws(preorder, contract, order_id=1)
         assert "PROVIDER_BROKER_UNSUPPORTED_FEATURE" in str(exc_info.value.code)
 
 
