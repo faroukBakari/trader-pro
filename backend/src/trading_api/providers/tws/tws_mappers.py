@@ -24,11 +24,11 @@ from ibapi.ticktype import TickTypeEnum
 
 from trading_api.models.broker import (
     AccountMetainfo,
+    Brackets,
     EquityData,
     OrderPreviewResult,
     OrderPreviewSection,
     OrderPreviewSectionRow,
-    OrderStatus,
     OrderType,
     ParentType,
     PlacedOrder,
@@ -849,59 +849,6 @@ TWS_ACTION_TO_SIDE: dict[str, int] = {
     "SLD": -1,  # Historical action
 }
 
-# TWS order status → Domain OrderStatus (direct mappings only)
-# Statuses that have a definitive domain mapping
-_DIRECT_MAPPED_STATUS: dict[str, int] = {
-    "PreSubmitted": 3,  # INACTIVE - simulated order held by IB (stop waiting for trigger)
-    "Submitted": 6,  # WORKING - active at exchange
-    "Cancelled": 1,  # CANCELED - confirmed cancelled
-    "Filled": 2,  # FILLED - confirmed filled
-    "Inactive": 3,  # INACTIVE - error or held
-}
-
-# Statuses requiring history-based resolution (preserve previous confirmed status)
-_HISTORY_RESOLVED_STATUS: set[str] = {
-    "PendingCancel",  # Cancel requested but not confirmed - could still fill
-    "ApiCancelled",  # Cancelled via API before ack - could still fill
-    "PendingSubmit",  # Sent, awaiting exchange ack - use last confirmed
-    "ApiPending",  # Not yet sent to IB server - use last confirmed
-}
-
-
-def tws_to_domain_status(tracked: TrackedOrder) -> OrderStatus:
-    """Convert TWS order status to domain OrderStatus.
-
-    Handles cancel transitions (PendingCancel, ApiCancelled) by preserving
-    the last confirmed status from order history. This prevents misleading
-    users during market halts where orders might still fill after cancel request.
-
-    Args:
-        tracked: TrackedOrder with current status and fills history
-
-    Returns:
-        Domain OrderStatus enum value
-
-    Resolution order:
-        1. Direct mapping for confirmed statuses (Submitted, Filled, Cancelled, etc.)
-        2. History lookup for transitional statuses (PendingCancel, ApiCancelled, etc.)
-        3. Fallback to PLACING (4) if no history available
-    """
-    current_status = tracked.orderState.status
-
-    # 1. Check direct mapping first (confirmed statuses)
-    if current_status in _DIRECT_MAPPED_STATUS:
-        return OrderStatus(_DIRECT_MAPPED_STATUS[current_status])
-
-    # 2. History-based resolution for transitional/cancel statuses
-    if current_status in _HISTORY_RESOLVED_STATUS and tracked.fills:
-        # Walk history backwards to find last confirmed status
-        for fill in reversed(tracked.fills):
-            if fill.status in _DIRECT_MAPPED_STATUS:
-                return OrderStatus(_DIRECT_MAPPED_STATUS[fill.status])
-
-    # 3. Fallback to PLACING for new orders with no history
-    return OrderStatus.PLACING
-
 
 @dataclass
 class BracketContext:
@@ -925,38 +872,6 @@ class BracketContext:
 # Order brackets: "brackets_{order_id}" where order_id is numeric
 # Position brackets: "brackets_{position_id}" where position_id is a symbol string
 ORDER_BRACKET_PATTERN = re.compile(r"^brackets_(\d+)$")
-
-
-def parse_bracket_oca(oca_group: str | None) -> tuple[str | None, ParentType | None]:
-    """Parse OCA group to extract parent ID and determine parent type.
-
-    The codebase uses deterministic OCA naming:
-    - Order brackets: "brackets_{order_id}" (numeric) → parentType=ORDER
-    - Position brackets: "brackets_{position_id}" (symbol string) → parentType=POSITION
-
-    Args:
-        oca_group: OCA group string (e.g., "brackets_100" or "brackets_AAPL:NASDAQ:STK")
-
-    Returns:
-        (parent_id, parent_type):
-        - ("100", ParentType.ORDER) for order brackets (numeric)
-        - ("AAPL:NASDAQ:STK", ParentType.POSITION) for position brackets (non-numeric)
-        - (None, None) if not a bracket OCA group
-    """
-    if not oca_group:
-        return None, None
-
-    # Check for order bracket (numeric parent_id)
-    match = ORDER_BRACKET_PATTERN.match(oca_group)
-    if match:
-        return match.group(1), ParentType.ORDER
-
-    # Check for position bracket (non-numeric, starts with "brackets_")
-    if oca_group.startswith("brackets_"):
-        position_id = oca_group[9:]  # Strip "brackets_" prefix
-        return position_id, ParentType.POSITION
-
-    return None, None
 
 
 def prebuild_tws_order(
@@ -987,6 +902,70 @@ def prebuild_tws_order(
     if account is not None:
         order.account = account
     return order
+
+
+def brackets_to_tws(
+    contract: Contract,
+    quantity: float,
+    bracket_side: int,
+    brackets: Brackets,
+    *,
+    account: str | None = None,
+) -> tuple[Order | None, Order | None]:
+    """Convert Brackets to TWS child orders (stop_loss, take_profit).
+
+    Creates TWS Order objects for bracket orders using consistent defaults
+    (TIF, outsideRth) via prebuild_tws_order helper.
+
+    Args:
+        contract: TWS Contract for order routing (determines TIF)
+        quantity: Order quantity for bracket orders
+        bracket_side: Side for bracket orders (opposite of parent order/position)
+                      Use -preorder.side for order brackets, opposite of position.side for position brackets
+        brackets: Brackets model with stopLoss, takeProfit, trailingStopPips
+        account: Optional account ID for multi-account routing
+
+    Returns:
+        Tuple of (stop_loss_order, take_profit_order) - either can be None
+
+    Note:
+        Stop type is inferred from trailingStopPips:
+        - trailingStopPips is not None → TRAIL order
+        - trailingStopPips is None, stopLoss is not None → STP order
+    """
+    stop_loss_order: Order | None = None
+    take_profit_order: Order | None = None
+
+    # Take-profit order (LIMIT)
+    if brackets.takeProfit is not None:
+        take_profit_order = prebuild_tws_order(
+            contract=contract,
+            quantity=quantity,
+            side=bracket_side,
+            order_type=OrderType.LIMIT,
+            price=brackets.takeProfit,
+            account=account,
+        )
+
+    # Stop-loss or trailing stop order
+    if brackets.stopLoss is not None or brackets.trailingStopPips is not None:
+        # Infer stop type from trailingStopPips presence
+        use_trailing = brackets.trailingStopPips is not None
+
+        stop_loss_order = prebuild_tws_order(
+            contract=contract,
+            quantity=quantity,
+            side=bracket_side,
+            order_type=OrderType.TRAIL if use_trailing else OrderType.STOP,
+            price=brackets.trailingStopPips or brackets.stopLoss,
+            account=account,
+        )
+
+        # Set initial stop trigger price if both trailingStopPips and stopLoss provided
+        if brackets.trailingStopPips and brackets.stopLoss:
+            stop_loss_order.trailStopPrice = brackets.stopLoss
+
+    return stop_loss_order, take_profit_order
 
 
 def preorder_to_tws(
@@ -1047,39 +1026,20 @@ def preorder_to_tws(
     if not has_brackets:
         return parent, None, None
 
-    stop_loss_order: Order | None = None
-    take_profit_order: Order | None = None
-
-    # Take-profit order (LIMIT) - created first to get sequential order ID
-    if preorder.takeProfit is not None:
-        take_profit_order = prebuild_tws_order(
-            contract=contract,
-            quantity=preorder.qty,
-            side=(-preorder.side),
-            order_type=OrderType.LIMIT,
-            price=preorder.takeProfit,
-            account=account,
-        )
-
-    # Stop-loss or trailing stop order
-    if preorder.stopLoss is not None or preorder.trailingStopPips is not None:
-        # Determine stop type: trailing vs regular stop
-        use_trailing = (
-            preorder.stopType == StopType.TRAILING_STOP
-            or preorder.trailingStopPips is not None
-        )
-        stop_loss_order = prebuild_tws_order(
-            contract=contract,
-            quantity=preorder.qty,
-            side=(-preorder.side),
-            order_type=OrderType.TRAIL if use_trailing else OrderType.STOP,
-            price=preorder.trailingStopPips or preorder.stopLoss,
-            account=account,
-        )
-
-        if preorder.trailingStopPips and preorder.stopLoss:
-            # Set initial stop trigger price if stopLoss provided (IB recommended)
-            stop_loss_order.trailStopPrice = preorder.stopLoss
+    # Delegate bracket creation to brackets_to_tws
+    brackets = Brackets(
+        stopLoss=preorder.stopLoss,
+        takeProfit=preorder.takeProfit,
+        trailingStopPips=preorder.trailingStopPips,
+        guaranteedStop=None,  # Already validated above
+    )
+    stop_loss_order, take_profit_order = brackets_to_tws(
+        contract=contract,
+        quantity=preorder.qty,
+        bracket_side=-preorder.side,
+        brackets=brackets,
+        account=account,
+    )
 
     return parent, stop_loss_order, take_profit_order
 
@@ -1106,7 +1066,6 @@ def tracked_order_to_placed_order(
 
     contract = contract or tracked.contract
     order = tracked.order
-    tracked.orderState
 
     # Build symbol from contract
     symbol = ticker_name(contract)
@@ -1122,7 +1081,7 @@ def tracked_order_to_placed_order(
     qty = float(order.totalQuantity)
 
     # Status with history-aware resolution
-    status = tws_to_domain_status(tracked)
+    status = tracked.domain_status
 
     # Prices
     limit_price: float | None = None
@@ -1157,9 +1116,18 @@ def tracked_order_to_placed_order(
     # TWS sets order.parentId > 0 for child orders (TP/SL)
     parent_id: str | None = None
     parent_type: ParentType | None = None
-    if order.parentId and order.parentId > 0:
+    if tracked.parent_filled:
+        parent_id = symbol
+        parent_type = ParentType.POSITION
+    elif order.parentId and order.parentId > 0:
         parent_id = str(order.parentId)
         parent_type = ParentType.ORDER
+    else:
+        # Try to parse parentId from OCA group for position brackets
+        parsed_parent_id, parsed_parent_type = tracked.brackets_info
+        if parsed_parent_id and parsed_parent_type == ParentType.POSITION:
+            parent_id = parsed_parent_id
+            parent_type = ParentType.POSITION
 
     return PlacedOrder(
         id=str(tracked.orderId),
@@ -1514,14 +1482,13 @@ __all__ = [
     "normalize_timezone",
     # Bracket OCA utilities
     "ORDER_BRACKET_PATTERN",
-    "parse_bracket_oca",
     # Order mappers
     "BracketContext",
     "ORDER_TYPE_TO_TWS",
     "TWS_TO_ORDER_TYPE",
     "SIDE_TO_TWS_ACTION",
     "TWS_ACTION_TO_SIDE",
-    "tws_to_domain_status",
+    "brackets_to_tws",
     "preorder_to_tws",
     "tracked_order_to_placed_order",
     "order_state_to_preview_result",

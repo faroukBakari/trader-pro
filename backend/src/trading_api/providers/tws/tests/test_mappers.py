@@ -17,6 +17,7 @@ from ibapi.order import Order as TWSOrder
 from ibapi.order_state import OrderState
 
 from trading_api.models.broker import (
+    Brackets,
     OrderStatus,
     OrderType,
     ParentType,
@@ -31,10 +32,10 @@ from trading_api.providers.tws.position_tracker import TrackedPosition
 from trading_api.providers.tws.tws_mappers import (
     SEC_TYPE_MAP,
     BracketContext,
+    brackets_to_tws,
     contract_description_to_search_result,
     contract_details_to_symbol_info,
     order_state_to_preview_result,
-    parse_bracket_oca,
     parse_tws_bar_date,
     preorder_to_tws,
     tracked_order_to_placed_order,
@@ -42,7 +43,6 @@ from trading_api.providers.tws.tws_mappers import (
     tws_account_summary_to_equity,
     tws_bar_to_domain_bar,
     tws_ticks_to_quote_data,
-    tws_to_domain_status,
 )
 
 # =============================================================================
@@ -737,6 +737,207 @@ class TestPreorderToTws:
         assert "PROVIDER_BROKER_UNSUPPORTED_FEATURE" in str(exc_info.value.code)
 
 
+class TestBracketsToTws:
+    """Test brackets_to_tws mapper for converting Brackets to TWS child orders."""
+
+    @staticmethod
+    def _make_contract(exchange: str = "SMART") -> Contract:
+        """Create a minimal test contract."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = exchange
+        contract.primaryExchange = "NASDAQ"
+        contract.currency = "USD"
+        return contract
+
+    def test_empty_brackets_returns_none_tuple(self) -> None:
+        """Test that empty brackets (all None) returns (None, None)."""
+        brackets = Brackets()
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is None
+        assert take_profit is None
+
+    def test_stop_loss_only(self) -> None:
+        """Test bracket with only stop loss creates STP order."""
+        brackets = Brackets(stopLoss=145.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "STP"
+        assert stop_loss.auxPrice == 145.00
+        assert stop_loss.action == "SELL"
+        assert stop_loss.totalQuantity == Decimal("100")
+        assert take_profit is None
+
+    def test_take_profit_only(self) -> None:
+        """Test bracket with only take profit creates LMT order."""
+        brackets = Brackets(takeProfit=160.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=50,
+            bracket_side=Side.BUY,
+            brackets=brackets,
+        )
+
+        assert stop_loss is None
+        assert take_profit is not None
+        assert take_profit.orderType == "LMT"
+        assert take_profit.lmtPrice == 160.00
+        assert take_profit.action == "BUY"
+        assert take_profit.totalQuantity == Decimal("50")
+
+    def test_trailing_stop_inferred_from_trailing_pips(self) -> None:
+        """Test trailingStopPips creates TRAIL order (inferred stop type)."""
+        brackets = Brackets(trailingStopPips=5.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "TRAIL"
+        assert stop_loss.auxPrice == 5.00
+        assert take_profit is None
+
+    def test_trailing_stop_with_initial_trigger(self) -> None:
+        """Test trailingStopPips + stopLoss sets trailStopPrice."""
+        brackets = Brackets(trailingStopPips=5.00, stopLoss=145.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "TRAIL"
+        assert stop_loss.auxPrice == 5.00
+        assert stop_loss.trailStopPrice == 145.00
+
+    def test_full_brackets_both_orders(self) -> None:
+        """Test full brackets creates both STP and LMT orders."""
+        brackets = Brackets(stopLoss=145.00, takeProfit=160.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "STP"
+        assert stop_loss.auxPrice == 145.00
+        assert take_profit is not None
+        assert take_profit.orderType == "LMT"
+        assert take_profit.lmtPrice == 160.00
+
+    def test_outside_rth_enabled(self) -> None:
+        """Test outsideRth is set to True on bracket orders."""
+        brackets = Brackets(stopLoss=145.00)
+        contract = self._make_contract()
+
+        stop_loss, _ = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.outsideRth is True
+
+    def test_tif_gtc_for_smart_exchange(self) -> None:
+        """Test TIF is GTC for SMART exchange."""
+        brackets = Brackets(stopLoss=145.00)
+        contract = self._make_contract(exchange="SMART")
+
+        stop_loss, _ = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.tif == "GTC"
+
+    def test_tif_day_for_overnight_exchange(self) -> None:
+        """Test TIF is DAY for OVERNIGHT exchange."""
+        brackets = Brackets(stopLoss=145.00)
+        contract = self._make_contract(exchange="OVERNIGHT")
+
+        stop_loss, _ = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.tif == "DAY"
+
+    def test_account_passed_to_orders(self) -> None:
+        """Test account parameter is passed to bracket orders."""
+        brackets = Brackets(stopLoss=145.00, takeProfit=160.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+            account="DU123456",
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.account == "DU123456"
+        assert take_profit is not None
+        assert take_profit.account == "DU123456"
+
+    def test_bracket_side_buy_for_short_position(self) -> None:
+        """Test bracket_side=BUY creates BUY bracket orders (for short positions)."""
+        brackets = Brackets(stopLoss=155.00, takeProfit=140.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.BUY,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.action == "BUY"
+        assert take_profit is not None
+        assert take_profit.action == "BUY"
+
+
 class TestTrackedOrderToPlacedOrder:
     """Test tracked_order_to_placed_order mapper."""
 
@@ -1061,7 +1262,7 @@ class TestOrderStateToPreviewResult:
 
 
 class TestTwsToDomainStatus:
-    """Test tws_to_domain_status helper function.
+    """Test domain_status helper function.
 
     Covers:
     - Direct mapping for confirmed statuses
@@ -1121,27 +1322,27 @@ class TestTwsToDomainStatus:
     def test_submitted_maps_to_working(self) -> None:
         """Submitted (active at exchange) → WORKING."""
         tracked = self._make_tracked_order(status="Submitted")
-        assert tws_to_domain_status(tracked) == OrderStatus.WORKING
+        assert tracked.domain_status == OrderStatus.WORKING
 
     def test_presubmitted_maps_to_inactive(self) -> None:
         """PreSubmitted (simulated order held by IB) → INACTIVE."""
         tracked = self._make_tracked_order(status="PreSubmitted")
-        assert tws_to_domain_status(tracked) == OrderStatus.INACTIVE
+        assert tracked.domain_status == OrderStatus.INACTIVE
 
     def test_filled_maps_to_filled(self) -> None:
         """Filled → FILLED."""
         tracked = self._make_tracked_order(status="Filled")
-        assert tws_to_domain_status(tracked) == OrderStatus.FILLED
+        assert tracked.domain_status == OrderStatus.FILLED
 
     def test_cancelled_maps_to_canceled(self) -> None:
         """Cancelled (confirmed) → CANCELED."""
         tracked = self._make_tracked_order(status="Cancelled")
-        assert tws_to_domain_status(tracked) == OrderStatus.CANCELED
+        assert tracked.domain_status == OrderStatus.CANCELED
 
     def test_inactive_maps_to_inactive(self) -> None:
         """Inactive (error/held) → INACTIVE."""
         tracked = self._make_tracked_order(status="Inactive")
-        assert tws_to_domain_status(tracked) == OrderStatus.INACTIVE
+        assert tracked.domain_status == OrderStatus.INACTIVE
 
     # --- History-based resolution tests ---
 
@@ -1153,7 +1354,7 @@ class TestTwsToDomainStatus:
         fills = [self._make_fill("Submitted")]
         tracked = self._make_tracked_order(status="PendingCancel", fills=fills)
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         assert result == OrderStatus.WORKING
 
@@ -1165,7 +1366,7 @@ class TestTwsToDomainStatus:
         fills = [self._make_fill("Submitted")]
         tracked = self._make_tracked_order(status="ApiCancelled", fills=fills)
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         assert result == OrderStatus.WORKING
 
@@ -1174,7 +1375,7 @@ class TestTwsToDomainStatus:
         fills = [self._make_fill("PreSubmitted")]
         tracked = self._make_tracked_order(status="PendingCancel", fills=fills)
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         assert result == OrderStatus.INACTIVE
 
@@ -1183,7 +1384,7 @@ class TestTwsToDomainStatus:
         fills = [self._make_fill("Submitted")]
         tracked = self._make_tracked_order(status="PendingSubmit", fills=fills)
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         assert result == OrderStatus.WORKING
 
@@ -1192,7 +1393,7 @@ class TestTwsToDomainStatus:
         fills = [self._make_fill("Submitted")]
         tracked = self._make_tracked_order(status="ApiPending", fills=fills)
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         assert result == OrderStatus.WORKING
 
@@ -1204,7 +1405,7 @@ class TestTwsToDomainStatus:
         ]
         tracked = self._make_tracked_order(status="PendingCancel", fills=fills)
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         # Should use Submitted (last in list), not PreSubmitted
         assert result == OrderStatus.WORKING
@@ -1217,7 +1418,7 @@ class TestTwsToDomainStatus:
         ]
         tracked = self._make_tracked_order(status="ApiCancelled", fills=fills)
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         # Should find Submitted, skipping PendingCancel
         assert result == OrderStatus.WORKING
@@ -1228,7 +1429,7 @@ class TestTwsToDomainStatus:
         """PendingCancel with no history → PLACING."""
         tracked = self._make_tracked_order(status="PendingCancel", fills=[])
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         assert result == OrderStatus.PLACING
 
@@ -1236,7 +1437,7 @@ class TestTwsToDomainStatus:
         """ApiPending (new order) with no history → PLACING."""
         tracked = self._make_tracked_order(status="ApiPending", fills=[])
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         assert result == OrderStatus.PLACING
 
@@ -1244,7 +1445,7 @@ class TestTwsToDomainStatus:
         """PendingSubmit (new order) with no history → PLACING."""
         tracked = self._make_tracked_order(status="PendingSubmit", fills=[])
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         assert result == OrderStatus.PLACING
 
@@ -1252,78 +1453,6 @@ class TestTwsToDomainStatus:
         """Unknown status with no history → PLACING."""
         tracked = self._make_tracked_order(status="UnknownTwsStatus", fills=[])
 
-        result = tws_to_domain_status(tracked)
+        result = tracked.domain_status
 
         assert result == OrderStatus.PLACING
-
-
-# =============================================================================
-# Bracket OCA Pattern Utilities
-# =============================================================================
-
-
-class TestParseBracketOca:
-    """Tests for parse_bracket_oca utility function."""
-
-    def test_order_bracket_numeric_parent(self) -> None:
-        """Order brackets with numeric parent_id return ParentType.ORDER."""
-        parent_id, parent_type = parse_bracket_oca("brackets_100")
-
-        assert parent_id == "100"
-        assert parent_type == ParentType.ORDER
-
-    def test_order_bracket_large_numeric_parent(self) -> None:
-        """Order brackets with large numeric ID work correctly."""
-        parent_id, parent_type = parse_bracket_oca("brackets_9999999")
-
-        assert parent_id == "9999999"
-        assert parent_type == ParentType.ORDER
-
-    def test_position_bracket_symbol_string(self) -> None:
-        """Position brackets with symbol string return ParentType.POSITION."""
-        parent_id, parent_type = parse_bracket_oca("brackets_AAPL:NASDAQ:STK")
-
-        assert parent_id == "AAPL:NASDAQ:STK"
-        assert parent_type == ParentType.POSITION
-
-    def test_position_bracket_complex_symbol(self) -> None:
-        """Position brackets with complex symbols (special chars) work."""
-        parent_id, parent_type = parse_bracket_oca("brackets_ES:CME:FUT:20250321")
-
-        assert parent_id == "ES:CME:FUT:20250321"
-        assert parent_type == ParentType.POSITION
-
-    def test_none_oca_group_returns_none(self) -> None:
-        """None OCA group returns (None, None)."""
-        parent_id, parent_type = parse_bracket_oca(None)
-
-        assert parent_id is None
-        assert parent_type is None
-
-    def test_empty_string_returns_none(self) -> None:
-        """Empty string OCA group returns (None, None)."""
-        parent_id, parent_type = parse_bracket_oca("")
-
-        assert parent_id is None
-        assert parent_type is None
-
-    def test_non_bracket_oca_returns_none(self) -> None:
-        """OCA groups not matching bracket pattern return (None, None)."""
-        parent_id, parent_type = parse_bracket_oca("some_other_oca_group")
-
-        assert parent_id is None
-        assert parent_type is None
-
-    def test_partial_match_no_brackets_prefix(self) -> None:
-        """OCA groups without 'brackets_' prefix return (None, None)."""
-        parent_id, parent_type = parse_bracket_oca("100")
-
-        assert parent_id is None
-        assert parent_type is None
-
-    def test_bracket_prefix_case_sensitive(self) -> None:
-        """Bracket pattern is case-sensitive (BRACKETS_ doesn't match)."""
-        parent_id, parent_type = parse_bracket_oca("BRACKETS_100")
-
-        assert parent_id is None
-        assert parent_type is None

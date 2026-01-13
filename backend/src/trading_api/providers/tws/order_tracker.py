@@ -5,9 +5,8 @@ data transformation. Raw TWS objects (Contract, Order, OrderState) are stored
 directly. Domain conversion happens at broker_provider level via tws_mappers.
 """
 
-from __future__ import annotations
-
 import asyncio
+import re
 import time
 import uuid
 from collections.abc import Callable, Coroutine
@@ -22,7 +21,26 @@ from ibapi.order import Order, OrderComboLeg
 from ibapi.order_state import OrderState
 from ibapi.softdollartier import SoftDollarTier
 
+from trading_api.models.broker import OrderStatus, ParentType
 from trading_api.models.exceptions import ProviderException
+
+_DIRECT_MAPPED_STATUS: dict[str, int] = {
+    "PreSubmitted": 3,  # INACTIVE - simulated order held by IB (stop waiting for trigger)
+    "Submitted": 6,  # WORKING - active at exchange
+    "Cancelled": 1,  # CANCELED - confirmed cancelled
+    "Filled": 2,  # FILLED - confirmed filled
+    "Inactive": 3,  # INACTIVE - error or held
+}
+
+# Statuses requiring history-based resolution (preserve previous confirmed status)
+_HISTORY_RESOLVED_STATUS: set[str] = {
+    "PendingCancel",  # Cancel requested but not confirmed - could still fill
+    "ApiCancelled",  # Cancelled via API before ack - could still fill
+    "PendingSubmit",  # Sent, awaiting exchange ack - use last confirmed
+    "ApiPending",  # Not yet sent to IB server - use last confirmed
+}
+
+ORDER_BRACKET_PATTERN = re.compile(r"^brackets_(\d+)$")
 
 
 @dataclass
@@ -66,6 +84,91 @@ class TrackedOrder:
     order: Order
     orderState: OrderState
     fills: list[OrderFill] = field(default_factory=list)
+    parent_filled: bool = False
+
+    @property
+    def domain_status(self) -> OrderStatus:
+        """Convert TWS order status to domain OrderStatus.
+        Handles cancel transitions (PendingCancel, ApiCancelled) by preserving
+        the last confirmed status from order history. This prevents misleading
+        users during market halts where orders might still fill after cancel request.
+
+        Args:
+            tracked: TrackedOrder with current status and fills history
+
+        Returns:
+            Domain OrderStatus enum value
+
+        Resolution order:
+            1. Direct mapping for confirmed statuses (Submitted, Filled, Cancelled, etc.)
+            2. History lookup for transitional statuses (PendingCancel, ApiCancelled, etc.)
+            3. Fallback to PLACING (4) if no history available
+        """
+        current_status = self.orderState.status
+
+        # 1. Check direct mapping first (confirmed statuses)
+        if current_status in _DIRECT_MAPPED_STATUS:
+            return OrderStatus(_DIRECT_MAPPED_STATUS[current_status])
+
+        # 2. History-based resolution for transitional/cancel statuses
+        if current_status in _HISTORY_RESOLVED_STATUS and self.fills:
+            # Walk history backwards to find last confirmed status
+            for fill in reversed(self.fills):
+                if fill.status in _DIRECT_MAPPED_STATUS:
+                    return OrderStatus(_DIRECT_MAPPED_STATUS[fill.status])
+
+        # 3. Fallback to PLACING for new orders with no history
+        return OrderStatus.PLACING
+
+    @property
+    def is_active(self) -> bool:
+        """Check if order is currently active (working/submitted)."""
+        return (
+            self.domain_status
+            not in {
+                OrderStatus.FILLED,  # Completed
+                OrderStatus.CANCELED,  # Cancelled
+            }
+            and self.order.whatIf is False
+            and self.order.transmit is True
+        )
+
+    @property
+    def oca_group(self) -> str | None:
+        """Get OCA group string if set, else None."""
+        return next(iter(self.order.ocaGroup.split("@")), self.order.ocaGroup)
+
+    @property
+    def brackets_info(self) -> tuple[str | None, ParentType | None]:
+        """Parse OCA group to extract parent ID and determine parent type.
+
+        The codebase uses deterministic OCA naming:
+        - Order brackets: "brackets_{order_id}" (numeric) → parentType=ORDER
+        - Position brackets: "brackets_{position_id}" (symbol string) → parentType=POSITION
+
+        Args:
+            oca_group: OCA group string (e.g., "brackets_100" or "brackets_AAPL:NASDAQ:STK")
+
+        Returns:
+            (parent_id, parent_type):
+            - ("100", ParentType.ORDER) for order brackets (numeric)
+            - ("AAPL:NASDAQ:STK", ParentType.POSITION) for position brackets (non-numeric)
+            - (None, None) if not a bracket OCA group
+        """
+        if not self.oca_group:
+            return None, None
+
+        # Check for order bracket (numeric parent_id)
+        match = ORDER_BRACKET_PATTERN.match(self.oca_group)
+        if match:
+            return match.group(1), ParentType.ORDER
+
+        # Check for position bracket (non-numeric, starts with "brackets_")
+        if self.oca_group.startswith("brackets_"):
+            position_id = self.oca_group[9:]  # Strip "brackets_" prefix
+            return position_id, ParentType.POSITION
+
+        return None, None
 
     def clone_order(self) -> Order:
         """Deep copy Order to avoid shared references."""
@@ -138,6 +241,52 @@ class OrderTracker:
 
     # --- Order management (reader thread) ---
 
+    def signed_oca_groups(self) -> set[str]:
+        """Get set of all OCA groups in tracked orders."""
+        return {
+            tracked.order.ocaGroup
+            for tracked in self._orders.values()
+            if tracked.order.ocaGroup and tracked.is_active
+        }
+
+    def find_by_oca_group(
+        self,
+        oca_group: str,
+        order_type: str,
+        action: str,
+    ) -> TrackedOrder | None:
+        """Find tracked order by OCA group, type, and side.
+
+        Used for bracket reconciliation: when updating position brackets,
+        find existing orders by their OCA membership and order type.
+
+        Args:
+            oca_group: OCA group string (e.g., "brackets_AAPL:NASDAQ:STK")
+            order_type: TWS order type ("STP", "LMT", "TRAIL")
+            action: Order side ("BUY" or "SELL")
+
+        Returns:
+            Matching TrackedOrder or None if not found
+
+        Note:
+            Skips filled/cancelled orders (status not "Submitted"/"PreSubmitted")
+        """
+        oca_group_ori = next(iter(oca_group.split("@")), oca_group)
+        orders = [
+            tracked
+            for tracked in self._orders.values()
+            if (
+                tracked.oca_group == oca_group_ori
+                and tracked.order.orderType == order_type
+                and tracked.order.action == action
+                and tracked.is_active
+            )
+        ]
+        assert (
+            len(orders) <= 1
+        ), f"Multiple active {order_type} {action} orders found for OCA group {oca_group}"
+        return next(iter(orders), None)
+
     def ensure_snapshot_requested(self, request_cb: Callable[[], None]) -> None:
         if not self._snapshot_requested:
             request_cb()
@@ -146,24 +295,38 @@ class OrderTracker:
     def set_next_order_id(self, orderId: int) -> None:
         self._order_id_count = count(orderId)
 
-    def notify_hooks(self, orderId: int, tracked: TrackedOrder) -> None:
+    def notify_hooks(self, orderId: int) -> None:
         """Notify all registered hooks with current orders.
 
         Called from reader thread after reconnect snapshot.
         """
+        tracked: TrackedOrder = self._orders[orderId]
+
+        notify_list: list[TrackedOrder] = [tracked]
+
+        if tracked.domain_status == OrderStatus.FILLED:
+            for child in self._orders.values():
+                if child.order.parentId == orderId:
+                    child.parent_filled = True
+                    notify_list.append(child)
+
+        if tracked.order.parentId and not tracked.parent_filled:
+            parent_tracked = self._orders.get(tracked.order.parentId)
+            if not parent_tracked or tracked.domain_status == OrderStatus.FILLED:
+                tracked.parent_filled = True
 
         def resolve_hook(future: asyncio.Future, tracked: TrackedOrder) -> None:
             if not future.done():
                 future.set_result(tracked)
 
-        for loop, future in self._order_hooks.get(orderId, {}).values():
-            loop.call_soon_threadsafe(resolve_hook, future, tracked)
-
-        for stream_loop, stream_callback, _ in self._stream_hooks.values():
-            stream_loop.call_soon_threadsafe(
-                stream_loop.create_task,
-                stream_callback(tracked),
-            )
+        for tracked in notify_list:
+            for loop, future in self._order_hooks.get(tracked.orderId, {}).values():
+                loop.call_soon_threadsafe(resolve_hook, future, tracked)
+            for stream_loop, stream_callback, _ in self._stream_hooks.values():
+                stream_loop.call_soon_threadsafe(
+                    stream_loop.create_task,
+                    stream_callback(tracked),
+                )
 
         # parent_tracked = tracked.order.parentId and self._orders.get(
         #     tracked.order.parentId
@@ -199,16 +362,19 @@ class OrderTracker:
         Returns:
             The created/updated TrackedOrder
         """
-        tracked = TrackedOrder(
-            orderId=orderId,
-            contract=contract,
-            order=order,
-            orderState=orderState,
-            fills=[],
-        )
-        self._orders[orderId] = tracked
+        if orderId in self._orders:
+            tracked = self._orders[orderId]
+            tracked.order = order
+            tracked.orderState = orderState
+        else:
+            self._orders[orderId] = TrackedOrder(
+                orderId=orderId,
+                contract=contract,
+                order=order,
+                orderState=orderState,
+            )
 
-        self.notify_hooks(orderId, tracked)
+        self.notify_hooks(orderId)
 
     def update_status(
         self,
@@ -275,7 +441,7 @@ class OrderTracker:
             )
         )
 
-        self.notify_hooks(orderId, tracked)
+        self.notify_hooks(orderId)
 
     def raise_error(self, exception: ProviderException) -> None:
         """Dispatch error to all stream hooks.
@@ -425,5 +591,4 @@ class OrderTracker:
 
     def remove_stream_hook(self, key: str) -> None:
         """Unregister order update callback."""
-        self._stream_hooks.pop(key, None)
         self._stream_hooks.pop(key, None)

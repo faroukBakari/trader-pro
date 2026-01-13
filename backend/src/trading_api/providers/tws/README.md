@@ -8,17 +8,17 @@
 
 ## Quick Reference
 
-| Layer                       | File                                  | Responsibility                                                               |
-| --------------------------- | ------------------------------------- | ---------------------------------------------------------------------------- |
-| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion                                   |
-| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management                             |
-| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket                             |
-| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                |
-| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                |
-| **OrderTracker**            | `order_tracker.py`                    | Order state tracking, `clone_order()`, `notify_hooks()` for unified dispatch |
-| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                |
-| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                            |
-| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                          |
+| Layer                       | File                                  | Responsibility                                                                  |
+| --------------------------- | ------------------------------------- | ------------------------------------------------------------------------------- |
+| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion                                      |
+| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management                                |
+| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket                                |
+| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                   |
+| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                   |
+| **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch |
+| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                   |
+| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                               |
+| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                             |
 
 **Tests:** `providers/tws/tests/test_{client,ibsocket,mappers,models,datafeed_provider,broker_provider,cached_contract,config}.py`
 
@@ -577,39 +577,66 @@ Position state can change between WebSocket updates and API calls (fills, partia
 
 Return type: `tuple[int, bool]` — `(order_id, place_flag)` where `place_flag=False` when no fields actually changed (skips TWS API call).
 
-When modifying (orderId > 0), the method:
+The method supports three resolution paths:
 
-1. Retrieves existing order via `OrderTracker.ensure_existing_order(orderId)`
+1. **Explicit Order ID** (`order_id > 0`): Modify existing order by ID
+2. **OCA Reconciliation** (`order.ocaGroup` set): Find existing order via `OrderTracker.find_by_oca_group()` matching OCA group, order type, and action
+3. **New Order** (neither above): Create new order with next available ID
+
+When modifying (paths 1 or 2), the method:
+
+1. Retrieves existing order via `OrderTracker.ensure_existing_order(order_id)` or `find_by_oca_group()`
 2. **Asserts immutable fields unchanged**: `contract.conId`, `contract.exchange`, `parentId`
 3. Clones original via `TrackedOrder.clone_order()` for thread safety
 4. Copies ONLY allowed fields from new order to clone **if values differ**
 5. **No-op detection**: If no fields changed, returns `(order_id, False)` without calling TWS
-6. Submits clone only when `place_flag=True`
+6. **Forces transmit=True** for existing orders (overrides staged orders)
+7. Submits clone only when `place_flag=True`
 
 ```python
 # In tws_connection.py - _submit_order() -> tuple[int, bool]
-if order_id > 0:
-    tracked = self.ibsocket.order_tracker.ensure_existing_order(order_id)
+order_id = order.orderId
+place_flag = True
+
+# Resolution: Explicit ID, OCA reconciliation, or new order
+tracked: TrackedOrder | None = (
+    self.ibsocket.order_tracker.ensure_existing_order(order_id)
+    if order_id > 0
+    else (
+        self.ibsocket.order_tracker.find_by_oca_group(
+            order.ocaGroup, order.orderType, order.action,
+        )
+        if order.ocaGroup
+        else None
+    )
+)
+
+if tracked:
     order_ori = tracked.clone_order()  # Deep copy for thread safety
+    order_id = tracked.orderId
 
     # Immutable field guards
     assert tracked.contract.conId == contract.conId, "Cannot change contract"
-    assert not contract.exchange or tracked.contract.exchange == contract.exchange
-    assert not parent_id or order_ori.parentId == parent_id
+    # ... asserts for exchange, parentId
 
     place_flag = False
     # Only copy allowed fields IF values differ
     if order.lmtPrice != UNSET_DOUBLE and order_ori.lmtPrice != order.lmtPrice:
         order_ori.lmtPrice = order.lmtPrice
         place_flag = True
-    if order.auxPrice != UNSET_DOUBLE and order_ori.auxPrice != order.auxPrice:
-        order_ori.auxPrice = order.auxPrice
-        place_flag = True
-    # ... similar for totalQuantity, tif
+    # ... similar for auxPrice, totalQuantity, tif
 
-    if place_flag:
-        self.ibsocket.placeOrder(order_id, contract, order_ori)
-    return order_id, place_flag
+    order = order_ori
+    order.transmit = True  # Always transmit existing orders
+else:
+    order_id = self.ibsocket.order_tracker.next_order_id
+    order.parentId = parent_id
+    order.orderId = order_id
+    order.transmit = transmit
+
+if place_flag:
+    self.ibsocket.placeOrder(order_id, contract, order)
+return order_id, place_flag
 ```
 
 **`TrackedOrder.clone_order()` Method:**
@@ -619,6 +646,17 @@ Deep copies the Order object to avoid shared mutable state between threads:
 - Shallow copies primitive fields via `__dict__.update()`
 - Recreates nested objects (`SoftDollarTier`, `OrderComboLeg`)
 - Uses `deepcopy()` for complex hierarchies (`conditions`)
+
+**`TrackedOrder` Properties:**
+
+| Property        | Type                                     | Description                                                                |
+| --------------- | ---------------------------------------- | -------------------------------------------------------------------------- |
+| `domain_status` | `OrderStatus`                            | Converts TWS status to domain enum (handles transitional states)           |
+| `is_active`     | `bool`                                   | True if order is working/submitted (not filled/canceled)                   |
+| `oca_group`     | `str \| None`                            | OCA group without timestamp suffix (e.g., `"brackets_100"`)                |
+| `brackets_info` | `tuple[str \| None, ParentType \| None]` | Parses OCA to extract `(parent_id, parent_type)` for bracket orders        |
+| `parent_filled` | `bool`                                   | True if parent order filled (converts order brackets to position brackets) |
+| `clone_order()` | `Order`                                  | Deep copies Order for thread-safe modifications                            |
 
 **Reference:** See [02-API-REFERENCE-CONTRACTS-ORDERS.md](../../external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md#32-order-modification) for official IB guidance.
 
@@ -705,15 +743,17 @@ tracked_orders = await self._tws_client.placeOcaGroup(
 
 ### OCA Group Naming Convention
 
-The codebase uses deterministic OCA naming to enable bracket relationship reconstruction:
+The codebase uses deterministic OCA naming with timestamps to enable bracket relationship reconstruction and prevent conflicts:
 
-| Pattern                           | Example                    | `parse_bracket_oca()` Returns              |
-| --------------------------------- | -------------------------- | ------------------------------------------ |
-| `brackets_{order_id}` (numeric)   | `brackets_100`             | `("100", ParentType.ORDER)`                |
-| `brackets_{position_id}` (string) | `brackets_AAPL:NASDAQ:STK` | `("AAPL:NASDAQ:STK", ParentType.POSITION)` |
-| Other patterns                    | `some_other_oca`           | `(None, None)`                             |
+| Pattern                           | Example                              | `TrackedOrder.brackets_info` Returns       |
+| --------------------------------- | ------------------------------------ | ------------------------------------------ |
+| `brackets_{order_id}` (numeric)   | `brackets_100@1736726400000`         | `("100", ParentType.ORDER)`                |
+| `brackets_{position_id}` (string) | `brackets_AAPL:NASDAQ:STK@timestamp` | `("AAPL:NASDAQ:STK", ParentType.POSITION)` |
+| Other patterns                    | `some_other_oca`                     | `(None, None)`                             |
 
-**Usage:** `get_orders()` uses this pattern to reconstruct bracket relationships from TWS open orders.
+**Timestamp Suffix:** OCA groups are suffixed with `@{unix_timestamp_ms}` to ensure uniqueness across sessions. The base pattern (before `@`) is used for matching/reconciliation.
+
+**Usage:** `get_orders()` uses `TrackedOrder.brackets_info` property to reconstruct bracket relationships from TWS open orders.
 
 ---
 
@@ -727,11 +767,13 @@ The codebase uses deterministic OCA naming to enable bracket relationship recons
 get_orders()
       │
       ├── 1. reqOpenOrders()  →  list[TrackedOrder]
+      │       └── Filters out whatIf orders and non-transmitted orders
       │
       ├── 2. _group_orders_by_bracket(orders)
       │       ├── parents_map: standalone/parent orders
       │       ├── order_children: {"parent_id": [child orders]}  (parentId > 0 or OCA numeric)
       │       └── position_children: {"symbol": [child orders]}  (OCA symbol string)
+      │       └── Uses TrackedOrder.brackets_info property for OCA parsing
       │
       ├── 3. For each parent with children:
       │       └── _build_bracket_context_from_children(children)
@@ -739,15 +781,17 @@ get_orders()
       │
       └── 4. _group_and_map_tws_orders(orders, contracts_map)
               ├── Parent orders enriched with stopLoss/takeProfit
-              └── Child orders linked with parentId/parentType
+              ├── Child orders linked with parentId/parentType
+              └── Uses TrackedOrder.parent_filled for position bracket detection
 ```
 
 **Detection Priority:**
 
-1. `order.parentId > 0` → Child of ORDER bracket (TWS native linking)
-2. `order.ocaGroup` matches `brackets_{numeric}` → Child of ORDER bracket (via OCA)
-3. `order.ocaGroup` matches `brackets_{symbol}` → Child of POSITION bracket
-4. Otherwise → Standalone or parent order
+1. `tracked.parent_filled == True` → Child of POSITION bracket (parent filled, now protecting position)
+2. `order.parentId > 0` → Child of ORDER bracket (TWS native linking)
+3. `tracked.brackets_info` returns `ParentType.ORDER` → Child of ORDER bracket (via OCA)
+4. `tracked.brackets_info` returns `ParentType.POSITION` → Child of POSITION bracket (via OCA)
+5. Otherwise → Standalone or parent order
 
 **Result Structure:**
 
@@ -854,17 +898,17 @@ PlacedOrder(
 
 ### Broker Mappers
 
-| Function                                | Description                                                                                                                                                                                                                              |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `preorder_to_tws()`                     | `PreOrder` → `(Order, Order \| None, Order \| None)` — parent, stop_loss, take_profit. Child orders are created without OCA linking (OCA groups managed by `TWSClient.placeOrderGroup()`). Supports `trailStopPrice` for trailing stops. |
-| `tracked_order_to_placed_order()`       | `TrackedOrder` → `PlacedOrder`. Accepts optional `BracketContext` to enrich parent orders with `stopLoss`/`takeProfit` prices from children. Uses `isUnset()` for safe handling of unset TWS values.                                     |
-| `isUnset()`                             | Checks if TWS value equals `UNSET_DOUBLE`, `UNSET_DECIMAL`, `None`, or `""` — used for safe float conversions in mapper functions.                                                                                                       |
-| `parse_bracket_oca()`                   | `str \| None` → `(parent_id, ParentType)`. Parses OCA group strings to determine bracket type: ORDER (numeric ID) or POSITION (symbol string).                                                                                           |
-| `tws_position_to_domain()`              | position data dict → `Position`                                                                                                                                                                                                          |
-| `tws_account_summary_to_equity()`       | summary dict → `EquityData`                                                                                                                                                                                                              |
-| `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`                                                                                                                                                                                                         |
-| `calculate_tws_duration()`              | time range → TWS duration string                                                                                                                                                                                                         |
-| `order_state_to_preview_result()`       | `OrderState` + `PreOrder` → `OrderPreviewResult` — converts TWS whatIf response to domain preview with margin, commission, and warnings sections.                                                                                        |
+| Function                                | Description                                                                                                                                                                                                                    |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `brackets_to_tws()`                     | `Brackets` → `(Order \| None, Order \| None)` — stop_loss, take_profit. Shared by `preorder_to_tws()` and `edit_position_brackets()`. Infers stop type from `trailingStopPips` presence.                                       |
+| `preorder_to_tws()`                     | `PreOrder` → `(Order, Order \| None, Order \| None)` — parent, stop_loss, take_profit. Delegates bracket creation to `brackets_to_tws()`. Child orders created without OCA linking (managed by `TWSClient.placeOrderGroup()`). |
+| `tracked_order_to_placed_order()`       | `TrackedOrder` → `PlacedOrder`. Accepts optional `BracketContext` to enrich parent orders with bracket prices. Uses `TrackedOrder.domain_status`, `brackets_info`, `parent_filled` properties.                                 |
+| `isUnset()`                             | Checks if TWS value equals `UNSET_DOUBLE`, `UNSET_DECIMAL`, `None`, or `""` — used for safe float conversions in mapper functions.                                                                                             |
+| `tws_position_to_domain()`              | position data dict → `Position`                                                                                                                                                                                                |
+| `tws_account_summary_to_equity()`       | summary dict → `EquityData`                                                                                                                                                                                                    |
+| `tws_account_summary_to_account_info()` | summary dict → `AccountMetainfo`                                                                                                                                                                                               |
+| `calculate_tws_duration()`              | time range → TWS duration string                                                                                                                                                                                               |
+| `order_state_to_preview_result()`       | `OrderState` + `PreOrder` → `OrderPreviewResult` — converts TWS whatIf response to domain preview with margin, commission, and warnings sections.                                                                              |
 
 **secType Mapping:**
 
@@ -1120,38 +1164,51 @@ def remove_stream(self, business_key: str) -> None:
 
 Used by: `edit_position_brackets()`, `placeOrderGroup()` with brackets
 
-OCA groups use the **transmit chain pattern** for atomic submission:
+OCA groups use the **transmit chain pattern** for atomic submission with automatic reconciliation:
 
 ```python
-# TWSClient.placeOcaGroup() - Atomic bracket order submission
+# TWSClient.placeOcaGroup() - Atomic bracket order submission with reconciliation
 async def placeOcaGroup(self, contract, children, oca_group, oca_type=1, parent_id=0, timeout=None):
+    if not oca_group.startswith("brackets_"):
+        raise ValueError("oca_group must start with 'brackets_'")
+
+    # Get or create unique OCA group name with timestamp
+    signed_oca_groups = self.ibsocket.order_tracker.signed_oca_groups()
+    signed_oca_group = next(
+        iter([group for group in signed_oca_groups if group.startswith(oca_group)]),
+        f"{oca_group}@{int(time.time() * 1000)}",
+    )
+
     # Assign OCA attributes to all orders
     for order in children:
-        order.ocaGroup = oca_group
+        order.ocaGroup = signed_oca_group
         order.ocaType = oca_type
 
     # Transmit chain: all orders except last staged with transmit=False
-    order_ids = [
+    # _submit_order() checks OrderTracker.find_by_oca_group() for existing orders
+    submit_results = [
         self._submit_order(contract, order, parent_id=parent_id, transmit=False)
         for order in children[:-1]
     ]
-    order_ids.append(
+    submit_results.append(
         self._submit_order(contract, children[-1], parent_id=parent_id, transmit=True)
     )
 
     # Await all order confirmations with timeout
     return await asyncio.gather(*[
         self.ibsocket.order_tracker.order_update(oid, timeout=timeout)
-        for oid in order_ids
+        for (oid, _) in submit_results
     ])
 ```
 
 **Key Points:**
 
-- All orders except last have `transmit=False` (staged but not sent)
-- Last order `transmit=True` triggers atomic submission of entire group
-- TWS processes all orders as a unit, preventing partial fills
-- OCA group ensures when one fills, others are automatically canceled
+- **Timestamp Uniqueness**: Appends `@{unix_ms}` to OCA group if new, reuses existing if found
+- **Reconciliation**: `_submit_order()` checks `OrderTracker.find_by_oca_group()` to detect existing orders by OCA group, type, and action
+- **Modification Detection**: If existing order found, modifies it instead of creating duplicate
+- **Transmit Chain**: All orders except last have `transmit=False` (staged), last order `transmit=True` triggers atomic submission
+- **Atomic Submission**: TWS processes all orders as a unit, preventing partial fills
+- **OCA Enforcement**: When one fills, others are automatically canceled by TWS
 
 ---
 

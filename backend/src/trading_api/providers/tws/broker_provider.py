@@ -46,6 +46,7 @@ from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.position_tracker import TrackedPosition
 from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.providers.tws.tws_mappers import (
+    brackets_to_tws,
     order_state_to_preview_result,
     preorder_to_tws,
     tracked_order_to_placed_order,
@@ -359,55 +360,30 @@ class TWSBrokerProvider(Provider, BrokerCapability):
                 capability="broker",
             )
 
-        # Build list of bracket orders to place
-        bracket_orders: list[Order] = []
-        tws_action = "SELL" if position.side == Side.BUY else "BUY"
+        # Resolve contract for this position's symbol (needed by brackets_to_tws)
+        contract = await self._resolve_trading_contract(position.symbol)
 
-        # Trailing stop or regular stop loss
-        if brackets.trailingStopPips is not None:
-            trailing_order = Order()
-            trailing_order.action = tws_action
-            trailing_order.totalQuantity = Decimal(str(position.qty))
-            trailing_order.orderType = "TRAIL"
-            trailing_order.auxPrice = brackets.trailingStopPips  # Trail amount
-            if brackets.stopLoss is not None:
-                trailing_order.trailStopPrice = brackets.stopLoss  # Initial trigger
-            trailing_order.tif = "GTC"
-            bracket_orders.append(trailing_order)
-        elif brackets.stopLoss is not None:
-            stop_order = Order()
-            stop_order.action = tws_action
-            stop_order.totalQuantity = Decimal(str(position.qty))
-            stop_order.orderType = "STP"
-            stop_order.auxPrice = brackets.stopLoss
-            stop_order.tif = "GTC"
-            bracket_orders.append(stop_order)
+        # Convert brackets to TWS orders using shared mapper
+        bracket_side = Side.SELL if position.side == Side.BUY else Side.BUY
+        stop_loss_order, take_profit_order = brackets_to_tws(
+            contract=contract,
+            quantity=position.qty,
+            bracket_side=bracket_side,
+            brackets=brackets,
+        )
 
-        # Take profit limit order
-        if brackets.takeProfit is not None:
-            tp_order = Order()
-            tp_order.action = tws_action
-            tp_order.totalQuantity = Decimal(str(position.qty))
-            tp_order.orderType = "LMT"
-            tp_order.lmtPrice = brackets.takeProfit
-            tp_order.tif = "GTC"
-            bracket_orders.append(tp_order)
+        # Collect non-None bracket orders
+        bracket_orders = [o for o in [stop_loss_order, take_profit_order] if o]
 
         # If no bracket orders to place, we're done (just cancelled existing)
         if not bracket_orders:
             return
 
-        # Resolve contract for this position's symbol
-        contract = await self._resolve_trading_contract(position.symbol)
-
-        # Generate unique OCA group name for this position's brackets
-        oca_group = f"brackets_{position_id}"
-
         # Place all bracket orders via OCA group (atomic submission)
         await self._tws_client.placeOcaGroup(
             contract,
             bracket_orders,
-            oca_group,
+            oca_group=f"brackets_{position_id}",
             oca_type=1,  # CANCEL_WITH_BLOCK (overfill protection)
         )
 
