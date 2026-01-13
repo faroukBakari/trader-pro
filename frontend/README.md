@@ -180,8 +180,27 @@ make generate
 
 ### Frontend-Specific Docs
 
-- **WebSocket Pattern**: See `docs/WEBSOCKET-ARCHITECTURE.md`
+- **WebSocket Pattern**: See [docs/WEBSOCKET-ARCHITECTURE.md](./docs/WEBSOCKET-ARCHITECTURE.md)
+- **Broker Integration**: See [docs/BROKER-INTEGRATION.md](./docs/BROKER-INTEGRATION.md)
+- **Error Management**: See [docs/ERROR-MANAGEMENT.md](./docs/ERROR-MANAGEMENT.md)
 - **Plugin Usage**: See `src/plugins/ws-plugin-usage.md`
+
+### TradingView Integration
+
+The frontend includes complete TradingView Trading Terminal integration with broker and datafeed APIs:
+
+- **[TradingView Documentation Index](./docs/tradingview/README.md)** - Complete TradingView integration reference
+- **[Bundle Maintenance Guide](./docs/tradingview/BUNDLE-MAINTENANCE.md)** - ⚠️ Essential guide for modifying TradingView bundles (debugging, obfuscation patterns, RxJS issues)
+- **[Broker Connection Adapter](./docs/tradingview/BROKER-CONNECTION-ADAPTER.md)** - Trading Host API reference and CustomUI hooks
+- **[UI Usage Guide](./docs/tradingview/UI-USAGE-GUIDE.md)** - Playwright testing patterns for TradingView UI
+- **[Type Definitions](./docs/tradingview/TYPE-DEFINITIONS.md)** - TradingView TypeScript types reference
+
+**Key Implementation Files**:
+- `src/components/TraderChartContainer.vue` - Main TradingView widget integration
+- `src/services/brokerTerminalService.ts` - Broker API implementation
+- `src/services/datafeedService.ts` - Datafeed API implementation
+- `src/plugins/mappers.ts` - Type mappers (backend ↔ TradingView)
+- `public/trading_terminal/bundles/` - TradingView library bundles
 
 ### Generated Files
 

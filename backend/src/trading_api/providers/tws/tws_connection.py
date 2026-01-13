@@ -1705,9 +1705,9 @@ class TWSClient:
         for desc in descriptions:
             con_id = desc.contract.conId
             if con_id not in self.__contracts_cache:
-                self.__contracts_cache[
-                    con_id
-                ] = CachedContract.from_contract_description(desc)
+                self.__contracts_cache[con_id] = (
+                    CachedContract.from_contract_description(desc)
+                )
 
         return descriptions
 
@@ -1755,10 +1755,10 @@ class TWSClient:
             )
         else:
             # Create new cache entry with full details
-            self.__contracts_cache[
-                detail_con_id
-            ] = CachedContract.from_contract_details(
-                details, overnight_hours=overnight_hours
+            self.__contracts_cache[detail_con_id] = (
+                CachedContract.from_contract_details(
+                    details, overnight_hours=overnight_hours
+                )
             )
 
     async def reqContractDetails(

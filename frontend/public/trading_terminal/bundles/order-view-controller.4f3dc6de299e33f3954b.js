@@ -345,6 +345,7 @@
           // SECTION 4: Public Setters
           // ═══════════════════════════════════════════════════════════════════
           this.setFocusedControl = (controlIndex) => {
+            // console.log('[ie.setFocusedControl] Setting focus to:', controlIndex)
             this._focusedControl$.next(controlIndex)
           }
 
@@ -383,6 +384,20 @@
               riskInPercent: currentRiskPercent,
             } = bracketValuesWithFocusedControl
 
+            // console.log('[ie._handleBracketsValuesChange] Input:', {
+            //   enabled,
+            //   focusedControl,
+            //   currentPips,
+            //   currentPrice,
+            //   currentRiskCurrency,
+            //   currentRiskPercent,
+            //   currentParentPrice,
+            //   currentSideSign,
+            //   currentPipValue,
+            //   currentEquity,
+            //   currentAmount,
+            // })
+
             const {
               pips: calculatedPips,
               price: calculatedPrice,
@@ -401,6 +416,13 @@
               riskInPercent: currentRiskPercent,
             })
 
+            // console.log('[ie._handleBracketsValuesChange] Calculated:', {
+            //   calculatedPips,
+            //   calculatedPrice,
+            //   calculatedRiskCurrency,
+            //   calculatedRiskPercent,
+            // })
+
             // Skip update if disabled with existing risk value, or if no values changed
             const shouldSkipUpdate =
               (!enabled && currentRiskCurrency !== null) ||
@@ -408,6 +430,8 @@
                 currentPrice === calculatedPrice &&
                 currentRiskCurrency === calculatedRiskCurrency &&
                 currentRiskPercent === calculatedRiskPercent)
+
+            // console.log('[ie._handleBracketsValuesChange] shouldSkipUpdate:', shouldSkipUpdate)
 
             if (!shouldSkipUpdate) {
               this._setUnfocusedControlsValues(
@@ -470,10 +494,12 @@
           this._getRiskInPercent = () => this._riskInPercent$.getValue()
 
           this._setPips = (value) => {
+            // console.log('[ie._setPips] Setting pips to:', value)
             this._pips$.next((0, q.applyRounding)(value, this._pipsFormatter))
           }
 
           this._setPrice = (value) => {
+            // console.log('[ie._setPrice] Setting price to:', value)
             this._price$.next((0, q.applyRounding)(value, this._priceFormatter))
           }
 
@@ -748,6 +774,7 @@
           this.supportGuaranteedStop = supportGuaranteedStop
         }
         subscribe() {
+          // console.log('[ie.subscribe] Setting up subscriptions for bracket sync')
           const e = this._settings$.subscribe(this._updateFocusIfNeeded),
             t = (0, M.combineLatest)({
               enabled: this._enabled$,
@@ -757,7 +784,14 @@
               equity: this._equity$,
               amount: this._amount$,
               bracketValuesWithFocusedControl: this._bracketValuesWithFocusedControl$,
-            }).subscribe(this._handleBracketsValuesChange),
+            }).subscribe((data) => {
+              // console.log('[ie.subscribe] combineLatest emitted!', {
+              //   focusedControl: data.bracketValuesWithFocusedControl?.focusedControl,
+              //   price: data.bracketValuesWithFocusedControl?.price,
+              //   pips: data.bracketValuesWithFocusedControl?.pips,
+              // })
+              this._handleBracketsValuesChange(data)
+            }),
             i = (0, M.combineLatest)({
               pips: this._pips$,
               error: this._error$,
@@ -766,6 +800,7 @@
               const { pips: t, error: i, enabled: s } = e
               this._value$.next(i.res || !s || null === t ? null : t)
             })
+          // console.log('[ie.subscribe] Subscriptions created')
           return (
             (this._subscriptions = [e, t, i]),
             this._subscriptions.push(this._subscribeError()),
@@ -5332,145 +5367,210 @@
       })(vt || (vt = {}))
       class Pt {
         constructor({
-          adapter: e,
-          position: t,
-          brackets: i,
-          settings$: s,
-          realtimeProvider: r,
-          isUndockAllowed: o,
-          isVisible: a,
-          toggleMode: l,
-          getDisplayMode: u,
-          toggleSettings: d,
-          displayMode$: h,
-          getSettings: c,
-          viewType: p,
-          pipValueType$: _,
-          handler: y,
-          trackEvent: b,
-          orderDialogOptions: v,
-          headerState: f,
+          adapter,
+          position,
+          brackets,
+          settings$,
+          realtimeProvider,
+          isUndockAllowed,
+          isVisible,
+          toggleMode,
+          getDisplayMode,
+          toggleSettings,
+          displayMode$,
+          getSettings,
+          viewType,
+          pipValueType$,
+          handler,
+          trackEvent,
+          orderDialogOptions,
+          headerState,
         }) {
-          ;((this.positionInfoModel = null),
-            (this.id = (0, x.randomHashN)(6)),
-            (this.onDoneButtonClicked = (0, g.createDeferredPromise)()),
-            (this.orderType$ = new n.BehaviorSubject(null)),
-            (this._onBackButtonClicked = new Q.Delegate()),
-            (this._onCloseButtonClicked = new Q.Delegate()),
-            (this._loading$ = new n.BehaviorSubject(!1)),
-            (this._rewardRisk$ = new n.BehaviorSubject('')),
-            (this._isButtonDisabled$ = new n.BehaviorSubject(!1)),
-            (this._status$ = new n.BehaviorSubject(E.OrderPanelStatus.Active)),
-            (this._warning$ = new n.BehaviorSubject(void 0)),
-            (this._headerState = f),
-            (this.headerStateValue = f),
-            this._headerState.setSettings(void 0),
-            (this._position = t),
-            (this._adapter = e),
-            (this._pipValueType$ = _),
-            (this.position = t),
-            (this.symbol = t.symbol),
-            (this.brackets = i),
-            (this._handler = y),
-            (this._isUndockAllowed = o),
-            (this._isVisible = a),
-            (this._toggleMode = l),
-            (this._getDisplayMode = u),
-            (this._displayMode$ = h),
-            (this._toggleSettings = d),
-            (this._getSettings = c),
-            (this._settings$ = s),
-            (this.rewardRisk$ = this._rewardRisk$.asObservable()),
-            (this.loading$ = this._loading$.asObservable()),
-            (this.status$ = this._status$.asObservable()),
-            (this.warning$ = this._warning$.asObservable()),
-            (this.isButtonDisabled$ = this._isButtonDisabled$.asObservable()))
-          const S = this._adapter.metainfo().configFlags
-          ;((this.supportPositions = p === vt.Position && S.supportPositions),
-            (this.supportIndividualPositions =
-              p === vt.IndividualPosition && S.supportPositionNetting),
-            (this.supportOnlyPairPositionBrackets = S.supportOnlyPairPositionBrackets),
-            (this.supportCryptoExchangeOrderTicket = S.supportCryptoExchangeOrderTicket),
-            this._adapter.orders().then((e) => {
-              var i
-              const s = e.filter((e) => 2 === e.parentType && e.parentId === t.id),
-                r = null === (i = s[0]) || void 0 === i ? void 0 : i.customFields,
-                o = this._adapter.getPositionDialogOptions()
-              ;((this.customFieldsModel = new W.CustomFieldsViewModel({
-                existingOrder: Boolean(s.length),
-                customFields: null == o ? void 0 : o.customFields,
-                initialInputState: r,
-                orderType$: (0, w.of)(null),
-              })),
-                this.supportOnlyPairPositionBrackets && this._updateWarning())
+          // Initialize instance properties
+          this.positionInfoModel = null
+          this.id = (0, x.randomHashN)(6)
+          this.onDoneButtonClicked = (0, g.createDeferredPromise)()
+          this.orderType$ = new n.BehaviorSubject(null)
+          this._onBackButtonClicked = new Q.Delegate()
+          this._onCloseButtonClicked = new Q.Delegate()
+          this._loading$ = new n.BehaviorSubject(false)
+          this._rewardRisk$ = new n.BehaviorSubject('')
+          this._isButtonDisabled$ = new n.BehaviorSubject(false)
+          this._status$ = new n.BehaviorSubject(E.OrderPanelStatus.Active)
+          this._warning$ = new n.BehaviorSubject(undefined)
+
+          // Store header state
+          this._headerState = headerState
+          this.headerStateValue = headerState
+          this._headerState.setSettings(undefined)
+
+          // Store position and adapter references
+          this._position = position
+          this._adapter = adapter
+          this._pipValueType$ = pipValueType$
+          this.position = position
+          this.symbol = position.symbol
+          this.brackets = brackets
+          // console.log('[Pt constructor] Received brackets:', brackets)
+
+          // Store handler and UI functions
+          this._handler = handler
+          this._isUndockAllowed = isUndockAllowed
+          this._isVisible = isVisible
+          this._toggleMode = toggleMode
+          this._getDisplayMode = getDisplayMode
+          this._displayMode$ = displayMode$
+          this._toggleSettings = toggleSettings
+          this._getSettings = getSettings
+          this._settings$ = settings$
+
+          // Create public observables from private subjects
+          this.rewardRisk$ = this._rewardRisk$.asObservable()
+          this.loading$ = this._loading$.asObservable()
+          this.status$ = this._status$.asObservable()
+          this.warning$ = this._warning$.asObservable()
+          this.isButtonDisabled$ = this._isButtonDisabled$.asObservable()
+
+          // Get broker config flags
+          const configFlags = this._adapter.metainfo().configFlags
+
+          // Determine position support based on view type
+          this.supportPositions = viewType === vt.Position && configFlags.supportPositions
+          this.supportIndividualPositions =
+            viewType === vt.IndividualPosition && configFlags.supportPositionNetting
+          this.supportOnlyPairPositionBrackets = configFlags.supportOnlyPairPositionBrackets
+          this.supportCryptoExchangeOrderTicket = configFlags.supportCryptoExchangeOrderTicket
+
+          // Fetch existing bracket orders for this position to initialize custom fields
+          this._adapter.orders().then((allOrders) => {
+            // Filter orders that are brackets for this position (parentType === 2 means Position)
+            const bracketOrdersForPosition = allOrders.filter(
+              (order) => order.parentType === 2 && order.parentId === position.id,
+            )
+            const existingCustomFields = bracketOrdersForPosition[0]?.customFields
+            const positionDialogOptions = this._adapter.getPositionDialogOptions()
+
+            // Create custom fields model
+            this.customFieldsModel = new W.CustomFieldsViewModel({
+              existingOrder: Boolean(bracketOrdersForPosition.length),
+              customFields: positionDialogOptions?.customFields,
+              initialInputState: existingCustomFields,
+              orderType$: (0, w.of)(null),
+            })
+
+            // Update warning if only pair brackets are supported
+            if (this.supportOnlyPairPositionBrackets) {
+              this._updateWarning()
+            }
+          })
+
+          // Store track event function
+          this._trackEvent = trackEvent
+
+          // Initialize async data loading - this is the main onReady promise
+          this.onReady = Promise.all([
+            adapter.symbolInfo(position.symbol),
+            adapter.getSymbolSpecificTradingOptions(position.symbol),
+            lt(adapter.accountMetainfo(), {
+              id: adapter.metainfo().id,
+              name: adapter.metainfo().title,
             }),
-            (this._trackEvent = b),
-            (this.onReady = Promise.all([
-              e.symbolInfo(t.symbol),
-              e.getSymbolSpecificTradingOptions(t.symbol),
-              lt(e.accountMetainfo(), { id: e.metainfo().id, name: e.metainfo().title }),
-              lt(e.formatter(t.symbol, !1), new A.PriceFormatter()),
-            ]).then(([s, o, n, a]) => {
-              ;((this.showRiskControlsAndInfo = S.supportRiskControlsAndInfo && 0 !== s.pipValue),
-                (this.currency = (0, q.getCurrency)(n)),
-                (this.symbolType = s.type),
-                (this.brokerSymbol = (0, q.getSymbolNameOverFullname)(
-                  s.brokerSymbol || t.brokerSymbol || this.symbol,
-                )),
-                (this._supportBrackets =
-                  p === vt.IndividualPosition
-                    ? null == o
-                      ? void 0
-                      : o.supportIndividualPositionBrackets
-                    : null == o
-                      ? void 0
-                      : o.supportPositionBrackets),
-                (this._supportModifyBrackets = this._supportBrackets && S.supportModifyBrackets),
-                (this._supportTrailingStop = this._supportBrackets && S.supportTrailingStop),
-                (this._supportGuaranteedStop = this._supportBrackets && S.supportGuaranteedStop),
-                (this._supportModifyTrailingStop =
-                  this._supportTrailingStop &&
-                  this._supportModifyBrackets &&
-                  S.supportModifyTrailingStop),
-                (this._quotes$ = T(
-                  (0, k.fromEventPattern)(
-                    (e) => r.subscribeRealtime(t.symbol, e),
-                    (e) => r.unsubscribeRealtime(t.symbol, e),
-                    (e, t) => t,
-                  ),
-                )),
-                (this._equity$ = T(
-                  (0, k.fromEventPattern)(
-                    (t) => e.subscribeEquity(t),
-                    (t) => e.unsubscribeEquity(t),
-                    (e, t) => t,
-                  ),
-                )),
-                (this._pipValues$ = T(
-                  (0, k.fromEventPattern)(
-                    (i) => e.subscribePipValue(t.symbol, i),
-                    (i) => e.unsubscribePipValue(t.symbol, i),
-                    (e, t) => t,
-                  ).pipe((0, m.startWith)({ buyPipValue: s.pipValue, sellPipValue: s.pipValue })),
-                )),
-                (this._pipValue$ = this._pipValues$.pipe(
-                  (0, P.map)((e) => (1 === t.side ? e.buyPipValue : e.sellPipValue)),
-                )),
-                this._createModels(i, s, n, a, v),
-                this._subscribe(),
-                this._headerState.setSettings(
-                  _t({
-                    pin: () => this.headerModel.pin(),
-                    toggleSettings: this._toggleSettings,
-                    mode$: this._displayMode$,
-                    settings$: this._settings$,
-                    currency: this.currency,
-                    showRiskControlsAndInfo: !0,
-                    supportBrackets: !0,
-                    isUndockAllowed: this._isUndockAllowed,
-                  }),
-                ))
-            })))
+            lt(adapter.formatter(position.symbol, false), new A.PriceFormatter()),
+          ]).then(([symbolInfo, tradingOptions, accountMetainfo, priceFormatter]) => {
+            // Determine if risk controls should be shown
+            this.showRiskControlsAndInfo =
+              configFlags.supportRiskControlsAndInfo && symbolInfo.pipValue !== 0
+            this.currency = (0, q.getCurrency)(accountMetainfo)
+            this.symbolType = symbolInfo.type
+            this.brokerSymbol = (0, q.getSymbolNameOverFullname)(
+              symbolInfo.brokerSymbol || position.brokerSymbol || this.symbol,
+            )
+
+            // Determine bracket support based on view type
+            if (viewType === vt.IndividualPosition) {
+              this._supportBrackets = tradingOptions?.supportIndividualPositionBrackets
+            } else {
+              this._supportBrackets = tradingOptions?.supportPositionBrackets
+            }
+
+            // Determine additional bracket feature support
+            this._supportModifyBrackets = this._supportBrackets && configFlags.supportModifyBrackets
+            this._supportTrailingStop = this._supportBrackets && configFlags.supportTrailingStop
+            this._supportGuaranteedStop = this._supportBrackets && configFlags.supportGuaranteedStop
+            this._supportModifyTrailingStop =
+              this._supportTrailingStop &&
+              this._supportModifyBrackets &&
+              configFlags.supportModifyTrailingStop
+
+            // Create quotes observable (realtime price updates)
+            // NOTE: Must use startWith to ensure combineLatest in _parentPrice$ can emit
+            this._quotes$ = T(
+              (0, k.fromEventPattern)(
+                (callback) => realtimeProvider.subscribeRealtime(position.symbol, callback),
+                (callback) => realtimeProvider.unsubscribeRealtime(position.symbol, callback),
+                (event, data) => data,
+              ).pipe((0, m.startWith)({ ask: position.avgPrice, bid: position.avgPrice })),
+            )
+
+            // Create equity observable (account equity updates)
+            // NOTE: Must use startWith(NaN) to ensure combineLatest can emit immediately
+            // Without this, the sync mechanism in BracketModel never triggers
+            this._equity$ = T(
+              (0, k.fromEventPattern)(
+                (callback) => adapter.subscribeEquity(callback),
+                (callback) => adapter.unsubscribeEquity(callback),
+                (event, data) => data,
+              ).pipe((0, m.startWith)(NaN)),
+            )
+
+            // Create pip values observable
+            this._pipValues$ = T(
+              (0, k.fromEventPattern)(
+                (callback) => adapter.subscribePipValue(position.symbol, callback),
+                (callback) => adapter.unsubscribePipValue(position.symbol, callback),
+                (event, data) => data,
+              ).pipe(
+                (0, m.startWith)({
+                  buyPipValue: symbolInfo.pipValue,
+                  sellPipValue: symbolInfo.pipValue,
+                }),
+              ),
+            )
+
+            // Create pip value observable based on position side
+            this._pipValue$ = this._pipValues$.pipe(
+              (0, P.map)((pipValues) =>
+                position.side === 1 ? pipValues.buyPipValue : pipValues.sellPipValue,
+              ),
+            )
+
+            // Create UI models (brackets, header, etc.)
+            // console.log('[Pt.onReady] Calling _createModels with brackets:', brackets)
+            this._createModels(
+              brackets,
+              symbolInfo,
+              accountMetainfo,
+              priceFormatter,
+              orderDialogOptions,
+            )
+
+            // Subscribe to events
+            this._subscribe()
+
+            // Configure header settings
+            this._headerState.setSettings(
+              _t({
+                pin: () => this.headerModel.pin(),
+                toggleSettings: this._toggleSettings,
+                mode$: this._displayMode$,
+                settings$: this._settings$,
+                currency: this.currency,
+                showRiskControlsAndInfo: true,
+                supportBrackets: true,
+                isUndockAllowed: this._isUndockAllowed,
+              }),
+            )
+          })
         }
         destroy() {
           ;(this._subscriptions && this._subscriptions.forEach((e) => e.unsubscribe()),
@@ -6469,55 +6569,91 @@
             }
           )
         }
-        async _createAndShowPositionViewModel({ position: e, viewType: t, brackets: i, focus: s }) {
-          ;(this._unsubscribeViewModels(),
-            await this._closeOrderDialog(),
-            await this._closePositionDialog(),
-            e.symbol !== this._state.symbol && this._setState({ symbol: e.symbol }))
-          const { broker: r, symbol: o } = this._state,
-            n = r ? await r.isTradable(o) : null
-          if (null === r || null === n || !n.tradable)
-            return (await this.showOrderView({ order: this._createOrderStub() }), !1)
-          const a = await r.getOrderDialogOptions(o),
-            l = void 0 !== (null == a ? void 0 : a.customFields) ? Lt(a.customFields) : void 0
-          this._setState({ savableCustomFields: l })
-          const u =
-              t === vt.Position
-                ? r.editPositionBrackets.bind(r)
-                : r.editIndividualPositionBrackets.bind(r),
-            d = new Pt({
-              adapter: r,
-              position: e,
-              brackets: i,
-              settings$: this._settings$,
-              displayMode$: this._mode$,
-              realtimeProvider: this._tradingCommands.realtimeProvider,
-              isUndockAllowed: this._isOpeningTradingPanelAvailable.value(),
-              isVisible: this._isVisible,
-              toggleMode: this._toggleMode,
-              getDisplayMode: this.getDisplayMode,
-              toggleSettings: this._toggleSettings,
-              getSettings: this._getSettings,
-              viewType: t,
-              pipValueType$: this._tradingCommands.pipValueType$,
-              handler: u,
-              trackEvent: this._tradingCommands.trackEvent,
-              orderDialogOptions: a,
-              headerState: this._orderViewHeaderState,
-            })
-          return (
-            (this._positionViewModel = d),
-            await this._positionViewModel.onReady,
-            this._positionViewModel !== d
-              ? Promise.reject('PositionViewModel was recreated during the initialization')
-              : (this._subscribePositionViewModel(),
-                this.getDisplayMode() === E.OrderEditorDisplayMode.ResizableDrawer
-                  ? this._showPositionDrawer()
-                  : this.getDisplayMode() === E.OrderEditorDisplayMode.Panel
-                    ? this._openPositionPanel(s)
-                    : this._showPositionDialog(s),
-                this._positionViewModel.onDoneButtonClicked.promise)
+        async _createAndShowPositionViewModel({ position, viewType, brackets, focus }) {
+          // Step 1: Clean up existing view models and dialogs
+          this._unsubscribeViewModels()
+          await this._closeOrderDialog()
+          await this._closePositionDialog()
+
+          // Step 2: Update state if symbol changed
+          if (position.symbol !== this._state.symbol) {
+            this._setState({ symbol: position.symbol })
+          }
+
+          // Step 3: Get broker and check tradability
+          const { broker, symbol } = this._state
+          const tradableResult = broker ? await broker.isTradable(symbol) : null
+
+          // Step 4: If not tradable, show order view instead and return false
+          if (broker === null || tradableResult === null || !tradableResult.tradable) {
+            await this.showOrderView({ order: this._createOrderStub() })
+            return false
+          }
+
+          // Step 5: Get order dialog options and extract custom fields
+          const orderDialogOptions = await broker.getOrderDialogOptions(symbol)
+          const savableCustomFields =
+            orderDialogOptions?.customFields !== undefined
+              ? Lt(orderDialogOptions.customFields)
+              : undefined
+          this._setState({ savableCustomFields })
+
+          // Step 6: Determine the bracket edit handler based on view type
+          const bracketEditHandler =
+            viewType === vt.Position
+              ? broker.editPositionBrackets.bind(broker)
+              : broker.editIndividualPositionBrackets.bind(broker)
+
+          // Step 7: Create the Position View Model (Pt class)
+          console.log(
+            '[_createAndShowPositionViewModel] Creating PositionViewModel with brackets:',
+            brackets,
           )
+          const positionViewModel = new Pt({
+            adapter: broker,
+            position: position,
+            brackets: brackets,
+            settings$: this._settings$,
+            displayMode$: this._mode$,
+            realtimeProvider: this._tradingCommands.realtimeProvider,
+            isUndockAllowed: this._isOpeningTradingPanelAvailable.value(),
+            isVisible: this._isVisible,
+            toggleMode: this._toggleMode,
+            getDisplayMode: this.getDisplayMode,
+            toggleSettings: this._toggleSettings,
+            getSettings: this._getSettings,
+            viewType: viewType,
+            pipValueType$: this._tradingCommands.pipValueType$,
+            handler: bracketEditHandler,
+            trackEvent: this._tradingCommands.trackEvent,
+            orderDialogOptions: orderDialogOptions,
+            headerState: this._orderViewHeaderState,
+          })
+
+          // Step 8: Assign to instance and wait for ready
+          this._positionViewModel = positionViewModel
+          await this._positionViewModel.onReady
+
+          // Step 9: Check if view model was replaced during initialization
+          if (this._positionViewModel !== positionViewModel) {
+            return Promise.reject('PositionViewModel was recreated during the initialization')
+          }
+
+          // Step 10: Subscribe to position view model events
+          this._subscribePositionViewModel()
+
+          // Step 11: Show the appropriate dialog based on display mode
+          const displayMode = this.getDisplayMode()
+          if (displayMode === E.OrderEditorDisplayMode.ResizableDrawer) {
+            this._showPositionDrawer()
+          } else if (displayMode === E.OrderEditorDisplayMode.Panel) {
+            this._openPositionPanel(focus)
+          } else {
+            this._showPositionDialog(focus)
+          }
+
+          // Step 12: Return the promise that resolves when user clicks Done
+          return this._positionViewModel.onDoneButtonClicked.promise
         }
         _setSettings() {
           var e

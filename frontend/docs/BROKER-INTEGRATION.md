@@ -1630,6 +1630,82 @@ return omitNullish({ id: '123', parentId: null, parentType: null, ... })
 
 ---
 
+### TradingView Bundle Issues
+
+#### Position Bracket Pre-Population
+
+**Issue**: Position edit dialog from Account Manager doesn't pre-fill Take Profit and Stop Loss fields, even though bracket orders exist on the position.
+
+**Status**: ✅ RESOLVED (January 13, 2026)
+
+**Root Cause**: TradingView passes empty `brackets` parameter to `customUI.showPositionDialog` hook when opening from Account Manager. The `Position` interface lacks `stopLoss`/`takeProfit` fields - bracket orders are stored separately with `parentId` and `parentType` fields.
+
+**Solution**: Enhanced `customUI.showPositionDialog` hook to fetch bracket orders from `orders()` API and enrich the brackets parameter before showing the dialog.
+
+**Implementation**: `frontend/src/components/TraderChartContainer.vue` (lines 217-252)
+
+**Code Pattern**:
+
+```typescript
+customUI: {
+  showPositionDialog: async (position, brackets, focus) => {
+    let enrichedBrackets = brackets
+    try {
+      const orders = await brokerService.orders()
+      const bracketOrders = orders.filter(
+        (o) => o.parentId === position.id && o.parentType === ParentType.Position,
+      )
+      enrichedBrackets = {
+        stopLoss: bracketOrders.find((o) => o.stopPrice)?.stopPrice,
+        takeProfit: bracketOrders.find((o) => o.limitPrice && !o.stopPrice)?.limitPrice,
+      }
+    } catch (e) {
+      console.warn('Failed to fetch bracket orders:', e)
+    }
+    return brokerService.showPositionBracketsDialog(position, enrichedBrackets, focus)
+  }
+}
+```
+
+**Documentation**: See [BUNDLE-MAINTENANCE.md](./tradingview/BUNDLE-MAINTENANCE.md) Case Study 1 for detailed analysis.
+
+---
+
+#### Position Dialog Field Sync
+
+**Issue**: Fields don't auto-sync in position edit dialog - changing the **Price** field doesn't update **Ticks** and **$** fields (unlike order dialog which works correctly).
+
+**Status**: ✅ RESOLVED (January 13, 2026)
+
+**Root Cause**: Position dialog's `_equity$` and `_quotes$` observables created with `fromEventPattern()` **without** `startWith()` operators, causing them to never emit initial values. This blocks RxJS `combineLatest` from firing, preventing the sync handler from executing.
+
+**Solution**: Added `.pipe(startWith(...))` to both observables in `Pt` class (PositionViewModel) to match the working pattern from `bt` class (OrderViewModel).
+
+**Files Modified**: `frontend/public/trading_terminal/bundles/order-view-controller.4f3dc6de299e33f3954b.js`
+
+**Changes**:
+
+1. Line 5506-5513: Added `.pipe(startWith({ ask: position.avgPrice, bid: position.avgPrice }))` to `_quotes$`
+2. Line 5515-5523: Added `.pipe(startWith(NaN))` to `_equity$`
+
+**Code Pattern**:
+
+```javascript
+// Before (BROKEN): No initial emission
+this._equity$ = T(fromEventPattern(subscribeEquity))
+
+// After (FIXED): Emits immediately
+this._equity$ = T(fromEventPattern(subscribeEquity).pipe((0, m.startWith)(NaN)))
+```
+
+**RxJS Pattern**: `combineLatest` requires **ALL** source observables to emit at least once before firing. Event-based observables from `fromEventPattern` must include `startWith()` to emit initial values.
+
+**Documentation**: See [BUNDLE-MAINTENANCE.md](./tradingview/BUNDLE-MAINTENANCE.md) Case Study 2 for detailed technical analysis.
+
+**Note**: All debug console logs preserved as comments for future reference.
+
+---
+
 ## References
 
 ### TradingView Documentation

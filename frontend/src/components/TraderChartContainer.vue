@@ -20,12 +20,14 @@ import type {
   IChartingLibraryWidget,
   IndividualPosition,
   LanguageCode,
+  Order,
   OrderTicketFocusControl,
   Position,
   ResolutionString,
   TradingTerminalWidgetOptions,
   IBrokerConnectionAdapterHost,
 } from '@public/trading_terminal'
+import { ParentType } from '@public/trading_terminal'
 
 function getLanguageFromURL() {
   const regex = new RegExp('[\\?&]lang=([^&#]*)')
@@ -213,15 +215,41 @@ onMounted(() => {
             supportLeverageButton: true,
           },
           // Custom UI hook to fix TradingView's position brackets preset bug
-          // When user drags TP/SL line on chart, this ensures the brackets values are passed to the dialog
+          // When user clicks edit from Account Manager, brackets are empty - we fetch them from orders
           customUI: {
-            showPositionDialog: (
+            showPositionDialog: async (
               position: Position | IndividualPosition,
               brackets: Brackets,
               focus?: OrderTicketFocusControl,
             ): Promise<boolean> => {
-              // brokerService is populated by broker_factory before this is called
-              return brokerService!.showPositionBracketsDialog(position, brackets, focus)
+              // If brackets are empty, fetch bracket orders for this position
+              let enrichedBrackets = brackets
+              try {
+                const orders: Order[] = await brokerService!.orders()
+                const bracketOrders = orders.filter(
+                  (o) =>
+                    'parentId' in o &&
+                    o.parentId === position.id &&
+                    o.parentType === ParentType.Position,
+                )
+                // Find stop loss (has stopPrice) and take profit (has limitPrice)
+                const stopLossOrder = bracketOrders.find((o) => o.stopPrice !== undefined)
+                const takeProfitOrder = bracketOrders.find(
+                  (o) => o.limitPrice !== undefined && o.stopPrice === undefined,
+                )
+                enrichedBrackets = {
+                  stopLoss: stopLossOrder?.stopPrice,
+                  takeProfit: takeProfitOrder?.limitPrice,
+                }
+                console.log(
+                  `[customUI.showPositionDialog] Enriched brackets for position ${position.id}:`,
+                  enrichedBrackets,
+                )
+              } catch (e) {
+                console.warn(`[customUI.showPositionDialog] Failed to fetch bracket orders:`, e)
+              }
+
+              return brokerService!.showPositionBracketsDialog(position, enrichedBrackets, focus)
             },
           },
         },
