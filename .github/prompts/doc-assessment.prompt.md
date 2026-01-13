@@ -1,6 +1,6 @@
 ---
 agent: "Plan"
-model: "Claude Opus 4.5"
+model: "Claude Sonnet 4.5"
 name: "doc-assessment-planner"
 description: "Code-First documentation auditor: map docs to codebase, identify drift, generate refactoring plan."
 ---

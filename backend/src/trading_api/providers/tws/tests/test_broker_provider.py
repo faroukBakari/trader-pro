@@ -22,7 +22,6 @@ from trading_api.models.broker import (
     OrderStatus,
     OrderType,
     PlaceOrderResult,
-    Position,
     PreOrder,
     Side,
 )
@@ -31,6 +30,7 @@ from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.broker_provider import TWSBrokerProvider
 from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.order_tracker import TrackedOrder
+from trading_api.providers.tws.position_tracker import TrackedPosition
 
 
 def _create_mock_contract(
@@ -782,6 +782,16 @@ class TestEditPositionBrackets:
         mock.cancelOrder = AsyncMock()
         mock.reqContractDetails = AsyncMock(return_value=[contract_details])
         mock.reqOpenOrders = AsyncMock(return_value=[])
+
+        # Mock reqPositions to return TrackedPosition matching the test position
+        contract = _create_mock_contract(symbol="AAPL", primary_exchange="NASDAQ")
+        tracked_position = TrackedPosition(
+            account="DU123456",
+            contract=contract,
+            position=Decimal("100.0"),  # Long 100 shares
+            avgCost=150.00,
+        )
+        mock.reqPositions = AsyncMock(return_value=[tracked_position])
         return mock
 
     @pytest.fixture
@@ -792,14 +802,8 @@ class TestEditPositionBrackets:
             return_value=mock_client,
         ):
             provider = TWSBrokerProvider()
-            # Add a test position for bracket operations
-            provider._positions["pos_123"] = Position(
-                id="pos_123",
-                symbol="NASDAQ:AAPL",
-                side=Side.BUY,
-                qty=100.0,
-                avgPrice=150.00,
-            )
+            # Position is now returned via mock_client.reqPositions (set in mock_client fixture)
+            # Position ID will be "NASDAQ:AAPL" (from ticker_name(contract))
             return provider
 
     @pytest.mark.asyncio
@@ -810,7 +814,7 @@ class TestEditPositionBrackets:
         brackets = Brackets(stopLoss=140.00, takeProfit=160.00)
 
         with pytest.raises(ProviderException) as exc_info:
-            await provider.edit_position_brackets("unknown_pos", brackets)
+            await provider.edit_position_brackets("INVALID:TICKER", brackets)
 
         assert "PROVIDER_BROKER_POSITION_NOT_FOUND" in str(exc_info.value.code)
 
@@ -821,7 +825,7 @@ class TestEditPositionBrackets:
         """Test edit_position_brackets calls placeOcaGroup with brackets."""
         brackets = Brackets(stopLoss=140.00, takeProfit=160.00)
 
-        await provider.edit_position_brackets("pos_123", brackets)
+        await provider.edit_position_brackets("NASDAQ:AAPL", brackets)
 
         mock_client.placeOcaGroup.assert_called_once()
         call_args = mock_client.placeOcaGroup.call_args
@@ -834,7 +838,7 @@ class TestEditPositionBrackets:
         # Should have 2 orders: stop loss + take profit
         assert len(orders) == 2
         # OCA group should contain position ID
-        assert oca_group == "brackets_pos_123"
+        assert oca_group == "brackets_NASDAQ:AAPL"
         # OCA type should be CANCEL_WITH_BLOCK (1)
         assert oca_type == 1
 
@@ -845,7 +849,7 @@ class TestEditPositionBrackets:
         """Test stop loss order has correct type and price."""
         brackets = Brackets(stopLoss=140.00)
 
-        await provider.edit_position_brackets("pos_123", brackets)
+        await provider.edit_position_brackets("NASDAQ:AAPL", brackets)
 
         call_args = mock_client.placeOcaGroup.call_args
         orders = call_args[0][1]
@@ -863,7 +867,7 @@ class TestEditPositionBrackets:
         """Test take profit order has correct type and price."""
         brackets = Brackets(takeProfit=165.00)
 
-        await provider.edit_position_brackets("pos_123", brackets)
+        await provider.edit_position_brackets("NASDAQ:AAPL", brackets)
 
         call_args = mock_client.placeOcaGroup.call_args
         orders = call_args[0][1]
@@ -881,7 +885,7 @@ class TestEditPositionBrackets:
         """Test trailing stop sets trailStopPrice when stopLoss provided."""
         brackets = Brackets(stopLoss=145.00, trailingStopPips=2.50)
 
-        await provider.edit_position_brackets("pos_123", brackets)
+        await provider.edit_position_brackets("NASDAQ:AAPL", brackets)
 
         call_args = mock_client.placeOcaGroup.call_args
         orders = call_args[0][1]
@@ -904,7 +908,7 @@ class TestEditPositionBrackets:
 
         brackets = Brackets(stopLoss=140.00, takeProfit=160.00)
 
-        await provider.edit_position_brackets("pos_123", brackets)
+        await provider.edit_position_brackets("NASDAQ:AAPL", brackets)
 
         # Should be able to retrieve 2 orders via get_orders
         orders = await provider.get_orders()

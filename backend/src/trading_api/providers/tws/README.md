@@ -476,11 +476,13 @@ async def _resolve_trading_contract(self, ticker: str) -> Contract:
 
 1. **Entry Order Only**: Only the entry order is previewed. Bracket orders (stop loss, take profit) are exit orders that release margin, not consume it, so their preview is not needed.
 
-2. **Error Propagation**: TWS errors propagate directly to the caller (BFF layer). The provider does not swallow errors with fallback responses—the BFF decides error handling strategy. This aligns with the "let it throw" philosophy in [ERROR-MANAGEMENT.md](../../../docs/ERROR-MANAGEMENT.md).
+2. **LMT Order Type for Accuracy**: Uses `orderType="LMT"` with current market price instead of `"MKT"`. Limit orders provide more accurate margin calculations because TWS can compute exact execution price, whereas market orders have variable execution prices. Price is fetched via `_get_symbol_price()` using inter-module DatafeedClient. Falls back to 100.0 if price unavailable. Same pattern used in `get_leverage_info()` (see implementation at lines 630-680).
 
-3. **Reuses Existing Methods**: Uses the existing `placeOrder()` method with `whatIf=True` flag rather than a dedicated preview method (DRY principle).
+3. **Error Propagation**: TWS errors propagate directly to the caller (BFF layer). The provider does not swallow errors with fallback responses—the BFF decides error handling strategy. This aligns with the "let it throw" philosophy in [ERROR-MANAGEMENT.md](../../../docs/ERROR-MANAGEMENT.md).
 
-4. **Contract Not Found Fallback**: If the contract cannot be resolved (e.g., invalid ticker), a fallback preview with estimated values is returned. This is distinct from TWS connection errors which propagate.
+4. **Reuses Existing Methods**: Uses the existing `placeOrder()` method with `whatIf=True` flag rather than a dedicated preview method (DRY principle).
+
+5. **Contract Not Found Fallback**: If the contract cannot be resolved (e.g., invalid ticker), a fallback preview with estimated values is returned. This is distinct from TWS connection errors which propagate.
 
 **OrderState Fields Used:**
 
@@ -517,6 +519,46 @@ OrderPreviewResult(
 ```
 
 **Mapper:** `order_state_to_preview_result()` in `tws_mappers.py` handles the OrderState → OrderPreviewResult conversion.
+
+### Position Data Freshness
+
+Position operations require **live position data** to avoid stale cache issues. The `_get_position_by_id()` helper ensures operations work with current state:
+
+**Implementation Pattern:**
+
+```python
+async def _get_position_by_id(self, position_id: str) -> Position | None:
+    """Get position by ID with fresh data."""
+    positions = await self.get_positions()
+    return next((p for p in positions if p.id == position_id), None)
+
+async def close_position(self, position_id: str, amount: float | None = None) -> None:
+    """Close position (full or partial)."""
+    position = await self._get_position_by_id(position_id)  # ← Fresh lookup
+    if not position:
+        raise ProviderException(
+            code="PROVIDER_BROKER_POSITION_NOT_FOUND",
+            message=f"Position {position_id} not found",
+            provider="tws",
+            capability="broker",
+        )
+    # ... continue with fresh position data
+```
+
+**Usage:**
+
+- `close_position()`: Validates current position quantity before closing
+- `attach_brackets_to_position()`: Ensures bracket orders reference current position state
+
+**Why Fresh Data?**
+
+Position state can change between WebSocket updates and API calls (fills, partial closes, etc.). Using cached `self._positions` risks:
+
+- Operating on stale quantity values
+- Closing non-existent positions
+- Bracket orders for wrong position size
+
+**Trade-off:** Small performance cost (one async call) for guaranteed correctness.
 
 ### Order Modification Constraints
 
