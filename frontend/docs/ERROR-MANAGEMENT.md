@@ -197,6 +197,42 @@ throw new WebSocketError(
 throw WebSocketError.fromSubscription(error, { subscriptionName: 'Orders' })
 ```
 
+#### Service Integration Pattern
+
+Services implement error handlers that convert subscription errors and throw them to the global handler:
+
+```typescript
+// brokerTerminalService.ts - Error handler method
+private handleSubscriptionError(
+  subscriptionName: string,
+  error: SubscriptionError
+): void {
+  throw WebSocketError.fromSubscription(error, { subscriptionName })
+}
+
+// Usage in subscription setup
+await this._wsAdapter.orders.subscribe(
+  'orders',
+  { accountId: this.accountId },
+  (order: PlacedOrder) => {
+    // Handle order update
+    this._hostAdapter.orderUpdate(order)
+  },
+  (error) => this.handleSubscriptionError('Orders', error)  // ← Error callback
+)
+```
+
+**Pattern Benefits:**
+
+- ✅ **Consistent Naming**: `handleSubscriptionError(subscriptionName, error)` convention
+- ✅ **Context Enrichment**: Adds `subscriptionName` to error details for better debugging
+- ✅ **Centralized Display**: Global error handler shows toasts, not the service
+- ✅ **Type Safety**: Factory method ensures correct error structure
+
+**Real Implementation**: [brokerTerminalService.ts#L674-L680](../../src/services/brokerTerminalService.ts#L674-L680) (error handler), [brokerTerminalService.ts#L689-L706](../../src/services/brokerTerminalService.ts#L689-L706) (usage)
+
+**Related**: See [WEBSOCKET-ARCHITECTURE.md#service-integration-example](./WEBSOCKET-ARCHITECTURE.md#service-integration-example) for complete WebSocket error handling flow
+
 ### NetworkError
 
 For REST API and HTTP errors.

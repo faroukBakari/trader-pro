@@ -74,21 +74,21 @@ class BrokerService(WsRouteService):
 
 All endpoints require authentication via JWT in HttpOnly cookie.
 
-| Method | Path                                     | Operation ID           | Description                              |
-| ------ | ---------------------------------------- | ---------------------- | ---------------------------------------- |
-| POST   | `/api/broker/v1/orders`                  | `placeOrder`           | Place a new order (accepts `confirmId`¹) |
-| POST   | `/api/broker/v1/orders/preview`          | `previewOrder`         | Preview order costs/margin               |
-| PUT    | `/api/broker/v1/orders/{id}`             | `modifyOrder`          | Modify existing order                    |
-| DELETE | `/api/broker/v1/orders/{id}`             | `cancelOrder`          | Cancel an order                          |
-| GET    | `/api/broker/v1/orders`                  | `getOrders`            | Get all user orders                      |
-| GET    | `/api/broker/v1/positions`               | `getPositions`         | Get all open positions                   |
-| GET    | `/api/broker/v1/executions/{symbol}`     | `getExecutions`        | Get executions for symbol                |
-| DELETE | `/api/broker/v1/positions/{id}`          | `closePosition`        | Close position (full/partial)            |
-| PUT    | `/api/broker/v1/positions/{id}/brackets` | `editPositionBrackets` | Update SL/TP brackets                    |
-| GET    | `/api/broker/v1/account`                 | `getAccountInfo`       | Get account metadata                     |
-| GET    | `/api/broker/v1/leverage/info`           | `leverageInfo`         | Get leverage constraints                 |
-| PUT    | `/api/broker/v1/leverage/set`            | `setLeverage`          | Set leverage for symbol                  |
-| POST   | `/api/broker/v1/leverage/preview`        | `previewLeverage`      | Preview leverage changes                 |
+| Method | Path                                     | Operation ID           | Description                                    |
+| ------ | ---------------------------------------- | ---------------------- | ---------------------------------------------- |
+| POST   | `/api/broker/v1/orders`                  | `placeOrder`           | Place a new order (accepts `confirmId`¹)       |
+| POST   | `/api/broker/v1/orders/preview`          | `previewOrder`         | Preview order costs/margin (returns confirmId) |
+| PUT    | `/api/broker/v1/orders/{id}`             | `modifyOrder`          | Modify existing order                          |
+| DELETE | `/api/broker/v1/orders/{id}`             | `cancelOrder`          | Cancel an order                                |
+| GET    | `/api/broker/v1/orders`                  | `getOrders`            | Get all user orders                            |
+| GET    | `/api/broker/v1/positions`               | `getPositions`         | Get all open positions                         |
+| GET    | `/api/broker/v1/executions/{symbol}`     | `getExecutions`        | Get executions for symbol                      |
+| DELETE | `/api/broker/v1/positions/{id}`          | `closePosition`        | Close position (full/partial)                  |
+| PUT    | `/api/broker/v1/positions/{id}/brackets` | `editPositionBrackets` | Update SL/TP brackets                          |
+| GET    | `/api/broker/v1/account`                 | `getAccountInfo`       | Get account metadata                           |
+| GET    | `/api/broker/v1/leverage/info`           | `leverageInfo`         | Get leverage constraints                       |
+| PUT    | `/api/broker/v1/leverage/set`            | `setLeverage`          | Set leverage for symbol                        |
+| POST   | `/api/broker/v1/leverage/preview`        | `previewLeverage`      | Preview leverage changes                       |
 
 ¹ **Preview-to-Place Flow:** The `confirmId` returned by `previewOrder` can be passed as a query parameter to `placeOrder` for audit trail correlation. This links the preview and execution for logging/compliance purposes.
 

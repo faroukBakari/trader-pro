@@ -43,6 +43,7 @@ from trading_api.models.exceptions import ProviderException, TradingApiException
 from trading_api.models.market.quotes import GetQuotesRequest
 from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.order_tracker import TrackedOrder
+from trading_api.providers.tws.position_tracker import TrackedPosition
 from trading_api.providers.tws.tws_connection import TWSClient
 from trading_api.providers.tws.tws_mappers import (
     order_state_to_preview_result,
@@ -86,10 +87,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         )
 
         # Business state (in-memory)
-        self._orders: dict[str, PlacedOrder] = {}
-        self._positions: dict[str, Position] = {}
         self._executions: list[Execution] = []
-        self._order_counter = 1
         self._leverage_settings: dict[str, float] = {}
 
         # P&L tracking
@@ -103,7 +101,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         # Subscription management
         self._subscription_counter = 0
-        self._position_callbacks: dict[str, Callable[[Position], Awaitable[None]]] = {}
         self._execution_callbacks: dict[
             str, tuple[str, Callable[[Execution], Awaitable[None]]]
         ] = {}  # sub_id → (symbol, callback)
@@ -234,11 +231,65 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         """Cancel an order."""
         await self._tws_client.cancelOrder(int(order_id))
 
+    async def get_orders(self) -> list[PlacedOrder]:
+        """Get all open orders from TWS.
+
+        Requests all open orders and converts them to domain PlacedOrder models.
+        Groups bracket orders and enriches parent orders with stopLoss/takeProfit.
+        Child orders are linked with parentId/parentType for TradingView UI.
+        """
+        # Request open orders from TWS (returns list of TrackedOrder objects)
+        tws_orders = await self._tws_client.reqOpenOrders()
+
+        # Filter out whatIf orders
+        real_orders = [
+            o for o in tws_orders if (o.order.transmit and not o.order.whatIf)
+        ]
+
+        # Build contract details map for symbol resolution
+        details_map: dict[int, Contract] = {
+            d.contract.conId: d.contract
+            for d in itertools.chain.from_iterable(
+                await asyncio.gather(
+                    *[
+                        self._tws_client.reqContractDetails(c)
+                        for c in {
+                            o.contract.conId: o.contract for o in real_orders
+                        }.values()
+                    ]
+                )
+            )
+        }
+
+        return [
+            tracked_order_to_placed_order(
+                o, details_map.get(o.contract.conId, o.contract)
+            )
+            for o in real_orders
+        ]
+
+    async def get_positions(self) -> list[Position]:
+        """Get all open positions from TWS.
+
+        Returns:
+            List of Position objects for all open positions
+        """
+        # Request positions from TWS
+        tracked_positions = await self._tws_client.reqPositions()
+
+        # Convert each TrackedPosition to domain Position using to_domain()
+        return [p.to_domain() for p in tracked_positions]
+
+    async def _get_position_by_id(self, position_id: str) -> Position | None:
+        """Get position by ID."""
+        positions = await self.get_positions()
+        return next((p for p in positions if p.id == position_id), None)
+
     async def close_position(
         self, position_id: str, amount: float | None = None
     ) -> None:
         """Close position (full or partial)."""
-        position = self._positions.get(position_id)
+        position = await self._get_position_by_id(position_id)
         if not position:
             raise ProviderException(
                 code="PROVIDER_BROKER_POSITION_NOT_FOUND",
@@ -299,7 +350,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             position_id: Position to attach brackets to
             brackets: Bracket configuration (stopLoss, takeProfit, trailingStopPips)
         """
-        position = self._positions.get(position_id)
+        position = await self._get_position_by_id(position_id)
         if not position:
             raise ProviderException(
                 code="PROVIDER_BROKER_POSITION_NOT_FOUND",
@@ -359,55 +410,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             oca_group,
             oca_type=1,  # CANCEL_WITH_BLOCK (overfill protection)
         )
-
-    async def get_orders(self) -> list[PlacedOrder]:
-        """Get all open orders from TWS.
-
-        Requests all open orders and converts them to domain PlacedOrder models.
-        Groups bracket orders and enriches parent orders with stopLoss/takeProfit.
-        Child orders are linked with parentId/parentType for TradingView UI.
-        """
-        # Request open orders from TWS (returns list of TrackedOrder objects)
-        tws_orders = await self._tws_client.reqOpenOrders()
-
-        # Filter out whatIf orders
-        real_orders = [
-            o for o in tws_orders if (o.order.transmit and not o.order.whatIf)
-        ]
-
-        # Build contract details map for symbol resolution
-        details_map: dict[int, Contract] = {
-            d.contract.conId: d.contract
-            for d in itertools.chain.from_iterable(
-                await asyncio.gather(
-                    *[
-                        self._tws_client.reqContractDetails(c)
-                        for c in {
-                            o.contract.conId: o.contract for o in real_orders
-                        }.values()
-                    ]
-                )
-            )
-        }
-
-        return [
-            tracked_order_to_placed_order(
-                o, details_map.get(o.contract.conId, o.contract)
-            )
-            for o in real_orders
-        ]
-
-    async def get_positions(self) -> list[Position]:
-        """Get all open positions from TWS.
-
-        Returns:
-            List of Position objects for all open positions
-        """
-        # Request positions from TWS
-        tracked_positions = await self._tws_client.reqPositions()
-
-        # Convert each TrackedPosition to domain Position using to_domain()
-        return [p.to_domain() for p in tracked_positions]
 
     async def get_executions(self, symbol: str) -> list[Execution]:
         """Get execution history for a symbol."""
@@ -634,11 +636,14 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         cached_contract = await self._tws_client.req_ticker_details(params.symbol)
         contract = cached_contract.build_best_contract()
 
+        current_price = await self._get_symbol_price(params.symbol)
+
         # Build WhatIf order (simulation only, no execution)
         order = Order()
         order.action = "BUY" if params.side == 1 else "SELL"
         order.totalQuantity = Decimal("1")  # Single unit for margin calc
-        order.orderType = "MKT"
+        order.orderType = "LMT"
+        order.lmtPrice = current_price if current_price > 0 else 100.0
         order.whatIf = True
         order.account = self._config.account_id
 
@@ -705,9 +710,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     def _start_execution_simulator_if_needed(self) -> None:
         """Start execution simulator if not running and has subscribers."""
         has_subscribers = (
-            len(self._position_callbacks) > 0
-            or len(self._execution_callbacks) > 0
-            or len(self._equity_callbacks) > 0
+            len(self._execution_callbacks) > 0 or len(self._equity_callbacks) > 0
         )
 
         if self._execution_simulator_task is None and has_subscribers:
@@ -719,9 +722,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     def _stop_execution_simulator_if_empty(self) -> None:
         """Stop execution simulator if no more subscribers."""
         has_subscribers = (
-            len(self._position_callbacks) > 0
-            or len(self._execution_callbacks) > 0
-            or len(self._equity_callbacks) > 0
+            len(self._execution_callbacks) > 0 or len(self._equity_callbacks) > 0
         )
 
         if self._execution_simulator_task is not None and not has_subscribers:
@@ -759,13 +760,20 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
     ) -> str:
         """Subscribe to position updates."""
-        sub_id = self._generate_subscription_id()
-        self._position_callbacks[sub_id] = callback
-        if on_error:
-            self._error_callbacks[sub_id] = on_error
 
-        logger.info(f"Registered position subscription: {sub_id}")
-        self._start_execution_simulator_if_needed()
+        # Domain callback wrapper (TWS → Domain conversion)
+        async def tws_callback(tracked: TrackedPosition) -> None:
+            # TrackedPosition already has to_domain() method
+            position = tracked.to_domain()
+            await callback(position)
+
+        # Error callback wrapper
+        async def tws_on_error(exc: ProviderException) -> None:
+            if on_error:
+                await on_error(exc)
+
+        # Delegate to TWSClient (handles stream registration + snapshot trigger)
+        sub_id = self._tws_client.reqPositionsStream(tws_callback, tws_on_error)
 
         return sub_id
 
@@ -839,14 +847,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
                 logger.exception(f"Error in execution simulator: {e}")
                 # Continue running despite errors
 
-    async def _broadcast_position(self, position: Position) -> None:
-        """Broadcast position update to all subscribers."""
-        for callback in list(self._position_callbacks.values()):
-            try:
-                await callback(position)
-            except Exception as e:
-                logger.exception(f"Error in position callback: {e}")
-
     async def _broadcast_execution(self, execution: Execution) -> None:
         """Broadcast execution to matching symbol subscribers.
 
@@ -870,7 +870,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
     async def _update_equity(self, execution: Execution) -> None:
         """Update equity after execution and broadcast changes."""
-        position = self._positions.get(execution.symbol)
+        position = await self._get_position_by_id(execution.symbol)
 
         if position is not None and position.qty != 0:
             if position.side == execution.side:
@@ -896,104 +896,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         # Broadcast equity update
         await self._broadcast_equity()
 
-        # Trigger position update
-        await self._update_position(execution)
-
-    async def _update_position(self, execution: Execution) -> None:
-        """Update position from execution and broadcast changes."""
-        existing = self._positions.get(execution.symbol)
-
-        if existing:
-            if existing.side == execution.side:
-                # Adding to position - weighted average price
-                total_cost = (existing.qty * existing.avgPrice) + (
-                    execution.qty * execution.price
-                )
-                total_qty = existing.qty + execution.qty
-
-                existing.qty = total_qty
-                existing.avgPrice = total_cost / total_qty
-
-                # Calculate unrealized P&L
-                if existing.side == Side.BUY:
-                    unrealized = (execution.price - existing.avgPrice) * existing.qty
-                else:
-                    unrealized = (existing.avgPrice - execution.price) * existing.qty
-
-                self._unrealized_pl[execution.symbol] = unrealized
-                self._equity.unrealizedPL = sum(self._unrealized_pl.values())
-                self._equity.equity = self._equity.balance + self._equity.unrealizedPL
-
-                await self._broadcast_position(existing)
-            else:
-                # Opposite side - closing or reversing
-                if execution.qty < existing.qty:
-                    # Partial close
-                    existing.qty -= execution.qty
-
-                    if existing.side == Side.BUY:
-                        unrealized = (
-                            execution.price - existing.avgPrice
-                        ) * existing.qty
-                    else:
-                        unrealized = (
-                            existing.avgPrice - execution.price
-                        ) * existing.qty
-
-                    self._unrealized_pl[execution.symbol] = unrealized
-                    self._equity.unrealizedPL = sum(self._unrealized_pl.values())
-                    self._equity.equity = (
-                        self._equity.balance + self._equity.unrealizedPL
-                    )
-
-                    await self._broadcast_position(existing)
-
-                elif execution.qty == existing.qty:
-                    # Full close
-                    existing.qty = 0
-
-                    if execution.symbol in self._unrealized_pl:
-                        del self._unrealized_pl[execution.symbol]
-                    self._equity.unrealizedPL = sum(self._unrealized_pl.values())
-                    self._equity.equity = (
-                        self._equity.balance + self._equity.unrealizedPL
-                    )
-
-                    await self._broadcast_position(existing)
-                    del self._positions[execution.symbol]
-
-                else:
-                    # Reverse position
-                    new_qty = execution.qty - existing.qty
-
-                    existing.side = execution.side
-                    existing.qty = new_qty
-                    existing.avgPrice = execution.price
-
-                    self._unrealized_pl[execution.symbol] = 0.0
-                    self._equity.unrealizedPL = sum(self._unrealized_pl.values())
-                    self._equity.equity = (
-                        self._equity.balance + self._equity.unrealizedPL
-                    )
-
-                    await self._broadcast_position(existing)
-        else:
-            # New position
-            new_position = Position(
-                id=execution.symbol,
-                symbol=execution.symbol,
-                qty=execution.qty,
-                side=execution.side,
-                avgPrice=execution.price,
-            )
-            self._positions[execution.symbol] = new_position
-
-            self._unrealized_pl[execution.symbol] = 0.0
-            self._equity.unrealizedPL = sum(self._unrealized_pl.values())
-            self._equity.equity = self._equity.balance + self._equity.unrealizedPL
-
-            await self._broadcast_position(new_position)
-
     # =========================================================================
     # Lifecycle / Testing Helpers
     # =========================================================================
@@ -1006,10 +908,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             self._execution_simulator_task = None
 
         # Clear all state
-        self._orders = {}
-        self._positions = {}
         self._executions = []
-        self._order_counter = 1
         self._leverage_settings = {}
         self._unrealized_pl = {}
         self._equity = EquityData(
@@ -1020,7 +919,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         )
 
         # Clear subscriptions
-        self._position_callbacks = {}
         self._execution_callbacks = {}
         self._equity_callbacks = {}
         self._error_callbacks = {}

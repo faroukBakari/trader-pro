@@ -16,9 +16,13 @@ import { ihmController } from '@/services/ihmControllerService'
 import type { ToolSchema } from '@/types/ihmController'
 import { widget } from '@public/trading_terminal'
 import type {
+  Brackets,
   IChartingLibraryWidget,
-  ResolutionString,
+  IndividualPosition,
   LanguageCode,
+  OrderTicketFocusControl,
+  Position,
+  ResolutionString,
   TradingTerminalWidgetOptions,
   IBrokerConnectionAdapterHost,
 } from '@public/trading_terminal'
@@ -207,6 +211,18 @@ onMounted(() => {
             supportPlaceOrderPreview: true,
             supportLeverage: true,
             supportLeverageButton: true,
+          },
+          // Custom UI hook to fix TradingView's position brackets preset bug
+          // When user drags TP/SL line on chart, this ensures the brackets values are passed to the dialog
+          customUI: {
+            showPositionDialog: (
+              position: Position | IndividualPosition,
+              brackets: Brackets,
+              focus?: OrderTicketFocusControl,
+            ): Promise<boolean> => {
+              // brokerService is populated by broker_factory before this is called
+              return brokerService!.showPositionBracketsDialog(position, brackets, focus)
+            },
           },
         },
       }),

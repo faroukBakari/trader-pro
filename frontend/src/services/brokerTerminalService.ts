@@ -11,6 +11,7 @@ import type {
   IBrokerConnectionAdapterHost,
   IBrokerWithoutRealtime,
   IDatafeedQuotesApi,
+  IndividualPosition,
   InstrumentInfo,
   INumberFormatter,
   IsTradableResult,
@@ -22,11 +23,15 @@ import type {
   LeverageSetResult,
   Order,
   OrderPreviewResult,
+  PlacedOrder,
   PlaceOrderResult,
   Position,
   PreOrder,
   TradeContext,
 } from '@public/trading_terminal'
+
+// Import enum as value (not type-only) since we use it as a value
+import { OrderTicketFocusControl } from '@public/trading_terminal'
 
 import { WebSocketError } from '@/errors'
 import { ApiAdapter, type ApiPromise } from '@/plugins/apiAdapter'
@@ -646,6 +651,11 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
           message: 'Broker data subscriptions established'
         })
+      }).catch((error) => {
+        console.error('[BrokerTerminalService] Failed to setup WebSocket handlers:', error)
+        this._hostAdapter.connectionStatusUpdate(ConnectionStatus.Error, {
+          message: 'Failed to establish broker data subscriptions'
+        })
       })
 
   }
@@ -679,7 +689,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
       this._getWsAdapter().orders?.subscribe(
         'orders',
         { accountId: this.accountId },
-        (order: Order) => {
+        (order: PlacedOrder) => {
           console.warn('Received order update via WebSocket: ' + JSON.stringify(order))
           this._hostAdapter.orderUpdate(omitNullish(order) as Order)
 
@@ -894,7 +904,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   async orders(): Promise<Order[]> {
     const response = await this._getApiAdapter().getOrders()
     console.log(`BrokerTerminalService.orders() => `, response.data)
-    const orders = response.data.map(order => omitNullish(order)) as Order[]
+    const orders = response.data.map(order => omitNullish(order) as Order)
     return orders
   }
 
@@ -1018,5 +1028,20 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     const response = await this._getApiAdapter().previewLeverage(leverageSetParams)
     console.log(`BrokerTerminalService.previewLeverage[${JSON.stringify(leverageSetParams)}] => ${JSON.stringify(response.data)}`)
     return response.data
+  }
+
+  /**
+   * Delegates to host adapter's showPositionBracketsDialog.
+   * Used by customUI.showPositionDialog hook to fix TradingView's bracket preset bug.
+   */
+  showPositionBracketsDialog(
+    position: Position | IndividualPosition,
+    brackets: Brackets,
+    focus?: OrderTicketFocusControl
+  ): Promise<boolean> {
+    console.log(`BrokerTerminalService.showPositionBracketsDialog[${position.id}] => brackets: ${JSON.stringify(brackets)}, focus: ${focus}`)
+    // TradingView's showPositionBracketsDialog requires focus parameter (not optional)
+    // Default to StopLoss if not provided
+    return this._hostAdapter.showPositionBracketsDialog(position, brackets, focus ?? OrderTicketFocusControl.StopLoss)
   }
 }

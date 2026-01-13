@@ -343,21 +343,21 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ## Query Pattern Mapping
 
-| User Query Pattern             | Relevant Documents                                                                  | Load Order            |
-| ------------------------------ | ----------------------------------------------------------------------------------- | --------------------- |
-| "How do I set up..."           | `GETTING-STARTED.md` → `DEVELOPMENT.md`                                             | Sequential            |
-| "How does [feature] work"      | `ARCHITECTURE.md` → topic-specific docs                                             | Architecture first    |
-| "Implement [backend feature]"  | `MODULAR_BACKEND_ARCHITECTURE.md` → `API-METHODOLOGY.md` → module docs              | Sequential            |
-| "Implement [frontend feature]" | `frontend/README.md` → component docs                                               | Sequential            |
-| "WebSocket [anything]"         | `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `WEBSOCKET-METHODOLOGY.md`  | All three             |
-| "Authentication/auth/login"    | `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md` | Auth doc first        |
-| "Testing [component]"          | `TESTING.md` → component-specific testing docs                                      | General first         |
-| "Error/CI/build issue"         | `CI-TROUBLESHOOTING.md` + relevant architecture docs                                | Troubleshooting first |
-| "Error handling/exceptions"    | `ERROR-MANAGEMENT.md` → `BACKEND_TESTING.md` (for testing)                          | Error doc first       |
-| "TWS API/broker integration"   | `providers/tws/README.md` → `tws/docs/README.md` → specific API docs                | Provider then API     |
-| "TradingView [anything]"       | `BROKER-INTEGRATION.md` → `tradingview/` docs                                       | Integration first     |
-| "Client generation"            | `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`                                  | Backend then frontend |
-| "Module/versioning"            | `MODULAR_BACKEND_ARCHITECTURE.md` → `MODULAR_VERSIONNING.md`                        | Architecture first    |
+| User Query Pattern             | Relevant Documents                                                                                                               | Load Order            |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| "How do I set up..."           | `GETTING-STARTED.md` → `DEVELOPMENT.md`                                                                                          | Sequential            |
+| "How does [feature] work"      | `ARCHITECTURE.md` → topic-specific docs                                                                                          | Architecture first    |
+| "Implement [backend feature]"  | `MODULAR_BACKEND_ARCHITECTURE.md` → `API-METHODOLOGY.md` → module docs                                                           | Sequential            |
+| "Implement [frontend feature]" | `frontend/README.md` → component docs                                                                                            | Sequential            |
+| "WebSocket [anything]"         | `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `WEBSOCKET-METHODOLOGY.md` + `ERROR-MANAGEMENT.md` (subscription errors) | All WebSocket docs    |
+| "Authentication/auth/login"    | `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`                                              | Auth doc first        |
+| "Testing [component]"          | `TESTING.md` → component-specific testing docs                                                                                   | General first         |
+| "Error/CI/build issue"         | `CI-TROUBLESHOOTING.md` + relevant architecture docs                                                                             | Troubleshooting first |
+| "Error handling/exceptions"    | `ERROR-MANAGEMENT.md` → `BACKEND_TESTING.md` (for testing) → `services/README.md` (frontend patterns)                            | Error doc first       |
+| "TWS API/broker integration"   | `providers/tws/README.md` → `tws/docs/README.md` → specific API docs                                                             | Provider then API     |
+| "TradingView [anything]"       | `BROKER-INTEGRATION.md` → `tradingview/` docs                                                                                    | Integration first     |
+| "Client generation"            | `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`                                                                               | Backend then frontend |
+| "Module/versioning"            | `MODULAR_BACKEND_ARCHITECTURE.md` → `MODULAR_VERSIONNING.md`                                                                     | Architecture first    |
 
 ---
 
@@ -374,7 +374,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **REST API Development**: `API-METHODOLOGY.md` → `MODULAR_BACKEND_ARCHITECTURE.md` → `SPECS_AND_CLIENT_GEN.md`
 - **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `ERROR-MANAGEMENT.md` (subscription errors)
 - **Authentication**: `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
-- **Error Handling**: `ERROR-MANAGEMENT.md` → `PROVIDER-SYSTEM.md` (providers) + `BACKEND_TESTING.md` (testing)
+- **Error Handling**: `ERROR-MANAGEMENT.md` → `PROVIDER-SYSTEM.md` (providers) + `BACKEND_TESTING.md` (testing) + `services/README.md` (frontend patterns)
 - **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BROKER-CONNECTION-ADAPTER.md`
 - **TWS Provider Integration**: `PROVIDER-SYSTEM.md` → `providers/tws/README.md` → `tws/docs/README.md` → specific API reference docs
 - **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`
@@ -449,13 +449,15 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### WebSocket & Real-Time
 
-**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming, subscription errors, error broadcasting, topic_error callback, SubscriptionError, recoverable errors
+**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming, subscription errors, error broadcasting, topic_error callback, SubscriptionError, recoverable errors, handleSubscriptionError, WebSocketError.fromSubscription, error callback pattern, throw to global handler
 
 **Scope**: WebSocket implementation (backend + frontend)  
 **Out of Scope**: HTTP polling, SSE, long-polling alternatives
 
 - **backend/docs/BACKEND_WEBSOCKETS.md** - ⭐ FastWS integration guide (WebSocket modules)
 - **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - Frontend WebSocket architecture patterns (comprehensive)
+- **frontend/src/services/README.md** - Service-level error handling patterns
+- **frontend/docs/ERROR-MANAGEMENT.md** - WebSocket error handling (WebSocketError, service integration)
 
 ### Testing
 
@@ -471,7 +473,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TradingView Integration
 
-**Keywords**: TradingView, broker API, Trading Host, charting library, order execution, broker adapter, UDF, LibrarySymbolInfo, SymbolInfo, currency_code, original_currency_code, expired, expiration_date, industry, sector, con_id, symbol metadata, DatafeedConfiguration, quote deduplication, subscribeQuotes, omitNullish, discriminated union, structural typing, nullish fields, PlacedOrder, BracketOrder
+**Keywords**: TradingView, broker API, Trading Host, charting library, order execution, broker adapter, UDF, LibrarySymbolInfo, SymbolInfo, currency_code, original_currency_code, expired, expiration_date, industry, sector, con_id, symbol metadata, DatafeedConfiguration, quote deduplication, subscribeQuotes, omitNullish, discriminated union, structural typing, nullish fields, PlacedOrder, BracketOrder, customUI, showPositionDialog, showPositionBracketsDialog, bracket preset bug, position dialog override, WebSocket subscriptions, error callbacks, handleSubscriptionError
 
 **Scope**: TradingView Trading Terminal integration  
 **Out of Scope**: Custom charting solutions, alternative charting libraries
@@ -499,17 +501,18 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### Error Handling
 
-**Keywords**: exceptions, error codes, error handling, HTTP status, WebSocket close codes, TradingApiException, ServiceException, ProviderException, CommonException, global handlers, subscription errors, recoverable errors, ErrorPayload, SubscriptionError, topic_error callback, AppError, WebSocketError, NetworkError, AuthError, ValidationError, errorService, toast notifications
+**Keywords**: exceptions, error codes, error handling, HTTP status, WebSocket close codes, TradingApiException, ServiceException, ProviderException, CommonException, global handlers, subscription errors, recoverable errors, ErrorPayload, SubscriptionError, topic_error callback, AppError, WebSocketError, NetworkError, AuthError, ValidationError, errorService, toast notifications, handleSubscriptionError, WebSocketError.fromSubscription, error callback pattern, throw to global handler
 
 **Scope**: Backend exception hierarchy and frontend error handling  
 **Out of Scope**: User-facing error messages content
 
 - **backend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete backend error management guide (exception hierarchy, error codes, handlers, subscription errors)
-- **frontend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete frontend error management guide (error classes, errorService, toast notifications)
+- **frontend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete frontend error management guide (error classes, errorService, toast notifications, service integration patterns)
 - **backend/docs/PROVIDER-SYSTEM.md** - ProviderException usage in providers (Section 8.4)
 - **backend/docs/BACKEND_WEBSOCKETS.md** - WebSocket error handling (close codes, subscription-level errors)
-- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket subscription error handling (globalErrorHandler)
+- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket subscription error handling (globalErrorHandler, service error patterns)
 - **backend/docs/BACKEND_TESTING.md** - Testing error responses (test client configuration)
+- **frontend/src/services/README.md** - Service-level error handling implementation
 
 ### Build & DevOps
 
@@ -591,6 +594,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2026-01-12**: Broker service error handling improvements - Updated services/README.md (Error Handling section with handleSubscriptionError pattern), BROKER-INTEGRATION.md (showPositionBracketsDialog method, Error Handling in Setup, WebSocket subscription error callbacks), WEBSOCKET-ARCHITECTURE.md (error handling philosophy, service throw pattern), ERROR-MANAGEMENT.md (Service Integration Pattern), DOCUMENTATION-GUIDE.md (keywords, query mapping)
 - **2026-01-12**: TWS Order streaming integration - Updated TWS README.md (`subscribe_orders()` → `reqOrdersStream()` flow, OrderTracker stream hooks, `set_leverage()` exception, `isUnset()` helper), broker module README.md (async topic lifecycle), DOCUMENTATION-GUIDE.md (keywords)
 - **2026-01-11**: Inter-module HTTP client factory - Updated SPECS_AND_CLIENT_GEN.md (InterModuleClients singleton, smart URL defaults, env overrides), TWS README.md (`_get_symbol_price()` inter-module pattern), DOCUMENTATION-GUIDE.md (keywords)
 - **2026-01-11**: Order modification constraints - Updated TWS README.md (order modification field restrictions, `clone_order()` deep copy pattern, `placeWhatifOrder()` method separation, leverage info via WhatIf margin simulation), broker module README.md (`confirmId` parameter for audit trail), `02-API-REFERENCE-CONTRACTS-ORDERS.md` (Section 3.2 Order Modification guidelines), DOCUMENTATION-GUIDE.md (TWS keywords)

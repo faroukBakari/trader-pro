@@ -819,15 +819,63 @@ Show reverse position confirmation dialog.
 
 #### `showPositionBracketsDialog(position: Position | IndividualPosition, brackets: Brackets, focus: OrderTicketFocusControl): Promise<boolean>`
 
-Show position brackets (SL/TP) editing dialog.
+Display TradingView's native position brackets (SL/TP) editing dialog with preset values.
+
+**Purpose**: Used to show position bracket editor with preset stop-loss, take-profit, and trailing stop values. Critical for `customUI.showPositionDialog` hook to fix TradingView's bracket preset bug.
 
 **Parameters**:
 
-- `position: Position | IndividualPosition` - Position to edit
-- `brackets: Brackets` - Current brackets
-- `focus: OrderTicketFocusControl` - Control to focus
+- `position: Position | IndividualPosition` - Position to edit (PlacedOrder or IndividualPosition types)
+- `brackets: Brackets` - Preset bracket configuration
+  - `stopLoss?: number` - Stop loss price
+  - `takeProfit?: number` - Take profit price
+  - `trailingStopPips?: number` - Trailing stop distance in pips
+- `focus: OrderTicketFocusControl` - Optional control to focus in dialog
+  - `'stop-loss'` - Focus stop loss input
+  - `'take-profit'` - Focus take profit input
+  - `'trailing-stop'` - Focus trailing stop input
 
-**Returns**: `Promise<boolean>` - `true` if confirmed
+**Returns**: `Promise<boolean>` - Resolves to `true` if user confirmed changes, `false` if canceled
+
+**Integration Pattern**:
+
+```typescript
+// Custom UI hook in chart widget configuration
+customUI: {
+  showPositionDialog: (
+    position: Position | IndividualPosition,
+    brackets: Brackets,
+    focus?: OrderTicketFocusControl
+  ): Promise<boolean> => {
+    return brokerService.showPositionBracketsDialog(position, brackets, focus)
+  }
+}
+
+// BrokerTerminalService delegates to host adapter
+showPositionBracketsDialog(
+  position: Position | IndividualPosition,
+  brackets: Brackets,
+  focus?: OrderTicketFocusControl
+): Promise<boolean> {
+  return this._hostAdapter.showPositionBracketsDialog(position, brackets, focus)
+}
+```
+
+**Flow**:
+
+1. User drags TP/SL line on chart → TradingView detects bracket change
+2. TradingView calls `customUI.showPositionDialog(position, brackets, focus)`
+3. Hook delegates to `BrokerTerminalService.showPositionBracketsDialog()`
+4. Service delegates to `_hostAdapter.showPositionBracketsDialog()`
+5. TradingView displays native dialog with preset bracket values
+6. User confirms or cancels → Promise resolves with result
+
+**Why This Matters**: Without this integration, TradingView's default behavior loses bracket values when transitioning from chart drag to dialog, forcing users to re-enter values. The customUI hook preserves these values.
+
+**Related Files**:
+
+- `frontend/src/components/TraderChartContainer.vue` (customUI hook configuration)
+- `frontend/src/services/brokerTerminalService.ts` (delegation method)
 
 ---
 
