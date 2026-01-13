@@ -2011,9 +2011,22 @@ class TWSClient:
     ) -> tuple[int, bool]:
         order_id = order.orderId
         place_flag = True
-        if order_id > 0:
-            tracked = self.ibsocket.order_tracker.ensure_existing_order(order_id)
+        tracked: TrackedOrder | None = (
+            self.ibsocket.order_tracker.ensure_existing_order(order_id)
+            if order_id > 0
+            else (
+                self.ibsocket.order_tracker.find_by_oca_group(
+                    order.ocaGroup,
+                    order.orderType,
+                    order.action,
+                )
+                if order.ocaGroup
+                else None
+            )
+        )
+        if tracked:
             order_ori = tracked.clone_order()
+            order_id = tracked.orderId
             # we only modify allowed fields. for more infos
             # check 02-API-REFERENCE-CONTRACTS-ORDERS.md
             assert (
@@ -2045,6 +2058,7 @@ class TWSClient:
                 not place_flag or order_ori.transmit == transmit
             ), "Cannot change transmit flag of an existing order"
             order = order_ori
+            order.transmit = True  # always transmit existing orders
         else:
             order_id = self.ibsocket.order_tracker.next_order_id
             order.parentId = parent_id
@@ -2084,9 +2098,19 @@ class TWSClient:
         if not order_list:
             return []
 
+        if not oca_group.startswith("brackets_"):
+            raise ValueError("oca_group must start with 'brackets_'")
+
+        # get or create unique OCA group name
+        signed_oca_groups = self.ibsocket.order_tracker.signed_oca_groups()
+        signed_oca_group = next(
+            iter([group for group in signed_oca_groups if group.startswith(oca_group)]),
+            f"{oca_group}@{int(time.time() * 1000)}",
+        )
+
         # Assign OCA attributes to each order
         for order in order_list:
-            order.ocaGroup = oca_group
+            order.ocaGroup = signed_oca_group
             order.ocaType = oca_type
 
         submit_results = [

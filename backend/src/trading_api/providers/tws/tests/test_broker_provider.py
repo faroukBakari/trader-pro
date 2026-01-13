@@ -830,15 +830,14 @@ class TestEditPositionBrackets:
         mock_client.placeOcaGroup.assert_called_once()
         call_args = mock_client.placeOcaGroup.call_args
         orders = call_args[0][1]
-        oca_group = call_args[0][2]
-        oca_type = call_args[1].get(
-            "oca_type", call_args[0][3] if len(call_args[0]) > 3 else 1
-        )
+        # oca_group is now a keyword argument
+        oca_group = call_args[1].get("oca_group")
+        oca_type = call_args[1].get("oca_type", 1)
 
         # Should have 2 orders: stop loss + take profit
         assert len(orders) == 2
-        # OCA group should contain position ID
-        assert oca_group == "brackets_NASDAQ:AAPL"
+        # OCA group should start with brackets prefix (timestamp appended in implementation)
+        assert oca_group.startswith("brackets_NASDAQ:AAPL")
         # OCA type should be CANCEL_WITH_BLOCK (1)
         assert oca_type == 1
 

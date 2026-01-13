@@ -713,7 +713,7 @@ class TestTWSClientPlaceOcaGroup:
         contract = Contract()
         contract.symbol = "AAPL"
 
-        result = await client.placeOcaGroup(contract, [], "test_oca")
+        result = await client.placeOcaGroup(contract, [], "brackets_test_oca")
 
         assert result == []
 
@@ -733,6 +733,8 @@ class TestTWSClientPlaceOcaGroup:
         # Mock order_tracker with next_order_id
         mock_order_tracker = MagicMock()
         mock_order_tracker.next_order_id = 100
+        mock_order_tracker.signed_oca_groups.return_value = set()
+        mock_order_tracker.find_by_oca_group.return_value = None
 
         # Mock order_update to return immediately
         async def mock_order_update(
@@ -765,13 +767,13 @@ class TestTWSClientPlaceOcaGroup:
 
         # Execute
         await client.placeOcaGroup(
-            contract, [order1, order2], "test_oca_group", oca_type=1
+            contract, [order1, order2], "brackets_test_oca_group", oca_type=1
         )
 
-        # Verify OCA attributes were set
-        assert order1.ocaGroup == "test_oca_group"
+        # Verify OCA attributes were set (with timestamp appended)
+        assert order1.ocaGroup.startswith("brackets_test_oca_group")
         assert order1.ocaType == 1
-        assert order2.ocaGroup == "test_oca_group"
+        assert order2.ocaGroup.startswith("brackets_test_oca_group")
         assert order2.ocaType == 1
 
     @pytest.mark.asyncio
@@ -794,6 +796,8 @@ class TestTWSClientPlaceOcaGroup:
         # Mock order_tracker
         mock_order_tracker = MagicMock()
         order_id_counter = [100]
+        mock_order_tracker.signed_oca_groups.return_value = set()
+        mock_order_tracker.find_by_oca_group.return_value = None
 
         def get_next_order_id() -> int:
             current = order_id_counter[0]
@@ -836,7 +840,7 @@ class TestTWSClientPlaceOcaGroup:
         contract.symbol = "AAPL"
 
         # Execute
-        await client.placeOcaGroup(contract, orders, "oca_test", oca_type=1)
+        await client.placeOcaGroup(contract, orders, "brackets_oca_test", oca_type=1)
 
         # Verify transmit chain pattern: all False except last
         assert len(place_order_calls) == 3
