@@ -24,6 +24,26 @@ This directory contains documentation specific to TradingView Trading Terminal i
 
 ---
 
+### [BUNDLE-MAINTENANCE.md](./BUNDLE-MAINTENANCE.md)
+
+**Purpose**: Comprehensive guide for maintaining and debugging TradingView Trading Terminal bundles.
+
+**Contents**:
+
+- Bundle architecture and obfuscation patterns
+- Debugging methodology (unobfuscation, console logging strategies)
+- Case study 1: Position bracket pre-population bug
+- Case study 2: Position dialog field sync bug
+- RxJS patterns in TradingView bundles (combineLatest, startWith, observables)
+- Common bundle issues and solutions
+- Maintenance best practices (preserve original code, document changes)
+- Reference: Key classes (Pt, bt, ie, gt)
+- Appendix: Tick value calculation
+
+**When to Read**: When modifying TradingView bundles, debugging dialog issues, investigating field sync problems, or understanding obfuscated code.
+
+---
+
 ### [UI-USAGE-GUIDE.md](./UI-USAGE-GUIDE.md)
 
 **Purpose**: Practical guide for interacting with TradingView Trading Terminal UI using Playwright MCP.

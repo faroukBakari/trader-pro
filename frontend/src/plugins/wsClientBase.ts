@@ -97,7 +97,7 @@ export class WebSocketBase {
       reconnect: true,
       maxReconnectAttempts: 5,
       reconnectDelay: 1000,
-      debug: true,
+      debug: false,
       wsUrl,
     }
     this.logger = this.config.debug
@@ -458,6 +458,11 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
   private debounceMs?: number
   private dataMapper: ((data: TBackendData) => TData)
 
+  private debug: boolean = false
+  private logger: Console = this.debug
+    ? console
+    : ({ log: () => { }, warn: () => { }, error: () => { }, debug: () => { } } as Console)
+
   // dont defaut to identity dataMapper to detect types missmatch (data => data as unknown as TData)
   constructor(wsUrl: string, wsRoute: string, dataMapper: ((data: TBackendData) => TData), debounceMs?: number) {
     this.wsRoute = wsRoute
@@ -467,6 +472,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     this.topicPromises = new Map()
     this.listeners = new Map()
     this.debouncedUnsub = new Map()
+
   }
 
   async subscribe(
@@ -481,7 +487,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     if (this.debouncedUnsub.has(paramsKey)) {
       clearTimeout(this.debouncedUnsub.get(paramsKey))
       this.debouncedUnsub.delete(paramsKey)
-      console.log(`[wsClientBase] Clearing debounced unsubscribe for topic ${paramsKey}`)
+      this.logger.log(`[wsClientBase] Clearing debounced unsubscribe for topic ${paramsKey}`)
     }
 
     if (this.listeners.has(listenerId)) {
@@ -492,24 +498,24 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
       if (topicListener.paramsKey !== paramsKey) {
 
         const oldParamsKey = topicListener.paramsKey
-        console.log(`[wsClientBase] listener ${listenerId} switching from ${oldParamsKey} to ${paramsKey}`)
+        this.logger.log(`[wsClientBase] listener ${listenerId} switching from ${oldParamsKey} to ${paramsKey}`)
 
         if ([...this.listeners.values()].every(lis => (lis.paramsKey !== oldParamsKey))) {
 
-          console.log(`[wsClientBase] No more listeners for oldParamsKey ${oldParamsKey}. Debouncing Unsub in ${this.debounceMs}ms...`)
+          this.logger.log(`[wsClientBase] No more listeners for oldParamsKey ${oldParamsKey}. Debouncing Unsub in ${this.debounceMs}ms...`)
 
           this.debouncedUnsub.set(
             oldParamsKey,
             setTimeout(async () => {
               if (this.debouncedUnsub.has(oldParamsKey)) {
-                console.log(`[wsClientBase] debounce triggered for ${oldParamsKey}...`)
+                this.logger.log(`[wsClientBase] debounce triggered for ${oldParamsKey}...`)
                 this.debouncedUnsub.delete(oldParamsKey)
                 if (this.topicPromises.has(oldParamsKey)) {
                   const topicPromise = this.topicPromises.get(oldParamsKey)!
                   this.topicPromises.delete(oldParamsKey)
                   const topic = await topicPromise
-                  console.log(`[wsClientBase] Unsubscribing from oldParamsKey ${oldParamsKey}...`)
-                  console.log(`[wsClientBase] remaining subscriptions ${[...this.topicPromises.keys()]}...`)
+                  this.logger.log(`[wsClientBase] Unsubscribing from oldParamsKey ${oldParamsKey}...`)
+                  this.logger.log(`[wsClientBase] remaining subscriptions ${[...this.topicPromises.keys()]}...`)
                   await this.baseSocket.unsubscribe(topic)
                 }
               }
@@ -522,7 +528,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
       }
 
     } else {
-      console.log(`[wsClientBase] New listener ${listenerId} subscribing to params:`, paramsKey)
+      this.logger.log(`[wsClientBase] New listener ${listenerId} subscribing to params:`, paramsKey)
     }
 
     this.listeners.set(listenerId, {
@@ -532,7 +538,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     })
 
     if (!this.topicPromises.has(paramsKey)) {
-      console.log(`[wsClientBase] Creating new subscription for params ${paramsKey}`)
+      this.logger.log(`[wsClientBase] Creating new subscription for params ${paramsKey}`)
       this.topicPromises.set(paramsKey, this.baseSocket.subscribe(
         this.wsRoute,
         subscriptionParams,
@@ -555,7 +561,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
       ))
     }
 
-    console.log(`[wsClientBase] ongoing subscriptions ${[...this.topicPromises.keys()]}...`)
+    this.logger.log(`[wsClientBase] ongoing subscriptions ${[...this.topicPromises.keys()]}...`)
     const topic = await this.topicPromises.get(paramsKey)!
     return topic
   }
@@ -570,19 +576,19 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
 
     const paramsKey = listener.paramsKey
     if ([...this.listeners.values()].every(lis => (lis.paramsKey !== paramsKey))) {
-      console.log(`[wsClientBase] No more listeners for paramsKey ${paramsKey}. Debouncing Unsub in ${this.debounceMs}ms...`)
+      this.logger.log(`[wsClientBase] No more listeners for paramsKey ${paramsKey}. Debouncing Unsub in ${this.debounceMs}ms...`)
       this.debouncedUnsub.set(
         paramsKey,
         setTimeout(async () => {
           if (this.debouncedUnsub.has(paramsKey)) {
-            console.log(`[wsClientBase] debounce triggered for ${paramsKey}...`)
+            this.logger.log(`[wsClientBase] debounce triggered for ${paramsKey}...`)
             this.debouncedUnsub.delete(paramsKey)
             if (this.topicPromises.has(paramsKey)) {
               const topicPromise = this.topicPromises.get(paramsKey)!
               this.topicPromises.delete(paramsKey)
               const topic = await topicPromise
-              console.log(`[wsClientBase] Unsubscribing from paramsKey ${paramsKey}...`)
-              console.log(`[wsClientBase] remaining subscirptions ${[...this.topicPromises.keys()]}...`)
+              this.logger.log(`[wsClientBase] Unsubscribing from paramsKey ${paramsKey}...`)
+              this.logger.log(`[wsClientBase] remaining subscirptions ${[...this.topicPromises.keys()]}...`)
               await this.baseSocket.unsubscribe(topic)
             }
           }

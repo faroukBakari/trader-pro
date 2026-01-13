@@ -21,7 +21,7 @@ Generate an actionable implementation plan designed for a follow-up "Executor" a
 3. **Codebase:**
     1- Search `@workspace` for similar features or patterns.
     2- Identify exact file paths, modules, and dependencies.
-4. **Analysis:** Evaluate the documentation against the user request. Identify potential conflicts, deprecated APIs, or logic gaps.
+4. **Analysis:** Evaluate the documentation against the user request. Identify potential conflicts, deprecations, or logic gaps.
 5. **Refinement loop:**
     1- **Macro Planning:** Suggest a high-level plan.
     2- **Recursive Feasibility Check:** For every step in the Macro Planning, "pre-process" the logic by verifying the requirements and compliances. If complexity or risk is high, pivot the plan immediately until the entire sequence is confirmed feasible.
