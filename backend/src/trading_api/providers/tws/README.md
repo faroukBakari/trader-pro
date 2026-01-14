@@ -15,6 +15,7 @@
 | **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket                                |
 | **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                   |
 | **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                   |
+| **ContractTracker**         | `contract_tracker.py`                 | Contract persistence with SQLite + lazy loading                                 |
 | **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch |
 | **PositionTracker**         | `position_tracker.py`                 | Position state tracking, thread-safe snapshot/stream pattern                    |
 | **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL       |
@@ -22,7 +23,7 @@
 | **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                               |
 | **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                             |
 
-**Tests:** `providers/tws/tests/test_{client,ibsocket,mappers,models,datafeed_provider,broker_provider,cached_contract,config}.py`
+**Tests:** `providers/tws/tests/test_{client,ibsocket,mappers,models,datafeed_provider,broker_provider,cached_contract,contract_tracker,config}.py`
 
 ---
 
@@ -126,7 +127,7 @@ from tws_mappers import ticker_name, parse_ticker, infer_sec_type
 **Usage:**
 
 - Business key generation: `f"datafeed:Quote:{contract.exchange}:{ticker_name(contract)}"`
-- Contract caching: `TWSClient.__contracts_cache[conId]` stores `CachedContract`
+- Contract caching: `IBSocket.contract_tracker` manages `CachedContract` with SQLite persistence
 - Unsubscription: Cancel by business key (maps internally to TWS reqId)
 
 ---
@@ -199,11 +200,90 @@ _business_to_tws_key: dict[str, str] = {
 
 ---
 
-## 2.3 Contract Caching
+## 2.3 Contract Caching & Persistence
 
-**File:** `cached_contract.py`
+**Files:** `cached_contract.py`, `contract_tracker.py`
 
-The `CachedContract` class provides a unified cache for contract data with session-aware routing:
+Contract data is cached in a two-tier architecture:
+
+1. **Descriptions** (SQLite + memory): `ContractDescription` data from `reqMatchingSymbols` - immutable instrument identity
+2. **Details** (memory only): Full `ContractDetails` from `reqContractDetails` - session-dependent (tradingHours, etc.)
+
+### ContractTracker
+
+**File:** `contract_tracker.py`
+
+The `ContractTracker` manages contract caching with SQLite persistence following the Tracker pattern:
+
+```python
+class ContractTracker:
+    _descriptions: dict[int, CachedContract]  # con_id → CachedContract (memory + SQLite)
+    _details: dict[int, CachedContract]       # con_id → CachedContract (memory only)
+    _sqlite: SQLiteContractCache              # Internal SQLite cache (hidden)
+
+    # Lookup Methods (main thread)
+    def get_by_con_id(self, con_id: int) -> CachedContract | None
+    def get_by_ticker(self, ticker: str) -> CachedContract | None
+    def get_by_symbol_prefix(self, prefix: str) -> list[CachedContract]
+    def get_full_details(self, con_id: int) -> CachedContract | None  # details only
+
+    # Upsert Methods (reader thread via callbacks)
+    def upsert_descriptions(self, descriptions: list[ContractDescription]) -> list[CachedContract]
+    def upsert_details(self, details: ContractDetails, overnight_hours: str | None) -> CachedContract
+
+    # Session Management
+    def clear_details_cache(self) -> None  # Clear session-dependent details
+    def reset(self) -> None                # Clear all memory caches (SQLite preserved)
+```
+
+**Lazy Loading Flow:**
+
+```
+reqMatchingSymbols("AAPL")
+        │
+ContractTracker.get_by_symbol_prefix("AAPL")
+        │
+        ├─► 1. Check _descriptions (memory)
+        │
+        ├─► 2. Check SQLite (load into memory)
+        │
+        └─► 3. Cache miss → API call → symbolSamples() callback
+                                            │
+                                 ContractTracker.upsert_descriptions()
+                                            │
+                                 Persists to SQLite + memory
+```
+
+**SQLite Schema:**
+
+```sql
+PRAGMA journal_mode=WAL;
+PRAGMA synchronous=NORMAL;
+
+CREATE TABLE contract_descriptions (
+    con_id INTEGER PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    sec_type TEXT NOT NULL,
+    primary_exchange TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    derivative_sec_types TEXT,
+    description TEXT,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    UNIQUE(symbol, sec_type, primary_exchange)
+);
+
+CREATE INDEX idx_symbol ON contract_descriptions(symbol);
+CREATE INDEX idx_symbol_prefix ON contract_descriptions(symbol COLLATE NOCASE);
+```
+
+**Configuration:**
+
+```bash
+# Environment variable (defaults to .cache/contracts.db)
+export TWS_CONTRACT_CACHE_PATH=/path/to/contracts.db
+```
+
+### CachedContract
 
 ```python
 @dataclass
@@ -248,7 +328,7 @@ class CachedContract(ContractDetails):
 ```python
 # TWSClient.reqContractDetails() - Multi-exchange resolution flow
 async def reqContractDetails(self, contract: Contract) -> list[CachedContract]:
-    # 1. Check cache by conId or ticker match
+    # 1. Check ContractTracker by conId
     #    → Return immediately if has_full_details=True
 
     # 2. Fetch primary details via _reqContractDetails()
@@ -260,8 +340,7 @@ async def reqContractDetails(self, contract: Contract) -> list[CachedContract]:
     #    → Fetch OVERNIGHT contract details
     #    → Extract overnight_hours = darkpool.tradingHours
 
-    # 5. Cache all details with overnight_hours
-    #    → _cache_details(details, overnight_hours=...)
+    # 5. Cache all details via ContractTracker.upsert_details()
 
 # TWSClient.req_ticker_details() - Simplified public API
 async def req_ticker_details(self, ticker: str, **kwargs) -> CachedContract:
@@ -274,13 +353,12 @@ async def req_ticker_details(self, ticker: str, **kwargs) -> CachedContract:
 **Internal Methods:**
 
 - `_reqContractDetails(contract)` - Low-level TWS request (no caching logic)
-- `_cache_details(details, overnight_hours)` - Cache with overnight hours metadata
-- `_get_cached_contracts(ticker, exchange, require_full_details)` - Cache lookup helper
+- `_get_cached_details(con_id)` - Cache lookup via ContractTracker
 
 **Cache Population:**
 
-- `reqMatchingSymbols()`: Populates cache from `ContractDescription` (partial, `has_full_details=False`)
-- `reqContractDetails()`: Upgrades cache entries to full details with overnight_hours
+- `symbolSamples()` callback: Calls `ContractTracker.upsert_descriptions()` (SQLite + memory)
+- `reqContractDetails()`: Calls `ContractTracker.upsert_details()` (memory only, session-dependent)
 
 ---
 

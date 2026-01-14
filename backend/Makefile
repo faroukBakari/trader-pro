@@ -28,7 +28,7 @@ endif
 
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-core list-providers list-providers-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS))
+.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api show-cache show-cache-json show-cache-symbol $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-core list-providers list-providers-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS))
 
 # Default target
 help:
@@ -98,6 +98,11 @@ help:
 	@echo "  logs-tail         Tail unified backend log (all servers with prefixes)"
 	@echo "  logs-tail-nginx   Tail nginx logs (access + error)"
 	@echo "  logs-clean        Clean all backend log files"
+	@echo ""
+	@echo "Cache inspection targets:"
+	@echo "  show-cache        Show contract cache statistics and latest records"
+	@echo "  show-cache-json   Show contract cache statistics in JSON format"
+	@echo "  show-cache-symbol Show contracts matching symbol (usage: make show-cache-symbol symbol=AAPL)"
 	@echo ""
 	@echo "Discovered modules: $(DISCOVERED_MODULES)"
 	@echo "Discovered providers: $(DISCOVERED_PROVIDERS)"
@@ -831,7 +836,36 @@ install-tws-api: ## Install TWS API with protobuf regeneration and validation
 	@echo ""
 	@echo "[3/3] Validating installation..."
 	@poetry run python scripts/validate_tws_install.py
-	@echo ""
+	@Cache inspection targets
+.PHONY: show-cache show-cache-json show-cache-symbol
+
+show-cache: ## Show contract cache statistics and latest records
+	@echo "🔍 Inspecting contract cache..."
+	@if [ ! -f ".cache/contracts.db" ]; then \
+		echo ""; \
+		echo "❌ Cache database not found at .cache/contracts.db"; \
+		echo ""; \
+		echo "💡 The cache is created after first use:"; \
+		echo "   1. Start the backend: make dev"; \
+		echo "   2. Search for symbols in the app (e.g., AAPL, MSFT)"; \
+		echo "   3. Run this command again"; \
+		exit 1; \
+	fi
+	@poetry run python scripts/inspect_contract_cache.py
+
+show-cache-json: ## Show contract cache statistics in JSON format
+	@poetry run python scripts/inspect_contract_cache.py --format json
+
+show-cache-symbol: ## Show contracts matching symbol (usage: make show-cache-symbol symbol=AAPL)
+	@if [ -z "$(symbol)" ]; then \
+		echo "❌ Error: symbol parameter required"; \
+		echo ""; \
+		echo "Usage: make show-cache-symbol symbol=AAPL"; \
+		exit 1; \
+	fi
+	@poetry run python scripts/inspect_contract_cache.py --symbol $(symbol)
+
+# echo ""
 	@echo "========================================"
 	@echo "✅ TWS API installation complete!"
 	@echo "========================================"

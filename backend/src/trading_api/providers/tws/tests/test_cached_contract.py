@@ -3,6 +3,7 @@
 Tests cover:
 - Factory methods (from_contract_details, from_contract_description)
 - Conversion methods (to_contract_details, to_contract_description)
+- Serialization methods (to_dict, from_dict) for SQLite persistence
 - Cache update (update_from_details)
 - Ticker matching (matches)
 """
@@ -228,3 +229,137 @@ class TestCachedContractMatches:
         cached = CachedContract.from_contract_details(details)
 
         assert cached.matches("NYSE:AAPL") is False
+
+
+class TestCachedContractSerialization:
+    """Test CachedContract.to_dict and from_dict serialization methods."""
+
+    def test_to_dict_returns_expected_fields(self) -> None:
+        """Test to_dict returns all required fields for SQLite storage."""
+        desc = ContractDescription()
+        desc.contract = _make_contract(
+            symbol="AAPL",
+            sec_type="STK",
+            primary_exchange="NASDAQ",
+            con_id=265598,
+        )
+        desc.contract.currency = "USD"
+        desc.contract.description = "Apple Inc"
+        desc.derivativeSecTypes = ["OPT", "FUT"]
+
+        cached = CachedContract.from_contract_description(desc)
+        data = cached.to_dict()
+
+        assert data["con_id"] == 265598
+        assert data["symbol"] == "AAPL"
+        assert data["sec_type"] == "STK"
+        assert data["primary_exchange"] == "NASDAQ"
+        assert data["currency"] == "USD"
+        assert data["description"] == "Apple Inc"
+        assert data["derivative_sec_types"] == ["OPT", "FUT"]
+
+    def test_to_dict_handles_empty_description(self) -> None:
+        """Test to_dict returns empty string for missing description."""
+        desc = ContractDescription()
+        desc.contract = _make_contract()
+        desc.contract.description = None  # type: ignore[assignment]
+
+        cached = CachedContract.from_contract_description(desc)
+        data = cached.to_dict()
+
+        assert data["description"] == ""
+
+    def test_from_dict_creates_partial_cached_contract(self) -> None:
+        """Test from_dict creates CachedContract with has_full_details=False."""
+        data = {
+            "con_id": 265598,
+            "symbol": "AAPL",
+            "sec_type": "STK",
+            "primary_exchange": "NASDAQ",
+            "currency": "USD",
+            "description": "Apple Inc",
+            "derivative_sec_types": ["OPT", "FUT"],
+        }
+
+        cached = CachedContract.from_dict(data)
+
+        assert cached.has_full_details is False
+        assert cached.contract.conId == 265598
+        assert cached.contract.symbol == "AAPL"
+        assert cached.contract.secType == "STK"
+        assert cached.contract.primaryExchange == "NASDAQ"
+        assert cached.contract.currency == "USD"
+        assert cached.contract.description == "Apple Inc"
+        assert cached.derivativeSecTypes == ["OPT", "FUT"]
+
+    def test_from_dict_handles_missing_optional_fields(self) -> None:
+        """Test from_dict handles missing optional fields gracefully."""
+        data = {
+            "con_id": 265598,
+            "symbol": "AAPL",
+            "sec_type": "STK",
+            "primary_exchange": "NASDAQ",
+            "currency": "USD",
+            # description and derivative_sec_types missing
+        }
+
+        cached = CachedContract.from_dict(data)
+
+        assert cached.contract.description == ""
+        assert cached.derivativeSecTypes == []
+
+    def test_from_dict_handles_none_derivative_sec_types(self) -> None:
+        """Test from_dict handles None derivative_sec_types."""
+        data = {
+            "con_id": 265598,
+            "symbol": "AAPL",
+            "sec_type": "STK",
+            "primary_exchange": "NASDAQ",
+            "currency": "USD",
+            "derivative_sec_types": None,
+        }
+
+        cached = CachedContract.from_dict(data)
+
+        assert cached.derivativeSecTypes == []
+
+    def test_serialization_roundtrip(self) -> None:
+        """Test to_dict → from_dict preserves all serialized fields."""
+        desc = ContractDescription()
+        desc.contract = _make_contract(
+            symbol="MSFT",
+            sec_type="STK",
+            primary_exchange="NASDAQ",
+            con_id=272093,
+        )
+        desc.contract.currency = "USD"
+        desc.contract.description = "Microsoft Corporation"
+        desc.derivativeSecTypes = ["OPT", "WAR"]
+
+        original = CachedContract.from_contract_description(desc)
+        data = original.to_dict()
+        restored = CachedContract.from_dict(data)
+
+        # Verify all serialized fields match
+        assert restored.con_id == original.con_id
+        assert restored.contract.symbol == original.contract.symbol
+        assert restored.contract.secType == original.contract.secType
+        assert restored.contract.primaryExchange == original.contract.primaryExchange
+        assert restored.contract.currency == original.contract.currency
+        assert restored.contract.description == original.contract.description
+        assert restored.derivativeSecTypes == original.derivativeSecTypes
+        assert restored.has_full_details is False
+
+    def test_from_dict_generates_ticker(self) -> None:
+        """Test from_dict generates ticker property correctly."""
+        data = {
+            "con_id": 265598,
+            "symbol": "AAPL",
+            "sec_type": "STK",
+            "primary_exchange": "NASDAQ",
+            "currency": "USD",
+        }
+
+        cached = CachedContract.from_dict(data)
+
+        assert cached.ticker == "NASDAQ:AAPL"

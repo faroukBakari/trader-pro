@@ -67,6 +67,7 @@ from trading_api.providers.tws.account_tracker import (
     TrackedAccount,
 )
 from trading_api.providers.tws.cached_contract import CachedContract
+from trading_api.providers.tws.contract_tracker import ContractTracker
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
 from trading_api.providers.tws.position_tracker import PositionTracker, TrackedPosition
 from trading_api.providers.tws.tws_mappers import (
@@ -265,6 +266,7 @@ class IBSocket(EWrapper):
         self.account_tracker: AccountTracker = AccountTracker(
             self.reqAccountSubscriptions, self.cancelAccountSubscriptions
         )
+        self.contract_tracker: ContractTracker = ContractTracker()
         self._reader_accounts: list[str] = []
         self._ready_event = (
             threading.Event()
@@ -1377,7 +1379,7 @@ class IBSocket(EWrapper):
             unrealizedPnL: Unrealized P&L across all positions
             realizedPnL: Realized P&L across all positions
         """
-        if DEBUG_TWS_BROKER:
+        if DEBUG_TWS_ACCOUNT:
             debug_log(
                 f"{current_fn_name()}: reqId={reqId} daily={dailyPnL} "
                 f"unrealized={unrealizedPnL} realized={realizedPnL}"
@@ -1391,6 +1393,10 @@ class IBSocket(EWrapper):
     ) -> None:
         if DEBUG_TWS_SHARED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+
+        # Persist to ContractTracker (SQLite + memory)
+        if contractDescriptions:
+            self.contract_tracker.upsert_descriptions(contractDescriptions)
 
         tws_key = f"req_{reqId}"
         if contractDescriptions:
@@ -1811,9 +1817,6 @@ class TWSClient:
         self._timeout = timeout
         self.__ibsocket = IBSocket()
 
-        # conId => CachedContract
-        self.__contracts_cache: dict[int, CachedContract] = {}
-
     @property
     def ibsocket(self) -> IBSocket:
         if not self.__ibsocket.running:
@@ -1871,69 +1874,68 @@ class TWSClient:
         self,
         contract: Contract,
     ) -> list[CachedContract]:
-        """Get cached contracts matching ticker with optional exchange filtering.
+        """Get cached contracts with full details matching the contract.
+
+        Uses ContractTracker for lazy loading: memory → SQLite → None.
+        Only returns contracts with has_full_details=True.
 
         Args:
-            ticker: Ticker string to match
-            preferred_exchanges: Optional list of exchanges to filter by
-            require_full_details: If True, only return contracts with full details
+            contract: Contract to match (by conId or symbol+exchange)
 
         Returns:
-            List of CachedContract matching the criteria
+            List of CachedContract with full details matching criteria
         """
-        contract_exchange = contract.primaryExchange or contract.exchange
-        cached = [
-            cached_contract
-            for cached_contract in (
-                [self.__contracts_cache.get(contract.conId)]
-                if (contract.conId and contract.conId > 0)
-                else [
-                    con
-                    for con in self.__contracts_cache.values()
-                    if contract.symbol == con.contract.symbol
-                    and (
-                        not contract_exchange or contract_exchange in con.validExchanges
-                    )
-                    and con.has_full_details
-                ]
-            )
-            if cached_contract is not None
-        ]
+        tracker = self.ibsocket.contract_tracker
 
-        return cached
+        # Try by conId first
+        if contract.conId and contract.conId > 0:
+            cached = tracker.get_full_details(contract.conId)
+            return [cached] if cached else []
+
+        # Fall back to symbol match with exchange filter
+        contract_exchange = contract.primaryExchange or contract.exchange
+        results = []
+        for con_id, cached in tracker._details.items():
+            if (
+                contract.symbol == cached.contract.symbol
+                and cached.has_full_details
+                and (
+                    not contract_exchange or contract_exchange in cached.validExchanges
+                )
+            ):
+                results.append(cached)
+        return results
 
     async def reqMatchingSymbols(
         self, pattern: str, timeout: float | None = None
     ) -> list[CachedContract]:
         """Search for matching symbols by pattern.
 
-        Uses cache-first strategy: results are cached by conId, and subsequent
-        searches populate the cache for reuse by reqContractDetails.
+        Uses lazy loading via ContractTracker:
+        1. Check in-memory cache
+        2. Check SQLite persistence
+        3. Fetch from IB API (callback populates tracker)
 
         Args:
             pattern: Symbol search pattern (e.g., "AAPL", "MSFT")
             timeout: Optional timeout override
 
         Returns:
-            List of ContractDescription matching the pattern
+            List of CachedContract matching the pattern
         """
+        tracker = self.ibsocket.contract_tracker
 
-        # TODO: need to cache data. IB has a tight ratelimit for this call.
-        cached_list = [
-            con
-            for con in self.__contracts_cache.values()
-            if con.contract.symbol.startswith(pattern)
-        ]
-
+        # 1. Check tracker (memory + SQLite lazy load)
+        cached_list = tracker.get_by_symbol_prefix(pattern)
         if cached_list:
             if DEBUG_TWS_CACHE:
                 debug_log(
-                    f"reqMatchingSymbols cache hit for conId {cached_list[0].contract.conId} => ({pattern})"
+                    f"reqMatchingSymbols cache hit for conId "
+                    f"{cached_list[0].contract.conId} => ({pattern})"
                 )
             return cached_list
 
-        reqId: int | None = None
-        coroutine: Awaitable[list[dict[str, ContractDescription]]]
+        # 2. Fetch from IB API (symbolSamples callback populates tracker)
         business_key = f"shared:reqMatchingSymbols:{pattern}"
 
         reqId, coroutine = self.ibsocket.create_snapshot(
@@ -1944,23 +1946,10 @@ class TWSClient:
         if reqId is not None:
             self.ibsocket.reqMatchingSymbols(reqId, pattern)
 
-        data = await coroutine
-        descriptions: list[ContractDescription] = [
-            item["contractDescriptions"] for item in data
-        ]
+        await coroutine
 
-        # Create CachedContracts and populate cache
-        results = [
-            CachedContract.from_contract_description(desc)
-            for desc in descriptions
-            if desc.contract.conId > 0
-        ]
-
-        # Populate cache for reuse by reqContractDetails
-        # for cached_contract in results:
-        #     self.__contracts_cache[cached_contract.contract.conId] = cached_contract
-
-        return results
+        # 3. Return from tracker (now populated by callback)
+        return tracker.get_by_symbol_prefix(pattern)
 
     async def _reqContractDetails(
         self, contract: Contract, timeout: float | None = None
@@ -1997,17 +1986,19 @@ class TWSClient:
     ) -> list[CachedContract]:
         """Get full contract details.
 
-        Uses cache-first strategy:
-        - If cached with full details, returns immediately
-        - Otherwise fetches from TWS and updates cache
+        Uses ContractTracker for caching:
+        1. Check in-memory details cache (full details)
+        2. Fetch descriptions via reqMatchingSymbols (uses SQLite persistence)
+        3. Fetch full details from IB API and cache in tracker
 
         Args:
             contract: The contract to get details for (must have conId)
             timeout: Optional timeout override
 
         Returns:
-            List of ContractDetails (usually 1, but can be multiple for ambiguous contracts)
+            List of CachedContract with full details
         """
+        tracker = self.ibsocket.contract_tracker
         ticker_name(contract)
         cached_list: list[CachedContract] = self._get_cached_details(contract)
 
@@ -2019,6 +2010,7 @@ class TWSClient:
                 )
             return cached_list
 
+        # Get descriptions first (SQLite-backed)
         cached_list = await self.reqMatchingSymbols(
             contract.symbol, timeout=timeout or self._timeout
         )
@@ -2035,11 +2027,8 @@ class TWSClient:
                     )
                 )
                 overnight_hours = darkpool_details.tradingHours
-            self.__contracts_cache[
-                details.contract.conId
-            ] = CachedContract.from_contract_details(
-                details, overnight_hours=overnight_hours
-            )
+            # Store full details in tracker (memory-only)
+            tracker.upsert_details(details, overnight_hours=overnight_hours)
 
         await asyncio.gather(
             *[

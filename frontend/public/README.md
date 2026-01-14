@@ -1,246 +1,494 @@
-# TradingView Public Assets - Reference Material
+# TradingView Trading Terminal - Bundle Maintenance Guide
 
-**Version**: 1.0.0  
-**Last Updated**: November 18, 2025  
-**Status**: ✅ Current
-
-> **Note**: This guide consolidates information from `datafeeds/README.md` and `datafeeds/udf/README.md` (archived November 18, 2025).
+**Version**: 2.0.0  
+**Last Updated**: January 14, 2026  
+**Status**: ✅ Active - Forked & Maintained
 
 ---
 
-## ⚠️ Important: These Are Examples Only
+## ⚠️ Critical: Forked Semi-Bundled Version
 
-This folder contains **TradingView's example implementations** from the Charting Library package. These are **reference materials only** and are **NOT used in our project**.
+This folder contains a **forked semi-bundled version** of TradingView Trading Terminal that we **actively maintain, patch, and evolve**. We have **NO official support** from TradingView and rely on reverse engineering for customizations.
 
-**Do NOT use these files in the project**. They are:
-
-- Excluded from Git (see `frontend/docs/FRONTEND-EXCLUSIONS.md`)
-- Excluded from linting and type-checking
-- Not imported by any project code
-- Only for reference and documentation purposes
+**This is NOT example code** - it is a **production-critical component** of our trading platform.
 
 ---
 
-## Project's Actual Implementation
+## Contents Overview
 
-### Our Custom Datafeed
+### Core Bundle Files (Production)
 
-**Implementation Location**: `frontend/src/services/datafeedService.ts`
+```
+frontend/public/
+├── trading_terminal/              # ⭐ CORE COMPONENT - Active maintenance
+│   ├── bundles/                   # Minified/obfuscated JavaScript bundles
+│   │   ├── order-view-controller.*.js  # Order/Position dialog logic (PATCHED)
+│   │   ├── trading.*.js           # Core trading operations
+│   │   ├── trading-account-manager.*.js  # Account Manager UI
+│   │   └── ... (100+ bundle files)
+│   ├── charting_library.d.ts      # TypeScript type definitions
+│   ├── broker-api.d.ts            # Broker API types
+│   └── datafeed-api.d.ts          # Datafeed API types
+│
+├── advanced_charting_library/     # Alternative chart library (not currently used)
+│
+└── datafeeds/                     # TradingView examples (reference only)
+    └── udf/                       # UDF protocol examples (NOT USED - we use custom backend)
+```
 
-### Why Custom Instead of UDF?
+### Status by Component
 
-Our project uses a custom implementation instead of TradingView's UDF (Universal Data Feed) protocol for several important reasons:
+| Component               | Status                  | Maintenance Level | Git Tracked |
+| ----------------------- | ----------------------- | ----------------- | ----------- |
+| `trading_terminal/`     | ✅ **Production**       | 🔴 High           | ❌ No       |
+| `advanced_charting/`    | 🟡 Available (not used) | ⚪ None           | ❌ No       |
+| `datafeeds/` (examples) | 📚 Reference only       | ⚪ None           | ❌ No       |
 
-1. **Backend Control**: Our backend uses FastAPI with custom endpoints, not UDF HTTP endpoints
-2. **WebSocket Support**: Real-time bar updates via WebSocket (UDF uses HTTP polling)
-3. **Type Safety**: Full TypeScript integration with backend OpenAPI spec
-4. **Smart Fallback**: Mock mode for development without running backend
-5. **Unified API**: Single backend API for both datafeed and broker operations
-6. **Broker Integration**: Combined with BrokerTerminalService for trading features
+---
 
-### Our Backend Endpoints (Custom)
+## Maintenance Approach
+
+### Our Engineering Reality
+
+1. **Forked Version**: Semi-bundled TradingView Trading Terminal with custom patches
+2. **No Vendor Support**: No official support channel - we're on our own
+3. **Reverse Engineering**: Debug obfuscated/minified bundles to understand internals
+4. **Selective Patching**: Apply surgical fixes to bundle files when needed
+5. **Documentation-Driven**: Comprehensive docs for every patch (see [BUNDLE-MAINTENANCE.md](../docs/tradingview/BUNDLE-MAINTENANCE.md))
+
+### Bundle Modification History
+
+| Date         | Bundle                   | Issue                       | Status | Commit  |
+| ------------ | ------------------------ | --------------------------- | ------ | ------- |
+| Jan 13, 2026 | order-view-controller.js | Position dialog field sync  | ✅     | 541d023 |
+| Jan 13, 2026 | order-view-controller.js | Bracket pre-population bug  | ✅     | 541d023 |
+| Oct 27, 2024 | trading_terminal/        | Switch from advanced charts | ✅     | ed323e2 |
+
+**See**: [BUNDLE-MAINTENANCE.md](../docs/tradingview/BUNDLE-MAINTENANCE.md) for detailed case studies.
+
+---
+
+## Key Documentation
+
+### Primary Maintenance Guides
+
+1. **[BUNDLE-MAINTENANCE.md](../docs/tradingview/BUNDLE-MAINTENANCE.md)** ⭐ **START HERE**
+   - Debugging methodology for obfuscated bundles
+   - RxJS observable patterns in TradingView code
+   - Case studies of actual bundle fixes
+   - Unobfuscation techniques
+   - Preservation best practices
+
+2. **[TYPE-DEFINITIONS.md](../docs/tradingview/TYPE-DEFINITIONS.md)**
+   - TypeScript type reference (`charting_library.d.ts`, `broker-api.d.ts`)
+   - Type usage patterns
+   - Core interfaces (Order, Position, Execution, PreOrder)
+   - Enum definitions (OrderStatus, OrderType, Side)
+
+3. **[BROKER-CONNECTION-ADAPTER.md](../docs/tradingview/BROKER-CONNECTION-ADAPTER.md)**
+   - Trading Host API (`IBrokerConnectionAdapterHost`)
+   - Event-driven architecture
+   - Reactive values (`IWatchedValue`)
+   - UI update mechanisms
+
+4. **[UI-USAGE-GUIDE.md](../docs/tradingview/UI-USAGE-GUIDE.md)**
+   - TradingView UI interaction patterns
+   - Playwright testing strategies
+   - Order placement workflows
+
+### Integration Documentation
+
+- **[BROKER-INTEGRATION.md](../docs/BROKER-INTEGRATION.md)** - Complete broker service integration
+- **[WEBSOCKET-ARCHITECTURE.md](../docs/WEBSOCKET-ARCHITECTURE.md)** - Real-time data integration
+- **[ERROR-MANAGEMENT.md](../docs/ERROR-MANAGEMENT.md)** - Error handling patterns
+
+---
+
+## Bundle Maintenance Workflow
+
+### When You Need to Modify a Bundle
+
+```mermaid
+flowchart TD
+    A[Issue Identified] --> B{Known Pattern?}
+    B -->|Yes| C[Check BUNDLE-MAINTENANCE.md]
+    B -->|No| D[Set Up Debug Environment]
+    D --> E[Unobfuscate Relevant Code]
+    E --> F[Add Console Logs]
+    F --> G[Test & Iterate]
+    G --> H[Document Solution]
+    H --> I[Update BUNDLE-MAINTENANCE.md]
+    I --> J[Commit with Detailed Message]
+    C --> K[Apply Known Fix]
+    K --> J
+```
+
+### Debug Environment Setup
+
+```bash
+# 1. Locate the bundle file
+cd frontend/public/trading_terminal/bundles/
+
+# 2. Find the target file (usually order-view-controller.*.js)
+ls -lh order-view-controller*
+
+# 3. Use unminify tools or manual beautification
+# - Search for class/function patterns
+# - Add readable comments above minified code
+# - Insert console.log statements for debugging
+
+# 4. Test in browser dev tools
+# - Set breakpoints
+# - Watch observable streams
+# - Trace RxJS operators
+```
+
+### Preservation Rules
+
+1. **NEVER delete original code** - Always preserve the original minified version
+2. **Add comments** - Document your understanding above/beside original code
+3. **Console logs** - Keep debug logs as comments for future reference
+4. **Git commit** - Every bundle modification gets a dedicated commit with detailed message
+5. **Update docs** - Add case study to BUNDLE-MAINTENANCE.md
+
+---
+
+## Common Debugging Patterns
+
+### RxJS Observable Issues
+
+**Problem**: Observables not emitting, `combineLatest` not firing
+
+**Solution**: Check for missing `startWith()` operators
+
+```javascript
+// ❌ BROKEN: fromEventPattern without initial emission
+this._equity$ = fromEventPattern(subscribeEquity)
+
+// ✅ FIXED: Add startWith() for immediate emission
+this._equity$ = fromEventPattern(subscribeEquity).pipe(startWith(NaN))
+```
+
+**Reference**: [BUNDLE-MAINTENANCE.md Case Study 2](../docs/tradingview/BUNDLE-MAINTENANCE.md#case-study-2-position-dialog-field-sync-bug)
+
+### Dialog Sync Issues
+
+**Problem**: Fields not updating in Order/Position dialogs
+
+**Key Classes**:
+
+- `Pt` - PositionViewModel (order-view-controller.js ~line 5500)
+- `bt` - OrderViewModel (order-view-controller.js ~line 3800)
+- `ie` - BracketModel
+
+**Debug Approach**:
+
+1. Search for class definition by pattern (e.g., `class Pt{constructor(`)
+2. Locate observable streams (`_quotes$`, `_equity$`, etc.)
+3. Check `combineLatest` subscriptions
+4. Verify `startWith()` operators on all observables
+
+---
+
+## Integration Points
+
+### How We Use TradingView Bundles
 
 ```typescript
-// Historical bars
-GET /api/v1/datafeed/history?symbol=AAPL&resolution=1D&from=...&to=...
+// 1. Import types from bundle type definitions
+import type {
+  PlacedOrder,
+  Position,
+  PreOrder,
+  OrderStatus,
+  OrderType,
+  Side,
+} from '@public/trading_terminal/charting_library'
 
-// Symbol search
-GET /api/v1/datafeed/search?query=AAPL
+// 2. Initialize Trading Terminal in component
+import { widget } from '@public/trading_terminal/charting_library'
 
-// Symbol info
-GET /api/v1/datafeed/symbols?symbol=AAPL
-
-// Real-time bars
-WebSocket: ws://localhost:8000/ws
-Topic: bars:SYMBOL:RESOLUTION
+const tradingTerminal = new widget({
+  library_path: '/trading_terminal/',
+  // ... configuration
+  broker_factory: (host) => new BrokerTerminalService(host),
+})
 ```
 
-### UDF Endpoints (Standard - Not Used)
+**See**: [TraderChartContainer.vue](../src/components/TraderChartContainer.vue)
 
-For reference, the standard UDF protocol uses these endpoints:
+### Custom Backend Integration (NOT UDF)
 
+We **DO NOT** use TradingView's UDF (Universal Data Feed) protocol. Instead:
+
+```typescript
+// Our custom datafeed implementation
+// Location: frontend/src/services/datafeedService.ts
+
+// Backend endpoints (FastAPI custom routes):
+GET /api/v1/datafeed/history      // Historical bars
+GET /api/v1/datafeed/search       // Symbol search
+GET /api/v1/datafeed/symbols      // Symbol info
+WS  /ws (topic: bars:SYMBOL:RESOLUTION)  // Real-time bars
 ```
-GET /config
-GET /symbol_info?symbol=AAPL
-GET /search?query=AAPL
-GET /history?symbol=AAPL&resolution=1D&from=...&to=...
-GET /time
-GET /marks?symbol=AAPL&from=...&to=...&resolution=1D
+
+**Advantage**: Type-safe OpenAPI-generated clients, WebSocket real-time updates, unified API
+
+---
+
+## Exclusion Configuration
+
+### What's Excluded from Git
+
+```gitignore
+# .gitignore
+frontend/public/trading_terminal/
+frontend/public/advanced_charting_library/
+frontend/public/datafeeds/
 ```
 
-**We do NOT implement these endpoints** - our backend uses the custom endpoints shown above.
+**Why**: Binary/minified bundles (100+ files) would bloat repository. We document patches instead.
+
+**Risk**: Bundle modifications are NOT version-controlled. **MUST document all changes comprehensively**.
+
+### What's Excluded from Linting/Type-Checking
+
+**ESLint** (`eslint.config.ts`):
+
+```typescript
+ignores: [
+  'public/trading_terminal/**',
+  'public/advanced_charting_library/**',
+  'public/datafeeds/**',
+]
+```
+
+**TypeScript** (`tsconfig.json`):
+
+```json
+{
+  "exclude": ["public/trading_terminal", "public/advanced_charting_library", "public/datafeeds"]
+}
+```
+
+**Vitest** (`vitest.config.ts`):
+
+```typescript
+exclude: [
+  '**/public/trading_terminal/**',
+  '**/public/advanced_charting_library/**',
+  '**/public/datafeeds/**',
+]
+```
+
+**See**: [FRONTEND-EXCLUSIONS.md](../docs/FRONTEND-EXCLUSIONS.md) for complete configuration reference.
 
 ---
 
-## Public Folder Contents
+## Upgrade Strategy
 
-### External Libraries
+### When New TradingView Version Available
 
-- `charting_library/` - TradingView Charting Library (minified external code)
-- `trading_terminal/` - TradingView Trading Terminal library
-- `advanced_charting_library/` - TradingView Advanced Chart library
+⚠️ **DANGER ZONE**: Upgrading bundles **WILL BREAK** our patches.
 
-### Example Implementations
+**Pre-Upgrade Checklist**:
 
-- `datafeeds/` - TradingView datafeed example implementations
-  - `udf/` - UDF (Universal Data Feed) compatible adapter implementation
-  - Other example implementations
+1. ✅ Document all current patches in BUNDLE-MAINTENANCE.md
+2. ✅ Create backup of current bundle directory
+3. ✅ Review bundle modification git history
+4. ✅ Export all patch code snippets
+5. ✅ Test current functionality comprehensively
 
----
-
-## Datafeed Examples Overview
-
-### What's Included
-
-The `datafeeds/` folder contains example datafeed implementations provided by TradingView, including:
-
-- **UDF Adapter**: Reference implementation of the UDF protocol
-- **Example Code**: TypeScript/JavaScript examples showing datafeed patterns
-- **Build Scripts**: Tools for bundling and compiling the examples (not used by us)
-
-### Why Keep These Examples?
-
-We keep these TradingView examples for:
-
-1. **Reference**: Understanding UDF protocol structure and patterns
-2. **Documentation**: TradingView's official implementation examples
-3. **Learning**: Comparing our custom approach vs. UDF standard
-4. **Library Files**: Part of the TradingView library package distribution
-
----
-
-## UDF Adapter Reference
-
-### About the UDF Implementation
-
-The `datafeeds/udf/` folder contains a [UDF][udf-url] datafeed adapter that implements the [Datafeed API][datafeed-url] and makes HTTP requests using the [UDF][udf-url] protocol.
-
-**Original Purpose**: You can use this datafeed adapter to plug your data if you implement UDF on your server.
-
-**Our Use Case**: We keep this for reference only. Our backend does **NOT** implement the UDF protocol.
-
-This datafeed example is implemented in [TypeScript](https://github.com/Microsoft/TypeScript/).
-
-### Folder Structure
-
-- `./src` - TypeScript source code
-- `./lib` - Transpiled ES5 code
-- `./dist` - Bundled JavaScript files for browser use
-
----
-
-## Build Instructions (Reference Only)
-
-**Note**: These build instructions are for the example UDF adapter only. You do NOT need to run these commands for our project.
-
-### Prerequisites
+**Upgrade Process**:
 
 ```bash
-cd datafeeds/udf
-npm install
+# 1. Backup current bundles
+cp -r frontend/public/trading_terminal/ /tmp/trading_terminal_backup_$(date +%Y%m%d)/
+
+# 2. Extract patch locations from docs
+grep "Line [0-9]" frontend/docs/tradingview/BUNDLE-MAINTENANCE.md
+
+# 3. Replace bundles with new version
+# (Manual step - depends on TradingView delivery method)
+
+# 4. Re-apply patches
+# - Use BUNDLE-MAINTENANCE.md as reference
+# - Search for similar patterns in new bundles
+# - May require significant debugging if structure changed
+
+# 5. Comprehensive testing
+# - Order dialog functionality
+# - Position dialog field sync
+# - Bracket order handling
+# - Account manager UI
 ```
 
-### Build Commands
+**Post-Upgrade**:
+
+1. Update BUNDLE-MAINTENANCE.md with new line numbers/patterns
+2. Update this README with new bundle file names (hash changes)
+3. Document any new issues discovered
+4. Commit all changes with detailed message
+
+---
+
+## Testing Modified Bundles
+
+### Browser DevTools Strategy
+
+1. **Open DevTools** → Sources tab
+2. **Navigate to** `frontend/public/trading_terminal/bundles/`
+3. **Set breakpoints** in modified functions
+4. **Test scenarios**:
+   - Place order with bracket
+   - Edit position (check field sync)
+   - Modify order
+   - Cancel order
+
+### Console Debugging
+
+```javascript
+// Add temporary debugging in bundle files
+console.log('[DEBUG] PositionViewModel._equity$ emitted:', value)
+console.log('[DEBUG] combineLatest fired with:', [quotes, equity, instrument])
+```
+
+**Remember**: Keep these logs as comments after debugging for future reference.
+
+### End-to-End Tests
+
+**Location**: `smoke-tests/tests/broker-integration.spec.ts`
 
 ```bash
-# Compile TypeScript to JavaScript
-npm run compile
-
-# Bundle JavaScript files
-npm run bundle-js
-
-# Compile and bundle
-npm run build
+# Run E2E tests after bundle modifications
+cd smoke-tests/
+npm run test
 ```
 
-### Production Build
+---
 
-To minify the bundle code, set the `ENV` environment variable:
+## Known Issues & Workarounds
+
+### Issue 1: Position Dialog Field Sync
+
+**Status**: ✅ RESOLVED (January 13, 2026)
+
+**Problem**: Price/Ticks/$ fields don't auto-sync in position edit dialog
+
+**Solution**: Added `startWith()` operators to `_quotes$` and `_equity$` observables in `Pt` class
+
+**File**: `order-view-controller.*.js` (Lines 5506-5523)
+
+**Reference**: [BUNDLE-MAINTENANCE.md Case Study 2](../docs/tradingview/BUNDLE-MAINTENANCE.md#case-study-2-position-dialog-field-sync-bug)
+
+### Issue 2: Bracket Pre-Population
+
+**Status**: ✅ RESOLVED (January 13, 2026)
+
+**Problem**: Bracket orders not pre-populating in position dialog
+
+**Solution**: Modified bracket preset initialization in position dialog controller
+
+**Reference**: [BUNDLE-MAINTENANCE.md Case Study 1](../docs/tradingview/BUNDLE-MAINTENANCE.md#case-study-1-position-bracket-pre-population-bug)
+
+---
+
+## Future Refactoring Plans
+
+### Potential Improvements
+
+1. **Extract Core Logic**: Identify reusable patterns from bundles → create wrapper services
+2. **Type Safety Layer**: Build TypeScript facade over modified bundle functions
+3. **Test Harness**: Isolated testing environment for bundle modifications
+4. **Patch Automation**: Scripts to apply known patches after upgrades
+
+### Contributing to Maintenance
+
+When you discover/fix a new bundle issue:
+
+1. **Document thoroughly** - Add case study to BUNDLE-MAINTENANCE.md
+2. **Code comments** - Explain the fix in comments within the bundle
+3. **Update this README** - Add to "Known Issues" section
+4. **Test comprehensively** - Add E2E test if applicable
+5. **Git commit** - Detailed message explaining the problem, investigation, and solution
+
+---
+
+## External Resources
+
+### TradingView Official Docs (Limited Applicability)
+
+⚠️ **Note**: Official docs are for **supported** integrations. Many patterns don't apply to our forked bundle approach.
+
+- **Trading Terminal Docs**: https://www.tradingview.com/charting-library-docs/latest/trading_terminal/
+- **Broker API Reference**: https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IBrokerTerminal/
+- **Trading Host API**: https://www.tradingview.com/charting-library-docs/latest/api/interfaces/Charting_Library.IBrokerConnectionAdapterHost/
+
+**Use Case**: Understanding intended API surface, not implementation details (bundles are obfuscated).
+
+### Our Documentation (Authoritative)
+
+For our actual implementation and bundle modifications, **always refer to our internal docs**:
+
+- **[docs/tradingview/](../docs/tradingview/)** - Complete TradingView integration guide
+- **[BUNDLE-MAINTENANCE.md](../docs/tradingview/BUNDLE-MAINTENANCE.md)** - Primary maintenance reference
+- **[BROKER-INTEGRATION.md](../docs/BROKER-INTEGRATION.md)** - Service-level integration
+- **[DOCUMENTATION-GUIDE.md](../../docs/DOCUMENTATION-GUIDE.md)** - Full project documentation index
+
+---
+
+## Quick Reference
+
+### Critical Files
+
+| File Path                         | Purpose                            | Maintenance |
+| --------------------------------- | ---------------------------------- | ----------- |
+| `trading_terminal/bundles/`       | All bundle JavaScript files        | 🔴 High     |
+| `trading_terminal/*.d.ts`         | TypeScript type definitions        | 🟢 Stable   |
+| `datafeeds/` (examples)           | TradingView examples (not used)    | ⚪ None     |
+| `advanced_charting_library/`      | Alternative library (not used)     | ⚪ None     |
+| `../docs/tradingview/`            | Our maintenance documentation      | 🔴 High     |
+| `../src/services/brokerTerminal*` | Service layer integration          | 🔴 High     |
+| `../src/services/datafeedService` | Custom datafeed (not UDF)          | 🟡 Medium   |
+| `../src/components/TraderChart*`  | Vue component wrapping TradingView | 🟡 Medium   |
+
+### Command Reference
 
 ```bash
-# Option 1
-export ENV=prod
-npm run build
+# Find a bundle file
+ls -lh frontend/public/trading_terminal/bundles/order-view-controller*
 
-# Option 2
-ENV=prod npm run build
+# Search for pattern in bundle
+grep -n "class Pt{" frontend/public/trading_terminal/bundles/order-view-controller*.js
+
+# View bundle modification history
+git log --oneline -- frontend/public/trading_terminal/bundles/
+
+# Run E2E tests
+cd smoke-tests && npm run test
+
+# Start dev environment (frontend serves public/ assets)
+make -f project.mk dev-frontend
 ```
 
-**Again**: These commands are for reference only. Our project uses the custom datafeed implementation in `frontend/src/services/datafeedService.ts`.
+---
+
+## Summary
+
+This is **NOT** a standard TradingView integration. We maintain a **forked, patched, reverse-engineered version** of the Trading Terminal with:
+
+- ✅ **Active maintenance** of obfuscated bundle files
+- ✅ **Comprehensive documentation** of every modification
+- ✅ **Custom backend integration** (no UDF protocol)
+- ✅ **Type-safe TypeScript** layer over bundles
+- ✅ **E2E testing** coverage
+- ⚠️ **No vendor support** - we're on our own
+- ⚠️ **Upgrade risk** - patches break on version updates
+
+**For all maintenance work, always start with**: [BUNDLE-MAINTENANCE.md](../docs/tradingview/BUNDLE-MAINTENANCE.md)
 
 ---
 
-## Related Project Documentation
-
-### Our Implementation
-
-- **[Datafeed Service](../src/services/datafeedService.ts)** - Our custom datafeed implementation
-- **[Datafeed Tests](../src/services/__tests__/datafeedService.spec.ts)** - Test coverage
-- **[Services README](../src/services/README.md)** - Service layer architecture
-- **[Services Testing](../src/services/__tests__/README.md)** - Testing strategies
-
-### Architecture & Integration
-
-- **[WebSocket Architecture](../docs/WEBSOCKET-ARCHITECTURE.md)** - WebSocket client patterns
-- **[Broker Integration](../docs/BROKER-INTEGRATION.md)** - TradingView broker integration
-- **[Frontend README](../README.md)** - Frontend overview
-- **[Frontend Exclusions](../docs/FRONTEND-EXCLUSIONS.md)** - Configuration exclusions
-
-### Project-Wide Documentation
-
-- **[Client Generation](../../docs/CLIENT-GENERATION.md)** - API client generation
-- **[WebSocket Architecture](../docs/WEBSOCKET-ARCHITECTURE.md)** - WebSocket implementation overview
-- **[Makefile Guide](../../docs/MAKEFILE-GUIDE.md)** - Build commands
-
----
-
-## External TradingView Resources
-
-If you need to understand the UDF protocol or implement a UDF-compatible datafeed, refer to TradingView's official documentation:
-
-- **[UDF Protocol][udf-url]** - Universal Data Feed specification
-- **[Datafeed API][datafeed-url]** - TradingView Datafeed API reference
-- **[Charting Library Docs](https://www.tradingview.com/charting-library-docs/)** - Complete documentation
-
-[udf-url]: https://www.tradingview.com/charting-library-docs/latest/connecting_data/UDF
-[datafeed-url]: https://www.tradingview.com/charting-library-docs/latest/connecting_data/Datafeed-API
-
----
-
-## Key Differences: Our Implementation vs. UDF
-
-| Aspect                 | UDF Standard    | Our Implementation      |
-| ---------------------- | --------------- | ----------------------- |
-| **Protocol**           | HTTP REST only  | HTTP REST + WebSocket   |
-| **Endpoints**          | Fixed UDF paths | Custom FastAPI routes   |
-| **Real-time**          | HTTP polling    | WebSocket push          |
-| **Type Safety**        | JavaScript      | TypeScript with OpenAPI |
-| **Backend**            | Any UDF server  | FastAPI Python backend  |
-| **Mock Support**       | No              | Yes (fallback mode)     |
-| **Broker Integration** | Separate        | Unified service         |
-
----
-
-## Usage Warning
-
-⚠️ **IMPORTANT**: These example files are reference material only.
-
-**Do NOT**:
-
-- Import these files in project code
-- Modify these files for project features
-- Use these files in production
-- Commit changes to these files
-
-**DO**:
-
-- Use our custom datafeed implementation
-- Refer to these examples for learning
-- Consult TradingView documentation
-- Edit `frontend/src/services/datafeedService.ts` for datafeed changes
-
----
-
-**Last Updated**: November 18, 2025  
+**Last Updated**: January 14, 2026  
 **Maintained by**: Development Team  
-**Status**: ✅ Current (Consolidated from datafeeds/README.md and datafeeds/udf/README.md)
+**Status**: ✅ Active Production Component - Forked & Evolving

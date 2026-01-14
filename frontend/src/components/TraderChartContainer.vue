@@ -29,6 +29,10 @@ import type {
 } from '@public/trading_terminal'
 import { ParentType } from '@public/trading_terminal'
 
+const filterEmptyFields = (obj: object) => {
+  return Object.fromEntries(Object.entries(obj).filter(([_, v]) => v != null))
+}
+
 function getLanguageFromURL() {
   const regex = new RegExp('[\\?&]lang=([^&#]*)')
   const results = regex.exec(window.location.search)
@@ -219,11 +223,11 @@ onMounted(() => {
           customUI: {
             showPositionDialog: async (
               position: Position | IndividualPosition,
-              brackets: Brackets,
+              newBrackets: Brackets,
               focus?: OrderTicketFocusControl,
             ): Promise<boolean> => {
               // If brackets are empty, fetch bracket orders for this position
-              let enrichedBrackets = brackets
+              let existingBrackets = {}
               try {
                 const orders: Order[] = await brokerService!.orders()
                 const bracketOrders = orders.filter(
@@ -237,19 +241,22 @@ onMounted(() => {
                 const takeProfitOrder = bracketOrders.find(
                   (o) => o.limitPrice !== undefined && o.stopPrice === undefined,
                 )
-                enrichedBrackets = {
-                  stopLoss: stopLossOrder?.stopPrice,
-                  takeProfit: takeProfitOrder?.limitPrice,
+
+                existingBrackets = {
+                  ...(stopLossOrder?.stopPrice && { stopLoss: stopLossOrder?.stopPrice }),
+                  ...(takeProfitOrder?.limitPrice && { takeProfit: takeProfitOrder?.limitPrice }),
                 }
                 console.log(
                   `[customUI.showPositionDialog] Enriched brackets for position ${position.id}:`,
-                  enrichedBrackets,
+                  existingBrackets,
                 )
               } catch (e) {
                 console.warn(`[customUI.showPositionDialog] Failed to fetch bracket orders:`, e)
               }
 
-              return brokerService!.showPositionBracketsDialog(position, enrichedBrackets, focus)
+              const brackets = { ...existingBrackets, ...filterEmptyFields(newBrackets) } // Merge existing brackets
+
+              return brokerService!.showPositionBracketsDialog(position, brackets, focus)
             },
           },
         },
