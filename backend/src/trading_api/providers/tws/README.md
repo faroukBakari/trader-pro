@@ -838,12 +838,12 @@ Return type: `tuple[int, bool]` — `(order_id, place_flag)` where `place_flag=F
 The method supports three resolution paths:
 
 1. **Explicit Order ID** (`order_id > 0`): Modify existing order by ID
-2. **OCA Reconciliation** (`order.ocaGroup` set): Find existing order via `OrderTracker.find_by_oca_group()` matching OCA group, order type, and action
+2. **OCA Reconciliation** (`order.ocaGroup` set): Find existing order via `OrderTracker.find_tracked_order(order)` - checks orderId first, then OCA group+type+action matching
 3. **New Order** (neither above): Create new order with next available ID
 
 When modifying (paths 1 or 2), the method:
 
-1. Retrieves existing order via `OrderTracker.ensure_existing_order(order_id)` or `find_by_oca_group()`
+1. Retrieves existing order via `OrderTracker.find_tracked_order(order)`
 2. **Asserts immutable fields unchanged**: `contract.conId`, `contract.exchange`, `parentId`
 3. Clones original via `TrackedOrder.clone_order()` for thread safety
 4. Copies ONLY allowed fields from new order to clone **if values differ**
@@ -857,16 +857,8 @@ order_id = order.orderId
 place_flag = True
 
 # Resolution: Explicit ID, OCA reconciliation, or new order
-tracked: TrackedOrder | None = (
-    self.ibsocket.order_tracker.ensure_existing_order(order_id)
-    if order_id > 0
-    else (
-        self.ibsocket.order_tracker.find_by_oca_group(
-            order.ocaGroup, order.orderType, order.action,
-        )
-        if order.ocaGroup
-        else None
-    )
+tracked: TrackedOrder | None = self.ibsocket.order_tracker.find_tracked_order(
+    order,
 )
 
 if tracked:
@@ -1430,22 +1422,25 @@ async def placeOcaGroup(self, contract, children, oca_group, oca_type=1, parent_
     if not oca_group.startswith("brackets_"):
         raise ValueError("oca_group must start with 'brackets_'")
 
-    # Get or create unique OCA group name with timestamp
-    signed_oca_groups = self.ibsocket.order_tracker.signed_oca_groups()
-    signed_oca_group = next(
-        iter([group for group in signed_oca_groups if group.startswith(oca_group)]),
-        f"{oca_group}@{int(time.time() * 1000)}",
-    )
+    # Check for existing OCA group and determine transmit strategy
+    transmit_all = False
+    signed_oca_group = self.ibsocket.order_tracker.find_oca_group(oca_group)
+    if signed_oca_group:
+        transmit_all = True  # Existing group - transmit all orders immediately
+    else:
+        signed_oca_group = f"{oca_group}@{int(time.time() * 1000)}"
 
     # Assign OCA attributes to all orders
     for order in children:
         order.ocaGroup = signed_oca_group
         order.ocaType = oca_type
 
-    # Transmit chain: all orders except last staged with transmit=False
-    # _submit_order() checks OrderTracker.find_by_oca_group() for existing orders
+    # Transmit chain: staged (transmit=False) for new groups, immediate for updates
+    # _submit_order() checks OrderTracker.find_tracked_order() for existing orders
     submit_results = [
-        self._submit_order(contract, order, parent_id=parent_id, transmit=False)
+        self._submit_order(
+            contract, order, parent_id=parent_id, transmit=transmit_all
+        )
         for order in children[:-1]
     ]
     submit_results.append(
@@ -1461,10 +1456,10 @@ async def placeOcaGroup(self, contract, children, oca_group, oca_type=1, parent_
 
 **Key Points:**
 
-- **Timestamp Uniqueness**: Appends `@{unix_ms}` to OCA group if new, reuses existing if found
-- **Reconciliation**: `_submit_order()` checks `OrderTracker.find_by_oca_group()` to detect existing orders by OCA group, type, and action
+- **Timestamp Uniqueness**: Appends `@{unix_ms}` to OCA group if new, reuses existing if found via `find_oca_group()`
+- **Reconciliation**: `_submit_order()` checks `OrderTracker.find_tracked_order()` to detect existing orders by orderId first, then OCA group+type+action
 - **Modification Detection**: If existing order found, modifies it instead of creating duplicate
-- **Transmit Chain**: All orders except last have `transmit=False` (staged), last order `transmit=True` triggers atomic submission
+- **Transmit Strategy**: New OCA groups use chain pattern (`transmit=False` → `True`); existing groups transmit all immediately (`transmit_all=True`)
 - **Atomic Submission**: TWS processes all orders as a unit, preventing partial fills
 - **OCA Enforcement**: When one fills, others are automatically canceled by TWS
 

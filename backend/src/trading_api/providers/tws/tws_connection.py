@@ -2223,18 +2223,8 @@ class TWSClient:
     ) -> tuple[int, bool]:
         order_id = order.orderId
         place_flag = True
-        tracked: TrackedOrder | None = (
-            self.ibsocket.order_tracker.ensure_existing_order(order_id)
-            if order_id > 0
-            else (
-                self.ibsocket.order_tracker.find_by_oca_group(
-                    order.ocaGroup,
-                    order.orderType,
-                    order.action,
-                )
-                if order.ocaGroup
-                else None
-            )
+        tracked: TrackedOrder | None = self.ibsocket.order_tracker.find_tracked_order(
+            order,
         )
         if tracked:
             order_ori = tracked.clone_order()
@@ -2263,9 +2253,6 @@ class TWSClient:
             ):
                 order_ori.totalQuantity = order.totalQuantity
                 place_flag = True
-            assert (
-                not place_flag or order_ori.transmit == transmit
-            ), f"Cannot change transmit flag of an existing order {order_ori.transmit} -> {transmit}"
             order = order_ori
             order.tif = ""  # do not modify time-in-force for existing orders
             order.transmit = True  # always transmit existing orders
@@ -2312,11 +2299,12 @@ class TWSClient:
             raise ValueError("oca_group must start with 'brackets_'")
 
         # get or create unique OCA group name
-        signed_oca_groups = self.ibsocket.order_tracker.signed_oca_groups()
-        signed_oca_group = next(
-            iter([group for group in signed_oca_groups if group.startswith(oca_group)]),
-            f"{oca_group}@{int(time.time() * 1000)}",
-        )
+        transmit_all = False
+        signed_oca_group = self.ibsocket.order_tracker.find_oca_group(oca_group)
+        if signed_oca_group:
+            transmit_all = True
+        else:
+            signed_oca_group = f"{oca_group}@{int(time.time() * 1000)}"
 
         # Assign OCA attributes to each order
         for order in order_list:
@@ -2324,7 +2312,9 @@ class TWSClient:
             order.ocaType = oca_type
 
         submit_results = [
-            self._submit_order(contract, order, parent_id=parent_id, transmit=False)
+            self._submit_order(
+                contract, order, parent_id=parent_id, transmit=transmit_all
+            )
             for order in order_list[:-1]
         ]
         submit_results.append(

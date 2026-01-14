@@ -1596,7 +1596,8 @@ debug_broker: 'all' // Logs all broker API calls and responses
 
 **Root Cause**: The `currentAccount()` method returned a hardcoded `'DEMO-ACCOUNT'` AccountId, but WebSocket subscriptions used a dynamically generated `listenerId` (e.g., `'ACCOUNT-abc123def456'`). This mismatch caused WebSocket updates to be sent with the wrong AccountId, preventing the Account Manager from receiving proper updates.
 
-**Solution**: 
+**Solution**:
+
 - Changed `accountId` from `readonly` property to mutable property initialized as `'UNKNOWN' as AccountId`
 - Added `_initAccountId()` async method that fetches account metadata from backend `accountsMetainfo()` endpoint
 - Constructor now calls `_initAccountId()` before `setupWebSocketHandlers()` to ensure accountId is set before WebSocket subscriptions

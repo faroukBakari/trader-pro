@@ -250,21 +250,21 @@ class OrderTracker:
             if tracked.order.ocaGroup and tracked.is_active
         }
 
-    def find_by_oca_group(
+    def find_tracked_order(
         self,
-        oca_group: str,
-        order_type: str,
-        action: str,
+        order: Order,
     ) -> TrackedOrder | None:
-        """Find tracked order by OCA group, type, and side.
+        """Find tracked order by orderId or OCA group+type+action.
+
+        Resolution priority:
+        1. If order.orderId > 0 and exists in tracker → return directly
+        2. If order.ocaGroup set → find by OCA group + orderType + action
 
         Used for bracket reconciliation: when updating position brackets,
         find existing orders by their OCA membership and order type.
 
         Args:
-            oca_group: OCA group string (e.g., "brackets_AAPL:NASDAQ:STK")
-            order_type: TWS order type ("STP", "LMT", "TRAIL")
-            action: Order side ("BUY" or "SELL")
+            order: Order object containing orderId, ocaGroup, orderType, and action
 
         Returns:
             Matching TrackedOrder or None if not found
@@ -272,21 +272,48 @@ class OrderTracker:
         Note:
             Skips filled/cancelled orders (status not "Submitted"/"PreSubmitted")
         """
-        oca_group_ori = next(iter(oca_group.split("@")), oca_group)
+
+        if order.orderId > 0 and order.orderId in self._orders:
+            return self._orders.get(order.orderId)
+
+        oca_group_ori = next(iter(order.ocaGroup.split("@")), order.ocaGroup)
+
+        if not oca_group_ori:
+            return None
+
         orders = [
             tracked
             for tracked in self._orders.values()
             if (
                 tracked.oca_group == oca_group_ori
-                and tracked.order.orderType == order_type
-                and tracked.order.action == action
+                and tracked.order.orderType == order.orderType
+                and tracked.order.action == order.action
                 and tracked.is_active
             )
         ]
-        assert (
-            len(orders) <= 1
-        ), f"Multiple active {order_type} {action} orders found for OCA group {oca_group}"
+        assert len(orders) <= 1, (
+            f"Multiple active {order.orderType} {order.action}"
+            f" orders found for OCA group {order.ocaGroup}"
+        )
         return next(iter(orders), None)
+
+    def find_oca_group(self, oca_group: str) -> str | None:
+        """Check if any active order exists in given OCA group."""
+        oca_group = next(iter(oca_group.split("@")), oca_group)
+
+        if not oca_group:
+            return None
+
+        return next(
+            iter(
+                [
+                    tracked.order.ocaGroup
+                    for tracked in self._orders.values()
+                    if (tracked.oca_group == oca_group and tracked.is_active)
+                ]
+            ),
+            None,
+        )
 
     def ensure_snapshot_requested(self, request_cb: Callable[[], None]) -> None:
         if not self._snapshot_requested.is_set():
