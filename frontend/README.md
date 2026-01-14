@@ -196,6 +196,7 @@ The frontend includes complete TradingView Trading Terminal integration with bro
 - **[Type Definitions](./docs/tradingview/TYPE-DEFINITIONS.md)** - TradingView TypeScript types reference
 
 **Key Implementation Files**:
+
 - `src/components/TraderChartContainer.vue` - Main TradingView widget integration
 - `src/services/brokerTerminalService.ts` - Broker API implementation
 - `src/services/datafeedService.ts` - Datafeed API implementation

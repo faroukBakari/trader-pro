@@ -598,6 +598,7 @@ _INFO_CODES: frozenset[int] = frozenset(
         2107,  # Historical data farm connection inactive (dormant)
         2108,  # Market data farm connection inactive (dormant)
         2158,  # Sec-def data farm connection is OK
+        10349,  # Order TIF auto-adjusted by TWS preset (informational)
     }
 )
 

@@ -605,8 +605,6 @@ class ApiFallback implements ApiInterface {
 export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly _hostAdapter: IBrokerConnectionAdapterHost
 
-  private readonly _quotesProvider: IDatafeedQuotesApi
-
   // Client adapters
   private readonly _apiFallback?: ApiInterface
   private readonly apiAdapter: ApiInterface
@@ -618,16 +616,16 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private equity: IWatchedValue<number>
   private readonly startingBalance = 100000
 
-  private readonly accountId: string
   private brokerConnectionStatus: ConnectionStatusType = ConnectionStatus.Disconnected
+
+  private accountId: AccountId = 'UNKNOWN' as AccountId
 
   constructor(
     host: IBrokerConnectionAdapterHost,
-    quotesProvider: IDatafeedQuotesApi,
+    _quotesProvider: IDatafeedQuotesApi,
     brokerMock?: BrokerMock,
   ) {
     this._hostAdapter = host
-    this._quotesProvider = quotesProvider
     this.apiAdapter = new ApiAdapter()
     this._wsAdapter = new WsAdapter()
 
@@ -642,22 +640,24 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
     // KNOWN ISSUE: listenerId must match currentAccount() return value
     // See BROKER-TERMINAL-SERVICE.md "Known Issues" section
-    this.accountId = "ACCOUNT-01" // `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
+    // this.accountId = "ACCOUNT-01" // `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
 
-    this.setupWebSocketHandlers()
-      .then(() => {
-        this.brokerConnectionStatus = ConnectionStatus.Connected
-        console.log('[BrokerTerminalService] WebSocket subscriptions ready')
-        this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
-          message: 'Broker data subscriptions established'
+    this._initAccountId()
+      .then(() => this.setupWebSocketHandlers()
+        .then(() => {
+          this.brokerConnectionStatus = ConnectionStatus.Connected
+          console.log('[BrokerTerminalService] WebSocket subscriptions ready')
+          this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
+            message: 'Broker data subscriptions established'
+          })
+        }).catch((error) => {
+          console.error('[BrokerTerminalService] Failed to setup WebSocket handlers:', error)
+          this._hostAdapter.connectionStatusUpdate(ConnectionStatus.Error, {
+            message: 'Failed to establish broker data subscriptions'
+          })
+        })).catch(err => {
+          console.error('[BrokerTerminalService] Failed to initialize account ID:', err)
         })
-      }).catch((error) => {
-        console.error('[BrokerTerminalService] Failed to setup WebSocket handlers:', error)
-        this._hostAdapter.connectionStatusUpdate(ConnectionStatus.Error, {
-          message: 'Failed to establish broker data subscriptions'
-        })
-      })
-
   }
 
   private _getApiAdapter(): ApiInterface {
@@ -741,11 +741,9 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
           // Update reactive balance/equity values
           if (data.balance !== undefined && data.balance !== null) {
-            console.log('Updating balance to:', data.balance)
             this.balance.setValue(data.balance)
           }
           if (data.equity !== undefined && data.equity !== null) {
-            console.log('Updating equity to:', data.equity)
             this.equity.setValue(data.equity)
           }
         },
@@ -894,10 +892,18 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     }
   }
 
+  private async _initAccountId(): Promise<void> {
+    const accounts = await this.accountsMetainfo()
+    this.accountId = accounts[0]?.id ?? 'DEMO-ACCOUNT'
+  }
+
   async accountsMetainfo(): Promise<AccountMetainfo[]> {
     const response = await this._getApiAdapter().getAccountInfo()
     const result = [response.data]
     console.log(`BrokerTerminalService.accountsMetainfo() => `, result)
+    if (result.length > 0) {
+      this.accountId = result[0].id
+    }
     return result
   }
 
@@ -987,15 +993,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   currentAccount(): AccountId {
-    // KNOWN ISSUE: This returns 'DEMO-ACCOUNT' but listenerId is dynamic (e.g., 'ACCOUNT-abc123')
-    // causing AccountId mismatch between currentAccount() and WebSocket subscriptions.
-    // This breaks Account Manager rendering with "Value is undefined" error.
-    // See BROKER-TERMINAL-SERVICE.md "Known Issues" section for details.
-    //
-    // Must be synchronous (TradingView requirement) - cannot await backend call.
-    // TODO: Fetch AccountId from backend during app initialization, store it,
-    // and use the same value here and in WebSocket subscriptions.
-    return 'DEMO-ACCOUNT' as AccountId
+    return this.accountId as AccountId
   }
 
   connectionStatus(): ConnectionStatusType {

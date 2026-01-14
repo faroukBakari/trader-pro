@@ -39,7 +39,6 @@ from trading_api.shared import Provider
 from .tws_connection import TWSClient
 from .tws_mappers import (
     calculate_tws_duration,
-    contract_description_to_search_result,
     contract_details_to_symbol_info,
     map_resolution_to_tws_bar_size,
     tws_ticks_to_bar,
@@ -137,9 +136,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         """
         result = await self._tws_client.reqMatchingSymbols(pattern, **kwargs)
 
-        return [
-            contract_description_to_search_result(cd) for cd in result
-        ]  # Map to domain models
+        return [cd.to_search_result() for cd in result]  # Map to domain models
 
     async def get_symbol_info(
         self,
@@ -297,8 +294,12 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
                         capability="datafeed",
                     )
                 await asyncio.sleep(0.5)
+                quote_list = ", ".join(
+                    [f"{c.symbol}:{c.primaryExchange}@{c.exchange}" for c in contracts]
+                )
                 logger.warning(
-                    f"TimeoutError when getting quotes snapshot. Retrying... ({nb_retreis} retries left)"
+                    f"TimeoutError when getting quotes snapshot for "
+                    f"{quote_list}. Retrying... ({nb_retreis} retries left)"
                 )
 
     async def subscribe_realtime_bars(

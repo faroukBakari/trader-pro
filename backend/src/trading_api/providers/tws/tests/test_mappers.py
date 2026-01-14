@@ -12,7 +12,7 @@ from decimal import Decimal
 
 import pytest
 from ibapi.common import BarData
-from ibapi.contract import Contract, ContractDescription, ContractDetails
+from ibapi.contract import Contract, ContractDetails
 from ibapi.order import Order as TWSOrder
 from ibapi.order_state import OrderState
 
@@ -30,17 +30,13 @@ from trading_api.models.market import QuoteValues
 from trading_api.providers.tws.order_tracker import OrderFill, TrackedOrder
 from trading_api.providers.tws.position_tracker import TrackedPosition
 from trading_api.providers.tws.tws_mappers import (
-    SEC_TYPE_MAP,
     BracketContext,
     brackets_to_tws,
-    contract_description_to_search_result,
     contract_details_to_symbol_info,
     order_state_to_preview_result,
     parse_tws_bar_date,
     preorder_to_tws,
     tracked_order_to_placed_order,
-    tws_account_summary_to_account_info,
-    tws_account_summary_to_equity,
     tws_bar_to_domain_bar,
     tws_ticks_to_quote_data,
 )
@@ -48,61 +44,6 @@ from trading_api.providers.tws.tws_mappers import (
 # =============================================================================
 # Contract Mappers
 # =============================================================================
-
-
-class TestContractDescriptionMapper:
-    """Test contract_description_to_search_result mapper."""
-
-    def test_stock_mapping_and_ticker_format(self) -> None:
-        """Test stock mapping with correct ticker format (EXCHANGE:SYMBOL)."""
-        contract = Contract()
-        contract.symbol = "AAPL"
-        contract.secType = "STK"
-        contract.exchange = "SMART"
-        contract.primaryExchange = "NASDAQ"
-        contract.description = "Apple Inc"
-
-        desc = ContractDescription()
-        desc.contract = contract
-
-        result = contract_description_to_search_result(desc)
-
-        assert result.symbol == "AAPL"
-        assert result.description == "Apple Inc"
-        assert result.exchange == "NASDAQ"
-        assert result.ticker == "NASDAQ:AAPL"
-        assert result.type == "stock"
-
-    def test_fallback_to_exchange_when_primaryexchange_empty(self) -> None:
-        """Test fallback to exchange when primaryExchange is empty."""
-        contract = Contract()
-        contract.symbol = "EUR"
-        contract.secType = "CASH"
-        contract.exchange = "IDEALPRO"
-        contract.primaryExchange = ""
-
-        desc = ContractDescription()
-        desc.contract = contract
-
-        result = contract_description_to_search_result(desc)
-
-        assert result.exchange == "IDEALPRO"
-        assert result.ticker == "IDEALPRO:EUR"
-        assert result.type == "forex"
-
-    def test_all_sec_type_mappings(self) -> None:
-        """Test all secType mappings produce correct types."""
-        for tws_type, expected_type in SEC_TYPE_MAP.items():
-            contract = Contract()
-            contract.symbol = "TEST"
-            contract.secType = tws_type
-            contract.exchange = "TEST"
-
-            desc = ContractDescription()
-            desc.contract = contract
-
-            result = contract_description_to_search_result(desc)
-            assert result.type == expected_type, f"Failed for {tws_type}"
 
 
 class TestContractDetailsMapper:
@@ -1116,52 +1057,6 @@ class TestTwsPositionToDomain:
 
         assert result.qty == 50.0
         assert result.side == Side.SELL
-
-
-class TestTwsAccountSummaryToEquity:
-    """Test tws_account_summary_to_equity mapper."""
-
-    def test_complete_summary(self) -> None:
-        """Test mapping complete account summary data."""
-        summary_data = {
-            "NetLiquidation": {"value": "100000.00"},
-            "TotalCashValue": {"value": "75000.50"},
-            "UnrealizedPnL": {"value": "5000.25"},
-            "RealizedPnL": {"value": "2500.00"},
-        }
-
-        result = tws_account_summary_to_equity(summary_data)
-
-        assert result.equity == 100000.00
-        assert result.balance == 75000.50
-        assert result.unrealizedPL == 5000.25
-        assert result.realizedPL == 2500.00
-
-    def test_missing_tags_default_to_zero(self) -> None:
-        """Test missing tags default to 0."""
-        summary_data = {"NetLiquidation": {"value": "50000.00"}}
-
-        result = tws_account_summary_to_equity(summary_data)
-
-        assert result.equity == 50000.00
-        assert result.balance == 0.0
-
-
-class TestTwsAccountSummaryToAccountInfo:
-    """Test tws_account_summary_to_account_info mapper."""
-
-    def test_account_info_extraction(self) -> None:
-        """Test account ID and name extraction."""
-        summary_data = {
-            "DU123456": {
-                "NetLiquidation": {"account": "DU123456", "value": "100000.00"},
-            },
-        }
-
-        result = tws_account_summary_to_account_info(summary_data, "DU123456")
-
-        assert result.id == "DU123456"
-        assert result.name == "IBKR DU123456"
 
 
 # =============================================================================

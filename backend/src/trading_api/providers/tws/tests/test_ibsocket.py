@@ -15,7 +15,7 @@ Note: All tests test IBSocket in isolation without real TWS connections.
 
 import asyncio
 from decimal import Decimal
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 from ibapi.common import BarData, TickAttrib
@@ -1163,6 +1163,10 @@ class TestIBSocketManagedAccounts:
 
     def test_managed_accounts_parses_list(self, running_ibsocket: IBSocket) -> None:
         """Test managedAccounts parses comma-separated account list."""
+        # Mock the subscription callbacks to avoid sending messages
+        running_ibsocket.account_tracker.account_sub_cb = Mock(return_value=1)
+        running_ibsocket.account_tracker.account_unsub_cb = Mock(return_value=None)
+
         running_ibsocket.managedAccounts("U123,U456,U789")
 
         assert running_ibsocket._reader_accounts == ["U123", "U456", "U789"]

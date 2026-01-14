@@ -5505,7 +5505,9 @@
           const e = await this.accountsMetainfo(),
             t = this.currentAccount(),
             i = e.find((e) => e.id === t)
-          if (void 0 === i) throw new Error('accountMetainfo not received')
+          if (void 0 === i) {
+            throw new Error('accountMetainfo not received')
+          }
           return i
         }
         accountsMetainfo() {

@@ -10,11 +10,29 @@ from zoneinfo import ZoneInfo
 
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
+from trading_api.models.market.instruments import SearchSymbolResultItem
 from trading_api.providers.tws.tws_mappers import (
     clone_contract,
     normalize_timezone,
     ticker_name,
 )
+
+# TWS secType → TradingView-style symbol type
+SEC_TYPE_MAP: dict[str, str] = {
+    "STK": "stock",
+    "OPT": "option",
+    "FUT": "futures",
+    "FOP": "option",
+    "CASH": "forex",
+    "BOND": "bond",
+    "FUND": "fund",
+    "IND": "index",
+    "CMDTY": "commodity",
+    "WAR": "warrant",
+    "CRYPTO": "crypto",
+    "NEWS": "news",
+    "BAG": "combo",
+}
 
 
 @dataclass
@@ -130,9 +148,28 @@ class CachedContract(ContractDetails):
         desc.derivativeSecTypes = self.derivativeSecTypes[:]
         return desc
 
-    def update_from_details(
-        self, details: ContractDetails, overnight_hours: str | None = None
-    ) -> None:
+    def to_search_result(self) -> SearchSymbolResultItem:
+        """Map CachedContract → domain SearchSymbolResultItem.
+
+        Args:
+            desc: CachedContract from symbolSamples callback
+
+        Returns:
+            Domain SearchSymbolResultItem for frontend consumption
+        """
+        contract = self.contract
+        description = contract.description or f"{contract.symbol} ({contract.secType})"
+        type = SEC_TYPE_MAP.get(contract.secType, "stock")
+        ticker = ticker_name(contract)
+        return SearchSymbolResultItem(
+            symbol=contract.symbol,
+            description=description,
+            exchange=contract.primaryExchange,
+            ticker=ticker,
+            type=type,
+        )
+
+    def update_from_details(self, details: ContractDetails) -> None:
         """Update this CachedContract with full details.
 
         Used to upgrade a partial cache entry (from ContractDescription)
