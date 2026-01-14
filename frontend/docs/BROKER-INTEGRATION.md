@@ -118,6 +118,8 @@ The **Broker Integration** provides a complete trading environment that connects
 └──────────────────────┘
 ```
 
+**Account Initialization Flow**: On service construction, `BrokerTerminalService` fetches account metadata from backend via `accountsMetainfo()` REST call. The returned account ID is stored and used consistently for `currentAccount()` and all WebSocket subscription `listenerId` values.
+
 ### Data Flow Architecture
 
 ```
@@ -1590,11 +1592,22 @@ debug_broker: 'all' // Logs all broker API calls and responses
 
 **Issue**: `Error: Value is undefined` in TradingView Account Manager rendering
 
-**Root Cause**: The `currentAccount()` method returns a hardcoded `'DEMO-ACCOUNT'` AccountId, but WebSocket subscriptions use a dynamically generated `listenerId` (e.g., `'ACCOUNT-abc123def456'`). This mismatch causes WebSocket updates to be sent with the wrong AccountId, preventing the Account Manager from receiving proper updates.
+**Status**: ✅ RESOLVED (January 14, 2026)
 
-**Priority**: High - Blocks Account Manager functionality
+**Root Cause**: The `currentAccount()` method returned a hardcoded `'DEMO-ACCOUNT'` AccountId, but WebSocket subscriptions used a dynamically generated `listenerId` (e.g., `'ACCOUNT-abc123def456'`). This mismatch caused WebSocket updates to be sent with the wrong AccountId, preventing the Account Manager from receiving proper updates.
 
-**Last Encountered**: October 22, 2025
+**Solution**: 
+- Changed `accountId` from `readonly` property to mutable property initialized as `'UNKNOWN' as AccountId`
+- Added `_initAccountId()` async method that fetches account metadata from backend `accountsMetainfo()` endpoint
+- Constructor now calls `_initAccountId()` before `setupWebSocketHandlers()` to ensure accountId is set before WebSocket subscriptions
+- `currentAccount()` now returns the consistent accountId value used in all WebSocket subscription `listenerId` values
+- **Bonus cleanup**: Removed unused `_quotesProvider` field (constructor parameter retained for backward compatibility as underscore-prefixed)
+
+**Code Reference**: See [brokerTerminalService.ts](../../src/services/brokerTerminalService.ts) lines 620-650
+
+**Related Backend Changes**: Backend now returns real account ID from TWS via `get_account_info()` endpoint using `AccountTracker` and `reqAccountSummary()` integration.
+
+**Impact**: Account Manager panel now renders correctly with real-time balance and equity updates.
 
 ### TradingView Order Type Discrimination: Nullish Fields Break Union Typing
 

@@ -16,6 +16,8 @@
 | **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                   |
 | **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                   |
 | **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch |
+| **PositionTracker**         | `position_tracker.py`                 | Position state tracking, thread-safe snapshot/stream pattern                    |
+| **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL       |
 | **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                   |
 | **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                               |
 | **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                             |
@@ -169,14 +171,15 @@ infer_sec_type("CME", "ES1!")         # → "CONTFUT" (continuous future)
 
 **Examples:**
 
-| Business Key                                                       | Purpose                     |
-| ------------------------------------------------------------------ | --------------------------- |
-| `shared:reqMatchingSymbols:AAPL`                                   | Symbol search request       |
-| `shared:reqContractDetails:ANY:NASDAQ:AAPL`                        | Contract details lookup     |
-| `datafeed:Quote:SMART:NASDAQ:AAPL`                                 | Quote stream/snapshot       |
-| `datafeed:reqBarDataStream:SMART:NASDAQ:AAPL@5 mins`               | Real-time bar subscription  |
-| `datafeed:reqHistoricalData:SMART:1 D:20251231:NASDAQ:AAPL@5 mins` | Historical bars request     |
-| `broker:orders`                                                    | Order subscription (future) |
+| Business Key                                                       | Purpose                                |
+| ------------------------------------------------------------------ | -------------------------------------- |
+| `shared:reqMatchingSymbols:AAPL`                                   | Symbol search request                  |
+| `shared:reqContractDetails:ANY:NASDAQ:AAPL`                        | Contract details lookup                |
+| `datafeed:Quote:SMART:NASDAQ:AAPL`                                 | Quote stream/snapshot                  |
+| `datafeed:reqBarDataStream:SMART:NASDAQ:AAPL@5 mins`               | Real-time bar subscription             |
+| `datafeed:reqHistoricalData:SMART:1 D:20251231:NASDAQ:AAPL@5 mins` | Historical bars request                |
+| `broker:orders`                                                    | Order subscription (future)            |
+| `broker:account:DEMO-ACCOUNT`                                      | Account equity/balance stream (future) |
 
 **Internal Mapping:**
 
@@ -281,6 +284,261 @@ async def req_ticker_details(self, ticker: str, **kwargs) -> CachedContract:
 
 ---
 
+## 2.4 Account Tracking
+
+**File:** `account_tracker.py`
+
+The `AccountTracker` class manages TWS account state (equity, balance, P&L metrics) with thread-safe snapshot/stream pattern similar to `OrderTracker` and `PositionTracker`.
+
+### TrackedAccount Dataclass
+
+Stores raw TWS account data from callbacks without transformation. All values are optional - populated incrementally as updates arrive.
+
+```python
+@dataclass
+class TrackedAccount:
+    """Wraps raw TWS account data.
+
+    Thread Safety:
+        - Created/updated by reader thread
+        - Passed by reference to main thread callbacks (no copies)
+        - Main thread consumers should not mutate these objects
+    """
+    id: str
+    pnl_req_id: int | None = None  # Request ID for P&L subscription
+
+    # Core Equity Metrics
+    net_liquidation: Decimal | None = None      # Total account value
+    total_cash_value: Decimal | None = None     # Cash + futures P&L
+    equity_with_loan_value: Decimal | None = None
+    gross_position_value: Decimal | None = None
+    buying_power: Decimal | None = None
+
+    # Margin & Risk
+    available_funds: Decimal | None = None
+    excess_liquidity: Decimal | None = None
+    cushion: Decimal | None = None
+    init_margin_req: Decimal | None = None
+    maint_margin_req: Decimal | None = None
+    leverage: Decimal | None = None
+
+    # P&L (from reqPnL - real-time updates)
+    daily_pnl: Decimal | None = None
+    unrealized_pnl: Decimal | None = None
+    realized_pnl: Decimal | None = None
+
+    # Account Info
+    currency: str | None = None
+    account_type: str | None = None
+    day_trades_remaining: int | None = None
+    account_ready: bool = True
+    last_update_time: str | None = None
+```
+
+**Field Mapping (`TWS_TAG_TO_FIELD`):**
+
+TWS sends PascalCase tag names (e.g., `"NetLiquidation"`) which are mapped to snake_case Python fields:
+
+| TWS Tag           | Python Field       | Description                       |
+| ----------------- | ------------------ | --------------------------------- |
+| `NetLiquidation`  | `net_liquidation`  | Total account value               |
+| `TotalCashValue`  | `total_cash_value` | Cash + futures P&L                |
+| `BuyingPower`     | `buying_power`     | Max marginable stocks purchasable |
+| `AvailableFunds`  | `available_funds`  | Available for trading             |
+| `ExcessLiquidity` | `excess_liquidity` | Excess over margin requirements   |
+| `InitMarginReq`   | `init_margin_req`  | Initial margin requirement        |
+| `MaintMarginReq`  | `maint_margin_req` | Maintenance margin requirement    |
+| `Leverage`        | `leverage`         | GrossPositionValue / NetLiq       |
+| `DailyPnL`        | `daily_pnl`        | Real-time daily P&L               |
+| `UnrealizedPnL`   | `unrealized_pnl`   | Real-time unrealized P&L          |
+| `RealizedPnL`     | `realized_pnl`     | Real-time realized P&L            |
+| `Currency`        | `currency`         | Base account currency             |
+
+### Data Sources
+
+Account data comes from three TWS API methods:
+
+| Method                | Callback               | Purpose                                    | Update Frequency      |
+| --------------------- | ---------------------- | ------------------------------------------ | --------------------- |
+| `reqAccountSummary()` | `accountSummary()`     | Batch fetch of all account metrics         | On-demand (snapshot)  |
+| `reqAccountUpdates()` | `updateAccountValue()` | Incremental account metric updates         | ~3 minutes (periodic) |
+| `reqPnL()`            | `pnl()`                | Real-time P&L streaming (daily, unr, real) | Real-time             |
+
+**Subscription Lifecycle:**
+
+```python
+# IBSocket methods
+def reqAccountSubscriptions(self, account: str) -> int:
+    """Subscribe to account updates with P&L.
+
+    Combines _reqAccountUpdates(True, account) + _reqPnL(reqId, account)
+    Returns: P&L request ID for tracking
+    """
+    self._reqAccountUpdates(True, account)
+    reqId = self.next_req_id
+    self._reqPnL(reqId, account)
+    return reqId
+
+def cancelAccountSubscriptions(self, reqId: int) -> None:
+    """Cancel P&L subscription."""
+    self._cancelPnL(reqId)
+```
+
+### Domain Conversion Methods
+
+**`TrackedAccount.equity_data()` → `EquityData`:**
+
+```python
+def equity_data(self) -> EquityData:
+    """Convert to domain EquityData for WebSocket streaming.
+
+    Field Mappings:
+        - equity = net_liquidation (total account value)
+        - balance = total_cash_value (cash + futures P&L)
+        - unrealizedPL = unrealized_pnl (from reqPnL)
+        - realizedPL = realized_pnl (from reqPnL)
+
+    Falls back to 0.0 for unset values (using isUnset() helper).
+    """
+```
+
+**`TrackedAccount.metainfo()` → `AccountMetainfo`:**
+
+```python
+def metainfo(self) -> AccountMetainfo:
+    """Convert to AccountMetainfo for account list.
+
+    Returns:
+        AccountMetainfo with id, name, currency, currencySign
+    """
+    return AccountMetainfo(
+        id=self.id,
+        name=self.id,  # TWS doesn't provide separate display name
+        currency=self.currency or "USD",
+        currencySign=self.currency_sign or "$",
+    )
+```
+
+**Currency Support:**
+
+```python
+CURRENCY_SIGNS = {
+    "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥",
+    "CHF": "CHF", "CAD": "C$", "AUD": "A$",
+}
+
+@property
+def currency_sign(self) -> str | None:
+    """Get currency sign based on currency code."""
+    return CURRENCY_SIGNS.get(self.currency) if self.currency else None
+```
+
+### Snapshot/Stream Pattern
+
+**AccountTracker Architecture:**
+
+```python
+class AccountTracker:
+    """Manages account state for IBSocket. Thread-safe via asyncio dispatch.
+
+    Thread Ownership:
+        - Envelope (hooks registration, reset): main thread
+        - Content (accounts dict): reader thread writes, main thread reads
+        - Dispatch (callbacks): reader thread schedules, main thread executes
+    """
+    def __init__(
+        self,
+        account_sub_cb: Callable[[str], int],
+        account_unsub_cb: Callable[[int], None],
+    ):
+        self._snapshot_requested = threading.Event()
+        self._snapshot_complete = threading.Event()
+        self._accounts: dict[str, TrackedAccount] = {}
+        self._snapshot_hooks: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Future]] = {}
+        self._stream_hooks: dict[str, tuple[loop, callback, on_error]] = {}
+        self.summary_req_id: int | None = None
+```
+
+**Usage Patterns:**
+
+```python
+# Snapshot: Get all accounts (wait for summary if needed)
+accounts = await account_tracker.all_accounts(timeout=5.0)
+
+# Stream: Register callback for continuous updates
+key = account_tracker.create_stream_hook(
+    loop=asyncio.get_running_loop(),
+    callback=async def on_update(tracked: TrackedAccount): ...,
+    on_error=async def on_error(exc: ProviderException): ...,
+)
+account_tracker.remove_stream_hook(key)  # Cleanup
+```
+
+**IBSocket Integration:**
+
+```python
+# Reader thread callbacks
+def managedAccounts(self, accountsList: str) -> None:
+    """Called on connection - creates TrackedAccount for each account."""
+    self._reader_accounts = accountsList.split(",")
+    for account in self._reader_accounts:
+        self.account_tracker.upsert_account(account)
+
+def accountSummary(self, reqId: int, account: str, tag: str, value: str, currency: str):
+    """Called for each tag in reqAccountSummary() response."""
+    self.account_tracker.update_account(account, tag, value, currency)
+
+def pnl(self, reqId: int, dailyPnL: float, unrealizedPnL: float, realizedPnL: float):
+    """Real-time P&L updates from reqPnL()."""
+    self.account_tracker.update_pnl(reqId, dailyPnL, unrealizedPnL, realizedPnL)
+```
+
+### TWSBrokerProvider Integration
+
+**Get Account Metadata:**
+
+```python
+async def get_account_info(self) -> AccountMetainfo:
+    """Get account metadata from TWS."""
+    account_list = await self._tws_client.reqAccountSummary()
+    tracked_account = next(iter(account_list), None)
+    assert tracked_account is not None, "Account summary returned no data"
+    return tracked_account.metainfo()
+```
+
+**Get Equity Data:**
+
+```python
+async def get_equity(self) -> EquityData:
+    """Get current equity data from TWS."""
+    account_list = await self._tws_client.reqAccountSummary()
+    tracked_account = next(iter(account_list), None)
+    assert tracked_account is not None, "Account summary returned no data"
+    return tracked_account.equity_data()
+```
+
+### Shared Utilities
+
+**`isUnset()` Helper:**
+
+Checks if TWS values are unset/placeholder (used throughout account and order tracking):
+
+```python
+def isUnset(value: Any) -> bool:
+    """Check if a TWS value is considered 'unset' (default/placeholder)."""
+    if value is None:
+        return True
+    if isinstance(value, (int, float)) and value == UNSET_DOUBLE:
+        return True
+    if isinstance(value, Decimal) and value == UNSET_DECIMAL:
+        return True
+    if isinstance(value, str) and value == "":
+        return True
+    return False
+```
+
+---
+
 ## 3. Asset Configuration
 
 **File:** `tws_models.py`
@@ -380,8 +638,8 @@ class BrokerCapability(ABC):
     async def edit_position_brackets(self, position_id: str, brackets: Brackets) -> None
 
     # Account Data (async)
-    async def get_account_info(self) -> AccountMetainfo
-    async def get_equity(self) -> EquityData
+    async def get_account_info(self) -> AccountMetainfo  # Get account metadata from TWS via reqAccountSummary(). Returns first account from managed accounts list with ID, name, currency, and currency sign.
+    async def get_equity(self) -> EquityData  # Get current equity data from TWS via reqAccountSummary(). Returns real-time balance, equity, and P&L values from TrackedAccount. Uses net_liquidation for equity, total_cash_value for balance, and real-time P&L from reqPnL() subscription.
     async def get_executions(self, symbol: str) -> list[Execution]
 
     # Leverage (NOT SUPPORTED by TWS - raises ProviderException)

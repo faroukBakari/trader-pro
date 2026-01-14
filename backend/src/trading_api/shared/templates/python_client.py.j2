@@ -67,10 +67,10 @@ class {{ class_name }}:
         except FileNotFoundError:
             return b""
     
-    def _sign_request(self, request: httpx.Request) -> httpx.Request:
-        """Sign request with HMAC-SHA256 signature."""
+    async def _sign_request(self, request: httpx.Request) -> None:
+        """Sign request with HMAC-SHA256 signature (async hook for AsyncClient)."""
         if not self._hmac_key:
-            return request
+            return
         timestamp = str(int(time.time()))
         body = request.content or b""
         body_hash = hashlib.sha256(body).hexdigest()
@@ -79,7 +79,6 @@ class {{ class_name }}:
         request.headers["X-Internal-Signature"] = signature
         request.headers["X-Internal-Timestamp"] = timestamp
         request.headers["X-Internal-Caller"] = self.caller_id
-        return request
     
     async def __aenter__(self) -> "{{ class_name }}":
         """Async context manager entry."""

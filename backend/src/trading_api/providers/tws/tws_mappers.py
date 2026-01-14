@@ -12,20 +12,13 @@ from zoneinfo import ZoneInfo
 
 from ibapi.common import BarData
 from ibapi.const import UNSET_DECIMAL, UNSET_DOUBLE
-from ibapi.contract import (
-    Contract,
-    ContractDescription,
-    ContractDetails,
-    DeltaNeutralContract,
-)
+from ibapi.contract import Contract, ContractDetails, DeltaNeutralContract
 from ibapi.order import Order
 from ibapi.order_state import OrderState
 from ibapi.ticktype import TickTypeEnum
 
 from trading_api.models.broker import (
-    AccountMetainfo,
     Brackets,
-    EquityData,
     OrderPreviewResult,
     OrderPreviewSection,
     OrderPreviewSectionRow,
@@ -42,7 +35,6 @@ from trading_api.models.market import (
     QuoteData,
     QuoteValues,
     Resolution,
-    SearchSymbolResultItem,
     SubsessionInfo,
     SymbolInfo,
 )
@@ -167,39 +159,6 @@ def build_darkpool_contract(session_details: ContractDetails) -> Contract | None
         contract = clone_contract(session_details.contract)
         contract.exchange = "OVERNIGHT"
     return contract
-
-
-def contract_description_to_search_result(
-    desc: ContractDescription,
-) -> SearchSymbolResultItem:
-    """Map TWS ContractDescription → domain SearchSymbolResultItem.
-
-    Args:
-        desc: TWS ContractDescription from symbolSamples callback
-
-    Returns:
-        Domain SearchSymbolResultItem for frontend consumption
-    """
-    contract = desc.contract
-    symbol = contract.symbol
-    description = contract.description or f"{contract.symbol} ({contract.secType})"
-    exchange = contract.primaryExchange or contract.exchange
-    type = SEC_TYPE_MAP.get(contract.secType, "stock")
-    if not (symbol and exchange and contract.secType):
-        raise ProviderException(
-            code="TWS_PROVIDER_INVALID_TICKER",
-            message=f"Invalid contract description: {desc}",
-            provider="tws",
-            capability="shared",
-        )
-    ticker = ticker_name(contract)
-    return SearchSymbolResultItem(
-        symbol=contract.symbol,
-        description=description,
-        exchange=exchange,
-        ticker=ticker,
-        type=type,
-    )
 
 
 def _convert_tws_trading_hours_to_session(trading_hours: str) -> str:
@@ -1382,94 +1341,10 @@ def order_state_to_preview_result(
     )
 
 
-# =============================================================================
-# Position/Account Mappers (Broker Capability)
-# =============================================================================
-
-
-def tws_account_summary_to_equity(
-    summary_data: dict[str, dict[str, Any]],
-) -> EquityData:
-    """Convert TWS account summary to domain EquityData.
-
-    Args:
-        summary_data: Dict from TWSClient.reqAccountSummary() mapping
-            tag names to their value data:
-            {
-                "NetLiquidation": {"account": "DU123", "tag": "NetLiquidation",
-                                   "value": "100000.00", "currency": "USD"},
-                "TotalCashValue": {...},
-                ...
-            }
-
-    Returns:
-        Domain EquityData model
-
-    Notes:
-        - equity = NetLiquidation (total account value including positions)
-        - balance = TotalCashValue (cash balance)
-        - unrealizedPL = UnrealizedPnL (from account summary)
-        - realizedPL = RealizedPnL (from account summary)
-    """
-
-    def get_value(tag: str, default: float = 0.0) -> float:
-        """Extract float value from summary data."""
-        tag_data = summary_data.get(tag, {})
-        value_str = tag_data.get("value", "")
-        try:
-            return float(value_str) if value_str else default
-        except (ValueError, TypeError):
-            return default
-
-    return EquityData(
-        equity=get_value("NetLiquidation"),
-        balance=get_value("TotalCashValue"),
-        unrealizedPL=get_value("UnrealizedPnL"),
-        realizedPL=get_value("RealizedPnL"),
-    )
-
-
-def tws_account_summary_to_account_info(
-    summary_data: dict[str, dict[str, dict[str, Any]]], account_id: str
-) -> AccountMetainfo:
-    """Convert TWS account summary to domain AccountMetainfo.
-
-    Args:
-        summary_data: Dict from TWSClient.reqAccountSummary()
-        account_id: Account ID (from config or first account in summary)
-
-    Returns:
-        Domain AccountMetainfo model
-    """
-
-    # Try to get account from summary data, fall back to provided account_id
-    main_account = next(
-        iter(
-            [acc for acc in summary_data.keys() if acc not in ("reqId", "business_key")]
-        ),
-        None,
-    )
-    assert main_account is not None, "No account data in summary_data"
-
-    main_account_data = summary_data[main_account]
-
-    account = account_id
-    for tag_data in main_account_data.values():
-        if "account" in tag_data:
-            account = tag_data["account"]
-            break
-
-    return AccountMetainfo(
-        id=account,
-        name=f"IBKR {account}",  # Simple name format
-    )
-
-
 __all__ = [
     "SEC_TYPE_MAP",
     "DEFAULT_SUPPORTED_RESOLUTIONS",
     "parse_tws_bar_date",
-    "contract_description_to_search_result",
     "contract_details_to_symbol_info",
     "tws_bar_to_domain_bar",
     "tws_ticks_to_bar",
@@ -1492,7 +1367,4 @@ __all__ = [
     "preorder_to_tws",
     "tracked_order_to_placed_order",
     "order_state_to_preview_result",
-    # Position/Account mappers
-    "tws_account_summary_to_equity",
-    "tws_account_summary_to_account_info",
 ]

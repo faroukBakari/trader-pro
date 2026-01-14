@@ -8,6 +8,7 @@ Domain conversion happens via TrackedPosition.to_domain() method.
 from __future__ import annotations
 
 import asyncio
+import threading
 import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
@@ -87,8 +88,8 @@ class PositionTracker:
     """
 
     def __init__(self) -> None:
-        self._snapshot_requested: bool = False
-        self._snapshot_complete: bool = False
+        self._snapshot_requested = threading.Event()
+        self._snapshot_complete = threading.Event()
         self._positions: dict[str, TrackedPosition] = {}
         self._snapshot_hooks: dict[
             str, tuple[asyncio.AbstractEventLoop, asyncio.Future[list[TrackedPosition]]]
@@ -106,9 +107,9 @@ class PositionTracker:
 
     def ensure_snapshot_requested(self, request_cb: Callable[[], None]) -> None:
         """Ensure snapshot request is made only once."""
-        if not self._snapshot_requested:
+        if not self._snapshot_requested.is_set():
             request_cb()
-            self._snapshot_requested = True
+            self._snapshot_requested.set()
 
     def upsert_position(
         self,
@@ -168,7 +169,7 @@ class PositionTracker:
 
     def mark_snapshot_complete(self) -> None:
         """Mark snapshot as complete. Called from positionEnd."""
-        self._snapshot_complete = True
+        self._snapshot_complete.set()
 
         for loop, future in self._snapshot_hooks.values():
 
@@ -191,8 +192,8 @@ class PositionTracker:
         Called from main thread before new snapshot request.
         """
         self._positions.clear()
-        self._snapshot_requested = False
-        self._snapshot_complete = False
+        self._snapshot_requested.clear()
+        self._snapshot_complete.clear()
         self._snapshot_hooks.clear()
         self._stream_hooks.clear()
 
@@ -213,7 +214,7 @@ class PositionTracker:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[list[TrackedPosition]] = loop.create_future()
 
-        if self._snapshot_complete:
+        if self._snapshot_complete.is_set():
             future.set_result(list(self._positions.values()))
             return await asyncio.wait_for(future, timeout)
 

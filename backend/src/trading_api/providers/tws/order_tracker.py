@@ -7,6 +7,7 @@ directly. Domain conversion happens at broker_provider level via tws_mappers.
 
 import asyncio
 import re
+import threading
 import time
 import uuid
 from collections.abc import Callable, Coroutine
@@ -217,8 +218,8 @@ class OrderTracker:
     """
 
     def __init__(self) -> None:
-        self._snapshot_requested: bool = False
-        self._snapshot_complete: bool = False
+        self._snapshot_requested = threading.Event()
+        self._snapshot_complete = threading.Event()
         self._order_id_count: count[int] = count()
         self._orders: dict[int, TrackedOrder] = {}
         self._snapshot_hooks: dict[
@@ -288,9 +289,9 @@ class OrderTracker:
         return next(iter(orders), None)
 
     def ensure_snapshot_requested(self, request_cb: Callable[[], None]) -> None:
-        if not self._snapshot_requested:
+        if not self._snapshot_requested.is_set():
             request_cb()
-            self._snapshot_requested = True
+            self._snapshot_requested.set()
 
     def set_next_order_id(self, orderId: int) -> None:
         self._order_id_count = count(orderId)
@@ -480,7 +481,7 @@ class OrderTracker:
 
     def mark_snapshot_complete(self) -> None:
         """Mark snapshot as complete. Called from openOrderEnd."""
-        self._snapshot_complete = True
+        self._snapshot_complete.set()
         for loop, future in self._snapshot_hooks.values():
 
             def resolve_hook(
@@ -500,7 +501,8 @@ class OrderTracker:
         Called from main thread before new snapshot request.
         """
         self._orders.clear()
-        self._snapshot_complete = False
+        self._snapshot_complete.clear()
+        self._snapshot_requested.clear()
         self._snapshot_hooks.clear()
         self._stream_hooks.clear()
         self._order_hooks.clear()
@@ -520,7 +522,7 @@ class OrderTracker:
         loop = asyncio.get_running_loop()
         future: asyncio.Future[list[TrackedOrder]] = loop.create_future()
 
-        if self._snapshot_complete:
+        if self._snapshot_complete.is_set():
             future.set_result(list(self._orders.values()))
             return await asyncio.wait_for(future, timeout)
 

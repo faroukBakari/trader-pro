@@ -5,7 +5,6 @@ All business logic (orders, positions, P&L) is encapsulated here.
 """
 
 import asyncio
-import itertools
 import logging
 import os
 import random
@@ -42,6 +41,7 @@ from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ProviderException, TradingApiException
 from trading_api.models.market.quotes import GetQuotesRequest
 from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
+from trading_api.providers.tws.account_tracker import TrackedAccount
 from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.position_tracker import TrackedPosition
 from trading_api.providers.tws.tws_connection import TWSClient
@@ -89,23 +89,12 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         # Business state (in-memory)
         self._executions: list[Execution] = []
-        self._leverage_settings: dict[str, float] = {}
-
-        # P&L tracking
-        self._unrealized_pl: dict[str, float] = {}
-        self._equity = EquityData(
-            equity=100000.0,
-            balance=100000.0,
-            unrealizedPL=0.0,
-            realizedPL=0.0,
-        )
 
         # Subscription management
         self._subscription_counter = 0
         self._execution_callbacks: dict[
             str, tuple[str, Callable[[Execution], Awaitable[None]]]
         ] = {}  # sub_id → (symbol, callback)
-        self._equity_callbacks: dict[str, Callable[[EquityData], Awaitable[None]]] = {}
 
         # Error callbacks (one per subscription)
         self._error_callbacks: dict[
@@ -247,19 +236,19 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             o for o in tws_orders if (o.order.transmit and not o.order.whatIf)
         ]
 
-        # Build contract details map for symbol resolution
+        # Build unique contracts to query (filter out missing conIds)
+        unique_contracts = {o.contract.conId: o.contract for o in real_orders}
+
+        # Fetch all contract details in parallel
+        details_lists = await asyncio.gather(
+            *[self._tws_client.reqContractDetails(c) for c in unique_contracts.values()]
+        )
+
+        # Build map: conId → full Contract (with all details)
         details_map: dict[int, Contract] = {
-            d.contract.conId: d.contract
-            for d in itertools.chain.from_iterable(
-                await asyncio.gather(
-                    *[
-                        self._tws_client.reqContractDetails(c)
-                        for c in {
-                            o.contract.conId: o.contract for o in real_orders
-                        }.values()
-                    ]
-                )
-            )
+            cached.contract.conId: cached.contract
+            for cached_list in details_lists
+            for cached in cached_list
         }
 
         return [
@@ -392,15 +381,30 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         return [e for e in self._executions if e.symbol == symbol]
 
     async def get_account_info(self) -> AccountMetainfo:
-        """Get account metadata."""
-        return AccountMetainfo(
-            id="NOT-IMPLEMENTED",
-            name="NOT-IMPLEMENTED",
-        )
+        """Get account metadata from TWS.
+
+        Returns:
+            AccountMetainfo with account ID and name
+        """
+        # Request account summary to get account info
+        account_list = await self._tws_client.reqAccountSummary()
+        tracked_account = next(iter(account_list), None)
+        assert tracked_account is not None, "Account summary returned no data"
+
+        return tracked_account.metainfo()
 
     async def get_equity(self) -> EquityData:
-        """Get current equity data."""
-        return self._equity
+        """Get current equity data from TWS.
+
+        Returns:
+            EquityData with equity, balance, and P&L values
+        """
+        # Request account summary with equity-related tags
+        account_list = await self._tws_client.reqAccountSummary()
+        tracked_account = next(iter(account_list), None)
+        assert tracked_account is not None, "Account summary returned no data"
+
+        return tracked_account.equity_data()
 
     async def preview_order(self, order: PreOrder) -> OrderPreviewResult:
         """Preview order costs and margin requirements using TWS whatIf mode.
@@ -620,6 +624,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         order.totalQuantity = Decimal("1")  # Single unit for margin calc
         order.orderType = "LMT"
         order.lmtPrice = current_price if current_price > 0 else 100.0
+        order.tif = "DAY" if contract.exchange == "OVERNIGHT" else "GTC"
         order.whatIf = True
         order.account = self._config.account_id
 
@@ -685,9 +690,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
     def _start_execution_simulator_if_needed(self) -> None:
         """Start execution simulator if not running and has subscribers."""
-        has_subscribers = (
-            len(self._execution_callbacks) > 0 or len(self._equity_callbacks) > 0
-        )
+        has_subscribers = len(self._execution_callbacks) > 0
 
         if self._execution_simulator_task is None and has_subscribers:
             logger.info("Starting execution simulator task")
@@ -697,9 +700,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
     def _stop_execution_simulator_if_empty(self) -> None:
         """Stop execution simulator if no more subscribers."""
-        has_subscribers = (
-            len(self._execution_callbacks) > 0 or len(self._equity_callbacks) > 0
-        )
+        has_subscribers = len(self._execution_callbacks) > 0
 
         if self._execution_simulator_task is not None and not has_subscribers:
             logger.info("Stopping execution simulator task (no subscribers)")
@@ -775,16 +776,37 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         callback: Callable[[EquityData], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
     ) -> str:
-        """Subscribe to equity updates."""
-        sub_id = self._generate_subscription_id()
-        self._equity_callbacks[sub_id] = callback
+        """Subscribe to real-time equity updates.
+
+        Uses TWSClient.reqAccountStream() which combines reqAccountUpdates()
+        and reqPnL() for comprehensive real-time account data.
+
+        Args:
+            callback: Called with EquityData on each account update
+            on_error: Optional error callback
+
+        Returns:
+            Subscription ID for unsubscribe()
+        """
+
+        async def tracked_to_equity(tracked: TrackedAccount) -> None:
+            """Adapter: TrackedAccount → EquityData callback."""
+            equity_data = tracked.equity_data()
+            await callback(equity_data)
+
+        async def error_handler(exc: ProviderException) -> None:
+            """Adapter: ProviderException → TradingApiException callback."""
+            if on_error:
+                await on_error(exc)
+
+        stream_key = self._tws_client.reqAccountStream(tracked_to_equity, error_handler)
+
+        # Track for cleanup in unsubscribe()
         if on_error:
-            self._error_callbacks[sub_id] = on_error
+            self._error_callbacks[stream_key] = on_error
 
-        logger.info(f"Registered equity subscription: {sub_id}")
-        self._start_execution_simulator_if_needed()
-
-        return sub_id
+        logger.info(f"Registered equity subscription: {stream_key}")
+        return stream_key
 
     def unsubscribe(self, subscription_id: str) -> None:
         """Unsubscribe from a stream."""
@@ -836,42 +858,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
                 except Exception as e:
                     logger.exception(f"Error in execution callback: {e}")
 
-    async def _broadcast_equity(self) -> None:
-        """Broadcast equity update to all subscribers."""
-        for callback in list(self._equity_callbacks.values()):
-            try:
-                await callback(self._equity)
-            except Exception as e:
-                logger.exception(f"Error in equity callback: {e}")
-
-    async def _update_equity(self, execution: Execution) -> None:
-        """Update equity after execution and broadcast changes."""
-        position = await self._get_position_by_id(execution.symbol)
-
-        if position is not None and position.qty != 0:
-            if position.side == execution.side:
-                # Adding to position - no realized P&L
-                pass
-            else:
-                # Closing/reducing position - realize P&L
-                qty_to_close = min(execution.qty, position.qty)
-
-                if position.side == Side.BUY:
-                    pnl = (execution.price - position.avgPrice) * qty_to_close
-                else:
-                    pnl = (position.avgPrice - execution.price) * qty_to_close
-
-                self._equity.balance += pnl
-                self._equity.realizedPL += pnl
-
-                remaining_qty = position.qty - qty_to_close
-                if remaining_qty == 0:
-                    if execution.symbol in self._unrealized_pl:
-                        del self._unrealized_pl[execution.symbol]
-
-        # Broadcast equity update
-        await self._broadcast_equity()
-
     # =========================================================================
     # Lifecycle / Testing Helpers
     # =========================================================================
@@ -885,18 +871,9 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         # Clear all state
         self._executions = []
-        self._leverage_settings = {}
-        self._unrealized_pl = {}
-        self._equity = EquityData(
-            equity=100000.0,
-            balance=100000.0,
-            unrealizedPL=0.0,
-            realizedPL=0.0,
-        )
 
         # Clear subscriptions
         self._execution_callbacks = {}
-        self._equity_callbacks = {}
         self._error_callbacks = {}
 
     def shutdown(self) -> None:
@@ -916,4 +893,5 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 # Alias for backward compatibility
 TWSBrokerProvider = TWSBrokerProvider
 
+__all__ = ["TWSBrokerProvider", "TWSBrokerProvider"]
 __all__ = ["TWSBrokerProvider", "TWSBrokerProvider"]

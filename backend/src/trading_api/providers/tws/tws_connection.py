@@ -61,12 +61,16 @@ from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
 
 from trading_api.models.exceptions import ProviderException
+from trading_api.providers.tws.account_tracker import (
+    TWS_TAG_TO_FIELD,
+    AccountTracker,
+    TrackedAccount,
+)
 from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
 from trading_api.providers.tws.position_tracker import PositionTracker, TrackedPosition
 from trading_api.providers.tws.tws_mappers import (
     build_darkpool_contract,
-    build_smart_contract,
     parse_ticker,
     ticker_name,
 )
@@ -89,6 +93,7 @@ DEBUG_TWS_NOTIFY = os.environ.get("DEBUG_TWS_NOTIFY") == "true"
 DEBUG_TWS_SHARED = os.environ.get("DEBUG_TWS_SHARED") == "true"
 DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
 DEBUG_TWS_BROKER = os.environ.get("DEBUG_TWS_BROKER") == "true"
+DEBUG_TWS_ACCOUNT = os.environ.get("DEBUG_TWS_ACCOUNT") == "true"
 DEBUG_TWS_CACHE = os.environ.get("DEBUG_TWS_CACHE") == "true"
 
 NO_VALID_ID = -1
@@ -257,6 +262,9 @@ class IBSocket(EWrapper):
         # Data tracking attributes
         self.order_tracker: OrderTracker = OrderTracker()
         self.position_tracker: PositionTracker = PositionTracker()
+        self.account_tracker: AccountTracker = AccountTracker(
+            self.reqAccountSubscriptions, self.cancelAccountSubscriptions
+        )
         self._reader_accounts: list[str] = []
         self._ready_event = (
             threading.Event()
@@ -1119,15 +1127,6 @@ class IBSocket(EWrapper):
 
         self.order_tracker.ensure_snapshot_requested(request_cb)
 
-    def reqPositions(self) -> None:
-        def request_cb() -> None:
-            VERSION = 1
-            self.send_message(OUT.REQ_POSITIONS, [VERSION])
-            if DEBUG_TWS_REQUEST:
-                debug_log("requested positions")
-
-        self.position_tracker.ensure_snapshot_requested(request_cb)
-
     def cancelOrder(self, order_id: int) -> None:
         orderCancel = OrderCancel()
         cancelOrderRequestProto = createCancelOrderRequestProto(order_id, orderCancel)
@@ -1138,6 +1137,101 @@ class IBSocket(EWrapper):
         if DEBUG_TWS_REQUEST:
             debug_log(f"cancelled order: id={order_id}")
 
+    def reqPositions(self) -> None:
+        def request_cb() -> None:
+            VERSION = 1
+            self.send_message(OUT.REQ_POSITIONS, [VERSION])
+            if DEBUG_TWS_REQUEST:
+                debug_log("requested positions")
+
+        self.position_tracker.ensure_snapshot_requested(request_cb)
+
+    def reqAccountSummary(self) -> None:
+        def request_cb() -> int:
+            VERSION = 1
+            reqId = self.next_req_id
+            self.send_message(
+                OUT.REQ_ACCOUNT_SUMMARY,
+                [VERSION, reqId, "All", ",".join(TWS_TAG_TO_FIELD.keys())],
+            )
+            if DEBUG_TWS_REQUEST:
+                debug_log("requested account summary")
+            return reqId
+
+        self.account_tracker.ensure_summary_requested(request_cb)
+
+    def _reqAccountUpdates(self, subscribe: bool, acctCode: str) -> None:
+        """Subscribe/unsubscribe to account updates.
+
+        Triggers callbacks:
+            - updateAccountValue() for each account metric
+            - updatePortfolio() for each position
+            - updateAccountTime() with timestamp
+            - accountDownloadEnd() when batch complete
+
+        Args:
+            subscribe: True to subscribe, False to unsubscribe
+            acctCode: Account code (required for FA accounts)
+        """
+        VERSION = 2
+        self.send_message(OUT.REQ_ACCT_DATA, [VERSION, subscribe, acctCode])
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"reqAccountUpdates subscribe={subscribe}, acct={acctCode}")
+
+    def _reqPnL(self, reqId: int, account: str, modelCode: str = "") -> None:
+        """Subscribe to real-time P&L updates.
+
+        Triggers pnl() callback with dailyPnL, unrealizedPnL, realizedPnL.
+        Updates are pushed in real-time (not on 3-min interval like reqAccountUpdates).
+
+        Args:
+            reqId: Request ID for tracking
+            account: Account code
+            modelCode: Model code (empty string for default)
+        """
+        self.send_message(OUT.REQ_PNL, [reqId, account, modelCode])
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"reqPnL reqId={reqId}, account={account}")
+
+    def reqAccountSubscriptions(self, account: str) -> int:
+        """Subscribe to account updates with P&L.
+
+        Combines _reqAccountUpdates and _reqPnL for comprehensive account tracking.
+
+        Args:
+            account: Account code
+        Returns:
+            Request ID for P&L subscription
+        """
+
+        self._reqAccountUpdates(True, account)
+        reqId = self.next_req_id
+        self._reqPnL(reqId, account)
+
+        return reqId
+
+    def _cancelPnL(self, reqId: int) -> None:
+        """Cancel P&L subscription.
+
+        Args:
+            reqId: Request ID from reqPnL()
+        """
+        self.send_message(OUT.CANCEL_PNL, [reqId])
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"cancelPnL reqId={reqId}")
+
+    def cancelAccountSubscriptions(self, reqId: int) -> None:
+        """Subscribe to account updates with P&L.
+
+        Combines _reqAccountUpdates and _reqPnL for comprehensive account tracking.
+
+        Args:
+            account: Account code
+        Returns:
+            Request ID for P&L subscription
+        """
+        self._cancelPnL(reqId)
+
     # ================================================
     # == Dispatch handlers for subscription events ===
     # ================================================
@@ -1145,18 +1239,150 @@ class IBSocket(EWrapper):
     # === Trading / account management ===
 
     def managedAccounts(self, accountsList: str) -> None:
-        if DEBUG_TWS_SHARED:
+        if DEBUG_TWS_ACCOUNT:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # should be sent upon connection
         self._reader_accounts = accountsList.split(",")
+        for account in self._reader_accounts:
+            self.account_tracker.upsert_account(account)
 
-    def nextValidId(self, orderId: int) -> None:
-        if DEBUG_TWS_SHARED:
-            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        # Signals connection fully established - safe to make requests
-        self.order_tracker.set_next_order_id(orderId)
-        self._ready_event.set()
-        debug_log(f"TWS connection ready for requests. Next order ID: {orderId}")
+    def accountSummary(
+        self, reqId: int, account: str, tag: str, value: str, currency: str
+    ) -> None:
+        """Callback for account summary information.
+
+        TWS sends this callback for each requested tag after reqAccountSummary().
+
+        Args:
+            reqId: Request ID
+            account: Account ID
+            tag: Tag name (e.g., "NetLiquidation", "TotalCashValue")
+            value: Tag value as string
+            currency: Currency of the value
+        """
+        if DEBUG_TWS_ACCOUNT:
+            debug_log(
+                f"{current_fn_name()}, reqId={reqId}, account={account}, "
+                f"tag={tag}, value={value}, currency={currency}"
+            )
+
+        self.account_tracker.update_account(account, tag, value, currency)
+
+    def accountSummaryEnd(self, reqId: int) -> None:
+        """End signal for account summary request.
+
+        Called after all accountSummary callbacks for reqAccountSummary().
+        Resolves the pending future with accumulated summary data.
+        """
+        if DEBUG_TWS_ACCOUNT:
+            debug_log(f"{current_fn_name()}")
+
+        # Mark snapshot complete and resolve pending futures
+        self.account_tracker.mark_snapshot_complete()
+
+    # === Account Updates (reqAccountUpdates callbacks) ===
+
+    def updateAccountValue(
+        self, key: str, val: str, currency: str, accountName: str
+    ) -> None:
+        """Callback for account value updates from reqAccountUpdates().
+
+        Called multiple times after reqAccountUpdates(True) for each account metric.
+        Uses same routing as accountSummary() via account_tracker.update_account().
+
+        Args:
+            key: TWS PascalCase tag name (e.g., "NetLiquidation")
+            val: Value as string
+            currency: Currency of the value (may be empty)
+            accountName: Account ID
+        """
+        if DEBUG_TWS_ACCOUNT:
+            debug_log(f"{current_fn_name()}: {key}={val} {currency} for {accountName}")
+        self.account_tracker.update_account(accountName, key, val, currency)
+
+    def updatePortfolio(
+        self,
+        contract: Contract,
+        position: Decimal,
+        marketPrice: float,
+        marketValue: float,
+        averageCost: float,
+        unrealizedPNL: float,
+        realizedPNL: float,
+        accountName: str,
+    ) -> None:
+        """Callback for portfolio updates from reqAccountUpdates().
+
+        Called for each position after reqAccountUpdates(True).
+        Currently logged only - per-position P&L enrichment deferred to future phase.
+
+        Args:
+            contract: Position contract
+            position: Position quantity (positive=long, negative=short)
+            marketPrice: Current market price
+            marketValue: Position market value
+            averageCost: Average cost per share
+            unrealizedPNL: Unrealized P&L for this position
+            realizedPNL: Realized P&L for this position
+            accountName: Account ID
+        """
+        if DEBUG_TWS_ACCOUNT:
+            debug_log(
+                f"{current_fn_name()}: {contract.symbol} pos={position} "
+                f"unrealPnL={unrealizedPNL} for {accountName}"
+            )
+        # Future: Route to position_tracker for per-position P&L enrichment
+        # self.position_tracker.update_position_pnl(...)
+
+    def updateAccountTime(self, timeStamp: str) -> None:
+        """Callback for account update timestamp.
+
+        Called during reqAccountUpdates() to indicate freshness of data.
+
+        Args:
+            timeStamp: Time string from TWS
+        """
+        if DEBUG_TWS_ACCOUNT:
+            debug_log(f"{current_fn_name()}: {timeStamp}")
+        # Update last_update_time on tracked accounts
+        for tracked in self.account_tracker._accounts.values():
+            tracked.last_update_time = timeStamp
+
+    def accountDownloadEnd(self, accountName: str) -> None:
+        """End signal for reqAccountUpdates() batch.
+
+        Called after all updateAccountValue/updatePortfolio callbacks.
+        Marks snapshot complete similar to accountSummaryEnd.
+
+        Args:
+            accountName: Account ID for which download completed
+        """
+        if DEBUG_TWS_ACCOUNT:
+            debug_log(f"{current_fn_name()}: {accountName}")
+        self.account_tracker.mark_snapshot_complete()
+
+    # === Real-time P&L (reqPnL callback) ===
+
+    def pnl(
+        self, reqId: int, dailyPnL: float, unrealizedPnL: float, realizedPnL: float
+    ) -> None:
+        """Real-time P&L callback from reqPnL().
+
+        Provides faster P&L updates than reqAccountUpdates() (real-time vs 3-min).
+        Routes to account_tracker.update_pnl() to update TrackedAccount.
+
+        Args:
+            reqId: Request ID from reqPnL()
+            dailyPnL: Today's profit/loss
+            unrealizedPnL: Unrealized P&L across all positions
+            realizedPnL: Realized P&L across all positions
+        """
+        if DEBUG_TWS_BROKER:
+            debug_log(
+                f"{current_fn_name()}: reqId={reqId} daily={dailyPnL} "
+                f"unrealized={unrealizedPnL} realized={realizedPnL}"
+            )
+        self.account_tracker.update_pnl(reqId, dailyPnL, unrealizedPnL, realizedPnL)
 
     # === symbolSamples ===
 
@@ -1313,6 +1539,14 @@ class IBSocket(EWrapper):
         self._flag_snapshot_complete(f"req_{reqId}")
 
     # === Order management ===
+
+    def nextValidId(self, orderId: int) -> None:
+        if DEBUG_TWS_SHARED:
+            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
+        # Signals connection fully established - safe to make requests
+        self.order_tracker.set_next_order_id(orderId)
+        self._ready_event.set()
+        debug_log(f"TWS connection ready for requests. Next order ID: {orderId}")
 
     def openOrder(
         self, orderId: int, contract: Contract, order: Order, orderState: OrderState
@@ -1633,11 +1867,9 @@ class TWSClient:
 
     # === Contract resolution and caching ===
 
-    def _get_cached_contracts(
+    def _get_cached_details(
         self,
-        ticker: str,
-        exchange: str | None = None,
-        require_full_details: bool = False,
+        contract: Contract,
     ) -> list[CachedContract]:
         """Get cached contracts matching ticker with optional exchange filtering.
 
@@ -1649,19 +1881,30 @@ class TWSClient:
         Returns:
             List of CachedContract matching the criteria
         """
+        contract_exchange = contract.primaryExchange or contract.exchange
         cached = [
-            con
-            for con in self.__contracts_cache.values()
-            if con.matches(ticker)
-            and (not exchange or con.contract.exchange == exchange)
-            and (not require_full_details or con.has_full_details)
+            cached_contract
+            for cached_contract in (
+                [self.__contracts_cache.get(contract.conId)]
+                if (contract.conId and contract.conId > 0)
+                else [
+                    con
+                    for con in self.__contracts_cache.values()
+                    if contract.symbol == con.contract.symbol
+                    and (
+                        not contract_exchange or contract_exchange in con.validExchanges
+                    )
+                    and con.has_full_details
+                ]
+            )
+            if cached_contract is not None
         ]
 
         return cached
 
     async def reqMatchingSymbols(
         self, pattern: str, timeout: float | None = None
-    ) -> list[ContractDescription]:
+    ) -> list[CachedContract]:
         """Search for matching symbols by pattern.
 
         Uses cache-first strategy: results are cached by conId, and subsequent
@@ -1674,42 +1917,50 @@ class TWSClient:
         Returns:
             List of ContractDescription matching the pattern
         """
-        reqId: int | None = None
-        coroutine: Awaitable[list[dict[str, ContractDescription]]]
-        descriptions: list[ContractDescription]
-        business_key = f"shared:reqMatchingSymbols:{pattern}"
 
-        data = self.ibsocket.get_cached_data(business_key)
-        if data is not None:
+        # TODO: need to cache data. IB has a tight ratelimit for this call.
+        cached_list = [
+            con
+            for con in self.__contracts_cache.values()
+            if con.contract.symbol.startswith(pattern)
+        ]
+
+        if cached_list:
             if DEBUG_TWS_CACHE:
                 debug_log(
-                    f"reqMatchingSymbols cache hit for pattern '{pattern}' "
-                    f"with {len(data)} items"
+                    f"reqMatchingSymbols cache hit for conId {cached_list[0].contract.conId} => ({pattern})"
                 )
-            descriptions = [item["contractDescriptions"] for item in data]
-            return [desc for desc in descriptions if desc.contract.conId > 0]
+            return cached_list
+
+        reqId: int | None = None
+        coroutine: Awaitable[list[dict[str, ContractDescription]]]
+        business_key = f"shared:reqMatchingSymbols:{pattern}"
 
         reqId, coroutine = self.ibsocket.create_snapshot(
             business_key,
-            timeout=timeout or self._timeout,
+            timeout=3.0,
         )
 
         if reqId is not None:
             self.ibsocket.reqMatchingSymbols(reqId, pattern)
 
         data = await coroutine
-        descriptions = [item["contractDescriptions"] for item in data]
-        descriptions = [desc for desc in descriptions if desc.contract.conId > 0]
+        descriptions: list[ContractDescription] = [
+            item["contractDescriptions"] for item in data
+        ]
 
-        # Cache results by conId for future lookups
-        for desc in descriptions:
-            con_id = desc.contract.conId
-            if con_id not in self.__contracts_cache:
-                self.__contracts_cache[con_id] = (
-                    CachedContract.from_contract_description(desc)
-                )
+        # Create CachedContracts and populate cache
+        results = [
+            CachedContract.from_contract_description(desc)
+            for desc in descriptions
+            if desc.contract.conId > 0
+        ]
 
-        return descriptions
+        # Populate cache for reuse by reqContractDetails
+        # for cached_contract in results:
+        #     self.__contracts_cache[cached_contract.contract.conId] = cached_contract
+
+        return results
 
     async def _reqContractDetails(
         self, contract: Contract, timeout: float | None = None
@@ -1732,7 +1983,7 @@ class TWSClient:
         if not data:
             reqId, coroutine = self.ibsocket.create_snapshot(
                 business_key,
-                timeout=timeout or self._timeout,
+                timeout=2.0,
             )
             if reqId is not None:
                 self.ibsocket.reqContractDetails(reqId, contract)
@@ -1740,26 +1991,6 @@ class TWSClient:
 
         details_list: list[ContractDetails] = [item["contractDetails"] for item in data]
         return details_list
-
-    async def _cache_details(
-        self,
-        details: ContractDetails,
-        overnight_hours: str | None = None,
-    ) -> None:
-        """Cache contract details by conId."""
-        detail_con_id = details.contract.conId
-        if detail_con_id in self.__contracts_cache:
-            # Update existing partial cache entry
-            self.__contracts_cache[detail_con_id].update_from_details(
-                details, overnight_hours=overnight_hours
-            )
-        else:
-            # Create new cache entry with full details
-            self.__contracts_cache[detail_con_id] = (
-                CachedContract.from_contract_details(
-                    details, overnight_hours=overnight_hours
-                )
-            )
 
     async def reqContractDetails(
         self, contract: Contract, timeout: float | None = None
@@ -1777,69 +2008,50 @@ class TWSClient:
         Returns:
             List of ContractDetails (usually 1, but can be multiple for ambiguous contracts)
         """
-        ticker = ticker_name(contract)
-        cached_list = [
-            cached_contract
-            for cached_contract in (
-                [self.__contracts_cache.get(contract.conId)]
-                if (contract.conId and contract.conId > 0)
-                else self._get_cached_contracts(
-                    ticker, contract.exchange, require_full_details=True
-                )
-            )
-            if cached_contract is not None
-        ]
+        ticker_name(contract)
+        cached_list: list[CachedContract] = self._get_cached_details(contract)
 
         if cached_list:
             if DEBUG_TWS_CACHE:
                 debug_log(
-                    f"reqContractDetails cache hit for conId {contract.conId} => ({ticker})"
+                    f"reqContractDetails cache hit for conId {contract.conId} => "
+                    f"({contract.primaryExchange or contract.exchange}:{contract.symbol})"
                 )
             return cached_list
 
-        details_list: list[ContractDetails] = await self._reqContractDetails(
-            contract, timeout=timeout
+        cached_list = await self.reqMatchingSymbols(
+            contract.symbol, timeout=timeout or self._timeout
         )
 
-        if not details_list:
-            return []
-
-        overnight_hours: str | None = None
-        first_details = next(iter(details_list))
-        smart_contract = build_smart_contract(first_details)
-        if smart_contract is not None:
-            smart_details_list = [
-                details
-                for details in details_list
-                if details.contract.exchange == "SMART"
-            ] or await self._reqContractDetails(smart_contract, timeout=timeout)
-            if smart_details_list:
-                first_details = next(iter(smart_details_list))
-                darkpool_contract = build_darkpool_contract(first_details)
-                if darkpool_contract is not None:
-                    darkpool_details_list = [
-                        details
-                        for details in details_list
-                        if details.contract.exchange == "SMART"
-                    ] or await self._reqContractDetails(
-                        darkpool_contract, timeout=timeout
-                    )
-                    if darkpool_details_list:
-                        overnight_hours = next(iter(darkpool_details_list)).tradingHours
-                        details_list = (
-                            [first_details] if not contract.exchange else details_list
+        async def load_and_cache(con: Contract) -> None:
+            details = next(iter(await self._reqContractDetails(con, timeout=timeout)))
+            overnight_hours: str | None = None
+            if darkpool_contract := build_darkpool_contract(details):
+                darkpool_details = next(
+                    iter(
+                        await self._reqContractDetails(
+                            darkpool_contract, timeout=timeout
                         )
-
-        for details in details_list:
-            await self._cache_details(
-                details,
-                overnight_hours=overnight_hours,
+                    )
+                )
+                overnight_hours = darkpool_details.tradingHours
+            self.__contracts_cache[
+                details.contract.conId
+            ] = CachedContract.from_contract_details(
+                details, overnight_hours=overnight_hours
             )
 
-        # return cached data
-        return self._get_cached_contracts(
-            ticker, contract.exchange, require_full_details=True
+        await asyncio.gather(
+            *[
+                load_and_cache(con)
+                for con in {
+                    cached.contract.conId: cached.contract for cached in cached_list
+                }.values()
+            ]
         )
+
+        # return cached data
+        return self._get_cached_details(contract)
 
     async def req_ticker_details(
         self,
@@ -1907,7 +2119,7 @@ class TWSClient:
 
         reqId, coroutine = self.ibsocket.create_snapshot(
             business_key,
-            timeout=timeout or self._timeout,
+            timeout=30,
         )
 
         if reqId is not None:
@@ -2031,13 +2243,13 @@ class TWSClient:
             # check 02-API-REFERENCE-CONTRACTS-ORDERS.md
             assert (
                 tracked.contract.conId == contract.conId
-            ), "Cannot change contract of an existing order"
+            ), f"Cannot change contract of an existing order {tracked.contract.conId} -> {contract.conId}"
             assert (
                 not contract.exchange or tracked.contract.exchange == contract.exchange
-            ), "Cannot change exchange of an existing order"
+            ), f"Cannot change exchange of an existing order {tracked.contract.exchange} -> {contract.exchange}"
             assert (
                 not parent_id or order_ori.parentId == parent_id
-            ), "Cannot change parentId of an existing order"
+            ), f"Cannot change parentId of an existing order {order_ori.parentId} -> {parent_id}"
             place_flag = False
             if order.lmtPrice != UNSET_DOUBLE and order_ori.lmtPrice != order.lmtPrice:
                 order_ori.lmtPrice = order.lmtPrice
@@ -2051,13 +2263,11 @@ class TWSClient:
             ):
                 order_ori.totalQuantity = order.totalQuantity
                 place_flag = True
-            if order.tif != "" and order_ori.tif != order.tif:
-                order_ori.tif = order.tif
-                place_flag = True
             assert (
                 not place_flag or order_ori.transmit == transmit
-            ), "Cannot change transmit flag of an existing order"
+            ), f"Cannot change transmit flag of an existing order {order_ori.transmit} -> {transmit}"
             order = order_ori
+            order.tif = ""  # do not modify time-in-force for existing orders
             order.transmit = True  # always transmit existing orders
         else:
             order_id = self.ibsocket.order_tracker.next_order_id
@@ -2276,6 +2486,26 @@ class TWSClient:
             timeout=timeout or self._timeout
         )
 
+    async def reqAccountSummary(
+        self, timeout: float | None = None
+    ) -> list[TrackedAccount]:
+        """Request all positions for this client (snapshot).
+
+        Returns positions for all accounts. Each position triggers
+        position() callback, then positionEnd().
+
+        Args:
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of TrackedPosition objects (one per position)
+        """
+        self.ibsocket.reqAccountSummary()
+
+        return await self.ibsocket.account_tracker.all_accounts(
+            timeout=timeout or self._timeout
+        )
+
     # === Real-time broker subscriptions ===
 
     def reqOrdersStream(
@@ -2320,10 +2550,32 @@ class TWSClient:
 
         return stream_key
 
+    def reqAccountStream(
+        self,
+        callback: Callable[[TrackedAccount], Coroutine[Any, Any, None]],
+        on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
+    ) -> str:
+        # 1. Register with AccountTracker
+        stream_key = self.ibsocket.account_tracker.create_stream_hook(
+            asyncio.get_event_loop(),
+            callback,
+            on_error,
+        )
+
+        # 2. Trigger initial snapshot (existing orders)
+        self.ibsocket.reqAccountSummary()
+
+        return stream_key
+
     def cancel_broker_stream(self, stream_key: str) -> None:
-        """Cancel a real-time broker subscription (orders or positions)."""
+        """Cancel a real-time broker subscription (orders, positions, or accounts)."""
         self.ibsocket.order_tracker.remove_stream_hook(stream_key)
         self.ibsocket.position_tracker.remove_stream_hook(stream_key)
+        self.ibsocket.account_tracker.remove_stream_hook(stream_key)
+
+        # Cancel underlying TWS subscriptions if this was an account stream
+        # TODO: Track stream_key → pnl_req_id mapping to cancel P&L subscription
+        # self.ibsocket.cancelAccountSubscriptions(pnl_req_id)
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""

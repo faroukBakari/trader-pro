@@ -33,7 +33,6 @@ from trading_api.models.market import (
 from trading_api.models.providers.tws_configs import TWSDatafeedProviderConfig
 from trading_api.providers.tws import TWSDatafeedProvider
 from trading_api.providers.tws.cached_contract import CachedContract
-from trading_api.providers.tws.tws_mappers import contract_description_to_search_result
 
 
 def _make_contract(
@@ -166,71 +165,6 @@ class TestProviderInitialization:
         MockClient.assert_called_once_with("10.0.0.1", 4001, 10)
 
 
-class TestDomainMappers:
-    """Test TWS → domain conversion (tws_mappers.py)."""
-
-    def test_contract_description_to_search_result(self) -> None:
-        """Test TWS ContractDescription → SearchSymbolResultItem."""
-        # Create TWS ContractDescription
-        contract = Contract()
-        contract.symbol = "AAPL"
-        contract.exchange = "SMART"
-        contract.secType = "STK"
-        contract.primaryExchange = "NASDAQ"
-        contract.description = "Apple Inc"
-
-        desc = ContractDescription()
-        desc.contract = contract
-        desc.derivativeSecTypes = []
-
-        # Convert using mapper
-        result = contract_description_to_search_result(desc)
-
-        assert isinstance(result, SearchSymbolResultItem)
-        assert result.symbol == "AAPL"
-        assert result.exchange == "NASDAQ"  # Uses primaryExchange
-        assert result.type == "stock"  # STK → stock
-        assert result.description == "Apple Inc"
-
-    def test_contract_description_no_primary_exchange(self) -> None:
-        """Test conversion when primaryExchange is not set."""
-        contract = Contract()
-        contract.symbol = "AAPL"
-        contract.exchange = "SMART"
-        contract.secType = "STK"
-        contract.primaryExchange = ""  # Empty
-
-        desc = ContractDescription()
-        desc.contract = contract
-
-        result = contract_description_to_search_result(desc)
-
-        assert result.exchange == "SMART"  # Falls back to exchange
-
-    def test_sec_type_mapping(self) -> None:
-        """Test secType → type mapping covers common types."""
-        test_cases = [
-            ("STK", "stock"),
-            ("OPT", "option"),
-            ("FUT", "futures"),
-            ("CASH", "forex"),
-            ("IND", "index"),
-            ("CRYPTO", "crypto"),
-        ]
-
-        for sec_type, expected_type in test_cases:
-            contract = Contract()
-            contract.symbol = "TEST"
-            contract.exchange = "SMART"
-            contract.secType = sec_type
-
-            desc = ContractDescription()
-            desc.contract = contract
-
-            result = contract_description_to_search_result(desc)
-            assert result.type == expected_type, f"Failed for {sec_type}"
-
-
 class TestSearchSymbols:
     """Test search_symbols implementation."""
 
@@ -244,6 +178,7 @@ class TestSearchSymbols:
         contract1.secType = "STK"
         contract1.primaryExchange = "NASDAQ"
         contract1.description = "Apple Inc"
+        contract1.conId = 265598
 
         desc1 = ContractDescription()
         desc1.contract = contract1
@@ -254,13 +189,17 @@ class TestSearchSymbols:
         contract2.secType = "STK"
         contract2.primaryExchange = "NYSE"
         contract2.description = "Apple Inc"
+        contract2.conId = 265599
 
         desc2 = ContractDescription()
         desc2.contract = contract2
 
-        # Mock TWSClient.reqMatchingSymbols to return our test data
+        # Mock TWSClient.reqMatchingSymbols to return CachedContract objects
+        cached1 = CachedContract.from_contract_description(desc1)
+        cached2 = CachedContract.from_contract_description(desc2)
+
         mock_client = Mock()
-        mock_client.reqMatchingSymbols = AsyncMock(return_value=[desc1, desc2])
+        mock_client.reqMatchingSymbols = AsyncMock(return_value=[cached1, cached2])
 
         with patch(
             "trading_api.providers.tws.datafeed_provider.TWSClient",
