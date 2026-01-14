@@ -6,6 +6,7 @@ ContractDescription (partial, from symbol search) or ContractDetails (full).
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from ibapi.contract import Contract, ContractDescription, ContractDetails
@@ -147,6 +148,56 @@ class CachedContract(ContractDetails):
         desc.contract = clone_contract(self.contract)
         desc.derivativeSecTypes = self.derivativeSecTypes[:]
         return desc
+
+    # === Serialization Methods (for SQLite persistence) ===
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize ContractDescription fields for SQLite storage.
+
+        Only serializes immutable instrument identity fields (from ContractDescription).
+        ContractDetails fields (tradingHours, etc.) are NOT persisted as they are
+        session-dependent and mutable.
+
+        Returns:
+            Dictionary suitable for SQLite INSERT/UPDATE
+        """
+        return {
+            "con_id": self.contract.conId,
+            "symbol": self.contract.symbol,
+            "sec_type": self.contract.secType,
+            "primary_exchange": self.contract.primaryExchange,
+            "currency": self.contract.currency,
+            "derivative_sec_types": self.derivativeSecTypes,
+            "description": self.contract.description or "",
+        }
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "CachedContract":
+        """Deserialize from SQLite row to CachedContract (partial).
+
+        Creates a CachedContract with ContractDescription-level data only.
+        has_full_details=False since ContractDetails fields are not persisted.
+
+        Args:
+            data: Dictionary from SQLite row (con_id, symbol, sec_type, etc.)
+
+        Returns:
+            CachedContract with partial details (from ContractDescription)
+        """
+        contract = Contract()
+        contract.conId = data["con_id"]
+        contract.symbol = data["symbol"]
+        contract.secType = data["sec_type"]
+        contract.primaryExchange = data["primary_exchange"]
+        contract.currency = data["currency"]
+        contract.description = data.get("description", "")
+
+        instance = CachedContract()
+        instance.contract = contract
+        instance.derivativeSecTypes = data.get("derivative_sec_types") or []
+        instance.has_full_details = False
+        instance._ticker = ticker_name(contract)
+        return instance
 
     def to_search_result(self) -> SearchSymbolResultItem:
         """Map CachedContract → domain SearchSymbolResultItem.

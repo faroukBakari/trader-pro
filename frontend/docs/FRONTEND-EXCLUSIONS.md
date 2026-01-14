@@ -15,12 +15,11 @@ The frontend has two categories of excluded files:
 
 ## Excluded Directories
 
-### External Libraries (Public Folder)
+### External Libraries & Forked Bundles (Public Folder)
 
-- `public/charting_library/` - TradingView charting library (minified external code)
-- `public/datafeeds/` - TradingView datafeed implementations (third-party examples)
-- `public/trading_terminal/` - TradingView Trading Terminal library
-- `public/advanced_charting_library/` - TradingView Advanced Chart library
+- `public/trading_terminal/` - ⭐ **Forked TradingView Trading Terminal** (PRODUCTION - actively maintained, patched bundles)
+- `public/advanced_charting_library/` - TradingView Advanced Chart library (alternative, not currently used)
+- `public/datafeeds/` - TradingView UDF examples (reference only - NOT USED, we use custom backend)
 
 ### Generated Code (Auto-Generated from Backend Specs)
 
@@ -37,16 +36,19 @@ The frontend has two categories of excluded files:
 
 ### 1. Root `.gitignore`
 
-**Purpose**: Prevent generated files from being committed to Git
+**Purpose**: Prevent generated files and large binary/minified bundles from being committed to Git
+
+**Note on `trading_terminal/`**: This is our **production** forked bundle (not just "external library"). We exclude it due to size, but **all modifications MUST be documented** in [BUNDLE-MAINTENANCE.md](tradingview/BUNDLE-MAINTENANCE.md).
 
 **Exclusions**:
 
 ```ignore
-# External TradingView libraries
-frontend/public/charting_library/
-frontend/public/datafeeds/
+# External TradingView libraries and forked bundles
+# Note: trading_terminal/ is PRODUCTION but excluded due to size (100+ minified files)
+# All bundle patches MUST be documented in frontend/docs/tradingview/BUNDLE-MAINTENANCE.md
 frontend/public/trading_terminal/
 frontend/public/advanced_charting_library/
+frontend/public/datafeeds/
 ```
 
 ### 2. Frontend `.gitignore`

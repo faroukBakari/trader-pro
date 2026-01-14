@@ -107,15 +107,15 @@ class TestTWSClientReqMatchingSymbols:
 
     @pytest.mark.asyncio
     async def test_req_matching_symbols_returns_descriptions(self) -> None:
-        """Test reqMatchingSymbols returns ContractDescription list."""
+        """Test reqMatchingSymbols returns CachedContract list."""
         client = TWSClient("127.0.0.1", 7497, 1, timeout=5.0)
 
-        # Create mock ibsocket
+        # Create mock ibsocket with contract_tracker
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
         mock_ibsocket.get_cached_data.return_value = None  # No cache hit
 
-        # Create test response
+        # Create test contract
         contract = Contract()
         contract.symbol = "AAPL"
         contract.exchange = "SMART"
@@ -123,6 +123,22 @@ class TestTWSClientReqMatchingSymbols:
         contract.conId = 265598  # Valid conId required by filter
         desc = ContractDescription()
         desc.contract = contract
+
+        # Create CachedContract for tracker response
+        cached_contract = CachedContract.from_contract_description(desc)
+
+        # Mock contract_tracker - first call returns empty (cache miss), second returns data
+        call_count = [0]
+
+        def get_by_symbol_prefix_side_effect(pattern: str) -> list[CachedContract]:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return []  # First call: cache miss
+            return [cached_contract]  # Second call: after API fetch
+
+        mock_ibsocket.contract_tracker.get_by_symbol_prefix.side_effect = (
+            get_by_symbol_prefix_side_effect
+        )
 
         # Setup create_snapshot mock that returns (reqId, awaitable)
         def create_snapshot_side_effect(
@@ -154,10 +170,13 @@ class TestTWSClientReqMatchingSymbols:
         """Test reqMatchingSymbols sends correct message format."""
         client = TWSClient("127.0.0.1", 7497, 1)
 
-        # Create mock ibsocket
+        # Create mock ibsocket with contract_tracker
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
         mock_ibsocket.get_cached_data.return_value = None  # No cache hit
+
+        # Mock contract_tracker - always return empty to trigger API call
+        mock_ibsocket.contract_tracker.get_by_symbol_prefix.return_value = []
 
         # Setup create_snapshot mock
         def create_snapshot_side_effect(
@@ -185,14 +204,14 @@ class TestTWSClientReqMatchingSymbols:
 
     @pytest.mark.asyncio
     async def test_req_matching_symbols_cache_hit_returns_cached_data(self) -> None:
-        """Test reqMatchingSymbols returns cached data when available."""
+        """Test reqMatchingSymbols returns cached data from ContractTracker."""
         client = TWSClient("127.0.0.1", 7497, 1, timeout=5.0)
 
-        # Create mock ibsocket
+        # Create mock ibsocket with contract_tracker
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
 
-        # Create cached contract and populate __contracts_cache directly
+        # Create cached contract
         contract = Contract()
         contract.symbol = "AAPL"
         contract.exchange = "SMART"
@@ -201,9 +220,12 @@ class TestTWSClientReqMatchingSymbols:
         desc = ContractDescription()
         desc.contract = contract
 
-        # Populate the TWSClient.__contracts_cache directly (this is the cache being tested)
         cached_contract = CachedContract.from_contract_description(desc)
-        client._TWSClient__contracts_cache[265598] = cached_contract  # type: ignore[attr-defined]
+
+        # Mock contract_tracker to return cached data (cache hit)
+        mock_ibsocket.contract_tracker.get_by_symbol_prefix.return_value = [
+            cached_contract
+        ]
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
@@ -217,16 +239,16 @@ class TestTWSClientReqMatchingSymbols:
         mock_ibsocket.reqMatchingSymbols.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_req_matching_symbols_populates_contracts_cache(self) -> None:
-        """Test reqMatchingSymbols populates __contracts_cache after API call."""
+    async def test_req_matching_symbols_populates_contracts_tracker(self) -> None:
+        """Test reqMatchingSymbols returns CachedContract list after API call."""
         client = TWSClient("127.0.0.1", 7497, 1, timeout=5.0)
 
-        # Create mock ibsocket
+        # Create mock ibsocket with contract_tracker
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
         mock_ibsocket.get_cached_data.return_value = None  # No cache hit
 
-        # Create test response
+        # Create test contract
         contract = Contract()
         contract.symbol = "AAPL"
         contract.exchange = "SMART"
@@ -234,6 +256,21 @@ class TestTWSClientReqMatchingSymbols:
         contract.conId = 265598
         desc = ContractDescription()
         desc.contract = contract
+
+        cached_contract = CachedContract.from_contract_description(desc)
+
+        # Mock contract_tracker - first call returns empty (cache miss), second returns data
+        call_count = [0]
+
+        def get_by_symbol_prefix_side_effect(pattern: str) -> list[CachedContract]:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return []  # First call: cache miss
+            return [cached_contract]  # Second call: after API fetch
+
+        mock_ibsocket.contract_tracker.get_by_symbol_prefix.side_effect = (
+            get_by_symbol_prefix_side_effect
+        )
 
         # Setup create_snapshot mock
         def create_snapshot_side_effect(
@@ -254,21 +291,21 @@ class TestTWSClientReqMatchingSymbols:
 
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
-        cache_list = await client.reqMatchingSymbols("AAPL")
+        result = await client.reqMatchingSymbols("AAPL")
 
-        contracts_cache = {cached.contract.conId: cached for cached in cache_list}
-
-        assert 265598 in contracts_cache
-        cached = contracts_cache[265598]
-        assert cached.contract.symbol == "AAPL"
-        assert cached.has_full_details is False  # Partial from description
+        # Verify we got results and API was called
+        assert len(result) == 1
+        assert result[0].contract.conId == 265598
+        assert result[0].contract.symbol == "AAPL"
+        assert result[0].has_full_details is False  # Partial from description
+        mock_ibsocket.reqMatchingSymbols.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_req_matching_symbols_filters_invalid_conids(self) -> None:
         """Test reqMatchingSymbols filters out contracts with conId <= 0."""
         client = TWSClient("127.0.0.1", 7497, 1, timeout=5.0)
 
-        # Create mock ibsocket
+        # Create mock ibsocket with contract_tracker
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
         mock_ibsocket.get_cached_data.return_value = None
@@ -290,7 +327,23 @@ class TestTWSClientReqMatchingSymbols:
         invalid_desc = ContractDescription()
         invalid_desc.contract = invalid_contract
 
-        # Setup create_snapshot mock
+        # Only valid contract should be cached
+        valid_cached = CachedContract.from_contract_description(valid_desc)
+
+        # Mock contract_tracker - first call returns empty (cache miss), second returns only valid
+        call_count = [0]
+
+        def get_by_symbol_prefix_side_effect(pattern: str) -> list[CachedContract]:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return []  # First call: cache miss
+            return [valid_cached]  # Second call: only valid contracts in tracker
+
+        mock_ibsocket.contract_tracker.get_by_symbol_prefix.side_effect = (
+            get_by_symbol_prefix_side_effect
+        )
+
+        # Setup create_snapshot mock - returns both valid and invalid
         def create_snapshot_side_effect(
             business_key: str, *, timeout: float | None = 5
         ) -> tuple[int | None, Awaitable[Any]]:
@@ -316,7 +369,7 @@ class TestTWSClientReqMatchingSymbols:
 
         result = await client.reqMatchingSymbols("AAPL")
 
-        # Only valid contract should be returned
+        # Only valid contract should be returned (filtering happens in symbolSamples callback)
         assert len(result) == 1
         assert result[0].contract.conId == 265598
 
@@ -326,7 +379,7 @@ class TestTWSClientReqContractDetails:
 
     @pytest.mark.asyncio
     async def test_req_contract_details_returns_list(self) -> None:
-        """Test reqContractDetails returns CachedContract list from cache."""
+        """Test reqContractDetails returns CachedContract list from ContractTracker cache."""
         client = TWSClient("127.0.0.1", 7497, 1)
 
         # Create test contract and details
@@ -340,13 +393,17 @@ class TestTWSClientReqContractDetails:
         details.contract = contract
         details.longName = "Apple Inc"
 
-        # Pre-populate cache with full details (simulating a previous fetch)
+        # Create cached contract with full details
         cached_contract = CachedContract.from_contract_details(details)
-        client._TWSClient__contracts_cache[265598] = cached_contract  # type: ignore[attr-defined]
 
-        # Create mock ibsocket (won't be called due to cache hit)
+        # Create mock ibsocket with contract_tracker
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
+
+        # Mock contract_tracker.get_full_details to return cached data (cache hit)
+        mock_ibsocket.contract_tracker.get_full_details.return_value = cached_contract
+        mock_ibsocket.contract_tracker._details = {265598: cached_contract}
+
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
         # Query by conId (direct cache hit)
@@ -365,7 +422,7 @@ class TestTWSClientReqContractDetails:
 
     @pytest.mark.asyncio
     async def test_req_contract_details_cache_hit_returns_cached_data(self) -> None:
-        """Test reqContractDetails returns cached data when available at TWSClient level."""
+        """Test reqContractDetails returns cached data from ContractTracker."""
         client = TWSClient("127.0.0.1", 7497, 1)
 
         # Create test contract and details
@@ -379,13 +436,16 @@ class TestTWSClientReqContractDetails:
         details.contract = contract
         details.longName = "Apple Inc (Cached)"
 
-        # Pre-populate TWSClient.__contracts_cache with full details
         cached_contract = CachedContract.from_contract_details(details)
-        client._TWSClient__contracts_cache[265598] = cached_contract  # type: ignore[attr-defined]
 
-        # Create mock ibsocket (won't be called due to cache hit)
+        # Create mock ibsocket with contract_tracker
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
+
+        # Mock contract_tracker.get_full_details to return cached data
+        mock_ibsocket.contract_tracker.get_full_details.return_value = cached_contract
+        mock_ibsocket.contract_tracker._details = {265598: cached_contract}
+
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
         query_contract = Contract()
@@ -403,31 +463,34 @@ class TestTWSClientReqContractDetails:
         mock_ibsocket.reqContractDetails.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_req_contract_details_uses_contracts_cache(self) -> None:
-        """Test reqContractDetails returns from __contracts_cache when has_full_details=True."""
+    async def test_req_contract_details_uses_contract_tracker(self) -> None:
+        """Test reqContractDetails returns from ContractTracker when has_full_details=True."""
         from trading_api.providers.tws.cached_contract import CachedContract
 
         client = TWSClient("127.0.0.1", 7497, 1)
 
-        # Create mock ibsocket
+        # Create mock ibsocket with contract_tracker
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
 
-        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
-
-        # Pre-populate contracts cache with full details
+        # Pre-populate tracker with full details
         contract = Contract()
         contract.symbol = "AAPL"
         contract.secType = "STK"
         contract.exchange = "SMART"
-        contract.primaryExchange = "SMART"  # Match query contract's exchange
+        contract.primaryExchange = "SMART"
         contract.conId = 265598
         details = ContractDetails()
         details.contract = contract
-        details.longName = "Apple Inc (From Cache)"
+        details.longName = "Apple Inc (From Tracker)"
 
         cached_contract = CachedContract.from_contract_details(details)
-        client._TWSClient__contracts_cache[265598] = cached_contract  # type: ignore[attr-defined]
+
+        # Mock contract_tracker.get_full_details to return cached data
+        mock_ibsocket.contract_tracker.get_full_details.return_value = cached_contract
+        mock_ibsocket.contract_tracker._details = {265598: cached_contract}
+
+        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
         # Query with matching ticker and conId (direct cache hit)
         query_contract = Contract()
@@ -439,7 +502,7 @@ class TestTWSClientReqContractDetails:
         result = await client.reqContractDetails(query_contract)
 
         assert len(result) == 1
-        assert result[0].longName == "Apple Inc (From Cache)"
+        assert result[0].longName == "Apple Inc (From Tracker)"
         # Neither ibsocket cache nor API should be called
         mock_ibsocket.get_cached_data.assert_not_called()
         mock_ibsocket.create_snapshot.assert_not_called()
@@ -654,10 +717,13 @@ class TestTWSClientErrorHandling:
         """Test TimeoutError is raised when request times out."""
         client = TWSClient("127.0.0.1", 7497, 1, timeout=0.05)
 
-        # Create mock ibsocket
+        # Create mock ibsocket with contract_tracker
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
         mock_ibsocket.get_cached_data.return_value = None  # No cache hit
+
+        # Mock contract_tracker to return empty (cache miss) - triggers API call
+        mock_ibsocket.contract_tracker.get_by_symbol_prefix.return_value = []
 
         # Setup create_snapshot that returns a future that never resolves
         def create_snapshot_side_effect(
