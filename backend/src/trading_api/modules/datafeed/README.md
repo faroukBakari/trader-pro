@@ -1,7 +1,7 @@
 # Datafeed Module
 
 **Status**: ✅ Production Ready  
-**Last Updated**: January 7, 2026  
+**Last Updated**: January 16, 2026  
 **Related Files**: `backend/src/trading_api/modules/datafeed/`
 
 ---
@@ -52,6 +52,8 @@ class DatafeedService(WsRouteService):
 ```
 
 **[DECISION]**: DatafeedService is a thin BFF layer - all business logic lives in the `DatafeedCapability` provider (e.g., `TWSDatafeedProvider`).
+
+**[PATTERN]**: Simple Topic Controller - Service subscribes to the provider once per symbol per topic. Symbol mutualization (deduplication) is handled at the provider/tracker level (`QuoteTracker` manages subscription reference counting internally).
 
 ### Provider Delegation
 
@@ -115,7 +117,9 @@ quotes:{"symbols":["AAPL","GOOGL"],"fast_symbols":["MSFT"]}
 
 ### Topic Lifecycle
 
-**Bars Subscription** - Direct 1:1 mapping between topic and provider subscription:
+Both `bars` and `quotes` topics follow **direct 1:1 mapping** between topics and provider subscriptions:
+
+**Bars Subscription:**
 
 ```python
 # In DatafeedService.create_topic()
@@ -129,28 +133,34 @@ if topic_type == "bars":
     self._topic_to_subs[topic] = [subscription_id]
 ```
 
-**Quotes Subscription** - Deduplication pattern shares provider subscriptions across topics:
+**Quotes Subscription - Topic-Level Subscriptions:**
 
 ```python
-# Internal state for quote deduplication
-_quote_callbacks: dict[str, dict[str, tuple[UpdateCallback, ErrorCallback]]]  # symbol → {topic → callbacks}
-_quote_symbol_to_sub_id: dict[str, str]  # symbol → subscription_id
-
 # In DatafeedService.create_topic()
 elif topic_type == "quotes":
+    all_symbols = list(set(request.symbols + request.fast_symbols))
+    subscription_ids = self._topic_to_subs.setdefault(topic, [])
+    
     for symbol in all_symbols:
-        # Only subscribe once per symbol (multiple topics may share same symbol)
-        if symbol not in self._quote_callbacks:
-            callback_wrapper, on_provider_error = self.quote_cb_wapper(symbol)
-            subscription_id = self.datafeed_provider.subscribe_market_data(
-                ticker_name=symbol,
-                callback=callback_wrapper,
-                on_error=on_provider_error,
-            )
-            self._quote_symbol_to_sub_id[symbol] = subscription_id
+        subscription_id = await self.datafeed_provider.subscribe_market_data(
+            ticker_name=symbol,
+            callback=topic_update,  # Same callback for all symbols in this topic
+            on_error=on_sub_error,
+        )
+        subscription_ids.append(subscription_id)
+```
 
-        # Register the topic's callbacks for this symbol
-        self._quote_callbacks.setdefault(symbol, {})[topic] = (topic_update, topic_error)
+**Key Points:**
+
+- **Simple Topic Controller**: Service creates one provider subscription per symbol per topic (no service-level deduplication)
+- **Provider-Level Mutualization**: If multiple topics request the same symbol, the provider (`TWSDatafeedProvider` + `QuoteTracker`) handles subscription reference counting and shares the underlying TWS subscription
+- **Topic Cleanup**: When `remove_topic()` is called, all subscription IDs for that topic are unsubscribed
+- **Error Handling**: Provider errors are classified as recoverable/non-recoverable at the service level via `_is_error_recoverable()`
+
+**Debug Logging:**
+
+```bash
+export DEBUG_TWS_DATAFEED=true  # Enables verbose topic lifecycle logs
 ```
 
 **Quote Callback Wrapper** - Multiplexes provider updates to all subscribed topics:

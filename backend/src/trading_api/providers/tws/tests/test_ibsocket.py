@@ -18,7 +18,7 @@ from decimal import Decimal
 from unittest.mock import MagicMock, Mock
 
 import pytest
-from ibapi.common import BarData, TickAttrib
+from ibapi.common import BarData
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
 from trading_api.models.exceptions import ProviderException
@@ -682,167 +682,6 @@ class TestIBSocketNotifyStream:
 # =============================================================================
 
 
-class TestIBSocketTickCallbacks:
-    """Test tickPrice, tickSize, tickString - field updates + notifications."""
-
-    def test_tick_price_updates_stream_data(self, running_ibsocket: IBSocket) -> None:
-        """Test tickPrice updates stream_data with price."""
-        from trading_api.providers.tws.tws_models import StreamData
-
-        business_key = "datafeed:Quote:NASDAQ:TEST"
-        tws_key = "req_42"
-
-        # Setup stream data
-        running_ibsocket._business_to_tws_key[business_key] = tws_key
-        running_ibsocket._stream_data[tws_key] = StreamData(business_key)
-        running_ibsocket._stream_data[tws_key].append({})
-
-        # TickType 1 = BID
-        attrib = TickAttrib()
-        running_ibsocket.tickPrice(42, 1, 150.25, attrib)
-
-        assert running_ibsocket._stream_data[tws_key][-1]["bid"] == 150.25
-
-    def test_tick_price_ignores_same_value(self, running_ibsocket: IBSocket) -> None:
-        """Test tickPrice doesn't notify if value unchanged."""
-        from trading_api.providers.tws.tws_models import StreamData
-
-        business_key = "datafeed:Quote:NASDAQ:TEST"
-        tws_key = "req_42"
-
-        # Setup stream with existing bid
-        running_ibsocket._business_to_tws_key[business_key] = tws_key
-        stream = StreamData(business_key)
-        stream.append({"bid": 150.25})
-        running_ibsocket._stream_data[tws_key] = stream
-
-        # Track notifications
-        notify_count = [0]
-        original_notify = running_ibsocket._notify_stream
-
-        def mock_notify(key: str, s: StreamData) -> None:
-            notify_count[0] += 1
-            original_notify(key, s)
-
-        running_ibsocket._notify_stream = mock_notify  # type: ignore
-
-        # Same price - should not notify
-        attrib = TickAttrib()
-        running_ibsocket.tickPrice(42, 1, 150.25, attrib)
-
-        assert notify_count[0] == 0
-
-    def test_tick_price_notifies_on_change(self, running_ibsocket: IBSocket) -> None:
-        """Test tickPrice notifies when value changes."""
-        from trading_api.providers.tws.tws_models import StreamData
-
-        business_key = "datafeed:Quote:NASDAQ:TEST"
-        tws_key = "req_42"
-
-        # Setup stream with existing bid
-        running_ibsocket._business_to_tws_key[business_key] = tws_key
-        stream = StreamData(business_key)
-        stream.append({"bid": 150.25})
-        running_ibsocket._stream_data[tws_key] = stream
-
-        # Track notifications
-        notify_calls: list[tuple[str, list]] = []
-
-        def mock_notify(key: str, s: StreamData) -> None:
-            notify_calls.append((key, list(s.updated_fields)))
-
-        running_ibsocket._notify_stream = mock_notify  # type: ignore
-
-        # Different price - should notify
-        attrib = TickAttrib()
-        running_ibsocket.tickPrice(42, 1, 150.50, attrib)
-
-        assert len(notify_calls) == 1
-        assert notify_calls[0][1] == ["bid"]
-
-    def test_tick_price_auto_completes_snapshot(
-        self, running_ibsocket: IBSocket
-    ) -> None:
-        """Test tickPrice auto-completes snapshot when bid/ask/last received."""
-        from trading_api.providers.tws.tws_models import StreamData
-
-        business_key = "datafeed:Quote:NASDAQ:TEST"
-        tws_key = "req_42"
-
-        # Setup stream data
-        running_ibsocket._business_to_tws_key[business_key] = tws_key
-        stream = StreamData(business_key)
-        stream.append({"bid": 150.0, "ask": 150.5})
-        running_ibsocket._stream_data[tws_key] = stream
-
-        assert stream.snapshot_complete is False
-
-        # TickType 4 = LAST - should complete snapshot
-        attrib = TickAttrib()
-        running_ibsocket.tickPrice(42, 4, 150.25, attrib)
-
-        assert stream.snapshot_complete is True
-
-    def test_tick_size_updates_stream_data(self, running_ibsocket: IBSocket) -> None:
-        """Test tickSize updates stream_data with size."""
-        from trading_api.providers.tws.tws_models import StreamData
-
-        business_key = "datafeed:Quote:NASDAQ:TEST"
-        tws_key = "req_42"
-
-        running_ibsocket._business_to_tws_key[business_key] = tws_key
-        running_ibsocket._stream_data[tws_key] = StreamData(business_key)
-        running_ibsocket._stream_data[tws_key].append({})
-
-        # TickType 0 = BID_SIZE
-        running_ibsocket.tickSize(42, 0, Decimal("100"))
-
-        assert running_ibsocket._stream_data[tws_key][-1]["bid_size"] == Decimal("100")
-
-    def test_tick_string_updates_stream_data(self, running_ibsocket: IBSocket) -> None:
-        """Test tickString updates stream_data with string value."""
-        from trading_api.providers.tws.tws_models import StreamData
-
-        business_key = "datafeed:Quote:NASDAQ:TEST"
-        tws_key = "req_42"
-
-        running_ibsocket._business_to_tws_key[business_key] = tws_key
-        running_ibsocket._stream_data[tws_key] = StreamData(business_key)
-        running_ibsocket._stream_data[tws_key].append({})
-
-        # TickType 45 = LAST_TIMESTAMP
-        running_ibsocket.tickString(42, 45, "1702656000")
-
-        assert (
-            running_ibsocket._stream_data[tws_key][-1]["last_timestamp"] == "1702656000"
-        )
-
-    def test_tick_generic_updates_stream_data(self, running_ibsocket: IBSocket) -> None:
-        """Test tickGeneric updates stream_data with float value."""
-        from trading_api.providers.tws.tws_models import StreamData
-
-        business_key = "datafeed:Quote:NASDAQ:TEST"
-        tws_key = "req_42"
-
-        running_ibsocket._business_to_tws_key[business_key] = tws_key
-        running_ibsocket._stream_data[tws_key] = StreamData(business_key)
-        running_ibsocket._stream_data[tws_key].append({})
-
-        # TickType 24 = OPTION_IMPLIED_VOL
-        running_ibsocket.tickGeneric(42, 24, 0.25)
-
-        assert running_ibsocket._stream_data[tws_key][-1]["option_implied_vol"] == 0.25
-
-    def test_tick_ignores_unknown_stream(self, running_ibsocket: IBSocket) -> None:
-        """Test tick callbacks handle unknown reqId gracefully."""
-        # Should not raise for unknown reqId
-        attrib = TickAttrib()
-        running_ibsocket.tickPrice(99999, 1, 150.0, attrib)
-        running_ibsocket.tickSize(99999, 0, Decimal("100"))
-        running_ibsocket.tickString(99999, 45, "12345")
-        running_ibsocket.tickGeneric(99999, 23, 0.5)
-
-
 # =============================================================================
 # TestIBSocketHistoricalCallbacks
 # =============================================================================
@@ -955,71 +794,6 @@ class TestIBSocketHistoricalCallbacks:
 # =============================================================================
 # TestIBSocketSnapshotEnd
 # =============================================================================
-
-
-class TestIBSocketSnapshotEnd:
-    """Test tickSnapshotEnd callback behavior."""
-
-    @pytest.mark.asyncio
-    async def test_tick_snapshot_end_resolves_future(
-        self, running_ibsocket: IBSocket
-    ) -> None:
-        """Test tickSnapshotEnd resolves pending snapshot."""
-        business_key = "datafeed:Quote:NASDAQ:AAPL"
-
-        reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
-        assert reqId is not None, "Expected reqId from create_snapshot"
-        tws_key = f"req_{reqId}"
-
-        # Add data
-        running_ibsocket._update_stream_data(tws_key, {"bid": 150.0, "ask": 150.5})
-
-        # tickSnapshotEnd flags completion
-        running_ibsocket.tickSnapshotEnd(reqId)
-
-        await asyncio.sleep(0.05)
-
-        result = await awaitable
-        assert result[-1]["bid"] == 150.0
-
-    @pytest.mark.asyncio
-    async def test_tick_snapshot_end_preserves_active_stream(
-        self, running_ibsocket: IBSocket
-    ) -> None:
-        """Test tickSnapshotEnd does NOT clean up when stream hook exists."""
-        business_key = "datafeed:Quote:NASDAQ:AAPL"
-
-        async def callback(data: dict, fields: list) -> None:
-            pass
-
-        async def on_error(error: ProviderException) -> None:
-            pass
-
-        # Create snapshot first
-        reqId, snapshot_awaitable = running_ibsocket.create_snapshot(
-            business_key, timeout=5
-        )
-        assert reqId is not None, "Expected reqId from create_snapshot"
-        tws_key = f"req_{reqId}"
-
-        # Register stream hook (simulates active subscription, now a list of tuples)
-        running_ibsocket._stream_hooks[tws_key] = (
-            asyncio.get_event_loop(),
-            callback,
-            on_error,
-        )
-
-        # Add data and trigger snapshot end
-        running_ibsocket._update_stream_data(tws_key, {"bid": 150.0, "ask": 150.5})
-        running_ibsocket.tickSnapshotEnd(reqId)
-
-        await asyncio.sleep(0.05)
-
-        await snapshot_awaitable
-
-        # Stream data should be preserved (active subscription)
-        assert tws_key in running_ibsocket._stream_data
-        assert tws_key in running_ibsocket._stream_hooks
 
 
 # =============================================================================
@@ -1528,39 +1302,6 @@ class TestIBSocketContractDetailsCallback:
 # =============================================================================
 # TestIBSocketMarketDataType
 # =============================================================================
-
-
-class TestIBSocketMarketDataType:
-    """Test marketDataType and tickReqParams callbacks."""
-
-    def test_market_data_type_updates_stream(self, running_ibsocket: IBSocket) -> None:
-        """Test marketDataType updates stream_data."""
-        business_key = "datafeed:Quote:NASDAQ:AAPL"
-        tws_key = "req_42"
-
-        running_ibsocket._business_to_tws_key[business_key] = tws_key
-        running_ibsocket._stream_data[tws_key] = StreamData(business_key)
-        running_ibsocket._stream_data[tws_key].append({})
-
-        running_ibsocket.marketDataType(42, 1)  # 1 = Live
-
-        assert running_ibsocket._stream_data[tws_key][-1]["market_data_type"] == 1
-
-    def test_tick_req_params_updates_stream(self, running_ibsocket: IBSocket) -> None:
-        """Test tickReqParams updates stream_data."""
-        business_key = "datafeed:Quote:NASDAQ:AAPL"
-        tws_key = "req_42"
-
-        running_ibsocket._business_to_tws_key[business_key] = tws_key
-        running_ibsocket._stream_data[tws_key] = StreamData(business_key)
-        running_ibsocket._stream_data[tws_key].append({})
-
-        running_ibsocket.tickReqParams(42, 0.01, "NASDAQ", 3)
-
-        stream = running_ibsocket._stream_data[tws_key]
-        assert stream[-1]["min_tick"] == 0.01
-        assert stream[-1]["bbo_exchange"] == "NASDAQ"
-        assert stream[-1]["snapshot_permissions"] == 3
 
 
 # =============================================================================

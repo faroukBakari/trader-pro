@@ -628,7 +628,7 @@ describe('wsClientBase', () => {
         expect(onUpdate).not.toHaveBeenCalled()
       })
 
-      it('should warn when no subscription found for update topic', async () => {
+      it('should throw when no subscription found for update topic', async () => {
         const wsBase = WebSocketBase.getInstance('ws://localhost:8000/ws')
         const onUpdate = vi.fn()
         const onError = vi.fn()
@@ -648,11 +648,13 @@ describe('wsClientBase', () => {
 
         await subscribePromise
 
-        // Send update for different topic
-        mockWs.simulateMessage({
-          type: 'orders.update',
-          payload: { topic: 'orders:UNKNOWN', payload: { orderId: '999' } },
-        })
+        // Send update for different topic - should throw
+        expect(() => {
+          mockWs.simulateMessage({
+            type: 'orders.update',
+            payload: { topic: 'orders:UNKNOWN', payload: { orderId: '999' } },
+          })
+        }).toThrow('No active subscription for topic: orders:UNKNOWN')
 
         // Should not call the subscribed callback
         expect(onUpdate).not.toHaveBeenCalled()

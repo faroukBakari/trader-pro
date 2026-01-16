@@ -17,6 +17,7 @@ Note: Helper method tests (_map_timeframe, _calculate_duration)
 
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import cast
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -25,7 +26,6 @@ from ibapi.contract import Contract, ContractDescription, ContractDetails
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import (
     Bar,
-    QuoteData,
     Resolution,
     SearchSymbolResultItem,
     SymbolInfo,
@@ -491,16 +491,54 @@ class TestGetQuotesSnapshot:
 
     @pytest.mark.asyncio
     async def test_get_quotes_snapshot_returns_quotes(self) -> None:
-        """Test get_quotes_snapshot returns QuoteData list.
+        """Test get_quotes_snapshot returns QuoteData list."""
+        from trading_api.models.market import QuoteData, QuoteValues
 
-        Note: Current implementation returns basic quote data structures
-        based on ticker names without actual market data.
-        """
         mock_client = AsyncMock()
-        # Return proper business_key for each call
+        # Return proper QuoteData for each call
         mock_client.reqQuoteSnapshot.side_effect = [
-            {"business_key": "datafeed:Quote:NASDAQ:NASDAQ:AAPL"},
-            {"business_key": "datafeed:Quote:NASDAQ:NASDAQ:MSFT"},
+            QuoteData(
+                s="ok",
+                n="NASDAQ:AAPL:STK",
+                v=QuoteValues(
+                    lp=150.0,
+                    ask=150.5,
+                    bid=150.0,
+                    spread=0.5,
+                    open_price=149.0,
+                    high_price=151.0,
+                    low_price=148.5,
+                    prev_close_price=149.5,
+                    volume=1000,
+                    ch=0.5,
+                    chp=0.33,
+                    short_name="AAPL",
+                    exchange="NASDAQ",
+                    description="Quote for AAPL",
+                    original_name="AAPL",
+                ),
+            ),
+            QuoteData(
+                s="ok",
+                n="NASDAQ:MSFT:STK",
+                v=QuoteValues(
+                    lp=250.0,
+                    ask=250.5,
+                    bid=250.0,
+                    spread=0.5,
+                    open_price=249.0,
+                    high_price=251.0,
+                    low_price=248.5,
+                    prev_close_price=249.5,
+                    volume=2000,
+                    ch=0.5,
+                    chp=0.20,
+                    short_name="MSFT",
+                    exchange="NASDAQ",
+                    description="Quote for MSFT",
+                    original_name="MSFT",
+                ),
+            ),
         ]
         _setup_mock_client_with_contracts(mock_client, "NASDAQ:AAPL")
 
@@ -514,14 +552,38 @@ class TestGetQuotesSnapshot:
 
         assert len(results) == 2
         assert all(isinstance(r, QuoteData) for r in results)
+        first_values = cast(QuoteValues, results[0].v)
+        second_values = cast(QuoteValues, results[1].v)
+        assert first_values.lp == 150.0
+        assert second_values.lp == 250.0
 
     @pytest.mark.asyncio
     async def test_get_quotes_snapshot_single_symbol(self) -> None:
         """Test get_quotes_snapshot with single symbol."""
+        from trading_api.models.market import QuoteData, QuoteValues
+
         mock_client = AsyncMock()
-        mock_client.reqQuoteSnapshot.return_value = {
-            "business_key": "datafeed:Quote:NASDAQ:NASDAQ:AAPL"
-        }
+        mock_client.reqQuoteSnapshot.return_value = QuoteData(
+            s="ok",
+            n="NASDAQ:AAPL:STK",
+            v=QuoteValues(
+                lp=150.0,
+                ask=150.5,
+                bid=150.0,
+                spread=0.5,
+                open_price=149.0,
+                high_price=151.0,
+                low_price=148.5,
+                prev_close_price=149.5,
+                volume=1000,
+                ch=0.5,
+                chp=0.33,
+                short_name="AAPL",
+                exchange="NASDAQ",
+                description="Quote for AAPL",
+                original_name="AAPL",
+            ),
+        )
         _setup_mock_client_with_contracts(mock_client, "NASDAQ:AAPL")
 
         with patch(
@@ -537,11 +599,31 @@ class TestGetQuotesSnapshot:
     @pytest.mark.asyncio
     async def test_get_quotes_snapshot_uses_ticker_name_as_symbol(self) -> None:
         """Test get_quotes_snapshot uses full ticker_name as symbol."""
+        from trading_api.models.market import QuoteData, QuoteValues
+
         mock_client = AsyncMock()
-        # Mock returns dict with business_key field used by tws_ticks_to_quote_data
-        mock_client.reqQuoteSnapshot.return_value = {
-            "business_key": "datafeed:Quote:NASDAQ:NASDAQ:AAPL"
-        }
+        # Mock returns QuoteData with ticker name
+        mock_client.reqQuoteSnapshot.return_value = QuoteData(
+            s="ok",
+            n="NASDAQ:AAPL:STK",
+            v=QuoteValues(
+                lp=150.0,
+                ask=150.5,
+                bid=150.0,
+                spread=0.5,
+                open_price=149.0,
+                high_price=151.0,
+                low_price=148.5,
+                prev_close_price=149.5,
+                volume=1000,
+                ch=0.5,
+                chp=0.33,
+                short_name="AAPL",
+                exchange="NASDAQ",
+                description="Quote for AAPL",
+                original_name="AAPL",
+            ),
+        )
         _setup_mock_client_with_contracts(mock_client, "NASDAQ:AAPL")
 
         with patch(
@@ -551,8 +633,8 @@ class TestGetQuotesSnapshot:
             provider = TWSDatafeedProvider()
             results = await provider.get_quotes_snapshot(["NASDAQ:AAPL"])
 
-        # Verify the symbol name is the full ticker_name (extracted from business_key)
-        assert results[0].n == "NASDAQ:AAPL"
+        # Verify the symbol name is the full ticker_name
+        assert results[0].n == "NASDAQ:AAPL:STK"
 
 
 class TestSubscriptionMethods:
@@ -619,12 +701,12 @@ class TestSubscriptionMethods:
 
     @pytest.mark.asyncio
     async def test_unsubscribe_realtime_bars_calls_cancel(self) -> None:
-        """Test unsubscribe_realtime_bars calls cancel_data_stream."""
+        """Test unsubscribe_realtime_bars calls cancelDataSubscription."""
         from trading_api.models.exceptions import TradingApiException
 
         mock_client = Mock()
         mock_client.reqBarDataStream = Mock(return_value="NASDAQ:AAPL@5 mins")
-        mock_client.cancel_data_stream = Mock()
+        mock_client.cancelDataSubscription = Mock()
         _setup_mock_client_with_contracts(mock_client, "NASDAQ:AAPL")
 
         with patch(
@@ -647,16 +729,16 @@ class TestSubscriptionMethods:
             provider.unsubscribe_realtime_bars(sub_id)
 
             # Verify cancel was called
-            mock_client.cancel_data_stream.assert_called_once_with(sub_id)
+            mock_client.cancelDataSubscription.assert_called_once_with(sub_id)
 
     @pytest.mark.asyncio
     async def test_unsubscribe_market_data_calls_cancel(self) -> None:
-        """Test unsubscribe_market_data calls cancel_data_stream."""
+        """Test unsubscribe_market_data calls cancelDataSubscription."""
         from trading_api.models.exceptions import TradingApiException
 
         mock_client = Mock()
         mock_client.reqMktDataStream = Mock(return_value="NASDAQ:AAPL")
-        mock_client.cancel_data_stream = Mock()
+        mock_client.cancelDataSubscription = Mock()
         _setup_mock_client_with_contracts(mock_client, "NASDAQ:AAPL")
 
         with patch(
@@ -677,4 +759,4 @@ class TestSubscriptionMethods:
 
             provider.unsubscribe_market_data(sub_id)
 
-            mock_client.cancel_data_stream.assert_called_once_with(sub_id)
+            mock_client.cancelDataSubscription.assert_called_once_with(sub_id)

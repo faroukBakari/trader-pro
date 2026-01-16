@@ -368,7 +368,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private wsAdapter: WsAdapterType
   private wsFallback?: Partial<WsAdapterType>
 
-  debug_datafeed: boolean = true
+  private readonly debug_datafeed: boolean = true
+  private activeQuoteSubscriptions = new Map<string, string>()
+
 
   private pendingRequests = new Map<string, {
     promise: Promise<unknown>
@@ -588,14 +590,23 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
           onRealtimeCallback([quoteData])
         }
       ).then((topic) => {
-        if (this.debug_datafeed) console.log(
-          `[Datafeed] ${listenerGUID} Quote subscription started : ${topic}`,
-        )
+        this.activeQuoteSubscriptions.set(listenerGUID, topic)
+        if (this.debug_datafeed) {
+          console.warn(`[Datafeed] active subscriptions: ${Array.from(
+            this.activeQuoteSubscriptions.entries()).map(([key, value]) => `${key}: ${value}`).join(' | ')}`
+          )
+        }
       })
   }
   unsubscribeQuotes(listenerGUID: string): void {
     this._getWsAdapter().quotes?.unsubscribe(listenerGUID).then(() => {
       if (this.debug_datafeed) console.log(`[Datafeed] Unsubscribed from quotes successfully: ${listenerGUID}`)
+      this.activeQuoteSubscriptions.delete(listenerGUID)
+      if (this.debug_datafeed) {
+        console.warn(`[Datafeed] active subscriptions: ${Array.from(
+          this.activeQuoteSubscriptions.entries()).map(([key, value]) => `${key}: ${value}`).join(' | ')}`
+        )
+      }
     })
   }
 }

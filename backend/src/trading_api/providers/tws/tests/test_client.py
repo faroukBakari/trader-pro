@@ -609,39 +609,8 @@ class TestTWSClientStreamMethods:
         mock_ibsocket.create_stream.assert_called_once()
         mock_ibsocket.reqBars.assert_called_once()
 
-    def test_req_mkt_data_stream_registers_callback(self) -> None:
-        """Test reqMktDataStream registers stream with callback."""
-        from trading_api.models.exceptions import ProviderException
-
-        client = TWSClient("127.0.0.1", 7497, 1)
-
-        # Create mock ibsocket
-        mock_ibsocket = MagicMock()
-        mock_ibsocket.running = True
-        mock_ibsocket.create_stream = MagicMock(return_value=1)  # Returns reqId
-        mock_ibsocket.reqQuote = MagicMock()
-
-        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
-
-        contract = Contract()
-        contract.symbol = "AAPL"
-        contract.secType = "STK"
-        contract.exchange = "SMART"
-
-        async def callback(data: dict[str, Any], fields: list[str]) -> None:
-            pass
-
-        async def on_error(exc: ProviderException) -> None:
-            pass
-
-        stream_key = client.reqMktDataStream(contract, callback, on_error)
-
-        assert isinstance(stream_key, str)
-        mock_ibsocket.create_stream.assert_called_once()
-        mock_ibsocket.reqQuote.assert_called_once()
-
     def test_cancel_bar_data_stream_sends_cancel(self) -> None:
-        """Test cancel_data_stream sends cancel message."""
+        """Test cancelDataSubscription sends cancel message."""
         from trading_api.models.exceptions import ProviderException
 
         client = TWSClient("127.0.0.1", 7497, 1)
@@ -670,41 +639,7 @@ class TestTWSClientStreamMethods:
         stream_key = client.reqBarDataStream(contract, "5 mins", callback, on_error)
 
         # Cancel the stream
-        client.cancel_data_stream(stream_key)
-
-        mock_ibsocket.remove_stream.assert_called_once_with(stream_key)
-
-    def test_cancel_mkt_data_stream_sends_cancel(self) -> None:
-        """Test cancel_data_stream sends cancel message."""
-        from trading_api.models.exceptions import ProviderException
-
-        client = TWSClient("127.0.0.1", 7497, 1)
-
-        # Create mock ibsocket
-        mock_ibsocket = MagicMock()
-        mock_ibsocket.running = True
-        mock_ibsocket.create_stream = MagicMock(return_value=1)
-        mock_ibsocket.reqQuote = MagicMock()
-        mock_ibsocket.remove_stream = MagicMock()
-
-        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
-
-        contract = Contract()
-        contract.symbol = "AAPL"
-        contract.secType = "STK"
-        contract.exchange = "SMART"
-
-        async def callback(data: dict[str, Any], fields: list[str]) -> None:
-            pass
-
-        async def on_error(exc: ProviderException) -> None:
-            pass
-
-        # First create a stream
-        stream_key = client.reqMktDataStream(contract, callback, on_error)
-
-        # Cancel the stream
-        client.cancel_data_stream(stream_key)
+        client.cancelDataSubscription(stream_key)
 
         mock_ibsocket.remove_stream.assert_called_once_with(stream_key)
 

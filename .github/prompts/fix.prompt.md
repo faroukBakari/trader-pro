@@ -1,6 +1,6 @@
 ---
 agent: "agent"
-model: "Claude Sonnet 4.5"
+model: "Claude Opus 4.5"
 name: "fix-v1"
 description: "End-to-end issue resolution: Diagnose, Plan, Fix, and Validate."
 ---

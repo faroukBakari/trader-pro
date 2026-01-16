@@ -378,7 +378,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 ### Feature Implementation Chains
 
 - **REST API Development**: `API-METHODOLOGY.md` → `MODULAR_BACKEND_ARCHITECTURE.md` → `SPECS_AND_CLIENT_GEN.md`
-- **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `ERROR-MANAGEMENT.md` (subscription errors)
+- **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `ERROR-MANAGEMENT.md` (subscription errors) + `providers/tws/README.md` (QuoteTracker)
 - **Authentication**: `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
 - **Error Handling**: `ERROR-MANAGEMENT.md` → `PROVIDER-SYSTEM.md` (providers) + `BACKEND_TESTING.md` (testing) + `services/README.md` (frontend patterns)
 - **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BUNDLE-MAINTENANCE.md` → `public/README.md`
@@ -455,7 +455,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### WebSocket & Real-Time
 
-**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming, subscription errors, error broadcasting, topic_error callback, SubscriptionError, recoverable errors, handleSubscriptionError, WebSocketError.fromSubscription, error callback pattern, throw to global handler
+**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming, subscription errors, error broadcasting, topic_error callback, SubscriptionError, recoverable errors, handleSubscriptionError, WebSocketError.fromSubscription, error callback pattern, throw to global handler, simple topic controller, mutualization, reference counting, centralized hooks, throw behavior, routeUpdateMessage, missing subscription errors, QuoteTracker
 
 **Scope**: WebSocket implementation (backend + frontend)  
 **Out of Scope**: HTTP polling, SSE, long-polling alternatives
@@ -464,6 +464,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - Frontend WebSocket architecture patterns (comprehensive)
 - **frontend/src/services/README.md** - Service-level error handling patterns
 - **frontend/docs/ERROR-MANAGEMENT.md** - WebSocket error handling (WebSocketError, service integration)
+- **backend/src/trading_api/providers/tws/README.md** - QuoteTracker implementation (section 2.5)
 
 ### Testing
 
@@ -602,6 +603,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2026-01-16**: QuoteTracker implementation - Added centralized quote subscription management (TWS README.md: QuoteTracker Quick Reference entry, Quote Subscription Pattern bullets, section 2.5 QuoteTracker architecture/threading model), updated Datafeed README.md (Simple Topic Controller pattern, topic-level subscriptions, mutualization delegation), updated WEBSOCKET-ARCHITECTURE.md v3.4.0 (Missing Subscription Errors subsection, throw behavior rationale), DOCUMENTATION-GUIDE.md (keywords: simple topic controller, mutualization, reference counting, centralized hooks, throw behavior, routeUpdateMessage; query patterns; WebSocket Development chain; timeline)
 - **2026-01-14**: ContractTracker SQLite persistence - Implemented two-tier contract caching (SQLite for descriptions, memory for details) following Tracker pattern, migrated TWSClient from `__contracts_cache` dict to lazy-loading ContractTracker, added CachedContract serialization (to_dict/from_dict), created SQLiteContractCache with WAL mode, updated TWS README.md (ContractTracker architecture, lazy loading flow, SQLite schema), test_client.py (mock contract_tracker instead of \_\_contracts_cache), tws_connection.py (symbolSamples callback persists to tracker, IBSocket owns contract_tracker), DOCUMENTATION-GUIDE.md (keywords, query pattern, timeline), test_cached_contract.py (serialization tests), test_contract_tracker.py (new file: 687 lines, 39 test methods)
 - **2026-01-14**: TradingView documentation restructure - Complete rewrite of `frontend/public/README.md` as bundle maintenance guide (reflecting forked semi-bundled reality, no vendor support, reverse engineering approach), updated `FRONTEND-EXCLUSIONS.md` (clarified production status of trading_terminal/), updated `tradingview/README.md` (maintenance-first messaging), updated DOCUMENTATION-GUIDE.md (bundle maintenance keywords, query patterns, dependencies, timeline)
 - **2026-01-14**: OrderTracker API simplification - Renamed `find_by_oca_group()` → `find_tracked_order(order)` for unified orderId+OCA lookup, extracted `find_oca_group()` for existence checking, updated TWS README.md (order modification section, OCA group submission flow, placeOcaGroup transmit logic with transmit_all strategy), test_client.py (mock method names), tws_connection.py (\_submit_order and placeOcaGroup simplification), DOCUMENTATION-GUIDE.md (keywords, timeline)
