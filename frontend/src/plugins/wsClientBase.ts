@@ -97,7 +97,7 @@ export class WebSocketBase {
       reconnect: true,
       maxReconnectAttempts: 5,
       reconnectDelay: 1000,
-      debug: false,
+      debug: true,
       wsUrl,
     }
     this.logger = this.config.debug
@@ -245,8 +245,7 @@ export class WebSocketBase {
     this.logger.debug(`${data.topic} message received:`, data)
     const subscription = this.subscriptions.get(data.topic)
     if (!subscription) {
-      this.logger.warn(`No subscription found for topic: ${data.topic}`)
-      return
+      throw new Error(`No active subscription for topic: ${data.topic}`)
     }
     subscription.onUpdate(data.payload)
   }
@@ -458,7 +457,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
   private debounceMs?: number
   private dataMapper: ((data: TBackendData) => TData)
 
-  private debug: boolean = false
+  private debug: boolean = true
   private logger: Console = this.debug
     ? console
     : ({ log: () => { }, warn: () => { }, error: () => { }, debug: () => { } } as Console)

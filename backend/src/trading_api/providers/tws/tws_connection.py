@@ -36,7 +36,7 @@ from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
-from typing import Any, TypeVar
+from typing import Any
 
 from ibapi.client_utils import (
     createCancelOrderRequestProto,
@@ -61,6 +61,7 @@ from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
 
 from trading_api.models.exceptions import ProviderException
+from trading_api.models.market import QuoteData
 from trading_api.providers.tws.account_tracker import (
     TWS_TAG_TO_FIELD,
     AccountTracker,
@@ -70,6 +71,7 @@ from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.contract_tracker import ContractTracker
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
 from trading_api.providers.tws.position_tracker import PositionTracker, TrackedPosition
+from trading_api.providers.tws.quote_tracker import QuoteTracker
 from trading_api.providers.tws.tws_mappers import (
     build_darkpool_contract,
     parse_ticker,
@@ -208,8 +210,14 @@ class IBSocketState:
 
 
 class IBSocket(EWrapper):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        quote_cb: Callable[[int, dict[str, int | float | str]], None] | None = None,
+        quote_err: Callable[[int, ProviderException], bool] | None = None,
+    ) -> None:
         # socket related attributes
+        self.quote_cb = quote_cb
+        self.quote_err = quote_err
         self._req_id_count: count[int] = count()
         self._socket_lock = threading.Lock()
         self._state = IBSocketState.READY
@@ -1047,58 +1055,6 @@ class IBSocket(EWrapper):
                 f"end_date_time='{end_date_time}', duration='{duration_str}', barSize='{bar_size}'"
             )
 
-    def reqQuote(self, reqId: int, contract: Contract) -> None:
-        assert (
-            isinstance(reqId, int) and reqId >= 0
-        ), "reqId must be a non-negative integer."
-        assert (
-            isinstance(contract, Contract) and contract.conId != 0
-        ), "contract must be an instance of Contract with a non-zero conId."
-        VERSION = 11
-        # Build message fields for REQ_MKT_DATA
-        mkt_data_fields: list[object] = [
-            VERSION,
-            reqId,
-            contract.conId,
-            contract.symbol,
-            contract.secType,
-            contract.lastTradeDateOrContractMonth,
-            contract.strike if contract.strike else "",
-            contract.right,
-            contract.multiplier,
-            contract.exchange,
-            contract.primaryExchange,
-            contract.currency,
-            contract.localSymbol,
-            contract.tradingClass,
-            0,  # deltaNeutralContract (False = no delta neutral)
-            get_asset_config(
-                contract.secType
-            ).generic_tick_list_str,  # Asset-type-specific tick list
-            0,  # snapshot
-            0,  # regulatorySnapshot
-            [],  # mktDataOptions (empty list)
-        ]
-
-        def cancelation_task() -> None:
-            VERSION = 2
-            self.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
-            if DEBUG_TWS_REQUEST:
-                debug_log(
-                    f"canceled quote data for reqId {reqId} symbol='{contract.symbol}'"
-                )
-
-        self._cleanup_hooks[f"req_{reqId}"] = (
-            asyncio.get_event_loop(),
-            cancelation_task,
-        )
-
-        self.send_message(OUT.REQ_MKT_DATA, mkt_data_fields)
-        if DEBUG_TWS_REQUEST:
-            debug_log(
-                f"requested quote data for reqId {reqId} symbol='{contract.symbol}'"
-            )
-
     def placeOrder(self, order_id: int, contract: Contract, order: Order) -> None:
         # Use protobuf encoding for server version >= 203
         assert (
@@ -1467,13 +1423,8 @@ class IBSocket(EWrapper):
         if field_name is None:
             return
 
-        self._update_stream_data(f"req_{reqId}", {field_name: price})
-
-        stream = self._stream_data.get(f"req_{reqId}")
-        if stream and not stream.snapshot_complete:
-            last_item = stream[-1]
-            if all(att in last_item for att in ["bid", "ask", "last"]):
-                self._flag_snapshot_complete(f"req_{reqId}")
+        if self.quote_cb is not None:
+            self.quote_cb(reqId, {field_name: price})
 
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
         """Accumulate size ticks for market data snapshot."""
@@ -1485,14 +1436,16 @@ class IBSocket(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        self._update_stream_data(f"req_{reqId}", {field_name: size})
+        if self.quote_cb is not None:
+            self.quote_cb(reqId, {field_name: float(size)})
 
     def marketDataType(self, reqId: int, marketDataType: int) -> None:
         """Set market data type for the request."""
         if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-        self._update_stream_data(f"req_{reqId}", {"market_data_type": marketDataType})
+        if self.quote_cb is not None:
+            self.quote_cb(reqId, {"market_data_type": marketDataType})
 
     def tickReqParams(
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
@@ -1502,14 +1455,15 @@ class IBSocket(EWrapper):
         if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-        self._update_stream_data(
-            f"req_{tickerId}",
-            {
-                "min_tick": minTick,
-                "bbo_exchange": bboExchange,
-                "snapshot_permissions": snapshotPermissions,
-            },
-        )
+        if self.quote_cb is not None:
+            self.quote_cb(
+                tickerId,
+                {
+                    "min_tick": minTick,
+                    "bbo_exchange": bboExchange,
+                    "snapshot_permissions": snapshotPermissions,
+                },
+            )
 
     def tickString(self, reqId: int, tickType: int, value: str) -> None:
         """Generic string tick for market data snapshot."""
@@ -1521,7 +1475,8 @@ class IBSocket(EWrapper):
         if field_name is None:
             return
 
-        self._update_stream_data(f"req_{reqId}", {field_name: value})
+        if self.quote_cb is not None:
+            self.quote_cb(reqId, {field_name: value})
 
     def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
         """Generic float tick for market data snapshot."""
@@ -1533,7 +1488,8 @@ class IBSocket(EWrapper):
         if field_name is None:
             return
 
-        self._update_stream_data(f"req_{reqId}", {field_name: value})
+        if self.quote_cb is not None:
+            self.quote_cb(reqId, {field_name: value})
 
     def tickSnapshotEnd(self, reqId: int) -> None:
         """When requesting market data snapshots, this market will indicate the
@@ -1542,7 +1498,8 @@ class IBSocket(EWrapper):
         if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-        self._flag_snapshot_complete(f"req_{reqId}")
+        if self.quote_cb is not None:
+            self.quote_cb(reqId, {"snapshot_complete": True})
 
     # === Order management ===
 
@@ -1754,7 +1711,21 @@ class IBSocket(EWrapper):
                     message=message,
                 )
             )
-        else:
+        elif not (
+            self.quote_err
+            and self.quote_err(
+                reqId,
+                ProviderException(
+                    provider="tws",
+                    capability="datafeed",
+                    code=f"PROVIDER_DATAFEED_{errorCode}",
+                    message=message,
+                    timestamp=(
+                        errorTime // 1000 if errorTime > 10_000_000_000 else errorTime
+                    ),
+                ),
+            )
+        ):
             # Request-related errors use req_{reqId} key format
             tws_key = f"req_{reqId}"
             self._handle_request_error(
@@ -1815,13 +1786,18 @@ class TWSClient:
         self._port = port
         self._client_id = client_id
         self._timeout = timeout
-        self.__ibsocket = IBSocket()
+        self.__ibsocket: IBSocket | None = None
+        self.__quote_tracker: QuoteTracker | None = None
 
     @property
     def ibsocket(self) -> IBSocket:
-        if not self.__ibsocket.running:
-            self.__ibsocket.disconnect()
-            self.__ibsocket = IBSocket()
+        if not (self.__ibsocket and self.__ibsocket.running):
+            if self.__ibsocket:
+                self.__ibsocket.disconnect()
+            if self.__quote_tracker:
+                self.__quote_tracker.reset()
+                self.__quote_tracker = None
+            self.__ibsocket = IBSocket(self._quoteUpdate, self._quoteError)
             self.__ibsocket.connect(
                 host=self._host,
                 port=self._port,
@@ -1832,41 +1808,66 @@ class TWSClient:
                 raise TimeoutError("Timeout waiting for TWS connection ready signal")
         return self.__ibsocket
 
-    # === Generic snapshot executor ===
+    @property
+    def quote_tracker(self) -> QuoteTracker:
+        if self.__quote_tracker is None:
+            self.__quote_tracker = QuoteTracker(
+                self._reqQuote, self._cancelQuote, self._timeout
+            )
 
-    _T = TypeVar("_T")
+        return self.__quote_tracker
 
-    async def _exec_snapshot(
-        self,
-        business_key: str,
-        request_fn: Callable[[int], None],
-        transform_fn: Callable[[list[dict[str, Any]]], _T],
-        timeout: float | None = None,
-    ) -> _T:
-        """Generic snapshot pattern executor.
+    def _reqQuote(self, contract: Contract) -> int:
+        assert (
+            isinstance(contract, Contract) and contract.conId != 0
+        ), "contract must be an instance of Contract with a non-zero conId."
+        reqId = self.ibsocket.next_req_id
+        VERSION = 11
+        # Build message fields for REQ_MKT_DATA
+        mkt_data_fields: list[object] = [
+            VERSION,
+            reqId,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            0,  # contract.deltaNeutralContract (False = no delta neutral)
+            (
+                get_asset_config(contract.secType).generic_tick_list_str
+                if contract.exchange != "OVERNIGHT"
+                else ""
+            ),  # Asset-type-specific tick list
+            0,  # snapshot
+            0,  # regulatorySnapshot
+            [],  # mktDataOptions (empty list)
+        ]
 
-        Handles the common cache-check → create-snapshot → request → await pattern.
+        self.ibsocket.send_message(OUT.REQ_MKT_DATA, mkt_data_fields)
+        if DEBUG_TWS_REQUEST:
+            debug_log(
+                f"requested quote data for reqId {reqId} symbol='{contract.symbol}'"
+            )
+        return reqId
 
-        Args:
-            business_key: Unique key for caching/deduplication
-            request_fn: Function called with reqId to issue the TWS request
-            transform_fn: Function to transform raw data list to return type
-            timeout: Optional timeout override
+    def _cancelQuote(self, reqId: int) -> None:
+        VERSION = 2
+        self.ibsocket.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"canceled quote data for reqId {reqId}'")
 
-        Returns:
-            Transformed result from TWS response
-        """
-        cached = self.ibsocket.get_cached_data(business_key)
-        if cached and cached.snapshot_complete:
-            return transform_fn(cached)
+    def _quoteUpdate(self, req_id: int, updates: dict[str, int | float | str]) -> None:
+        self.quote_tracker.update(req_id, updates)
 
-        reqId, coroutine = self.ibsocket.create_snapshot(
-            business_key, timeout=timeout or self._timeout
-        )
-        if reqId is not None:
-            request_fn(reqId)
-
-        return transform_fn(await coroutine)
+    def _quoteError(self, req_id: int, error: ProviderException) -> bool:
+        return self.quote_tracker.raise_error(req_id, error)
 
     # === Contract resolution and caching ===
 
@@ -2017,6 +2018,7 @@ class TWSClient:
 
         async def load_and_cache(con: Contract) -> None:
             details = next(iter(await self._reqContractDetails(con, timeout=timeout)))
+            details.contract = con  # ensure contract matches
             overnight_hours: str | None = None
             if darkpool_contract := build_darkpool_contract(details):
                 darkpool_details = next(
@@ -2126,21 +2128,20 @@ class TWSClient:
 
     async def reqQuoteSnapshot(
         self,
-        contract: Contract,
+        contract: CachedContract,
         timeout: float | None = None,
-    ) -> dict[str, Any]:
-        business_key = f"datafeed:Quote:{contract.exchange}:{ticker_name(contract)}"
+    ) -> QuoteData:
+        """Request a one-time market data snapshot for the given contract.
 
-        def transform(data: list[dict[str, Any]]) -> dict[str, Any]:
-            assert data, "No data received for quote snapshot"
-            return next(iter(data))
+        Uses TWS reqMktData with snapshot flag to get current market data.
 
-        return await self._exec_snapshot(
-            business_key,
-            lambda rid: self.ibsocket.reqQuote(rid, contract),
-            transform,
-            timeout,
-        )
+        Args:
+            contract: CachedContract to get quote for
+            timeout: Optional timeout override
+        Returns:
+            QuoteData with current market data
+        """
+        return await self.quote_tracker.request(contract, timeout=timeout)
 
     # === Real-time data subscriptions (continuous pattern) ===
 
@@ -2177,28 +2178,24 @@ class TWSClient:
 
     def reqMktDataStream(
         self,
-        contract: Contract,
+        contract: CachedContract,
         callback: Callable[
-            [dict[str, Any], list[str]],
+            [QuoteData],
             Coroutine[Any, Any, None],
         ],
         on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
         # **kwargs: Any,
     ) -> str:
-        business_key = f"datafeed:Quote:{contract.exchange}:{ticker_name(contract)}"
-        reqId: int | None = self.ibsocket.create_stream(
-            business_key,
+        """Request a real-time market data subscription (bars or market data)."""
+        return self.quote_tracker.subscribe(
+            contract,
             callback,
             on_error,
         )
 
-        if reqId is not None:
-            self.ibsocket.reqQuote(reqId, contract)
-
-        return business_key
-
-    def cancel_data_stream(self, stream_key: str) -> None:
+    def cancelDataSubscription(self, stream_key: str) -> None:
         """Cancel a real-time data subscription (bars or market data)."""
+        self.quote_tracker.unsubscribe(stream_key)
         self.ibsocket.remove_stream(stream_key)
 
     # === Order management ===
@@ -2558,4 +2555,5 @@ class TWSClient:
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""
-        self.__ibsocket.disconnect()
+        if self.__ibsocket and self.__ibsocket.running:
+            self.__ibsocket.disconnect()

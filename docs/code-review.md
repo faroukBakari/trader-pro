@@ -1,3 +1,10 @@
+---
+agent: "agent"
+model: "Claude Opus 4.5"
+name: "ask"
+description: "High-level technical consultation and project analysis without implementation."
+---
+
 # Backend Architecture Code Review
 
 **Date:** December 8, 2025  

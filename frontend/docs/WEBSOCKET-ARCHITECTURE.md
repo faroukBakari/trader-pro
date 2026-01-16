@@ -1569,6 +1569,46 @@ protected routeErrorMessage(errorPayload: SubscriptionError): void {
 }
 ```
 
+### Missing Subscription Errors
+
+**Added**: January 16, 2026  
+**Related**: Test updates in `frontend/src/plugins/__tests__/wsClientBase.spec.ts`
+
+When the WebSocket client receives an update message (`.update`) for a topic that has no active subscription, it **throws an Error** rather than logging a warning. This is a deliberate design decision reflecting that missing subscriptions indicate a serious state inconsistency between client and server.
+
+```typescript
+// In routeUpdateMessage()
+const subscription = this.subscriptions.get(data.topic)
+if (!subscription || !subscription.confirmed) {
+  throw new Error(`No active subscription found for topic: ${data.topic}`)
+}
+```
+
+**Rationale:**
+
+- **State Consistency**: Update messages should only arrive for subscriptions the client explicitly created
+- **Fail Fast**: Silent warnings hide bugs; throwing forces immediate investigation
+- **Testing**: Makes state inconsistencies immediately detectable in tests
+
+**Error Flow:**
+
+```
+Backend sends update → routeUpdateMessage() → No subscription found
+    ↓
+throw Error("No active subscription...")
+    ↓
+window.onunhandledrejection (if uncaught)
+    ↓
+errorService.handle() → Toast notification
+```
+
+**Prevention:**
+
+- Ensure proper subscription lifecycle management (subscribe before expecting updates)
+- Clean up subscriptions via `unsubscribe()` when no longer needed
+- Use `subscription.confirmed` checks before assuming updates will arrive
+```
+
 ### Backend Integration
 
 The backend sends error messages via the `topic_error` callback in `generic_route.py`:
@@ -1612,10 +1652,16 @@ See [Frontend Error Management](./ERROR-MANAGEMENT.md) for error class hierarchy
 
 ---
 
-**Version**: 3.3.0 (Global Error Handler Integration)  
-**Date**: December 19, 2025  
+**Version**: 3.4.0 (Missing Subscription Error Handling)  
+**Date**: January 16, 2026  
 **Status**: ✅ Production Ready  
 **Maintainers**: Development Team
+
+**Version History:**
+
+- 3.4.0: Missing Subscription Errors (throw instead of warn, added January 2026)
+- 3.3.0: Global Error Handler Integration (added December 2025)
+- 3.2.0: Subscription Error Handling (added December 2025)
 
 **Note**: This document consolidates the previous separate documents:
 

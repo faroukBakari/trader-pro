@@ -214,10 +214,10 @@ async def test_create_topic_quotes_subscribes_to_provider(
 
 
 @pytest.mark.asyncio
-async def test_create_topic_quotes_shares_symbol_subscription(
+async def test_create_topic_quotes_multiple_topics_call_provider(
     service: DatafeedService, mock_provider: MockDatafeedProvider
 ) -> None:
-    """Test multiple topics share the same symbol subscription."""
+    """Test each topic subscribes via provider (mutualization delegated to tracker)."""
     # Create first topic with AAPL
     topic1 = 'quotes:{"fast_symbols":[],"symbols":["AAPL"]}'
     await service.create_topic(topic1, AsyncMock(), AsyncMock(), user_id="test-user")
@@ -226,9 +226,8 @@ async def test_create_topic_quotes_shares_symbol_subscription(
     topic2 = 'quotes:{"fast_symbols":["AAPL"],"symbols":[]}'
     await service.create_topic(topic2, AsyncMock(), AsyncMock(), user_id="test-user")
 
-    # Provider should only be called once for AAPL (shared subscription)
-    assert len(mock_provider.calls["subscribe_market_data"]) == 1
-    assert mock_provider.calls["subscribe_market_data"][0]["ticker_name"] == "AAPL"
+    # Service calls provider for each topic - tracker handles mutualization
+    assert len(mock_provider.calls["subscribe_market_data"]) == 2
 
 
 @pytest.mark.asyncio
@@ -268,27 +267,23 @@ async def test_remove_topic_quotes_unsubscribes_from_provider(
 
 
 @pytest.mark.asyncio
-async def test_remove_topic_quotes_keeps_shared_subscription(
+async def test_remove_topic_quotes_unsubscribes_each_topic(
     service: DatafeedService, mock_provider: MockDatafeedProvider
 ) -> None:
-    """Test remove_topic keeps subscription if other topics still use symbol."""
-    # Create two topics sharing AAPL
+    """Test each topic removal unsubscribes via provider (tracker handles refcount)."""
+    # Create two topics with AAPL
     topic1 = 'quotes:{"fast_symbols":[],"symbols":["AAPL"]}'
     topic2 = 'quotes:{"fast_symbols":["AAPL"],"symbols":[]}'
     await service.create_topic(topic1, AsyncMock(), AsyncMock(), user_id="test-user")
     await service.create_topic(topic2, AsyncMock(), AsyncMock(), user_id="test-user")
 
-    # Remove first topic - should NOT unsubscribe (topic2 still uses AAPL)
+    # Remove first topic - service unsubscribes (tracker handles actual cleanup)
     service.remove_topic(topic1)
-
-    # Verify NOT unsubscribed yet
-    assert len(mock_provider.calls["unsubscribe_market_data"]) == 0
-
-    # Remove second topic - NOW should unsubscribe
-    service.remove_topic(topic2)
-
-    # Verify unsubscribed
     assert len(mock_provider.calls["unsubscribe_market_data"]) == 1
+
+    # Remove second topic
+    service.remove_topic(topic2)
+    assert len(mock_provider.calls["unsubscribe_market_data"]) == 2
 
 
 # ============================================================================

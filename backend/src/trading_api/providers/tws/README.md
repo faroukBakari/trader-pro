@@ -2,7 +2,7 @@
 
 **Status:** Production-Ready (Datafeed + Broker Capabilities)  
 **Architecture:** Three-Layer Streaming Pattern  
-**Last Updated:** January 11, 2026
+**Last Updated:** January 16, 2026
 
 ---
 
@@ -16,6 +16,7 @@
 | **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                   |
 | **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                   |
 | **ContractTracker**         | `contract_tracker.py`                 | Contract persistence with SQLite + lazy loading                                 |
+| **QuoteTracker**            | `quote_tracker.py`                    | Quote subscription management, centralized snapshot/stream hooks, refcount logic |
 | **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch |
 | **PositionTracker**         | `position_tracker.py`                 | Position state tracking, thread-safe snapshot/stream pattern                    |
 | **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL       |
@@ -23,7 +24,7 @@
 | **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                               |
 | **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                             |
 
-**Tests:** `providers/tws/tests/test_{client,ibsocket,mappers,models,datafeed_provider,broker_provider,cached_contract,contract_tracker,config}.py`
+**Tests:** `providers/tws/tests/test_{client,ibsocket,mappers,models,datafeed_provider,broker_provider,cached_contract,contract_tracker,quote_tracker,config}.py`
 
 ---
 
@@ -92,6 +93,11 @@ callback(data) ◄────────────────────�
 - **Snapshot Hooks**: `_snapshot_hooks[tws_key]` holds list of (loop, Future) for one-shot requests
 - **Stream Hooks**: `_stream_hooks[tws_key]` holds list of (loop, callback, on_error) for continuous updates
 - **Deduplication**: `create_snapshot()`/`create_stream()` return `None` reqId if reusing existing request
+
+**Quote Subscription Pattern:**
+- **Centralized Hooks**: `QuoteTracker` owns `_snapshot_hooks` and `_stream_hooks` (not per-`TrackedQuote`)
+- **Reference Counting**: Tracker manages subscription refcount - unsubscribe only when last consumer disconnects
+- **Symbol Deduplication**: Multiple topics requesting same symbol share underlying TWS subscription
 
 ---
 
@@ -614,6 +620,60 @@ def isUnset(value: Any) -> bool:
         return True
     return False
 ```
+
+---
+
+## 2.5 Quote Tracking
+
+**File:** `quote_tracker.py`
+
+The `QuoteTracker` manages real-time market data subscriptions with centralized hook management:
+
+```python
+class QuoteTracker:
+    _quotes: dict[str, TrackedQuote]              # ticker_name → TrackedQuote
+    _snapshot_hooks: dict[str, list[...]]         # tws_key → [(loop, Future)]
+    _stream_hooks: dict[str, list[...]]           # tws_key → [(loop, callback, on_error)]
+    _lock: threading.Lock
+
+    # Snapshot Pattern (one-time fetch)
+    async def request(self, ticker_name: str, timeout: float = 10) -> Quote:
+        """Request quote snapshot, reuses existing subscription if available."""
+
+    # Stream Pattern (continuous updates)
+    def subscribe(self, ticker_name: str, callback: Callable, on_error: Callable) -> str:
+        """Subscribe to quote stream, returns subscription_id for cleanup."""
+
+    def unsubscribe(self, subscription_id: str) -> None:
+        """Unsubscribe from stream, uses reference counting."""
+
+    # Update Dispatch (called from reader thread)
+    def update(self, tws_key: str, tick_data: dict[str, Any]) -> None:
+        """Dispatch tick updates to registered hooks (thread-safe)."""
+```
+
+**Architecture:**
+
+- **Centralized Hooks**: Unlike other trackers, hooks are stored centrally in `_snapshot_hooks` and `_stream_hooks`, not per-`TrackedQuote`
+- **Reference Counting**: Each subscription increments a refcount; `unsubscribe()` decrements and only cancels TWS subscription when count reaches zero
+- **Symbol Deduplication**: Multiple topics requesting the same symbol share the underlying TWS subscription via `create_stream()`
+
+**Threading Model:**
+
+- **Main Thread**: `request()`, `subscribe()`, `unsubscribe()` called from async service methods
+- **Reader Thread**: `update()` called from TWS tick callbacks (`tickPrice`, `tickString`, etc.)
+- **Dispatch**: Hooks dispatched to main thread via `asyncio.loop.call_soon_threadsafe()`
+
+**Debug Logging:**
+
+```bash
+export DEBUG_TWS_DATAFEED=true  # Enables verbose quote tracking logs
+```
+
+**Reference:**
+
+- **Tests**: `providers/tws/tests/test_quote_tracker.py` (28 test methods)
+- **Usage**: Used by `TWSDatafeedProvider.subscribe_market_data()`
 
 ---
 
@@ -1474,7 +1534,7 @@ async def subscribe_realtime_bars(self, ticker_name: str, resolution: Resolution
 
 ```python
 # TWSClient
-def cancel_data_stream(self, stream_key: str) -> None:
+def cancelDataSubscription(self, stream_key: str) -> None:
     self.ibsocket.remove_stream(stream_key)  # Triggers cleanup hook → sends cancel message
 
 # IBSocket.remove_stream() cleanup

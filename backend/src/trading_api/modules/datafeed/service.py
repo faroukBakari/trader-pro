@@ -2,9 +2,9 @@
 Datafeed service for handling market data operations
 """
 
-import asyncio
 import json
 import logging
+import os
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +32,8 @@ from trading_api.shared.ws.ws_router import (
 )
 
 logger = logging.getLogger(__name__)
+
+DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
 
 us_eastern = ZoneInfo("US/Eastern")
 
@@ -104,10 +106,6 @@ class DatafeedService(WsRouteService):
         # Track provider subscription IDs for each topic (for cleanup)
         self._topic_to_subs: dict[str, list[str]] = {}
         self._last_bars: dict[str, Bar] = {}
-        self._quote_callbacks: dict[
-            str, dict[str, tuple[ProviderUpdateCallback, TopicErrorCallback]]
-        ] = {}
-        self._quote_symbol_to_sub_id: dict[str, str] = {}
 
     def get_configuration(self) -> DatafeedConfiguration:
         """Get datafeed configuration.
@@ -116,43 +114,6 @@ class DatafeedService(WsRouteService):
             DatafeedConfiguration with supported resolutions, exchanges, etc.
         """
         return self.configuration
-
-    def quote_cb_wapper(
-        self, symbol: str
-    ) -> tuple[ProviderUpdateCallback, ProviderErrorCallback]:
-        """Wrap quote callback to include symbol in the update.
-
-        Args:
-            symbol: Symbol ticker name
-
-        Returns:
-            Callback function that includes symbol in the update
-        """
-
-        async def on_provider_error(exc: TradingApiException) -> None:
-            """Handle provider errors - determine recoverable status and forward."""
-            recoverable = self._is_error_recoverable(exc)
-            if not recoverable:
-                self._quote_symbol_to_sub_id.pop(symbol, None)
-                for topic in self._quote_callbacks.get(symbol, {}).keys():
-                    logger.error(f"Non-recoverable error on topic {topic} : {exc!r}")
-                    self._topic_to_subs.pop(topic, None)
-
-            retry_after_ms = _DEFAULT_RETRY_AFTER_MS if recoverable else None
-            await asyncio.gather(
-                *[
-                    err(exc, recoverable, retry_after_ms)
-                    for _, err in self._quote_callbacks.get(symbol, {}).values()
-                ]
-            )
-
-        async def callback_wrapper(data: QuoteData) -> None:
-            """Wrapped callback to include symbol."""
-            await asyncio.gather(
-                *[cb(data) for cb, _ in self._quote_callbacks.get(symbol, {}).values()]
-            )
-
-        return callback_wrapper, on_provider_error
 
     async def create_topic(
         self,
@@ -203,7 +164,8 @@ class DatafeedService(WsRouteService):
             params_dict = json.loads(params_json)
             subscription_request = BarsSubscriptionRequest.model_validate(params_dict)
 
-            logger.info(f"creating new topic : {topic}")
+            if DEBUG_TWS_DATAFEED:
+                logger.info(f"creating new topic : {topic}")
 
             # Wrap error callback to compute recoverable/retry at service level
             async def on_sub_error(exc: TradingApiException) -> None:
@@ -247,29 +209,32 @@ class DatafeedService(WsRouteService):
                     module="datafeed",
                 )
 
-            logger.info(f"creating new topic : {topic}")
+            if DEBUG_TWS_DATAFEED:
+                logger.info(f"creating new topic : {topic}")
 
             # Subscribe to market data for all symbols via provider
+            # Note: Symbol mutualization is handled at the provider/tracker level
+            subscription_ids = self._topic_to_subs.setdefault(topic, [])
             for symbol in all_symbols:
-                # Only subscribe once per symbol (multiple topics may share same symbol)
-                if symbol not in self._quote_callbacks:
-                    callback_wrapper, on_provider_error = self.quote_cb_wapper(symbol)
-                    subscription_id = (
-                        await self.datafeed_provider.subscribe_market_data(
-                            ticker_name=symbol,
-                            callback=callback_wrapper,
-                            on_error=on_provider_error,
+                # Wrap error callback to compute recoverable/retry at service level
+                async def on_sub_error(exc: TradingApiException) -> None:
+                    """Handle provider errors - determine recoverable status and forward."""
+                    recoverable = self._is_error_recoverable(exc)
+                    if not recoverable:
+                        logger.error(
+                            f"Non-recoverable error on topic {topic} : {exc!r}"
                         )
-                    )
-                    self._quote_symbol_to_sub_id[symbol] = subscription_id
-                    self._topic_to_subs.setdefault(topic, []).append(subscription_id)
+                        self._topic_to_subs.pop(topic, None)
 
-                # Register the topic's callbacks for this symbol
-                symbol_callbacks = self._quote_callbacks.setdefault(symbol, {})
-                symbol_callbacks[topic] = (
-                    topic_update,
-                    topic_error,
+                    retry_after_ms = _DEFAULT_RETRY_AFTER_MS if recoverable else None
+                    await topic_error(exc, recoverable, retry_after_ms)
+
+                subscription_id = await self.datafeed_provider.subscribe_market_data(
+                    ticker_name=symbol,
+                    callback=topic_update,
+                    on_error=on_sub_error,
                 )
+                subscription_ids.append(subscription_id)
         else:
             raise ServiceException(
                 code="SERVICE_DATAFEED_UNKNOWN_TOPIC_TYPE",
@@ -316,39 +281,33 @@ class DatafeedService(WsRouteService):
 
         Handles both legacy asyncio tasks and provider subscriptions.
         """
-        logger.info(f"removing topic: {topic}")
+        if DEBUG_TWS_DATAFEED:
+            logger.info(f"removing topic: {topic}")
         subscription_ids = self._topic_to_subs.pop(topic, [])
 
-        topic_type, params_json = topic.split(":", 1)
+        topic_type, _ = topic.split(":", 1)
         if topic_type == "bars":
-            subscription_id = next(iter(subscription_ids), None)
-            if subscription_id:
-                logger.info(
-                    f"Unsubscribing from bars: subscription ID {subscription_id}"
-                )
+            for subscription_id in subscription_ids:
+                if DEBUG_TWS_DATAFEED:
+                    logger.info(
+                        f"Unsubscribing from bars: subscription ID {subscription_id}"
+                    )
                 self.datafeed_provider.unsubscribe_realtime_bars(subscription_id)
+            if DEBUG_TWS_DATAFEED:
+                logger.info("remaining bar subs: ")
+                for topic, sub_ids in self._topic_to_subs.items():
+                    logger.info(f"  topic: {topic}, sub_ids: {sub_ids}")
         elif topic_type == "quotes":
-            params_dict = json.loads(params_json)
-            quote_subscription_request = QuoteDataSubscriptionRequest.model_validate(
-                params_dict
-            )
-            all_symbols = list(
-                set(
-                    quote_subscription_request.symbols
-                    + quote_subscription_request.fast_symbols
-                )
-            )
-            for symbol in all_symbols:
-                symbol_callbacks = self._quote_callbacks.get(symbol, {})
-                symbol_callbacks.pop(topic, None)
-                if not symbol_callbacks:
-                    self._quote_callbacks.pop(symbol, None)
-                    subscription_id = self._quote_symbol_to_sub_id.pop(symbol, None)
-                    if subscription_id:
-                        logger.info(
-                            f"Unsubscribing from {symbol} quotes: subscription ID {subscription_id}"
-                        )
-                        self.datafeed_provider.unsubscribe_market_data(subscription_id)
+            for subscription_id in subscription_ids:
+                if DEBUG_TWS_DATAFEED:
+                    logger.info(
+                        f"Unsubscribing from quotes: subscription ID {subscription_id}"
+                    )
+                self.datafeed_provider.unsubscribe_market_data(subscription_id)
+            if DEBUG_TWS_DATAFEED:
+                logger.info("remaining quotes subs: ")
+                for topic, sub_ids in self._topic_to_subs.items():
+                    logger.info(f"  topic: {topic}, sub_ids: {sub_ids}")
         else:
             raise ServiceException(
                 code="SERVICE_DATAFEED_UNKNOWN_TOPIC_TYPE",

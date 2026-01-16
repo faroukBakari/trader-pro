@@ -1,6 +1,6 @@
 ---
 agent: "agent"
-model: "Claude Sonnet 4.5"
+model: "Claude Opus 4.5"
 name: "rca"
 description: "Investigate issue reports and perform root cause analysis."
 ---

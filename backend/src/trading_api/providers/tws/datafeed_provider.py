@@ -21,8 +21,6 @@ from pathlib import Path
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from ibapi.contract import Contract
-
 from trading_api.capabilities.datafeed import DatafeedCapability
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ProviderException, TradingApiException
@@ -42,7 +40,6 @@ from .tws_mappers import (
     contract_details_to_symbol_info,
     map_resolution_to_tws_bar_size,
     tws_ticks_to_bar,
-    tws_ticks_to_quote_data,
 )
 
 logger = logging.getLogger(__name__)
@@ -261,29 +258,26 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             TimeoutError: If snapshot exceeds timeout
         """
 
-        details = await asyncio.gather(
+        cached_list = await asyncio.gather(
             *[
                 self._tws_client.req_ticker_details(ticker_name)
                 for ticker_name in ticker_names
             ]
         )
-        contracts: list[Contract] = [
-            session_details.build_best_contract() for session_details in details
-        ]
 
         nb_retreis = 2
         while True:
             try:
-                results_raw = await asyncio.gather(
+                return await asyncio.gather(
                     *[
                         self._tws_client.reqQuoteSnapshot(
                             contract,
                             **kwargs,
                         )
-                        for contract in contracts
+                        for contract in cached_list
                     ]
                 )
-                return [tws_ticks_to_quote_data(result) for result in results_raw]
+
             except TimeoutError:
                 nb_retreis -= 1
                 if nb_retreis == 0:
@@ -294,9 +288,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
                         capability="datafeed",
                     )
                 await asyncio.sleep(0.5)
-                quote_list = ", ".join(
-                    [f"{c.symbol}:{c.primaryExchange}@{c.exchange}" for c in contracts]
-                )
+                quote_list = ", ".join([f"{c.ticker}" for c in cached_list])
                 logger.warning(
                     f"TimeoutError when getting quotes snapshot for "
                     f"{quote_list}. Retrying... ({nb_retreis} retries left)"
@@ -369,23 +361,10 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             ProviderException: If subscription fails
         """
 
-        # Register quote callback on the ticker
-        async def quote_callback(
-            rt_data: dict[str, Any], fields: list[str] | None
-        ) -> None:
-            if fields is not None and any(f in {"bid", "ask", "last"} for f in fields):
-                if DEBUG_TWS_PROVIDER:
-                    debug_log(
-                        f"Received market data update for {rt_data.get('business_key', 'UNKNOWN')}"
-                        f" with fields: {fields}"
-                    )
-                await callback(tws_ticks_to_quote_data(rt_data))
-
-        details = await self._tws_client.req_ticker_details(ticker_name)
-        contract = details.build_best_contract()
+        cached = await self._tws_client.req_ticker_details(ticker_name)
 
         return self._tws_client.reqMktDataStream(
-            contract, quote_callback, on_error=on_error, **kwargs
+            cached, callback, on_error=on_error, **kwargs
         )
 
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
@@ -398,7 +377,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             ProviderException: If subscription ID not found
         """
         # Lookup symbol/exchange from reverse mapping
-        self._tws_client.cancel_data_stream(subscription_id)
+        self._tws_client.cancelDataSubscription(subscription_id)
 
     def unsubscribe_market_data(self, subscription_id: str) -> None:
         """Unsubscribe from market data.
@@ -409,7 +388,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         Raises:
             ProviderException: If subscription ID not found
         """
-        self._tws_client.cancel_data_stream(subscription_id)
+        self._tws_client.cancelDataSubscription(subscription_id)
 
     def shutdown(self) -> None:
         """Perform any necessary cleanup on provider shutdown.
