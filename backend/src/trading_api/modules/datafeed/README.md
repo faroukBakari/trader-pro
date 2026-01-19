@@ -117,21 +117,29 @@ quotes:{"symbols":["AAPL","GOOGL"],"fast_symbols":["MSFT"]}
 
 ### Topic Lifecycle
 
-Both `bars` and `quotes` topics follow **direct 1:1 mapping** between topics and provider subscriptions:
+**Direct Provider Callback Pattern (Simplified - January 19, 2026)**
 
-**Bars Subscription:**
+**Bars Subscription - Direct Domain Model Callback:**
 
 ```python
 # In DatafeedService.create_topic()
 if topic_type == "bars":
-    subscription_id = self.datafeed_provider.subscribe_realtime_bars(
+    # Direct delegation - provider returns Bar domain model via BarsTracker
+    subscription_id = await self.datafeed_provider.subscribe_realtime_bars(
         ticker_name=request.symbol,
         resolution=request.resolution,
-        callback=topic_update,
+        callback=topic_update,  # ← Receives Bar domain model directly
         on_error=on_sub_error,
     )
     self._topic_to_subs[topic] = [subscription_id]
 ```
+
+**Architectural Fix (January 19, 2026):**
+
+- **Before**: Intermediate callback wrapper converted raw TWS dict to Bar
+- **After**: Provider delegates to `BarsTracker` which converts TWS BarData → Bar domain model
+- **Impact**: Eliminated 10 lines of redundant conversion logic from datafeed_provider.py
+- **Benefit**: Single conversion point for all bars (historical + real-time)
 
 **Quotes Subscription - Topic-Level Subscriptions:**
 
@@ -140,7 +148,7 @@ if topic_type == "bars":
 elif topic_type == "quotes":
     all_symbols = list(set(request.symbols + request.fast_symbols))
     subscription_ids = self._topic_to_subs.setdefault(topic, [])
-    
+
     for symbol in all_symbols:
         subscription_id = await self.datafeed_provider.subscribe_market_data(
             ticker_name=symbol,

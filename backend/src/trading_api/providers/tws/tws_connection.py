@@ -282,7 +282,6 @@ class IBSocket(EWrapper):
             self.reqAccountSubscriptions, self.cancelAccountSubscriptions
         )
         self.contract_tracker: ContractTracker = ContractTracker()
-        self._reader_accounts: list[str] = []
         self._ready_event = (
             threading.Event()
         )  # Signals when IBKR connection is fully established
@@ -434,7 +433,6 @@ class IBSocket(EWrapper):
             self._stream_hooks.clear()
             self._snapshot_hooks.clear()
             self._cleanup_hooks.clear()
-            self._reader_accounts.clear()
             self._ready_event.clear()
             self._business_to_tws_key.clear()
             self._req_id_count = count()
@@ -509,10 +507,6 @@ class IBSocket(EWrapper):
     @property
     def connection_time(self) -> str:
         return self._connection_time
-
-    @property
-    def account_id(self) -> str:
-        return next(iter(self._reader_accounts), "Not set")
 
     @property
     def next_req_id(self) -> int:
@@ -1207,8 +1201,8 @@ class IBSocket(EWrapper):
         if DEBUG_TWS_ACCOUNT:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # should be sent upon connection
-        self._reader_accounts = accountsList.split(",")
-        for account in self._reader_accounts:
+        accounts = accountsList.split(",")
+        for account in accounts:
             self.account_tracker.upsert_account(account)
 
     def accountSummary(
@@ -2210,31 +2204,18 @@ class TWSClient:
         contract: Contract,
         bar_size: str,
         callback: Callable[
-            [dict[str, Any], list[str]],
+            [Bar],
             Coroutine[Any, Any, None],
         ],
         on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
         # **kwargs: Any,
     ) -> str:
-        business_key = f"datafeed:reqBarDataStream:{contract.exchange}:{ticker_name(contract, bar_size)}"
-        reqId: int | None = self.ibsocket.create_stream(
-            business_key,
+        return self.bars_tracker.subscribe(
+            contract,
+            bar_size,
             callback,
             on_error,
         )
-
-        if reqId is not None:
-            self.ibsocket.reqBars(
-                reqId,
-                contract,
-                end_date_time="",
-                duration_str=least_duration_from_bar_size(bar_size),
-                bar_size=bar_size,
-                useRTH=0,
-                format_date=1,
-            )
-
-        return business_key
 
     def reqMktDataStream(
         self,
@@ -2256,6 +2237,7 @@ class TWSClient:
     def cancelDataSubscription(self, stream_key: str) -> None:
         """Cancel a real-time data subscription (bars or market data)."""
         self.quote_tracker.unsubscribe(stream_key)
+        self.bars_tracker.unsubscribe(stream_key)
         self.ibsocket.remove_stream(stream_key)
 
     # === Order management ===

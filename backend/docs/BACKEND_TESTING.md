@@ -1761,6 +1761,141 @@ Benefits:
 - Easy to insert new tests
 - Clear test flow in IDE/output
 
+---
+
+### TWS Provider Testing
+
+**Overview**: TWS provider tests use mocks for external TWS API interactions and domain models for callback testing.
+
+**Key Testing Patterns:**
+
+1. **Mock TWSClient methods** - Not low-level TWS API calls
+2. **Use domain models** - Bar objects, not TWS BarData
+3. **Mock trackers** - Quote/bars trackers for subscription tests
+4. **Test callbacks** - Verify domain model conversion and routing
+
+#### BarsTracker Test Migration (January 19, 2026)
+
+**Architectural Change**: `reqBarDataStream()` now delegates through `BarsTracker` for centralized registration.
+
+**OLD Pattern (Before):**
+```python
+# ❌ OLD: Mock ibsocket.create_stream (bypassed BarsTracker)
+@patch.object(IBSocket, "create_stream")
+async def test_reqBarDataStream_old(mock_create_stream):
+    mock_create_stream.return_value = (42, lambda: None)  # (req_id, cancel_fn)
+    
+    req_id, cancel_fn = await client.reqBarDataStream(...)
+    
+    # Verify create_stream was called
+    mock_create_stream.assert_called_once()
+```
+
+**NEW Pattern (After Fix):**
+```python
+# ✅ NEW: Mock bars_tracker.subscribe (unified pathway)
+@patch.object(BarsTracker, "subscribe")
+async def test_reqBarDataStream_new(mock_subscribe):
+    mock_subscribe.return_value = None  # void method
+    
+    req_id, cancel_fn = await client.reqBarDataStream(...)
+    
+    # Verify bars_tracker.subscribe was called with domain callback
+    mock_subscribe.assert_called_once()
+    args = mock_subscribe.call_args
+    assert args[0][0] == req_id  # First positional arg
+    assert callable(args[0][1])  # Callback (Bar → Awaitable[None])
+```
+
+**Why the Change:**
+
+- **Before**: `reqBarDataStream()` called `ibsocket.create_stream()` directly → bypassed BarsTracker registration → "unknown req_id" warnings
+- **After**: `reqBarDataStream()` calls `bars_tracker.subscribe()` → centralized registration → no warnings
+- **Test Impact**: Mock the new delegation point (`bars_tracker.subscribe`) instead of the old one (`ibsocket.create_stream`)
+
+**Callback Signature Change:**
+
+- **OLD**: `Callable[[dict[str, Any], list[str]], Coroutine]` - Raw TWS dict
+- **NEW**: `Callable[[Bar], Awaitable[None]]` - Domain model
+
+**Migration Checklist:**
+
+1. ✅ Replace `@patch.object(IBSocket, "create_stream")` with `@patch.object(BarsTracker, "subscribe")`
+2. ✅ Update mock return value from `(req_id, cancel_fn)` to `None`
+3. ✅ Update callback assertions to expect `Bar` domain model signature
+4. ✅ Add mocks for `quote_tracker` and `ibsocket` if testing cancellation (prevents hanging)
+
+**Example Test (Full Pattern):**
+
+```python
+from unittest.mock import patch, AsyncMock
+from trading_api.providers.tws.bars_tracker import BarsTracker
+from trading_api.providers.tws.quote_tracker import QuoteTracker
+from trading_api.models.datafeed import Bar
+
+class TestTWSClientStreamMethods:
+    @patch.object(BarsTracker, "subscribe")
+    @patch.object(QuoteTracker, "request_ticker_id", new_callable=AsyncMock)
+    @patch.object(IBSocket, "reqBars", new_callable=AsyncMock)
+    async def test_reqBarDataStream(
+        self,
+        mock_reqBars,
+        mock_request_ticker_id,
+        mock_subscribe,
+        tws_client
+    ):
+        """Test real-time bar streaming through BarsTracker."""
+        # Setup
+        mock_request_ticker_id.return_value = 42
+        mock_subscribe.return_value = None
+        
+        # Execute
+        req_id, cancel_fn = await tws_client.reqBarDataStream(
+            contract=Contract(...),
+            bar_size="5 secs",
+            what_to_show="TRADES",
+            use_rth=False,
+            callback=AsyncMock(),  # Domain callback: Bar → None
+            on_error=AsyncMock()
+        )
+        
+        # Verify BarsTracker registration (unified pathway)
+        mock_subscribe.assert_called_once()
+        args = mock_subscribe.call_args[0]
+        assert args[0] == 42  # req_id
+        assert callable(args[1])  # callback (Bar → Awaitable[None])
+        assert callable(args[2])  # on_error
+        
+        # Verify IBSocket call (through BarsTracker)
+        mock_reqBars.assert_called_once()
+```
+
+**Test Hanging Fix:**
+
+If tests hang at 100%, add mocks for `quote_tracker` and `ibsocket` in cancellation tests:
+
+```python
+@patch.object(BarsTracker, "unsubscribe")
+@patch.object(QuoteTracker, "cancel_subscription", new_callable=AsyncMock)
+@patch.object(IBSocket, "cancelDataSubscription")
+async def test_cancelDataSubscription(
+    mock_ibsocket_cancel,
+    mock_quote_cancel,
+    mock_bars_unsubscribe,
+    tws_client
+):
+    """Test canceling both quote and bar subscriptions."""
+    # Prevents hanging by mocking all cleanup paths
+    await tws_client.cancelDataSubscription(42)
+    
+    mock_bars_unsubscribe.assert_called_once_with(42)
+    mock_quote_cancel.assert_awaited_once_with(42)
+```
+
+**Root Cause**: Unmocked `call_later` timers in quote_tracker/ibsocket caused event loop to never complete.
+
+---
+
 ## Cleanup and Resource Management
 
 ### Session Cleanup Pattern

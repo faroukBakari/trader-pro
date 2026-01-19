@@ -570,19 +570,18 @@ class TestTWSClientReqHistoricalData:
 class TestTWSClientStreamMethods:
     """Test stream subscription methods."""
 
-    def test_req_bar_data_stream_registers_callback(self) -> None:
-        """Test reqBarDataStream registers stream with callback."""
+    async def test_req_bar_data_stream_registers_callback(self) -> None:
+        """Test reqBarDataStream delegates to bars_tracker.subscribe()."""
         from trading_api.models.exceptions import ProviderException
+        from trading_api.models.market import Bar
 
         client = TWSClient("127.0.0.1", 7497, 1)
 
-        # Create mock ibsocket
-        mock_ibsocket = MagicMock()
-        mock_ibsocket.running = True
-        mock_ibsocket.create_stream = MagicMock(return_value=1)  # Returns reqId
-        mock_ibsocket.reqBars = MagicMock()
+        # Mock bars_tracker.subscribe() - the new delegation target
+        mock_bars_tracker = MagicMock()
+        mock_bars_tracker.subscribe = MagicMock(return_value="AAPL-SMART#uuid-key")
 
-        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+        client._TWSClient__bars_tracker = mock_bars_tracker  # type: ignore[attr-defined]
 
         contract = Contract()
         contract.symbol = "AAPL"
@@ -590,7 +589,7 @@ class TestTWSClientStreamMethods:
         contract.exchange = "SMART"
         contract.currency = "USD"
 
-        async def callback(data: dict[str, Any], fields: list[str]) -> None:
+        async def callback(bar: Bar) -> None:
             pass
 
         async def on_error(exc: ProviderException) -> None:
@@ -599,22 +598,33 @@ class TestTWSClientStreamMethods:
         stream_key = client.reqBarDataStream(contract, "5 mins", callback, on_error)
 
         assert isinstance(stream_key, str)
-        mock_ibsocket.create_stream.assert_called_once()
-        mock_ibsocket.reqBars.assert_called_once()
+        assert stream_key == "AAPL-SMART#uuid-key"
+        mock_bars_tracker.subscribe.assert_called_once_with(
+            contract, "5 mins", callback, on_error
+        )
 
-    def test_cancel_bar_data_stream_sends_cancel(self) -> None:
-        """Test cancelDataSubscription sends cancel message."""
+    async def test_cancel_bar_data_stream_sends_cancel(self) -> None:
+        """Test cancelDataSubscription calls bars_tracker.unsubscribe()."""
         from trading_api.models.exceptions import ProviderException
+        from trading_api.models.market import Bar
 
         client = TWSClient("127.0.0.1", 7497, 1)
 
-        # Create mock ibsocket
+        # Mock bars_tracker with subscribe/unsubscribe
+        mock_bars_tracker = MagicMock()
+        mock_bars_tracker.subscribe = MagicMock(return_value="AAPL-SMART#uuid-key")
+        mock_bars_tracker.unsubscribe = MagicMock()
+
+        # Mock quote_tracker to prevent call_later from being scheduled
+        mock_quote_tracker = MagicMock()
+        mock_quote_tracker.unsubscribe = MagicMock()
+
+        # Mock ibsocket to prevent remove_stream side effects
         mock_ibsocket = MagicMock()
-        mock_ibsocket.running = True
-        mock_ibsocket.create_stream = MagicMock(return_value=1)
-        mock_ibsocket.reqBars = MagicMock()
         mock_ibsocket.remove_stream = MagicMock()
 
+        client._TWSClient__bars_tracker = mock_bars_tracker  # type: ignore[attr-defined]
+        client._TWSClient__quote_tracker = mock_quote_tracker  # type: ignore[attr-defined]
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
 
         contract = Contract()
@@ -622,7 +632,7 @@ class TestTWSClientStreamMethods:
         contract.secType = "STK"
         contract.exchange = "SMART"
 
-        async def callback(data: dict[str, Any], fields: list[str]) -> None:
+        async def callback(bar: Bar) -> None:
             pass
 
         async def on_error(exc: ProviderException) -> None:
@@ -633,7 +643,8 @@ class TestTWSClientStreamMethods:
 
         # Cancel the stream
         client.cancelDataSubscription(stream_key)
-
+        mock_bars_tracker.unsubscribe.assert_called_once_with(stream_key)
+        mock_quote_tracker.unsubscribe.assert_called_once_with(stream_key)
         mock_ibsocket.remove_stream.assert_called_once_with(stream_key)
 
 

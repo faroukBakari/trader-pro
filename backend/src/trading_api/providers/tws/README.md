@@ -721,6 +721,50 @@ class BarsTracker:
         """Mark historical request complete, resolve snapshot Future."""
 ```
 
+### Unified Bar Subscription Pattern
+
+**[ARCHITECTURE FIX - January 19, 2026]**: All bar subscriptions (both historical and real-time) now route through BarsTracker for centralized registration. This fixes the "Received bar update for unknown req_id" warning.
+
+**Call Flow:**
+
+```
+TWSClient.reqBarDataStream()
+        │
+        ├──> bars_tracker.subscribe()    # ← Centralized registration
+        │           │
+        │           └──> ibsocket.reqBars(keepUpToDate=True)
+        │
+IBSocket.historicalData() callback
+        │
+        └──> bars_cb(reqId, bar)
+                │
+                └──> bars_tracker.update(reqId, bar)  # ← Routes to registered hooks
+```
+
+**Before (Bug):**
+
+```python
+# OLD: reqBarDataStream bypassed tracker registration
+reqBarDataStream() → ibsocket.create_stream()  # ❌ Not registered in BarsTracker
+                                                # bars_tracker.update() → unknown req_id warning
+```
+
+**After (Fixed):**
+
+```python
+# NEW: Unified path through BarsTracker
+reqBarDataStream() → bars_tracker.subscribe()  # ✅ Registered in BarsTracker
+                   → ibsocket.reqBars(keepUpToDate=True)
+                                                # bars_tracker.update() → req_id found
+```
+
+**Key Benefits:**
+
+- ✅ Single subscription pathway for all bar data (historical + real-time)
+- ✅ Eliminates "unknown req_id" warnings
+- ✅ Consistent callback routing through BarsTracker
+- ✅ Simplified architecture (no parallel pathways)
+
 **Architecture:**
 
 - **SmartTwsBar**: Timezone-aware wrapper for `ibapi.common.BarData`
@@ -812,6 +856,60 @@ def _barsComplete(self, req_id: int, start: str, end: str) -> None:
 
 - **Tests**: `providers/tws/tests/test_client.py` (bar construction), `test_datafeed_provider.py` (Bar objects), `test_ibsocket.py` (callback routing)
 - **Usage**: Used by `TWSClient.reqHistoricalData()` and `TWSDatafeedProvider.get_historical_bars()`
+
+---
+
+## 2.7 Crypto-Specific Handling
+
+**[CRYPTO SUPPORT - January 19, 2026]**: Special handling for cryptocurrency assets (CRYPTO secType).
+
+### Broker Provider - Leverage
+
+**File:** `broker_provider.py`
+
+Crypto assets return fixed leverage (no margin trading):
+
+```python
+# In get_leverage_info()
+if contract.secType == "CRYPTO":
+    return LeverageInfo(
+        leverage=1.0,  # No leverage for crypto
+        margin_rate=None,
+        buy_rate=None,
+        sell_rate=None,
+    )
+```
+
+**Rationale**: IBKR does not support margin trading for cryptocurrencies. All crypto positions must be fully funded.
+
+### Order Mappers - Cash Quantity
+
+**File:** `tws_mappers.py`
+
+Crypto orders use cash quantity instead of share quantity:
+
+```python
+# In prebuild_tws_order()
+if contract.secType == "CRYPTO":
+    order.cashQty = preorder.qty  # Cash amount (USD, EUR, etc.)
+    order.tif = "IOC"             # Immediate-Or-Cancel
+else:
+    order.totalQuantity = preorder.qty  # Share quantity
+```
+
+**TWS API Specifics:**
+
+| Field           | Stock Orders     | Crypto Orders                |
+| --------------- | ---------------- | ---------------------------- |
+| `totalQuantity` | Share count      | _(not used)_                 |
+| `cashQty`       | _(not used)_     | Cash amount (e.g., 1000 USD) |
+| `tif`           | DAY/GTC/IOC      | IOC (Immediate-Or-Cancel)    |
+| `orderType`     | LMT/MKT/STP/etc. | LMT/MKT only                 |
+
+**Example:**
+
+- Stock: `totalQuantity=100` shares at `lmtPrice=150.00` → Total: $15,000
+- Crypto: `cashQty=15000` USD → Buys equivalent BTC at market price
 
 ---
 
