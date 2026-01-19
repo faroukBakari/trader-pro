@@ -616,6 +616,16 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         cached_contract = await self._tws_client.req_ticker_details(params.symbol)
         contract = cached_contract.build_best_contract()
 
+        # Crypto is cash-only, no margin/leverage
+        if contract.secType == "CRYPTO":
+            return LeverageInfo(
+                title=f"Margin Info ({params.symbol})",
+                leverage=1.0,  # No leverage for crypto
+                min=1.0,
+                max=1.0,
+                step=0.0,
+            )
+
         current_price = await self._get_symbol_price(params.symbol)
 
         # Build WhatIf order (simulation only, no execution)
@@ -624,7 +634,12 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         order.totalQuantity = Decimal("1")  # Single unit for margin calc
         order.orderType = "LMT"
         order.lmtPrice = current_price if current_price > 0 else 100.0
-        order.tif = "DAY" if contract.exchange == "OVERNIGHT" else "GTC"
+        if contract.secType == "CRYPTO":
+            order.tif = "IOC"  # or "Minutes" with GTD
+        elif contract.exchange == "OVERNIGHT":
+            order.tif = "DAY"
+        else:
+            order.tif = "GTC"
         order.whatIf = True
         order.account = self._config.account_id
 

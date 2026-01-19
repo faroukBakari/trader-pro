@@ -366,6 +366,7 @@ class BarsRequest:
 
         # Live subscription tracking
         self.__last_update_time: float | None = None
+        self.__last_index: datetime | None = None
 
         # Request state events
         self.__request_complete: threading.Event = threading.Event()
@@ -424,6 +425,13 @@ class BarsRequest:
         """Whether the request has completed successfully."""
         return self.__request_complete.is_set()
 
+    @property
+    def last(self) -> SmartTwsBar | None:
+        """Get the most recent bar, if any."""
+        if not self.__bars or self.__last_index is None:
+            return None
+        return self.__bars.get(self.__last_index)
+
     def upsert(self, bar: BarData) -> None:
         """Insert or update a bar from TWS callback.
 
@@ -433,15 +441,15 @@ class BarsRequest:
         Args:
             bar: TWS BarData object
         """
-        bar_time = parse_tws_bar_date_as_datetime(bar.date)
+        self.__last_index = parse_tws_bar_date_as_datetime(bar.date)
 
-        if bar_time in self.__bars:
-            self.__bars[bar_time].update_from_bardata(bar)
+        if self.__last_index in self.__bars:
+            self.__bars[self.__last_index].update_from_bardata(bar)
             self.__last_update_time = time_.time()
         else:
             # New bar in live stream - insert it
             smart_bar = SmartTwsBar.from_bar_data(bar)
-            self.__bars[smart_bar.time] = smart_bar
+            self.__bars[self.__last_index] = smart_bar
             self.__last_update_time = time_.time()
 
     def flag_request_complete(self, start: str, end: str) -> None:
@@ -499,10 +507,12 @@ def reject_snapshot(fut: asyncio.Future[list[Bar]], exc: ProviderException) -> N
 
 
 async def dispatch_update(
-    callback: Callable[[list[Bar]], Coroutine[Any, Any, None]],
+    callback: Callable[[Bar], Coroutine[Any, Any, None]],
     bars: BarsRequest,
 ) -> None:
-    await callback(bars.to_domain())
+    last = bars.last
+    assert last is not None, "dispatch_update called with no last bar"
+    await callback(last.to_domain())
 
 
 class BarsTracker:
@@ -552,7 +562,7 @@ class BarsTracker:
                 str,
                 tuple[
                     asyncio.AbstractEventLoop,
-                    Callable[[list[Bar]], Coroutine[Any, Any, None]],
+                    Callable[[Bar], Coroutine[Any, Any, None]],
                     Callable[[ProviderException], Coroutine[Any, Any, None]],
                 ],
             ],
@@ -721,7 +731,7 @@ class BarsTracker:
         self,
         contract: Contract,
         bar_size: str,
-        on_update: Callable[[list[Bar]], Coroutine[Any, Any, None]],
+        on_update: Callable[[Bar], Coroutine[Any, Any, None]],
         on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
     ) -> str:
         """Subscribe to streaming bar updates for a contract.

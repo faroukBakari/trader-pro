@@ -39,7 +39,6 @@ from .tws_mappers import (
     calculate_tws_duration,
     contract_details_to_symbol_info,
     map_resolution_to_tws_bar_size,
-    tws_ticks_to_bar,
 )
 
 logger = logging.getLogger(__name__)
@@ -309,23 +308,13 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             ProviderException: If subscription fails or resolution not supported
         """
         bar_size = map_resolution_to_tws_bar_size(resolution)
-
-        async def bar_callback(
-            rt_data: dict[str, Any], fields: list[str] | None
-        ) -> None:
-            if DEBUG_TWS_PROVIDER:
-                debug_log(
-                    f"Received real-time bar update for {ticker_name} with fields: {fields}"
-                )
-            await callback(tws_ticks_to_bar(rt_data))
-
         details = await self._tws_client.req_ticker_details(ticker_name)
         contract = details.build_best_contract()
 
         return self._tws_client.reqBarDataStream(
             contract,
             bar_size,
-            bar_callback,
+            callback,
             on_error=on_error,
             **kwargs,
         )

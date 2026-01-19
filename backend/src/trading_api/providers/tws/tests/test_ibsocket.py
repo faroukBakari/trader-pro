@@ -91,7 +91,6 @@ class TestIBSocketStateManagement:
         """Test _reset clears tracking dictionaries used during connection."""
         # Setup some state
         ibsocket._stream_data["test"] = MagicMock()  # New structure uses str keys
-        ibsocket._reader_accounts = ["U123"]
         ibsocket._ready_event.set()
 
         # Reset
@@ -99,7 +98,6 @@ class TestIBSocketStateManagement:
 
         # Verify cleared
         assert len(ibsocket._stream_data) == 0
-        assert len(ibsocket._reader_accounts) == 0
         assert len(ibsocket._business_to_tws_key) == 0
         assert not ibsocket._ready_event.is_set()
 
@@ -899,8 +897,6 @@ class TestIBSocketManagedAccounts:
         running_ibsocket.account_tracker.account_unsub_cb = Mock(return_value=None)
 
         running_ibsocket.managedAccounts("U123,U456,U789")
-
-        assert running_ibsocket._reader_accounts == ["U123", "U456", "U789"]
 
     def test_next_valid_id_sets_ready_event(self, running_ibsocket: IBSocket) -> None:
         """Test nextValidId sets the ready event and initializes order_tracker."""

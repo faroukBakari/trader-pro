@@ -848,9 +848,14 @@ def prebuild_tws_order(
         A new TWS Order object with default values.
     """
     order = Order()
-    order.tif = "DAY" if contract.exchange == "OVERNIGHT" else "GTC"
-    order.outsideRth = True  # Allow execution outside regular trading hours
-    order.totalQuantity = Decimal(str(quantity))
+    if contract.secType == "CRYPTO":
+        # Crypto requires cash quantity (USD value) not coin quantity
+        order.cashQty = quantity  # quantity is already in USD for crypto
+        order.tif = "IOC"  # Crypto requires IOC or Minutes
+    else:
+        order.totalQuantity = Decimal(str(quantity))
+        order.tif = "DAY" if contract.exchange == "OVERNIGHT" else "GTC"
+        order.outsideRth = True  # Allow execution outside regular trading hours
     order.action = SIDE_TO_TWS_ACTION.get(side, "BUY")
     order.orderType = ORDER_TYPE_TO_TWS.get(order_type, "MKT")
     if price is not None:
