@@ -582,6 +582,100 @@ Before submitting your test:
 
 ## Testing Patterns
 
+### TWS Provider Testing
+
+**Test Pattern Migration (January 2026):**
+
+Following the BarsTracker implementation, TWS provider tests now use strict domain models instead of dict mocks:
+
+**✅ NEW Pattern (BarsTracker architecture):**
+
+```python
+from unittest.mock import AsyncMock
+from trading_api.models.bars import Bar
+
+# Use Bar objects with strict int types
+bar1 = Bar(
+    time=1702641000000,  # int milliseconds UTC (not datetime)
+    open=150.0,
+    high=151.0,
+    low=149.5,
+    close=150.5,
+    volume=1000000,      # int (not float/Decimal)
+)
+
+# Mock tracker methods, not IBSocket internals
+mock_bars_tracker.request = AsyncMock(return_value=[bar1, bar2])
+result = await tws_client.reqHistoricalData(contract, "1 min", ...)
+mock_bars_tracker.request.assert_called_once_with(contract, "1 min", ...)
+```
+
+**❌ OLD Pattern (deprecated):**
+
+```python
+# Don't mock _stream_data or create_snapshot
+mock_ibsocket.create_snapshot.return_value = [  # ❌ Obsolete API
+    {"time": datetime(...), "open": 150.0, ...}  # ❌ Dict mocks
+]
+```
+
+**Key Changes:**
+
+1. **Domain Models**: Use `Bar` Pydantic models, not dicts
+2. **Int Timestamps**: `time=1702641000000` (milliseconds), not `datetime` objects
+3. **Int Volume**: `volume=1000000` (int), not `float` or `Decimal`
+4. **Tracker Mocking**: Mock `bars_tracker.request()` (AsyncMock), not `ibsocket.create_snapshot()`
+5. **Callback Routing Tests**: Verify `bars_cb(reqId, bar)` calls, not `_stream_data` accumulation
+6. **No Async in IBSocket Tests**: Callback verification is synchronous (no `async def`, no `await`)
+
+**Example Test Patterns:**
+
+```python
+# test_client.py - Mock tracker at TWSClient level
+@pytest.mark.asyncio
+async def test_req_historical_data_returns_bars(mock_tws_client, mock_bars_tracker):
+    bar1 = Bar(time=1702630200000, open=150.0, high=151.0, low=149.5, close=150.5, volume=1000000)
+    mock_bars_tracker.request = AsyncMock(return_value=[bar1])
+
+    result = await mock_tws_client.reqHistoricalData(contract, "1 min", "1 D", ...)
+
+    assert result[0].open == 150.0  # Bar attribute access (not dict key)
+    mock_bars_tracker.request.assert_called_once()
+
+# test_ibsocket.py - Verify callback routing
+def test_historical_data_calls_bars_cb():
+    bars_cb_mock = Mock()
+    ibsocket = IBSocket(bars_cb=bars_cb_mock, ...)
+
+    tws_bar = ibapi.common.BarData()
+    ibsocket.historicalData(reqId=1, bar=tws_bar)
+
+    bars_cb_mock.assert_called_once_with(1, tws_bar)  # Verify routing
+
+# test_datafeed_provider.py - Domain model construction
+@pytest.mark.asyncio
+async def test_get_historical_bars_returns_bars(mock_client):
+    bar1 = Bar(time=1702641000000, open=150.0, high=151.0, low=149.5, close=150.5, volume=1000000)
+    mock_client.reqHistoricalData = AsyncMock(return_value=[bar1])
+
+    result = await provider.get_historical_bars("NASDAQ:AAPL", start, end, Resolution.ONE_MINUTE)
+
+    assert isinstance(result[0], Bar)
+    assert result[0].time == 1702641000000
+```
+
+**Migration Checklist:**
+
+- [ ] Replace dict mocks with `Bar` objects
+- [ ] Use `time: int` (milliseconds), not `datetime`
+- [ ] Use `volume: int`, not `float` or `Decimal`
+- [ ] Mock tracker methods (`bars_tracker.request()`), not IBSocket internals
+- [ ] Import `AsyncMock` from `unittest.mock` for async method mocking
+- [ ] Remove `_stream_data` / `create_snapshot` references
+- [ ] Verify callback routing (`bars_cb`, `bars_complete_cb`), not accumulation
+
+---
+
 ### Available Fixtures
 
 **Session-scoped (shared across all tests):**
@@ -1459,20 +1553,17 @@ The backend manager (`scripts/backend_manager.py`) orchestrates multi-process se
 Starting the backend involves several expensive operations:
 
 1. **Spec & Client Generation** (~5-6 seconds)
-
    - OpenAPI spec generation from FastAPI routes
    - AsyncAPI spec generation from WebSocket endpoints
    - Python client code generation from specs
    - Frontend TypeScript client generation
 
 2. **Server Process Startup** (~2-3 seconds per server)
-
    - Multiple uvicorn instances (broker, datafeed, etc.)
    - Module loading and dependency injection
    - Health check endpoints becoming ready
 
 3. **Nginx Gateway Startup** (~1 second)
-
    - Configuration validation
    - Worker process initialization
    - Port binding and routing setup
@@ -2035,25 +2126,21 @@ poetry run pytest tests/integration/test_module_isolation.py::TestModuleIsolatio
 ### For Test Maintenance
 
 1. **Keep tests fast**
-
    - Prefer unit tests over integration tests
    - Use session fixtures to share resources
    - Minimize server restarts
 
 2. **Organize logically**
-
    - Group related tests in classes
    - Follow test execution order
    - Use descriptive test names
 
 3. **Clean up properly**
-
    - Use fixtures for resource management
    - Ensure processes are terminated
    - Check for port leaks
 
 4. **Document complex tests**
-
    - Add docstrings explaining test purpose
    - Comment tricky test logic
    - Document test constraints
@@ -2066,25 +2153,21 @@ poetry run pytest tests/integration/test_module_isolation.py::TestModuleIsolatio
 ### For CI/CD
 
 1. **Separate test levels**
-
    - Run unit tests first (fast feedback)
    - Run integration tests separately
    - Use `make test-boundaries`, `make test-modules`, `make test-integration`
 
 2. **Use pytest markers**
-
    - Mark integration tests: `@pytest.mark.integration`
    - Mark slow tests: `@pytest.mark.slow`
    - Skip slow tests in dev: `pytest -m "not slow"`
 
 3. **Parallel execution**
-
    - Consider pytest-xdist for unit tests
    - Keep integration tests sequential (resource conflicts)
    - Use session fixtures to minimize overhead
 
 4. **Resource cleanup**
-
    - Ensure CI runners terminate all processes
    - Check for port conflicts
    - Clean up temporary files
@@ -2339,18 +2422,15 @@ By following these guidelines, you can write efficient, maintainable, and reliab
 Starting the backend involves several expensive operations:
 
 1. **Spec & Client Generation** (~5-6 seconds)
-
    - OpenAPI spec generation from FastAPI routes
    - AsyncAPI spec generation from WebSocket endpoints
    - Python client code generation from specs
 
 2. **Server Process Startup** (~2-3 seconds per server)
-
    - Multiple uvicorn instances (broker, datafeed, etc.)
    - Module loading and dependency injection
 
 3. **Nginx Gateway Startup** (~1 second)
-
    - Configuration validation
    - Worker process initialization
 

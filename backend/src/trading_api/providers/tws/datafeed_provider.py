@@ -206,18 +206,15 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         else:
             end_dt_str = end_time_utc.strftime("%Y%m%d %H:%M:%S UTC")
 
-        tws_bars: list[dict[str, Any]] = []
+        cached = await self._tws_client.req_ticker_details(ticker_name)
 
-        details = await self._tws_client.req_ticker_details(ticker_name)
-        contracts = [
-            con
-            for con in [
-                details.build_smart_contract(),
-                details.build_darkpool_contract(),
-            ]
-            if con is not None
-        ] or [details.build_best_contract()]
+        # Build list of exchanges to request - always SMART, plus darkpool if available
+        contracts = [cached.build_session_contract()]
+        darkpool_contract = cached.build_darkpool_contract()
+        if darkpool_contract is not None:
+            contracts.append(darkpool_contract)
 
+        # Request bars for each exchange in parallel
         results = await asyncio.gather(
             *[
                 self._tws_client.reqHistoricalData(
@@ -228,16 +225,10 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             return_exceptions=True,
         )
 
-        tws_bars = [
-            bar
-            for r in results
-            if not isinstance(r, BaseException)  # Filter out ALL exceptions first
-            for bar in r
-        ]
+        # Flatten results, filter out exceptions
+        bars = [bar for r in results if not isinstance(r, BaseException) for bar in r]
 
-        return sorted(
-            [tws_ticks_to_bar(bar) for bar in tws_bars], key=lambda bar: bar.time
-        )
+        return sorted(bars, key=lambda bar: bar.time)
 
     async def get_quotes_snapshot(
         self,

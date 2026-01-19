@@ -16,7 +16,6 @@ Note: Helper method tests (_map_timeframe, _calculate_duration)
 """
 
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import cast
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -383,24 +382,25 @@ class TestGetHistoricalBars:
     @pytest.mark.asyncio
     async def test_get_historical_bars_returns_bars(self) -> None:
         """Test get_historical_bars returns Bar list."""
-        # Return dicts matching the StreamData format from create_snapshot
-        bar1 = {
-            "date": "1702656000",  # Epoch format
-            "open": 150.0,
-            "high": 151.0,
-            "low": 149.5,
-            "close": 150.5,
-            "volume": Decimal("1000000"),
-        }
+        # Return Bar objects - reqHistoricalData now returns list[Bar] via BarsTracker
+        # time is in milliseconds, volume is int
+        bar1 = Bar(
+            time=1702641000000,  # 2023-12-15 12:00:00 UTC in ms
+            open=150.0,
+            high=151.0,
+            low=149.5,
+            close=150.5,
+            volume=1000000,
+        )
 
-        bar2 = {
-            "date": "1702656060",
-            "open": 150.5,
-            "high": 152.0,
-            "low": 150.0,
-            "close": 151.5,
-            "volume": Decimal("800000"),
-        }
+        bar2 = Bar(
+            time=1702641060000,  # 2023-12-15 12:01:00 UTC in ms
+            open=150.5,
+            high=152.0,
+            low=150.0,
+            close=151.5,
+            volume=800000,
+        )
 
         mock_client = Mock()
         mock_client.reqHistoricalData = AsyncMock(return_value=[bar1, bar2])

@@ -29,7 +29,7 @@ import select
 import struct
 import threading
 import time
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Callable, Coroutine
 from decimal import Decimal
 from itertools import count
 from socket import MSG_PEEK
@@ -61,12 +61,13 @@ from ibapi.ticktype import TickTypeEnum
 from ibapi.wrapper import EWrapper, current_fn_name
 
 from trading_api.models.exceptions import ProviderException
-from trading_api.models.market import QuoteData
+from trading_api.models.market import Bar, QuoteData
 from trading_api.providers.tws.account_tracker import (
     TWS_TAG_TO_FIELD,
     AccountTracker,
     TrackedAccount,
 )
+from trading_api.providers.tws.bars_tracker import BarsTracker
 from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.contract_tracker import ContractTracker
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
@@ -214,10 +215,16 @@ class IBSocket(EWrapper):
         self,
         quote_cb: Callable[[int, dict[str, int | float | str]], None] | None = None,
         quote_err: Callable[[int, ProviderException], bool] | None = None,
+        bars_cb: Callable[[int, BarData], None] | None = None,
+        bars_complete_cb: Callable[[int, str, str], None] | None = None,
+        bars_err: Callable[[int, ProviderException], bool] | None = None,
     ) -> None:
         # socket related attributes
         self.quote_cb = quote_cb
         self.quote_err = quote_err
+        self.bars_cb = bars_cb
+        self.bars_complete_cb = bars_complete_cb
+        self.bars_err = bars_err
         self._req_id_count: count[int] = count()
         self._socket_lock = threading.Lock()
         self._state = IBSocketState.READY
@@ -1389,24 +1396,21 @@ class IBSocket(EWrapper):
         TWS sends one historicalData callback per bar.
         Results are accumulated until historicalDataEnd is called.
         """
-        # if DEBUG_TWS_DATAFEED:
-        #     debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-
-        self._append_stream_data(f"req_{reqId}", bar.__dict__)
+        # Route to BarsTracker via callback
+        if self.bars_cb is not None:
+            self.bars_cb(reqId, bar)
 
     def historicalDataUpdate(self, reqId: int, bar: BarData) -> None:
         """Returns updates in real time when keepUpToDate is set to True."""
-        if DEBUG_TWS_DATAFEED:
-            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-
-        self._update_stream_data(f"req_{reqId}", bar.__dict__)
+        # Route to BarsTracker via callback
+        if self.bars_cb is not None:
+            self.bars_cb(reqId, bar)
 
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
         """End signal for historical data - resolve Future with accumulated results."""
-        if DEBUG_TWS_DATAFEED:
-            debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-
-        self._flag_snapshot_complete(f"req_{reqId}")
+        # Route to BarsTracker via callback
+        if self.bars_complete_cb is not None:
+            self.bars_complete_cb(reqId, start, end)
 
     # === Market data (accumulation pattern) ===
 
@@ -1711,22 +1715,27 @@ class IBSocket(EWrapper):
                     message=message,
                 )
             )
-        elif not (
-            self.quote_err
-            and self.quote_err(
-                reqId,
-                ProviderException(
-                    provider="tws",
-                    capability="datafeed",
-                    code=f"PROVIDER_DATAFEED_{errorCode}",
-                    message=message,
-                    timestamp=(
-                        errorTime // 1000 if errorTime > 10_000_000_000 else errorTime
-                    ),
+        else:
+            # Request-related errors - try bars_tracker first, then quote_err
+            datafeed_error = ProviderException(
+                provider="tws",
+                capability="datafeed",
+                code=f"PROVIDER_DATAFEED_{errorCode}",
+                message=message,
+                timestamp=(
+                    errorTime // 1000 if errorTime > 10_000_000_000 else errorTime
                 ),
             )
-        ):
-            # Request-related errors use req_{reqId} key format
+
+            # Try BarsTracker first via callback
+            if self.bars_err is not None and self.bars_err(reqId, datafeed_error):
+                return
+
+            # Try QuoteTracker via callback
+            if self.quote_err and self.quote_err(reqId, datafeed_error):
+                return
+
+            # Fallback: legacy request error handling
             tws_key = f"req_{reqId}"
             self._handle_request_error(
                 category=TWSErrorCategory.API,
@@ -1788,6 +1797,7 @@ class TWSClient:
         self._timeout = timeout
         self.__ibsocket: IBSocket | None = None
         self.__quote_tracker: QuoteTracker | None = None
+        self.__bars_tracker: BarsTracker | None = None
 
     @property
     def ibsocket(self) -> IBSocket:
@@ -1797,7 +1807,16 @@ class TWSClient:
             if self.__quote_tracker:
                 self.__quote_tracker.reset()
                 self.__quote_tracker = None
-            self.__ibsocket = IBSocket(self._quoteUpdate, self._quoteError)
+            if self.__bars_tracker:
+                self.__bars_tracker.reset()
+                self.__bars_tracker = None
+            self.__ibsocket = IBSocket(
+                self._quoteUpdate,
+                self._quoteError,
+                self._barsUpdate,
+                self._barsComplete,
+                self._barsError,
+            )
             self.__ibsocket.connect(
                 host=self._host,
                 port=self._port,
@@ -1816,6 +1835,17 @@ class TWSClient:
             )
 
         return self.__quote_tracker
+
+    @property
+    def bars_tracker(self) -> BarsTracker:
+        """Lazy-initialized BarsTracker for historical/streaming bar data."""
+        if self.__bars_tracker is None:
+            self.__bars_tracker = BarsTracker(
+                self._reqBars, self._cancelBars, self._timeout
+            )
+        return self.__bars_tracker
+
+    # === quote hooks and callbacks ===
 
     def _reqQuote(self, contract: Contract) -> int:
         assert (
@@ -1868,6 +1898,47 @@ class TWSClient:
 
     def _quoteError(self, req_id: int, error: ProviderException) -> bool:
         return self.quote_tracker.raise_error(req_id, error)
+
+    # === bars hooks and callbacks ===
+
+    def _reqBars(
+        self,
+        contract: Contract,
+        bar_size: str,
+        end_date_time: str | None,
+        duration_str: str | None,
+    ) -> int:
+        """Request historical bars via IBSocket.reqBars."""
+        req_id = self.ibsocket.next_req_id
+        self.ibsocket.reqBars(
+            reqId=req_id,
+            contract=contract,
+            end_date_time=end_date_time or "",
+            duration_str=duration_str or "1 D",
+            bar_size=bar_size,
+            useRTH=0,  # Include extended hours
+            format_date=2,  # Unix timestamps
+        )
+        return req_id
+
+    def _cancelBars(self, req_id: int) -> None:
+        """Cancel historical data request."""
+        VERSION = 1
+        self.ibsocket.send_message(OUT.CANCEL_HISTORICAL_DATA, [VERSION, req_id])
+        if DEBUG_TWS_REQUEST:
+            debug_log(f"canceled bar data for reqId {req_id}")
+
+    def _barsUpdate(self, req_id: int, bar: BarData) -> None:
+        """Forward bar data to BarsTracker (called from reader thread)."""
+        self.bars_tracker.update(req_id, bar)
+
+    def _barsComplete(self, req_id: int, start: str, end: str) -> None:
+        """Forward completion signal to BarsTracker (called from reader thread)."""
+        self.bars_tracker.flag_complete(req_id, start, end)
+
+    def _barsError(self, req_id: int, error: ProviderException) -> bool:
+        """Forward error to BarsTracker (called from reader thread)."""
+        return self.bars_tracker.raise_error(req_id, error)
 
     # === Contract resolution and caching ===
 
@@ -2093,38 +2164,27 @@ class TWSClient:
         end_date_time: str,
         duration_str: str,
         bar_size: str,
-        useRTH: int = 0,
-        format_date: int = 1,
         timeout: float | None = None,
-    ) -> list[dict[str, Any]]:
-        reqId: int | None = None
-        coroutine: Awaitable[list[dict[str, Any]]]
-        business_key = (
-            f"datafeed:reqHistoricalData:{contract.exchange}:{duration_str}:"
-            f"{end_date_time}:{ticker_name(contract, bar_size)}"
+    ) -> list[Bar]:
+        """Request historical bars using BarsTracker.
+
+        Args:
+            contract: Contract with ticker name and resolved contract
+            end_date_time: End datetime string (TWS format) or empty for "now"
+            duration_str: Duration string (e.g., "2 D")
+            bar_size: TWS bar size string (e.g., "5 mins")
+            timeout: Optional timeout override
+
+        Returns:
+            List of Bar domain models sorted by time
+        """
+        return await self.bars_tracker.request(
+            contract,
+            bar_size,
+            end_date_time,
+            duration_str,
+            timeout=timeout,
         )
-
-        cached_data = self.ibsocket.get_cached_data(business_key)
-        if cached_data is not None and cached_data.snapshot_complete:
-            return cached_data
-
-        reqId, coroutine = self.ibsocket.create_snapshot(
-            business_key,
-            timeout=30,
-        )
-
-        if reqId is not None:
-            self.ibsocket.reqBars(
-                reqId,
-                contract,
-                end_date_time,
-                duration_str,
-                bar_size,
-                useRTH,
-                format_date,
-            )
-
-        return await coroutine
 
     async def reqQuoteSnapshot(
         self,

@@ -688,91 +688,53 @@ class TestIBSocketNotifyStream:
 
 
 class TestIBSocketHistoricalCallbacks:
-    """Test historicalData accumulation, historicalDataEnd resolution."""
+    """Test historicalData and historicalDataEnd route to bars_cb/bars_complete_cb."""
 
-    @pytest.mark.asyncio
-    async def test_historical_data_accumulates_bars(
-        self, running_ibsocket: IBSocket
-    ) -> None:
-        """Test historicalData accumulates bars in stream_data."""
-        business_key = "datafeed:reqHistoricalData:SMART:1 D::NASDAQ:AAPL"
+    def test_historical_data_calls_bars_cb(self) -> None:
+        """Test historicalData routes to bars_cb callback."""
+        mock_bars_cb = MagicMock()
+        sock = IBSocket(bars_cb=mock_bars_cb)
+        sock._state = IBSocketState.RUNNING
 
-        reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
-        assert reqId is not None, "Expected reqId from create_snapshot"
-        tws_key = f"req_{reqId}"
+        bar = BarData()
+        bar.date = "20231215"
+        bar.open = 150.0
+        bar.high = 151.0
+        bar.low = 149.0
+        bar.close = 150.5
 
-        bar1 = BarData()
-        bar1.date = "20231215"
-        bar1.open = 150.0
-        bar1.high = 151.0
-        bar1.low = 149.0
-        bar1.close = 150.5
+        sock.historicalData(123, bar)
 
-        bar2 = BarData()
-        bar2.date = "20231216"
-        bar2.open = 150.5
-        bar2.high = 152.0
-        bar2.low = 150.0
-        bar2.close = 151.5
+        mock_bars_cb.assert_called_once_with(123, bar)
 
-        running_ibsocket.historicalData(reqId, bar1)
-        running_ibsocket.historicalData(reqId, bar2)
+    def test_historical_data_does_nothing_without_bars_cb(self) -> None:
+        """Test historicalData does nothing when bars_cb not set."""
+        sock = IBSocket()  # No bars_cb
+        sock._state = IBSocketState.RUNNING
 
-        stream = running_ibsocket._stream_data[tws_key]
-        assert len(stream) == 2
-        assert stream[0]["open"] == 150.0
-        assert stream[1]["open"] == 150.5
+        bar = BarData()
+        bar.date = "20231215"
+        bar.open = 150.0
 
-        # Cleanup
-        running_ibsocket._flag_snapshot_complete(tws_key)
-        await awaitable
+        # Should not raise
+        sock.historicalData(123, bar)
 
-    @pytest.mark.asyncio
-    async def test_historical_data_end_resolves_future(
-        self, running_ibsocket: IBSocket
-    ) -> None:
-        """Test historicalDataEnd resolves snapshot with accumulated bars."""
-        business_key = "datafeed:reqHistoricalData:SMART:1 D::NASDAQ:AAPL"
+    def test_historical_data_end_calls_bars_complete_cb(self) -> None:
+        """Test historicalDataEnd routes to bars_complete_cb callback."""
+        mock_bars_complete_cb = MagicMock()
+        sock = IBSocket(bars_complete_cb=mock_bars_complete_cb)
+        sock._state = IBSocketState.RUNNING
 
-        reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
-        assert reqId is not None, "Expected reqId from create_snapshot"
+        sock.historicalDataEnd(123, "20231215", "20231216")
 
-        bar1 = BarData()
-        bar1.date = "20231215"
-        bar1.open = 150.0
+        mock_bars_complete_cb.assert_called_once_with(123, "20231215", "20231216")
 
-        running_ibsocket.historicalData(reqId, bar1)
-        running_ibsocket.historicalDataEnd(reqId, "20231215", "20231216")
+    def test_historical_data_update_calls_bars_cb(self) -> None:
+        """Test historicalDataUpdate routes to bars_cb callback for real-time updates."""
+        mock_bars_cb = MagicMock()
+        sock = IBSocket(bars_cb=mock_bars_cb)
+        sock._state = IBSocketState.RUNNING
 
-        await asyncio.sleep(0.01)
-
-        result = await awaitable
-        assert len(result) == 1
-        assert result[0]["open"] == 150.0
-
-    @pytest.mark.asyncio
-    async def test_historical_data_update_updates_stream(
-        self, running_ibsocket: IBSocket
-    ) -> None:
-        """Test historicalDataUpdate updates existing bar in stream."""
-        business_key = "datafeed:reqBarDataStream:SMART:NASDAQ:AAPL@5 mins"
-        received: list[tuple[dict, list]] = []
-
-        async def callback(data: dict, fields: list) -> None:
-            received.append((dict(data), list(fields)))
-
-        async def on_error(error: ProviderException) -> None:
-            pass
-
-        reqId = running_ibsocket.create_stream(business_key, callback, on_error)
-        assert reqId is not None, "Expected reqId from create_snapshot"
-        tws_key = f"req_{reqId}"
-
-        # Initialize with first bar
-        stream = running_ibsocket._stream_data[tws_key]
-        stream.append({"date": "20231215 16:00:00", "open": 150.0, "close": 150.5})
-
-        # Update bar
         bar = BarData()
         bar.date = "20231215 16:00:00"
         bar.open = 150.0
@@ -780,15 +742,10 @@ class TestIBSocketHistoricalCallbacks:
         bar.low = 149.5
         bar.close = 150.75
         bar.volume = Decimal("1000")
-        bar.wap = Decimal("150.25")
-        bar.barCount = 100
 
-        running_ibsocket.historicalDataUpdate(reqId, bar)
+        sock.historicalDataUpdate(123, bar)
 
-        await asyncio.sleep(0.05)
-
-        assert len(received) >= 1
-        assert received[0][0]["close"] == 150.75
+        mock_bars_cb.assert_called_once_with(123, bar)
 
 
 # =============================================================================

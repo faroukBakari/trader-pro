@@ -8,21 +8,22 @@
 
 ## Quick Reference
 
-| Layer                       | File                                  | Responsibility                                                                  |
-| --------------------------- | ------------------------------------- | ------------------------------------------------------------------------------- |
-| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion                                      |
-| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management                                |
-| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket                                |
-| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                   |
-| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                   |
-| **ContractTracker**         | `contract_tracker.py`                 | Contract persistence with SQLite + lazy loading                                 |
+| Layer                       | File                                  | Responsibility                                                                   |
+| --------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- |
+| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion                                       |
+| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management                                 |
+| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket                                 |
+| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                    |
+| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                    |
+| **ContractTracker**         | `contract_tracker.py`                 | Contract persistence with SQLite + lazy loading                                  |
 | **QuoteTracker**            | `quote_tracker.py`                    | Quote subscription management, centralized snapshot/stream hooks, refcount logic |
-| **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch |
-| **PositionTracker**         | `position_tracker.py`                 | Position state tracking, thread-safe snapshot/stream pattern                    |
-| **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL       |
-| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                   |
-| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                               |
-| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                             |
+| **BarsTracker**             | `bars_tracker.py`                     | Bar data management, timezone-aware conversion, snapshot/stream patterns         |
+| **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch  |
+| **PositionTracker**         | `position_tracker.py`                 | Position state tracking, thread-safe snapshot/stream pattern                     |
+| **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL        |
+| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                    |
+| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                                |
+| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                              |
 
 **Tests:** `providers/tws/tests/test_{client,ibsocket,mappers,models,datafeed_provider,broker_provider,cached_contract,contract_tracker,quote_tracker,config}.py`
 
@@ -95,6 +96,7 @@ callback(data) ◄────────────────────�
 - **Deduplication**: `create_snapshot()`/`create_stream()` return `None` reqId if reusing existing request
 
 **Quote Subscription Pattern:**
+
 - **Centralized Hooks**: `QuoteTracker` owns `_snapshot_hooks` and `_stream_hooks` (not per-`TrackedQuote`)
 - **Reference Counting**: Tracker manages subscription refcount - unsubscribe only when last consumer disconnects
 - **Symbol Deduplication**: Multiple topics requesting same symbol share underlying TWS subscription
@@ -674,6 +676,142 @@ export DEBUG_TWS_DATAFEED=true  # Enables verbose quote tracking logs
 
 - **Tests**: `providers/tws/tests/test_quote_tracker.py` (28 test methods)
 - **Usage**: Used by `TWSDatafeedProvider.subscribe_market_data()`
+
+---
+
+## 2.6 Bar Data Management (BarsTracker)
+
+**File:** `bars_tracker.py`
+
+The `BarsTracker` manages historical and real-time bar data with timezone-aware conversion and snapshot/stream patterns:
+
+```python
+class BarsTracker:
+    _bars_requests: dict[int, BarsRequest]        # reqId → BarsRequest
+    _stream_hooks: dict[int, StreamHook]          # reqId → (loop, callback, on_error)
+    _lock: threading.Lock
+
+    # Snapshot Pattern (historical bars)
+    async def request(
+        self,
+        contract: Contract,
+        bar_size: str,
+        duration: str,
+        end_datetime: str,
+        what_to_show: str,
+        use_rth: int,
+        timeout: float = 10
+    ) -> list[Bar]:
+        """Request historical bars snapshot with timezone-aware conversion."""
+
+    # Stream Pattern (real-time bars)
+    def subscribe(
+        self,
+        req_id: int,
+        callback: Callable[[Bar], Awaitable[None]],
+        on_error: Callable[[ProviderException], Awaitable[None]]
+    ) -> None:
+        """Subscribe to real-time bar updates."""
+
+    # Update Dispatch (called from reader thread)
+    def update(self, req_id: int, bar: ibapi.common.BarData) -> None:
+        """Convert TWS bar to domain Bar and dispatch to hooks (thread-safe)."""
+
+    def complete(self, req_id: int, start: str, end: str) -> None:
+        """Mark historical request complete, resolve snapshot Future."""
+```
+
+**Architecture:**
+
+- **SmartTwsBar**: Timezone-aware wrapper for `ibapi.common.BarData`
+  - Converts TWS datetime strings (`"20231215 09:30:00 US/Eastern"`) to UTC timestamps
+  - Provides `to_domain()` → `Bar` (Pydantic model with `time: int` milliseconds, `volume: int`)
+- **BarsRequest**: Lifecycle tracking for single historical data request
+  - `upsert()`: Accumulates bars by timestamp (replaces duplicates)
+  - `flag_request_complete()`: Resolves snapshot Future with sorted bars
+- **Callback Routing**: `IBSocket.historicalData()` → `bars_cb(reqId, bar)` → `BarsTracker.update()`
+  - Not routed through `_stream_data` accumulation (unlike older patterns)
+
+**Threading Model:**
+
+- **Main Thread**: `request()` creates Future, awaits completion with timeout
+- **Reader Thread**: `update()` called from TWS callbacks (`historicalData`, `historicalDataUpdate`)
+- **Dispatch**: Hooks dispatched to main thread via `asyncio.loop.call_soon_threadsafe()`
+
+**Domain Conversion:**
+
+```python
+from bars_tracker import SmartTwsBar
+from trading_api.models.bars import Bar
+
+# TWS BarData → SmartTwsBar → Bar
+tws_bar = ibapi.common.BarData()  # date="20231215 09:30:00 US/Eastern"
+smart_bar = SmartTwsBar(bar=tws_bar)
+domain_bar = smart_bar.to_domain()
+
+# domain_bar.time → 1702641000000 (int milliseconds UTC)
+# domain_bar.volume → 1000000 (int, not float/Decimal)
+# domain_bar.count → Optional[int] (None for historical, set for real-time)
+```
+
+**Test Patterns:**
+
+- **Snapshot Testing**: Mock `bars_tracker.request()` with `AsyncMock(return_value=[bar1, bar2])`
+  - Use `Bar` objects with `time: int` (milliseconds), `volume: int`
+  - Example: `Bar(time=1702641000000, open=150.0, high=151.0, low=149.5, close=150.5, volume=1000000)`
+- **Callback Routing**: Verify `IBSocket.historicalData()` → `bars_cb(reqId, bar)` (not `_stream_data`)
+  - Test `bars_complete_cb(reqId, start, end)` for request completion
+  - No async patterns in IBSocket tests (synchronous callback verification)
+
+**IBSocket Integration:**
+
+```python
+# IBSocket constructor adds bar callbacks
+self.bars_cb: Callable[[int, ibapi.common.BarData], None] | None = bars_cb
+self.bars_complete_cb: Callable[[int, str, str], None] | None = bars_complete_cb
+self.bars_err: Callable[[str, int, str], None] | None = bars_err
+
+# historicalData callback routes to BarsTracker
+def historicalData(self, reqId: int, bar: ibapi.common.BarData) -> None:
+    if self.bars_cb:
+        self.bars_cb(reqId, bar)  # Not _append_stream_data()
+
+# historicalDataEnd callback completes request
+def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
+    if self.bars_complete_cb:
+        self.bars_complete_cb(reqId, start, end)  # Not _flag_snapshot_complete()
+```
+
+**TWSClient Integration:**
+
+```python
+# TWSClient owns BarsTracker
+@property
+def bars_tracker(self) -> BarsTracker:
+    if self._bars_tracker is None:
+        self._bars_tracker = BarsTracker()
+    return self._bars_tracker
+
+# reqHistoricalData delegates to tracker
+async def reqHistoricalData(
+    self, contract: Contract, bar_size: str, duration: str, ...
+) -> list[Bar]:
+    return await self.bars_tracker.request(
+        contract, bar_size, duration, end_datetime, what_to_show, use_rth
+    )
+
+# Hook methods route callbacks to tracker
+def _barsUpdate(self, req_id: int, bar: ibapi.common.BarData) -> None:
+    self.bars_tracker.update(req_id, bar)
+
+def _barsComplete(self, req_id: int, start: str, end: str) -> None:
+    self.bars_tracker.complete(req_id, start, end)
+```
+
+**Reference:**
+
+- **Tests**: `providers/tws/tests/test_client.py` (bar construction), `test_datafeed_provider.py` (Bar objects), `test_ibsocket.py` (callback routing)
+- **Usage**: Used by `TWSClient.reqHistoricalData()` and `TWSDatafeedProvider.get_historical_bars()`
 
 ---
 
