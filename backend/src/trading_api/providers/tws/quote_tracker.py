@@ -510,11 +510,11 @@ class QuoteTracker:
         self.tracker_lock = threading.Lock()
         self._quote_request_hook = quote_request_hook
         self._quote_cancel_hook = quote_cancel_hook
-        self._requests: dict[str, int] = {}  # ticker_name -> req_id
         self._timeout = timeout
 
         # shared quote storage
         self._quotes: dict[int, TrackedQuote] = {}  # req_id -> TrackedQuote
+        self._requests: dict[str, int] = {}  # ticker_name -> req_id
 
         # shared hook storage
         self._snapshot_hooks: dict[

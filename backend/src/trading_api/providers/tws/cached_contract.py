@@ -374,11 +374,15 @@ class CachedContract(ContractDetails):
             contract.exchange = contract.exchange or contract.primaryExchange
         return contract
 
-    def build_smart_contract(self) -> Contract | None:
-        contract = None
-        if "SMART" in self.validExchanges:
-            contract = clone_contract(self.contract)
-            contract.exchange = "SMART"
+    def build_session_contract(self) -> Contract:
+        exchange = (
+            "SMART"
+            if "SMART" in self.validExchanges
+            else (self.contract.exchange or self.contract.primaryExchange)
+        )
+
+        contract = clone_contract(self.contract)
+        contract.exchange = exchange
         return contract
 
     def build_darkpool_contract(self: ContractDetails) -> Contract | None:

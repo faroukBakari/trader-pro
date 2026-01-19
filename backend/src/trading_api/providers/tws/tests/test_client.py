@@ -13,7 +13,7 @@ Note: All tests mock IBSocket to avoid real TWS connections.
 
 import asyncio
 from typing import Any, Awaitable
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from ibapi.contract import Contract, ContractDescription, ContractDetails
@@ -513,49 +513,36 @@ class TestTWSClientReqHistoricalData:
 
     @pytest.mark.asyncio
     async def test_req_historical_data_returns_bars(self) -> None:
-        """Test reqHistoricalData returns BarData list."""
+        """Test reqHistoricalData returns list[Bar] via BarsTracker."""
+        from trading_api.models.market import Bar
+
         client = TWSClient("127.0.0.1", 7497, 1)
 
-        # Create mock ibsocket
-        mock_ibsocket = MagicMock()
-        mock_ibsocket.running = True
+        # Create test bars as domain Bar objects (reqHistoricalData now returns list[Bar])
+        # time is in milliseconds, volume is int
+        bar1 = Bar(
+            time=1702630200000,  # 2023-12-15 09:30:00 UTC in ms
+            open=150.0,
+            high=151.0,
+            low=149.5,
+            close=150.5,
+            volume=1000000,
+        )
 
-        # Create test bars as dicts (reqHistoricalData returns list[dict[str, Any]])
-        bar1 = {
-            "date": "20231215 09:30:00",
-            "open": 150.0,
-            "high": 151.0,
-            "low": 149.5,
-            "close": 150.5,
-        }
+        bar2 = Bar(
+            time=1702630260000,  # 2023-12-15 09:31:00 UTC in ms
+            open=150.5,
+            high=151.0,
+            low=150.0,
+            close=151.0,
+            volume=800000,
+        )
 
-        bar2 = {
-            "date": "20231215 09:31:00",
-            "open": 150.5,
-            "close": 151.0,
-        }
+        # Mock bars_tracker.request() which TWSClient.reqHistoricalData now delegates to
+        mock_bars_tracker = MagicMock()
+        mock_bars_tracker.request = AsyncMock(return_value=[bar1, bar2])
 
-        # Mock get_cached_data to return None (no cache)
-        mock_ibsocket.get_cached_data = MagicMock(return_value=None)
-
-        # Setup create_snapshot mock
-        def create_snapshot_side_effect(
-            business_key: str, *, timeout: float | None = 5
-        ) -> tuple[int | None, Awaitable[Any]]:
-            loop = asyncio.get_running_loop()
-            future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
-
-            async def resolve() -> None:
-                await asyncio.sleep(0.01)
-                future.set_result([bar1, bar2])
-
-            asyncio.create_task(resolve())
-            return (1, asyncio.wait_for(future, timeout))
-
-        mock_ibsocket.create_snapshot = create_snapshot_side_effect
-        mock_ibsocket.reqBars = MagicMock()
-
-        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+        client._TWSClient__bars_tracker = mock_bars_tracker  # type: ignore[attr-defined]
 
         contract = Contract()
         contract.symbol = "AAPL"
@@ -570,8 +557,14 @@ class TestTWSClientReqHistoricalData:
         )
 
         assert len(result) == 2
-        assert result[0]["open"] == 150.0
-        mock_ibsocket.reqBars.assert_called_once()
+        assert result[0].open == 150.0
+        mock_bars_tracker.request.assert_called_once_with(
+            contract,
+            "1 min",
+            "20231215 16:00:00",
+            "1 D",
+            timeout=None,
+        )
 
 
 class TestTWSClientStreamMethods:
