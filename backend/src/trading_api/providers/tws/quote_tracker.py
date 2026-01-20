@@ -728,36 +728,36 @@ class QuoteTracker:
             updates: Dict of field_name -> value from tick data
         """
 
-        with self.tracker_lock:
-            quote = self._quotes.get(req_id)
+        # with self.tracker_lock: <- disabled for performance
+        quote = self._quotes.get(req_id)
 
-            if quote is None:
-                logger.warning(f"Received tick update for unknown req_id {req_id}")
-                return
-            quote.update(updates)
+        if quote is None:
+            logger.warning(f"Received tick update for unknown req_id {req_id}")
+            return
+        quote.update(updates)
 
-            quote_snapshot_hooks = list(self._snapshot_hooks.get(req_id, {}).values())
-            quote_stream_hooks = list(self._stream_hooks.get(req_id, {}).values())
+        quote_snapshot_hooks = list(self._snapshot_hooks.get(req_id, {}).values())
+        quote_stream_hooks = list(self._stream_hooks.get(req_id, {}).values())
 
-            # If no longer used, debounce cancel
-            if not (quote_snapshot_hooks or quote_stream_hooks):
-                logger.warning(
-                    f"update: Unused quote subscription for req_id "
-                    f"{req_id} --> {quote.cached_contract.ticker}"
-                )
-                return
+        # If no longer used, debounce cancel
+        if not (quote_snapshot_hooks or quote_stream_hooks):
+            logger.warning(
+                f"update: Unused quote subscription for req_id "
+                f"{req_id} --> {quote.cached_contract.ticker}"
+            )
+            return
 
-            # Resolve snapshot hooks if ready
-            if quote.is_ready:
-                for loop, future in quote_snapshot_hooks:
-                    loop.call_soon_threadsafe(resolve_snapshot, future, quote)
+        # Resolve snapshot hooks if ready
+        if quote.is_ready:
+            for loop, future in quote_snapshot_hooks:
+                loop.call_soon_threadsafe(resolve_snapshot, future, quote)
 
-            # Dispatch to stream hooks
-            for loop, callback, _ in quote_stream_hooks:
-                loop.call_soon_threadsafe(
-                    loop.create_task,
-                    dispatch_update(callback, quote),
-                )
+        # Dispatch to stream hooks
+        for loop, callback, _ in quote_stream_hooks:
+            loop.call_soon_threadsafe(
+                loop.create_task,
+                dispatch_update(callback, quote),
+            )
 
     def raise_error(self, req_id: int, exception: ProviderException) -> bool:
         """Dispatch error to a TrackedQuote's hooks.
@@ -768,35 +768,35 @@ class QuoteTracker:
             req_id: TWS request ID for the failed request
             exception: ProviderException to propagate to hooks
         """
-        with self.tracker_lock:
-            quote = self._quotes.get(req_id)
+        # with self.tracker_lock:  <- disabled for performance
+        quote = self._quotes.get(req_id)
 
-            if quote is None:
-                logger.warning(f"Received error for unknown req_id {req_id}")
-                return False
+        if quote is None:
+            logger.warning(f"Received error for unknown req_id {req_id}")
+            return False
 
-            quote_snapshot_hooks = list(self._snapshot_hooks.get(req_id, {}).values())
-            quote_stream_hooks = list(self._stream_hooks.get(req_id, {}).values())
+        quote_snapshot_hooks = list(self._snapshot_hooks.get(req_id, {}).values())
+        quote_stream_hooks = list(self._stream_hooks.get(req_id, {}).values())
 
-            # If no longer used, debounce cancel
-            if not (quote_snapshot_hooks or quote_stream_hooks):
-                logger.warning(
-                    f"raise_error: Unused quote subscription for req_id "
-                    f"{req_id} --> {quote.cached_contract.ticker}"
-                )
-                return True
-
-            # Dispatch to snapshot hooks
-            for loop, future in quote_snapshot_hooks:
-                loop.call_soon_threadsafe(reject_snapshot, future, exception)
-
-            # Dispatch to stream hooks
-            for loop, _, on_error in quote_stream_hooks:
-                loop.call_soon_threadsafe(
-                    loop.create_task,
-                    on_error(exception),
-                )
+        # If no longer used, debounce cancel
+        if not (quote_snapshot_hooks or quote_stream_hooks):
+            logger.warning(
+                f"raise_error: Unused quote subscription for req_id "
+                f"{req_id} --> {quote.cached_contract.ticker}"
+            )
             return True
+
+        # Dispatch to snapshot hooks
+        for loop, future in quote_snapshot_hooks:
+            loop.call_soon_threadsafe(reject_snapshot, future, exception)
+
+        # Dispatch to stream hooks
+        for loop, _, on_error in quote_stream_hooks:
+            loop.call_soon_threadsafe(
+                loop.create_task,
+                on_error(exception),
+            )
+        return True
 
     # === Session Management ===
 
