@@ -424,6 +424,7 @@ private onOrderFilled(order: Order): void {
     qty: order.qty,
     side: order.side,
     time: Date.now(),
+    commission: 2.50,  // Optional: Commission amount from broker
   };
 
   // Notify TradingView

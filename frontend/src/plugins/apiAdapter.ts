@@ -540,6 +540,9 @@ export class ApiAdapter {
       data: response.data.map(execution => ({
         ...execution,
         side: execution.side as unknown as Execution['side'],
+        // Commission field: Convert backend null → TradingView undefined
+        // Backend may return null if commissionAndFeesReport hasn't fired yet (TWS two-phase dispatch)
+        commission: execution.commission ?? undefined,
       })),
     }
   }

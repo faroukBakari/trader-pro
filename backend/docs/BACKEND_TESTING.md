@@ -674,6 +674,88 @@ async def test_get_historical_bars_returns_bars(mock_client):
 - [ ] Remove `_stream_data` / `create_snapshot` references
 - [ ] Verify callback routing (`bars_cb`, `bars_complete_cb`), not accumulation
 
+**ExecutionTracker Testing (Two-Phase Dispatch):**
+
+ExecutionTracker follows the same pattern as BarsTracker but adds commission joining via two-phase dispatch:
+
+```python
+from unittest.mock import Mock, AsyncMock
+from ibapi.contract import Contract
+from ibapi.execution import Execution as TWSExecution
+from trading_api.providers.tws.execution_tracker import TrackedExecution, ExecutionTracker
+
+# Test two-phase dispatch pattern
+@pytest.mark.asyncio
+async def test_execution_tracker_two_phase_dispatch():
+    tracker = ExecutionTracker()
+    contract = Contract()
+    contract.symbol = "AAPL"
+    contract.exchange = "NASDAQ"
+
+    execution = TWSExecution()
+    execution.execId = "001"
+    execution.price = 150.0
+    execution.shares = 100
+    execution.side = "BOT"
+    execution.time = "20240115 14:30:45"
+
+    # Track dispatches
+    dispatches = []
+    async def on_execution(tracked: TrackedExecution):
+        dispatches.append(tracked)
+
+    loop = asyncio.get_running_loop()
+    tracker.create_stream_hook(loop, on_execution, lambda e: None)
+
+    # Phase 1: execDetails (commission=None)
+    tracker.upsert_execution(contract, execution)
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 1
+    assert dispatches[0].commission is None
+
+    # Phase 2: commissionAndFeesReport (commission enriched)
+    tracker.update_commission("001", 1.50)
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 2
+    assert dispatches[1].commission == 1.50
+    assert dispatches[1].exec_id == "001"
+
+# Test provider-level integration
+@pytest.mark.asyncio
+async def test_subscribe_executions_with_symbol_filter(mock_socket):
+    tracker = mock_socket.execution_tracker
+    callback_mock = AsyncMock()
+
+    # Subscribe with symbol filter
+    hook_key = await provider.subscribe_executions(
+        symbol="AAPL",
+        callback=callback_mock,
+        on_error=lambda e: None,
+    )
+
+    # Simulate execution for different symbols
+    contract1 = Contract()
+    contract1.symbol = "AAPL"
+    contract1.exchange = "NASDAQ"
+
+    execution1 = TWSExecution()
+    execution1.execId = "001"
+    tracker.upsert_execution(contract1, execution1)
+
+    await asyncio.sleep(0.01)
+    # Only AAPL executions should be dispatched
+    callback_mock.assert_called_once()
+```
+
+**ExecutionTracker Key Points:**
+
+- **Two-Phase Dispatch**: Test both phases (execDetails → commissionAndFeesReport)
+- **Symbol Filtering**: Test at provider layer (TrackedExecution.symbol format: "EXCHANGE:SYMBOL")
+- **Domain Conversion**: Use `TrackedExecution.to_domain()` → `Execution` Pydantic model
+- **Time Parsing**: TWS format "YYYYMMDD HH:MM:SS" → int milliseconds UTC
+- **Snapshot Pattern**: Mock `execution_tracker.all_executions()` with list of `TrackedExecution`
+- **Stream Hooks**: Verify `create_stream_hook()` registration and dispatch
+
 ---
 
 ### Available Fixtures
@@ -1779,27 +1861,29 @@ Benefits:
 **Architectural Change**: `reqBarDataStream()` now delegates through `BarsTracker` for centralized registration.
 
 **OLD Pattern (Before):**
+
 ```python
 # ❌ OLD: Mock ibsocket.create_stream (bypassed BarsTracker)
 @patch.object(IBSocket, "create_stream")
 async def test_reqBarDataStream_old(mock_create_stream):
     mock_create_stream.return_value = (42, lambda: None)  # (req_id, cancel_fn)
-    
+
     req_id, cancel_fn = await client.reqBarDataStream(...)
-    
+
     # Verify create_stream was called
     mock_create_stream.assert_called_once()
 ```
 
 **NEW Pattern (After Fix):**
+
 ```python
 # ✅ NEW: Mock bars_tracker.subscribe (unified pathway)
 @patch.object(BarsTracker, "subscribe")
 async def test_reqBarDataStream_new(mock_subscribe):
     mock_subscribe.return_value = None  # void method
-    
+
     req_id, cancel_fn = await client.reqBarDataStream(...)
-    
+
     # Verify bars_tracker.subscribe was called with domain callback
     mock_subscribe.assert_called_once()
     args = mock_subscribe.call_args
@@ -1848,7 +1932,7 @@ class TestTWSClientStreamMethods:
         # Setup
         mock_request_ticker_id.return_value = 42
         mock_subscribe.return_value = None
-        
+
         # Execute
         req_id, cancel_fn = await tws_client.reqBarDataStream(
             contract=Contract(...),
@@ -1858,14 +1942,14 @@ class TestTWSClientStreamMethods:
             callback=AsyncMock(),  # Domain callback: Bar → None
             on_error=AsyncMock()
         )
-        
+
         # Verify BarsTracker registration (unified pathway)
         mock_subscribe.assert_called_once()
         args = mock_subscribe.call_args[0]
         assert args[0] == 42  # req_id
         assert callable(args[1])  # callback (Bar → Awaitable[None])
         assert callable(args[2])  # on_error
-        
+
         # Verify IBSocket call (through BarsTracker)
         mock_reqBars.assert_called_once()
 ```
@@ -1887,7 +1971,7 @@ async def test_cancelDataSubscription(
     """Test canceling both quote and bar subscriptions."""
     # Prevents hanging by mocking all cleanup paths
     await tws_client.cancelDataSubscription(42)
-    
+
     mock_bars_unsubscribe.assert_called_once_with(42)
     mock_quote_cancel.assert_awaited_once_with(42)
 ```

@@ -294,6 +294,7 @@ export class WsAdapter {
     // Broker
     this.orders = new WebSocketClient('orders', mapOrder)
     this.positions = new WebSocketClient('positions', mapPosition)
+    // mapExecution: side enum conversion + commission (null → undefined for TradingView)
     this.executions = new WebSocketClient('executions', mapExecution)
     this.equity = new WebSocketClient('equity', (data) => data)
   }
@@ -523,11 +524,17 @@ private async setupWebSocketHandlers(): Promise<(void | undefined)[]> {
       (error) => this.handleSubscriptionError('Positions', error)  // ← Error callback
     ),
 
-    // 3. Execution updates (trade confirmations)
+    // 3. Execution updates (trade confirmations with commission data)
+    // Backend may dispatch twice for same execution:
+    // - First: execution with commission=null (execDetails callback)
+    // - Second: execution with commission=value (commissionAndFeesReport callback)
+    // This two-phase dispatch is TWS provider behavior, frontend just passes updates through
     this._getWsAdapter().executions?.subscribe(
       'executions',
       { accountId: this.accountId },
       (execution: Execution) => {
+        // execution.commission: number | undefined (null converted by mapExecution)
+        // TradingView displays commission in Execution History panel
         this._hostAdapter.executionUpdate(execution)
       },
       (error) => this.handleSubscriptionError('Executions', error)  // ← Error callback

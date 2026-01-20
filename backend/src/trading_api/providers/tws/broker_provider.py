@@ -7,7 +7,6 @@ All business logic (orders, positions, P&L) is encapsulated here.
 import asyncio
 import logging
 import os
-import random
 from decimal import Decimal
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -42,6 +41,7 @@ from trading_api.models.exceptions import ProviderException, TradingApiException
 from trading_api.models.market.quotes import GetQuotesRequest
 from trading_api.models.providers.tws_configs import TWSBrokerProviderConfig
 from trading_api.providers.tws.account_tracker import TrackedAccount
+from trading_api.providers.tws.execution_tracker import TrackedExecution
 from trading_api.providers.tws.order_tracker import TrackedOrder
 from trading_api.providers.tws.position_tracker import TrackedPosition
 from trading_api.providers.tws.tws_connection import TWSClient
@@ -87,22 +87,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             self._config.host, self._config.port, self._config.client_id
         )
 
-        # Business state (in-memory)
-        self._executions: list[Execution] = []
-
         # Subscription management
         self._subscription_counter = 0
-        self._execution_callbacks: dict[
-            str, tuple[str, Callable[[Execution], Awaitable[None]]]
-        ] = {}  # sub_id → (symbol, callback)
-
-        # Error callbacks (one per subscription)
-        self._error_callbacks: dict[
-            str, Callable[[TradingApiException], Awaitable[None]]
-        ] = {}
-
-        # Execution simulator task
-        self._execution_simulator_task: asyncio.Task | None = None
 
         # Shutdown event
         self._shutdown_event = asyncio.Event()
@@ -377,8 +363,25 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         )
 
     async def get_executions(self, symbol: str) -> list[Execution]:
-        """Get execution history for a symbol."""
-        return [e for e in self._executions if e.symbol == symbol]
+        """Get execution history for a symbol from TWS.
+
+        Uses TWSClient.reqExecutions() to get executions from the past 24 hours
+        (or longer if Trade Log is open in TWS).
+
+        Args:
+            symbol: Symbol to filter executions (empty string for all symbols)
+
+        Returns:
+            List of Execution objects matching the symbol filter
+        """
+        tracked_executions = await self._tws_client.reqExecutions()
+
+        # Convert to domain and filter by symbol
+        executions = [te.to_domain() for te in tracked_executions]
+        if symbol:
+            executions = [e for e in executions if e.symbol == symbol]
+
+        return executions
 
     async def get_account_info(self) -> AccountMetainfo:
         """Get account metadata from TWS.
@@ -703,25 +706,6 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         self._subscription_counter += 1
         return f"sub-{self._subscription_counter}"
 
-    def _start_execution_simulator_if_needed(self) -> None:
-        """Start execution simulator if not running and has subscribers."""
-        has_subscribers = len(self._execution_callbacks) > 0
-
-        if self._execution_simulator_task is None and has_subscribers:
-            logger.info("Starting execution simulator task")
-            self._execution_simulator_task = asyncio.create_task(
-                self._execution_simulator()
-            )
-
-    def _stop_execution_simulator_if_empty(self) -> None:
-        """Stop execution simulator if no more subscribers."""
-        has_subscribers = len(self._execution_callbacks) > 0
-
-        if self._execution_simulator_task is not None and not has_subscribers:
-            logger.info("Stopping execution simulator task (no subscribers)")
-            self._execution_simulator_task.cancel()
-            self._execution_simulator_task = None
-
     async def subscribe_orders(
         self,
         callback: Callable[[PlacedOrder], Awaitable[None]],
@@ -775,16 +759,38 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         callback: Callable[[Execution], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
     ) -> str:
-        """Subscribe to execution updates for a symbol."""
-        sub_id = self._generate_subscription_id()
-        self._execution_callbacks[sub_id] = (symbol, callback)
-        if on_error:
-            self._error_callbacks[sub_id] = on_error
+        """Subscribe to real-time execution updates from TWS.
 
-        logger.info(f"Registered execution subscription for {symbol}: {sub_id}")
-        self._start_execution_simulator_if_needed()
+        Uses TWSClient.reqExecutionsStream() which triggers initial snapshot
+        and provides real-time fill notifications.
 
-        return sub_id
+        Args:
+            symbol: Symbol to filter executions (empty string for all symbols)
+            callback: Called with Execution on each fill
+            on_error: Optional error callback
+
+        Returns:
+            Subscription ID for unsubscribe()
+        """
+
+        async def tracked_to_execution(tracked: TrackedExecution) -> None:
+            """Adapter: TrackedExecution → Execution callback with symbol filter."""
+            execution = tracked.to_domain()
+            # Filter by symbol if specified (empty symbol = all symbols)
+            if not symbol or execution.symbol == symbol:
+                await callback(execution)
+
+        async def error_handler(exc: ProviderException) -> None:
+            """Adapter: ProviderException → TradingApiException callback."""
+            if on_error:
+                await on_error(exc)
+
+        stream_key = self._tws_client.reqExecutionsStream(
+            tracked_to_execution, error_handler
+        )
+
+        logger.info(f"Registered execution subscription for {symbol}: {stream_key}")
+        return stream_key
 
     async def subscribe_equity(
         self,
@@ -816,87 +822,23 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         stream_key = self._tws_client.reqAccountStream(tracked_to_equity, error_handler)
 
-        # Track for cleanup in unsubscribe()
-        if on_error:
-            self._error_callbacks[stream_key] = on_error
-
         logger.info(f"Registered equity subscription: {stream_key}")
         return stream_key
 
     def unsubscribe(self, subscription_id: str) -> None:
         """Unsubscribe from a stream."""
-        # Remove from all callback registries
-
+        # Delegate to TWSClient to cancel all broker streams
         self._tws_client.cancel_broker_stream(subscription_id)
 
-        # Remove error callback
-        self._error_callbacks.pop(subscription_id, None)
-
         logger.info(f"Unsubscribed: {subscription_id}")
-        self._stop_execution_simulator_if_empty()
-
-    # =========================================================================
-    # Execution Simulator (internal)
-    # =========================================================================
-
-    async def _execution_simulator(self) -> None:
-        """Simulate random order executions at configurable intervals."""
-        logger.info("Execution simulator started")
-
-        while not self._shutdown_event.is_set():
-            try:
-                delay = random.uniform(
-                    1.0,
-                    2.0,
-                )
-                await asyncio.sleep(delay)
-
-                logger.debug("No working orders to execute")
-
-            except asyncio.CancelledError:
-                logger.info("Execution simulator cancelled")
-                break
-            except Exception as e:
-                logger.exception(f"Error in execution simulator: {e}")
-                # Continue running despite errors
-
-    async def _broadcast_execution(self, execution: Execution) -> None:
-        """Broadcast execution to matching symbol subscribers.
-
-        Note: Empty symbol means 'all symbols' subscription.
-        """
-        for sub_id, (symbol, callback) in list(self._execution_callbacks.items()):
-            # Empty symbol means subscribe to all executions
-            if symbol == "" or symbol == execution.symbol:
-                try:
-                    await callback(execution)
-                except Exception as e:
-                    logger.exception(f"Error in execution callback: {e}")
 
     # =========================================================================
     # Lifecycle / Testing Helpers
     # =========================================================================
 
-    def reset(self) -> None:
-        """Reset provider to initial state (for testing)."""
-        # Cancel execution simulator
-        if self._execution_simulator_task:
-            self._execution_simulator_task.cancel()
-            self._execution_simulator_task = None
-
-        # Clear all state
-        self._executions = []
-
-        # Clear subscriptions
-        self._execution_callbacks = {}
-        self._error_callbacks = {}
-
     def shutdown(self) -> None:
         """Shutdown provider (cancel background tasks)."""
         self._shutdown_event.set()
-        if self._execution_simulator_task:
-            self._execution_simulator_task.cancel()
-            self._execution_simulator_task = None
 
         if DEBUG_TWS_BROKER:
             logger.info("Shutting down TWSBrokerProvider...")
@@ -905,8 +847,4 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             logger.info("TWSBrokerProvider shutdown complete.")
 
 
-# Alias for backward compatibility
-TWSBrokerProvider = TWSBrokerProvider
-
-__all__ = ["TWSBrokerProvider", "TWSBrokerProvider"]
-__all__ = ["TWSBrokerProvider", "TWSBrokerProvider"]
+__all__ = ["TWSBrokerProvider"]
