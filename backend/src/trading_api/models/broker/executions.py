@@ -18,6 +18,9 @@ class Execution(BaseModel):
     qty: float = Field(..., description="Execution quantity", gt=0)
     side: Side = Field(..., description="Execution side")
     time: int = Field(..., description="Time (unix timestamp in milliseconds)")
+    commission: float | None = Field(
+        default=None, description="Commission amount (from TWS commissionAndFeesReport)"
+    )
 
     model_config = {"use_enum_values": True}
 

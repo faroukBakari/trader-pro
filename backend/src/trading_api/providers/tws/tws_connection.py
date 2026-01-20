@@ -40,9 +40,11 @@ from typing import Any
 
 from ibapi.client_utils import (
     createCancelOrderRequestProto,
+    createExecutionRequestProto,
     createPlaceOrderRequestProto,
 )
-from ibapi.common import BarData, TickAttrib
+from ibapi.commission_and_fees_report import CommissionAndFeesReport
+from ibapi.common import PROTOBUF_MSG_ID, BarData, TickAttrib
 from ibapi.const import (
     DOUBLE_INFINITY,
     INFINITY_STR,
@@ -52,6 +54,7 @@ from ibapi.const import (
 )
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.decoder import Decoder
+from ibapi.execution import Execution, ExecutionFilter
 from ibapi.message import OUT
 from ibapi.order import Order
 from ibapi.order_cancel import OrderCancel
@@ -70,6 +73,10 @@ from trading_api.providers.tws.account_tracker import (
 from trading_api.providers.tws.bars_tracker import BarsTracker
 from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.contract_tracker import ContractTracker
+from trading_api.providers.tws.execution_tracker import (
+    ExecutionTracker,
+    TrackedExecution,
+)
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
 from trading_api.providers.tws.position_tracker import PositionTracker, TrackedPosition
 from trading_api.providers.tws.quote_tracker import QuoteTracker
@@ -103,7 +110,6 @@ DEBUG_TWS_CACHE = os.environ.get("DEBUG_TWS_CACHE") == "true"
 NO_VALID_ID = -1
 MIN_CLIENT_VER = 100
 MAX_CLIENT_VER = 203
-PROTOBUF_MSG_ID = 200
 VERSION = 2
 
 
@@ -282,6 +288,7 @@ class IBSocket(EWrapper):
             self.reqAccountSubscriptions, self.cancelAccountSubscriptions
         )
         self.contract_tracker: ContractTracker = ContractTracker()
+        self.execution_tracker: ExecutionTracker = ExecutionTracker()
         self._ready_event = (
             threading.Event()
         )  # Signals when IBKR connection is fully established
@@ -438,6 +445,7 @@ class IBSocket(EWrapper):
             self._req_id_count = count()
             self.order_tracker.reset()
             self.position_tracker.reset()
+            self.execution_tracker.reset()
 
     def _handle_request_error(
         self,
@@ -1105,6 +1113,26 @@ class IBSocket(EWrapper):
 
         self.position_tracker.ensure_snapshot_requested(request_cb)
 
+    def reqExecutions(self) -> None:
+        """Request all executions for this client (snapshot).
+
+        Returns executions for the past 24 hours (or longer if Trade Log is open).
+        Each execution triggers execDetails() callback, then execDetailsEnd().
+
+        Uses an empty ExecutionFilter to get all executions.
+        """
+
+        def request_cb() -> None:
+            reqId = self.next_req_id
+            exec_filter = ExecutionFilter()
+            exec_request_proto = createExecutionRequestProto(reqId, exec_filter)
+            serialized = exec_request_proto.SerializeToString()
+            self.send_protobuf(OUT.REQ_EXECUTIONS + PROTOBUF_MSG_ID, serialized)
+            if DEBUG_TWS_REQUEST:
+                debug_log(f"requested executions reqId={reqId}")
+
+        self.execution_tracker.ensure_snapshot_requested(request_cb)
+
     def reqAccountSummary(self) -> None:
         def request_cb() -> int:
             VERSION = 1
@@ -1648,6 +1676,74 @@ class IBSocket(EWrapper):
 
         # Mark snapshot complete and resolve pending futures
         self.position_tracker.mark_snapshot_complete()
+
+    # === execution callbacks ===
+
+    def execDetails(self, reqId: int, contract: Contract, execution: Execution) -> None:
+        """Callback for execution details.
+
+        TWS sends this callback for:
+        1. Each execution after reqExecutions() is called
+        2. Real-time when an order is filled
+
+        Routes to ExecutionTracker which dispatches to stream hooks.
+        Commission arrives separately via commissionAndFeesReport().
+
+        Args:
+            reqId: Request ID from reqExecutions() or -1 for real-time fills
+            contract: Contract the execution is for
+            execution: Execution details (execId, price, shares, side, time)
+        """
+        if DEBUG_TWS_BROKER:
+            debug_log(
+                f"{current_fn_name()}, reqId={reqId}, "
+                f"execId={execution.execId}, symbol={contract.symbol}, "
+                f"side={execution.side}, shares={execution.shares}, "
+                f"price={execution.price}"
+            )
+
+        self.execution_tracker.upsert_execution(contract, execution)
+
+    def execDetailsEnd(self, reqId: int) -> None:
+        """End signal for executions request.
+
+        Called after all execDetails callbacks for reqExecutions().
+        Resolves the pending future with accumulated execution data.
+
+        Args:
+            reqId: Request ID from reqExecutions()
+        """
+        if DEBUG_TWS_BROKER:
+            debug_log(f"{current_fn_name()}, reqId={reqId}")
+
+        self.execution_tracker.mark_snapshot_complete()
+
+    def commissionAndFeesReport(
+        self, commissionAndFeesReport: CommissionAndFeesReport
+    ) -> None:
+        """Callback for commission and fees data.
+
+        TWS sends this callback:
+        1. Immediately after a trade execution
+        2. For each execution after reqExecutions() is called
+
+        Enriches the TrackedExecution with commission data and re-dispatches
+        to stream hooks so subscribers receive the updated execution.
+
+        Args:
+            commissionAndFeesReport: Commission report linked by execId
+        """
+        if DEBUG_TWS_BROKER:
+            debug_log(
+                f"{current_fn_name()}, execId={commissionAndFeesReport.execId}, "
+                f"commission={commissionAndFeesReport.commissionAndFees}, "
+                f"currency={commissionAndFeesReport.currency}"
+            )
+
+        self.execution_tracker.update_commission(
+            commissionAndFeesReport.execId,
+            commissionAndFeesReport.commissionAndFees,
+        )
 
     # === error handling ===
 
@@ -2524,6 +2620,26 @@ class TWSClient:
             timeout=timeout or self._timeout
         )
 
+    async def reqExecutions(
+        self, timeout: float | None = None
+    ) -> list[TrackedExecution]:
+        """Request all executions for this client (snapshot).
+
+        Returns executions for the past 24 hours (or longer if Trade Log is open).
+        Each execution triggers execDetails() callback, then execDetailsEnd().
+
+        Args:
+            timeout: Request timeout in seconds
+
+        Returns:
+            List of TrackedExecution objects (one per execution)
+        """
+        self.ibsocket.reqExecutions()
+
+        return await self.ibsocket.execution_tracker.all_executions(
+            timeout=timeout or self._timeout
+        )
+
     # === Real-time broker subscriptions ===
 
     def reqOrdersStream(
@@ -2585,11 +2701,33 @@ class TWSClient:
 
         return stream_key
 
+    def reqExecutionsStream(
+        self,
+        callback: Callable[[TrackedExecution], Coroutine[Any, Any, None]],
+        on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
+    ) -> str:
+        """Create execution stream subscription.
+
+        Returns stream_key for later unsubscription.
+        """
+        # 1. Register with ExecutionTracker
+        stream_key = self.ibsocket.execution_tracker.create_stream_hook(
+            asyncio.get_event_loop(),
+            callback,
+            on_error,
+        )
+
+        # 2. Trigger initial snapshot (existing executions)
+        self.ibsocket.reqExecutions()
+
+        return stream_key
+
     def cancel_broker_stream(self, stream_key: str) -> None:
         """Cancel a real-time broker subscription (orders, positions, or accounts)."""
         self.ibsocket.order_tracker.remove_stream_hook(stream_key)
         self.ibsocket.position_tracker.remove_stream_hook(stream_key)
         self.ibsocket.account_tracker.remove_stream_hook(stream_key)
+        self.ibsocket.execution_tracker.remove_stream_hook(stream_key)
 
         # Cancel underlying TWS subscriptions if this was an account stream
         # TODO: Track stream_key → pnl_req_id mapping to cancel P&L subscription

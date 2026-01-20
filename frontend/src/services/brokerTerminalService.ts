@@ -725,7 +725,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         'executions',
         { accountId: this.accountId },
         (execution: Execution) => {
-          console.log('Received execution update via WebSocket:', execution)
+          console.warn('Received execution update via WebSocket:', execution)
           this._hostAdapter.executionUpdate(execution)
         },
         (error) => this.handleSubscriptionError('Executions', error)
@@ -922,7 +922,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   async executions(symbol: string): Promise<Execution[]> {
     const response = await this._getApiAdapter().getExecutions(symbol)
-    console.log(`BrokerTerminalService.executions[${symbol}] => `, response.data)
+    console.warn(`BrokerTerminalService.executions[${symbol}] => ${JSON.stringify(response.data)}`)
     return response.data
   }
 

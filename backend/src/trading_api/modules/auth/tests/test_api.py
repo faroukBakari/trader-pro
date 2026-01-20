@@ -186,8 +186,9 @@ class TestRefreshTokenEndpoint:
             login_data = login_response.json()
             refresh_token = login_data["refresh_token"]
 
-        # Wait a moment to ensure different timestamp in JWT (exp claim has 1-second precision)
-        time.sleep(1.1)
+        # Wait to ensure different timestamp in JWT (iat claim has 1-second precision)
+        # Using 2s to handle edge cases where 1.1s might still land in the same second
+        time.sleep(2)
 
         # Now refresh the token
         refresh_response = client.post(

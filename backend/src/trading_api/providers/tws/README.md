@@ -21,6 +21,7 @@
 | **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch  |
 | **PositionTracker**         | `position_tracker.py`                 | Position state tracking, thread-safe snapshot/stream pattern                     |
 | **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL        |
+| **ExecutionTracker**        | `execution_tracker.py`                | Execution tracking with commission joining, two-phase dispatch pattern           |
 | **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                    |
 | **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                                |
 | **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                              |
@@ -913,6 +914,155 @@ else:
 
 ---
 
+## 2.8 ExecutionTracker: Commission Joining Pattern
+
+**Purpose:** Track trade executions with commission enrichment via two-phase dispatch.
+
+**Key Classes:**
+
+- `TrackedExecution` - Dataclass wrapping Contract, Execution, and optional commission
+- `ExecutionTracker` - Manages execution state with snapshot/stream hooks
+
+**Commission Joining Workflow:**
+
+```
+┌────────────────┐  (commission=None)
+│ execDetails    │
+│ callback       │
+└───────┬────────┘
+        │
+        ▼
+┌────────────────────┐         ┌─────────────────────┐
+│ upsert_execution() │────────▶│ Dispatch to streams │  (immediate)
+└────────────────────┘         └─────────────────────┘
+        │                               ▲
+        │                               │
+┌───────▼────────┐                      │
+│ Store tracked  │                      │
+│ execution      │                      │
+└────────────────┘                      │
+                                        │
+┌──────────────────────┐         ┌──────┴──────────────────┐
+│ commissionAndFees    │────────▶│ Re-dispatch with    │  (~50-200ms later)
+│ Report callback      │         │ enriched commission │
+└──────────────────────┘         └─────────────────────────┘
+```
+
+**Why Two-Phase Dispatch?**
+
+- **Fast Fill Notifications:** Frontend receives execution ~2ms after fill
+- **Complete Data:** Commission arrives ~50-200ms later, triggers update
+- **No Blocking:** Don't wait for commission before notifying subscribers
+
+**Thread Safety:**
+
+- **Reader Thread:** `upsert_execution()`, `update_commission()`, `mark_snapshot_complete()`
+- **Main Thread:** `all_executions()`, `create_stream_hook()`, `reset()`
+- **No Locks Needed:** Reader thread writes, main thread reads via asyncio dispatch
+
+**API:**
+
+```python
+class ExecutionTracker:
+    # Reader thread (IBSocket callbacks)
+    def upsert_execution(self, contract: Contract, execution: TWSExecution) -> None:
+        """Store execution and dispatch immediately (commission may be None)."""
+
+    def update_commission(self, exec_id: str, commission: float) -> None:
+        """Enrich execution with commission and re-dispatch."""
+
+    def mark_snapshot_complete(self) -> None:
+        """Resolve all snapshot hooks with current executions."""
+
+    # Main thread (TWSClient/BrokerProvider)
+    async def all_executions(self, filter_symbol: str = "", timeout: float | None = None) -> list[TrackedExecution]:
+        """Get all executions, waiting for snapshot if needed."""
+
+    def create_stream_hook(self, loop, callback, on_error) -> str:
+        """Register callback for execution updates (called twice per execution)."""
+
+    def remove_stream_hook(self, key: str) -> None:
+        """Unregister execution callback."""
+```
+
+**Usage Example (BrokerProvider):**
+
+```python
+class TWSBrokerProvider:
+    async def get_executions(self, symbol: str | None = None) -> list[DomainExecution]:
+        """Get all executions with optional symbol filter."""
+        # Trigger snapshot if needed
+        self._tws_client.socket.execution_tracker.ensure_snapshot_requested(
+            lambda: self._tws_client.socket.reqExecutions(ExecutionFilter())
+        )
+        # Wait for snapshot completion
+        tracked = await self._tws_client.socket.execution_tracker.all_executions(
+            filter_symbol=f"EXCHANGE:{symbol}" if symbol else ""
+        )
+        return [t.to_domain() for t in tracked]
+
+    async def subscribe_executions(self, callback, on_error, symbol: str | None = None) -> str:
+        """Subscribe to execution stream (with commission enrichment)."""
+        loop = asyncio.get_running_loop()
+
+        async def on_execution_update(tracked: TrackedExecution) -> None:
+            # Filter by symbol if specified
+            if symbol and tracked.symbol != f"EXCHANGE:{symbol}":
+                return
+            # Convert to domain and dispatch
+            await callback(tracked.to_domain())
+
+        # Register stream hook (receives both initial and commission-enriched executions)
+        hook_key = self._tws_client.socket.execution_tracker.create_stream_hook(
+            loop, on_execution_update, on_error
+        )
+        # Trigger snapshot to populate existing executions
+        self._tws_client.socket.execution_tracker.ensure_snapshot_requested(
+            lambda: self._tws_client.socket.reqExecutions(ExecutionFilter())
+        )
+        return hook_key
+```
+
+**Testing Patterns:**
+
+```python
+# Mock execution_tracker in IBSocket
+class TestBrokerProvider:
+    def test_subscribe_executions_dispatches_twice(self, mock_socket):
+        """Verify two-phase dispatch: execDetails → commissionAndFeesReport."""
+        tracker = mock_socket.execution_tracker
+        contract = Contract()
+        execution = TWSExecution()
+        execution.execId = "001"
+
+        # Track dispatches
+        dispatches = []
+        tracker.create_stream_hook(
+            loop=asyncio.get_running_loop(),
+            callback=lambda t: dispatches.append(t),
+            on_error=lambda e: None,
+        )
+
+        # Phase 1: execDetails (commission=None)
+        tracker.upsert_execution(contract, execution)
+        assert len(dispatches) == 1
+        assert dispatches[0].commission is None
+
+        # Phase 2: commissionAndFeesReport (commission enriched)
+        tracker.update_commission("001", 1.50)
+        assert len(dispatches) == 2
+        assert dispatches[1].commission == 1.50
+```
+
+**Known Behavior:**
+
+- Commission may arrive before execution (rare, gracefully handled)
+- Re-dispatch uses same hook keys (subscribers receive both notifications)
+- Snapshot includes all executions up to `execDetailsEnd` callback
+- Symbol filtering happens at provider layer (not tracker)
+
+---
+
 ## 3. Asset Configuration
 
 **File:** `tws_models.py`
@@ -1014,7 +1164,7 @@ class BrokerCapability(ABC):
     # Account Data (async)
     async def get_account_info(self) -> AccountMetainfo  # Get account metadata from TWS via reqAccountSummary(). Returns first account from managed accounts list with ID, name, currency, and currency sign.
     async def get_equity(self) -> EquityData  # Get current equity data from TWS via reqAccountSummary(). Returns real-time balance, equity, and P&L values from TrackedAccount. Uses net_liquidation for equity, total_cash_value for balance, and real-time P&L from reqPnL() subscription.
-    async def get_executions(self, symbol: str) -> list[Execution]
+    async def get_executions(self, symbol: str | None = None) -> list[Execution]  # Get all executions with optional symbol filter. Uses ExecutionTracker.all_executions() for snapshot, domain conversion via TrackedExecution.to_domain().
 
     # Leverage (NOT SUPPORTED by TWS - raises ProviderException)
     async def preview_leverage(self, params: LeverageSetParams) -> LeveragePreviewResult
@@ -1036,7 +1186,7 @@ class BrokerCapability(ABC):
 
     def subscribe_executions(
         self,
-        symbol: str,
+        symbol: str | None,
         callback: Callable[[Execution], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
     ) -> str
@@ -1052,8 +1202,9 @@ class BrokerCapability(ABC):
 
 **TWS-Specific Notes:**
 
-- **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `req_ticker_details()`. Order streaming (`subscribe_orders()`) is fully TWS-backed via `OrderTracker`. Some features (positions, executions, equity streaming) still use in-memory state.
+- **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `req_ticker_details()`. Order streaming (`subscribe_orders()`) is fully TWS-backed via `OrderTracker`. Execution tracking (`get_executions()`, `subscribe_executions()`) is TWS-backed via `ExecutionTracker` with commission joining pattern. Some features (positions, equity streaming) still use in-memory state.
 - **Order Streaming**: `subscribe_orders()` delegates to `TWSClient.reqOrdersStream()` which registers callbacks via `OrderTracker.create_stream_hook()`. Initial snapshot is triggered via `reqOpenOrders()` on subscription. Domain conversion uses `tracked_order_to_placed_order()`.
+- **Execution Streaming**: `subscribe_executions()` delegates to `ExecutionTracker.create_stream_hook()` with two-phase dispatch (immediate on execDetails, re-dispatch on commissionAndFeesReport). Snapshot triggered via `reqExecutions(ExecutionFilter())`. Optional symbol filtering at provider layer (TrackedExecution.symbol format: "EXCHANGE:SYMBOL").
 - **Session-Aware Routing**: Orders are routed via `_resolve_trading_contract()` which uses `CachedContract.build_best_contract()` to select SMART or OVERNIGHT exchange based on market hours.
 - **Leverage Methods**: IBKR uses account-level margin, not per-symbol leverage. `preview_leverage()` and `set_leverage()` raise `ProviderException` (code: `PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED`). `get_leverage_info()` computes implied leverage via WhatIf margin simulation.
 - **Inter-Module Price Fetch**: `_get_symbol_price()` uses `DatafeedClient` (inter-module HTTP) instead of direct TWS calls to maintain capability isolation. The client is instantiated once per provider with `InterModuleClients(caller_id="tws-broker-provider")` and requests are automatically HMAC-signed. See [AUTHENTICATION.md](../../../../docs/AUTHENTICATION.md#inter-module-hmac-authentication).

@@ -98,15 +98,22 @@ All endpoints require authentication via JWT in HttpOnly cookie.
 
 Real-time streaming via WebSocket with topic-based routing.
 
-| Topic               | Request Model                         | Response Model           | Description                    |
-| ------------------- | ------------------------------------- | ------------------------ | ------------------------------ |
-| `orders`            | `OrderSubscriptionRequest`            | `PlacedOrder`            | Order status changes           |
-| `positions`         | `PositionSubscriptionRequest`         | `Position`               | Position updates               |
-| `executions`        | `ExecutionSubscriptionRequest`        | `Execution`              | Trade execution notifications  |
-| `equity`            | `EquitySubscriptionRequest`           | `EquityData`             | Account balance/equity changes |
-| `broker-connection` | `BrokerConnectionSubscriptionRequest` | `BrokerConnectionStatus` | Broker connection status       |
+| Topic               | Request Model                         | Response Model           | Description                                                                                                                                        |
+| ------------------- | ------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `orders`            | `OrderSubscriptionRequest`            | `PlacedOrder`            | Order status changes                                                                                                                               |
+| `positions`         | `PositionSubscriptionRequest`         | `Position`               | Position updates                                                                                                                                   |
+| `executions`        | `ExecutionSubscriptionRequest`        | `Execution`              | Trade execution notifications (two-phase: immediate fill notification with commission=None, enriched update ~50-200ms later with commission value) |
+| `equity`            | `EquitySubscriptionRequest`           | `EquityData`             | Account balance/equity changes                                                                                                                     |
+| `broker-connection` | `BrokerConnectionSubscriptionRequest` | `BrokerConnectionStatus` | Broker connection status                                                                                                                           |
 
 **Implementation Note**: The `equity` topic streams real-time balance/equity updates via TWS `reqAccountSummary()` + `reqPnL()` integration. Provider pushes updates whenever account summary tags or P&L values change (typical update frequency: ~3 minutes for account summary, real-time for P&L).
+
+**Execution Topic - Two-Phase Dispatch**: The `executions` topic uses a commission joining pattern where subscribers receive TWO notifications per execution:
+
+1. **Immediate Notification (~2ms)**: Execution details with `commission=None` (fast fill notification)
+2. **Enriched Update (~50-200ms)**: Same execution with commission value from TWS `commissionAndFeesReport`
+
+This pattern ensures frontend receives instant fill notifications while commission data is enriched asynchronously. See [TWS Provider README](../../../providers/tws/README.md#28-executiontracker-commission-joining-pattern) for implementation details.
 
 ### Topic Format
 

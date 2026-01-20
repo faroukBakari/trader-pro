@@ -171,7 +171,16 @@ export function mapPosition(position: Position_Ws_Backend): Position {
 
 /**
  * Maps backend Execution_Ws_Backend to TradingView Execution
- * Handles enum type conversions for side
+ *
+ * **Commission Field**:
+ * - Backend: `commission?: float | None` - TWS commission data from commissionAndFeesReport callback
+ * - Frontend: `commission?: number` - TradingView native Execution field
+ * - Conversion: null → undefined for TradingView compatibility
+ * - TWS Pattern: Initial execution dispatched with commission=null, re-dispatched with commission=value
+ *   when commissionAndFeesReport callback fires (two-phase dispatch)
+ *
+ * @param execution - Backend execution data from WebSocket topic
+ * @returns TradingView-compatible Execution with enum conversions and commission field
  */
 export function mapExecution(execution: Execution_Ws_Backend): Execution {
   return {
@@ -180,6 +189,7 @@ export function mapExecution(execution: Execution_Ws_Backend): Execution {
     qty: execution.qty,
     side: execution.side as unknown as Execution['side'],
     time: execution.time,
+    commission: execution.commission ?? undefined,
   }
 }
 
