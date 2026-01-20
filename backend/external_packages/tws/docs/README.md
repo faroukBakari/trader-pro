@@ -948,7 +948,7 @@ Regenerates protobuf Python files from `.proto` definitions when:
 
 **[CROSS-REFERENCE]** For implementation details, see:
 
-- **[TWS Provider README](../../../src/trading_api/providers/tws/README.md)** - Three-layer architecture (TWSProvider → TWSClient → IBSocket)
+- **[TWS Provider README](../../../src/trading_api/providers/tws/README.md)** - Three-layer architecture (TWSDatafeedProvider → TWSClient → IBSocket)
 - **[Provider System Guide](../../docs/PROVIDER-SYSTEM.md)** - Capability-based provider architecture
 
 ---

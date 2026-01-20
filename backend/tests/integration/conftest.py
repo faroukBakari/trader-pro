@@ -22,6 +22,11 @@ from httpx import AsyncClient
 from jose import jwt
 
 from trading_api.app_factory import ModularApp
+from trading_api.capabilities.auth import AuthCapability
+
+# Import BrokerService for broker_provider fixture
+from trading_api.capabilities.broker import BrokerCapability
+from trading_api.capabilities.datafeed import DatafeedCapability
 from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
@@ -32,8 +37,10 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.providers.capabilities.auth import AuthCapability
-from trading_api.providers.capabilities.datafeed import DatafeedCapability
+from trading_api.modules.broker.service import BrokerService
+
+# Import FakeBrokerProvider for integration tests (needs full broker functionality)
+from trading_api.providers.fakebroker import FakeBrokerProvider
 from trading_api.shared import FastWSAdapter, Provider
 from trading_api.shared.config import Settings
 
@@ -192,7 +199,7 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
             for ticker_name in ticker_names
         ]
 
-    def subscribe_realtime_bars(
+    async def subscribe_realtime_bars(
         self,
         ticker_name: str,
         resolution: Resolution,
@@ -206,30 +213,26 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
         self._subscriptions[sub_id] = ticker_name
         return sub_id
 
-    def subscribe_market_data(
+    async def subscribe_market_data(
         self,
-        ticker_names: list[str],
+        ticker_name: str,
         callback: Callable[[QuoteData], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
-    ) -> list[str]:
+    ) -> str:
         """Subscribe to market data (mock - no actual streaming)."""
-        sub_ids: list[str] = []
-        for ticker_name in ticker_names:
-            sub_id = str(self._next_sub_id)
-            self._next_sub_id += 1
-            self._subscriptions[sub_id] = ticker_name
-            sub_ids.append(sub_id)
-        return sub_ids
+        sub_id = str(self._next_sub_id)
+        self._next_sub_id += 1
+        self._subscriptions[sub_id] = ticker_name
+        return sub_id
 
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         """Unsubscribe from realtime bars."""
         self._subscriptions.pop(subscription_id, None)
 
-    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
+    def unsubscribe_market_data(self, subscription_id: str) -> None:
         """Unsubscribe from market data."""
-        for sub_id in subscription_ids:
-            self._subscriptions.pop(sub_id, None)
+        self._subscriptions.pop(subscription_id, None)
 
 
 # ============================================================================
@@ -369,6 +372,7 @@ async def apps() -> ModularApp:
     factory.provider_registry.clear()
     factory.provider_registry.register(MockDatafeedProvider, "mock_datafeed")
     factory.provider_registry.register(MockAuthProvider, "mock_auth")
+    factory.provider_registry.register(FakeBrokerProvider, "fake_broker")
 
     # Resolve required capabilities
     required_capabilities = factory._resolve_capabilities(None)
@@ -407,6 +411,24 @@ async def apps() -> ModularApp:
     )
 
     return modular_app
+
+
+@pytest.fixture(scope="module")
+def broker_provider(apps: ModularApp) -> BrokerCapability:
+    """Get the broker provider from the apps fixture.
+
+    Args:
+        apps: The full modular application with all modules
+
+    Returns:
+        BrokerCapability: The broker provider (e.g., FakeBrokerProvider)
+    """
+    # Find the broker module app and extract the provider
+    for module_app in apps.modules_apps:
+        if isinstance(module_app.module.service, BrokerService):
+            return module_app.module.service.broker_provider
+
+    raise RuntimeError("BrokerService not found in apps.modules_apps")
 
 
 @pytest.fixture(scope="module")

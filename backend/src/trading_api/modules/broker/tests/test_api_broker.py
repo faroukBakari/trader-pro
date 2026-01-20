@@ -3,12 +3,16 @@ Tests for broker API endpoints
 """
 
 import time
+from typing import TYPE_CHECKING
 
 import pytest
 from httpx import AsyncClient
 from jose import jwt
 
 from trading_api.shared.config import Settings
+
+if TYPE_CHECKING:
+    from trading_api.capabilities.broker import BrokerCapability
 
 
 @pytest.fixture
@@ -283,11 +287,13 @@ async def test_get_account_info_endpoint(
 
 @pytest.mark.asyncio
 async def test_close_position_endpoint(
-    async_client: AsyncClient, auth_cookies: dict[str, str]
+    async_client: AsyncClient,
+    auth_cookies: dict[str, str],
+    broker_provider: "BrokerCapability",
 ) -> None:
     """Test closing a position (full close) - verify closing order is created"""
     # Reset broker state
-    await async_client.post("/api/v1/broker/debug/reset")
+    broker_provider.reset()  # type: ignore[attr-defined]
 
     # Create a position via proper API flow (place order → execution → position)
     # Step 1: Place a BUY order
@@ -304,8 +310,7 @@ async def test_close_position_endpoint(
     assert place_response.status_code == 200
 
     # Step 2: Execute the order immediately (for testing)
-    execute_response = await async_client.post("/api/v1/broker/debug/execute-orders")
-    assert execute_response.status_code == 200
+    await broker_provider.execute_all_working_orders()  # type: ignore[attr-defined]
 
     # Step 3: Verify position was created
     positions_response = await async_client.get(
@@ -345,11 +350,13 @@ async def test_close_position_endpoint(
 
 @pytest.mark.asyncio
 async def test_close_position_partial_endpoint(
-    async_client: AsyncClient, auth_cookies: dict[str, str]
+    async_client: AsyncClient,
+    auth_cookies: dict[str, str],
+    broker_provider: "BrokerCapability",
 ) -> None:
     """Test partially closing a position - verify partial closing order is created"""
     # Reset broker state
-    await async_client.post("/api/v1/broker/debug/reset")
+    broker_provider.reset()  # type: ignore[attr-defined]
 
     # Create a position via proper API flow (place order → execution → position)
     # Step 1: Place a BUY order
@@ -366,8 +373,7 @@ async def test_close_position_partial_endpoint(
     assert place_response.status_code == 200
 
     # Step 2: Execute the order immediately (for testing)
-    execute_response = await async_client.post("/api/v1/broker/debug/execute-orders")
-    assert execute_response.status_code == 200
+    await broker_provider.execute_all_working_orders()  # type: ignore[attr-defined]
 
     # Step 3: Verify position was created
     positions_response = await async_client.get(
@@ -405,11 +411,13 @@ async def test_close_position_partial_endpoint(
 
 @pytest.mark.asyncio
 async def test_edit_position_brackets_endpoint(
-    async_client: AsyncClient, auth_cookies: dict[str, str]
+    async_client: AsyncClient,
+    auth_cookies: dict[str, str],
+    broker_provider: "BrokerCapability",
 ) -> None:
     """Test editing position brackets (stop-loss, take-profit) - verify bracket orders are created"""
     # Reset broker state
-    await async_client.post("/api/v1/broker/debug/reset")
+    broker_provider.reset()  # type: ignore[attr-defined]
 
     # Create a position via proper API flow (place order → execution → position)
     # Step 1: Place a BUY order
@@ -426,8 +434,7 @@ async def test_edit_position_brackets_endpoint(
     assert place_response.status_code == 200
 
     # Step 2: Execute the order immediately (for testing)
-    execute_response = await async_client.post("/api/v1/broker/debug/execute-orders")
-    assert execute_response.status_code == 200
+    await broker_provider.execute_all_working_orders()  # type: ignore[attr-defined]
 
     # Step 3: Verify position was created
     positions_response = await async_client.get(

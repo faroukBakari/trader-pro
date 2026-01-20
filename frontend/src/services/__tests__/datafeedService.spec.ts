@@ -8,6 +8,7 @@ import type {
   LibrarySymbolInfo,
   QuoteData,
   SearchSymbolResultItem,
+  SymbolResolveExtension,
 } from '@public/trading_terminal'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DatafeedMock, DatafeedService } from '../datafeedService'
@@ -50,9 +51,9 @@ describe('DatafeedService', () => {
     })
   }
 
-  const resolveSymbolPromise = (symbolName: string): Promise<LibrarySymbolInfo> => {
+  const resolveSymbolPromise = (symbolName: string, extension?: SymbolResolveExtension): Promise<LibrarySymbolInfo> => {
     return new Promise((resolve, reject) => {
-      datafeedService.resolveSymbol(symbolName, resolve, reject)
+      datafeedService.resolveSymbol(symbolName, resolve, reject, extension)
     })
   }
 
@@ -554,7 +555,7 @@ describe('DatafeedService', () => {
       // Should not throw
       expect(() => {
         datafeedService.subscribeQuotes([], [], () => { }, listenerGuid)
-      }).not.toThrow()
+      }).toThrow('No symbols provided for quote subscription')
 
       // Clean up
       datafeedService.unsubscribeQuotes(listenerGuid)
@@ -704,6 +705,211 @@ describe('DatafeedService', () => {
 
       // Second array should be unchanged
       expect(bars2[0].close).not.toBe(99999)
+    })
+  })
+
+  describe('Extended Sessions (Subsession Switching)', () => {
+    /**
+     * Tests for TradingView extended session support.
+     * When a symbol has subsessions (regular, extended, premarket, postmarket),
+     * TradingView calls resolveSymbol with extension.session to switch sessions.
+     */
+
+    it('should switch to extended session when extension.session is provided', async () => {
+      // Create a service that uses a mock adapter returning subsessions
+      const mockAdapter = {
+        resolveSymbol: vi.fn().mockResolvedValue({
+          status: 200,
+          data: {
+            name: 'SPY',
+            ticker: 'ARCA:SPY',
+            description: 'SPDR S&P 500 ETF',
+            type: 'stock',
+            exchange: 'ARCA',
+            session: '0930-1600',
+            timezone: 'America/New_York',
+            format: 'price',
+            pricescale: 100,
+            minmov: 1,
+            has_intraday: true,
+            has_daily: true,
+            supported_resolutions: ['1D'],
+            subsession_id: 'regular',
+            subsessions: [
+              { id: 'regular', session: '0930-1600', description: 'Regular Trading Hours' },
+              { id: 'extended', session: '0400-2000', description: 'Extended Trading Hours' },
+              { id: 'premarket', session: '0400-0930', description: 'Pre-market' },
+              { id: 'postmarket', session: '1600-2000', description: 'Post-market' },
+            ],
+          },
+        }),
+        getConfig: vi.fn().mockResolvedValue({ status: 200, data: { supported_resolutions: ['1D'] } }),
+        searchSymbols: vi.fn().mockResolvedValue({ status: 200, data: [] }),
+        getBars: vi.fn().mockResolvedValue({ status: 200, data: { bars: [], no_data: true } }),
+        getQuotes: vi.fn().mockResolvedValue({ status: 200, data: [] }),
+      }
+
+      // Create service and inject mock adapter
+      const service = new DatafeedService()
+      service._getApiAdapter = () => mockAdapter
+
+      // Resolve with extended session requested
+      const result = await new Promise<LibrarySymbolInfo>((resolve, reject) => {
+        service.resolveSymbol('SPY', resolve, reject, { session: 'extended' })
+      })
+
+      expect(result.session).toBe('0400-2000')
+      expect(result.subsession_id).toBe('extended')
+    })
+
+    it('should use regular session when no extension is provided', async () => {
+      const mockAdapter = {
+        resolveSymbol: vi.fn().mockResolvedValue({
+          status: 200,
+          data: {
+            name: 'SPY',
+            ticker: 'ARCA:SPY',
+            description: 'SPDR S&P 500 ETF',
+            type: 'stock',
+            exchange: 'ARCA',
+            session: '0930-1600',
+            timezone: 'America/New_York',
+            format: 'price',
+            pricescale: 100,
+            minmov: 1,
+            has_intraday: true,
+            has_daily: true,
+            supported_resolutions: ['1D'],
+            subsession_id: 'regular',
+            subsessions: [
+              { id: 'regular', session: '0930-1600', description: 'Regular Trading Hours' },
+              { id: 'extended', session: '0400-2000', description: 'Extended Trading Hours' },
+            ],
+          },
+        }),
+        getConfig: vi.fn(),
+        searchSymbols: vi.fn(),
+        getBars: vi.fn(),
+        getQuotes: vi.fn(),
+      }
+
+      const service = new DatafeedService()
+      service._getApiAdapter = () => mockAdapter
+
+      // Resolve without extension
+      const result = await new Promise<LibrarySymbolInfo>((resolve, reject) => {
+        service.resolveSymbol('SPY', resolve, reject)
+      })
+
+      expect(result.session).toBe('0930-1600')
+      expect(result.subsession_id).toBe('regular')
+    })
+
+    it('should switch to premarket session', async () => {
+      const mockAdapter = {
+        resolveSymbol: vi.fn().mockResolvedValue({
+          status: 200,
+          data: {
+            name: 'AAPL',
+            ticker: 'NASDAQ:AAPL',
+            session: '0930-1600',
+            timezone: 'America/New_York',
+            format: 'price',
+            pricescale: 100,
+            minmov: 1,
+            subsession_id: 'regular',
+            subsessions: [
+              { id: 'regular', session: '0930-1600', description: 'Regular Trading Hours' },
+              { id: 'premarket', session: '0400-0930', description: 'Pre-market' },
+              { id: 'postmarket', session: '1600-2000', description: 'Post-market' },
+            ],
+          },
+        }),
+        getConfig: vi.fn(),
+        searchSymbols: vi.fn(),
+        getBars: vi.fn(),
+        getQuotes: vi.fn(),
+      }
+
+      const service = new DatafeedService()
+      service._getApiAdapter = () => mockAdapter
+
+      const result = await new Promise<LibrarySymbolInfo>((resolve, reject) => {
+        service.resolveSymbol('AAPL', resolve, reject, { session: 'premarket' })
+      })
+
+      expect(result.session).toBe('0400-0930')
+      expect(result.subsession_id).toBe('premarket')
+    })
+
+    it('should keep original session when requested session not found', async () => {
+      const mockAdapter = {
+        resolveSymbol: vi.fn().mockResolvedValue({
+          status: 200,
+          data: {
+            name: 'ES',
+            ticker: 'CME:ES',
+            session: '1800-1700',
+            timezone: 'America/Chicago',
+            format: 'price',
+            pricescale: 100,
+            minmov: 1,
+            subsession_id: 'regular',
+            subsessions: [
+              { id: 'regular', session: '1800-1700', description: 'Regular Trading Hours' },
+            ],
+          },
+        }),
+        getConfig: vi.fn(),
+        searchSymbols: vi.fn(),
+        getBars: vi.fn(),
+        getQuotes: vi.fn(),
+      }
+
+      const service = new DatafeedService()
+      service._getApiAdapter = () => mockAdapter
+
+      // Request extended but symbol only has regular
+      const result = await new Promise<LibrarySymbolInfo>((resolve, reject) => {
+        service.resolveSymbol('ES', resolve, reject, { session: 'extended' })
+      })
+
+      // Should keep original session since 'extended' not found
+      expect(result.session).toBe('1800-1700')
+      expect(result.subsession_id).toBe('regular')
+    })
+
+    it('should handle symbol without subsessions', async () => {
+      const mockAdapter = {
+        resolveSymbol: vi.fn().mockResolvedValue({
+          status: 200,
+          data: {
+            name: 'EURUSD',
+            ticker: 'IDEALPRO:EURUSD',
+            session: '1715-1700',
+            timezone: 'America/New_York',
+            format: 'price',
+            pricescale: 10000,
+            minmov: 1,
+            // No subsessions - 24h forex
+          },
+        }),
+        getConfig: vi.fn(),
+        searchSymbols: vi.fn(),
+        getBars: vi.fn(),
+        getQuotes: vi.fn(),
+      }
+
+      const service = new DatafeedService()
+      service._getApiAdapter = () => mockAdapter
+
+      // Even with extension, should not crash
+      const result = await new Promise<LibrarySymbolInfo>((resolve, reject) => {
+        service.resolveSymbol('EURUSD', resolve, reject, { session: 'extended' })
+      })
+
+      expect(result.session).toBe('1715-1700')
+      expect(result.subsession_id).toBeUndefined()
     })
   })
 

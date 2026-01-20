@@ -8,6 +8,7 @@ from typing import Any
 from authlib.integrations.starlette_client import OAuth
 from jose import jwt
 
+from trading_api.capabilities.auth import AuthCapability
 from trading_api.models.auth import (
     DeviceInfo,
     JWTPayload,
@@ -23,7 +24,6 @@ from trading_api.modules.auth.repository import (
     RefreshTokenRepositoryInterface,
     UserRepositoryInterface,
 )
-from trading_api.providers.capabilities.auth import AuthCapability
 from trading_api.shared import settings
 from trading_api.shared.service_interface import ServiceInterface
 

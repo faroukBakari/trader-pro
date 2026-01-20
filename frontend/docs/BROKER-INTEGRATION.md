@@ -118,6 +118,8 @@ The **Broker Integration** provides a complete trading environment that connects
 └──────────────────────┘
 ```
 
+**Account Initialization Flow**: On service construction, `BrokerTerminalService` fetches account metadata from backend via `accountsMetainfo()` REST call. The returned account ID is stored and used consistently for `currentAccount()` and all WebSocket subscription `listenerId` values.
+
 ### Data Flow Architecture
 
 ```
@@ -292,6 +294,7 @@ export class WsAdapter {
     // Broker
     this.orders = new WebSocketClient('orders', mapOrder)
     this.positions = new WebSocketClient('positions', mapPosition)
+    // mapExecution: side enum conversion + commission (null → undefined for TradingView)
     this.executions = new WebSocketClient('executions', mapExecution)
     this.equity = new WebSocketClient('equity', (data) => data)
   }
@@ -332,12 +335,56 @@ constructor(
   this.equity = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
 
   // Generate unique listener ID for WebSocket subscriptions
-  this.listenerId = `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
+  this.accountId = "ACCOUNT-01"
 
-  // Setup all 5 WebSocket subscriptions
-  this.setupWebSocketHandlers()  // 👈 Key initialization
+  // Setup all 5 WebSocket subscriptions with error handling
+  this.setupWebSocketHandlers()
+    .then(() => {
+      this.brokerConnectionStatus = ConnectionStatus.Connected
+      this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
+        message: 'Broker data subscriptions established'
+      })
+    }).catch((error) => {
+      console.error('[BrokerTerminalService] Failed to setup WebSocket handlers:', error)
+      this._hostAdapter.connectionStatusUpdate(ConnectionStatus.Error, {
+        message: 'Failed to establish broker data subscriptions'
+      })
+    })
 }
 ```
+
+#### Error Handling in Setup
+
+**Critical Pattern**: The constructor's promise chain includes `.catch()` to handle WebSocket initialization failures:
+
+```typescript
+this.setupWebSocketHandlers()
+  .then(() => {
+    // Success: Update connection status
+    this.brokerConnectionStatus = ConnectionStatus.Connected
+    this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
+      message: 'Broker data subscriptions established',
+    })
+  })
+  .catch((error) => {
+    // Failure: Log error and update connection status
+    console.error('[BrokerTerminalService] Failed to setup WebSocket handlers:', error)
+    this._hostAdapter.connectionStatusUpdate(ConnectionStatus.Error, {
+      message: 'Failed to establish broker data subscriptions',
+    })
+  })
+```
+
+**Why This Matters:**
+
+- ✅ **Prevents Silent Failures**: Without `.catch()`, initialization errors are swallowed
+- ✅ **Updates UI State**: Sets `ConnectionStatus.Error` to inform user of issues
+- ✅ **Enables Debugging**: Logs error for developer diagnosis
+- ✅ **Production Ready**: Critical for production deployments
+
+**Source**: [brokerTerminalService.ts#L647-L660](../src/services/brokerTerminalService.ts#L647-L660)
+
+````
 
 ### Smart Client Selection
 
@@ -347,7 +394,7 @@ The `_getWsAdapter()` method selects between fallback and real WebSocket:
 private _getWsAdapter(): WsAdapterType | Partial<WsAdapterType> {
   return this._wsFallback ?? this._wsAdapter
 }
-```
+````
 
 **Logic**:
 
@@ -356,91 +403,229 @@ private _getWsAdapter(): WsAdapterType | Partial<WsAdapterType> {
 
 This mirrors the REST API pattern with `_getApiAdapter()`.
 
-### WebSocket Subscription Lifecycle
+### Custom UI Hooks
 
-The `setupWebSocketHandlers()` method establishes 5 real-time subscriptions:
+TradingView's `customUI` configuration allows overriding default UI dialogs to fix bugs or add custom behavior.
+
+**Purpose**: The `customUI.showPositionDialog` hook intercepts TradingView's position bracket editing to fix a bug where bracket values from chart drag operations aren't passed to the dialog.
+
+**Implementation**:
 
 ```typescript
-private setupWebSocketHandlers(): void {
-  // 1. Order updates (status changes, fills, cancellations)
-  this._getWsAdapter().orders?.subscribe(
-    'broker-orders',
-    { accountId: this.listenerId },
-    (order: Order) => {
-      this._hostAdapter.orderUpdate(order)
+// frontend/src/components/TraderChartContainer.vue (lines 215-223)
+customUI: {
+  showPositionDialog: (
+    position: Position | IndividualPosition,
+    brackets: Brackets,
+    focus?: OrderTicketFocusControl,
+  ): Promise<boolean> => {
+    // brokerService is populated by broker_factory before this is called
+    return brokerService!.showPositionBracketsDialog(position, brackets, focus)
+  },
+}
+```
 
-      // Show notification on fill
-      if (order.status === OrderStatus.Filled) {
-        this._hostAdapter.showNotification(
-          'Order Filled',
-          `${order.symbol} ${order.side === 1 ? 'Buy' : 'Sell'} ${order.qty} @ ${order.avgPrice ?? 'market'}`,
-          NotificationType.Success
-        )
-      }
-    }
-  )
+**Flow**:
 
-  // 2. Position updates (new positions, quantity changes, closures)
-  this._getWsAdapter().positions?.subscribe(
-    'broker-positions',
-    { accountId: this.listenerId },
-    (position: Position) => {
-      this._hostAdapter.positionUpdate(position)
-    }
-  )
+```
+User drags TP/SL on chart
+        ↓
+TradingView detects bracket change
+        ↓
+Calls customUI.showPositionDialog(position, brackets, focus)
+        ↓
+TraderChartContainer hook
+        ↓
+BrokerTerminalService.showPositionBracketsDialog()
+        ↓
+_hostAdapter.showPositionBracketsDialog()
+        ↓
+TradingView displays native dialog with preset values ✓
+```
 
-  // 3. Execution updates (trade confirmations)
-  this._getWsAdapter().executions?.subscribe(
-    'broker-executions',
-    { accountId: this.listenerId },
-    (execution: Execution) => {
-      this._hostAdapter.executionUpdate(execution)
-    }
-  )
+**Without Hook**: TradingView would show empty brackets dialog, losing user's drag values.
 
-  // 4. Equity updates (balance, equity, P&L changes)
-  this._getWsAdapter().equity?.subscribe(
-    'broker-equity',
-    { accountId: this.listenerId },
-    (data: EquityData) => {
-      this._hostAdapter.equityUpdate(data.equity)
+**With Hook**: Brackets values are preserved and preset in the dialog.
 
-      // Update reactive balance/equity values
-      if (data.balance !== undefined && data.balance !== null) {
-        this.balance.setValue(data.balance)
-      }
-      if (data.equity !== undefined && data.equity !== null) {
-        this.equity.setValue(data.equity)
-      }
-    }
-  )
+#### showPositionBracketsDialog Method
 
-  // 5. Broker connection status (connected, disconnected, errors)
-  this._getWsAdapter().brokerConnectionStatus?.subscribe(
-    'broker-connection-status',
-    { accountId: this.listenerId },
-    (status: BrokerConnectionStatus) => {
-      this._hostAdapter.showNotification(
-        'Broker Status',
-        status.message || 'Connection status changed',
-        status.status === ConnectionStatus.Connected
-          ? NotificationType.Success
-          : NotificationType.Error
-      )
-    }
+The service implements a delegation method that handles the custom UI hook:
+
+```typescript
+/**
+ * Delegates to host adapter's showPositionBracketsDialog.
+ * Used by customUI.showPositionDialog hook to fix TradingView's bracket preset bug.
+ */
+showPositionBracketsDialog(
+  position: Position | IndividualPosition,
+  brackets: Brackets,
+  focus?: OrderTicketFocusControl
+): Promise<boolean> {
+  // TradingView's showPositionBracketsDialog requires focus parameter (not optional)
+  // Default to StopLoss if not provided
+  return this._hostAdapter.showPositionBracketsDialog(
+    position,
+    brackets,
+    focus ?? OrderTicketFocusControl.StopLoss
   )
 }
 ```
 
+**Key Points:**
+
+- **Method Signature**: Accepts `Position | IndividualPosition` to support both position types
+- **Focus Parameter**: TradingView requires focus control, defaults to `OrderTicketFocusControl.StopLoss`
+- **Pure Delegation**: Passes through to host adapter without modification
+- **Source**: [brokerTerminalService.ts#L1032-L1047](../src/services/brokerTerminalService.ts#L1032-L1047)
+- **Hook Setup**: [TraderChartContainer.vue#L215-L223](../src/components/TraderChartContainer.vue#L215-L223)
+
+### WebSocket Subscription Lifecycle
+
+The `setupWebSocketHandlers()` method establishes 5 real-time subscriptions with error handling:
+
+#### Subscription Pattern with Error Callbacks
+
+```typescript
+private handleSubscriptionError(
+  subscriptionName: string,
+  error: SubscriptionError
+): void {
+  throw WebSocketError.fromSubscription(error, { subscriptionName })
+}
+
+private async setupWebSocketHandlers(): Promise<(void | undefined)[]> {
+  return Promise.all([
+    // 1. Order updates (status changes, fills, cancellations)
+    this._getWsAdapter().orders?.subscribe(
+      'orders',
+      { accountId: this.accountId },
+      (order: PlacedOrder) => {
+        this._hostAdapter.orderUpdate(omitNullish(order) as Order)
+
+        // Show notification on fill
+        if (order.status === OrderStatus.Filled) {
+          this._hostAdapter.showNotification(
+            'Order Filled',
+            `${order.symbol} ${order.side === 1 ? 'Buy' : 'Sell'} ${order.qty} @ ${order.avgPrice ?? 'market'}`,
+            NotificationType.Success
+          )
+        }
+      },
+      (error) => this.handleSubscriptionError('Orders', error)  // ← Error callback
+    ),
+
+    // 2. Position updates (new positions, quantity changes, closures)
+    this._getWsAdapter().positions?.subscribe(
+      'positions',
+      { accountId: this.accountId },
+      (position: Position) => {
+        this._hostAdapter.positionUpdate(position)
+      },
+      (error) => this.handleSubscriptionError('Positions', error)  // ← Error callback
+    ),
+
+    // 3. Execution updates (trade confirmations with commission data)
+    // Backend may dispatch twice for same execution:
+    // - First: execution with commission=null (execDetails callback)
+    // - Second: execution with commission=value (commissionAndFeesReport callback)
+    // This two-phase dispatch is TWS provider behavior, frontend just passes updates through
+    this._getWsAdapter().executions?.subscribe(
+      'executions',
+      { accountId: this.accountId },
+      (execution: Execution) => {
+        // execution.commission: number | undefined (null converted by mapExecution)
+        // TradingView displays commission in Execution History panel
+        this._hostAdapter.executionUpdate(execution)
+      },
+      (error) => this.handleSubscriptionError('Executions', error)  // ← Error callback
+    ),
+
+    // 4. Equity updates (balance, equity, P&L changes)
+    this._getWsAdapter().equity?.subscribe(
+      'equity',
+      { accountId: this.accountId },
+      (data: EquityData) => {
+        this._hostAdapter.equityUpdate(data.equity)
+
+        // Update reactive balance/equity values
+        if (data.balance !== undefined && data.balance !== null) {
+          this.balance.setValue(data.balance)
+        }
+        if (data.equity !== undefined && data.equity !== null) {
+          this.equity.setValue(data.equity)
+        }
+      },
+      (error) => this.handleSubscriptionError('Equity', error)  // ← Error callback
+    ),
+
+    // 5. Broker connection status (backend ↔ real broker)
+    this._getWsAdapter().brokerConnection?.subscribe(
+      'broker-connection',
+      { accountId: this.accountId },
+      (data: BrokerConnectionStatus) => {
+        this.brokerConnectionStatus = data.status
+        this._hostAdapter.connectionStatusUpdate(data.status, {
+          message: data.message ?? undefined,
+          disconnectType: data.disconnectType ?? undefined,
+        })
+
+        // Notify user on connection changes
+        if (data.status === ConnectionStatus.Disconnected) {
+          this._hostAdapter.showNotification(
+            'Broker Disconnected',
+            data.message ?? 'Connection to broker lost',
+            NotificationType.Error
+          )
+        } else if (data.status === ConnectionStatus.Connected) {
+          this._hostAdapter.showNotification(
+            'Broker Connected',
+            data.message ?? 'Successfully connected to broker',
+            NotificationType.Success
+          )
+        }
+      },
+      (error) => this.handleSubscriptionError('Broker Connection', error)  // ← Error callback
+    ),
+  ])
+}
+```
+
+**Error Propagation Flow:**
+
+```
+Backend Subscription Error (e.g., provider timeout)
+        ↓
+WebSocket error message received
+        ↓
+Subscription error callback invoked
+        ↓
+handleSubscriptionError('Orders', error)
+        ↓
+WebSocketError.fromSubscription(error, { subscriptionName: 'Orders' })
+        ↓
+Throw WebSocketError (propagates to global handler)
+        ↓
+errorService.handle(error)
+        ↓
+Toast notification displayed to user ✓
+```
+
+**Source**: [brokerTerminalService.ts#L674-L680](../src/services/brokerTerminalService.ts#L674-L680) (error handler), [brokerTerminalService.ts#L689-L768](../src/services/brokerTerminalService.ts#L689-L768) (subscriptions)
+
 ### Subscription Details
 
-| Subscription               | Topic                                  | Purpose                         | Updates                                  |
-| -------------------------- | -------------------------------------- | ------------------------------- | ---------------------------------------- |
-| **orders**                 | `orders:{accountId}`                   | Real-time order status changes  | Working, Filled, Canceled, Rejected      |
-| **positions**              | `positions:{accountId}`                | Position quantity/price updates | New positions, size changes, closures    |
-| **executions**             | `executions:{accountId}`               | Trade confirmations             | Execution price, quantity, timestamp     |
-| **equity**                 | `equity:{accountId}`                   | Account value changes           | Balance, equity, unrealized/realized P&L |
-| **brokerConnectionStatus** | `broker-connection-status:{accountId}` | Connection health               | Connected, Disconnected, Error           |
+| Subscription         | Topic                           | Purpose                         | Updates                                  |
+| -------------------- | ------------------------------- | ------------------------------- | ---------------------------------------- |
+| **orders**           | `orders:{accountId}`            | Real-time order status changes  | Working, Filled, Canceled, Rejected      |
+| **positions**        | `positions:{accountId}`         | Position quantity/price updates | New positions, size changes, closures    |
+| **executions**       | `executions:{accountId}`        | Trade confirmations             | Execution price, quantity, timestamp     |
+| **equity**           | `equity:{accountId}`            | Account value changes           | Balance, equity, unrealized/realized P&L |
+| **brokerConnection** | `broker-connection:{accountId}` | Connection health               | Connected, Disconnected, Error           |
+
+**Related Documentation:**
+
+- [WEBSOCKET-ARCHITECTURE.md#subscription-error-handling](./WEBSOCKET-ARCHITECTURE.md#subscription-error-handling) - WebSocket error handling architecture
+- [ERROR-MANAGEMENT.md#websocketerror](./ERROR-MANAGEMENT.md#websocketerror) - WebSocketError class details
 
 ### Mock vs Real WebSocket Behavior
 
@@ -721,8 +906,7 @@ The broker's capabilities are defined via `broker_config.configFlags`:
 - ✅ **WebSocket Updates**: Real-time position/order updates via WsAdapter
 - ✅ **WebSocket Subscriptions**: 5 broker event subscriptions (orders, positions, executions, equity, connection status)
 - ✅ **Smart Client Selection**: `_getWsAdapter()` method for fallback/real WebSocket switching
-- ⚠️ **Backend Broadcasting**: Phase 5 pending (backend WebSocket implementation)
-- ⚠️ **Optimistic Updates**: UI updates before backend confirmation (planned)
+- ✅ **Backend Broadcasting**: WebSocket event broadcasting implemented
 
 ### ❌ Not Implemented (Future)
 
@@ -774,7 +958,7 @@ accountManagerInfo(): AccountManagerInfo {
       },
     ],
     orderColumns: [...],  // Order panel column configuration
-    positionColumns: [...], // Position panel column configuration
+    positionColumns: [...], // Position panel: Symbol, Side, Qty, AvgPrice, Limit, Stop, PnL
     pages: [],            // Custom account pages (empty)
   }
 }
@@ -830,10 +1014,14 @@ async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
 async modifyOrder(order: Order): Promise<void> {
   if (this._orders.has(order.id)) {
     this._orders.set(order.id, { ...order, updateTime: Date.now() })
+    // Notify TradingView UI of the update
+    this._hostAdapter.orderUpdate(order)
     console.log(`Order modified: ${order.id}`)
   }
 }
 ```
+
+**Critical:** The `orderUpdate()` call notifies TradingView's Trading Terminal to refresh the Order Panel UI. Without this, the UI won't reflect modifications until the next WebSocket event.
 
 #### Cancel Order
 
@@ -961,7 +1149,7 @@ Places a new order.
 
 ###### `modifyOrder(order: Order): Promise<void>`
 
-Modifies an existing order.
+Modifies an existing order. **Must call `_hostAdapter.orderUpdate(order)`** after modification to sync TradingView UI.
 
 ###### `cancelOrder(orderId: string): Promise<void>`
 
@@ -988,6 +1176,46 @@ Returns trading metadata for a symbol.
 ###### `isTradable(): Promise<boolean>`
 
 Checks if a symbol is tradable.
+
+##### Position Dialog Methods
+
+###### `showPositionBracketsDialog(position: Position | IndividualPosition, brackets: Brackets, focus?: OrderTicketFocusControl): Promise<boolean>`
+
+Display TradingView's native position brackets (SL/TP) dialog with preset values.
+
+**Purpose**: Fix TradingView's bracket preset bug where TP/SL values from chart drag operations aren't passed to the edit dialog.
+
+**Parameters**:
+
+- `position`: Current position to edit
+- `brackets`: Preset bracket values (stopLoss, takeProfit, trailingStopPips)
+- `focus`: Optional control to focus ('stop-loss', 'take-profit', or 'trailing-stop')
+
+**Returns**: Promise resolving to `true` if user confirmed changes, `false` if canceled
+
+**Usage**: Called by `customUI.showPositionDialog` hook in TraderChartContainer when user drags TP/SL lines on chart.
+
+**Implementation**:
+
+```typescript
+// frontend/src/services/brokerTerminalService.ts (lines 1027-1036)
+showPositionBracketsDialog(
+  position: Position | IndividualPosition,
+  brackets: Brackets,
+  focus?: OrderTicketFocusControl
+): Promise<boolean> {
+  console.log(`BrokerTerminalService.showPositionBracketsDialog[${position.id}]`)
+  return this._hostAdapter.showPositionBracketsDialog(position, brackets, focus)
+}
+```
+
+**Delegation Chain**:
+
+1. User drags TP/SL line on chart
+2. TradingView calls `customUI.showPositionDialog(position, brackets, focus)`
+3. TraderChartContainer hook delegates to `brokerService.showPositionBracketsDialog()`
+4. BrokerTerminalService delegates to `_hostAdapter.showPositionBracketsDialog()`
+5. TradingView displays native dialog with preset values
 
 ##### UI Methods
 
@@ -1371,11 +1599,131 @@ debug_broker: 'all' // Logs all broker API calls and responses
 
 **Issue**: `Error: Value is undefined` in TradingView Account Manager rendering
 
-**Root Cause**: The `currentAccount()` method returns a hardcoded `'DEMO-ACCOUNT'` AccountId, but WebSocket subscriptions use a dynamically generated `listenerId` (e.g., `'ACCOUNT-abc123def456'`). This mismatch causes WebSocket updates to be sent with the wrong AccountId, preventing the Account Manager from receiving proper updates.
+**Status**: ✅ RESOLVED (January 14, 2026)
 
-**Priority**: High - Blocks Account Manager functionality
+**Root Cause**: The `currentAccount()` method returned a hardcoded `'DEMO-ACCOUNT'` AccountId, but WebSocket subscriptions used a dynamically generated `listenerId` (e.g., `'ACCOUNT-abc123def456'`). This mismatch caused WebSocket updates to be sent with the wrong AccountId, preventing the Account Manager from receiving proper updates.
 
-**Last Encountered**: October 22, 2025
+**Solution**:
+
+- Changed `accountId` from `readonly` property to mutable property initialized as `'UNKNOWN' as AccountId`
+- Added `_initAccountId()` async method that fetches account metadata from backend `accountsMetainfo()` endpoint
+- Constructor now calls `_initAccountId()` before `setupWebSocketHandlers()` to ensure accountId is set before WebSocket subscriptions
+- `currentAccount()` now returns the consistent accountId value used in all WebSocket subscription `listenerId` values
+- **Bonus cleanup**: Removed unused `_quotesProvider` field (constructor parameter retained for backward compatibility as underscore-prefixed)
+
+**Code Reference**: See [brokerTerminalService.ts](../../src/services/brokerTerminalService.ts) lines 620-650
+
+**Related Backend Changes**: Backend now returns real account ID from TWS via `get_account_info()` endpoint using `AccountTracker` and `reqAccountSummary()` integration.
+
+**Impact**: Account Manager panel now renders correctly with real-time balance and equity updates.
+
+### TradingView Order Type Discrimination: Nullish Fields Break Union Typing
+
+**Issue**: After page refresh, bracket orders display incorrectly - parent orders appear disconnected from children, phantom orders appear with no price labels, and duplicate price labels on correct orders.
+
+**Root Cause**: TradingView's `Order` type is a discriminated union: `type Order = PlacedOrder | BracketOrder`. The discrimination relies on **key presence**, not value truthiness:
+
+- `PlacedOrder`: Does NOT have `parentId` or `parentType` fields
+- `BracketOrder`: Has **required** `parentId: string` and `parentType: ParentType`
+
+When backend sends `{ parentId: null, parentType: null }`, TypeScript structural typing sees the **presence** of these keys and treats the object as `BracketOrder`. But `null` is not a valid `string` or `ParentType`, causing TradingView's internal type guards to fail silently.
+
+**Solution**: Use `omitNullish()` utility on frontend mappers to **remove** null/undefined fields entirely before passing orders to TradingView:
+
+```typescript
+// ❌ WRONG - TradingView sees parentId key, treats as BracketOrder
+return { id: '123', parentId: null, parentType: null, ... }
+
+// ✅ CORRECT - No parentId key, TradingView treats as PlacedOrder
+return omitNullish({ id: '123', parentId: null, parentType: null, ... })
+// Result: { id: '123', ... }
+```
+
+**Affected Areas**:
+
+- `frontend/src/plugins/mappers.ts` - Order mapping functions
+- `frontend/src/plugins/wsAdapter.ts` - WebSocket order event handlers
+- Any code path that converts backend `PlacedOrder` to TradingView `Order`
+
+**Priority**: High - Causes visual corruption in order display after refresh
+
+**Date Identified**: January 12, 2026
+
+---
+
+### TradingView Bundle Issues
+
+#### Position Bracket Pre-Population
+
+**Issue**: Position edit dialog from Account Manager doesn't pre-fill Take Profit and Stop Loss fields, even though bracket orders exist on the position.
+
+**Status**: ✅ RESOLVED (January 13, 2026)
+
+**Root Cause**: TradingView passes empty `brackets` parameter to `customUI.showPositionDialog` hook when opening from Account Manager. The `Position` interface lacks `stopLoss`/`takeProfit` fields - bracket orders are stored separately with `parentId` and `parentType` fields.
+
+**Solution**: Enhanced `customUI.showPositionDialog` hook to fetch bracket orders from `orders()` API and enrich the brackets parameter before showing the dialog.
+
+**Implementation**: `frontend/src/components/TraderChartContainer.vue` (lines 217-252)
+
+**Code Pattern**:
+
+```typescript
+customUI: {
+  showPositionDialog: async (position, brackets, focus) => {
+    let enrichedBrackets = brackets
+    try {
+      const orders = await brokerService.orders()
+      const bracketOrders = orders.filter(
+        (o) => o.parentId === position.id && o.parentType === ParentType.Position,
+      )
+      enrichedBrackets = {
+        stopLoss: bracketOrders.find((o) => o.stopPrice)?.stopPrice,
+        takeProfit: bracketOrders.find((o) => o.limitPrice && !o.stopPrice)?.limitPrice,
+      }
+    } catch (e) {
+      console.warn('Failed to fetch bracket orders:', e)
+    }
+    return brokerService.showPositionBracketsDialog(position, enrichedBrackets, focus)
+  }
+}
+```
+
+**Documentation**: See [BUNDLE-MAINTENANCE.md](./tradingview/BUNDLE-MAINTENANCE.md) Case Study 1 for detailed analysis.
+
+---
+
+#### Position Dialog Field Sync
+
+**Issue**: Fields don't auto-sync in position edit dialog - changing the **Price** field doesn't update **Ticks** and **$** fields (unlike order dialog which works correctly).
+
+**Status**: ✅ RESOLVED (January 13, 2026)
+
+**Root Cause**: Position dialog's `_equity$` and `_quotes$` observables created with `fromEventPattern()` **without** `startWith()` operators, causing them to never emit initial values. This blocks RxJS `combineLatest` from firing, preventing the sync handler from executing.
+
+**Solution**: Added `.pipe(startWith(...))` to both observables in `Pt` class (PositionViewModel) to match the working pattern from `bt` class (OrderViewModel).
+
+**Files Modified**: `frontend/public/trading_terminal/bundles/order-view-controller.4f3dc6de299e33f3954b.js`
+
+**Changes**:
+
+1. Line 5506-5513: Added `.pipe(startWith({ ask: position.avgPrice, bid: position.avgPrice }))` to `_quotes$`
+2. Line 5515-5523: Added `.pipe(startWith(NaN))` to `_equity$`
+
+**Code Pattern**:
+
+```javascript
+// Before (BROKEN): No initial emission
+this._equity$ = T(fromEventPattern(subscribeEquity))
+
+// After (FIXED): Emits immediately
+this._equity$ = T(fromEventPattern(subscribeEquity).pipe((0, m.startWith)(NaN)))
+```
+
+**RxJS Pattern**: `combineLatest` requires **ALL** source observables to emit at least once before firing. Event-based observables from `fromEventPattern` must include `startWith()` to emit initial values.
+
+**Documentation**: See [BUNDLE-MAINTENANCE.md](./tradingview/BUNDLE-MAINTENANCE.md) Case Study 2 for detailed technical analysis.
+
+**Note**: All debug console logs preserved as comments for future reference.
 
 ---
 

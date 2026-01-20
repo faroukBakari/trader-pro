@@ -10,7 +10,7 @@ function serializeParams(obj: unknown): string {
   }
 
   if (Array.isArray(obj)) {
-    return `[${obj.map(serializeParams).join(',')}]`
+    return `[${obj.map(serializeParams).sort().join(',')}]`
   }
 
   const objRecord = obj as Record<string, unknown>
@@ -118,7 +118,7 @@ export class WebSocketBase {
       try {
         instance.ws?.close()
       } finally {
-        console.log(`WebSocket connection for ${wsUrl} ===> CLOSED`)
+        console.log(`[wsClientBase] WebSocket connection for ${wsUrl} ===> CLOSED`)
         instance.ws = null
       }
     })
@@ -128,11 +128,11 @@ export class WebSocketBase {
     if (!this.wsCnxPromise) {
       this.wsCnxPromise = new Promise((resolve, reject) => {
         try {
-          this.logger.log('Connecting to', this.config.wsUrl)
+          this.logger.log('[wsBase] Connecting to', this.config.wsUrl)
           this.ws = new WebSocket(this.config.wsUrl)
 
           this.ws.onerror = async (error) => {
-            this.logger.log('Error:', error)
+            this.logger.log('[wsBase] Error:', error)
             setTimeout(() => {
               this.wsCnxPromise = null
               reject(error)
@@ -140,7 +140,7 @@ export class WebSocketBase {
           }
 
           this.ws.onclose = async (event) => {
-            this.logger.log('WS Connection closed:', event)
+            this.logger.log('[wsBase] WS Connection closed:', event)
             setTimeout(() => {
               this.wsCnxPromise = null
               reject(event)
@@ -148,7 +148,7 @@ export class WebSocketBase {
           }
 
           this.ws.onopen = () => {
-            this.logger.log('WS Connected')
+            this.logger.log('[wsBase] WS Connected')
             this.ws!.binaryType = 'arraybuffer'
 
             this.ws!.onmessage = (event) => {
@@ -156,21 +156,19 @@ export class WebSocketBase {
             }
 
             this.ws!.onerror = async (error) => {
-              this.logger.log('WS Connection Error:', error)
+              this.logger.log('[wsBase] WS Connection Error:', error)
               setTimeout(() => this.resubscribeAll(), 0)
             }
 
             this.ws!.onclose = async (event) => {
-              this.logger.log('WS Connection closed:', event)
+              this.logger.log('[wsBase] WS Connection closed:', event)
               setTimeout(() => this.resubscribeAll(), 0)
             }
             resolve()
             this.wsCnxPromise = null
           }
         } finally {
-          setTimeout(() => {
-            this.wsCnxPromise = null
-          }, 200)
+          // nothing
         }
       })
     }
@@ -205,7 +203,7 @@ export class WebSocketBase {
     await this.connect()
     const message = JSON.stringify({ type, payload }, null, 2)
     this.ws!.send(message)
-    this.logger.log('Sent:', type, message)
+    this.logger.log('[wsBase] Sent:', type, message)
   }
 
   private handleMessage(event: MessageEvent): void {
@@ -224,7 +222,7 @@ export class WebSocketBase {
       const error = payload as unknown as SubscriptionError
       this.routeErrorMessage(error)
     } else {
-      this.logger.log('Received:', type, payload)
+      this.logger.log('[wsBase] Received:', type, payload)
       if (type.endsWith('.response')) {
         if (type.replace(/.response$/, '').endsWith('.subscribe')) {
           const subResponse = payload as SubscriptionResponse
@@ -247,8 +245,7 @@ export class WebSocketBase {
     this.logger.debug(`${data.topic} message received:`, data)
     const subscription = this.subscriptions.get(data.topic)
     if (!subscription) {
-      this.logger.warn(`No subscription found for topic: ${data.topic}`)
-      return
+      throw new Error(`No active subscription for topic: ${data.topic}`)
     }
     subscription.onUpdate(data.payload)
   }
@@ -354,7 +351,7 @@ export class WebSocketBase {
   }
 
   private async resubscribeAll(): Promise<void> {
-    this.logger.log('Resubscribing to all active subscriptions...')
+    this.logger.log('[wsBase] Resubscribing to all active subscriptions...')
 
     await new Promise(resolve => setTimeout(resolve, 200))
 
@@ -444,20 +441,26 @@ export interface WebSocketInterface<TParams extends object, TData extends object
 }
 
 /** Listener callbacks stored per-listener for fanout */
-interface ListenerCallbacks<TData extends object> {
+interface Listener<TData extends object> {
+  paramsKey: string
   onUpdate: (data: TData) => void
   onError: (error: SubscriptionError) => void
 }
 
 export class WebSocketClient<TParams extends object, TBackendData extends object, TData extends object> implements WebSocketInterface<TParams, TData> {
   protected baseSocket: WebSocketBase
-  protected topics: Map<string, Promise<string>>
-  protected listeners: Map<string, Map<string, ListenerCallbacks<TData>>>
+  protected topicPromises: Map<string, Promise<string>>
+  protected listeners: Map<string, Listener<TData>>
   protected debouncedUnsub: Map<string, NodeJS.Timeout>
 
   private wsRoute: string = ''
   private debounceMs?: number
   private dataMapper: ((data: TBackendData) => TData)
+
+  private debug: boolean = false
+  private logger: Console = this.debug
+    ? console
+    : ({ log: () => { }, warn: () => { }, error: () => { }, debug: () => { } } as Console)
 
   // dont defaut to identity dataMapper to detect types missmatch (data => data as unknown as TData)
   constructor(wsUrl: string, wsRoute: string, dataMapper: ((data: TBackendData) => TData), debounceMs?: number) {
@@ -465,9 +468,10 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
     this.debounceMs = debounceMs
     this.dataMapper = dataMapper
     this.baseSocket = WebSocketBase.getInstance(wsUrl)
-    this.topics = new Map()
+    this.topicPromises = new Map()
     this.listeners = new Map()
     this.debouncedUnsub = new Map()
+
   }
 
   async subscribe(
@@ -479,70 +483,116 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
 
     const paramsKey = serializeParams(subscriptionParams)
 
-    const unsubTimeout = this.debouncedUnsub.get(paramsKey)
-    if (unsubTimeout) {
-      console.log(`Clearing debounced unsubscribe for topic ${paramsKey}`)
-      clearTimeout(unsubTimeout)
+    if (this.debouncedUnsub.has(paramsKey)) {
+      clearTimeout(this.debouncedUnsub.get(paramsKey))
       this.debouncedUnsub.delete(paramsKey)
+      this.logger.log(`[wsClientBase] Clearing debounced unsubscribe for topic ${paramsKey}`)
     }
 
-    if (this.listeners.has(paramsKey)) {
-      const topicListeners = this.listeners.get(paramsKey)!
-      if (topicListeners?.has(listenerId)) {
-        console.warn(`listener ${listenerId} spamming for the same subscription`, paramsKey)
-      }
-      topicListeners.set(listenerId, {
-        onUpdate,
-        onError: onError || ((error) => this.baseSocket.globalErrorHandler(error))
-      })
-    } else {
-      console.log(`listener ${listenerId} subscribing to new params:`, paramsKey)
-      this.listeners.set(paramsKey, new Map([[listenerId, {
-        onUpdate,
-        onError: onError || ((error) => this.baseSocket.globalErrorHandler(error))
-      }]]))
-      const topicPromise = this.baseSocket.subscribe(
-        this.wsRoute,
-        subscriptionParams,
-        (backendData: object) =>
-          this.listeners.get(paramsKey)?.forEach(
-            ({ onUpdate }) => onUpdate(this.dataMapper(backendData as TBackendData))
-          ),
-        (error: SubscriptionError) => {
-          this.listeners.get(paramsKey)?.forEach(
-            ({ onError }) => onError?.(error)
-          )
-        }
-      )
-      this.topics.set(paramsKey, topicPromise)
-    }
-    return await this.topics.get(paramsKey)!
-  }
+    if (this.listeners.has(listenerId)) {
 
-  // TODO: unsub and debounce not working as expected. need to fiabilize that!
-  async unsubscribe(listenerId: string): Promise<void> {
-    for (const [paramsKey, listenersMap] of this.listeners.entries()) {
-      for (const id of listenersMap.keys())
-        if (id.startsWith(listenerId)) {
-          listenersMap.delete(id)
-          const topic = await this.topics.get(paramsKey)
-          console.log(`listener ${listenerId} unsubscribed from topic ${paramsKey}`)
-          if (topic && !listenersMap.size) {
-            console.log(`No more listeners for topic ${paramsKey}. Debouncing Unsub in ${this.debounceMs}ms...`)
-            this.debouncedUnsub.set(
-              paramsKey,
-              setTimeout(async () => {
-                if (this.debouncedUnsub.get(paramsKey)) {
-                  console.log(`Unsubscribing from topic ${paramsKey}...`)
-                  this.topics.delete(paramsKey)
-                  this.listeners.delete(paramsKey)
-                  this.debouncedUnsub.delete(paramsKey)
+      const topicListener = this.listeners.get(listenerId)!
+      this.listeners.delete(listenerId)
+
+      if (topicListener.paramsKey !== paramsKey) {
+
+        const oldParamsKey = topicListener.paramsKey
+        this.logger.log(`[wsClientBase] listener ${listenerId} switching from ${oldParamsKey} to ${paramsKey}`)
+
+        if ([...this.listeners.values()].every(lis => (lis.paramsKey !== oldParamsKey))) {
+
+          this.logger.log(`[wsClientBase] No more listeners for oldParamsKey ${oldParamsKey}. Debouncing Unsub in ${this.debounceMs}ms...`)
+
+          this.debouncedUnsub.set(
+            oldParamsKey,
+            setTimeout(async () => {
+              if (this.debouncedUnsub.has(oldParamsKey)) {
+                this.logger.log(`[wsClientBase] debounce triggered for ${oldParamsKey}...`)
+                this.debouncedUnsub.delete(oldParamsKey)
+                if (this.topicPromises.has(oldParamsKey)) {
+                  const topicPromise = this.topicPromises.get(oldParamsKey)!
+                  this.topicPromises.delete(oldParamsKey)
+                  const topic = await topicPromise
+                  this.logger.log(`[wsClientBase] Unsubscribing from oldParamsKey ${oldParamsKey}...`)
+                  this.logger.log(`[wsClientBase] remaining subscriptions ${[...this.topicPromises.keys()]}...`)
                   await this.baseSocket.unsubscribe(topic)
                 }
-              }, this.debounceMs || 0)
-            )
+              }
+            }, this.debounceMs || 0)
+          )
+        }
+
+      } else {
+        console.warn(`[wsClientBase] listener ${listenerId} spamming for the same subscription`, paramsKey)
+      }
+
+    } else {
+      this.logger.log(`[wsClientBase] New listener ${listenerId} subscribing to params:`, paramsKey)
+    }
+
+    this.listeners.set(listenerId, {
+      paramsKey,
+      onUpdate,
+      onError: onError || ((error) => this.baseSocket.globalErrorHandler(error))
+    })
+
+    if (!this.topicPromises.has(paramsKey)) {
+      this.logger.log(`[wsClientBase] Creating new subscription for params ${paramsKey}`)
+      this.topicPromises.set(paramsKey, this.baseSocket.subscribe(
+        this.wsRoute,
+        subscriptionParams,
+        (backendData: object) => {
+          // capture this.listeners by reference so only mutations are allower
+          for (const listener of this.listeners.values()) {
+            if (listener.paramsKey === paramsKey) {
+              listener.onUpdate(this.dataMapper(backendData as TBackendData))
+            }
+          }
+        },
+        (error: SubscriptionError) => {
+          // capture this.listeners by reference so only mutations are allower
+          for (const listener of this.listeners.values()) {
+            if (listener.paramsKey === paramsKey) {
+              listener.onError(error)
+            }
           }
         }
+      ))
+    }
+
+    this.logger.log(`[wsClientBase] ongoing subscriptions ${[...this.topicPromises.keys()]}...`)
+    const topic = await this.topicPromises.get(paramsKey)!
+    return topic
+  }
+
+  async unsubscribe(listenerId: string): Promise<void> {
+    if (!this.listeners.has(listenerId)) {
+      console.warn(`[wsClientBase] listener ${listenerId} trying to unsubscribe but not found`)
+      return
+    }
+    const listener = this.listeners.get(listenerId)!
+    this.listeners.delete(listenerId)
+
+    const paramsKey = listener.paramsKey
+    if ([...this.listeners.values()].every(lis => (lis.paramsKey !== paramsKey))) {
+      this.logger.log(`[wsClientBase] No more listeners for paramsKey ${paramsKey}. Debouncing Unsub in ${this.debounceMs}ms...`)
+      this.debouncedUnsub.set(
+        paramsKey,
+        setTimeout(async () => {
+          if (this.debouncedUnsub.has(paramsKey)) {
+            this.logger.log(`[wsClientBase] debounce triggered for ${paramsKey}...`)
+            this.debouncedUnsub.delete(paramsKey)
+            if (this.topicPromises.has(paramsKey)) {
+              const topicPromise = this.topicPromises.get(paramsKey)!
+              this.topicPromises.delete(paramsKey)
+              const topic = await topicPromise
+              this.logger.log(`[wsClientBase] Unsubscribing from paramsKey ${paramsKey}...`)
+              this.logger.log(`[wsClientBase] remaining subscirptions ${[...this.topicPromises.keys()]}...`)
+              await this.baseSocket.unsubscribe(topic)
+            }
+          }
+        }, this.debounceMs || 0)
+      )
     }
   }
 }

@@ -49,7 +49,7 @@ async function watchAuthStatus() {
       router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
 
     } else {
-      authMonitorTimeout = setTimeout(watchAuthStatus, 10 * 1000) // Check again in 10 seconds
+      authMonitorTimeout = setTimeout(watchAuthStatus, 30 * 1000) // Check again in 30 seconds
     }
   }
 }

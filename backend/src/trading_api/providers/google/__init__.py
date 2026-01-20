@@ -5,10 +5,10 @@ from typing import Any
 
 import httpx
 
+from trading_api.capabilities.auth import AuthCapability
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.providers.google_oauth_configs import GoogleProviderConfig
-from trading_api.providers.capabilities.auth import AuthCapability
 from trading_api.shared import Provider
 
 
@@ -34,11 +34,6 @@ class GoogleProvider(Provider, AuthCapability):
     def provider_dir(cls) -> Path:
         """Return provider directory."""
         return Path(__file__).parent
-
-    @property
-    def name(self) -> str:
-        """Provider name."""
-        return "google"
 
     @classmethod
     def capabilities(cls) -> list[CapabilitySpec]:

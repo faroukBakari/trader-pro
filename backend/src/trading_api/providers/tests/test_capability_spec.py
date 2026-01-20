@@ -22,7 +22,7 @@ def test_capability_spec_version_mismatch() -> None:
 def test_capability_spec_name_mismatch() -> None:
     """Service requires auth → Broker provider does NOT match."""
     req = CapabilitySpec(name="auth")
-    prov = CapabilitySpec(name="broker")  # type: ignore[arg-type]
+    prov = CapabilitySpec(name="broker")
 
     assert not req.matches(prov)
 

@@ -5,8 +5,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from trading_api.app_factory import AppFactory
-from trading_api.providers.capabilities.datafeed import DatafeedCapability
-from trading_api.providers.tws import TWSProvider
+from trading_api.capabilities.datafeed import DatafeedCapability
+from trading_api.providers.tws import TWSDatafeedProvider
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
@@ -30,14 +32,14 @@ def mock_tws_connection():
 
 @pytest.mark.asyncio
 async def test_tws_provider_injection(mock_tws_connection):
-    """Test TWSProvider is injected into DatafeedService."""
+    """Test TWSDatafeedProvider is injected into DatafeedService."""
     factory = AppFactory()
 
     # Create app with datafeed module enabled
     await factory.create_app(enabled_module_names=["datafeed"])
 
-    # Verify provider was discovered and registered
-    assert "tws" in factory.provider_registry.list_providers()
+    # Verify provider was discovered and registered (uses class name)
+    assert "TWSDatafeedProvider" in factory.provider_registry.list_providers()
 
     # Find datafeed module
     datafeed_modules = [
@@ -48,12 +50,12 @@ async def test_tws_provider_injection(mock_tws_connection):
     datafeed_module = datafeed_modules[0]
     service = datafeed_module.service
 
-    # Verify provider was injected
-    assert len(service._providers) > 0
+    # Verify provider was injected (service uses _capability_map)
+    assert len(service._capability_map) > 0
 
-    # Verify it's a TWSProvider instance
+    # Verify it's a TWSDatafeedProvider instance
     provider = service.get_capability_provider("datafeed")
-    assert isinstance(provider, TWSProvider)
+    assert isinstance(provider, TWSDatafeedProvider)
     assert provider.name == "tws"
 
 
@@ -81,19 +83,19 @@ async def test_datafeed_service_has_provider_property(mock_tws_connection):
 
 @pytest.mark.asyncio
 async def test_tws_provider_has_datafeed_capability(mock_tws_connection):
-    """Test TWSProvider implements DatafeedCapability."""
+    """Test TWSDatafeedProvider implements DatafeedCapability."""
     factory = AppFactory()
     await factory.create_app(enabled_module_names=["datafeed"])
 
-    # Get TWSProvider instance
-    tws_provider = factory.provider_registry._instances.get("tws")
+    # Get TWSDatafeedProvider instance (uses class name as key)
+    tws_provider = factory.provider_registry._instances.get("TWSDatafeedProvider")
     assert tws_provider is not None
-    assert isinstance(tws_provider, TWSProvider)
+    assert isinstance(tws_provider, TWSDatafeedProvider)
 
     # Verify it implements DatafeedCapability
     assert isinstance(tws_provider, DatafeedCapability)
 
     # Verify capabilities declared
-    capabilities = TWSProvider.capabilities()
+    capabilities = TWSDatafeedProvider.capabilities()
     assert len(capabilities) == 1
     assert capabilities[0].name == "datafeed"

@@ -3,13 +3,15 @@ Copyright (C) 2025 Interactive Brokers LLC. All rights reserved. This code is su
  and conditions of the IB API Non-Commercial License or the IB API Commercial License, as applicable.
 """
 
+from datetime import date
+
 from ibapi.const import UNSET_DOUBLE
 from ibapi.contract import ComboLeg, Contract, DeltaNeutralContract
 from ibapi.execution import ExecutionFilter
 from ibapi.order import Order
+from ibapi.order_cancel import OrderCancel
 from ibapi.order_condition import (
     ContractCondition,
-    Create,
     ExecutionCondition,
     MarginCondition,
     OperatorCondition,
@@ -73,7 +75,9 @@ def createExecutionRequestProto(
     if isValidIntValue(execFilter.lastNDays):
         executionFilterProto.lastNDays = execFilter.lastNDays
     if execFilter.specificDates is not None and execFilter.specificDates:
-        executionFilterProto.specificDates.extend(execFilter.specificDates)
+        executionFilterProto.specificDates.extend(
+            [int(dt) for dt in execFilter.specificDates]
+        )
     executionRequestProto = ExecutionRequestProto()
     if isValidIntValue(reqId):
         executionRequestProto.reqId = reqId
@@ -119,7 +123,7 @@ def createContractProto(contract: Contract, order: Order) -> ContractProto:
     if contract.exchange:
         contractProto.exchange = contract.exchange
     if contract.primaryExchange:
-        contractProto.primaryExchange = contract.primaryExchange
+        contractProto.primaryExch = contract.primaryExchange
     if contract.currency:
         contractProto.currency = contract.currency
     if contract.localSymbol:
@@ -143,9 +147,10 @@ def createContractProto(contract: Contract, order: Order) -> ContractProto:
     if comboLegProtoList is not None and comboLegProtoList:
         contractProto.comboLegs.extend(comboLegProtoList)
 
-    deltaNeutralContractProto = createDeltaNeutralContractProto(contract)
-    if deltaNeutralContractProto is not None:
-        contractProto.deltaNeutralContract.CopyFrom(deltaNeutralContractProto)
+    if contract.deltaNeutralContract is not None:
+        deltaNeutralContractProto = createDeltaNeutralContractProto(contract)
+        if deltaNeutralContractProto is not None:
+            contractProto.deltaNeutralContract.CopyFrom(deltaNeutralContractProto)
 
     return contractProto
 
@@ -574,7 +579,7 @@ def createMarginConditionProto(marginCondition: MarginCondition) -> OrderConditi
     if marginCondition.percent is not None and isValidFloatValue(
         marginCondition.percent
     ):
-        marginConditionProto.percent = marginCondition.percent
+        marginConditionProto.percent = int(marginCondition.percent)
     return marginConditionProto
 
 
@@ -640,7 +645,7 @@ def fillTagValueList(tagValueList: list, orderProtoMap: dict):
 
 @staticmethod
 def createCancelOrderRequestProto(
-    orderId: int, orderCancel: OrderCancelProto
+    orderId: int, orderCancel: OrderCancel
 ) -> CancelOrderRequestProto:
     cancelOrderRequestProto = CancelOrderRequestProto()
     if isValidIntValue(orderId):
@@ -653,7 +658,7 @@ def createCancelOrderRequestProto(
 
 @staticmethod
 def createGlobalCancelRequestProto(
-    orderCancel: OrderCancelProto,
+    orderCancel: OrderCancel,
 ) -> GlobalCancelRequestProto:
     globalCancelRequestProto = GlobalCancelRequestProto()
     orderCancelProto = createOrderCancelProto(orderCancel)

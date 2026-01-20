@@ -1,6 +1,7 @@
 import json
 import logging
-from typing import Any, Awaitable, Callable
+from collections.abc import Coroutine
+from typing import Any, Callable
 
 from pydantic import BaseModel
 
@@ -13,13 +14,13 @@ logger = logging.getLogger(__name__)
 
 
 # Type alias for provider update callback (data updates)
-ProviderUpdateCallback = Callable[[Any], Awaitable[None]]
+ProviderUpdateCallback = Callable[[Any], Coroutine[Any, Any, None]]
 
 # Type alias for topic error callback signature
 # Service calls: topic_error(exc, recoverable, retry_after_ms)
 TopicErrorCallback = Callable[
     [TradingApiException, bool, int | None],
-    Awaitable[None],
+    Coroutine[Any, Any, None],
 ]
 
 
@@ -55,11 +56,12 @@ class WsRouteService(ServiceInterface):
         remove_topic: Called when last client unsubscribes from a topic.
     """
 
-    def create_topic(
+    async def create_topic(
         self,
         topic: str,
         topic_update: ProviderUpdateCallback,
         topic_error: TopicErrorCallback,
+        user_id: str,
     ) -> None:
         """Create a new subscription topic.
 
@@ -68,6 +70,7 @@ class WsRouteService(ServiceInterface):
             topic_update: Callback to broadcast data updates to subscribers
             topic_error: Callback to broadcast errors to subscribers.
                         Called with (exception, recoverable, retry_after_ms).
+            user_id: Authenticated user ID for user-scoped data access.
         """
         ...
 

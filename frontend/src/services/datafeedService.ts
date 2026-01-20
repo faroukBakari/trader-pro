@@ -23,6 +23,7 @@ import type {
   SearchSymbolsCallback,
   SeriesFormat,
   SubscribeBarsCallback,
+  SymbolResolveExtension,
   Timezone
 } from '@public/trading_terminal/charting_library';
 
@@ -367,7 +368,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
   private wsAdapter: WsAdapterType
   private wsFallback?: Partial<WsAdapterType>
 
-  debug_datafeed: boolean = false
+  private readonly debug_datafeed: boolean = false
+  private activeQuoteSubscriptions = new Map<string, string>()
+
 
   private pendingRequests = new Map<string, {
     promise: Promise<unknown>
@@ -453,7 +456,9 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     symbolName: string,
     onResolve: ResolveCallback,
     onError: DatafeedErrorCallback,
+    extension?: SymbolResolveExtension,
   ): void {
+    console.log('[Datafeed] Resolving symbol:', symbolName, extension ? `with session: ${extension.session}` : '')
     this.coalesce(`resolveSymbol`, () =>
       this._getApiAdapter().resolveSymbol(symbolName)
     ).then((response) => {
@@ -461,8 +466,30 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
         `[Datafeed] resolveSymbol found ${response.data ? 'a' : 'no'} symbol for input "${symbolName}"`,
       )
       if (response.data) {
-        if (this.debug_datafeed) console.log('[Datafeed] Symbol resolved:', response.data)
-        onResolve(response.data)
+        let symbolInfo = response.data
+
+        // Handle session switching via SymbolResolveExtension
+        // When user selects a different session (e.g., "extended"), TradingView calls
+        // resolveSymbol again with extension.session set to the requested session ID
+        if (extension?.session && symbolInfo.subsessions) {
+          const requestedSession = symbolInfo.subsessions.find(
+            s => s.id === extension.session
+          )
+          if (requestedSession) {
+            // Create modified symbol info with requested session
+            symbolInfo = {
+              ...symbolInfo,
+              session: requestedSession.session,
+              subsession_id: extension.session,
+            }
+            if (this.debug_datafeed) console.log(
+              `[Datafeed] Session switched to ${extension.session}: ${requestedSession.session}`
+            )
+          }
+        }
+
+        if (this.debug_datafeed) console.log('[Datafeed] Symbol resolved:', symbolInfo)
+        onResolve(symbolInfo)
       } else {
         if (this.debug_datafeed) console.log('[Datafeed] Symbol not found:', symbolName)
         onError('unknown_symbol')
@@ -521,6 +548,11 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onDataCallback: QuotesCallback,
     // onErrorCallback: QuotesErrorCallback,
   ): void {
+    if (symbols.length === 0) {
+      onDataCallback([])
+      return
+    }
+    console.log(`[Datafeed] getQuotes called for symbols : ${symbols}`)
     this.coalesce(`getQuotes`, () =>
       this._getApiAdapter()
         .getQuotes({ symbols }))
@@ -537,39 +569,44 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     onRealtimeCallback: QuotesCallback,
     listenerGUID: string,
   ): void {
-    // Combine all symbols for subscription
-    const allSymbols = [...new Set([...symbols, ...fast_symbols])]
 
-    if (allSymbols.length === 0) {
-      if (this.debug_datafeed) console.log('[Datafeed] No symbols to subscribe to for quotes')
-      return
+    const all_symbols = [...new Set([...symbols, ...fast_symbols])]
+
+    if (all_symbols.length === 0) {
+      throw new Error('No symbols provided for quote subscription')
     }
 
-    console.log(`[Datafeed] Subscribing to quotes for ${allSymbols.length} symbols`)
+    console.log(`[Datafeed] ${listenerGUID} Subscribing to quotes for symbols : ${all_symbols}`)
 
-    for (const symbol of allSymbols) {
-      const symbolSubId = listenerGUID + '_' + symbol
-      this._getWsAdapter().quotes
-        ?.subscribe(
-          symbolSubId,
-          { symbols: [], fast_symbols: [symbol] },
-          (quoteData) => {
-            if (this.debug_datafeed) {
-              const v = quoteData.v as { bid?: number; ask?: number; lp?: number }
-              console.warn(`[${listenerGUID}] Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask} / last: ${v?.lp}`)
-            }
-            onRealtimeCallback([quoteData])
+    this._getWsAdapter().quotes
+      ?.subscribe(
+        listenerGUID,
+        { symbols: all_symbols, fast_symbols: [] },
+        (quoteData) => {
+          if (this.debug_datafeed) {
+            const v = quoteData.v as { bid?: number; ask?: number; lp?: number }
+            console.warn(`[${listenerGUID}] Quote data received n: ${quoteData.n}, bid: ${v?.bid} / ask: ${v?.ask} / last: ${v?.lp}`)
           }
-        ).then((topic) => {
-          if (this.debug_datafeed) console.log(
-            `[Datafeed] Quote subscription started : ${topic}`,
+          onRealtimeCallback([quoteData])
+        }
+      ).then((topic) => {
+        this.activeQuoteSubscriptions.set(listenerGUID, topic)
+        if (this.debug_datafeed) {
+          console.warn(`[Datafeed] active subscriptions: ${Array.from(
+            this.activeQuoteSubscriptions.entries()).map(([key, value]) => `${key}: ${value}`).join(' | ')}`
           )
-        })
-    }
+        }
+      })
   }
   unsubscribeQuotes(listenerGUID: string): void {
     this._getWsAdapter().quotes?.unsubscribe(listenerGUID).then(() => {
       if (this.debug_datafeed) console.log(`[Datafeed] Unsubscribed from quotes successfully: ${listenerGUID}`)
+      this.activeQuoteSubscriptions.delete(listenerGUID)
+      if (this.debug_datafeed) {
+        console.warn(`[Datafeed] active subscriptions: ${Array.from(
+          this.activeQuoteSubscriptions.entries()).map(([key, value]) => `${key}: ${value}`).join(' | ')}`
+        )
+      }
     })
   }
 }

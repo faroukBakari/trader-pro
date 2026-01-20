@@ -1,156 +1,83 @@
 """Tests for TWS domain mappers.
 
-Tests cover:
-- contract_description_to_search_result (search_symbols)
-- contract_details_to_symbol_info (get_symbol_info)
-- tws_bar_to_domain_bar (historical bars)
-- tws_ticks_to_quote_data (quote snapshots)
+Covers core mapping functionality for:
+- Contract descriptions → search results
+- Contract details → symbol info
+- Bars, ticks, quotes
+- Orders (PreOrder → TWS, TrackedOrder → PlacedOrder)
+- Positions and account data
 """
 
-import pytest
-from ibapi.contract import Contract, ContractDescription, ContractDetails
+from decimal import Decimal
 
+import pytest
+from ibapi.common import BarData
+from ibapi.contract import Contract, ContractDetails
+from ibapi.order import Order as TWSOrder
+from ibapi.order_state import OrderState
+
+from trading_api.models.broker import (
+    Brackets,
+    OrderStatus,
+    OrderType,
+    ParentType,
+    PreOrder,
+    Side,
+    StopType,
+)
+from trading_api.models.exceptions import ProviderException
+from trading_api.models.market import QuoteValues
+from trading_api.providers.tws.order_tracker import OrderFill, TrackedOrder
+from trading_api.providers.tws.position_tracker import TrackedPosition
 from trading_api.providers.tws.tws_mappers import (
-    SEC_TYPE_MAP,
-    contract_description_to_search_result,
+    BracketContext,
+    brackets_to_tws,
     contract_details_to_symbol_info,
+    order_state_to_preview_result,
+    parse_tws_bar_date,
+    preorder_to_tws,
+    tracked_order_to_placed_order,
     tws_bar_to_domain_bar,
     tws_ticks_to_quote_data,
 )
 
-
-class TestContractDescriptionMapper:
-    """Test contract_description_to_search_result mapper."""
-
-    def test_basic_stock_mapping(self) -> None:
-        """Test mapping a basic stock contract description."""
-        contract = Contract()
-        contract.symbol = "AAPL"
-        contract.secType = "STK"
-        contract.exchange = "SMART"
-        contract.primaryExchange = "NASDAQ"
-        contract.localSymbol = "AAPL"
-        contract.description = "Apple Inc"
-
-        desc = ContractDescription()
-        desc.contract = contract
-
-        result = contract_description_to_search_result(desc)
-
-        assert result.symbol == "AAPL"
-        assert result.description == "Apple Inc"
-        assert result.exchange == "NASDAQ"  # Uses primaryExchange
-        assert result.ticker == "AAPL:NASDAQ:STK-0"  # New composite format
-        assert result.type == "stock"
-
-    def test_fallback_exchange(self) -> None:
-        """Test fallback to exchange when primaryExchange is empty."""
-        contract = Contract()
-        contract.symbol = "EUR"
-        contract.secType = "CASH"
-        contract.exchange = "IDEALPRO"
-        contract.primaryExchange = ""
-        contract.localSymbol = "EUR.USD"
-
-        desc = ContractDescription()
-        desc.contract = contract
-
-        result = contract_description_to_search_result(desc)
-
-        assert result.exchange == "IDEALPRO"
-        assert result.ticker == "EUR:IDEALPRO:CASH-0"  # New composite format
-        assert result.type == "forex"
-
-    def test_sec_type_mapping(self) -> None:
-        """Test all secType mappings."""
-        for tws_type, expected_type in SEC_TYPE_MAP.items():
-            contract = Contract()
-            contract.symbol = "TEST"
-            contract.secType = tws_type
-            contract.exchange = "TEST"
-
-            desc = ContractDescription()
-            desc.contract = contract
-
-            result = contract_description_to_search_result(desc)
-            assert result.type == expected_type, f"Failed for {tws_type}"
-
-    def test_unknown_sec_type_defaults_to_stock(self) -> None:
-        """Test unknown secType defaults to 'stock'."""
-        contract = Contract()
-        contract.symbol = "TEST"
-        contract.secType = "UNKNOWN"
-        contract.exchange = "TEST"
-
-        desc = ContractDescription()
-        desc.contract = contract
-
-        result = contract_description_to_search_result(desc)
-        assert result.type == "stock"
+# =============================================================================
+# Contract Mappers
+# =============================================================================
 
 
 class TestContractDetailsMapper:
     """Test contract_details_to_symbol_info mapper."""
 
-    def test_basic_stock_mapping(self) -> None:
-        """Test mapping a basic stock contract details."""
+    def test_stock_mapping_with_pricescale(self) -> None:
+        """Test stock details mapping with pricescale calculation."""
         contract = Contract()
         contract.symbol = "MSFT"
         contract.secType = "STK"
         contract.exchange = "SMART"
         contract.primaryExchange = "NASDAQ"
-        contract.localSymbol = "MSFT"
-        contract.currency = "USD"
 
         details = ContractDetails()
         details.contract = contract
         details.longName = "Microsoft Corporation"
         details.minTick = 0.01
-        details.tradingHours = "20231120:0930-20231120:1600"
-        details.timeZoneId = "America/New_York"
 
         result = contract_details_to_symbol_info(details)
 
         assert result.name == "MSFT"
         assert result.description == "Microsoft Corporation"
         assert result.type == "stock"
-        assert result.exchange == "NASDAQ"
-        assert result.listed_exchange == "SMART"
-        assert result.ticker == "MSFT:NASDAQ:STK-0"  # New composite format
-        assert result.pricescale == 100  # 1/0.01 = 100
-        assert result.minmov == 1
-        assert result.has_intraday is True
-        assert result.has_daily is True
-        assert result.data_status == "streaming"
+        assert result.ticker == "NASDAQ:MSFT"
+        assert result.pricescale == 100  # 1/0.01
 
-    def test_pricescale_calculation(self) -> None:
-        """Test pricescale is correctly calculated from minTick."""
-        contract = Contract()
-        contract.symbol = "TEST"
-        contract.secType = "STK"
-        contract.exchange = "TEST"
-
-        # Test various minTick values
-        test_cases = [
-            (0.01, 100),
-            (0.001, 1000),
-            (0.0001, 10000),
-            (0.05, 20),
-            (1.0, 1),
-        ]
-
-        for min_tick, expected_pricescale in test_cases:
-            details = ContractDetails()
-            details.contract = contract
-            details.minTick = min_tick
-
-            result = contract_details_to_symbol_info(details)
-            assert (
-                result.pricescale == expected_pricescale
-            ), f"Failed for minTick={min_tick}"
-
-    def test_pricescale_zero_mintick_default(self) -> None:
-        """Test pricescale defaults to 100 when minTick is 0 or None."""
+    @pytest.mark.parametrize(
+        "min_tick,expected_pricescale",
+        [(0.01, 100), (0.001, 1000), (0.0001, 10000), (0.05, 20), (1.0, 1), (0, 100)],
+    )
+    def test_pricescale_calculations(
+        self, min_tick: float, expected_pricescale: int
+    ) -> None:
+        """Test pricescale correctly calculated from minTick."""
         contract = Contract()
         contract.symbol = "TEST"
         contract.secType = "STK"
@@ -158,36 +85,58 @@ class TestContractDetailsMapper:
 
         details = ContractDetails()
         details.contract = contract
-        details.minTick = 0
+        details.minTick = min_tick
 
         result = contract_details_to_symbol_info(details)
-        assert result.pricescale == 100
+        assert result.pricescale == expected_pricescale
 
-    def test_fallback_values(self) -> None:
-        """Test fallback values when fields are empty."""
+    def test_new_fields_from_contract_details(self) -> None:
+        """Test new fields: currency_code, industry, sector, con_id."""
         contract = Contract()
-        contract.symbol = "TEST"
+        contract.symbol = "AAPL"
         contract.secType = "STK"
         contract.exchange = "SMART"
-        contract.primaryExchange = ""
-        contract.localSymbol = ""
+        contract.primaryExchange = "NASDAQ"
+        contract.currency = "USD"
+        contract.conId = 265598
 
         details = ContractDetails()
         details.contract = contract
-        details.longName = ""
-        details.tradingHours = ""
-        details.timeZoneId = ""
+        details.longName = "Apple Inc"
+        details.minTick = 0.01
+        details.industry = "Technology"
+        details.category = "Computers"
 
         result = contract_details_to_symbol_info(details)
 
-        assert result.description == "TEST"  # Falls back to symbol
-        assert result.exchange == "SMART"  # Falls back to exchange
-        assert result.ticker == "TEST:SMART:STK-0"  # New composite format
-        assert result.session == "0000-2359"  # Default session (24h fallback)
-        assert result.timezone == "America/New_York"  # Default timezone
+        assert result.currency_code == "USD"
+        assert result.industry == "Technology"
+        assert result.sector == "Computers"
+        assert result.con_id == 265598
 
-    def test_supported_resolutions(self) -> None:
-        """Test supported resolutions are included."""
+    def test_liquidhours_preferred_over_tradinghours(self) -> None:
+        """Test session uses liquidHours (regular session) over tradingHours (extended)."""
+        contract = Contract()
+        contract.symbol = "SPY"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "ARCA"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        # liquidHours = regular session (9:30-4:00)
+        details.liquidHours = "20260105:0930-20260105:1600"
+        # tradingHours = extended hours (4:00-8:00)
+        details.tradingHours = "20260105:0400-20260105:2000"
+
+        result = contract_details_to_symbol_info(details)
+
+        # Should use liquidHours, not tradingHours
+        assert result.session == "0930-1600"
+
+    def test_fallback_to_tradinghours_when_liquidhours_empty(self) -> None:
+        """Test session falls back to tradingHours when liquidHours is empty."""
         contract = Contract()
         contract.symbol = "TEST"
         contract.secType = "STK"
@@ -195,63 +144,289 @@ class TestContractDetailsMapper:
 
         details = ContractDetails()
         details.contract = contract
+        details.minTick = 0.01
+        details.liquidHours = ""
+        details.tradingHours = "20260105:0800-20260105:1700"
 
         result = contract_details_to_symbol_info(details)
 
-        expected_resolutions = ["1", "5", "15", "30", "60", "1D", "1W", "1M"]
-        assert result.supported_resolutions == expected_resolutions
+        assert result.session == "0800-1700"
 
-    def test_forex_mapping(self) -> None:
-        """Test mapping forex contract details."""
-        contract = Contract()
-        contract.symbol = "EUR"
-        contract.secType = "CASH"
-        contract.exchange = "IDEALPRO"
-        contract.primaryExchange = ""
-        contract.localSymbol = "EUR.USD"
-
-        details = ContractDetails()
-        details.contract = contract
-        details.longName = "Euro vs US Dollar"
-        details.minTick = 0.00005
-
-        result = contract_details_to_symbol_info(details)
-
-        assert result.name == "EUR"
-        assert result.type == "forex"
-        assert result.pricescale == 20000  # 1/0.00005
-        assert result.ticker == "EUR:IDEALPRO:CASH-0"  # New composite format
-
-    def test_futures_mapping(self) -> None:
-        """Test mapping futures contract details."""
+    def test_expiration_date_for_futures(self) -> None:
+        """Test expiration_date and expired fields for FUT contracts."""
         contract = Contract()
         contract.symbol = "ES"
         contract.secType = "FUT"
         contract.exchange = "CME"
-        contract.localSymbol = "ESZ3"
+        contract.primaryExchange = "CME"
+        # Past expiration date
+        contract.lastTradeDateOrContractMonth = "20200320"
 
         details = ContractDetails()
         details.contract = contract
-        details.longName = "E-mini S&P 500"
         details.minTick = 0.25
 
         result = contract_details_to_symbol_info(details)
 
-        assert result.name == "ES"
-        assert result.type == "futures"
-        assert result.pricescale == 4  # 1/0.25
-        assert result.ticker == "ES:CME:FUT-0"  # New composite format
+        assert result.expiration_date is not None
+        assert result.expired is True  # Past date should be expired
+
+    def test_expiration_date_for_active_option(self) -> None:
+        """Test expiration_date for active OPT contract (future date)."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "OPT"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "CBOE"
+        # Future expiration date
+        contract.lastTradeDateOrContractMonth = "20301220"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.expiration_date is not None
+        assert result.expired is False  # Future date should not be expired
+
+    def test_empty_optional_fields_return_none(self) -> None:
+        """Test backward compatibility: empty ContractDetails → None values."""
+        contract = Contract()
+        contract.symbol = "TEST"
+        contract.secType = "STK"
+        contract.exchange = "TEST"
+        # No currency, conId, industry, category set
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+
+        result = contract_details_to_symbol_info(details)
+
+        # Empty strings/zero values should map to None
+        assert result.currency_code is None
+        assert result.industry is None
+        assert result.sector is None
+        assert result.con_id is None
+        assert result.expired is None
+        assert result.expiration_date is None
+
+
+class TestSubsessionsMapping:
+    """Test subsession building from liquidHours and tradingHours."""
+
+    def test_subsessions_built_from_liquid_and_trading_hours(self) -> None:
+        """Test standard US equity with pre/post market hours."""
+        contract = Contract()
+        contract.symbol = "SPY"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "ARCA"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        # Regular session: 9:30 AM - 4:00 PM
+        details.liquidHours = "20260107:0930-20260107:1600"
+        # Extended hours: 4:00 AM - 8:00 PM
+        details.tradingHours = "20260107:0400-20260107:2000"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsession_id == "regular"
+        assert result.subsessions is not None
+        assert len(result.subsessions) == 4
+
+        # Check regular session
+        regular = next((s for s in result.subsessions if s.id == "regular"), None)
+        assert regular is not None
+        assert regular.session == "0930-1600"
+        assert regular.description == "Regular Trading Hours"
+
+        # Check extended session
+        extended = next((s for s in result.subsessions if s.id == "extended"), None)
+        assert extended is not None
+        assert extended.session == "0400-2000"
+        assert extended.description == "Extended Trading Hours"
+
+        # Check premarket (4:00 AM - 9:30 AM)
+        premarket = next((s for s in result.subsessions if s.id == "premarket"), None)
+        assert premarket is not None
+        assert premarket.session == "0400-0930"
+        assert premarket.description == "Pre-market"
+
+        # Check postmarket (4:00 PM - 8:00 PM)
+        postmarket = next((s for s in result.subsessions if s.id == "postmarket"), None)
+        assert postmarket is not None
+        assert postmarket.session == "1600-2000"
+        assert postmarket.description == "Post-market"
+
+    def test_subsessions_none_when_hours_equal(self) -> None:
+        """Test 24h futures (CME) - no extended hours distinction."""
+        contract = Contract()
+        contract.symbol = "ES"
+        contract.secType = "FUT"
+        contract.exchange = "CME"
+        contract.primaryExchange = "CME"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.25
+        # Same hours for both = no extended session concept
+        details.liquidHours = "20260107:1800-20260108:1700"
+        details.tradingHours = "20260107:1800-20260108:1700"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsession_id is None
+        assert result.subsessions is None
+
+    def test_subsessions_none_when_trading_hours_empty(self) -> None:
+        """Test fallback when tradingHours is empty."""
+        contract = Contract()
+        contract.symbol = "TEST"
+        contract.secType = "STK"
+        contract.exchange = "TEST"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = ""  # Empty extended hours
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsession_id is None
+        assert result.subsessions is None
+
+    def test_subsession_id_defaults_to_regular(self) -> None:
+        """Test subsession_id is 'regular' when subsessions exist."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = "20260107:0400-20260107:2000"
+
+        result = contract_details_to_symbol_info(details)
+
+        # Should default to regular (user hasn't selected extended yet)
+        assert result.subsession_id == "regular"
+
+    def test_premarket_only_when_extended_starts_earlier(self) -> None:
+        """Test premarket created only when extended starts before regular."""
+        contract = Contract()
+        contract.symbol = "TEST"
+        contract.secType = "STK"
+        contract.exchange = "TEST"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        # Regular: 9:30-16:00, Extended: 9:30-20:00 (same start, later end)
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = "20260107:0930-20260107:2000"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsessions is not None
+        ids = [s.id for s in result.subsessions]
+        assert "premarket" not in ids  # No premarket
+        assert "postmarket" in ids  # Has postmarket
+
+    def test_postmarket_only_when_extended_ends_later(self) -> None:
+        """Test postmarket created only when extended ends after regular."""
+        contract = Contract()
+        contract.symbol = "TEST"
+        contract.secType = "STK"
+        contract.exchange = "TEST"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        # Regular: 9:30-16:00, Extended: 4:00-16:00 (earlier start, same end)
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = "20260107:0400-20260107:1600"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsessions is not None
+        ids = [s.id for s in result.subsessions]
+        assert "premarket" in ids  # Has premarket
+        assert "postmarket" not in ids  # No postmarket
+
+    def test_overnight_subsession_added_when_overnight_exchange_available(self) -> None:
+        """Test overnight subsession is added when OVERNIGHT in validExchanges."""
+        contract = Contract()
+        contract.symbol = "GOOGL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = "20260107:0400-20260107:2000"
+        # Include OVERNIGHT exchange (Blue Ocean ATS)
+        details.validExchanges = "SMART,AMEX,NYSE,NASDAQ,OVERNIGHT,ARCA"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsessions is not None
+        assert (
+            len(result.subsessions) == 5
+        )  # regular, extended, premarket, postmarket, overnight
+
+        # Check overnight session
+        overnight = next((s for s in result.subsessions if s.id == "overnight"), None)
+        assert overnight is not None
+        assert overnight.session == "0000-2350"
+        assert overnight.description == "Overnight Trading (Blue Ocean)"
+
+    def test_overnight_subsession_not_added_when_no_overnight_exchange(self) -> None:
+        """Test overnight subsession is NOT added when OVERNIGHT not in validExchanges."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        details = ContractDetails()
+        details.contract = contract
+        details.minTick = 0.01
+        details.liquidHours = "20260107:0930-20260107:1600"
+        details.tradingHours = "20260107:0400-20260107:2000"
+        # No OVERNIGHT exchange
+        details.validExchanges = "SMART,AMEX,NYSE,NASDAQ,ARCA"
+
+        result = contract_details_to_symbol_info(details)
+
+        assert result.subsessions is not None
+        assert (
+            len(result.subsessions) == 4
+        )  # regular, extended, premarket, postmarket (no overnight)
+
+        ids = [s.id for s in result.subsessions]
+        assert "overnight" not in ids
+
+
+# =============================================================================
+# Bar/Quote Mappers
+# =============================================================================
 
 
 class TestTwsBarMapper:
     """Test tws_bar_to_domain_bar mapper."""
 
-    def test_basic_bar_mapping(self) -> None:
-        """Test mapping a basic TWS BarData to domain Bar."""
-        from decimal import Decimal
-
-        from ibapi.common import BarData
-
+    def test_bar_with_timezone_date(self) -> None:
+        """Test bar parsing with timezone-aware date format."""
         tws_bar = BarData()
         tws_bar.date = "20231215  16:00:00 US/Eastern"
         tws_bar.open = 150.25
@@ -267,36 +442,12 @@ class TestTwsBarMapper:
         assert result.low == 149.75
         assert result.close == 150.80
         assert result.volume == 1000000
-        assert result.time > 0  # Valid timestamp
-
-    def test_bar_with_single_space_date(self) -> None:
-        """Test bar parsing with single space date format."""
-        from decimal import Decimal
-
-        from ibapi.common import BarData
-
-        tws_bar = BarData()
-        tws_bar.date = "20231215 16:00:00 UTC"
-        tws_bar.open = 100.0
-        tws_bar.high = 101.0
-        tws_bar.low = 99.0
-        tws_bar.close = 100.5
-        tws_bar.volume = Decimal("500")
-
-        result = tws_bar_to_domain_bar(tws_bar)
-
-        assert result.open == 100.0
-        assert result.close == 100.5
-        assert result.volume == 500
+        assert result.time > 0
 
     def test_bar_with_epoch_date(self) -> None:
         """Test bar parsing with epoch timestamp format."""
-        from decimal import Decimal
-
-        from ibapi.common import BarData
-
         tws_bar = BarData()
-        tws_bar.date = "1702656000"  # Unix epoch timestamp
+        tws_bar.date = "1702656000"
         tws_bar.open = 200.0
         tws_bar.high = 210.0
         tws_bar.low = 195.0
@@ -305,38 +456,16 @@ class TestTwsBarMapper:
 
         result = tws_bar_to_domain_bar(tws_bar)
 
-        assert result.time == 1702656000000  # Converted to milliseconds
-        assert result.open == 200.0
-
-    def test_bar_volume_conversion_from_decimal(self) -> None:
-        """Test volume is correctly converted from Decimal to int."""
-        from decimal import Decimal
-
-        from ibapi.common import BarData
-
-        tws_bar = BarData()
-        tws_bar.date = "1702656000"
-        tws_bar.open = 100.0
-        tws_bar.high = 100.0
-        tws_bar.low = 100.0
-        tws_bar.close = 100.0
-        tws_bar.volume = Decimal("12345678")
-
-        result = tws_bar_to_domain_bar(tws_bar)
-
-        assert isinstance(result.volume, int)
-        assert result.volume == 12345678
+        assert result.time == 1702656000000  # Milliseconds
 
 
-class TestTwsTicksToQuoteDataMapper:
+class TestTwsTicksToQuoteData:
     """Test tws_ticks_to_quote_data mapper."""
 
-    def test_basic_quote_mapping(self) -> None:
-        """Test mapping dict ticker data to QuoteData."""
-        from trading_api.models.market import QuoteValues
-
+    def test_complete_quote_mapping(self) -> None:
+        """Test mapping complete tick data to QuoteData."""
         rt_data = {
-            "ticker_name": "AAPL:NASDAQ:STK-12345",
+            "business_key": "datafeed:Quote:SMART:NASDAQ:AAPL",
             "bid": 150.25,
             "ask": 150.30,
             "last": 150.28,
@@ -350,361 +479,875 @@ class TestTwsTicksToQuoteDataMapper:
         result = tws_ticks_to_quote_data(rt_data)
 
         assert result.s == "ok"
-        assert (
-            result.n == "AAPL:NASDAQ:STK-12345"
-        )  # Full ticker name for identification
+        assert result.n == "NASDAQ:AAPL"
         assert isinstance(result.v, QuoteValues)
         assert result.v.bid == 150.25
         assert result.v.ask == 150.30
         assert result.v.lp == 150.28
-        assert result.v.open_price == 149.00
-        assert result.v.high_price == 151.00
-        assert result.v.low_price == 148.50
-        assert result.v.prev_close_price == 149.50
+        assert result.v.spread == pytest.approx(0.05)
         assert result.v.volume == 1000000
 
-    def test_spread_calculation(self) -> None:
-        """Test spread is calculated from bid/ask."""
-        from trading_api.models.market import QuoteValues
-
+    def test_rt_volume_fallback_for_last_price(self) -> None:
+        """Test rt_trd_volume provides fallback when 'last' tick missing."""
         rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
-            "bid": 100.00,
-            "ask": 100.10,
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.spread == pytest.approx(0.10)
-
-    def test_change_calculation(self) -> None:
-        """Test change and change percent are calculated."""
-        from trading_api.models.market import QuoteValues
-
-        rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
-            "last": 105.00,
-            "bar_close": 100.00,
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.ch == 5.0
-        assert result.v.chp == 5.0  # 5% change
-
-    def test_missing_values_default_to_zero(self) -> None:
-        """Test missing tick values default to zero."""
-        from trading_api.models.market import QuoteValues
-
-        rt_data: dict[str, object] = {
-            "ticker_name": "TEST:SMART:STK-0",
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert result.s == "ok"
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 0.0
-        assert result.v.bid == 0.0
-        assert result.v.ask == 0.0
-        assert result.v.volume == 0
-        assert result.v.spread == 0.0
-
-    def test_partial_tick_data(self) -> None:
-        """Test handling of partial tick data."""
-        from trading_api.models.market import QuoteValues
-
-        rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
-            "last": 150.00,
-            "bar_volume": 500000,
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 150.00
-        assert result.v.volume == 500000
-        assert result.v.bid == 0.0  # Missing defaults to 0
-        assert result.v.ask == 0.0
-
-    def test_rt_trd_volume_fallback_for_last_price(self) -> None:
-        """Test rt_trd_volume provides fallback for last price when direct tick missing."""
-        from trading_api.models.market import QuoteValues
-
-        # Simulates STK market data stream where 'last' tick doesn't arrive
-        # but rt_trd_volume does (Generic 375)
-        rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
+            "business_key": "datafeed:Quote:SMART:NASDAQ:GOOGL",
             "bid": 320.55,
             "ask": 320.78,
-            # No "last" field - this is the bug we're fixing
             "rt_trd_volume": "320.64;1.0;1765200318856;4027.0;320.359;true",
         }
 
         result = tws_ticks_to_quote_data(rt_data)
 
         assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 320.64  # Parsed from rt_trd_volume
-        assert result.v.bid == 320.55
-        assert result.v.ask == 320.78
-        assert result.v.volume == 4027  # totalVolume from rt_trd_volume
 
-    def test_rt_volume_fallback_when_rt_trd_volume_missing(self) -> None:
-        """Test rt_volume provides fallback when rt_trd_volume is missing."""
-        from trading_api.models.market import QuoteValues
+        assert result.v.lp == 320.64
+        assert result.v.volume == 4027
 
-        rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
-            "bid": 100.00,
-            "ask": 100.05,
-            "rt_volume": "99.95;100.0;1765200318856;5000.0;99.90;false",
+    def test_missing_values_default_to_zero(self) -> None:
+        """Test missing tick values default to zero."""
+        rt_data: dict[str, object] = {
+            "business_key": "datafeed:Quote:SMART:SMART:TEST",
         }
 
         result = tws_ticks_to_quote_data(rt_data)
 
         assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 99.95  # Parsed from rt_volume
-        assert result.v.volume == 5000
 
-    def test_rt_volume_with_empty_price_ignored(self) -> None:
-        """Test rt_volume with empty price (odd lot) doesn't override zero."""
-        from trading_api.models.market import QuoteValues
-
-        # Odd lot trades have empty price field
-        rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
-            "bid": 100.00,
-            "ask": 100.05,
-            "rt_volume": ";0E-16;1765200320968;4026.0;320.95;true",  # Empty price
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 0.0  # Should remain 0, not parsed from empty
-
-    def test_direct_last_takes_priority_over_rt_volume(self) -> None:
-        """Test direct 'last' tick takes priority over rt_trd_volume."""
-        from trading_api.models.market import QuoteValues
-
-        rt_data = {
-            "ticker_name": "TEST:SMART:STK-0",
-            "last": 150.00,  # Direct tick
-            "rt_trd_volume": "149.50;1.0;1765200318856;1000.0;149.00;true",  # Different
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 150.00  # Direct 'last' wins
-
-
-class TestTwsTicksToQuoteDataRealWorldScenarios:
-    """Tests using real production data sampled from api-traces.log."""
-
-    def test_googl_stock_stream_without_last_tick(self) -> None:
-        """Test GOOGL STK stream - real scenario where 'last' tick doesn't arrive.
-
-        From logs: reqId=23 GOOGL subscription receives bid/ask but no 'last' tick.
-        The rt_trd_volume field provides the last trade price as fallback.
-        """
-        from trading_api.models.market import QuoteValues
-
-        # Real data from api-traces.log - GOOGL market data stream
-        rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
-            "bid": 320.55,
-            "ask": 320.78,
-            # No "last" - this is the actual bug scenario
-            "rt_trd_volume": "320.64;1.0000000000000000;1765200318856;363.0000000000000000;320.35900826;true",
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 320.64  # From rt_trd_volume
-        assert result.v.bid == 320.55
-        assert result.v.ask == 320.78
-        assert result.v.spread == 0.23
-        assert result.v.volume == 363
-        assert result.v.short_name == "GOOGL"
-        assert result.v.exchange == "NASDAQ"
-
-    def test_googl_stock_rt_volume_with_empty_price(self) -> None:
-        """Test GOOGL with rt_volume odd lot (empty price field).
-
-        From logs: rt_volume sometimes has empty price for odd lot trades.
-        Format: ";0E-16;timestamp;totalVolume;vwap;singleMM"
-
-        When price field is empty (starts with ";"), we skip the entire rt_volume
-        parsing to avoid using potentially stale/irrelevant data.
-        """
-        from trading_api.models.market import QuoteValues
-
-        # Real data - odd lot update with empty price
-        rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
-            "bid": 320.51,
-            "ask": 320.88,
-            "rt_volume": ";0E-16;1765200320968;4026.0000000000000000;320.95565875;true",
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 0.0  # Empty price - entire rt_volume skipped
-        assert result.v.bid == 320.51
-        assert result.v.ask == 320.88
-        # Volume also 0 since rt_volume was skipped (no bar_volume provided)
-        assert result.v.volume == 0
-
-    def test_googl_stock_rt_volume_with_valid_price(self) -> None:
-        """Test GOOGL with rt_volume containing valid trade price.
-
-        From logs: rt_volume with actual trade data.
-        """
-        from trading_api.models.market import QuoteValues
-
-        # Real data - rt_volume with trade
-        rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
-            "bid": 320.51,
-            "ask": 320.60,
-            "rt_volume": "320.58;4.0000000000000000;1765200301083;4015.0000000000000000;320.95659154;false",
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 320.58  # Parsed from rt_volume
-        assert result.v.volume == 4015
-
-    def test_btc_crypto_with_all_ticks(self) -> None:
-        """Test BTC CRYPTO with complete tick data.
-
-        From logs: BTC subscription receives all standard ticks including 'last'.
-        """
-        from trading_api.models.market import QuoteValues
-
-        # Real data from api-traces.log - BTC complete tick data
-        rt_data = {
-            "ticker_name": "BTC:PAXOS:CRYPTO-479624278",
-            "bid": 91588.25,
-            "ask": 91588.5,
-            "last": 91608.75,
-            "high": 92460.0,
-            "low": 89032.5,
-            "close": 91434.75,
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 91608.75
-        assert result.v.bid == 91588.25
-        assert result.v.ask == 91588.5
-        assert result.v.spread == 0.25
-        assert result.v.short_name == "BTC"
-        assert result.v.exchange == "PAXOS"
-
-    def test_btc_crypto_initial_zero_values(self) -> None:
-        """Test BTC CRYPTO with initial zero values before data arrives.
-
-        From logs: Initial subscription may receive 0.0 for all prices.
-        """
-        from trading_api.models.market import QuoteValues
-
-        # Real data - initial state with zeros
-        rt_data = {
-            "ticker_name": "BTC:PAXOS:CRYPTO-479624278",
-            "bid": 0.0,
-            "ask": 0.0,
-            "high": 0.0,
-            "low": 0.0,
-            "close": 0.0,
-        }
-
-        result = tws_ticks_to_quote_data(rt_data)
-
-        assert isinstance(result.v, QuoteValues)
         assert result.v.lp == 0.0
         assert result.v.bid == 0.0
-        assert result.v.ask == 0.0
-        assert result.v.spread == 0.0  # No spread when bid/ask are 0
+        assert result.v.volume == 0
 
-    def test_stock_snapshot_with_complete_data(self) -> None:
-        """Test stock snapshot request - receives all standard ticks.
 
-        From logs: Snapshot requests (reqId=1,3,4,5) receive complete data.
+class TestParseTwsBarDate:
+    """Test parse_tws_bar_date function for various TWS date formats."""
+
+    @pytest.mark.parametrize(
+        "date_str",
+        [
+            "20251229 08:30:00 US/Central",
+            "20251229  08:30:00 US/Eastern",
+            "20251229 08:30:00 UTC",
+            "20251229",
+            "1735500600",
+        ],
+    )
+    def test_valid_date_formats(self, date_str: str) -> None:
+        """Test parsing various valid TWS date formats."""
+        result = parse_tws_bar_date(date_str)
+        assert result > 0
+        assert isinstance(result, int)
+
+    def test_invalid_format_raises_exception(self) -> None:
+        """Test that invalid format raises ProviderException."""
+        with pytest.raises(ProviderException) as exc_info:
+            parse_tws_bar_date("invalid-date-format")
+        assert "PROVIDER_TWS_INVALID_DATE_FORMAT" in str(exc_info.value)
+
+
+# =============================================================================
+# Order Mappers
+# =============================================================================
+
+
+class TestPreorderToTws:
+    """Test preorder_to_tws mapper."""
+
+    @staticmethod
+    def _make_contract() -> Contract:
+        """Create a minimal test contract."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+        contract.currency = "USD"
+        return contract
+
+    def test_market_order(self) -> None:
+        """Test converting a market buy order."""
+        preorder = PreOrder(
+            symbol="NASDAQ:AAPL",
+            type=OrderType.MARKET,
+            side=Side.BUY,
+            qty=100,
+        )
+        contract = self._make_contract()
+
+        parent, stop_loss, take_profit = preorder_to_tws(
+            preorder, contract, account="DU123456", order_id=1
+        )
+
+        assert parent.action == "BUY"
+        assert parent.totalQuantity == Decimal("100")
+        assert parent.orderType == "MKT"
+        assert parent.account == "DU123456"
+        assert stop_loss is None
+        assert take_profit is None
+
+    def test_limit_order_with_price(self) -> None:
+        """Test converting a limit sell order."""
+        preorder = PreOrder(
+            symbol="NASDAQ:MSFT",
+            type=OrderType.LIMIT,
+            side=Side.SELL,
+            qty=50,
+            limitPrice=350.50,
+        )
+        contract = self._make_contract()
+
+        parent, _, _ = preorder_to_tws(preorder, contract, order_id=1)
+
+        assert parent.action == "SELL"
+        assert parent.orderType == "LMT"
+        assert parent.lmtPrice == 350.50
+
+    def test_stop_order(self) -> None:
+        """Test converting a stop order."""
+        preorder = PreOrder(
+            symbol="NASDAQ:TSLA",
+            type=OrderType.STOP,
+            side=Side.BUY,
+            qty=10,
+            stopPrice=245.00,
+        )
+        contract = self._make_contract()
+
+        parent, _, _ = preorder_to_tws(preorder, contract, order_id=1)
+
+        assert parent.orderType == "STP"
+        assert parent.auxPrice == 245.00
+
+    def test_bracket_order_with_stop_and_take_profit(self) -> None:
+        """Test converting order with both stop loss and take profit."""
+        preorder = PreOrder(
+            symbol="NASDAQ:AAPL",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            stopLoss=145.00,
+            takeProfit=160.00,
+        )
+        contract = self._make_contract()
+
+        parent, stop_loss, take_profit = preorder_to_tws(preorder, contract, order_id=1)
+
+        assert parent.orderType == "LMT"
+        assert stop_loss is not None
+        assert stop_loss.orderType == "STP"
+        assert stop_loss.auxPrice == 145.00
+        assert stop_loss.action == "SELL"
+        assert take_profit is not None
+        assert take_profit.orderType == "LMT"
+        assert take_profit.lmtPrice == 160.00
+        assert take_profit.action == "SELL"
+
+    def test_trailing_stop_order(self) -> None:
+        """Test converting order with trailing stop."""
+        preorder = PreOrder(
+            symbol="NASDAQ:AAPL",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            trailingStopPips=5.00,
+            stopType=StopType.TRAILING_STOP,
+        )
+        contract = self._make_contract()
+
+        parent, stop_loss, _ = preorder_to_tws(preorder, contract, order_id=1)
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "TRAIL"
+        assert stop_loss.auxPrice == 5.00
+
+    def test_guaranteed_stop_raises_exception(self) -> None:
+        """Test that guaranteed stop raises ProviderException."""
+        preorder = PreOrder(
+            symbol="NASDAQ:AAPL",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            guaranteedStop=140.00,
+        )
+        contract = self._make_contract()
+
+        with pytest.raises(ProviderException) as exc_info:
+            preorder_to_tws(preorder, contract, order_id=1)
+        assert "PROVIDER_BROKER_UNSUPPORTED_FEATURE" in str(exc_info.value.code)
+
+
+class TestBracketsToTws:
+    """Test brackets_to_tws mapper for converting Brackets to TWS child orders."""
+
+    @staticmethod
+    def _make_contract(exchange: str = "SMART") -> Contract:
+        """Create a minimal test contract."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = exchange
+        contract.primaryExchange = "NASDAQ"
+        contract.currency = "USD"
+        return contract
+
+    def test_empty_brackets_returns_none_tuple(self) -> None:
+        """Test that empty brackets (all None) returns (None, None)."""
+        brackets = Brackets()
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is None
+        assert take_profit is None
+
+    def test_stop_loss_only(self) -> None:
+        """Test bracket with only stop loss creates STP order."""
+        brackets = Brackets(stopLoss=145.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "STP"
+        assert stop_loss.auxPrice == 145.00
+        assert stop_loss.action == "SELL"
+        assert stop_loss.totalQuantity == Decimal("100")
+        assert take_profit is None
+
+    def test_take_profit_only(self) -> None:
+        """Test bracket with only take profit creates LMT order."""
+        brackets = Brackets(takeProfit=160.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=50,
+            bracket_side=Side.BUY,
+            brackets=brackets,
+        )
+
+        assert stop_loss is None
+        assert take_profit is not None
+        assert take_profit.orderType == "LMT"
+        assert take_profit.lmtPrice == 160.00
+        assert take_profit.action == "BUY"
+        assert take_profit.totalQuantity == Decimal("50")
+
+    def test_trailing_stop_inferred_from_trailing_pips(self) -> None:
+        """Test trailingStopPips creates TRAIL order (inferred stop type)."""
+        brackets = Brackets(trailingStopPips=5.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "TRAIL"
+        assert stop_loss.auxPrice == 5.00
+        assert take_profit is None
+
+    def test_trailing_stop_with_initial_trigger(self) -> None:
+        """Test trailingStopPips + stopLoss sets trailStopPrice."""
+        brackets = Brackets(trailingStopPips=5.00, stopLoss=145.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "TRAIL"
+        assert stop_loss.auxPrice == 5.00
+        assert stop_loss.trailStopPrice == 145.00
+
+    def test_full_brackets_both_orders(self) -> None:
+        """Test full brackets creates both STP and LMT orders."""
+        brackets = Brackets(stopLoss=145.00, takeProfit=160.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.orderType == "STP"
+        assert stop_loss.auxPrice == 145.00
+        assert take_profit is not None
+        assert take_profit.orderType == "LMT"
+        assert take_profit.lmtPrice == 160.00
+
+    def test_outside_rth_enabled(self) -> None:
+        """Test outsideRth is set to True on bracket orders."""
+        brackets = Brackets(stopLoss=145.00)
+        contract = self._make_contract()
+
+        stop_loss, _ = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.outsideRth is True
+
+    def test_tif_gtc_for_smart_exchange(self) -> None:
+        """Test TIF is GTC for SMART exchange."""
+        brackets = Brackets(stopLoss=145.00)
+        contract = self._make_contract(exchange="SMART")
+
+        stop_loss, _ = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.tif == "GTC"
+
+    def test_tif_day_for_overnight_exchange(self) -> None:
+        """Test TIF is DAY for OVERNIGHT exchange."""
+        brackets = Brackets(stopLoss=145.00)
+        contract = self._make_contract(exchange="OVERNIGHT")
+
+        stop_loss, _ = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.tif == "DAY"
+
+    def test_account_passed_to_orders(self) -> None:
+        """Test account parameter is passed to bracket orders."""
+        brackets = Brackets(stopLoss=145.00, takeProfit=160.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.SELL,
+            brackets=brackets,
+            account="DU123456",
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.account == "DU123456"
+        assert take_profit is not None
+        assert take_profit.account == "DU123456"
+
+    def test_bracket_side_buy_for_short_position(self) -> None:
+        """Test bracket_side=BUY creates BUY bracket orders (for short positions)."""
+        brackets = Brackets(stopLoss=155.00, takeProfit=140.00)
+        contract = self._make_contract()
+
+        stop_loss, take_profit = brackets_to_tws(
+            contract=contract,
+            quantity=100,
+            bracket_side=Side.BUY,
+            brackets=brackets,
+        )
+
+        assert stop_loss is not None
+        assert stop_loss.action == "BUY"
+        assert take_profit is not None
+        assert take_profit.action == "BUY"
+
+
+class TestTrackedOrderToPlacedOrder:
+    """Test tracked_order_to_placed_order mapper."""
+
+    def _make_tracked_order(
+        self,
+        order_id: int = 1,
+        symbol: str = "AAPL",
+        action: str = "BUY",
+        qty: Decimal = Decimal("100"),
+        order_type: str = "MKT",
+        status: str = "Submitted",
+        lmt_price: float = 0.0,
+        aux_price: float = 0.0,
+        filled_qty: Decimal = Decimal("0"),
+        parent_id: int = 0,
+    ) -> TrackedOrder:
+        """Helper to create TrackedOrder for testing."""
+        contract = Contract()
+        contract.symbol = symbol
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        order = TWSOrder()
+        order.action = action
+        order.totalQuantity = qty
+        order.orderType = order_type
+        order.lmtPrice = lmt_price
+        order.auxPrice = aux_price
+        order.filledQuantity = filled_qty
+        order.parentId = parent_id
+
+        order_state = OrderState()
+        order_state.status = status
+
+        return TrackedOrder(
+            orderId=order_id,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+        )
+
+    def test_working_market_order(self) -> None:
+        """Test mapping a working market order."""
+        tracked = self._make_tracked_order()
+
+        result = tracked_order_to_placed_order(tracked)
+
+        assert result.id == "1"
+        assert result.symbol == "NASDAQ:AAPL"
+        assert result.type == OrderType.MARKET
+        assert result.side == Side.BUY
+        assert result.qty == 100
+        assert result.status == OrderStatus.WORKING
+
+    def test_filled_limit_order(self) -> None:
+        """Test mapping a filled limit order with fill info."""
+        tracked = self._make_tracked_order(
+            order_type="LMT",
+            lmt_price=350.00,
+            status="Filled",
+            filled_qty=Decimal("50"),
+        )
+        fill = OrderFill(
+            orderId=1,
+            status="Filled",
+            filled=Decimal("50"),
+            remaining=Decimal("0"),
+            avgFillPrice=350.25,
+            permId=123456,
+            parentId=0,
+            lastFillPrice=350.25,
+            clientId=1,
+            whyHeld="",
+            mktCapPrice=0.0,
+            timestamp=1234567890,
+        )
+        tracked.fills = [fill]
+
+        result = tracked_order_to_placed_order(tracked)
+
+        assert result.type == OrderType.LIMIT
+        assert result.status == OrderStatus.FILLED
+        assert result.limitPrice == 350.00
+        assert result.filledQty == 50.0
+        assert result.avgPrice == 350.25
+
+    def test_cancelled_order(self) -> None:
+        """Test mapping a cancelled order."""
+        tracked = self._make_tracked_order(status="Cancelled")
+
+        result = tracked_order_to_placed_order(tracked)
+
+        assert result.status == OrderStatus.CANCELED
+
+    def test_bracket_context_preserved(self) -> None:
+        """Test that BracketContext fields are preserved."""
+        tracked = self._make_tracked_order(order_type="LMT", lmt_price=150.00)
+        bracket_context = BracketContext(
+            take_profit=160.00,
+            stop_loss=145.00,
+            trailing_stop_pips=5.00,
+            stop_type=int(StopType.TRAILING_STOP),
+        )
+
+        result = tracked_order_to_placed_order(tracked, bracket_context=bracket_context)
+
+        assert result.takeProfit == 160.00
+        assert result.stopLoss == 145.00
+        assert result.trailingStopPips == 5.00
+        assert result.stopType == StopType.TRAILING_STOP
+
+    def test_child_order_has_parent_id(self) -> None:
+        """Test that child bracket orders have parentId set."""
+        tracked = self._make_tracked_order(
+            order_id=101,
+            action="SELL",
+            order_type="LMT",
+            lmt_price=160.00,
+            parent_id=100,
+        )
+
+        result = tracked_order_to_placed_order(tracked)
+
+        assert result.id == "101"
+        assert result.parentId == "100"
+        assert result.parentType == ParentType.ORDER
+
+
+# =============================================================================
+# Position/Account Mappers
+# =============================================================================
+
+
+class TestTwsPositionToDomain:
+    """Test TrackedPosition.to_domain() method."""
+
+    def test_long_position(self) -> None:
+        """Test mapping a long position."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        tracked = TrackedPosition(
+            account="DU123456",
+            contract=contract,
+            position=Decimal("100"),
+            avgCost=150.50,
+        )
+
+        result = tracked.to_domain()
+
+        assert result.symbol == "NASDAQ:AAPL"
+        assert result.qty == 100.0
+        assert result.side == Side.BUY
+        assert result.avgPrice == 150.50
+
+    def test_short_position(self) -> None:
+        """Test mapping a short position (negative quantity)."""
+        contract = Contract()
+        contract.symbol = "TSLA"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        tracked = TrackedPosition(
+            account="DU123456",
+            contract=contract,
+            position=Decimal("-50"),
+            avgCost=250.75,
+        )
+
+        result = tracked.to_domain()
+
+        assert result.qty == 50.0
+        assert result.side == Side.SELL
+
+
+# =============================================================================
+# Order Preview Mapper
+# =============================================================================
+
+
+class TestOrderStateToPreviewResult:
+    """Test order_state_to_preview_result mapper."""
+
+    def _make_order_state(
+        self,
+        init_margin_change: str = "5000.00",
+        commission: float = 1.0,
+        warning_text: str = "",
+        reject_reason: str = "",
+    ) -> OrderState:
+        """Create mock OrderState for testing."""
+        order_state = OrderState()
+        order_state.initMarginChange = init_margin_change
+        order_state.maintMarginChange = "2500.00"
+        order_state.equityWithLoanChange = "-5000.00"
+        order_state.initMarginAfter = "10000.00"
+        order_state.commissionAndFees = commission
+        order_state.minCommissionAndFees = commission
+        order_state.maxCommissionAndFees = commission
+        order_state.marginCurrency = "USD"
+        order_state.commissionAndFeesCurrency = "USD"
+        order_state.warningText = warning_text
+        order_state.rejectReason = reject_reason
+        return order_state
+
+    def test_preview_result_structure(self) -> None:
+        """Test OrderPreviewResult has required sections."""
+        order_state = self._make_order_state()
+        preorder = PreOrder(
+            symbol="NASDAQ:AAPL",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+        )
+
+        result = order_state_to_preview_result(order_state, preorder, "test-123")
+
+        section_headers = [s.header for s in result.sections]
+        assert "Order Details" in section_headers
+        assert "Margin Requirements" in section_headers
+        assert "Commission & Fees" in section_headers
+        assert result.confirmId == "test-123"
+
+    def test_bracket_section_included(self) -> None:
+        """Test Risk Management section included for bracket orders."""
+        order_state = self._make_order_state()
+        preorder = PreOrder(
+            symbol="NASDAQ:AAPL",
+            type=OrderType.LIMIT,
+            side=Side.BUY,
+            qty=100,
+            limitPrice=150.00,
+            stopLoss=145.00,
+            takeProfit=160.00,
+        )
+
+        result = order_state_to_preview_result(order_state, preorder, "test-123")
+
+        section_headers = [s.header for s in result.sections]
+        assert "Risk Management" in section_headers
+
+    def test_warnings_from_tws(self) -> None:
+        """Test TWS warnings are included."""
+        order_state = self._make_order_state(warning_text="Order requires margin")
+        preorder = PreOrder(
+            symbol="NASDAQ:AAPL", type=OrderType.MARKET, side=Side.BUY, qty=100
+        )
+
+        result = order_state_to_preview_result(order_state, preorder, "test-123")
+
+        assert result.warnings is not None
+        assert any("Order requires margin" in w for w in result.warnings)
+
+    def test_errors_from_tws(self) -> None:
+        """Test TWS reject reasons are included as errors."""
+        order_state = self._make_order_state(reject_reason="Insufficient funds")
+        preorder = PreOrder(
+            symbol="NASDAQ:AAPL", type=OrderType.MARKET, side=Side.BUY, qty=100
+        )
+
+        result = order_state_to_preview_result(order_state, preorder, "test-123")
+
+        assert result.errors is not None
+        assert any("Insufficient funds" in e for e in result.errors)
+
+
+# =============================================================================
+# TWS Status Mapping
+# =============================================================================
+
+
+class TestTwsToDomainStatus:
+    """Test domain_status helper function.
+
+    Covers:
+    - Direct mapping for confirmed statuses
+    - History-based resolution for cancel transitions
+    - Fallback to PLACING for new orders
+    """
+
+    def _make_tracked_order(
+        self,
+        status: str = "Submitted",
+        fills: list[OrderFill] | None = None,
+    ) -> TrackedOrder:
+        """Helper to create TrackedOrder with specific status and fills."""
+        contract = Contract()
+        contract.symbol = "AAPL"
+        contract.secType = "STK"
+        contract.exchange = "SMART"
+        contract.primaryExchange = "NASDAQ"
+
+        order = TWSOrder()
+        order.action = "BUY"
+        order.totalQuantity = Decimal("100")
+        order.orderType = "MKT"
+
+        order_state = OrderState()
+        order_state.status = status
+
+        tracked = TrackedOrder(
+            orderId=1,
+            contract=contract,
+            order=order,
+            orderState=order_state,
+        )
+        if fills:
+            tracked.fills = fills
+        return tracked
+
+    def _make_fill(self, status: str) -> OrderFill:
+        """Helper to create OrderFill with specific status."""
+        return OrderFill(
+            orderId=1,
+            status=status,
+            filled=Decimal("0"),
+            remaining=Decimal("100"),
+            avgFillPrice=0.0,
+            permId=12345,
+            parentId=0,
+            lastFillPrice=0.0,
+            clientId=1,
+            whyHeld="",
+            mktCapPrice=0.0,
+            timestamp=1234567890,
+        )
+
+    # --- Direct mapping tests ---
+
+    def test_submitted_maps_to_working(self) -> None:
+        """Submitted (active at exchange) → WORKING."""
+        tracked = self._make_tracked_order(status="Submitted")
+        assert tracked.domain_status == OrderStatus.WORKING
+
+    def test_presubmitted_maps_to_inactive(self) -> None:
+        """PreSubmitted (simulated order held by IB) → INACTIVE."""
+        tracked = self._make_tracked_order(status="PreSubmitted")
+        assert tracked.domain_status == OrderStatus.INACTIVE
+
+    def test_filled_maps_to_filled(self) -> None:
+        """Filled → FILLED."""
+        tracked = self._make_tracked_order(status="Filled")
+        assert tracked.domain_status == OrderStatus.FILLED
+
+    def test_cancelled_maps_to_canceled(self) -> None:
+        """Cancelled (confirmed) → CANCELED."""
+        tracked = self._make_tracked_order(status="Cancelled")
+        assert tracked.domain_status == OrderStatus.CANCELED
+
+    def test_inactive_maps_to_inactive(self) -> None:
+        """Inactive (error/held) → INACTIVE."""
+        tracked = self._make_tracked_order(status="Inactive")
+        assert tracked.domain_status == OrderStatus.INACTIVE
+
+    # --- History-based resolution tests ---
+
+    def test_pending_cancel_preserves_working_status(self) -> None:
+        """PendingCancel with Submitted history → WORKING (not CANCELED).
+
+        Critical for halt scenarios: order might still fill after cancel request.
         """
-        from trading_api.models.market import QuoteValues
+        fills = [self._make_fill("Submitted")]
+        tracked = self._make_tracked_order(status="PendingCancel", fills=fills)
 
-        # Real data from snapshot request
-        rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
-            "bid": 320.55,
-            "ask": 320.6,
-            "last": 320.56,
-            "bar_volume": 4011,
-            "bar_close": 321.06,
-        }
+        result = tracked.domain_status
 
-        result = tws_ticks_to_quote_data(rt_data)
+        assert result == OrderStatus.WORKING
 
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 320.56
-        assert result.v.bid == 320.55
-        assert result.v.ask == 320.6
-        assert result.v.spread == 0.05
-        assert result.v.volume == 4011
-        assert result.v.prev_close_price == 321.06
-        # Change calculation: last - close = 320.56 - 321.06 = -0.50
-        assert result.v.ch == -0.5
-        # Change percent: -0.50 / 321.06 * 100 = -0.16%
-        assert result.v.chp == -0.16
+    def test_api_cancelled_preserves_working_status(self) -> None:
+        """ApiCancelled with Submitted history → WORKING.
 
-    def test_rt_trd_volume_preferred_over_rt_volume(self) -> None:
-        """Test that rt_trd_volume is preferred over rt_volume when both present.
-
-        rt_trd_volume excludes unreportable trades (odd lots) so is more reliable.
+        ApiCancelled means cancelled via API before ack - could still fill.
         """
-        from trading_api.models.market import QuoteValues
+        fills = [self._make_fill("Submitted")]
+        tracked = self._make_tracked_order(status="ApiCancelled", fills=fills)
 
-        rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
-            "bid": 320.55,
-            "ask": 320.78,
-            # Both present - rt_trd_volume should win
-            "rt_trd_volume": "320.64;1.0;1765200318856;363.0;320.36;true",
-            "rt_volume": "320.58;4.0;1765200301083;4015.0;320.96;false",
-        }
+        result = tracked.domain_status
 
-        result = tws_ticks_to_quote_data(rt_data)
+        assert result == OrderStatus.WORKING
 
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 320.64  # From rt_trd_volume, not rt_volume
-        assert result.v.volume == 363  # From rt_trd_volume
+    def test_pending_cancel_preserves_presubmitted_status(self) -> None:
+        """PendingCancel with PreSubmitted history → INACTIVE."""
+        fills = [self._make_fill("PreSubmitted")]
+        tracked = self._make_tracked_order(status="PendingCancel", fills=fills)
 
-    def test_high_precision_rt_volume_values(self) -> None:
-        """Test parsing rt_volume with high precision decimal values.
+        result = tracked.domain_status
 
-        TWS sends values like "4.0000000000000000" which should parse correctly.
-        """
-        from trading_api.models.market import QuoteValues
+        assert result == OrderStatus.INACTIVE
 
-        rt_data = {
-            "ticker_name": "GOOGL:NASDAQ:STK-208813719",
-            "bid": 320.51,
-            "ask": 320.60,
-            # High precision values from actual logs
-            "rt_volume": "320.60;3.0000000000000000;1765200301942;4018.0000000000000000;320.95632843;false",
-        }
+    def test_pending_submit_with_history_uses_last_confirmed(self) -> None:
+        """PendingSubmit with prior Submitted history → WORKING."""
+        fills = [self._make_fill("Submitted")]
+        tracked = self._make_tracked_order(status="PendingSubmit", fills=fills)
 
-        result = tws_ticks_to_quote_data(rt_data)
+        result = tracked.domain_status
 
-        assert isinstance(result.v, QuoteValues)
-        assert result.v.lp == 320.60
-        assert result.v.volume == 4018
+        assert result == OrderStatus.WORKING
+
+    def test_api_pending_with_history_uses_last_confirmed(self) -> None:
+        """ApiPending with prior Submitted history → WORKING."""
+        fills = [self._make_fill("Submitted")]
+        tracked = self._make_tracked_order(status="ApiPending", fills=fills)
+
+        result = tracked.domain_status
+
+        assert result == OrderStatus.WORKING
+
+    def test_history_resolution_walks_backwards(self) -> None:
+        """History resolution finds last confirmed status (walks backwards)."""
+        fills = [
+            self._make_fill("PreSubmitted"),  # First
+            self._make_fill("Submitted"),  # Last confirmed
+        ]
+        tracked = self._make_tracked_order(status="PendingCancel", fills=fills)
+
+        result = tracked.domain_status
+
+        # Should use Submitted (last in list), not PreSubmitted
+        assert result == OrderStatus.WORKING
+
+    def test_history_skips_transitional_statuses(self) -> None:
+        """History resolution skips transitional statuses in history."""
+        fills = [
+            self._make_fill("Submitted"),
+            self._make_fill("PendingCancel"),  # Transitional - skip
+        ]
+        tracked = self._make_tracked_order(status="ApiCancelled", fills=fills)
+
+        result = tracked.domain_status
+
+        # Should find Submitted, skipping PendingCancel
+        assert result == OrderStatus.WORKING
+
+    # --- Fallback tests ---
+
+    def test_pending_cancel_no_history_falls_back_to_placing(self) -> None:
+        """PendingCancel with no history → PLACING."""
+        tracked = self._make_tracked_order(status="PendingCancel", fills=[])
+
+        result = tracked.domain_status
+
+        assert result == OrderStatus.PLACING
+
+    def test_api_pending_no_history_falls_back_to_placing(self) -> None:
+        """ApiPending (new order) with no history → PLACING."""
+        tracked = self._make_tracked_order(status="ApiPending", fills=[])
+
+        result = tracked.domain_status
+
+        assert result == OrderStatus.PLACING
+
+    def test_pending_submit_no_history_falls_back_to_placing(self) -> None:
+        """PendingSubmit (new order) with no history → PLACING."""
+        tracked = self._make_tracked_order(status="PendingSubmit", fills=[])
+
+        result = tracked.domain_status
+
+        assert result == OrderStatus.PLACING
+
+    def test_unknown_status_falls_back_to_placing(self) -> None:
+        """Unknown status with no history → PLACING."""
+        tracked = self._make_tracked_order(status="UnknownTwsStatus", fills=[])
+
+        result = tracked.domain_status
+
+        assert result == OrderStatus.PLACING

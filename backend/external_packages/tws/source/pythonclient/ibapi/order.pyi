@@ -5,7 +5,9 @@ from typing import Any
 
 from ibapi.contract import Contract
 from ibapi.object_implem import Object
+from ibapi.order_condition import OrderCondition
 from ibapi.softdollartier import SoftDollarTier
+from ibapi.tag_value import TagValue
 
 # Enum Origin
 CUSTOMER: int
@@ -140,7 +142,7 @@ class Order(Object):
 
     # ALGO ORDERS ONLY
     algoStrategy: str
-    algoParams: list[Any]
+    algoParams: list[TagValue]
     smartComboRoutingParams: list[Any]
     algoId: str
 
@@ -173,7 +175,7 @@ class Order(Object):
     adjustableTrailingUnit: int
     lmtPriceOffset: float
 
-    conditions: list[Any]
+    conditions: list[OrderCondition]
     conditionsCancelOrder: bool
     conditionsIgnoreRth: bool
 

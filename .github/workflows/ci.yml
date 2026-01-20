@@ -111,9 +111,11 @@ jobs:
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
         fail-on-cache-miss: false
 
-    - name: Generate JWT key pair for tests
+    - name: Generate keys for tests
       working-directory: backend
-      run: make check-generate-keypair
+      run: |
+        make check-generate-keypair
+        make check-generate-hmac-key
 
     - name: Run import boundary tests
       working-directory: backend
@@ -152,9 +154,11 @@ jobs:
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
         fail-on-cache-miss: false
 
-    - name: Generate JWT key pair for tests
+    - name: Generate keys for tests
       working-directory: backend
-      run: make check-generate-keypair
+      run: |
+        make check-generate-keypair
+        make check-generate-hmac-key
 
     - name: Run provider core tests
       working-directory: backend
@@ -195,9 +199,11 @@ jobs:
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
         fail-on-cache-miss: false
 
-    - name: Generate JWT key pair for tests
+    - name: Generate keys for tests
       working-directory: backend
-      run: make check-generate-keypair
+      run: |
+        make check-generate-keypair
+        make check-generate-hmac-key
 
     - name: Run ${{ matrix.provider }} provider tests
       working-directory: backend
@@ -238,9 +244,11 @@ jobs:
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
         fail-on-cache-miss: false
 
-    - name: Generate JWT key pair for tests
+    - name: Generate keys for tests
       working-directory: backend
-      run: make check-generate-keypair
+      run: |
+        make check-generate-keypair
+        make check-generate-hmac-key
 
     - name: Run ${{ matrix.module }} module tests
       working-directory: backend
@@ -279,9 +287,11 @@ jobs:
         key: venv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('backend/poetry.lock') }}-v3
         fail-on-cache-miss: false
 
-    - name: Generate JWT key pair for tests
+    - name: Generate keys for tests
       working-directory: backend
-      run: make check-generate-keypair
+      run: |
+        make check-generate-keypair
+        make check-generate-hmac-key
 
     - name: Run all tests with coverage (final report)
       working-directory: backend

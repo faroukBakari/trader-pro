@@ -549,7 +549,7 @@ Providers raise `ProviderException` for external integration errors:
 
 ```python
 # providers/tws/__init__.py
-class TWSProvider(Provider, DatafeedCapability):
+class TWSDatafeedProvider(Provider, DatafeedCapability):
 
     async def get_symbol_info(self, ticker: str, **kwargs) -> SymbolInfo:
         contract_details_list = await self._tws_client.reqContractDetails(...)

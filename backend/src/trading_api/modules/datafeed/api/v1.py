@@ -53,7 +53,7 @@ class DatafeedApi(APIRouterInterface):
         )
         async def search_symbols(
             _: Annotated[UserData, Depends(get_current_user)],
-            user_input: str = Query(..., description="User search input"),
+            user_input: str = Query(..., min_length=1, description="User search input"),
             exchange: str = Query("", description="Exchange filter"),
             symbol_type: str = Query("", description="Symbol type filter"),
             max_results: int = Query(50, description="Maximum results"),

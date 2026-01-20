@@ -104,6 +104,10 @@ export class ApiError extends Error {
     super(message)
     this.name = 'ApiError'
   }
+
+  toJSON(): string {
+    return this.message  // Only serialize the message
+  }
 }
 
 function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
@@ -132,13 +136,13 @@ function ApiErrorHandler(endpoint: string | ((...args: unknown[]) => string)) {
           if (error.response) {
             const status = error.response.status
             const data = error.response.data as { detail?: string; message?: string }
-            const message = data?.detail || data?.message || error.message
+            const message = (error.code ? `[${error.code}] ` : '') + (data?.detail || data?.message || error.message)
 
             throw new ApiError(
               `API error (${status}): ${message}`,
               status,
               endpointStr,
-              error,
+              // error,
             )
           }
 
@@ -407,13 +411,25 @@ export class ApiAdapter {
   @ApiErrorHandler((...args) => `/symbols/${args[0]}`)
   async resolveSymbol(symbol: string): ApiPromise<LibrarySymbolInfo> {
     const response = await this.datafeedApi.resolveSymbol(symbol)
+    // Destructure to exclude backend-only fields (con_id) not in TradingView's LibrarySymbolInfo
+    const { con_id: _, expired: __, ...symbolData } = response.data
     return {
       status: response.status,
       data: {
-        ...response.data,
+        ...symbolData,
         timezone: response.data.timezone as unknown as LibrarySymbolInfo['timezone'],
         format: response.data.format as unknown as LibrarySymbolInfo['format'],
         supported_resolutions: response.data.supported_resolutions as unknown as TradingViewDatafeedConfiguration['supported_resolutions'],
+        // Convert null → undefined for optional TradingView fields
+        currency_code: response.data.currency_code ?? undefined,
+        original_currency_code: response.data.original_currency_code ?? undefined,
+        // expired: response.data.expired ?? false,
+        expiration_date: response.data.expiration_date ?? undefined,
+        industry: response.data.industry ?? undefined,
+        sector: response.data.sector ?? undefined,
+        // Extended sessions support (subsessions)
+        subsession_id: response.data.subsession_id ?? undefined,
+        subsessions: response.data.subsessions as unknown as LibrarySymbolInfo['subsessions'] ?? undefined,
       }
     }
   }
@@ -449,8 +465,8 @@ export class ApiAdapter {
 
   // Broker module endpoints
   @ApiErrorHandler('/orders')
-  async placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult> {
-    const response = await this.brokerApi.placeOrder(mapPreOrder(order))
+  async placeOrder(order: PreOrder, confirmId?: string): ApiPromise<PlaceOrderResult> {
+    const response = await this.brokerApi.placeOrder(mapPreOrder(order), confirmId)
 
     return {
       status: response.status,
@@ -469,7 +485,7 @@ export class ApiAdapter {
 
   @ApiErrorHandler((...args) => `/orders/${(args[1] as string | undefined) ?? (args[0] as Order).id}`)
   async modifyOrder(order: Order, confirmId?: string): ApiPromise<void> {
-    const orderId = confirmId ?? order.id
+    const orderId = order.id ?? confirmId
     const response = await this.brokerApi.modifyOrder(mapPreOrder(order), orderId)
 
     return {
@@ -524,6 +540,9 @@ export class ApiAdapter {
       data: response.data.map(execution => ({
         ...execution,
         side: execution.side as unknown as Execution['side'],
+        // Commission field: Convert backend null → TradingView undefined
+        // Backend may return null if commissionAndFeesReport hasn't fired yet (TWS two-phase dispatch)
+        commission: execution.commission ?? undefined,
       })),
     }
   }

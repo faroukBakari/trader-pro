@@ -18,6 +18,7 @@ This document contains comprehensive reference information for TWS API contract 
 | **1.0**     | [Execution](#10-execution-class)                         | Trade           | Execution details       |
 | **2.0**     | [ExecutionFilter](#20-executionfilter-class)             | Filter          | Execution filtering     |
 | **3.0**     | [Order](#30-order-class)                                 | [REQUIRED] Core | Order parameters (100+) |
+| **3.2**     | [Order Modification](#32-order-modification)             | [CRITICAL]      | Modifying live orders   |
 | **4.0**     | [OrderAllocation](#40-orderallocation-class)             | Advanced        | FA allocations          |
 | **5.0**     | [OrderCancel](#50-ordercancel-class)                     | Action          | Order cancellation      |
 | **6.0**     | [OrderComboLeg](#60-ordercomboleg-class)                 | Order           | Combo order legs        |
@@ -37,6 +38,7 @@ This document contains comprehensive reference information for TWS API contract 
 - [1.0 Execution Class](#10-execution-class)
 - [2.0 ExecutionFilter Class](#20-executionfilter-class)
 - [3.0 Order Class](#30-order-class)
+  - [3.2 Order Modification](#32-order-modification)
 - [4.0 OrderAllocation Class](#40-orderallocation-class)
 - [5.0 OrderCancel Class](#50-ordercancel-class)
 - [6.0 OrderComboLeg Class](#60-ordercomboleg-class)
@@ -409,6 +411,78 @@ This document contains comprehensive reference information for TWS API contract 
 | `AUCTION_TRANSPARENT`                   | static int    | 3                       |
 | `EMPTY_STR`                             | static string | ""                      |
 | `COMPETE_AGAINST_BEST_OFFSET_UP_TO_MID` | static double | double.PositiveInfinity |
+
+### 3.2 Order Modification
+
+<!-- METADATA: scope=order-modification, priority=critical, dependencies=[placeOrder] -->
+
+**[CRITICAL]** **[PITFALL]** Guidelines for modifying existing orders.
+
+#### Recommended Modifiable Fields
+
+> **Official IB Guidance:** "It is not generally recommended to try to change order fields aside from order price, size, and tif (for DAY → IOC modifications). To change other parameters, it might be preferable to instead cancel the open order, and create a new one."
+
+**[REQUIRED]** Only these fields should be modified on live orders:
+
+| Field           | Type    | Notes                              |
+| --------------- | ------- | ---------------------------------- |
+| `lmtPrice`      | double  | For LMT, STP LMT, TRAIL orders     |
+| `auxPrice`      | double  | Stop/trailing price for STP, TRAIL |
+| `totalQuantity` | decimal | Can increase or decrease           |
+| `tif`           | string  | **Only DAY → IOC** is recommended  |
+
+#### How to Modify an Order
+
+**[WORKFLOW]** Call `placeOrder()` with the **same orderId**:
+
+```python
+# Modify existing order - use SAME orderId
+ib_socket.placeOrder(
+    orderId=existing_order_id,  # Must match original order
+    contract=contract,           # Same contract
+    order=modified_order         # Changed price/size/tif only
+)
+```
+
+**[PITFALL]** Requirements for modification:
+
+- **orderId** must match the original order
+- **clientId** must match the API session that placed the order
+- Only modify price, size, or TIF - other changes risk rejection
+
+#### Fields NOT Recommended for Modification
+
+**[PITFALL]** Cancel and re-create the order instead of modifying:
+
+| Category        | Fields                                          |
+| --------------- | ----------------------------------------------- |
+| **Basic**       | `action`, `orderType`, `account`                |
+| **Routing**     | `exchange`, `primaryExch`, `optOutSmartRouting` |
+| **Algo**        | `algoStrategy`, `algoParams`                    |
+| **Conditions**  | `conditions[]`, `conditionsIgnoreRth`           |
+| **Bracket/OCA** | `parentId`, `ocaGroup`, `ocaType`               |
+| **FA**          | `faGroup`, `faMethod`, `faProfile`              |
+| **Special**     | VOL, Scale, Hedge, Pegged order fields          |
+
+#### Common Modification Errors
+
+| Error Code | Message                                                      | Cause                                        |
+| ---------- | ------------------------------------------------------------ | -------------------------------------------- |
+| **104**    | "Can't modify a filled order"                                | Order already executed                       |
+| **105**    | "Order being modified does not match original order"         | Changed basic params (not price/size)        |
+| **134**    | "Modify order failed"                                        | Order executed/cancelled during modification |
+| **2102**   | "Unable to modify this order as it is still being processed" | Modify attempted too quickly                 |
+
+#### Modifying Manual TWS Orders
+
+**[WORKFLOW]** Orders placed manually in TWS require **binding** before API modification:
+
+1. Connect with `clientId=0`
+2. Call `reqOpenOrders()` to bind current orders, or
+3. Call `reqAutoOpenOrders(True)` to auto-bind future orders
+4. Use the assigned API `orderId` to modify
+
+**[PITFALL]** Binding cancels/resubmits the order on the exchange, which may affect queue priority.
 
 ---
 

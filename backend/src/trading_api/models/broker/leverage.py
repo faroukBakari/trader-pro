@@ -15,11 +15,13 @@ class Brackets(BaseModel):
     Matching TradingView Brackets interface
     """
 
-    stopLoss: Optional[float] = Field(None, description="Stop loss price")
-    guaranteedStop: Optional[float] = Field(None, description="Guaranteed stop price")
-    takeProfit: Optional[float] = Field(None, description="Take profit price")
+    stopLoss: Optional[float] = Field(default=None, description="Stop loss price")
+    guaranteedStop: Optional[float] = Field(
+        default=None, description="Guaranteed stop price"
+    )
+    takeProfit: Optional[float] = Field(default=None, description="Take profit price")
     trailingStopPips: Optional[float] = Field(
-        None, description="Trailing stop pips value"
+        default=None, description="Trailing stop pips value"
     )
 
 
@@ -33,7 +35,7 @@ class LeverageInfoParams(BaseModel):
     orderType: OrderType = Field(..., description="Order type")
     side: Side = Field(..., description="Order side (buy or sell)")
     customFields: Optional[Dict[str, Any]] = Field(
-        None, description="Custom data for the broker"
+        default=None, description="Custom data for the broker"
     )
 
     model_config = {"use_enum_values": True}

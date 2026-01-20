@@ -2,7 +2,7 @@
 Broker order models matching TradingView broker API types
 """
 
-from enum import IntEnum
+from enum import Enum, IntEnum
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -25,7 +25,7 @@ class OrderType(IntEnum):
     LIMIT = 1
     MARKET = 2
     STOP = 3
-    STOP_LIMIT = 4
+    TRAIL = 4
 
 
 class Side(IntEnum):
@@ -43,6 +43,25 @@ class StopType(IntEnum):
     GUARANTEED_STOP = 2
 
 
+class OrderOrPositionMessageType(str, Enum):
+    """Message type for order/position state messages (matching TradingView)."""
+
+    INFORMATION = "information"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+class ParentType(IntEnum):
+    """Parent type enumeration matching TradingView ParentType.
+
+    Used to identify the type of parent for bracket orders.
+    """
+
+    ORDER = 1
+    POSITION = 2
+    INDIVIDUAL_POSITION = 3
+
+
 class CurrentQuotes(BaseModel):
     """
     Current market quotes (matching TradingView AskBid)
@@ -51,6 +70,26 @@ class CurrentQuotes(BaseModel):
 
     ask: float = Field(..., description="Current ask price")
     bid: float = Field(..., description="Current bid price")
+
+    model_config = {"use_enum_values": True}
+
+
+class OrderDuration(BaseModel):
+    """Order duration/expiration (matching TradingView OrderDuration)."""
+
+    type: str = Field(..., description="Duration type (e.g., 'DAY', 'GTC', 'GTD')")
+    datetime: Optional[int] = Field(
+        default=None, description="Expiration timestamp for GTD orders"
+    )
+
+    model_config = {"use_enum_values": True}
+
+
+class OrderOrPositionMessage(BaseModel):
+    """Message describing order/position state (matching TradingView)."""
+
+    type: OrderOrPositionMessageType = Field(..., description="Message type")
+    text: str = Field(..., description="Message content")
 
     model_config = {"use_enum_values": True}
 
@@ -65,24 +104,32 @@ class PreOrder(BaseModel):
     type: OrderType = Field(..., description="Order type")
     side: Side = Field(..., description="Order/execution side")
     qty: float = Field(..., description="Order quantity", gt=0)
-    limitPrice: Optional[float] = Field(None, description="Order limit price")
-    stopPrice: Optional[float] = Field(None, description="Order stop price")
+    limitPrice: Optional[float] = Field(default=None, description="Order limit price")
+    stopPrice: Optional[float] = Field(default=None, description="Order stop price")
     takeProfit: Optional[float] = Field(
-        None, description="Order take profit (Brackets)"
+        default=None, description="Order take profit (Brackets)"
     )
-    stopLoss: Optional[float] = Field(None, description="Order stop loss (Brackets)")
+    stopLoss: Optional[float] = Field(
+        default=None, description="Order stop loss (Brackets)"
+    )
     guaranteedStop: Optional[float] = Field(
-        None, description="Order guaranteed stop loss (Brackets)"
+        default=None, description="Order guaranteed stop loss (Brackets)"
     )
     trailingStopPips: Optional[float] = Field(
-        None, description="Order trailing stop (Brackets)"
+        default=None, description="Order trailing stop (Brackets)"
     )
-    stopType: Optional[StopType] = Field(None, description="Type of stop order")
+    stopType: Optional[StopType] = Field(default=None, description="Type of stop order")
     seenPrice: Optional[float] = Field(
-        None, description="Price seen at order creation time"
+        default=None, description="Price seen at order creation time"
     )
     currentQuotes: Optional[CurrentQuotes] = Field(
-        None, description="Current market quotes (ask and bid)"
+        default=None, description="Current market quotes (ask and bid)"
+    )
+    duration: Optional[OrderDuration] = Field(
+        default=None, description="Order duration/expiration"
+    )
+    isClose: Optional[bool] = Field(
+        default=None, description="True if order closes a position"
     )
 
     model_config = {"use_enum_values": True}
@@ -100,25 +147,43 @@ class PlacedOrder(BaseModel):
     side: Side = Field(..., description="Order side (buy or sell)")
     qty: float = Field(..., description="Order quantity", gt=0)
     status: OrderStatus = Field(..., description="Order status")
-    limitPrice: Optional[float] = Field(None, description="Price for the limit order")
-    stopPrice: Optional[float] = Field(None, description="Price for the stop order")
+    limitPrice: Optional[float] = Field(
+        default=None, description="Price for the limit order"
+    )
+    stopPrice: Optional[float] = Field(
+        default=None, description="Price for the stop order"
+    )
     takeProfit: Optional[float] = Field(
-        None, description="Take profit price (Brackets)"
+        default=None, description="Take profit price (Brackets)"
     )
     stopLoss: Optional[float] = Field(None, description="Stop loss price (Brackets)")
     guaranteedStop: Optional[float] = Field(
-        None, description="Guaranteed stop loss price (Brackets)"
+        default=None, description="Guaranteed stop loss price (Brackets)"
     )
     trailingStopPips: Optional[float] = Field(
-        None, description="Trailing stop pips value (Brackets)"
+        default=None, description="Trailing stop pips value (Brackets)"
     )
-    stopType: Optional[StopType] = Field(None, description="Stop loss type")
-    filledQty: Optional[float] = Field(None, description="Filled order quantity")
+    stopType: Optional[StopType] = Field(default=None, description="Stop loss type")
+    filledQty: Optional[float] = Field(
+        default=None, description="Filled order quantity"
+    )
     avgPrice: Optional[float] = Field(
-        None, description="Average fulfilled price for the order"
+        default=None, description="Average fulfilled price for the order"
     )
     updateTime: Optional[int] = Field(
-        None, description="Last update time (unix timestamp in milliseconds)"
+        default=None, description="Last update time (unix timestamp in milliseconds)"
+    )
+    parentId: Optional[str] = Field(
+        default=None, description="Parent order/position ID for bracket orders"
+    )
+    parentType: Optional[ParentType] = Field(
+        default=None, description="Type of parent (Order=1, Position=2)"
+    )
+    duration: Optional[OrderDuration] = Field(
+        default=None, description="Order duration/expiration"
+    )
+    message: Optional[OrderOrPositionMessage] = Field(
+        default=None, description="Order state message"
     )
 
     model_config = {"use_enum_values": True}
@@ -129,7 +194,9 @@ class PlaceOrderResult(BaseModel):
     Result of placing an order (matching TradingView PlaceOrderResult)
     """
 
-    orderId: str = Field(..., description="Order ID (mainly for debugging)")
+    orderId: Optional[str] = Field(
+        default=None, description="Order ID (mainly for debugging)"
+    )
 
     model_config = {"use_enum_values": True}
 

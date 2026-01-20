@@ -11,6 +11,9 @@ import pytest
 # Add src to path for module imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
+# Import MockBrokerProvider from conftest
+from tests.conftest import MockBrokerProvider  # type: ignore  # noqa: E402
+from trading_api.capabilities.datafeed import DatafeedCapability  # noqa: E402
 from trading_api.models.common import CapabilitySpec, ProviderConfig  # noqa: E402
 from trading_api.models.exceptions import (  # noqa: E402
     CommonException,
@@ -26,7 +29,6 @@ from trading_api.models.market import (  # noqa: E402
 from trading_api.modules.auth import AuthModule  # noqa: E402
 from trading_api.modules.broker import BrokerModule  # noqa: E402
 from trading_api.modules.datafeed import DatafeedModule  # noqa: E402
-from trading_api.providers.capabilities.datafeed import DatafeedCapability  # noqa: E402
 from trading_api.shared import Provider  # noqa: E402
 from trading_api.shared.module_interface import ModuleApp  # noqa: E402
 
@@ -85,17 +87,17 @@ class MockDatafeedProvider(Provider, DatafeedCapability):
 
     def subscribe_market_data(
         self,
-        ticker_names: list[str],
+        ticker_name: str,
         callback: Callable[[QuoteData], Awaitable[None]],
         on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
         **kwargs: Any,
-    ) -> list[str]:
-        return []
+    ) -> str:
+        return "sub_0"
 
     def unsubscribe_realtime_bars(self, subscription_id: str) -> None:
         pass
 
-    def unsubscribe_market_data(self, subscription_ids: list[str]) -> None:
+    def unsubscribe_market_data(self, subscription_id: str) -> None:
         pass
 
 
@@ -123,8 +125,11 @@ class TestModuleCodegen:
 
     def test_broker_module_creates_apps_via_module_app_wrapper(self):
         """Test that BrokerModule can generate apps via ModuleApp wrapper."""
-        # Instantiate module
-        module = BrokerModule()
+        # Provide mock provider for broker capability
+        mock_provider = MockBrokerProvider()
+
+        # Instantiate module with provider
+        module = BrokerModule(providers=[mock_provider])
 
         # Create apps using ModuleApp wrapper (correct pattern)
         module_app = ModuleApp(module)
@@ -200,5 +205,7 @@ class TestModuleCodegen:
         )
 
         # Should succeed (after fix to module_codegen.py)
+        assert result.returncode == 0, f"Script failed for auth: {result.stderr}"
+        assert "CommonException" not in result.stderr
         assert result.returncode == 0, f"Script failed for auth: {result.stderr}"
         assert "CommonException" not in result.stderr
