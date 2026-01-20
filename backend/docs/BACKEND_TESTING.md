@@ -582,6 +582,182 @@ Before submitting your test:
 
 ## Testing Patterns
 
+### TWS Provider Testing
+
+**Test Pattern Migration (January 2026):**
+
+Following the BarsTracker implementation, TWS provider tests now use strict domain models instead of dict mocks:
+
+**✅ NEW Pattern (BarsTracker architecture):**
+
+```python
+from unittest.mock import AsyncMock
+from trading_api.models.bars import Bar
+
+# Use Bar objects with strict int types
+bar1 = Bar(
+    time=1702641000000,  # int milliseconds UTC (not datetime)
+    open=150.0,
+    high=151.0,
+    low=149.5,
+    close=150.5,
+    volume=1000000,      # int (not float/Decimal)
+)
+
+# Mock tracker methods, not IBSocket internals
+mock_bars_tracker.request = AsyncMock(return_value=[bar1, bar2])
+result = await tws_client.reqHistoricalData(contract, "1 min", ...)
+mock_bars_tracker.request.assert_called_once_with(contract, "1 min", ...)
+```
+
+**❌ OLD Pattern (deprecated):**
+
+```python
+# Don't mock _stream_data or create_snapshot
+mock_ibsocket.create_snapshot.return_value = [  # ❌ Obsolete API
+    {"time": datetime(...), "open": 150.0, ...}  # ❌ Dict mocks
+]
+```
+
+**Key Changes:**
+
+1. **Domain Models**: Use `Bar` Pydantic models, not dicts
+2. **Int Timestamps**: `time=1702641000000` (milliseconds), not `datetime` objects
+3. **Int Volume**: `volume=1000000` (int), not `float` or `Decimal`
+4. **Tracker Mocking**: Mock `bars_tracker.request()` (AsyncMock), not `ibsocket.create_snapshot()`
+5. **Callback Routing Tests**: Verify `bars_cb(reqId, bar)` calls, not `_stream_data` accumulation
+6. **No Async in IBSocket Tests**: Callback verification is synchronous (no `async def`, no `await`)
+
+**Example Test Patterns:**
+
+```python
+# test_client.py - Mock tracker at TWSClient level
+@pytest.mark.asyncio
+async def test_req_historical_data_returns_bars(mock_tws_client, mock_bars_tracker):
+    bar1 = Bar(time=1702630200000, open=150.0, high=151.0, low=149.5, close=150.5, volume=1000000)
+    mock_bars_tracker.request = AsyncMock(return_value=[bar1])
+
+    result = await mock_tws_client.reqHistoricalData(contract, "1 min", "1 D", ...)
+
+    assert result[0].open == 150.0  # Bar attribute access (not dict key)
+    mock_bars_tracker.request.assert_called_once()
+
+# test_ibsocket.py - Verify callback routing
+def test_historical_data_calls_bars_cb():
+    bars_cb_mock = Mock()
+    ibsocket = IBSocket(bars_cb=bars_cb_mock, ...)
+
+    tws_bar = ibapi.common.BarData()
+    ibsocket.historicalData(reqId=1, bar=tws_bar)
+
+    bars_cb_mock.assert_called_once_with(1, tws_bar)  # Verify routing
+
+# test_datafeed_provider.py - Domain model construction
+@pytest.mark.asyncio
+async def test_get_historical_bars_returns_bars(mock_client):
+    bar1 = Bar(time=1702641000000, open=150.0, high=151.0, low=149.5, close=150.5, volume=1000000)
+    mock_client.reqHistoricalData = AsyncMock(return_value=[bar1])
+
+    result = await provider.get_historical_bars("NASDAQ:AAPL", start, end, Resolution.ONE_MINUTE)
+
+    assert isinstance(result[0], Bar)
+    assert result[0].time == 1702641000000
+```
+
+**Migration Checklist:**
+
+- [ ] Replace dict mocks with `Bar` objects
+- [ ] Use `time: int` (milliseconds), not `datetime`
+- [ ] Use `volume: int`, not `float` or `Decimal`
+- [ ] Mock tracker methods (`bars_tracker.request()`), not IBSocket internals
+- [ ] Import `AsyncMock` from `unittest.mock` for async method mocking
+- [ ] Remove `_stream_data` / `create_snapshot` references
+- [ ] Verify callback routing (`bars_cb`, `bars_complete_cb`), not accumulation
+
+**ExecutionTracker Testing (Two-Phase Dispatch):**
+
+ExecutionTracker follows the same pattern as BarsTracker but adds commission joining via two-phase dispatch:
+
+```python
+from unittest.mock import Mock, AsyncMock
+from ibapi.contract import Contract
+from ibapi.execution import Execution as TWSExecution
+from trading_api.providers.tws.execution_tracker import TrackedExecution, ExecutionTracker
+
+# Test two-phase dispatch pattern
+@pytest.mark.asyncio
+async def test_execution_tracker_two_phase_dispatch():
+    tracker = ExecutionTracker()
+    contract = Contract()
+    contract.symbol = "AAPL"
+    contract.exchange = "NASDAQ"
+
+    execution = TWSExecution()
+    execution.execId = "001"
+    execution.price = 150.0
+    execution.shares = 100
+    execution.side = "BOT"
+    execution.time = "20240115 14:30:45"
+
+    # Track dispatches
+    dispatches = []
+    async def on_execution(tracked: TrackedExecution):
+        dispatches.append(tracked)
+
+    loop = asyncio.get_running_loop()
+    tracker.create_stream_hook(loop, on_execution, lambda e: None)
+
+    # Phase 1: execDetails (commission=None)
+    tracker.upsert_execution(contract, execution)
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 1
+    assert dispatches[0].commission is None
+
+    # Phase 2: commissionAndFeesReport (commission enriched)
+    tracker.update_commission("001", 1.50)
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 2
+    assert dispatches[1].commission == 1.50
+    assert dispatches[1].exec_id == "001"
+
+# Test provider-level integration
+@pytest.mark.asyncio
+async def test_subscribe_executions_with_symbol_filter(mock_socket):
+    tracker = mock_socket.execution_tracker
+    callback_mock = AsyncMock()
+
+    # Subscribe with symbol filter
+    hook_key = await provider.subscribe_executions(
+        symbol="AAPL",
+        callback=callback_mock,
+        on_error=lambda e: None,
+    )
+
+    # Simulate execution for different symbols
+    contract1 = Contract()
+    contract1.symbol = "AAPL"
+    contract1.exchange = "NASDAQ"
+
+    execution1 = TWSExecution()
+    execution1.execId = "001"
+    tracker.upsert_execution(contract1, execution1)
+
+    await asyncio.sleep(0.01)
+    # Only AAPL executions should be dispatched
+    callback_mock.assert_called_once()
+```
+
+**ExecutionTracker Key Points:**
+
+- **Two-Phase Dispatch**: Test both phases (execDetails → commissionAndFeesReport)
+- **Symbol Filtering**: Test at provider layer (TrackedExecution.symbol format: "EXCHANGE:SYMBOL")
+- **Domain Conversion**: Use `TrackedExecution.to_domain()` → `Execution` Pydantic model
+- **Time Parsing**: TWS format "YYYYMMDD HH:MM:SS" → int milliseconds UTC
+- **Snapshot Pattern**: Mock `execution_tracker.all_executions()` with list of `TrackedExecution`
+- **Stream Hooks**: Verify `create_stream_hook()` registration and dispatch
+
+---
+
 ### Available Fixtures
 
 **Session-scoped (shared across all tests):**
@@ -1459,20 +1635,17 @@ The backend manager (`scripts/backend_manager.py`) orchestrates multi-process se
 Starting the backend involves several expensive operations:
 
 1. **Spec & Client Generation** (~5-6 seconds)
-
    - OpenAPI spec generation from FastAPI routes
    - AsyncAPI spec generation from WebSocket endpoints
    - Python client code generation from specs
    - Frontend TypeScript client generation
 
 2. **Server Process Startup** (~2-3 seconds per server)
-
    - Multiple uvicorn instances (broker, datafeed, etc.)
    - Module loading and dependency injection
    - Health check endpoints becoming ready
 
 3. **Nginx Gateway Startup** (~1 second)
-
    - Configuration validation
    - Worker process initialization
    - Port binding and routing setup
@@ -1669,6 +1842,143 @@ Benefits:
 - Explicit execution order
 - Easy to insert new tests
 - Clear test flow in IDE/output
+
+---
+
+### TWS Provider Testing
+
+**Overview**: TWS provider tests use mocks for external TWS API interactions and domain models for callback testing.
+
+**Key Testing Patterns:**
+
+1. **Mock TWSClient methods** - Not low-level TWS API calls
+2. **Use domain models** - Bar objects, not TWS BarData
+3. **Mock trackers** - Quote/bars trackers for subscription tests
+4. **Test callbacks** - Verify domain model conversion and routing
+
+#### BarsTracker Test Migration (January 19, 2026)
+
+**Architectural Change**: `reqBarDataStream()` now delegates through `BarsTracker` for centralized registration.
+
+**OLD Pattern (Before):**
+
+```python
+# ❌ OLD: Mock ibsocket.create_stream (bypassed BarsTracker)
+@patch.object(IBSocket, "create_stream")
+async def test_reqBarDataStream_old(mock_create_stream):
+    mock_create_stream.return_value = (42, lambda: None)  # (req_id, cancel_fn)
+
+    req_id, cancel_fn = await client.reqBarDataStream(...)
+
+    # Verify create_stream was called
+    mock_create_stream.assert_called_once()
+```
+
+**NEW Pattern (After Fix):**
+
+```python
+# ✅ NEW: Mock bars_tracker.subscribe (unified pathway)
+@patch.object(BarsTracker, "subscribe")
+async def test_reqBarDataStream_new(mock_subscribe):
+    mock_subscribe.return_value = None  # void method
+
+    req_id, cancel_fn = await client.reqBarDataStream(...)
+
+    # Verify bars_tracker.subscribe was called with domain callback
+    mock_subscribe.assert_called_once()
+    args = mock_subscribe.call_args
+    assert args[0][0] == req_id  # First positional arg
+    assert callable(args[0][1])  # Callback (Bar → Awaitable[None])
+```
+
+**Why the Change:**
+
+- **Before**: `reqBarDataStream()` called `ibsocket.create_stream()` directly → bypassed BarsTracker registration → "unknown req_id" warnings
+- **After**: `reqBarDataStream()` calls `bars_tracker.subscribe()` → centralized registration → no warnings
+- **Test Impact**: Mock the new delegation point (`bars_tracker.subscribe`) instead of the old one (`ibsocket.create_stream`)
+
+**Callback Signature Change:**
+
+- **OLD**: `Callable[[dict[str, Any], list[str]], Coroutine]` - Raw TWS dict
+- **NEW**: `Callable[[Bar], Awaitable[None]]` - Domain model
+
+**Migration Checklist:**
+
+1. ✅ Replace `@patch.object(IBSocket, "create_stream")` with `@patch.object(BarsTracker, "subscribe")`
+2. ✅ Update mock return value from `(req_id, cancel_fn)` to `None`
+3. ✅ Update callback assertions to expect `Bar` domain model signature
+4. ✅ Add mocks for `quote_tracker` and `ibsocket` if testing cancellation (prevents hanging)
+
+**Example Test (Full Pattern):**
+
+```python
+from unittest.mock import patch, AsyncMock
+from trading_api.providers.tws.bars_tracker import BarsTracker
+from trading_api.providers.tws.quote_tracker import QuoteTracker
+from trading_api.models.datafeed import Bar
+
+class TestTWSClientStreamMethods:
+    @patch.object(BarsTracker, "subscribe")
+    @patch.object(QuoteTracker, "request_ticker_id", new_callable=AsyncMock)
+    @patch.object(IBSocket, "reqBars", new_callable=AsyncMock)
+    async def test_reqBarDataStream(
+        self,
+        mock_reqBars,
+        mock_request_ticker_id,
+        mock_subscribe,
+        tws_client
+    ):
+        """Test real-time bar streaming through BarsTracker."""
+        # Setup
+        mock_request_ticker_id.return_value = 42
+        mock_subscribe.return_value = None
+
+        # Execute
+        req_id, cancel_fn = await tws_client.reqBarDataStream(
+            contract=Contract(...),
+            bar_size="5 secs",
+            what_to_show="TRADES",
+            use_rth=False,
+            callback=AsyncMock(),  # Domain callback: Bar → None
+            on_error=AsyncMock()
+        )
+
+        # Verify BarsTracker registration (unified pathway)
+        mock_subscribe.assert_called_once()
+        args = mock_subscribe.call_args[0]
+        assert args[0] == 42  # req_id
+        assert callable(args[1])  # callback (Bar → Awaitable[None])
+        assert callable(args[2])  # on_error
+
+        # Verify IBSocket call (through BarsTracker)
+        mock_reqBars.assert_called_once()
+```
+
+**Test Hanging Fix:**
+
+If tests hang at 100%, add mocks for `quote_tracker` and `ibsocket` in cancellation tests:
+
+```python
+@patch.object(BarsTracker, "unsubscribe")
+@patch.object(QuoteTracker, "cancel_subscription", new_callable=AsyncMock)
+@patch.object(IBSocket, "cancelDataSubscription")
+async def test_cancelDataSubscription(
+    mock_ibsocket_cancel,
+    mock_quote_cancel,
+    mock_bars_unsubscribe,
+    tws_client
+):
+    """Test canceling both quote and bar subscriptions."""
+    # Prevents hanging by mocking all cleanup paths
+    await tws_client.cancelDataSubscription(42)
+
+    mock_bars_unsubscribe.assert_called_once_with(42)
+    mock_quote_cancel.assert_awaited_once_with(42)
+```
+
+**Root Cause**: Unmocked `call_later` timers in quote_tracker/ibsocket caused event loop to never complete.
+
+---
 
 ## Cleanup and Resource Management
 
@@ -2035,25 +2345,21 @@ poetry run pytest tests/integration/test_module_isolation.py::TestModuleIsolatio
 ### For Test Maintenance
 
 1. **Keep tests fast**
-
    - Prefer unit tests over integration tests
    - Use session fixtures to share resources
    - Minimize server restarts
 
 2. **Organize logically**
-
    - Group related tests in classes
    - Follow test execution order
    - Use descriptive test names
 
 3. **Clean up properly**
-
    - Use fixtures for resource management
    - Ensure processes are terminated
    - Check for port leaks
 
 4. **Document complex tests**
-
    - Add docstrings explaining test purpose
    - Comment tricky test logic
    - Document test constraints
@@ -2066,25 +2372,21 @@ poetry run pytest tests/integration/test_module_isolation.py::TestModuleIsolatio
 ### For CI/CD
 
 1. **Separate test levels**
-
    - Run unit tests first (fast feedback)
    - Run integration tests separately
    - Use `make test-boundaries`, `make test-modules`, `make test-integration`
 
 2. **Use pytest markers**
-
    - Mark integration tests: `@pytest.mark.integration`
    - Mark slow tests: `@pytest.mark.slow`
    - Skip slow tests in dev: `pytest -m "not slow"`
 
 3. **Parallel execution**
-
    - Consider pytest-xdist for unit tests
    - Keep integration tests sequential (resource conflicts)
    - Use session fixtures to minimize overhead
 
 4. **Resource cleanup**
-
    - Ensure CI runners terminate all processes
    - Check for port conflicts
    - Clean up temporary files
@@ -2339,18 +2641,15 @@ By following these guidelines, you can write efficient, maintainable, and reliab
 Starting the backend involves several expensive operations:
 
 1. **Spec & Client Generation** (~5-6 seconds)
-
    - OpenAPI spec generation from FastAPI routes
    - AsyncAPI spec generation from WebSocket endpoints
    - Python client code generation from specs
 
 2. **Server Process Startup** (~2-3 seconds per server)
-
    - Multiple uvicorn instances (broker, datafeed, etc.)
    - Module loading and dependency injection
 
 3. **Nginx Gateway Startup** (~1 second)
-
    - Configuration validation
    - Worker process initialization
 

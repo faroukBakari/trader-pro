@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Any, Generic, Literal, TypeVar, get_args
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar, cast, get_args
 
 from fastapi.websockets import WebSocketState
 from pydantic import BaseModel
@@ -17,6 +17,9 @@ from trading_api.models import (
 from trading_api.models.exceptions import TradingApiException
 from trading_api.shared.exception_handlers import log_exception
 from trading_api.shared.ws.ws_router import WsRouteFeature, WsRouteService
+
+if TYPE_CHECKING:
+    from trading_api.models.auth.token import UserData
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +60,9 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
             self._clients.add(client)
             topic = self.topic_builder(payload.sub_params)
             if topic not in self._topics:
-                self._create_topic(topic)
+                # user_data is guaranteed to be set by get_current_user_ws dependency
+                user_data = cast("UserData", client.user_data)
+                await self._create_topic(topic, user_data.user_id)
             client.subscribe(topic)
             if DEBUG_WS_ROUTER:
                 debug_log(f"Client {client.uid} subscribed to topic: {topic}")
@@ -185,8 +190,12 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         """
         await self._broadcast_payload(update.topic, update, "update")
 
-    def _create_topic(self, topic: str) -> None:
+    async def _create_topic(self, topic: str, user_id: str) -> None:
         """Create a new topic and register callbacks with the service.
+
+        Args:
+            topic: Topic identifier string
+            user_id: Authenticated user ID for user-scoped data access
 
         Sets up both update and error callbacks:
         - topic_update: Called by service/provider with data updates
@@ -246,7 +255,7 @@ class WsRouter(WsRouteFeature, Generic[_TRequest, _TData]):
         if DEBUG_WS_ROUTER:
             debug_log(f"Creating new topic in {self.route} service: {topic}")
 
-        self.service.create_topic(topic, topic_update, topic_error)
+        await self.service.create_topic(topic, topic_update, topic_error, user_id)
         self._topics.add(topic)
 
     def _remove_topic(self, topic: str) -> None:

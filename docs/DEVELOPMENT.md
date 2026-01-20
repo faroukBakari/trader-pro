@@ -240,7 +240,7 @@ See `docs/CLIENT-GENERATION.md` for details.
 ```bash
 # Backend debugging (with debugpy)
 cd backend && make dev
-# Attach debugger to localhost:5678
+# Attach debugger to localhost:4444
 
 # Frontend debugging
 cd frontend && npm run dev

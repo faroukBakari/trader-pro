@@ -61,9 +61,10 @@ Comprehensive tests for the `ApiService` class that leverage its built-in fallba
 
 The tests work directly with the `ApiService` and its fallback mechanism:
 
-- Uses real `TraderPlugin` with fallback to `FallbackApiService`
-- Tests both successful fallback behavior and actual API structure
-- Leverages built-in mock delays and realistic responses
+- `ApiService` auto-detects Vitest via `process.env.VITEST` (set automatically by Vitest)
+- Constructor defaults to `mock: true` in test environment
+- Uses `ApiFallback` with realistic mock data and network delays
+- No `vi.mock()` needed — same production code paths tested
 
 #### Comprehensive Coverage
 

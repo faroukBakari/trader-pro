@@ -3,6 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from trading_api.models.common import CapabilitySpec
+from trading_api.models.exceptions import CommonException
 from trading_api.models.health import HealthResponse
 from trading_api.models.versioning import APIMetadata, VersionInfo
 from trading_api.shared.provider_interface import Provider
@@ -26,11 +27,9 @@ class ServiceInterface(ABC):
         """
         super().__init__()
         self.module_dir = module_dir
-        self._providers = providers or []
 
         # Build capability map and fail-fast validate
-        self._capability_map: dict[str, "Provider"] = {}
-        self._resolve_capabilities()
+        self._capability_map = self._resolve_capabilities(providers or [])
 
         api_dir = self.module_dir / "api"
         available_versions: dict[str, VersionInfo] = {}
@@ -80,7 +79,9 @@ class ServiceInterface(ABC):
         """
         ...
 
-    def _resolve_capabilities(self) -> None:
+    def _resolve_capabilities(
+        self, providers: list[Provider]
+    ) -> dict[str, list[Provider]]:
         """Resolve and cache capability → provider mapping.
 
         [FAIL-FAST]: Validates at initialization, not at request time.
@@ -88,35 +89,35 @@ class ServiceInterface(ABC):
         Raises:
             CommonException: If required capability not found
         """
-        from trading_api.models.exceptions import CommonException
 
-        required_capabilities = self.capabilities()
+        capability_map: dict[str, list[Provider]] = {}
 
-        for req_cap in required_capabilities:
-            matched = False
+        for req_cap in self.capabilities():
+            provs = [
+                provider
+                for provider in providers
+                if any(
+                    req_cap.matches(prov_cap) for prov_cap in provider.capabilities()
+                )
+            ]
 
-            for provider in self._providers:
-                # Check if provider offers matching capability
-                for prov_cap in provider.capabilities():
-                    if req_cap.matches(prov_cap):
-                        self._capability_map[req_cap.name] = provider
-                        matched = True
-                        break
-
-                if matched:
-                    break
-
-            if not matched:
+            if not provs:
                 raise CommonException(
                     code="COMMON_CAPABILITY_NOT_FOUND",
                     message=(
                         f"Service '{self.module_name}' requires capability "
                         f"'{req_cap}' but no provider found. "
-                        f"Available providers: {[p.name for p in self._providers]}"
+                        f"Available providers: {[p.name for p in providers]}"
                     ),
                 )
 
-    def get_capability_provider(self, capability_name: str) -> Provider:
+            capability_map[req_cap.name] = provs
+
+        return capability_map
+
+    def get_capability_provider(
+        self, capability_name: str, preferred_provider: str | None = None
+    ) -> Provider:
         """Get provider for specific capability (cached lookup).
 
         Args:
@@ -130,13 +131,24 @@ class ServiceInterface(ABC):
 
         [PERFORMANCE]: O(1) lookup after initialization.
         """
-        provider = self._capability_map.get(capability_name)
-        if provider is None:
+        providers = self._capability_map.get(capability_name)
+        if not providers:
             raise RuntimeError(
                 f"Capability '{capability_name}' not initialized. "
                 "This should never happen - validation should occur at init."
             )
-        return provider
+        if preferred_provider:
+            providers = [
+                provider
+                for provider in providers
+                if provider.name == preferred_provider
+            ]
+            if not providers:
+                raise RuntimeError(
+                    f"Preferred provider '{preferred_provider}' for capability "
+                    f"'{capability_name}' not found."
+                )
+        return next(iter(providers))
 
     @property
     def module_name(self) -> str:
@@ -180,4 +192,5 @@ class ServiceInterface(ABC):
         return self.api_metadata.available_versions[current_version]
 
     def shutdown(self) -> None:
+        """Perform any necessary cleanup on service shutdown."""
         """Perform any necessary cleanup on service shutdown."""

@@ -2824,14 +2824,14 @@ test = ["cupy-cuda12x (>=13.6.0)", "fastavro (>=0.22.9)", "hypothesis (>=6.131.7
 
 [[package]]
 name = "pyright"
-version = "1.1.407"
+version = "1.1.408"
 description = "Command line wrapper for pyright"
 optional = false
 python-versions = ">=3.7"
 groups = ["dev"]
 files = [
-    {file = "pyright-1.1.407-py3-none-any.whl", hash = "sha256:6dd419f54fcc13f03b52285796d65e639786373f433e243f8b94cf93a7444d21"},
-    {file = "pyright-1.1.407.tar.gz", hash = "sha256:099674dba5c10489832d4a4b2d302636152a9a42d317986c38474c76fe562262"},
+    {file = "pyright-1.1.408-py3-none-any.whl", hash = "sha256:090b32865f4fdb1e0e6cd82bf5618480d48eecd2eb2e70f960982a3d9a4c17c1"},
+    {file = "pyright-1.1.408.tar.gz", hash = "sha256:f28f2321f96852fa50b5829ea492f6adb0e6954568d1caa3f3af3a5f555eb684"},
 ]
 
 [package.dependencies]
@@ -3283,14 +3283,14 @@ test = ["black (>=22.3.0,<23.0.0)", "coverage (>=6.2,<7.0)", "isort (>=5.0.6,<6.
 
 [[package]]
 name = "types-authlib"
-version = "1.6.5.20251005"
+version = "1.6.6.20251220"
 description = "Typing stubs for Authlib"
 optional = false
 python-versions = ">=3.9"
 groups = ["dev"]
 files = [
-    {file = "types_authlib-1.6.5.20251005-py3-none-any.whl", hash = "sha256:dc635602cae4adf8aef814e34943a8f5542db5d4697468b9f6e51d01f77e8028"},
-    {file = "types_authlib-1.6.5.20251005.tar.gz", hash = "sha256:b45303969716d95115503de1677a76f28813ed25dd62e22a7cc21b8bf43842b5"},
+    {file = "types_authlib-1.6.6.20251220-py3-none-any.whl", hash = "sha256:dd1d545fe4c498686c0285d59dc950d87d977d294fc430617c91e0a11f6f4f2b"},
+    {file = "types_authlib-1.6.6.20251220.tar.gz", hash = "sha256:a2369f23732fe88d5087ed720864f40d0319c19e8411d85a4930e31018996f90"},
 ]
 
 [package.dependencies]
@@ -3723,4 +3723,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "6c35165f0868acdf83d8c1fc493ba0302944fab0b9833364a9bd757264a1c5d6"
+content-hash = "65d8263c9c34fbec11fcdb2b0aefc8fa3673f589c19aa725b2e26dfb1c6ed201"

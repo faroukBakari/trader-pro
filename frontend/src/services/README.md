@@ -555,6 +555,107 @@ Tests verify:
 - **Log**: `[IHMController] Failed to register tool: <name>`
 - **Action**: Check backend WebSocket availability, check schema validity
 
+---
+
+## Error Handling
+
+### Philosophy: "Only Catch What You Can Handle"
+
+Services in this directory follow a **centralized error handling pattern**. Exceptions are NOT caught within services unless there is a specific mitigation strategy.
+
+### Why No Try-Catch?
+
+```typescript
+// ❌ WRONG - Don't do this
+async getBars(symbol: string): Promise<Bar[]> {
+  try {
+    const response = await this.api.getBars(symbol)
+    return response.data.bars
+  } catch (error) {
+    console.error('Error:', error)  // Just logging = useless
+    throw error                      // Just re-throwing = pointless
+  }
+}
+
+// ✅ CORRECT - Let errors propagate
+async getBars(symbol: string): Promise<Bar[]> {
+  const response = await this.api.getBars(symbol)
+  return response.data.bars
+  // Error? → Propagates to global handler → Toast displayed
+}
+```
+
+### When to Catch Locally
+
+Only catch when you can **mitigate**:
+
+| Mitigation         | Example                              |
+| ------------------ | ------------------------------------ |
+| Retry with backoff | Network timeout → retry 3x           |
+| Fallback value     | Config fetch fails → use defaults    |
+| Partial results    | `Promise.allSettled` for multi-fetch |
+| User prompt        | Ask user to retry/cancel             |
+
+### WebSocket Subscription Error Handling
+
+WebSocket services implement error handlers that convert backend subscription errors to frontend error classes:
+
+```typescript
+// Pattern: Create error handler method
+private handleSubscriptionError(
+  subscriptionName: string,
+  error: SubscriptionError
+): void {
+  throw WebSocketError.fromSubscription(error, { subscriptionName })
+}
+
+// Use in subscription setup
+await this._wsAdapter.orders.subscribe(
+  'orders',
+  { accountId: this.accountId },
+  (order: PlacedOrder) => {
+    // Handle order update
+    this._hostAdapter.orderUpdate(order)
+  },
+  (error) => this.handleSubscriptionError('Orders', error)  // ← Error callback
+)
+```
+
+**Key Points:**
+
+- **Factory Pattern**: Use `WebSocketError.fromSubscription(error, context)` to convert backend errors
+- **Context Enrichment**: Add `subscriptionName` for better error messages
+- **Throw, Don't Handle**: Let global error handler show toasts
+- **Constructor Error Handling**: Promise chains MUST include `.catch()` for initialization errors
+
+**Example**: [brokerTerminalService.ts#L674-L680](../services/brokerTerminalService.ts#L674-L680)
+
+```typescript
+this.setupWebSocketHandlers()
+  .then(() => {
+    this.brokerConnectionStatus = ConnectionStatus.Connected
+    this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
+      message: 'Broker data subscriptions established',
+    })
+  })
+  .catch((error) => {
+    console.error('[BrokerTerminalService] Failed to setup WebSocket handlers:', error)
+    this._hostAdapter.connectionStatusUpdate(ConnectionStatus.Error, {
+      message: 'Failed to establish broker data subscriptions',
+    })
+  })
+```
+
+### Global Error System
+
+All uncaught errors reach the global handler (`errorService.handle()`) which:
+
+- ✅ Displays toast notification to user
+- ✅ Logs full error details for debugging
+- ✅ Handles deduplication (2s window)
+
+**Full documentation**: See [docs/ERROR-MANAGEMENT.md](../../docs/ERROR-MANAGEMENT.md)
+
 ### Related Documentation
 
 - [IHM Controller Types](../types/ihmController.ts) - Type definitions
@@ -778,6 +879,26 @@ The API service automatically handles different scenarios:
 3. **Generated Client Fails**: Gracefully falls back to mocks if generated client errors
 
 This ensures your app works regardless of whether the generated client is available, and provides realistic data for development and testing.
+
+### Test Environment Auto-Detection
+
+`ApiService` automatically uses mock data in test environments:
+
+```typescript
+// ApiService constructor auto-detects Vitest
+constructor(mock: boolean = !!process.env.VITEST) {
+  this.adapter = new ApiAdapter()
+  this.fallback = new ApiFallback()
+  this.mock = mock
+}
+```
+
+**How it works:**
+
+- Vitest automatically sets `process.env.VITEST = 'true'`
+- Components using `new ApiService()` automatically get `ApiFallback` in tests
+- No manual mocking or `vi.mock()` needed for component tests
+- Same code paths tested with realistic mock data
 
 ### Mock Data Features
 

@@ -76,7 +76,7 @@ from pathlib import Path
 from typing import Any
 from trading_api.models.common import CapabilitySpec, AuthenticationError
 from trading_api.shared import Provider
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class LocalProvider(Provider, AuthCapability):
     def __init__(self, config: LocalProviderConfig | None = None):
@@ -180,7 +180,7 @@ class MyProvider(Provider):
 Contract that providers must implement.
 
 ```python
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class MyProvider(Provider, AuthCapability):
     async def verify_token(self, token: str) -> dict[str, Any]:
@@ -324,7 +324,7 @@ from trading_api.models.common import (
     CapabilitySpec,
 )
 from trading_api.shared import Provider
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 
 class LocalProvider(Provider, AuthCapability):
@@ -730,8 +730,8 @@ async def test_verify_token_mocks_google_api(provider):
 **Use Case:** Single provider implements multiple capabilities.
 
 ```python
-from trading_api.providers.capabilities.auth import AuthCapability
-from trading_api.providers.capabilities.broker import BrokerCapability  # Future
+from trading_api.capabilities.auth import AuthCapability
+from trading_api.capabilities.broker import BrokerCapability  # Future
 
 class IBKRProvider(Provider, AuthCapability, BrokerCapability):
     """IBKR provider implementing auth + broker capabilities."""
@@ -1039,14 +1039,15 @@ class GoogleProvider(Provider, AuthCapability):
 
 Provider error codes follow the pattern: `PROVIDER_{CAPABILITY}_{ERROR_TYPE}`
 
-| Code Pattern | HTTP Status | Description |
-|-------------|-------------|-------------|
-| `PROVIDER_*_NOT_FOUND` | 404 | Resource not found |
-| `PROVIDER_AUTH_*_INVALID` | 401 | Authentication failure |
-| `PROVIDER_*_INVALID` | 400 | Invalid input/request |
-| `PROVIDER_*` (other) | 500 | Internal provider error |
+| Code Pattern              | HTTP Status | Description             |
+| ------------------------- | ----------- | ----------------------- |
+| `PROVIDER_*_NOT_FOUND`    | 404         | Resource not found      |
+| `PROVIDER_AUTH_*_INVALID` | 401         | Authentication failure  |
+| `PROVIDER_*_INVALID`      | 400         | Invalid input/request   |
+| `PROVIDER_*` (other)      | 500         | Internal provider error |
 
 **Examples:**
+
 - `PROVIDER_AUTH_TOKEN_INVALID` → 401 Unauthorized
 - `PROVIDER_DATAFEED_SYMBOL_NOT_FOUND` → 404 Not Found
 - `PROVIDER_BROKER_ORDER_INVALID` → 400 Bad Request
@@ -1065,14 +1066,14 @@ class GoogleProvider(Provider, AuthCapability):
                 code="PROVIDER_AUTH_TOKEN_INVALID",
                 message=f"Google token claims invalid: {e}",
             )
-        
+
         # Validate audience
         if claims.get("aud") != self._config.client_id:
             raise ProviderException(
                 code="PROVIDER_AUTH_AUDIENCE_MISMATCH",
                 message="Token audience doesn't match configured client ID",
             )
-        
+
         return {
             "sub": claims["sub"],
             "email": claims["email"],
@@ -1314,12 +1315,12 @@ raise ProviderException(
 
 **HTTP Status Mapping:**
 
-| Code Pattern | HTTP Status |
-|-------------|-------------|
-| `*_NOT_FOUND` | 404 |
-| `*AUTH*_INVALID` | 401 |
-| `*_INVALID` | 400 |
-| Other | 500 |
+| Code Pattern     | HTTP Status |
+| ---------------- | ----------- |
+| `*_NOT_FOUND`    | 404         |
+| `*AUTH*_INVALID` | 401         |
+| `*_INVALID`      | 400         |
+| Other            | 500         |
 
 **Legacy Exceptions (deprecated):**
 
@@ -1354,10 +1355,15 @@ class CapabilityNotFoundError(ProviderError):
 
 See **[TWS Provider Implementation Guide](../src/trading_api/providers/tws/README.md)** for a production-ready provider implementing:
 
-- Three-layer architecture (TWSProvider → TWSClient → IBSocket)
-- DatafeedCapability interface
-- Async/await with Future-based threading bridge
+- Three-layer architecture (TWSDatafeedProvider → TWSClient → IBSocket)
+- DatafeedCapability interface (full streaming implementation)
+- BrokerCapability interface (order placement, brackets via OCA groups)
+- Business key tracking system for async request/response correlation
+- StreamData dataclass for typed data accumulation
+- CachedContract for contract caching with lazy upgrade pattern
 - Comprehensive domain mappers
+
+**Note:** `TWSBrokerProvider` uses in-memory state for position/order tracking while integrating with real TWS for order execution. Features like `edit_position_brackets()` use OCA (One-Cancels-All) groups for proper bracket order linking.
 
 **File Template:**
 
@@ -1366,7 +1372,7 @@ See **[TWS Provider Implementation Guide](../src/trading_api/providers/tws/READM
 from pathlib import Path
 from trading_api.models.common import CapabilitySpec
 from trading_api.shared import Provider
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class MyproviderProvider(Provider, AuthCapability):
     @classmethod
@@ -1392,5 +1398,5 @@ class MyproviderProvider(Provider, AuthCapability):
 
 ---
 
-**Last Updated**: November 20, 2025  
+**Last Updated**: January 4, 2026  
 **Questions?** Check [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) or raise an issue.

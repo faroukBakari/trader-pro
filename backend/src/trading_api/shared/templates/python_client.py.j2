@@ -5,6 +5,10 @@ Auto-generated from OpenAPI specification.
 DO NOT EDIT MANUALLY - Auto-generate using openapi specs at module level.
 """
 
+import hashlib
+import hmac
+import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -24,27 +28,65 @@ class {{ class_name }}:
     
     Used for inter-module communication when running as separate processes.
     All models are imported from trading_api.models to maintain consistency.
+    Requests are automatically signed with HMAC-SHA256 for authentication.
     
     Example:
-        >>> client = {{ class_name }}(base_url="http://{{ module_name }}-service:8000")
+        >>> client = {{ class_name }}(caller_id="broker")  # With required caller ID
+        >>> client = {{ class_name }}(caller_id="broker", base_url="http://{{ module_name }}-service:8000")
         >>> result = await client.some_operation()
     """
     
-    def __init__(self, base_url: str = "http://localhost:8000", timeout: float = 30.0):
+    def __init__(
+        self,
+        caller_id: str,
+        base_url: str = "http://localhost:{{ default_port }}{{ api_prefix }}/{{ version }}/{{ module_name }}",
+        key_path: str = "{{ hmac_key_path }}",
+        timeout: float = {{ default_timeout }},
+    ):
         """
         Initialize the client.
         
         Args:
+            caller_id: Identifier of the calling module (required for signing)
             base_url: Base URL of the {{ module_name }} service
+            key_path: Path to HMAC key file for request signing
             timeout: Request timeout in seconds
         """
+        assert caller_id, "caller_id parameter is required"
         self.base_url = base_url.rstrip("/")
+        self.key_path = key_path
         self.timeout = timeout
+        self.caller_id = caller_id
+        self._hmac_key = self._load_hmac_key()
         self._client: httpx.AsyncClient | None = None
+    
+    def _load_hmac_key(self) -> bytes:
+        """Load HMAC key from file. Returns empty bytes if not found."""
+        try:
+            return Path(self.key_path).read_bytes()
+        except FileNotFoundError:
+            return b""
+    
+    async def _sign_request(self, request: httpx.Request) -> None:
+        """Sign request with HMAC-SHA256 signature (async hook for AsyncClient)."""
+        if not self._hmac_key:
+            return
+        timestamp = str(int(time.time()))
+        body = request.content or b""
+        body_hash = hashlib.sha256(body).hexdigest()
+        message = f"{timestamp}|{self.caller_id}|{request.method}|{str(request.url)}|{body_hash}"
+        signature = hmac.new(self._hmac_key, message.encode(), hashlib.sha256).hexdigest()
+        request.headers["X-Internal-Signature"] = signature
+        request.headers["X-Internal-Timestamp"] = timestamp
+        request.headers["X-Internal-Caller"] = self.caller_id
     
     async def __aenter__(self) -> "{{ class_name }}":
         """Async context manager entry."""
-        self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=self.timeout,
+            event_hooks={"request": [self._sign_request]},
+        )
         return self
     
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
@@ -56,7 +98,11 @@ class {{ class_name }}:
     def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
         if self._client is None:
-            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=self.timeout)
+            self._client = httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=self.timeout,
+                event_hooks={"request": [self._sign_request]},
+            )
         return self._client
     
     async def close(self) -> None:

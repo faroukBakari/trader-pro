@@ -3,8 +3,13 @@
 Tests cross-module interactions between broker and datafeed modules.
 """
 
+from typing import TYPE_CHECKING
+
 import pytest
 from httpx import AsyncClient
+
+if TYPE_CHECKING:
+    from trading_api.capabilities.broker import BrokerCapability
 
 
 @pytest.mark.integration
@@ -38,7 +43,10 @@ async def test_place_order_with_market_data(async_client: AsyncClient) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_position_tracking_with_executions(async_client: AsyncClient) -> None:
+async def test_position_tracking_with_executions(
+    async_client: AsyncClient,
+    broker_provider: "BrokerCapability",
+) -> None:
     """Test position updates correlate with execution reports."""
     # Get initial positions
     positions_response = await async_client.get("/api/v1/broker/positions")
@@ -59,9 +67,8 @@ async def test_position_tracking_with_executions(async_client: AsyncClient) -> N
     order = order_response.json()
     order["orderId"]
 
-    # Execute the order via debug endpoint
-    execute_response = await async_client.post("/api/v1/broker/debug/execute-orders")
-    assert execute_response.status_code == 200
+    # Execute the order via provider directly
+    await broker_provider.execute_all_working_orders()  # type: ignore[attr-defined]
 
     # Verify positions updated
     updated_positions_response = await async_client.get("/api/v1/broker/positions")

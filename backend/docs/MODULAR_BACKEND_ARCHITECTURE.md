@@ -378,7 +378,7 @@ class ServiceInterface(ABC):
                     ),
                 )
 
-    def _get_capability_provider(self, capability_name: str) -> "Provider":
+    def get_capability_provider(self, capability_name: str) -> "Provider":
         """Get provider for specific capability (cached lookup).
 
         Args:
@@ -389,13 +389,13 @@ class ServiceInterface(ABC):
 
         [PERFORMANCE]: O(1) lookup after initialization.
         """
-        provider = self._capability_map.get(capability_name)
-        if provider is None:
+        providers = self._capability_map.get(capability_name)
+        if not providers:
             raise RuntimeError(
                 f"Capability '{capability_name}' not initialized. "
                 "This should never happen - validation should occur at init."
             )
-        return provider
+        return providers[0]  # Return first matching provider
 ```
 
 **Benefits**:
@@ -705,7 +705,7 @@ The AppFactory uses a two-phase loading pattern to resolve provider dependencies
 
 - **`ServiceInterface.capabilities()`**: Classmethod declaring required capabilities (e.g., `[CapabilitySpec(name="auth")]`)
 - **`ServiceInterface.__init__(providers=...)`**: Receives provider instances, validates at initialization (fail-fast)
-- **`ServiceInterface._get_capability_provider(name)`**: O(1) cached lookup for provider access
+- **`ServiceInterface.get_capability_provider(name)`**: O(1) cached lookup for provider access
 - **`Module.__init__(providers=...)`**: Keyword-only parameter passes providers to service initialization
 
 **Example - AuthService with Provider:**
@@ -719,7 +719,7 @@ class AuthService(ServiceInterface):
     @property
     def auth_provider(self) -> AuthCapability:
         """Get auth capability provider (cached lookup)."""
-        provider = self._get_capability_provider("auth")
+        provider = self.get_capability_provider("auth")
         if not isinstance(provider, AuthCapability):
             raise TypeError(f"Expected AuthCapability, got {type(provider).__name__}")
         return provider
@@ -1223,7 +1223,7 @@ class MyProvider(Provider):
 #### AuthCapability - Authentication Contract Interface
 
 ```python
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class MyProvider(Provider, AuthCapability):
     async def verify_token(self, token: str) -> dict[str, Any]:
@@ -1276,18 +1276,18 @@ def capabilities(cls) -> list[CapabilitySpec]:
     ...
 ```
 
-**\_get_capability_provider() - Cached Lookup**
+**get_capability_provider() - Cached Lookup**
 
 ```python
-def _get_capability_provider(self, capability_name: str) -> "Provider":
+def get_capability_provider(self, capability_name: str) -> "Provider":
     """Get provider for specific capability (O(1) cached lookup).
 
     [PERFORMANCE]: O(1) lookup after initialization.
     """
-    provider = self._capability_map.get(capability_name)
-    if provider is None:
+    providers = self._capability_map.get(capability_name)
+    if not providers:
         raise RuntimeError(f"Capability '{capability_name}' not initialized.")
-    return provider
+    return providers[0]  # Return first matching provider
 ```
 
 **File**: `backend/src/trading_api/shared/service_interface.py` lines 15-110
@@ -1299,7 +1299,7 @@ def _get_capability_provider(self, capability_name: str) -> "Provider":
 ```python
 # modules/auth/service.py
 from trading_api.models.common import CapabilitySpec
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class AuthService(ServiceInterface):
     @classmethod
@@ -1309,7 +1309,7 @@ class AuthService(ServiceInterface):
     @property
     def auth_provider(self) -> AuthCapability:
         """Get auth capability provider (cached, type-safe lookup)."""
-        provider = self._get_capability_provider("auth")
+        provider = self.get_capability_provider("auth")
 
         # Type narrowing
         if not isinstance(provider, AuthCapability):
@@ -1332,7 +1332,7 @@ class AuthService(ServiceInterface):
 ```python
 # providers/google/__init__.py
 from trading_api.shared import Provider
-from trading_api.providers.capabilities.auth import AuthCapability
+from trading_api.capabilities.auth import AuthCapability
 
 class GoogleProvider(Provider, AuthCapability):
     @classmethod

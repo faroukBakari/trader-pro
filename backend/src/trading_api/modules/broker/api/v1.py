@@ -44,36 +44,6 @@ class BrokerApi(APIRouterInterface):
         super().__init__(*args, **kwargs)
 
         @self.post(
-            "/debug/reset",
-            response_model=SuccessResponse,
-            summary="Reset broker service state (development only)",
-            operation_id="resetBrokerState",
-            include_in_schema=False,  # Hide from production docs
-        )
-        async def resetBrokerState() -> SuccessResponse:
-            """
-            Reset the broker service state. This clears all orders, positions, and executions.
-            Only available in development mode for testing purposes.
-            """
-            self.service.reset()
-            return SuccessResponse(message="Broker service state reset successfully")
-
-        @self.post(
-            "/debug/execute-orders",
-            response_model=SuccessResponse,
-            summary="Execute all working orders immediately (development only)",
-            operation_id="executeWorkingOrders",
-            include_in_schema=False,  # Hide from production docs
-        )
-        async def executeWorkingOrders() -> SuccessResponse:
-            """
-            Execute all working orders immediately for testing purposes.
-            Only available in development mode for testing purposes.
-            """
-            await self.service.execute_all_working_orders()
-            return SuccessResponse(message="All working orders executed successfully")
-
-        @self.post(
             "/orders",
             response_model=PlaceOrderResult,
             summary="Place a new order",
@@ -82,6 +52,9 @@ class BrokerApi(APIRouterInterface):
         async def placeOrder(
             order: PreOrder,
             user_data: Annotated[UserData, Depends(get_current_user)],
+            confirmId: Optional[str] = Query(
+                None, description="Confirmation ID from preview_order (for audit trail)"
+            ),
         ) -> PlaceOrderResult:
             """
             Place a new order in the trading system.
@@ -91,12 +64,15 @@ class BrokerApi(APIRouterInterface):
             Args:
                 order: Order request with symbol, type, side, quantity, and optional prices
                 user_data: Authenticated user data (injected by middleware)
+                confirmId: Optional confirmation ID from preview_order (for audit trail)
 
             Returns:
                 PlaceOrderResult: Result containing the generated order ID
             """
             # ServiceException will be handled by global exception handler
-            return await self.service.place_order(order)
+            return await self.service.place_order(
+                order, user_data.user_id, confirm_id=confirmId
+            )
 
         @self.post(
             "/orders/preview",
@@ -121,7 +97,7 @@ class BrokerApi(APIRouterInterface):
                 OrderPreviewResult: Estimated costs, fees, margin, and confirmation ID
             """
             # ServiceException will be handled by global exception handler
-            return await self.service.preview_order(order)
+            return await self.service.preview_order(order, user_data.user_id)
 
         @self.put(
             "/orders/{order_id}",
@@ -148,7 +124,7 @@ class BrokerApi(APIRouterInterface):
                 SuccessResponse: Success confirmation
             """
             # ServiceException will be handled by global exception handler
-            await self.service.modify_order(order_id, order)
+            await self.service.modify_order(order_id, order, user_data.user_id)
             return SuccessResponse()
 
         @self.delete(
@@ -174,7 +150,7 @@ class BrokerApi(APIRouterInterface):
                 SuccessResponse: Success confirmation
             """
             # ServiceException will be handled by global exception handler
-            await self.service.cancel_order(order_id)
+            await self.service.cancel_order(order_id, user_data.user_id)
             return SuccessResponse()
 
         @self.get(
@@ -197,7 +173,7 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 List[PlacedOrder]: List of user's orders
             """
-            return await self.service.get_orders()
+            return await self.service.get_orders(user_data.user_id)
 
         @self.get(
             "/positions",
@@ -219,7 +195,7 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 List[Position]: List of user's open positions
             """
-            return await self.service.get_positions()
+            return await self.service.get_positions(user_data.user_id)
 
         @self.get(
             "/executions/{symbol}",
@@ -243,7 +219,7 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 List[Execution]: List of user's trade executions for the specified symbol
             """
-            return await self.service.get_executions(symbol)
+            return await self.service.get_executions(symbol, user_data.user_id)
 
         @self.get(
             "/account",
@@ -265,7 +241,7 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 AccountMetainfo: Account metadata including ID and name
             """
-            return await self.service.get_account_info()
+            return await self.service.get_account_info(user_data.user_id)
 
         @self.delete(
             "/positions/{position_id}",
@@ -296,7 +272,7 @@ class BrokerApi(APIRouterInterface):
                 SuccessResponse: Success confirmation
             """
             # ServiceException will be handled by global exception handler
-            await self.service.close_position(position_id, amount)
+            await self.service.close_position(position_id, user_data.user_id, amount)
             if amount:
                 return SuccessResponse(
                     message=f"Partially closed position {position_id} ({amount} units)"
@@ -335,7 +311,7 @@ class BrokerApi(APIRouterInterface):
             """
             # ServiceException will be handled by global exception handler
             await self.service.edit_position_brackets(
-                position_id, brackets, customFields
+                position_id, brackets, user_data.user_id, customFields
             )
             return SuccessResponse(
                 message=f"Updated brackets for position {position_id}"
@@ -373,7 +349,7 @@ class BrokerApi(APIRouterInterface):
             params = LeverageInfoParams(
                 symbol=symbol, orderType=orderType, side=side, customFields=None
             )
-            return await self.service.leverage_info(params)
+            return await self.service.leverage_info(params, user_data.user_id)
 
         @self.put(
             "/leverage/set",
@@ -401,7 +377,7 @@ class BrokerApi(APIRouterInterface):
                 LeverageSetResult: Confirmed leverage value
             """
             # ServiceException will be handled by global exception handler
-            return await self.service.set_leverage(params)
+            return await self.service.set_leverage(params, user_data.user_id)
 
         @self.post(
             "/leverage/preview",
@@ -428,7 +404,7 @@ class BrokerApi(APIRouterInterface):
             Returns:
                 LeveragePreviewResult: Preview messages (infos, warnings, errors)
             """
-            return await self.service.preview_leverage(params)
+            return await self.service.preview_leverage(params, user_data.user_id)
 
     @property
     def service(self) -> BrokerService:

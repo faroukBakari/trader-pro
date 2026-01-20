@@ -24,12 +24,16 @@ from .leverage import (
     LeverageSetResult,
 )
 from .orders import (
+    OrderDuration,
+    OrderOrPositionMessage,
+    OrderOrPositionMessageType,
     OrderPreviewResult,
     OrderPreviewSection,
     OrderPreviewSectionRow,
     OrderStatus,
     OrderSubscriptionRequest,
     OrderType,
+    ParentType,
     PlacedOrder,
     PlaceOrderResult,
     PreOrder,
@@ -42,6 +46,8 @@ __all__ = [
     # Enums
     "OrderStatus",
     "OrderType",
+    "OrderOrPositionMessageType",
+    "ParentType",
     "Side",
     "StopType",
     # Order models
@@ -51,6 +57,8 @@ __all__ = [
     "OrderPreviewResult",
     "OrderPreviewSection",
     "OrderPreviewSectionRow",
+    "OrderDuration",
+    "OrderOrPositionMessage",
     # Position models
     "Position",
     # Execution models

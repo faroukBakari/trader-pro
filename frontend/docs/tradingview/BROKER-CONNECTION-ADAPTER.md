@@ -424,6 +424,7 @@ private onOrderFilled(order: Order): void {
     qty: order.qty,
     side: order.side,
     time: Date.now(),
+    commission: 2.50,  // Optional: Commission amount from broker
   };
 
   // Notify TradingView
@@ -819,15 +820,63 @@ Show reverse position confirmation dialog.
 
 #### `showPositionBracketsDialog(position: Position | IndividualPosition, brackets: Brackets, focus: OrderTicketFocusControl): Promise<boolean>`
 
-Show position brackets (SL/TP) editing dialog.
+Display TradingView's native position brackets (SL/TP) editing dialog with preset values.
+
+**Purpose**: Used to show position bracket editor with preset stop-loss, take-profit, and trailing stop values. Critical for `customUI.showPositionDialog` hook to fix TradingView's bracket preset bug.
 
 **Parameters**:
 
-- `position: Position | IndividualPosition` - Position to edit
-- `brackets: Brackets` - Current brackets
-- `focus: OrderTicketFocusControl` - Control to focus
+- `position: Position | IndividualPosition` - Position to edit (PlacedOrder or IndividualPosition types)
+- `brackets: Brackets` - Preset bracket configuration
+  - `stopLoss?: number` - Stop loss price
+  - `takeProfit?: number` - Take profit price
+  - `trailingStopPips?: number` - Trailing stop distance in pips
+- `focus: OrderTicketFocusControl` - Optional control to focus in dialog
+  - `'stop-loss'` - Focus stop loss input
+  - `'take-profit'` - Focus take profit input
+  - `'trailing-stop'` - Focus trailing stop input
 
-**Returns**: `Promise<boolean>` - `true` if confirmed
+**Returns**: `Promise<boolean>` - Resolves to `true` if user confirmed changes, `false` if canceled
+
+**Integration Pattern**:
+
+```typescript
+// Custom UI hook in chart widget configuration
+customUI: {
+  showPositionDialog: (
+    position: Position | IndividualPosition,
+    brackets: Brackets,
+    focus?: OrderTicketFocusControl
+  ): Promise<boolean> => {
+    return brokerService.showPositionBracketsDialog(position, brackets, focus)
+  }
+}
+
+// BrokerTerminalService delegates to host adapter
+showPositionBracketsDialog(
+  position: Position | IndividualPosition,
+  brackets: Brackets,
+  focus?: OrderTicketFocusControl
+): Promise<boolean> {
+  return this._hostAdapter.showPositionBracketsDialog(position, brackets, focus)
+}
+```
+
+**Flow**:
+
+1. User drags TP/SL line on chart → TradingView detects bracket change
+2. TradingView calls `customUI.showPositionDialog(position, brackets, focus)`
+3. Hook delegates to `BrokerTerminalService.showPositionBracketsDialog()`
+4. Service delegates to `_hostAdapter.showPositionBracketsDialog()`
+5. TradingView displays native dialog with preset bracket values
+6. User confirms or cancels → Promise resolves with result
+
+**Why This Matters**: Without this integration, TradingView's default behavior loses bracket values when transitioning from chart drag to dialog, forcing users to re-enter values. The customUI hook preserves these values.
+
+**Related Files**:
+
+- `frontend/src/components/TraderChartContainer.vue` (customUI hook configuration)
+- `frontend/src/services/brokerTerminalService.ts` (delegation method)
 
 ---
 
@@ -1152,6 +1201,199 @@ Unsubscribe from quantity change notifications.
 
 - `symbol: string` - Symbol
 - `listener: SuggestedQtyChangedListener` - Callback to remove
+
+---
+
+## CustomUI Hooks
+
+TradingView provides `customUI` hooks in the broker configuration to intercept and customize dialog behavior before they are shown to the user.
+
+### Overview
+
+**Purpose**: Override default dialog behavior for custom implementations
+
+**Use Cases**:
+
+- Data enrichment (fetch related data before showing dialog)
+- Validation (block dialog if conditions not met)
+- Custom workflows (redirect to custom UI)
+- Workarounds for TradingView limitations
+
+**Pattern**: Async functions returning `Promise<boolean>`
+
+- Return `true` to proceed with showing the dialog
+- Return `false` to cancel dialog display
+
+### Available Hooks
+
+The `customUI` object in broker configuration supports the following hooks:
+
+```typescript
+customUI: {
+  showOrderDialog?: (order?: Order, focus?: OrderTicketFocusControl) => Promise<boolean>;
+  showPositionDialog?: (position: Position | IndividualPosition, brackets: Brackets, focus?: OrderTicketFocusControl) => Promise<boolean>;
+  showCancelOrderDialog?: (order: Order) => Promise<boolean>;
+  showCancelMultipleOrdersDialog?: (symbol: string, side: Side | undefined, orders: string[]) => Promise<boolean>;
+  showClosePositionDialog?: (position: Position | IndividualPosition) => Promise<boolean>;
+  showReversePositionDialog?: (position: Position) => Promise<boolean>;
+  showPositionBracketsDialog?: (position: Position | IndividualPosition, brackets: Brackets, focus?: OrderTicketFocusControl) => Promise<boolean>;
+}
+```
+
+### `showPositionDialog` Hook
+
+**Purpose**: Intercept position bracket editing dialog to enrich or validate data
+
+**Signature**:
+
+```typescript
+showPositionDialog: async (
+  position: Position | IndividualPosition,
+  brackets: Brackets,
+  focus?: OrderTicketFocusControl,
+): Promise<boolean>
+```
+
+**Parameters**:
+
+- `position`: Position object being edited
+- `brackets`: Brackets object with stopLoss/takeProfit (may be empty `{}`)
+- `focus`: Optional control to focus (OrderTicketFocusControl.StopLoss or .TakeProfit)
+
+**Returns**: `Promise<boolean>`
+
+- `true`: Show dialog with provided/enriched data
+- `false`: Cancel dialog display
+
+#### Known Issue: Empty Brackets from Account Manager
+
+**Issue**: When the position edit dialog is opened from TradingView's Account Manager, the `brackets` parameter arrives **empty** (`{}`), even though bracket orders exist on the position.
+
+**Root Cause**: TradingView's `Position` interface doesn't contain `stopLoss`/`takeProfit` fields. Bracket orders are stored as separate `Order` records with `parentId` and `parentType` fields. The Account Manager doesn't automatically fetch these bracket orders before calling the hook.
+
+**Workaround**: Fetch bracket orders manually in the hook and enrich the `brackets` parameter.
+
+**Implementation Example**:
+
+```typescript
+// File: frontend/src/components/TraderChartContainer.vue (lines 217-252)
+customUI: {
+  showPositionDialog: async (
+    position: Position | IndividualPosition,
+    brackets: Brackets,
+    focus?: OrderTicketFocusControl,
+  ): Promise<boolean> => {
+    // If brackets are empty, fetch bracket orders for this position
+    let enrichedBrackets = brackets
+    try {
+      // Step 1: Fetch all orders from backend
+      const orders: Order[] = await brokerService!.orders()
+
+      // Step 2: Filter for bracket orders linked to this position
+      const bracketOrders = orders.filter(
+        (o) =>
+          'parentId' in o &&
+          o.parentId === position.id &&
+          o.parentType === ParentType.Position, // enum value 2
+      )
+
+      // Step 3: Extract Stop Loss and Take Profit from bracket orders
+      const stopLossOrder = bracketOrders.find((o) => o.stopPrice !== undefined)
+      const takeProfitOrder = bracketOrders.find(
+        (o) => o.limitPrice !== undefined && o.stopPrice === undefined,
+      )
+
+      // Step 4: Create enriched brackets object
+      enrichedBrackets = {
+        stopLoss: stopLossOrder?.stopPrice,
+        takeProfit: takeProfitOrder?.limitPrice,
+      }
+
+      console.log(
+        `[customUI.showPositionDialog] Enriched brackets for position ${position.id}:`,
+        enrichedBrackets,
+      )
+    } catch (e) {
+      console.warn(`[customUI.showPositionDialog] Failed to fetch bracket orders:`, e)
+    }
+
+    // Step 5: Call original showPositionBracketsDialog with enriched data
+    return brokerService!.showPositionBracketsDialog(position, enrichedBrackets, focus)
+  },
+},
+```
+
+**Key Points**:
+
+- Filter orders by `parentId === position.id` AND `parentType === ParentType.Position`
+- Stop Loss orders have `stopPrice` field
+- Take Profit orders have `limitPrice` field without `stopPrice`
+- Wrap in try/catch for graceful error handling
+
+**Related Documentation**: See [BUNDLE-MAINTENANCE.md](./BUNDLE-MAINTENANCE.md) Case Study 1 for detailed analysis.
+
+### Best Practices
+
+#### 1. Always Validate Input Parameters
+
+```typescript
+customUI: {
+  showOrderDialog: async (order, focus) => {
+    if (!order || !order.symbol) {
+      console.warn('[customUI] Invalid order:', order)
+      return false // Cancel dialog
+    }
+    return true // Proceed
+  }
+}
+```
+
+#### 2. Handle Async Operations with Try/Catch
+
+```typescript
+customUI: {
+  showPositionDialog: async (position, brackets, focus) => {
+    try {
+      const enrichedData = await fetchRelatedData(position.id)
+      return brokerService.showDialog(position, enrichedData, focus)
+    } catch (error) {
+      console.error('[customUI] Failed to fetch data:', error)
+      // Decide: return false (cancel) or true (proceed with original data)
+      return true
+    }
+  }
+}
+```
+
+#### 3. Log Enrichment Steps for Debugging
+
+```typescript
+console.log(`[customUI.${hookName}] Original data:`, originalData)
+console.log(`[customUI.${hookName}] Enriched data:`, enrichedData)
+```
+
+#### 4. Return `true` on Success, `false` on Cancel
+
+```typescript
+// ✅ GOOD: Clear return semantics
+return await brokerService.showDialog(enrichedData) // Delegates to broker service
+
+// ❌ BAD: Missing return value
+await brokerService.showDialog(enrichedData)
+// Falls through, returns undefined (falsy)
+```
+
+#### 5. Preserve Original Data When Enrichment Fails
+
+```typescript
+let enrichedBrackets = brackets // Start with original
+try {
+  enrichedBrackets = await fetchBrackets()
+} catch (e) {
+  // Use original brackets on error
+}
+return brokerService.showDialog(position, enrichedBrackets)
+```
 
 ---
 

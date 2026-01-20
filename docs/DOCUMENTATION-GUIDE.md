@@ -2,7 +2,7 @@
 document_type: documentation_index
 primary_purpose: discovery_and_navigation
 target_audience: ai_agents
-last_updated: 2025-11-30
+last_updated: 2026-01-20
 total_documents: 45
 coverage_areas:
   [
@@ -128,17 +128,17 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ## 📖 docs/ Folder (Core Cross-Cutting Documentation)
 
-| File                            | Purpose                                         |
-| ------------------------------- | ----------------------------------------------- |
-| **docs/README.md**              | Documentation index and navigation guide        |
-| **docs/DOCUMENTATION-GUIDE.md** | This file - complete documentation index        |
-| **docs/GETTING-STARTED.md**     | Complete setup guide (workspace, hooks, env)    |
-| **docs/BROKER-ARCHITECTURE.md** | Broker service execution simulator architecture |
-| **docs/CLIENT-GENERATION.md**   | REST and WebSocket client auto-generation       |
-| **docs/DEVELOPMENT.md**         | Development workflows and setup                 |
-| **docs/TESTING.md**             | Testing strategy and best practices             |
-| **docs/FULLSTACK-DEV-MODE.md**  | Full-stack dev mode with auto-regeneration      |
-| **docs/CI-TROUBLESHOOTING.md**  | CI/CD troubleshooting guide                     |
+| File                            | Purpose                                                           |
+| ------------------------------- | ----------------------------------------------------------------- |
+| **docs/README.md**              | Documentation index and navigation guide                          |
+| **docs/DOCUMENTATION-GUIDE.md** | This file - complete documentation index                          |
+| **docs/GETTING-STARTED.md**     | Complete setup guide (workspace, hooks, env)                      |
+| **docs/BROKER-ARCHITECTURE.md** | Fakebroker provider execution simulator (`providers/fakebroker/`) |
+| **docs/CLIENT-GENERATION.md**   | REST and WebSocket client auto-generation                         |
+| **docs/DEVELOPMENT.md**         | Development workflows and setup                                   |
+| **docs/TESTING.md**             | Testing strategy and best practices                               |
+| **docs/FULLSTACK-DEV-MODE.md**  | Full-stack dev mode with auto-regeneration                        |
+| **docs/CI-TROUBLESHOOTING.md**  | CI/CD troubleshooting guide                                       |
 
 ### docs/methodologies/ (Implementation Methodologies)
 
@@ -176,9 +176,19 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### backend/src/trading_api/providers/tws/ (TWS Provider Implementation)
 
-| File                                                | Purpose                                                                                                                                              |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **backend/src/trading_api/providers/tws/README.md** | ⭐ **TWS Datafeed Provider implementation guide** - Three-layer architecture (TWSProvider → TWSClient → IBSocket), threading model, testing patterns |
+| File                                                | Purpose                                                                                                                                                      |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **backend/src/trading_api/providers/tws/README.md** | ⭐ **TWS Datafeed Provider implementation guide** - Three-layer architecture (TWSDatafeedProvider → TWSClient → IBSocket), threading model, testing patterns |
+
+### backend/src/trading_api/modules/ (Module Documentation)
+
+| File                                                   | Purpose                                                                             |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| **backend/src/trading_api/modules/broker/README.md**   | ⭐ Broker module - BFF layer for trading operations (REST API + 5 WebSocket topics) |
+| **backend/src/trading_api/modules/datafeed/README.md** | ⭐ Datafeed module - BFF layer for market data (REST API + 2 WebSocket topics)      |
+| **backend/src/trading_api/modules/auth/README.md**     | Auth module - Google OAuth, JWT tokens, session management (83 tests)               |
+
+> **Note**: Broker and datafeed module documentation created January 2, 2026 documenting BFF patterns, WebSocket topic handling, and provider capability delegation.
 
 ### backend/external_packages/tws/docs/ (TWS API Documentation)
 
@@ -253,9 +263,11 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### frontend/public/ (Third-Party Documentation)
 
-| File                          | Purpose                                                 |
-| ----------------------------- | ------------------------------------------------------- |
-| **frontend/public/README.md** | TradingView public assets reference (external examples) |
+| File                          | Purpose                                                  |
+| ----------------------------- | -------------------------------------------------------- |
+| **frontend/public/README.md** | ⭐ TradingView bundle maintenance guide (forked version) |
+
+> **Note**: The TradingView Trading Terminal in `frontend/public/trading_terminal/` is a **forked semi-bundled version** we actively maintain and patch. This README serves as the primary maintenance reference for bundle modifications, upgrade strategy, and known issues.
 
 ---
 
@@ -333,21 +345,28 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ## Query Pattern Mapping
 
-| User Query Pattern             | Relevant Documents                                                                  | Load Order            |
-| ------------------------------ | ----------------------------------------------------------------------------------- | --------------------- |
-| "How do I set up..."           | `GETTING-STARTED.md` → `DEVELOPMENT.md`                                             | Sequential            |
-| "How does [feature] work"      | `ARCHITECTURE.md` → topic-specific docs                                             | Architecture first    |
-| "Implement [backend feature]"  | `MODULAR_BACKEND_ARCHITECTURE.md` → `API-METHODOLOGY.md` → module docs              | Sequential            |
-| "Implement [frontend feature]" | `frontend/README.md` → component docs                                               | Sequential            |
-| "WebSocket [anything]"         | `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `WEBSOCKET-METHODOLOGY.md`  | All three             |
-| "Authentication/auth/login"    | `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md` | Auth doc first        |
-| "Testing [component]"          | `TESTING.md` → component-specific testing docs                                      | General first         |
-| "Error/CI/build issue"         | `CI-TROUBLESHOOTING.md` + relevant architecture docs                                | Troubleshooting first |
-| "Error handling/exceptions"    | `ERROR-MANAGEMENT.md` → `BACKEND_TESTING.md` (for testing)                          | Error doc first       |
-| "TWS API/broker integration"   | `providers/tws/README.md` → `tws/docs/README.md` → specific API docs                | Provider then API     |
-| "TradingView [anything]"       | `BROKER-INTEGRATION.md` → `tradingview/` docs                                       | Integration first     |
-| "Client generation"            | `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`                                  | Backend then frontend |
-| "Module/versioning"            | `MODULAR_BACKEND_ARCHITECTURE.md` → `MODULAR_VERSIONNING.md`                        | Architecture first    |
+| User Query Pattern                | Relevant Documents                                                                                                                           | Load Order            |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| "How do I set up..."              | `GETTING-STARTED.md` → `DEVELOPMENT.md`                                                                                                      | Sequential            |
+| "How does [feature] work"         | `ARCHITECTURE.md` → topic-specific docs                                                                                                      | Architecture first    |
+| "Implement [backend feature]"     | `MODULAR_BACKEND_ARCHITECTURE.md` → `API-METHODOLOGY.md` → module docs                                                                       | Sequential            |
+| "Implement [frontend feature]"    | `frontend/README.md` → component docs                                                                                                        | Sequential            |
+| "WebSocket [anything]"            | `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `WEBSOCKET-METHODOLOGY.md` + `ERROR-MANAGEMENT.md` (subscription errors)             | All WebSocket docs    |
+| "Authentication/auth/login"       | `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`                                                          | Auth doc first        |
+| "Account tracking/equity/balance" | `providers/tws/README.md` (AccountTracker) → `modules/broker/README.md` (account endpoints) → `BROKER-INTEGRATION.md` (frontend integration) | Provider then module  |
+| "Account ID/accountsMetainfo"     | `BROKER-INTEGRATION.md` (Known Issues resolution) → `providers/tws/README.md` (get_account_info implementation)                              | Frontend then backend |
+| "Testing [component]"             | `TESTING.md` → component-specific testing docs                                                                                               | General first         |
+| "Error/CI/build issue"            | `CI-TROUBLESHOOTING.md` + relevant architecture docs                                                                                         | Troubleshooting first |
+| "Error handling/exceptions"       | `ERROR-MANAGEMENT.md` → `BACKEND_TESTING.md` (for testing) → `services/README.md` (frontend patterns)                                        | Error doc first       |
+| "TWS API/broker integration"      | `providers/tws/README.md` → `tws/docs/README.md` → specific API docs                                                                         | Provider then API     |
+| "Contract caching/persistence"    | `providers/tws/README.md` (ContractTracker, SQLite, lazy loading) → `contract_tracker.py` implementation                                     | Architecture first    |
+| "Bar data/historical bars"        | `providers/tws/README.md` (section 2.6 BarsTracker) → `bars_tracker.py` implementation → `BACKEND_TESTING.md` (test patterns)                | Architecture first    |
+| "Execution tracking/fills/trades" | `providers/tws/README.md` (section 2.8 ExecutionTracker) → `execution_tracker.py` implementation → `BACKEND_TESTING.md` (two-phase dispatch) | Architecture first    |
+| "Commission joining/enrichment"   | `providers/tws/README.md` (section 2.8 commission joining workflow) → `modules/broker/README.md` (execution topic)                           | Provider then module  |
+| "TradingView [anything]"          | `public/README.md` (maintenance overview) → `tradingview/BUNDLE-MAINTENANCE.md` → `BROKER-INTEGRATION.md`                                    | Maintenance first     |
+| "Bundle/obfuscated/minified code" | `public/README.md` → `tradingview/BUNDLE-MAINTENANCE.md` (case studies)                                                                      | Bundle docs           |
+| "Client generation"               | `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`                                                                                           | Backend then frontend |
+| "Module/versioning"               | `MODULAR_BACKEND_ARCHITECTURE.md` → `MODULAR_VERSIONNING.md`                                                                                 | Architecture first    |
 
 ---
 
@@ -362,11 +381,12 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 ### Feature Implementation Chains
 
 - **REST API Development**: `API-METHODOLOGY.md` → `MODULAR_BACKEND_ARCHITECTURE.md` → `SPECS_AND_CLIENT_GEN.md`
-- **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `ERROR-MANAGEMENT.md` (subscription errors)
+- **WebSocket Development**: `WEBSOCKET-METHODOLOGY.md` → `BACKEND_WEBSOCKETS.md` + `WEBSOCKET-ARCHITECTURE.md` + `ERROR-MANAGEMENT.md` (subscription errors) + `providers/tws/README.md` (QuoteTracker, BarsTracker, ExecutionTracker)
 - **Authentication**: `backend/docs/AUTHENTICATION.md` → `backend/src/trading_api/modules/auth/README.md`
-- **Error Handling**: `ERROR-MANAGEMENT.md` → `PROVIDER-SYSTEM.md` (providers) + `BACKEND_TESTING.md` (testing)
-- **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BROKER-CONNECTION-ADAPTER.md`
+- **Error Handling**: `ERROR-MANAGEMENT.md` → `PROVIDER-SYSTEM.md` (providers) + `BACKEND_TESTING.md` (testing) + `services/README.md` (frontend patterns)
+- **TradingView Integration**: `BROKER-INTEGRATION.md` → `tradingview/BUNDLE-MAINTENANCE.md` → `public/README.md`
 - **TWS Provider Integration**: `PROVIDER-SYSTEM.md` → `providers/tws/README.md` → `tws/docs/README.md` → specific API reference docs
+- **Execution Tracking**: `providers/tws/README.md` (section 2.8) → `modules/broker/README.md` (execution topic) → `BACKEND_TESTING.md` (two-phase dispatch patterns)
 - **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`
 
 ### Testing Chains
@@ -396,8 +416,8 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
   - Backend Models Architecture: Topic-based organization principles
 - **backend/docs/PROVIDER-SYSTEM.md** - ⭐ Provider/capability system for pluggable integrations
   - Keywords: integration patterns, capability system, service abstraction, external services
-- **docs/BROKER-ARCHITECTURE.md** - Broker service execution simulator architecture
-  - Keywords: order execution, trade simulation, broker proxy
+- **docs/BROKER-ARCHITECTURE.md** - Fakebroker provider execution simulator architecture
+  - Keywords: fakebroker, execution simulator, order execution, trade simulation, providers/fakebroker
 - **backend/docs/AUTHENTICATION.md** - JWT-based authentication with Google OAuth
   - Keywords: JWT, OAuth, Google login, cookies, security, stateless auth
 - **docs/methodologies/API-METHODOLOGY.md** - TDD methodology for API development
@@ -418,12 +438,12 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### API & Client Generation
 
-**Keywords**: OpenAPI, AsyncAPI, code generation, client generation, REST clients, WebSocket types, auto-generation
+**Keywords**: OpenAPI, AsyncAPI, code generation, client generation, REST clients, WebSocket types, auto-generation, InterModuleClients, inter-module HTTP, client_factory, smart URL defaults
 
 **Scope**: Automated client and type generation from specs  
 **Out of Scope**: Manual API implementation, custom client code
 
-- **backend/docs/SPECS_AND_CLIENT_GEN.md** - ⭐ Complete generation guide (OpenAPI/AsyncAPI/Python clients)
+- **backend/docs/SPECS_AND_CLIENT_GEN.md** - ⭐ Complete generation guide (OpenAPI/AsyncAPI/Python clients, inter-module communication)
 - **docs/CLIENT-GENERATION.md** - Client auto-generation overview and frontend integration
 - **frontend/src/clients_generated/** - Per-module generated clients (REST + WebSocket types)
 
@@ -439,17 +459,20 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### WebSocket & Real-Time
 
-**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming, subscription errors, error broadcasting, topic_error callback, SubscriptionError, recoverable errors
+**Keywords**: WebSocket, real-time communication, FastWS, bidirectional communication, async messaging, event streaming, subscription errors, error broadcasting, topic_error callback, SubscriptionError, recoverable errors, handleSubscriptionError, WebSocketError.fromSubscription, error callback pattern, throw to global handler, simple topic controller, mutualization, reference counting, centralized hooks, throw behavior, routeUpdateMessage, missing subscription errors, QuoteTracker, BarsTracker, SmartTwsBar, BarsRequest, bars_cb, bars_complete_cb, timezone-aware conversion, int milliseconds, Bar domain model, historical data, real-time bars, callback routing, upsert pattern, snapshot Future
 
 **Scope**: WebSocket implementation (backend + frontend)  
 **Out of Scope**: HTTP polling, SSE, long-polling alternatives
 
 - **backend/docs/BACKEND_WEBSOCKETS.md** - ⭐ FastWS integration guide (WebSocket modules)
 - **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - Frontend WebSocket architecture patterns (comprehensive)
+- **frontend/src/services/README.md** - Service-level error handling patterns
+- **frontend/docs/ERROR-MANAGEMENT.md** - WebSocket error handling (WebSocketError, service integration)
+- **backend/src/trading_api/providers/tws/README.md** - QuoteTracker implementation (section 2.5)
 
 ### Testing
 
-**Keywords**: testing strategy, unit tests, integration tests, E2E tests, test automation, Playwright, pytest, vitest
+**Keywords**: testing strategy, unit tests, integration tests, E2E tests, test automation, Playwright, pytest, vitest, process.env.VITEST, ApiFallback, test auto-detection, mock auto-detection, AsyncMock, tracker mocking, Bar objects, domain models, callback routing tests, test pattern migration, int timestamps, int volume, bars_tracker.request mocking
 
 **Scope**: All testing strategies (unit, integration, E2E)  
 **Out of Scope**: Production monitoring, observability
@@ -461,27 +484,28 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TradingView Integration
 
-**Keywords**: TradingView, broker API, Trading Host, charting library, order execution, broker adapter, UDF
+**Keywords**: TradingView, broker API, Trading Host, charting library, order execution, broker adapter, UDF, LibrarySymbolInfo, SymbolInfo, currency_code, original_currency_code, expired, expiration_date, industry, sector, con_id, symbol metadata, DatafeedConfiguration, quote deduplication, subscribeQuotes, omitNullish, discriminated union, structural typing, nullish fields, PlacedOrder, BracketOrder, customUI, showPositionDialog, showPositionBracketsDialog, bracket preset bug, position dialog override, WebSocket subscriptions, error callbacks, handleSubscriptionError, **forked bundle, semi-bundled, bundle maintenance, reverse engineering, obfuscated code, RxJS patterns, order-view-controller, minified bundles, patch strategy, no vendor support, startWith operator, combineLatest, observable streams, Pt class, bt class, PositionViewModel, OrderViewModel**
 
-**Scope**: TradingView Trading Terminal integration  
+**Scope**: TradingView Trading Terminal integration **and forked bundle maintenance**  
 **Out of Scope**: Custom charting solutions, alternative charting libraries
 
+- **frontend/public/README.md** - ⭐ **Bundle maintenance guide** (forked version overview, upgrade strategy, debugging workflow)
 - **frontend/docs/BROKER-INTEGRATION.md** - Complete broker integration implementation guide
+- **frontend/docs/tradingview/BUNDLE-MAINTENANCE.md** - ⭐ **Detailed debugging guide** (case studies, RxJS patterns, unobfuscation)
 - **frontend/docs/tradingview/BROKER-CONNECTION-ADAPTER.md** - Trading Host API reference
 - **frontend/docs/tradingview/UI-USAGE-GUIDE.md** - UI testing with Playwright
 - **frontend/docs/tradingview/TYPE-DEFINITIONS.md** - TradingView TypeScript type definitions
-- **frontend/public/README.md** - TradingView public assets and datafeeds reference
 
 ### Authentication & Security
 
-**Keywords**: authentication, authorization, JWT, OAuth, Google login, cookies, security, stateless auth, middleware
+**Keywords**: authentication, authorization, JWT, OAuth, Google login, cookies, security, stateless auth, middleware, HMAC, inter-module auth, X-Internal-Signature, replay protection, request signing
 
 **Scope**: Complete authentication system (backend + frontend)  
 **Out of Scope**: User management, permissions/roles system
 
-- **backend/docs/AUTHENTICATION.md** - ⭐ Complete authentication system (Google OAuth, JWT, cookies, security)
+- **backend/docs/AUTHENTICATION.md** - ⭐ Complete authentication system (Google OAuth, JWT, cookies, security, inter-module HMAC)
 - **backend/src/trading_api/modules/auth/README.md** - Auth module implementation
-- **backend/src/trading_api/shared/middleware/auth.py** - Stateless middleware (public key validation)
+- **backend/src/trading_api/shared/middleware/auth.py** - Stateless middleware (public key validation, HMAC verification)
 - **frontend/src/services/README.md** - Auth service architecture
 - **frontend/src/router/README.md** - Router authentication guards
 - **frontend/src/views/LoginView.vue** - Google OAuth login UI
@@ -489,17 +513,18 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### Error Handling
 
-**Keywords**: exceptions, error codes, error handling, HTTP status, WebSocket close codes, TradingApiException, ServiceException, ProviderException, CommonException, global handlers, subscription errors, recoverable errors, ErrorPayload, SubscriptionError, topic_error callback, AppError, WebSocketError, NetworkError, AuthError, ValidationError, errorService, toast notifications
+**Keywords**: exceptions, error codes, error handling, HTTP status, WebSocket close codes, TradingApiException, ServiceException, ProviderException, CommonException, global handlers, subscription errors, recoverable errors, ErrorPayload, SubscriptionError, topic_error callback, AppError, WebSocketError, NetworkError, AuthError, ValidationError, errorService, toast notifications, handleSubscriptionError, WebSocketError.fromSubscription, error callback pattern, throw to global handler
 
 **Scope**: Backend exception hierarchy and frontend error handling  
 **Out of Scope**: User-facing error messages content
 
 - **backend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete backend error management guide (exception hierarchy, error codes, handlers, subscription errors)
-- **frontend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete frontend error management guide (error classes, errorService, toast notifications)
+- **frontend/docs/ERROR-MANAGEMENT.md** - ⭐ Complete frontend error management guide (error classes, errorService, toast notifications, service integration patterns)
 - **backend/docs/PROVIDER-SYSTEM.md** - ProviderException usage in providers (Section 8.4)
 - **backend/docs/BACKEND_WEBSOCKETS.md** - WebSocket error handling (close codes, subscription-level errors)
-- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket subscription error handling (globalErrorHandler)
+- **frontend/docs/WEBSOCKET-ARCHITECTURE.md** - WebSocket subscription error handling (globalErrorHandler, service error patterns)
 - **backend/docs/BACKEND_TESTING.md** - Testing error responses (test client configuration)
+- **frontend/src/services/README.md** - Service-level error handling implementation
 
 ### Build & DevOps
 
@@ -526,20 +551,25 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### TWS API Integration
 
-**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, type stubs, .pyi files, Pylance, ibapi, TWSProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, ticker slots, stream keys, AssetConfig, Resolution enum, ticker naming convention
+**Keywords**: Interactive Brokers, TWS API, IB Gateway, broker integration, trading API, market data, order execution, order modification, modifiable fields, lmtPrice, auxPrice, totalQuantity, tif, type stubs, .pyi files, Pylance, ibapi, TWSDatafeedProvider, TWSBrokerProvider, TWSClient, IBSocket, genericTickList, tick types, mdoff, news sources, business key, stream data, StreamData, CachedContract, ContractTracker, SQLite persistence, lazy loading, two-tier caching, contract persistence, to_dict, from_dict, TWS_CONTRACT_CACHE_PATH, connection-per-thread, WAL mode, SQLiteContractCache, upsert_descriptions, upsert_details, get_by_con_id, get_by_ticker, get_by_symbol_prefix, get_full_details, clear_details_cache, symbolSamples callback, OrderTracker, AssetConfig, Resolution enum, ticker naming convention, snapshot pattern, stream pattern, overnight_hours, darkpool, Blue Ocean ATS, build_best_contract, is_session_closed, is_darkpool_closed, infer_sec_type, FOREX_CURRENCIES, req_ticker_details, \_resolve_trading_contract, session-aware routing, bracket grouping, OCA pattern, OCA reconciliation, OCA timestamping, signed_oca_groups, find_tracked_order, find_oca_group, brackets_info, parent_filled, domain_status, is_active, oca_group property, TrackedOrder properties, brackets_to_tws, \_group_orders_by_bracket, ParentType, BracketContext, tracked_order_to_placed_order, reqOrdersStream, create_stream_hook, remove_stream_hook, isUnset, PROVIDER_BROKER_LEVERAGE_NOT_SUPPORTED, \_submit_order reconciliation, AccountTracker, TrackedAccount, reqAccountSummary, reqAccountUpdates, reqPnL, accountSummary callback, updateAccountValue callback, pnl callback, TWS_TAG_TO_FIELD, account metrics, equity streaming, balance tracking, net_liquidation, total_cash_value, account currency, currencySign, CURRENCY_SIGNS, isUnset helper, account snapshot, account stream hooks, \_initAccountId, accountsMetainfo, account ID synchronization, managed accounts, ExecutionTracker, TrackedExecution, commission joining, two-phase dispatch, execDetails, commissionAndFeesReport, execution tracking, trade fills, reqExecutions, reqExecutionsStream, execution snapshot, execution stream hooks, exec_id, commission enrichment, fast fill notifications, subscribe_executions, get_executions, upsert_execution, update_commission, mark_snapshot_complete, all_executions, execution filtering, domain conversion, to_domain, execution time parsing, \_parse_tws_execution_time
 
 **Scope**: Interactive Brokers TWS API integration  
 **Out of Scope**: Other broker APIs, custom trading protocols
 
 - **backend/src/trading_api/providers/tws/README.md** - ⭐ TWS Datafeed Provider implementation guide (start here for integration)
-  - Three-layer architecture: TWSProvider → TWSClient → IBSocket
-  - Ticker slot streaming pattern, domain mappers, testing patterns
-  - Composite ticker format: `{symbol}:{exchange}:{secType}-{conId}[@{bar_size}]`
+  - Three-layer architecture: TWSDatafeedProvider → TWSClient → IBSocket
+  - Business key tracking system (`{capability}:{operation}:{params}`)
+  - StreamData dataclass for typed data accumulation
+  - CachedContract for contract caching with lazy upgrade pattern and session-aware methods
+  - ContractTracker for SQLite persistence with two-tier caching (descriptions + details)
+  - Snapshot/stream pattern separation, domain mappers, testing patterns
+  - Session-aware routing: `build_best_contract()`, `overnight_hours`, darkpool support
+  - Bracket order grouping: `_group_orders_by_bracket()`, OCA pattern parsing, parent/child enrichment
 - **backend/external_packages/tws/docs/README.md** - TWS API documentation index (includes local modifications)
 - **backend/external_packages/tws/docs/06-SETUP-GUIDE.md** - TWS/Gateway installation and configuration
 - **backend/external_packages/tws/docs/07-CONNECTIVITY-GUIDE.md** - Connection management, threading, error handling
 - **backend/external_packages/tws/docs/01-API-REFERENCE-CLASSES.md** - Core API classes (EClient, EWrapper, Contract)
-- **backend/external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md** - Order placement and execution
+- **backend/external_packages/tws/docs/02-API-REFERENCE-CONTRACTS-ORDERS.md** - Order placement, execution, and **order modification guidelines**
 - **backend/external_packages/tws/docs/04-API-REFERENCE-CONDITIONS.md** - Advanced conditional orders
 - **Type Stubs**: 15 `.pyi` files in `backend/external_packages/tws/source/pythonclient/ibapi/` for Pylance/Pyright support
 - **backend/external_packages/tws/docs/TWS-GENERIC-TICK-LIST.md** - `genericTickList` parameter complete reference
@@ -560,11 +590,12 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### Total Documentation Files
 
-- **User-Maintained**: ~45 actively maintained documentation files
+- **User-Maintained**: ~47 actively maintained documentation files
   - Files consolidated: 5 → 2 (Nov 12, 2025 documentation refactoring)
   - Files archived: 5 old files preserved in `frontend/docs/archive/`
   - New organization: TradingView docs in dedicated `frontend/docs/tradingview/` subdirectory
   - TWS API docs added: 8 files (Nov 19, 2025)
+  - Module READMEs added: broker, datafeed (Jan 2, 2026)
 - **Auto-Generated**: Per-module client documentation (regenerated on API changes)
 - **Third-Party**: 3 external package documentation files
 
@@ -576,6 +607,22 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2026-01-20**: ExecutionTracker implementation - Added real TWS execution tracking with commission joining pattern (execution_tracker.py: TrackedExecution dataclass, ExecutionTracker class with two-phase dispatch), integrated in broker_provider.py (removed mock simulation, added get_executions/subscribe_executions TWS integration), tws_connection.py (execDetails/commissionAndFeesReport callbacks, reqExecutions/reqExecutionsStream methods), updated TWS README.md (Quick Reference table, section 2.8 ExecutionTracker architecture/threading/API/testing patterns, broker capability methods), broker README.md (execution topic two-phase dispatch note, WebSocket topics table), BACKEND_TESTING.md (ExecutionTracker testing pattern with two-phase dispatch examples), DOCUMENTATION-GUIDE.md (keywords: ExecutionTracker, TrackedExecution, commission joining, two-phase dispatch, execDetails, commissionAndFeesReport, fast fill notifications; query patterns: "Execution tracking/fills/trades", "Commission joining/enrichment"; Feature Implementation Chains: Execution Tracking; timeline)
+- **2026-01-16**: BarsTracker implementation - Added centralized bar data management with timezone-aware conversion (TWS README.md: BarsTracker Quick Reference entry, section 2.6 architecture/threading model/test patterns), updated BACKEND_TESTING.md (TWS Provider Testing subsection with test pattern migration guide), updated DOCUMENTATION-GUIDE.md (keywords: BarsTracker, SmartTwsBar, BarsRequest, bars_cb, bars_complete_cb, timezone-aware, int milliseconds, Bar domain model, callback routing, AsyncMock; query patterns; timeline)
+- **2026-01-16**: QuoteTracker implementation - Added centralized quote subscription management (TWS README.md: QuoteTracker Quick Reference entry, Quote Subscription Pattern bullets, section 2.5 QuoteTracker architecture/threading model), updated Datafeed README.md (Simple Topic Controller pattern, topic-level subscriptions, mutualization delegation), updated WEBSOCKET-ARCHITECTURE.md v3.4.0 (Missing Subscription Errors subsection, throw behavior rationale), DOCUMENTATION-GUIDE.md (keywords: simple topic controller, mutualization, reference counting, centralized hooks, throw behavior, routeUpdateMessage; query patterns; WebSocket Development chain; timeline)
+- **2026-01-14**: ContractTracker SQLite persistence - Implemented two-tier contract caching (SQLite for descriptions, memory for details) following Tracker pattern, migrated TWSClient from `__contracts_cache` dict to lazy-loading ContractTracker, added CachedContract serialization (to_dict/from_dict), created SQLiteContractCache with WAL mode, updated TWS README.md (ContractTracker architecture, lazy loading flow, SQLite schema), test_client.py (mock contract_tracker instead of \_\_contracts_cache), tws_connection.py (symbolSamples callback persists to tracker, IBSocket owns contract_tracker), DOCUMENTATION-GUIDE.md (keywords, query pattern, timeline), test_cached_contract.py (serialization tests), test_contract_tracker.py (new file: 687 lines, 39 test methods)
+- **2026-01-14**: TradingView documentation restructure - Complete rewrite of `frontend/public/README.md` as bundle maintenance guide (reflecting forked semi-bundled reality, no vendor support, reverse engineering approach), updated `FRONTEND-EXCLUSIONS.md` (clarified production status of trading_terminal/), updated `tradingview/README.md` (maintenance-first messaging), updated DOCUMENTATION-GUIDE.md (bundle maintenance keywords, query patterns, dependencies, timeline)
+- **2026-01-14**: OrderTracker API simplification - Renamed `find_by_oca_group()` → `find_tracked_order(order)` for unified orderId+OCA lookup, extracted `find_oca_group()` for existence checking, updated TWS README.md (order modification section, OCA group submission flow, placeOcaGroup transmit logic with transmit_all strategy), test_client.py (mock method names), tws_connection.py (\_submit_order and placeOcaGroup simplification), DOCUMENTATION-GUIDE.md (keywords, timeline)
+- **2026-01-14**: Account tracking implementation - Updated TWS README.md (AccountTracker class, TrackedAccount dataclass, reqAccountSummary/reqAccountUpdates/reqPnL integration, snapshot/stream pattern, domain conversion methods, currency support), broker README.md (account metadata endpoint clarification, equity topic implementation note), BROKER-INTEGRATION.md (resolved accountId synchronization issue), account.py model (currency/currencySign fields), DOCUMENTATION-GUIDE.md (keywords, timeline)
+- **2026-01-13**: OCA reconciliation & TrackedOrder enhancements - Updated TWS README.md (OCA timestamping with `@{unix_ms}` suffix, `_submit_order()` OCA reconciliation via `find_by_oca_group()`, TrackedOrder properties table: `domain_status`, `is_active`, `oca_group`, `brackets_info`, `parent_filled`; `brackets_to_tws()` shared mapper, bracket grouping flow updates), DOCUMENTATION-GUIDE.md (keywords: OCA reconciliation, signed_oca_groups, brackets_info, TrackedOrder properties, brackets_to_tws, \_submit_order reconciliation)
+- **2026-01-12**: Broker service error handling improvements - Updated services/README.md (Error Handling section with handleSubscriptionError pattern), BROKER-INTEGRATION.md (showPositionBracketsDialog method, Error Handling in Setup, WebSocket subscription error callbacks), WEBSOCKET-ARCHITECTURE.md (error handling philosophy, service throw pattern), ERROR-MANAGEMENT.md (Service Integration Pattern), DOCUMENTATION-GUIDE.md (keywords, query mapping)
+- **2026-01-12**: TWS Order streaming integration - Updated TWS README.md (`subscribe_orders()` → `reqOrdersStream()` flow, OrderTracker stream hooks, `set_leverage()` exception, `isUnset()` helper), broker module README.md (async topic lifecycle), DOCUMENTATION-GUIDE.md (keywords)
+- **2026-01-11**: Inter-module HTTP client factory - Updated SPECS_AND_CLIENT_GEN.md (InterModuleClients singleton, smart URL defaults, env overrides), TWS README.md (`_get_symbol_price()` inter-module pattern), DOCUMENTATION-GUIDE.md (keywords)
+- **2026-01-11**: Order modification constraints - Updated TWS README.md (order modification field restrictions, `clone_order()` deep copy pattern, `placeWhatifOrder()` method separation, leverage info via WhatIf margin simulation), broker module README.md (`confirmId` parameter for audit trail), `02-API-REFERENCE-CONTRACTS-ORDERS.md` (Section 3.2 Order Modification guidelines), DOCUMENTATION-GUIDE.md (TWS keywords)
+- **2026-01-11**: TWS Bracket order grouping - Updated TWS README.md (bracket order grouping helpers, OCA naming convention, get_orders enrichment, parse_bracket_oca utility, preview_order error propagation), broker module README.md (bracket relationship handling), DOCUMENTATION-GUIDE.md (TWS keywords)
+- **2026-01-07**: SymbolInfo/DatafeedConfiguration enhancement - Updated datafeed README.md (quote deduplication pattern, enhanced SymbolInfo fields table, quote-specific error handling), TWS README.md (contract_details_to_symbol_info() field mappings, SymbolInfo priority fields), DOCUMENTATION-GUIDE.md (TradingView keywords)
+- **2026-01-02**: Documentation assessment wave execution - Created broker/README.md and datafeed/README.md (BFF pattern, WebSocket topics, provider delegation), fixed BROKER-ARCHITECTURE.md (renamed to Fakebroker, updated class names), updated SPECS_AND_CLIENT_GEN.md (versioned file naming), FULLSTACK-DEV-MODE.md (per-module watching), CLIENT-GENERATION.md (deprecated commands), TESTING.md (provider testing section), frontend README.md (routes), BROKER-INTEGRATION.md (Phase 5 status), MODULAR_BACKEND_ARCHITECTURE.md (get_capability_provider method)
+- **2026-01-02**: TWS Provider major refactoring documentation - Updated TWS README.md (business key system, StreamData dataclass, CachedContract caching, snapshot/stream pattern separation, error routing with tws_key), PROVIDER-SYSTEM.md (BrokerCapability stub notes), DOCUMENTATION-GUIDE.md (keywords, dependencies)
 - **2025-12-19**: Frontend error management documentation - Created frontend/docs/ERROR-MANAGEMENT.md (error classes, errorService, toast notifications, philosophy emphasis), expanded backend ERROR-MANAGEMENT.md philosophy section (decision matrix, anti-patterns), updated WEBSOCKET-ARCHITECTURE.md v3.3.0 (globalErrorHandler integration), added error handling section to services README
 - **2025-12-19**: WebSocket subscription error handling - Updated BACKEND_WEBSOCKETS.md (unified error broadcasting), WEBSOCKET-ARCHITECTURE.md v3.2.0 (frontend error handling section), generic_route.py (all errors now broadcast before cleanup)
 - **2025-12-11**: Error management documentation - Created ERROR-MANAGEMENT.md (exception hierarchy, error codes, handlers), updated MODULAR_BACKEND_ARCHITECTURE.md, PROVIDER-SYSTEM.md, BACKEND_TESTING.md, BACKEND_WEBSOCKETS.md with error handling sections
@@ -606,5 +653,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: December 19, 2025  
+**Last Updated**: January 20, 2026  
 **Maintained by**: Development Team

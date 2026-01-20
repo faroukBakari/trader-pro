@@ -2,6 +2,8 @@
 
 This directory contains documentation specific to TradingView Trading Terminal integration.
 
+> **⚠️ Important**: We use a **forked semi-bundled version** of TradingView Trading Terminal with **no official support**. All customizations require reverse engineering. See [public/README.md](../../public/README.md) for maintenance overview.
+
 ---
 
 ## Documentation Files
@@ -21,6 +23,26 @@ This directory contains documentation specific to TradingView Trading Terminal i
 - Account manager configuration
 
 **When to Read**: When implementing broker integration and understanding how to push updates to TradingView UI.
+
+---
+
+### [BUNDLE-MAINTENANCE.md](./BUNDLE-MAINTENANCE.md)
+
+**Purpose**: ⭐ **PRIMARY MAINTENANCE GUIDE** - Comprehensive guide for maintaining and debugging TradingView Trading Terminal bundles.
+
+**Contents**:
+
+- Bundle architecture and obfuscation patterns
+- Debugging methodology (unobfuscation, console logging strategies)
+- Case study 1: Position bracket pre-population bug
+- Case study 2: Position dialog field sync bug
+- RxJS patterns in TradingView bundles (combineLatest, startWith, observables)
+- Common bundle issues and solutions
+- Maintenance best practices (preserve original code, document changes)
+- Reference: Key classes (Pt, bt, ie, gt)
+- Appendix: Tick value calculation
+
+**When to Read**: ⭐ **START HERE** for any bundle modification work, debugging dialog issues, investigating field sync problems, or understanding obfuscated code.
 
 ---
 
@@ -85,10 +107,28 @@ This directory contains documentation specific to TradingView Trading Terminal i
 
 ## Related Documentation
 
-- **[BROKER-INTEGRATION.md](../BROKER-INTEGRATION.md)**: Complete broker integration implementation guide
-- **[WEBSOCKET-ARCHITECTURE.md](../WEBSOCKET-ARCHITECTURE.md)**: WebSocket integration patterns
-- **[Frontend README](../../README.md)**: Frontend overview and setup
-- **[Architecture](../../../docs/ARCHITECTURE.md)**: System architecture overview
+- **[public/README.md](../../public/README.md)** - ⭐ Bundle maintenance overview, upgrade strategy, known issues
+- **[BROKER-INTEGRATION.md](../BROKER-INTEGRATION.md)** - Complete broker integration implementation guide
+- **[WEBSOCKET-ARCHITECTURE.md](../WEBSOCKET-ARCHITECTURE.md)** - WebSocket integration patterns
+- **[Frontend README](../../README.md)** - Frontend overview and setup
+- **[Architecture](../../../docs/ARCHITECTURE.md)** - System architecture overview
+
+---
+
+## Forked Bundle Reality
+
+We maintain a **forked, patched, reverse-engineered** TradingView Trading Terminal:
+
+- ⚠️ **No official support** - All customizations via reverse engineering
+- ⚠️ **Bundle modifications** - Direct JavaScript patches to obfuscated code
+- ✅ **Comprehensive docs** - Every patch documented in BUNDLE-MAINTENANCE.md
+- ✅ **Known issues** - Solutions for Position dialog, bracket orders, field sync
+- ⚠️ **Upgrade risk** - Version updates break our patches
+
+**For maintenance work, always start with**:
+
+1. [BUNDLE-MAINTENANCE.md](./BUNDLE-MAINTENANCE.md) - Debugging & case studies
+2. [public/README.md](../../public/README.md) - Maintenance workflow & upgrade strategy
 
 ---
 

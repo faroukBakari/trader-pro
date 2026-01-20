@@ -49,6 +49,9 @@ class ServerConfig(BaseModel):
     modules: list[str] = Field(
         default_factory=list, description="Enabled modules for this server"
     )
+    providers: list[str] | None = Field(
+        default=None, description="Enabled providers for this server (None = all)"
+    )
     reload: bool = Field(default=True, description="Enable auto-reload")
 
     @field_validator("port")

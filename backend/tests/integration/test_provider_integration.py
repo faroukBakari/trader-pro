@@ -5,6 +5,8 @@ import pytest
 from trading_api.app_factory import AppFactory
 from trading_api.providers.google import GoogleProvider
 
+pytestmark = pytest.mark.integration
+
 
 def test_provider_auto_discovery():
     """Providers auto-discovered from directory."""
@@ -12,7 +14,7 @@ def test_provider_auto_discovery():
     factory.provider_registry.auto_discover()
 
     providers = factory.provider_registry.list_providers()
-    assert "google" in providers
+    assert "GoogleProvider" in providers
 
 
 @pytest.mark.asyncio
@@ -30,8 +32,13 @@ async def test_provider_injection_into_modules():
     assert len(auth_modules) > 0
     auth_module = auth_modules[0]
     assert auth_module is not None
-    assert len(auth_module.service._providers) > 0
-    assert isinstance(auth_module.service._providers[0], GoogleProvider)
+    # Service uses _capability_map internally (capability_name -> list of providers)
+    capability_map = getattr(auth_module.service, "_capability_map", {})
+    assert len(capability_map) > 0
+    # Auth service requires 'auth' capability
+    auth_providers = capability_map.get("auth", [])
+    assert len(auth_providers) > 0
+    assert isinstance(auth_providers[0], GoogleProvider)
 
 
 @pytest.mark.asyncio
@@ -52,7 +59,7 @@ async def test_auth_service_uses_provider():
     assert hasattr(auth_service, "auth_provider")
 
     # Should be AuthCapability instance
-    from trading_api.providers.capabilities.auth import AuthCapability
+    from trading_api.capabilities.auth import AuthCapability
 
     assert isinstance(auth_service.get_capability_provider("auth"), AuthCapability)
 
@@ -73,7 +80,7 @@ async def test_create_app_two_phase_loading():
 
     # Verify provider registry populated
     assert len(factory.provider_registry._provider_classes) > 0
-    assert "google" in factory.provider_registry._provider_classes
+    assert "GoogleProvider" in factory.provider_registry._provider_classes
 
 
 @pytest.mark.asyncio
@@ -85,4 +92,4 @@ async def test_provider_lifecycle_hooks():
     await factory.create_app(enabled_module_names=["auth"])
 
     # Verify provider instance was created
-    assert "google" in factory.provider_registry._instances
+    assert "GoogleProvider" in factory.provider_registry._instances

@@ -28,7 +28,7 @@ endif
 
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-core list-providers list-providers-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS))
+.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api show-cache show-cache-json show-cache-symbol $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-core list-providers list-providers-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS))
 
 # Default target
 help:
@@ -98,6 +98,11 @@ help:
 	@echo "  logs-tail         Tail unified backend log (all servers with prefixes)"
 	@echo "  logs-tail-nginx   Tail nginx logs (access + error)"
 	@echo "  logs-clean        Clean all backend log files"
+	@echo ""
+	@echo "Cache inspection targets:"
+	@echo "  show-cache        Show contract cache statistics and latest records"
+	@echo "  show-cache-json   Show contract cache statistics in JSON format"
+	@echo "  show-cache-symbol Show contracts matching symbol (usage: make show-cache-symbol symbol=AAPL)"
 	@echo ""
 	@echo "Discovered modules: $(DISCOVERED_MODULES)"
 	@echo "Discovered providers: $(DISCOVERED_PROVIDERS)"
@@ -421,12 +426,12 @@ install-ci:
 	@bash ./scripts/regenerate_tws_protobufs.sh
 	@echo "✅ CI installation complete!"
 
-test-boundaries: check-generate-keypair
+test-boundaries: check-generate-keypair check-generate-hmac-key
 	@echo "Running root-level tests..."
 	poetry run pytest tests/ -v --ignore=tests/integration/ $(ARGS)
 
 # Provider core tests (registry, capability spec)
-test-providers-core: check-generate-keypair
+test-providers-core: check-generate-keypair check-generate-hmac-key
 	@echo "Running provider core tests..."
 	poetry run pytest src/trading_api/providers/tests/ -v $(ARGS)
 
@@ -453,7 +458,7 @@ test-providers: test-providers-core
 		done; \
 	fi
 
-test-modules: check-generate-keypair
+test-modules: check-generate-keypair check-generate-hmac-key
 	@echo "Running module tests..."
 	@if [ -z "$(SELECTED_MODULES)" ]; then \
 		echo "⚠️  No modules selected or found"; \
@@ -505,7 +510,7 @@ $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)): test-provider-%:
 		echo "⚠️  No tests found for provider: $*"; \
 	fi
 
-test-integration: check-generate-keypair
+test-integration: check-generate-keypair check-generate-hmac-key
 	@echo "Running integration tests..."
 	poetry run pytest tests/integration/ -v -x -m integration $(ARGS)
 
@@ -513,7 +518,7 @@ test: test-boundaries test-providers test-modules test-integration
 	@echo "✅ All tests passed (boundaries + providers + modules + integration)"
 
 # Coverage targets
-test-cov: check-generate-keypair test-boundaries
+test-cov: check-generate-keypair check-generate-hmac-key test-boundaries
 	@echo "Running all tests with coverage..."
 	@poetry run pytest -x --cov=trading_api --cov-report=xml --cov-report=term-missing
 	@echo ""
@@ -560,8 +565,8 @@ dev:
 		exit 1; \
 	fi
 	@echo "✅ Port $(BACKEND_PORT) is available"
-	@echo "Debug server listening on port 5678 (attach debugger to localhost:5678)"
-	poetry run python -m debugpy --listen 0.0.0.0:5678 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" \
+	@echo "Debug server listening on port 4444 (attach debugger to localhost:4444)"
+	poetry run python -m debugpy --listen 0.0.0.0:4444 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" \
 		--reload \
 		--reload-exclude '**/*__generated/*' \
 		--reload-exclude '**/.local/*' \
@@ -831,7 +836,36 @@ install-tws-api: ## Install TWS API with protobuf regeneration and validation
 	@echo ""
 	@echo "[3/3] Validating installation..."
 	@poetry run python scripts/validate_tws_install.py
-	@echo ""
+	@Cache inspection targets
+.PHONY: show-cache show-cache-json show-cache-symbol
+
+show-cache: ## Show contract cache statistics and latest records
+	@echo "🔍 Inspecting contract cache..."
+	@if [ ! -f ".cache/contracts.db" ]; then \
+		echo ""; \
+		echo "❌ Cache database not found at .cache/contracts.db"; \
+		echo ""; \
+		echo "💡 The cache is created after first use:"; \
+		echo "   1. Start the backend: make dev"; \
+		echo "   2. Search for symbols in the app (e.g., AAPL, MSFT)"; \
+		echo "   3. Run this command again"; \
+		exit 1; \
+	fi
+	@poetry run python scripts/inspect_contract_cache.py
+
+show-cache-json: ## Show contract cache statistics in JSON format
+	@poetry run python scripts/inspect_contract_cache.py --format json
+
+show-cache-symbol: ## Show contracts matching symbol (usage: make show-cache-symbol symbol=AAPL)
+	@if [ -z "$(symbol)" ]; then \
+		echo "❌ Error: symbol parameter required"; \
+		echo ""; \
+		echo "Usage: make show-cache-symbol symbol=AAPL"; \
+		exit 1; \
+	fi
+	@poetry run python scripts/inspect_contract_cache.py --symbol $(symbol)
+
+# echo ""
 	@echo "========================================"
 	@echo "✅ TWS API installation complete!"
 	@echo "========================================"
@@ -864,4 +898,17 @@ check-generate-keypair: ## Check and generate JWT key pair if missing
 		echo "  JWT_PRIVATE_KEY_PATH=backend/.local/secrets/jwt_private.pem"; \
 		echo "  JWT_PUBLIC_KEY_PATH=backend/.local/secrets/jwt_public.pem"; \
 		echo "  ACCESS_TOKEN_EXPIRE_MINUTES=5"; \
+	fi
+
+# HMAC Key Management (for inter-module authentication)
+HMAC_KEY_PATH := $(SECRETS_DIR)/hmac_internal.key
+
+.PHONY: check-generate-hmac-key
+check-generate-hmac-key: ## Check and generate HMAC key if missing
+	@if [ ! -f "$(HMAC_KEY_PATH)" ]; then \
+		echo "🔐 Generating HMAC key for inter-module auth..."; \
+		mkdir -p $(SECRETS_DIR); \
+		openssl rand -hex 32 > "$(HMAC_KEY_PATH)"; \
+		chmod 600 "$(HMAC_KEY_PATH)"; \
+		echo "✓ HMAC key generated at $(HMAC_KEY_PATH)"; \
 	fi

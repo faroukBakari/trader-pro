@@ -1,5 +1,9 @@
 # Trading API
 
+<p align="center">
+  <img src="trader-pro-hq.png" alt="Trader Pro Logo" width="200">
+</p>
+
 [![CI](https://github.com/faroukBakari/trading-api/actions/workflows/ci.yml/badge.svg)](https://github.com/faroukBakari/trading-api/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/faroukBakari/trading-api/branch/main/graph/badge.svg)](https://codecov.io/gh/faroukBakari/trading-api)
 

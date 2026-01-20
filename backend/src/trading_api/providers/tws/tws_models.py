@@ -4,7 +4,10 @@ Combines realtime bars and market data (quotes) into a single typed dataclass.
 Handles all TickTypeEnum values with proper typing.
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
 
 # =============================================================================
 # Bar Size Constants
@@ -550,6 +553,22 @@ def get_asset_config(sec_type: str) -> AssetTypeConfig:
 # =============================================================================
 
 
+class TWSErrorNature:
+    """Nature of TWS error - indicates what the error ID represents.
+
+    The TWS API error callback provides an 'id' field that can be either:
+    - A request ID (reqId) for data requests like market data, historical data
+    - An order ID (orderId) for order-related operations
+    - -1 for system-wide errors (neither request nor order specific)
+
+    This classification helps route errors to the appropriate handler.
+    """
+
+    REQUEST = "req"  # Error ID is a request ID (market data, historical, etc.)
+    ORDER = "order"  # Error ID is an order ID
+    SYSTEM = "system"  # System-wide error (reqId=-1 or connection-level)
+
+
 class TWSErrorClassification:
     """TWS error classification categories (from TWS error codes).
 
@@ -573,11 +592,13 @@ class TWSErrorClassification:
 # Informational status messages - not real errors
 _INFO_CODES: frozenset[int] = frozenset(
     {
+        202,  # Order cancelation acknowledged
         2104,  # Market data farm connection is OK
         2106,  # Historical data farm is connected
         2107,  # Historical data farm connection inactive (dormant)
         2108,  # Market data farm connection inactive (dormant)
         2158,  # Sec-def data farm connection is OK
+        10349,  # Order TIF auto-adjusted by TWS preset (informational)
     }
 )
 
@@ -632,7 +653,6 @@ _VALIDATION_CODES: frozenset[int] = frozenset(
     {
         200,  # No security definition found
         201,  # Order rejected
-        202,  # Order cancelled (may be expected)
         203,  # Security not available for account
         300,  # Can't find ticker ID
         321,  # Server error validating request
@@ -661,6 +681,7 @@ _FATAL_CODES: frozenset[int] = frozenset(
 _NOT_FOUND_CODES: frozenset[int] = frozenset(
     {
         135,  # Can't find order with ID
+        162,  # HMDS query returned no data (valid empty response)
         300,  # Can't find ticker ID
         366,  # No historical data query found
         365,  # No scanner subscription found
@@ -668,70 +689,288 @@ _NOT_FOUND_CODES: frozenset[int] = frozenset(
     }
 )
 
+# =============================================================================
+# Error Nature Classification (reqId vs orderId)
+# Based on TWS API documentation - the error callback 'id' field represents
+# different things depending on the error code.
+# =============================================================================
 
-def classify_error(error_code: int) -> tuple[str, bool]:
-    """Classify TWS error code by category and recoverability.
+# Order-related error codes (id = orderId)
+# These errors occur during order placement, modification, or cancellation
+_ORDER_NATURE_CODES: frozenset[int] = frozenset(
+    {
+        # Duplicate/conflict
+        103,  # Duplicate order ID
+        # Order transmission/validation (104-161 range)
+        104,  # Can't modify a filled order
+        105,  # Order being modified does not match original
+        106,  # Can't transmit order ID
+        107,  # Cannot transmit incomplete order
+        109,  # Price out of range (order defaults)
+        110,  # Price doesn't conform to min tick
+        111,  # TIF and order type incompatible
+        113,  # TIF should be DAY for MOC/LOC
+        131,  # Sweep-to-fill/display size ignored
+        132,  # Order requires clearing account
+        133,  # Submit new order failed
+        134,  # Modify order failed
+        135,  # Can't find order with ID
+        136,  # Order cannot be cancelled
+        140,  # Size value should be integer
+        141,  # Price value should be double
+        144,  # Order size doesn't match allocation
+        145,  # Error validating entry fields
+        146,  # Invalid trigger method
+        147,  # Conditional contract info incomplete
+        151,  # Order requires username
+        152,  # Hidden order not allowed
+        154,  # Orders cannot be transmitted for halted security
+        157,  # Order can be EITHER Iceberg or Discretionary
+        158,  # Must specify offset amount or percent
+        159,  # Percent offset must be 0-100%
+        160,  # Size value cannot be zero
+        161,  # Cancel attempted when order not cancellable
+        # Order rejected/cancelled
+        201,  # Order rejected
+        202,  # Order cancelled
+        # Order validation (311-399 range)
+        311,  # Origin is invalid
+        312,  # Combo details invalid
+        313,  # Combo leg details invalid
+        314,  # Security type BAG requires combo legs
+        315,  # Stock combo legs restricted to SMART
+        321,  # Server error validating request (can be order)
+        322,  # Server error processing request (can be order)
+        325,  # Discretionary orders not supported
+        328,  # Trailing stop attachment error
+        329,  # Cannot change to new order type
+        # Algo order errors (399-449 range)
+        399,  # Order message error
+        400,  # Algo order error
+        439,  # Algorithm definition not found
+        440,  # Algorithm cannot be modified
+        441,  # Algo attributes validation failed
+        442,  # Algorithm not allowed for order
+        443,  # Unknown algo attribute
+        444,  # Volatility combo not acknowledged
+        446,  # Missing scale order profit offset
+        447,  # Missing scale price adjustment
+        448,  # Invalid scale price adjustment interval
+        449,  # Unexpected scale price adjustment
+        # Order state errors (10xxx)
+        10006,  # Missing parent order
+        10148,  # Order cannot be cancelled, wrong state
+    }
+)
+
+# Request-related error codes (id = reqId)
+# These errors occur during data requests (market data, historical, contract details)
+_REQUEST_NATURE_CODES: frozenset[int] = frozenset(
+    {
+        # Rate limiting
+        100,  # Max rate of messages exceeded
+        101,  # Max number of tickers reached
+        # Duplicate ticker/request IDs
+        102,  # Duplicate ticker ID
+        385,  # Duplicate ticker ID for scanner
+        386,  # Duplicate ticker ID for historical data
+        # Historical data errors
+        162,  # Historical market data service error
+        165,  # Historical market data query message
+        166,  # HMDS expired contract violation
+        366,  # No historical data query found
+        # Contract/security definition
+        200,  # No security definition found
+        203,  # Security not available for account (can be request context)
+        # Market data request errors
+        300,  # Can't find ticker ID
+        309,  # Max market depth requests reached
+        310,  # Can't find subscribed market depth
+        316,  # Market depth halted
+        317,  # Market depth reset
+        # Subscription issues
+        354,  # Not subscribed to market data
+        365,  # No scanner subscription found
+        414,  # Snapshot not applicable to generic ticks
+        420,  # Invalid real-time query (pacing)
+        # Market data subscription (10xxx)
+        10090,  # Part of requested market data not subscribed
+        10167,  # Requested market data requires subscription
+        10186,  # Market data not subscribed, delayed not enabled
+        10197,  # No market data during competing session
+    }
+)
+
+# System-level error codes (id is not meaningful or -1)
+# These are connection, protocol, or system-wide errors
+_SYSTEM_NATURE_CODES: frozenset[int] = frozenset(
+    {
+        # Client/protocol errors
+        501,  # Already connected
+        502,  # Couldn't connect to TWS
+        503,  # TWS out of date
+        504,  # Not connected
+        505,  # Unknown message ID
+        506,  # Unsupported version
+        507,  # Bad message length
+        508,  # Bad message
+        509,  # Socket exception
+        520,  # Failed to create socket
+        530,  # SSL error
+        # Connection state (1xxx)
+        1100,  # Connectivity lost
+        1101,  # Connectivity restored, data lost
+        1102,  # Connectivity restored, data maintained
+        1300,  # Socket port reset
+        # System warnings (2xxx) - farm connections
+        2100,  # New account data requested
+        2101,  # Unable to subscribe to account
+        2102,  # Unable to modify order (processing)
+        2103,  # Market data farm disconnected
+        2104,  # Market data farm connection OK
+        2105,  # Historical data farm disconnected
+        2106,  # Historical data farm connected
+        2107,  # Historical data farm inactive
+        2108,  # Market data farm inactive
+        2109,  # Outside RTH attribute ignored
+        2110,  # TWS-server connection broken
+        2137,  # Cross side warning
+        2158,  # Sec-def data farm connection OK
+        2168,  # EtradeOnly not supported
+        2169,  # FirmQuoteOnly not supported
+        # Client ID conflict
+        326,  # Client ID already in use
+    }
+)
+
+
+def _classify_nature(error_code: int) -> str:
+    """Determine if error ID represents a request ID, order ID, or system error.
+
+    Args:
+        error_code: TWS error code
+
+    Returns:
+        TWSErrorNature constant (REQUEST, ORDER, or SYSTEM)
+    """
+    if error_code in _ORDER_NATURE_CODES:
+        return TWSErrorNature.ORDER
+
+    if error_code in _REQUEST_NATURE_CODES:
+        return TWSErrorNature.REQUEST
+
+    if error_code in _SYSTEM_NATURE_CODES:
+        return TWSErrorNature.SYSTEM
+
+    # Range-based heuristics for unclassified codes
+    # 1xxx and 2xxx are typically system/connection messages
+    if 1000 <= error_code < 3000:
+        return TWSErrorNature.SYSTEM
+
+    # 10xxx range: mostly order-related except subscription codes
+    if 10000 <= error_code < 11000:
+        # Subscription codes already handled above, rest are order-related
+        return TWSErrorNature.ORDER
+
+    # 100-199: mixed, but most are request-related (ticker/rate limits)
+    if 100 <= error_code < 200:
+        return TWSErrorNature.REQUEST
+
+    # 300-399: mostly order validation, but some request (market depth)
+    if 300 <= error_code < 400:
+        return TWSErrorNature.ORDER
+
+    # 400-499: algo order errors
+    if 400 <= error_code < 500:
+        return TWSErrorNature.ORDER
+
+    # Default: assume request (safer for unknown codes)
+    return TWSErrorNature.REQUEST
+
+
+def classify_error(error_code: int) -> tuple[str, str, bool]:
+    """Classify TWS error code by nature, category, and recoverability.
 
     Based on TWS API documentation:
     https://interactivebrokers.github.io/tws-api/message_codes.html
+
+    The TWS API error callback provides an 'id' field that can represent either
+    a request ID or an order ID depending on the error context. This function
+    determines which type of ID it is based on the error code.
 
     Args:
         error_code: TWS error code from error() callback
 
     Returns:
-        Tuple of (category, is_recoverable):
+        Tuple of (nature, category, is_recoverable):
+        - nature: TWSErrorNature (REQUEST, ORDER, SYSTEM) - what the error ID represents
         - category: TWSErrorClassification string (INFO, CONNECTION, PACING, etc.)
         - is_recoverable: True if error can be recovered from automatically
 
     Examples:
         >>> classify_error(2104)  # Market data farm OK
-        ('INFO', True)
+        ('system', 'INFO', True)
         >>> classify_error(1100)  # Connectivity lost
-        ('CONNECTION', True)
+        ('system', 'CONNECTION', True)
         >>> classify_error(200)   # No security definition
-        ('VALIDATION', False)
+        ('req', 'VALIDATION', False)
+        >>> classify_error(201)   # Order rejected
+        ('order', 'VALIDATION', False)
         >>> classify_error(503)   # TWS out of date
-        ('FATAL', False)
+        ('system', 'FATAL', False)
     """
+    # Determine error nature (what does the ID represent?)
+    nature = _classify_nature(error_code)
+
     # Informational/Status messages - not real errors
     if error_code in _INFO_CODES:
-        return (TWSErrorClassification.INFO, True)
+        return (nature, TWSErrorClassification.INFO, True)
 
     # Connection recoverable - wait/retry
     if error_code in _CONNECTION_RECOVERABLE:
-        return (TWSErrorClassification.CONNECTION, True)
+        return (nature, TWSErrorClassification.CONNECTION, True)
 
     # Rate limiting - throttle and retry
     if error_code in _PACING_CODES:
-        return (TWSErrorClassification.PACING, True)
+        return (nature, TWSErrorClassification.PACING, True)
 
     # Duplicate/already exists - use different ID and retry
     if error_code in _DUPLICATE_CODES:
-        return (TWSErrorClassification.DUPLICATE, True)
+        return (nature, TWSErrorClassification.DUPLICATE, True)
 
     # Data subscription issues - requires user action
     if error_code in _SUBSCRIPTION_CODES:
-        return (TWSErrorClassification.SUBSCRIPTION, False)
+        return (nature, TWSErrorClassification.SUBSCRIPTION, False)
 
     # Invalid contract/request - not recoverable without fixing request
     if error_code in _VALIDATION_CODES:
-        return (TWSErrorClassification.VALIDATION, False)
+        return (nature, TWSErrorClassification.VALIDATION, False)
 
     # System/protocol errors - not recoverable
     if error_code in _FATAL_CODES:
-        return (TWSErrorClassification.FATAL, False)
+        return (nature, TWSErrorClassification.FATAL, False)
 
     # Request not found - informational (already cancelled/completed)
     if error_code in _NOT_FOUND_CODES:
-        return (TWSErrorClassification.INFO, True)
+        return (nature, TWSErrorClassification.INFO, True)
 
     # Warnings (2xxx range, excluding handled above)
     if 2000 <= error_code < 3000:
-        return (TWSErrorClassification.WARNING, True)
+        return (nature, TWSErrorClassification.WARNING, True)
 
     # System messages (1xxx range, excluding handled above)
     if 1000 <= error_code < 2000:
-        return (TWSErrorClassification.SYSTEM, True)
+        return (nature, TWSErrorClassification.SYSTEM, True)
 
     # Default for unclassified errors (conservative: non-recoverable)
-    return (TWSErrorClassification.ERROR, False)
+    return (nature, TWSErrorClassification.ERROR, False)
+
+
+@dataclass
+class StreamData(list[dict[str, Any]]):
+    business_key: str
+    snapshot_complete: bool = False
+    index_key: str | None = None
+    updated_fields: list[str] = field(default_factory=list)
+    last_updated: int = 0
+    last_dispatched: int = 0

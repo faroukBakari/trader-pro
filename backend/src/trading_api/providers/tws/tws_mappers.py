@@ -3,24 +3,42 @@
 Converts TWS API types to domain models (SearchSymbolResultItem, SymbolInfo, Bar, QuoteData, etc.).
 """
 
-from __future__ import annotations
-
-from datetime import datetime
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ibapi.common import BarData
-from ibapi.contract import Contract, ContractDescription, ContractDetails
+from ibapi.const import UNSET_DECIMAL, UNSET_DOUBLE
+from ibapi.contract import Contract, ContractDetails, DeltaNeutralContract
+from ibapi.order import Order
+from ibapi.order_state import OrderState
 from ibapi.ticktype import TickTypeEnum
 
+from trading_api.models.broker import (
+    Brackets,
+    OrderPreviewResult,
+    OrderPreviewSection,
+    OrderPreviewSectionRow,
+    OrderType,
+    ParentType,
+    PlacedOrder,
+    PreOrder,
+    Side,
+    StopType,
+)
+from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import (
     Bar,
     QuoteData,
     QuoteValues,
     Resolution,
-    SearchSymbolResultItem,
+    SubsessionInfo,
     SymbolInfo,
 )
+from trading_api.providers.tws.order_tracker import TrackedOrder
 
 # TWS secType → TradingView-style symbol type
 SEC_TYPE_MAP: dict[str, str] = {
@@ -51,6 +69,20 @@ DEFAULT_SUPPORTED_RESOLUTIONS: list[Resolution] = [
     Resolution.MONTH_1,
 ]
 
+
+def isUnset(value: Any) -> bool:
+    """Check if a TWS value is considered 'unset' (default/placeholder)."""
+    if value is None:
+        return True
+    if isinstance(value, (int, float)) and value == UNSET_DOUBLE:
+        return True
+    if isinstance(value, Decimal) and value == UNSET_DECIMAL:
+        return True
+    if isinstance(value, str) and value == "":
+        return True
+    return False
+
+
 get_tick_type_name_ = TickTypeEnum.idx2name.get
 
 
@@ -65,46 +97,68 @@ def get_tick_type_name(tick_type: int) -> str:
 
 
 def ticker_name(contract: Contract, bar_size: str | None = None) -> str:
-    ticker = (
-        contract.symbol
-        + ":"
-        + (contract.primaryExchange or contract.exchange)
-        + ":"
-        + contract.secType
-        + "-"
-        + str(contract.conId)
-    )
+    if not (contract.symbol and (contract.primaryExchange or contract.exchange)):
+        raise ProviderException(
+            code="TWS_PROVIDER_INVALID_CONTRACT",
+            message=f"Invalid contract for ticker generation: {contract}",
+            provider="tws",
+            capability="shared",
+        )
+    ticker = (contract.primaryExchange or contract.exchange) + ":" + contract.symbol
     if bar_size:
         ticker += "@" + bar_size
     return ticker
 
 
-def contract_description_to_search_result(
-    desc: ContractDescription,
-) -> SearchSymbolResultItem:
-    """Map TWS ContractDescription → domain SearchSymbolResultItem.
+def clone_contract(contract: Contract) -> Contract:
+    """Create a deep copy of a TWS Contract object.
 
     Args:
-        desc: TWS ContractDescription from symbolSamples callback
+        contract: The Contract to clone
 
     Returns:
-        Domain SearchSymbolResultItem for frontend consumption
+        A new Contract instance with the same attributes
     """
-    contract = desc.contract
-    symbol = contract.symbol
-    description = contract.description or f"{contract.symbol} ({contract.secType})"
-    exchange = contract.primaryExchange or contract.exchange
-    type = SEC_TYPE_MAP.get(contract.secType, "stock")
-    ticker = (
-        symbol + ":" + exchange + ":" + contract.secType + "-" + str(contract.conId)
-    )
-    return SearchSymbolResultItem(
-        symbol=contract.symbol,
-        description=description,
-        exchange=exchange,
-        ticker=ticker,
-        type=type,
-    )
+    contract_copy = Contract()
+    contract_copy.__dict__.update(contract.__dict__)
+    contract_copy.primaryExchange = contract.primaryExchange or contract.exchange
+    contract_copy.comboLegs = contract.comboLegs[:]
+    if contract.deltaNeutralContract:
+        contract_copy.deltaNeutralContract = DeltaNeutralContract()
+        contract_copy.deltaNeutralContract.__dict__.update(
+            contract.deltaNeutralContract.__dict__
+        )
+    return contract_copy
+
+
+def build_best_contract(session_details: ContractDetails) -> Contract:
+    contract = clone_contract(session_details.contract)
+    if (
+        is_trading_session_closed(session_details)
+        and "OVERNIGHT" in session_details.validExchanges
+    ):
+        contract.exchange = "OVERNIGHT"
+    elif "SMART" in session_details.validExchanges:
+        contract.exchange = "SMART"
+    else:
+        contract.exchange = contract.exchange or contract.primaryExchange
+    return contract
+
+
+def build_smart_contract(session_details: ContractDetails) -> Contract | None:
+    contract = None
+    if "SMART" in session_details.validExchanges:
+        contract = clone_contract(session_details.contract)
+        contract.exchange = "SMART"
+    return contract
+
+
+def build_darkpool_contract(session_details: ContractDetails) -> Contract | None:
+    contract = None
+    if "OVERNIGHT" in session_details.validExchanges:
+        contract = clone_contract(session_details.contract)
+        contract.exchange = "OVERNIGHT"
+    return contract
 
 
 def _convert_tws_trading_hours_to_session(trading_hours: str) -> str:
@@ -124,24 +178,24 @@ def _convert_tws_trading_hours_to_session(trading_hours: str) -> str:
     if not trading_hours:
         return "0000-2359"  # Default US equity hours
 
-    # for segment in trading_hours.split(";"):
-    #     if "CLOSED" in segment:
-    #         continue
-    #     # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" → "HHMM-HHMM"
-    #     if "-" in segment:
-    #         start, end = segment.split("-", 1)
-    #         start_time = start.split(":", 1)[1] if ":" in start else start
-    #         end_time = end.split(":", 1)[1] if ":" in end else end
-    #         if int(end_time) < int(start_time):
-    #             current_hour = (
-    #                 datetime.now().astimezone(ZoneInfo("US/Eastern")).time().hour
-    #             )
-    #             if int(end_time) / 100 < current_hour:
-    #                 end_time = "2359"
-    #             else:
-    #                 start_time = "0000"
+    for segment in trading_hours.split(";"):
+        if "CLOSED" in segment:
+            continue
+        # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" → "HHMM-HHMM"
+        if "-" in segment:
+            start, end = segment.split("-", 1)
+            start_time = start.split(":", 1)[1] if ":" in start else start
+            end_time = end.split(":", 1)[1] if ":" in end else end
+            if int(end_time) < int(start_time):
+                current_hour = (
+                    datetime.now().astimezone(ZoneInfo("US/Eastern")).time().hour
+                )
+                if int(end_time) / 100 < current_hour:
+                    end_time = "2359"
+                else:
+                    start_time = "0000"
 
-    #         return start_time + "-" + end_time
+            return start_time + "-" + end_time
 
     return "0000-2359"  # Fallback
 
@@ -155,9 +209,205 @@ TWS_TIMEZONE_MAP: dict[str, str] = {
 }
 
 
-def _normalize_timezone(tws_timezone: str) -> str:
+def normalize_timezone(tws_timezone: str) -> str:
     """Convert TWS timeZoneId to TradingView-compatible timezone."""
     return TWS_TIMEZONE_MAP.get(tws_timezone, tws_timezone) or "America/New_York"
+
+
+def is_trading_session_closed(
+    contract_details: ContractDetails,
+    *,
+    reference_time: datetime | None = None,
+) -> bool:
+    """Check if trading session is currently closed.
+
+    Parses TWS tradingHours string and compares against current time
+    in the instrument's timezone to determine if market is closed.
+
+    Args:
+        trading_hours: TWS tradingHours or liquidHours string
+            Format: "YYYYMMDD:HHMM-YYYYMMDDHHMM;YYYYMMDD:CLOSED;..."
+        timezone_id: TWS timeZoneId (e.g., "US/Eastern")
+        reference_time: Override current time (for testing)
+
+    Returns:
+        True if market is closed, False if open
+
+    Examples:
+        >>> is_trading_session_closed("20260109:0930-20260109:1600", "US/Eastern")
+        False  # During market hours
+        >>> is_trading_session_closed("20260109:CLOSED", "US/Eastern")
+        True   # Holiday
+    """
+    trading_hours = contract_details.tradingHours
+    timezone_id = contract_details.timeZoneId
+    if not trading_hours:
+        return True  # No hours = assume closed
+
+    # Get current time in instrument's timezone
+    tz = ZoneInfo(normalize_timezone(timezone_id))
+    now = reference_time or datetime.now(tz)
+    today_str = now.strftime("%Y%m%d")
+
+    # Find today's segment in tradingHours
+    for segment in trading_hours.split(";"):
+        segment = segment.strip()
+        if not segment:
+            continue
+
+        # Check if this segment is for today
+        if not segment.startswith(today_str):
+            continue
+
+        # Today is explicitly CLOSED
+        if "CLOSED" in segment:
+            return True
+
+        # Parse "YYYYMMDD:HHMM-YYYYMMDDHHMM" or "YYYYMMDD:HHMM-HHMM"
+        if "-" not in segment:
+            continue
+
+        try:
+            start_part, end_part = segment.split("-", 1)
+            # Extract time: "YYYYMMDD:HHMM" → "HHMM"
+            start_time_str = (
+                start_part.split(":", 1)[1] if ":" in start_part else start_part
+            )
+            end_time_str = end_part.split(":", 1)[1] if ":" in end_part else end_part
+
+            # Parse to time objects
+            start_time = datetime.strptime(start_time_str, "%H%M").time()
+            end_time = datetime.strptime(end_time_str, "%H%M").time()
+            current_time = now.time()
+
+            # Handle overnight session (end < start means crosses midnight)
+            if end_time < start_time:
+                # Open if: current >= start OR current < end
+                return not (current_time >= start_time or current_time < end_time)
+            else:
+                # Normal session: open if start <= current < end
+                return not (start_time <= current_time < end_time)
+
+        except (ValueError, IndexError):
+            continue
+
+    # No matching segment for today = closed
+    return True
+
+
+def _build_subsessions(
+    liquid_hours: str,
+    trading_hours: str,
+    valid_exchanges: str | None = None,
+) -> list[SubsessionInfo] | None:
+    """Build TradingView subsessions array from TWS liquidHours and tradingHours.
+
+    Derives pre-market, post-market, and overnight sessions by comparing regular
+    (liquidHours) and extended (tradingHours) trading hours, and checking for
+    overnight exchange availability.
+
+    Args:
+        liquid_hours: TWS liquidHours (regular session, e.g., "20260107:0930-20260107:1600")
+        trading_hours: TWS tradingHours (extended session, e.g., "20260107:0400-20260107:2000")
+        valid_exchanges: TWS validExchanges comma-separated string (e.g., "SMART,NASDAQ,OVERNIGHT")
+
+    Returns:
+        List of SubsessionInfo objects, or None if no extended session (equal hours)
+    """
+    regular_session = _convert_tws_trading_hours_to_session(liquid_hours)
+    extended_session = _convert_tws_trading_hours_to_session(trading_hours)
+
+    # If sessions are equal, no extended hours available
+    if regular_session == extended_session or not trading_hours:
+        return None
+
+    # Parse time boundaries
+    try:
+        reg_start, reg_end = regular_session.split("-")
+        ext_start, ext_end = extended_session.split("-")
+    except ValueError:
+        return None
+
+    subsessions = [
+        SubsessionInfo(
+            id="regular",
+            session=regular_session,
+            description="Regular Trading Hours",
+        ),
+        SubsessionInfo(
+            id="extended",
+            session=extended_session,
+            description="Extended Trading Hours",
+        ),
+    ]
+
+    # Add premarket if extended starts before regular
+    if ext_start < reg_start:
+        subsessions.append(
+            SubsessionInfo(
+                id="premarket",
+                session=f"{ext_start}-{reg_start}",
+                description="Pre-market",
+            )
+        )
+
+    # Add postmarket if extended ends after regular
+    if ext_end > reg_end:
+        subsessions.append(
+            SubsessionInfo(
+                id="postmarket",
+                session=f"{reg_end}-{ext_end}",
+                description="Post-market",
+            )
+        )
+
+    # Add overnight if OVERNIGHT exchange is available (Blue Ocean ATS)
+    # Split session: 20:00-23:50 (evening) + 00:00-04:00 (early morning)
+    if valid_exchanges and "OVERNIGHT" in valid_exchanges.upper():
+        subsessions.append(
+            SubsessionInfo(
+                id="overnight",
+                session="0000-2350",
+                description="Overnight Trading (Blue Ocean)",
+            )
+        )
+
+    return subsessions
+
+
+def _parse_expiration_date(expiration_str: str) -> int | None:
+    """Parse TWS expiration date string to milliseconds timestamp.
+
+    TWS format: "YYYYMMDD" or "YYYYMM" (for monthly contracts)
+
+    Args:
+        expiration_str: TWS lastTradeDateOrContractMonth string
+
+    Returns:
+        Timestamp in milliseconds, or None if parsing fails
+    """
+    if not expiration_str:
+        return None
+
+    try:
+        # Full date format: YYYYMMDD
+        if len(expiration_str) == 8:
+            dt = datetime.strptime(expiration_str, "%Y%m%d")
+            return int(dt.timestamp() * 1000)
+        # Monthly format: YYYYMM (assume last day of month)
+        elif len(expiration_str) == 6:
+            dt = datetime.strptime(expiration_str + "01", "%Y%m%d")
+            # Move to last day of month
+            if dt.month == 12:
+                next_month = dt.replace(year=dt.year + 1, month=1, day=1)
+            else:
+                next_month = dt.replace(month=dt.month + 1, day=1)
+            last_day = next_month - timedelta(days=1)
+            return int(last_day.timestamp() * 1000)
+    except ValueError:
+        return None
+
+    return None
 
 
 def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
@@ -177,22 +427,34 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
     )
 
     # Determine symbol type
-
     symbol = contract.symbol
-    exchange = contract.primaryExchange or contract.exchange
     symbol_type = SEC_TYPE_MAP.get(contract.secType, "stock")
+
+    # Parse expiration for derivatives (FUT/OPT)
+    expiration_date: int | None = None
+    expired: bool | None = None
+    if contract.lastTradeDateOrContractMonth:
+        expiration_date = _parse_expiration_date(contract.lastTradeDateOrContractMonth)
+        if expiration_date:
+            expired = expiration_date < int(datetime.now().timestamp() * 1000)
+
+    # Build subsessions from liquidHours (regular), tradingHours (extended), and validExchanges
+    subsessions = _build_subsessions(
+        details.liquidHours, details.tradingHours, details.validExchanges
+    )
 
     return SymbolInfo(
         name=symbol,
         description=details.longName or symbol,
         type=symbol_type,
-        session=_convert_tws_trading_hours_to_session(details.tradingHours),
-        timezone=_normalize_timezone(details.timeZoneId),
-        ticker=(
-            symbol + ":" + exchange + ":" + contract.secType + "-" + str(contract.conId)
+        # Use liquidHours for regular session, fallback to tradingHours (extended)
+        session=_convert_tws_trading_hours_to_session(
+            details.liquidHours or details.tradingHours
         ),
-        exchange=exchange,
-        listed_exchange=contract.exchange,
+        timezone=normalize_timezone(details.timeZoneId),
+        ticker=ticker_name(contract),
+        exchange=contract.primaryExchange,
+        listed_exchange=contract.primaryExchange,
         format="price",
         pricescale=pricescale,
         minmov=1,
@@ -201,15 +463,29 @@ def contract_details_to_symbol_info(details: ContractDetails) -> SymbolInfo:
         supported_resolutions=DEFAULT_SUPPORTED_RESOLUTIONS,
         volume_precision=0,
         data_status="streaming",
+        # New fields from ContractDetails
+        currency_code=contract.currency or None,
+        original_currency_code=contract.currency or None,
+        industry=details.industry or None,
+        sector=details.category or None,
+        con_id=contract.conId if contract.conId > 0 else None,
+        expired=expired,
+        expiration_date=expiration_date,
+        # Extended session support
+        subsession_id="regular" if subsessions else None,
+        subsessions=subsessions,
     )
+
+
+# Regex: "YYYYMMDD<1-2 spaces>HH:MM:SS <timezone>"
+_TWS_DATE_TZ_PATTERN = re.compile(r"^(\d{8})\s{1,2}(\d{2}:\d{2}:\d{2})\s+(.+)$")
 
 
 def parse_tws_bar_date(date_str: str) -> int:
     """Parse TWS bar date string to milliseconds timestamp.
 
-    Handles multiple TWS date formats:
-    - "yyyyMMdd  HH:mm:ss US/Eastern" (two spaces, timezone)
-    - "yyyyMMdd HH:mm:ss UTC" (single space, UTC)
+    Handles multiple TWS date formats dynamically:
+    - "yyyyMMdd  HH:mm:ss <timezone>" (1-2 spaces, any timezone like US/Eastern, US/Central, UTC)
     - "yyyyMMdd" (daily bars, date only)
     - epoch string (if formatDate=2 was used)
 
@@ -218,29 +494,35 @@ def parse_tws_bar_date(date_str: str) -> int:
 
     Returns:
         Timestamp in milliseconds
+
+    Raises:
+        ProviderException: If date format is unrecognized
     """
     date_str = date_str.strip()
-    time_ms: int = 0
 
-    # Try datetime with timezone (two spaces)
-    try:
-        dt = datetime.strptime(date_str, "%Y%m%d  %H:%M:%S US/Eastern")
-        time_ms = int(dt.timestamp() * 1000)
-    except ValueError:
-        # Try single space UTC format
-        try:
-            dt = datetime.strptime(date_str, "%Y%m%d %H:%M:%S UTC")
-            time_ms = int(dt.timestamp() * 1000)
-        except ValueError:
-            # Try daily bar format (date only, no time)
-            try:
-                dt = datetime.strptime(date_str, "%Y%m%d")
-                time_ms = int(dt.timestamp() * 1000)
-            except ValueError:
-                # Fall back to epoch format (if formatDate=2 was used)
-                time_ms = int(date_str) * 1000
+    # 1. Try datetime with timezone (US/Eastern, US/Central, UTC, etc.)
+    if match := _TWS_DATE_TZ_PATTERN.match(date_str):
+        date_part, time_part, tz_name = match.groups()
+        dt_naive = datetime.strptime(f"{date_part} {time_part}", "%Y%m%d %H:%M:%S")
+        dt = dt_naive.replace(tzinfo=ZoneInfo(tz_name))
+        return int(dt.timestamp() * 1000)
 
-    return time_ms
+    # 2. Try daily bar format (date only, 8 digits)
+    if len(date_str) == 8 and date_str.isdigit():
+        dt = datetime.strptime(date_str, "%Y%m%d")
+        return int(dt.timestamp() * 1000)
+
+    # 3. Try epoch format (formatDate=2)
+    if date_str.isdigit():
+        return int(date_str) * 1000
+
+    # 4. Unrecognized format
+    raise ProviderException(
+        provider="tws",
+        capability="datafeed",
+        code="PROVIDER_TWS_INVALID_DATE_FORMAT",
+        message=f"Cannot parse TWS bar date: '{date_str}'",
+    )
 
 
 def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
@@ -267,62 +549,24 @@ def tws_bar_to_domain_bar(tws_bar: BarData) -> Bar:
     )
 
 
-def tws_rt_bar_to_domain_bar(
-    time: int = 0,
-    open_: float = 0.0,
-    high: float = 0.0,
-    low: float = 0.0,
-    close: float = 0.0,
-    volume: Decimal = Decimal(0),
-    _: Decimal = Decimal(0),
-    count: int = 0,
-) -> Bar:
-    """Map TWS BarData → domain Bar.
-
-    Args:
-        bar.time  - start of bar in unix (or 'epoch') time
-        bar.endTime - for synthetic bars, the end time (requires TWS v964). Otherwise -1.
-        bar.open_  - the bar's open value
-        bar.high  - the bar's high value
-        bar.low   - the bar's low value
-        bar.close - the bar's closing value
-        bar.volume - the bar's traded volume if available
-        bar.WAP   - the bar's Weighted Average Price
-        bar.count - the number of trades during the bar's timespan (only available
-
-    Returns:
-        Domain Bar model
-    """
-    # Parse TWS date format: "yyyyMMdd  HH:mm:ss" or epoch
-    # TWS returns string dates like "20231215  16:00:00" (note: two spaces)
-    time = int(time) * 1000
-    return Bar(
-        time=time,
-        open=float(open_),
-        high=float(high),
-        low=float(low),
-        close=float(close),
-        volume=(int(volume) if isinstance(volume, Decimal) else volume),
-        count=count,
-    )
-
-
 def tws_ticks_to_bar(rt_data: dict[str, Any]) -> Bar:
     # Prefer bar_date (string) over bar_time (legacy int)
-    if rt_data.get("bar_date"):
-        time_ms = parse_tws_bar_date(rt_data["bar_date"])
-    elif rt_data.get("bar_time"):
-        time_ms = rt_data["bar_time"] * 1000
+    if rt_data.get("date"):
+        time_ms = parse_tws_bar_date(rt_data["date"])
+    elif rt_data.get("time"):
+        time_ms = rt_data["time"] * 1000
     else:
         time_ms = 0
+    raw_vol = rt_data.get("volume", 0)
+    volume = int(raw_vol) if isinstance(raw_vol, Decimal) else raw_vol
     return Bar(
         time=time_ms,
-        open=float(rt_data.get("bar_open", 0.0)),
-        high=float(rt_data.get("bar_high", 0.0)),
-        low=float(rt_data.get("bar_low", 0.0)),
-        close=float(rt_data.get("bar_close", 0.0)),
-        volume=rt_data.get("bar_volume", 0),
-        count=rt_data.get("bar_count", 0),
+        open=float(rt_data.get("open", 0.0)),
+        high=float(rt_data.get("high", 0.0)),
+        low=float(rt_data.get("low", 0.0)),
+        close=float(rt_data.get("close", 0.0)),
+        volume=volume,
+        count=rt_data.get("count", 0),
     )
 
 
@@ -353,8 +597,10 @@ def _parse_rt_volume(rt_volume_str: str | None) -> tuple[float, float, float]:
 
 
 def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
-    ticker_name = rt_data.get("ticker_name", "UNKNOWN")
-    symbol, exchange, _, _, _ = parse_ticker(ticker_name)
+    business_key = rt_data.get("business_key", "UNKNOWN")
+    # FIXME: Improve ticker name extraction
+    ticker_name = business_key.split(":", 3)[-1] or "UNKNOWN"
+    symbol, exchange, _, _ = parse_ticker(ticker_name)
     ticker_name = ticker_name.split("@")[0]
 
     # Parse RT Trade Volume as fallback source (more reliable than rt_volume)
@@ -402,60 +648,48 @@ def tws_ticks_to_quote_data(rt_data: dict[str, Any]) -> QuoteData:
     return QuoteData(s="ok", n=ticker_name, v=quote_values)
 
 
-def parse_ticker(ticker: str) -> tuple[str, str, str, str, str]:
+FOREX_CURRENCIES = {"USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD"}
+
+
+def infer_sec_type(exchange: str, symbol: str) -> str:
+    if symbol.endswith("1!"):
+        return "CONTFUT"
+    if exchange in ("IDEALPRO", "FX"):
+        return "CASH"
+    if exchange in ("PAXOS", "ZEROHASH"):
+        return "CRYPTO"
+    if len(symbol) == 6 and symbol[:3].upper() in FOREX_CURRENCIES:
+        return "CASH"  # EURUSD
+    if symbol[-3:] in ("USD", "EUR", "GBP"):
+        return "CRYPTO"
+
+    return "STK"  # Default
+
+
+def parse_ticker(ticker: str) -> tuple[str, str, str, str]:
     """Parse ticker string into components.
     Args:
-        ticker: Ticker string in format "SYMBOL:EXCHANGE:SECTYPE-CONTRACTID"
+        ticker: Ticker string in format "EXCHANGE:SYMBOL[@bar_size]"
     Returns:
-        Tuple of (symbol_name, exchange, secType, contractId, bar_size)
-    Examples:
-        >>> self.parse_ticker('AAPL:NASDAQ:STK-12345@1D')
-        ('AAPL', 'NASDAQ', 'STK', '12345', '1D')
-        >>> self.parse_ticker('GOOGL:NASDAQ')
-        ('GOOGL', 'NASDAQ', '', '', '')
+        Tuple of (symbol_name, exchange, secType, bar_size)
     """
-
     ticker_parts = ticker.split(":")
+    symbol_with_bar = ticker_parts[-1].strip()
+    exchange = ticker_parts[0].strip() if len(ticker_parts) > 1 else ""
+    ticker_parts = symbol_with_bar.split("@")
     symbol_name = ticker_parts[0].strip()
-    exchange = ""
-    if len(ticker_parts) > 1:
-        exchange = ticker_parts[1].strip()
-    secType = ""
-    contractId = ""
-    bar_size = ""
-    if len(ticker_parts) > 2:
-        ticker_parts = ticker_parts[2].split("-")
-        secType = ticker_parts[0].strip()
-        if len(ticker_parts) > 1:
-            ticker_parts = ticker_parts[1].split("@")
-            contractId = ticker_parts[0].strip()
-            if len(ticker_parts) > 1:
-                bar_size = ticker_parts[1].strip()
-    return symbol_name, exchange, secType, contractId, bar_size
+    bar_size = ticker_parts[1].strip() if len(ticker_parts) > 1 else ""
 
+    secType = infer_sec_type(exchange, symbol_name)
 
-def build_contract(
-    ticker: str,
-) -> Contract:
-    """Build TWS Contract object from domain parameters.
-
-    Args:
-        symbol: Symbol name (e.g., "AAPL")
-        exchange: Exchange name (default: "SMART" for smart routing)
-        sec_type: Security type (default: "STK" for stocks)
-        currency: Currency code (default: "USD")
-
-    Returns:
-        TWS Contract object ready for API calls
-    """
-    symbol, exchange, sec_type, conId, _ = parse_ticker(ticker)
-    contract = Contract()
-    contract.symbol = symbol
-    contract.secType = sec_type
-    contract.exchange = exchange if exchange else "SMART"
-    contract.primaryExchange = exchange
-    contract.conId = int(conId)
-    return contract
+    if not (symbol_name and exchange and secType):
+        raise ProviderException(
+            code="TWS_PROVIDER_INVALID_TICKER",
+            message=f"Invalid ticker format: {ticker}",
+            provider="tws",
+            capability="shared",
+        )
+    return symbol_name, exchange, secType, bar_size
 
 
 def map_resolution_to_tws_bar_size(resolution: Resolution) -> str:
@@ -540,18 +774,602 @@ def calculate_tws_duration(
         return f"{years} Y"
 
 
+# =============================================================================
+# Order Mappers (Broker Capability)
+# =============================================================================
+
+# Domain OrderType → TWS orderType string
+ORDER_TYPE_TO_TWS: dict[int, str] = {
+    1: "LMT",  # LIMIT
+    2: "MKT",  # MARKET
+    3: "STP",  # STOP
+    4: "TRAIL",  # TRAIL
+}
+
+# TWS orderType string → Domain OrderType
+TWS_TO_ORDER_TYPE: dict[str, int] = {
+    "LMT": 1,  # LIMIT
+    "MKT": 2,  # MARKET
+    "STP": 3,  # STOP
+    "TRAIL": 4,  # Alias
+}
+
+# Domain Side → TWS action string
+SIDE_TO_TWS_ACTION: dict[int, str] = {
+    1: "BUY",  # Side.BUY
+    -1: "SELL",  # Side.SELL
+}
+
+# TWS action → Domain Side
+TWS_ACTION_TO_SIDE: dict[str, int] = {
+    "BUY": 1,
+    "SELL": -1,
+    "BOT": 1,  # Historical action
+    "SLD": -1,  # Historical action
+}
+
+
+@dataclass
+class BracketContext:
+    """Context for bracket order information.
+
+    Preserves original PreOrder bracket fields for PlacedOrder reconstruction.
+    TWS doesn't return bracket prices in order callbacks, so we track them here.
+    """
+
+    take_profit: float | None = None
+    stop_loss: float | None = None
+    trailing_stop_pips: float | None = None
+    stop_type: int | None = None
+    child_order_ids: list[int] = field(default_factory=list)
+
+
+# =============================================================================
+# Bracket Order OCA Pattern Utilities
+# =============================================================================
+
+# Order brackets: "brackets_{order_id}" where order_id is numeric
+# Position brackets: "brackets_{position_id}" where position_id is a symbol string
+ORDER_BRACKET_PATTERN = re.compile(r"^brackets_(\d+)$")
+
+
+def prebuild_tws_order(
+    contract: Contract,
+    quantity: float,
+    side: int,
+    order_type: int,
+    *,
+    price: float | None = None,
+    account: str | None = None,
+) -> Order:
+    """Build a basic TWS Order object with default settings.
+
+    Returns:
+        A new TWS Order object with default values.
+    """
+    order = Order()
+    if contract.secType == "CRYPTO":
+        # Crypto requires cash quantity (USD value) not coin quantity
+        order.cashQty = quantity  # quantity is already in USD for crypto
+        order.tif = "IOC"  # Crypto requires IOC or Minutes
+    else:
+        order.totalQuantity = Decimal(str(quantity))
+        order.tif = "DAY" if contract.exchange == "OVERNIGHT" else "GTC"
+        order.outsideRth = True  # Allow execution outside regular trading hours
+    order.action = SIDE_TO_TWS_ACTION.get(side, "BUY")
+    order.orderType = ORDER_TYPE_TO_TWS.get(order_type, "MKT")
+    if price is not None:
+        if order.orderType == "LMT":
+            order.lmtPrice = price
+        else:
+            order.auxPrice = price
+    if account is not None:
+        order.account = account
+    return order
+
+
+def brackets_to_tws(
+    contract: Contract,
+    quantity: float,
+    bracket_side: int,
+    brackets: Brackets,
+    *,
+    account: str | None = None,
+) -> tuple[Order | None, Order | None]:
+    """Convert Brackets to TWS child orders (stop_loss, take_profit).
+
+    Creates TWS Order objects for bracket orders using consistent defaults
+    (TIF, outsideRth) via prebuild_tws_order helper.
+
+    Args:
+        contract: TWS Contract for order routing (determines TIF)
+        quantity: Order quantity for bracket orders
+        bracket_side: Side for bracket orders (opposite of parent order/position)
+                      Use -preorder.side for order brackets, opposite of position.side for position brackets
+        brackets: Brackets model with stopLoss, takeProfit, trailingStopPips
+        account: Optional account ID for multi-account routing
+
+    Returns:
+        Tuple of (stop_loss_order, take_profit_order) - either can be None
+
+    Note:
+        Stop type is inferred from trailingStopPips:
+        - trailingStopPips is not None → TRAIL order
+        - trailingStopPips is None, stopLoss is not None → STP order
+    """
+    stop_loss_order: Order | None = None
+    take_profit_order: Order | None = None
+
+    # Take-profit order (LIMIT)
+    if brackets.takeProfit is not None:
+        take_profit_order = prebuild_tws_order(
+            contract=contract,
+            quantity=quantity,
+            side=bracket_side,
+            order_type=OrderType.LIMIT,
+            price=brackets.takeProfit,
+            account=account,
+        )
+
+    # Stop-loss or trailing stop order
+    if brackets.stopLoss is not None or brackets.trailingStopPips is not None:
+        # Infer stop type from trailingStopPips presence
+        use_trailing = brackets.trailingStopPips is not None
+
+        stop_loss_order = prebuild_tws_order(
+            contract=contract,
+            quantity=quantity,
+            side=bracket_side,
+            order_type=OrderType.TRAIL if use_trailing else OrderType.STOP,
+            price=brackets.trailingStopPips or brackets.stopLoss,
+            account=account,
+        )
+
+        # Set initial stop trigger price if both trailingStopPips and stopLoss provided
+        if brackets.trailingStopPips and brackets.stopLoss:
+            stop_loss_order.trailStopPrice = brackets.stopLoss
+
+    return stop_loss_order, take_profit_order
+
+
+def preorder_to_tws(
+    preorder: PreOrder,
+    contract: Contract,
+    *,
+    order_id: int | None = None,
+    account: str | None = None,
+) -> tuple[Order, Order | None, Order | None]:
+    """Convert domain PreOrder to TWS Order objects.
+
+    Supports bracket orders (stopLoss, takeProfit, trailingStopPips) by returning
+    multiple orders: parent + child orders linked via parentId and OCA group.
+
+    Args:
+        preorder: Domain PreOrder with symbol, type, side, qty, prices
+        account: Account ID for order routing (required for multi-account)
+        order_id: Base order ID for parent; children use sequential IDs
+
+    Returns:
+        Tuple of (parent, stop_loss, take_profit) Order objects:
+        - Simple order: (parent, None, None)
+        - Bracket order: (parent, stop_loss, take_profit) with non-None children
+
+    Raises:
+        ProviderException: If guaranteedStop is set (not supported by TWS)
+    """
+
+    # Validate unsupported features
+    if preorder.guaranteedStop is not None:
+        raise ProviderException(
+            code="PROVIDER_BROKER_UNSUPPORTED_FEATURE",
+            message="Guaranteed stop orders are not supported by TWS/Interactive Brokers",
+            provider="tws",
+            capability="broker",
+        )
+
+    # Determine if this is a bracket order
+    has_brackets = (
+        preorder.stopLoss is not None
+        or preorder.takeProfit is not None
+        or preorder.trailingStopPips is not None
+    )
+
+    # Build parent order
+    parent = prebuild_tws_order(
+        contract=contract,
+        quantity=preorder.qty,
+        side=preorder.side,
+        order_type=preorder.type,
+        price=preorder.limitPrice or preorder.stopPrice,
+        account=account,
+    )
+
+    if order_id:
+        parent.orderId = order_id
+
+    if not has_brackets:
+        return parent, None, None
+
+    # Delegate bracket creation to brackets_to_tws
+    brackets = Brackets(
+        stopLoss=preorder.stopLoss,
+        takeProfit=preorder.takeProfit,
+        trailingStopPips=preorder.trailingStopPips,
+        guaranteedStop=None,  # Already validated above
+    )
+    stop_loss_order, take_profit_order = brackets_to_tws(
+        contract=contract,
+        quantity=preorder.qty,
+        bracket_side=-preorder.side,
+        brackets=brackets,
+        account=account,
+    )
+
+    return parent, stop_loss_order, take_profit_order
+
+
+def tracked_order_to_placed_order(
+    tracked: TrackedOrder,
+    contract: Contract | None = None,
+    bracket_context: BracketContext | None = None,
+) -> PlacedOrder:
+    """Convert TrackedOrder to domain PlacedOrder.
+
+    Extracts data directly from raw TWS objects (Contract, Order, OrderState)
+    stored in TrackedOrder without relying on flattened dict fields.
+
+    Args:
+        tracked: TrackedOrder wrapping raw TWS objects
+        bracket_context: Optional bracket info from original PreOrder.
+            TWS doesn't return bracket prices in callbacks, so this
+            preserves the original stopLoss/takeProfit/trailingStopPips.
+
+    Returns:
+        Domain PlacedOrder model
+    """
+
+    contract = contract or tracked.contract
+    order = tracked.order
+
+    # Build symbol from contract
+    symbol = ticker_name(contract)
+
+    # Order type
+    order_type_str = order.orderType
+    order_type = OrderType(TWS_TO_ORDER_TYPE.get(order_type_str, 2))
+
+    # Side from action
+    side = Side(TWS_ACTION_TO_SIDE.get(order.action, 1))
+
+    # Quantity
+    qty = float(order.totalQuantity)
+
+    # Status with history-aware resolution
+    status = tracked.domain_status
+
+    # Prices
+    limit_price: float | None = None
+    stop_price: float | None = None
+    if order.lmtPrice and order.lmtPrice > 0:
+        limit_price = order.lmtPrice
+    if order.auxPrice and order.auxPrice > 0:
+        stop_price = order.auxPrice
+
+    # Filled quantity from order object (mutated by orderStatus callback)
+    filled_qty = 0.0 if isUnset(order.filledQuantity) else float(order.filledQuantity)
+
+    # Average fill price from fills history (last fill's avgFillPrice)
+    avg_price: float | None = None
+    if tracked.fills and filled_qty > 0:
+        avg_price = tracked.fills[-1].avgFillPrice
+
+    # Bracket fields from context (TWS doesn't return these in callbacks)
+    take_profit: float | None = None
+    stop_loss: float | None = None
+    trailing_stop_pips: float | None = None
+    stop_type: StopType | None = None
+
+    if bracket_context:
+        take_profit = bracket_context.take_profit
+        stop_loss = bracket_context.stop_loss
+        trailing_stop_pips = bracket_context.trailing_stop_pips
+        if bracket_context.stop_type is not None:
+            stop_type = StopType(bracket_context.stop_type)
+
+    # Parent order linking (for bracket child orders)
+    # TWS sets order.parentId > 0 for child orders (TP/SL)
+    parent_id: str | None = None
+    parent_type: ParentType | None = None
+    if tracked.parent_filled:
+        parent_id = symbol
+        parent_type = ParentType.POSITION
+    elif order.parentId and order.parentId > 0:
+        parent_id = str(order.parentId)
+        parent_type = ParentType.ORDER
+    else:
+        # Try to parse parentId from OCA group for position brackets
+        parsed_parent_id, parsed_parent_type = tracked.brackets_info
+        if parsed_parent_id and parsed_parent_type == ParentType.POSITION:
+            parent_id = parsed_parent_id
+            parent_type = ParentType.POSITION
+
+    return PlacedOrder(
+        id=str(tracked.orderId),
+        symbol=symbol,
+        type=order_type,
+        side=side,
+        qty=qty if qty > 0 else 1,  # Ensure positive qty
+        status=status,
+        limitPrice=limit_price,
+        stopPrice=stop_price,
+        takeProfit=take_profit,
+        stopLoss=stop_loss,
+        guaranteedStop=None,  # Not supported by TWS
+        trailingStopPips=trailing_stop_pips,
+        stopType=stop_type,
+        filledQty=filled_qty if filled_qty > 0 else None,
+        avgPrice=avg_price,
+        updateTime=None,  # Could add timestamp from last fill
+        parentId=parent_id,
+        parentType=parent_type,
+    )
+
+
+# UNSET_DOUBLE sentinel from ibapi (~1.7976931348623157e+308)
+_UNSET_DOUBLE = 1.7976931348623157e308
+
+
+def _parse_margin_value(value: str) -> float | None:
+    """Parse TWS margin string to float.
+
+    TWS returns margin values as strings (e.g., "1234.56" or empty string).
+
+    Args:
+        value: Margin string from OrderState
+
+    Returns:
+        Float value or None if empty/invalid
+    """
+    if not value or not value.strip():
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_currency(value: float | None, currency: str = "USD") -> str:
+    """Format currency value for display.
+
+    Args:
+        value: Numeric value
+        currency: Currency code
+
+    Returns:
+        Formatted string (e.g., "$1,234.56 USD")
+    """
+    if value is None:
+        return "N/A"
+    return f"${value:,.2f} {currency}"
+
+
+def _is_valid_commission(value: float) -> bool:
+    """Check if commission value is valid (not UNSET_DOUBLE sentinel)."""
+    return value < _UNSET_DOUBLE / 2  # Safe comparison for sentinel
+
+
+def order_state_to_preview_result(
+    order_state: OrderState,
+    preorder: PreOrder,
+    confirm_id: str,
+) -> OrderPreviewResult:
+    """Convert TWS OrderState (whatIf=True response) to domain OrderPreviewResult.
+
+    Extracts margin and commission data from OrderState returned by TWS
+    when order.whatIf=True is set.
+
+    Args:
+        order_state: TWS OrderState object with margin/commission fields
+        preorder: Original PreOrder for order details display
+        confirm_id: UUID for order confirmation
+
+    Returns:
+        Domain OrderPreviewResult with sections for Order Details,
+        Margin Requirements, and Commission/Fees
+    """
+    sections: list[OrderPreviewSection] = []
+
+    # --- Section 1: Order Details ---
+    order_type_map = {
+        OrderType.MARKET: "Market",
+        OrderType.LIMIT: "Limit",
+        OrderType.STOP: "Stop",
+        OrderType.TRAIL: "Trailing Stop",
+    }
+
+    order_details_rows = [
+        OrderPreviewSectionRow(title="Symbol", value=preorder.symbol),
+        OrderPreviewSectionRow(
+            title="Side", value="Buy" if preorder.side == Side.BUY else "Sell"
+        ),
+        OrderPreviewSectionRow(title="Quantity", value=f"{preorder.qty:.2f}"),
+        OrderPreviewSectionRow(
+            title="Order Type", value=order_type_map.get(preorder.type, "Unknown")
+        ),
+    ]
+
+    if preorder.limitPrice is not None:
+        order_details_rows.append(
+            OrderPreviewSectionRow(
+                title="Limit Price", value=f"${preorder.limitPrice:.2f}"
+            )
+        )
+    if preorder.stopPrice is not None:
+        order_details_rows.append(
+            OrderPreviewSectionRow(
+                title="Stop Price", value=f"${preorder.stopPrice:.2f}"
+            )
+        )
+
+    sections.append(
+        OrderPreviewSection(header="Order Details", rows=order_details_rows)
+    )
+
+    # --- Section 2: Margin Requirements ---
+    margin_currency = order_state.marginCurrency or "USD"
+    margin_rows: list[OrderPreviewSectionRow] = []
+
+    # Initial margin change (additional margin required for this order)
+    init_margin_change = _parse_margin_value(order_state.initMarginChange)
+    if init_margin_change is not None:
+        margin_rows.append(
+            OrderPreviewSectionRow(
+                title="Initial Margin Required",
+                value=_format_currency(init_margin_change, margin_currency),
+            )
+        )
+
+    # Maintenance margin change
+    maint_margin_change = _parse_margin_value(order_state.maintMarginChange)
+    if maint_margin_change is not None:
+        margin_rows.append(
+            OrderPreviewSectionRow(
+                title="Maintenance Margin",
+                value=_format_currency(maint_margin_change, margin_currency),
+            )
+        )
+
+    # Equity with loan change
+    equity_change = _parse_margin_value(order_state.equityWithLoanChange)
+    if equity_change is not None:
+        margin_rows.append(
+            OrderPreviewSectionRow(
+                title="Equity Impact",
+                value=_format_currency(equity_change, margin_currency),
+            )
+        )
+
+    # Post-order margin state
+    init_margin_after = _parse_margin_value(order_state.initMarginAfter)
+    if init_margin_after is not None:
+        margin_rows.append(
+            OrderPreviewSectionRow(
+                title="Initial Margin (After)",
+                value=_format_currency(init_margin_after, margin_currency),
+            )
+        )
+
+    if margin_rows:
+        sections.append(
+            OrderPreviewSection(header="Margin Requirements", rows=margin_rows)
+        )
+
+    # --- Section 3: Commission & Fees ---
+    comm_currency = order_state.commissionAndFeesCurrency or "USD"
+    fee_rows: list[OrderPreviewSectionRow] = []
+
+    # Commission (may have min/max range)
+    commission = order_state.commissionAndFees
+    min_comm = order_state.minCommissionAndFees
+    max_comm = order_state.maxCommissionAndFees
+
+    if _is_valid_commission(commission):
+        fee_rows.append(
+            OrderPreviewSectionRow(
+                title="Commission",
+                value=_format_currency(commission, comm_currency),
+            )
+        )
+    elif _is_valid_commission(min_comm) and _is_valid_commission(max_comm):
+        # Show range if exact commission unknown
+        fee_rows.append(
+            OrderPreviewSectionRow(
+                title="Commission (Est.)",
+                value=f"${min_comm:,.2f} - ${max_comm:,.2f} {comm_currency}",
+            )
+        )
+
+    if fee_rows:
+        sections.append(OrderPreviewSection(header="Commission & Fees", rows=fee_rows))
+
+    # --- Section 4: Risk Management (brackets from PreOrder) ---
+    if preorder.takeProfit or preorder.stopLoss or preorder.trailingStopPips:
+        bracket_rows: list[OrderPreviewSectionRow] = []
+
+        if preorder.takeProfit is not None:
+            bracket_rows.append(
+                OrderPreviewSectionRow(
+                    title="Take Profit", value=f"${preorder.takeProfit:.2f}"
+                )
+            )
+
+        if preorder.stopLoss is not None:
+            bracket_rows.append(
+                OrderPreviewSectionRow(
+                    title="Stop Loss", value=f"${preorder.stopLoss:.2f}"
+                )
+            )
+
+        if preorder.trailingStopPips is not None:
+            bracket_rows.append(
+                OrderPreviewSectionRow(
+                    title="Trailing Stop", value=f"{preorder.trailingStopPips:.1f} pips"
+                )
+            )
+
+        if bracket_rows:
+            sections.append(
+                OrderPreviewSection(header="Risk Management", rows=bracket_rows)
+            )
+
+    # --- Warnings and Errors ---
+    warnings: list[str] = []
+    errors: list[str] = []
+
+    # TWS warning text
+    if order_state.warningText:
+        warnings.append(order_state.warningText)
+
+    # TWS reject reason (would indicate preview failure)
+    if order_state.rejectReason:
+        errors.append(order_state.rejectReason)
+
+    # Market order warning
+    if preorder.type == OrderType.MARKET:
+        warnings.append("Market orders execute immediately at current market price")
+
+    return OrderPreviewResult(
+        sections=sections,
+        confirmId=confirm_id,
+        warnings=warnings if warnings else None,
+        errors=errors if errors else None,
+    )
+
+
 __all__ = [
     "SEC_TYPE_MAP",
     "DEFAULT_SUPPORTED_RESOLUTIONS",
     "parse_tws_bar_date",
-    "contract_description_to_search_result",
     "contract_details_to_symbol_info",
     "tws_bar_to_domain_bar",
-    "tws_rt_bar_to_domain_bar",
     "tws_ticks_to_bar",
     "tws_ticks_to_quote_data",
     "parse_ticker",
-    "build_contract",
+    "build_best_contract",
     "map_resolution_to_tws_bar_size",
     "calculate_tws_duration",
+    "is_trading_session_closed",
+    "normalize_timezone",
+    # Bracket OCA utilities
+    "ORDER_BRACKET_PATTERN",
+    # Order mappers
+    "BracketContext",
+    "ORDER_TYPE_TO_TWS",
+    "TWS_TO_ORDER_TYPE",
+    "SIDE_TO_TWS_ACTION",
+    "TWS_ACTION_TO_SIDE",
+    "brackets_to_tws",
+    "preorder_to_tws",
+    "tracked_order_to_placed_order",
+    "order_state_to_preview_result",
 ]

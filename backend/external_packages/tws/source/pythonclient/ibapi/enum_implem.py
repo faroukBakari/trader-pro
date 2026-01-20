@@ -3,7 +3,6 @@ Copyright (C) 2019 Interactive Brokers LLC. All rights reserved. This code is su
  and conditions of the IB API Non-Commercial License or the IB API Commercial License, as applicable.
 """
 
-
 """ 
     Simple enum implementation
 """
@@ -16,5 +15,7 @@ class Enum:
             setattr(self, name, idx)
             self.idx2name[idx] = name
 
-    def toStr(self, idx):
+    def toStr(self, idx: int | None) -> str:
+        if idx is None:
+            return "NOTFOUND"
         return self.idx2name.get(idx, "NOTFOUND")

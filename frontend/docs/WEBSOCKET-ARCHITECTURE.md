@@ -59,6 +59,43 @@ class DatafeedService {
 }
 ```
 
+**Services Delegate Error Handling** ⭐
+
+Services create error handlers that throw `WebSocketError` to propagate to the global error handler. Services never handle toasts directly - that's the global error handler's responsibility.
+
+```typescript
+// ✅ Good - Service delegates to global handler
+private handleSubscriptionError(
+  subscriptionName: string,
+  error: SubscriptionError
+): void {
+  throw WebSocketError.fromSubscription(error, { subscriptionName })
+}
+
+// Use in subscription
+await wsAdapter.orders.subscribe(
+  'orders',
+  params,
+  (data) => handleData(data),
+  (error) => this.handleSubscriptionError('Orders', error)  // ← Throw, don't log
+)
+
+// ❌ Bad - Don't handle notifications in services
+private handleSubscriptionError(error: SubscriptionError): void {
+  console.error('Error:', error)  // Only logging doesn't help user
+  showToast(error.message)        // Service shouldn't manage toasts
+}
+```
+
+**Key Points:**
+
+- **Factory Pattern**: Use `WebSocketError.fromSubscription(error, context)` for conversion
+- **Context Enrichment**: Add `subscriptionName` to error context for better error messages
+- **Centralized Display**: Global error handler (`errorService`) shows toasts
+- **Example**: [brokerTerminalService.ts#L674-L680](../../src/services/brokerTerminalService.ts#L674-L680)
+
+**Related**: See [ERROR-MANAGEMENT.md#error-handling-philosophy](./ERROR-MANAGEMENT.md#error-handling-philosophy) for complete error handling architecture.
+
 ### WebSocket Authentication
 
 WebSocket connections are **automatically authenticated** using cookies. No manual token management is required in the frontend.
@@ -1434,33 +1471,67 @@ await wsAdapter.positions.subscribe('positions', { accountId: 'TEST-001' }, (pos
 
 ### Service Integration Example
 
+Services implement error handlers that convert backend subscription errors to frontend error classes and throw them to the global handler:
+
 ```typescript
 // brokerTerminalService.ts
 private handleSubscriptionError(
   subscriptionName: string,
   error: SubscriptionError
 ): void {
-  console.error(`[BrokerTerminalService] ${subscriptionName} subscription error:`, error)
-
-  const errorMessage = error.error.message
-  const isRecoverable = error.recoverable ?? false
-
-  // Show notification to user
-  this._hostAdapter.showNotification(
-    isRecoverable ? `${subscriptionName} Warning` : `${subscriptionName} Error`,
-    errorMessage,
-    NotificationType.Error
-  )
+  throw WebSocketError.fromSubscription(error, { subscriptionName })
 }
 
 // Usage in setupWebSocketHandlers()
-await this._wsAdapter.orders.subscribe(
-  'orders',
-  { accountId: this.accountId },
-  (order) => this._hostAdapter.orderUpdate(order),
-  (error) => this.handleSubscriptionError('Orders', error)  // ← Error handler
-)
+private async setupWebSocketHandlers(): Promise<(void | undefined)[]> {
+  return Promise.all([
+    this._wsAdapter.orders.subscribe(
+      'orders',
+      { accountId: this.accountId },
+      (order: PlacedOrder) => {
+        // Handle order update
+        this._hostAdapter.orderUpdate(order)
+      },
+      (error) => this.handleSubscriptionError('Orders', error)  // ← Error callback
+    ),
+
+    this._wsAdapter.positions.subscribe(
+      'positions',
+      { accountId: this.accountId },
+      (position: Position) => {
+        // Handle position update
+        this._hostAdapter.positionUpdate(position)
+      },
+      (error) => this.handleSubscriptionError('Positions', error)  // ← Error callback
+    ),
+  ])
+}
 ```
+
+**Error Propagation:**
+
+```
+Backend error → WebSocket message → Subscription callback
+    ↓
+handleSubscriptionError('Orders', error)
+    ↓
+throw WebSocketError.fromSubscription(error, { subscriptionName: 'Orders' })
+    ↓
+Global error handler (errorService.handle)
+    ↓
+Toast notification displayed ✓
+```
+
+**Why Throw Instead of Log?**
+
+- ✅ **Centralized Handling**: Global error handler manages all toast display
+- ✅ **Context Enrichment**: `subscriptionName` added to error for better messages
+- ✅ **Deduplication**: Global handler prevents duplicate toasts
+- ✅ **Consistent UX**: All errors shown to user via same mechanism
+
+**Real Implementation**: [brokerTerminalService.ts#L674-L680](../../src/services/brokerTerminalService.ts#L674-L680) (error handler), [brokerTerminalService.ts#L689-L706](../../src/services/brokerTerminalService.ts#L689-L706) (subscription with error callback)
+
+**Related**: See [ERROR-MANAGEMENT.md#websocketerror](./ERROR-MANAGEMENT.md#websocketerror) for error class details
 
 ### Global Error Handler
 
@@ -1496,6 +1567,46 @@ protected routeErrorMessage(errorPayload: SubscriptionError): void {
     this.globalErrorHandler(errorPayload)
   }
 }
+```
+
+### Missing Subscription Errors
+
+**Added**: January 16, 2026  
+**Related**: Test updates in `frontend/src/plugins/__tests__/wsClientBase.spec.ts`
+
+When the WebSocket client receives an update message (`.update`) for a topic that has no active subscription, it **throws an Error** rather than logging a warning. This is a deliberate design decision reflecting that missing subscriptions indicate a serious state inconsistency between client and server.
+
+```typescript
+// In routeUpdateMessage()
+const subscription = this.subscriptions.get(data.topic)
+if (!subscription || !subscription.confirmed) {
+  throw new Error(`No active subscription found for topic: ${data.topic}`)
+}
+```
+
+**Rationale:**
+
+- **State Consistency**: Update messages should only arrive for subscriptions the client explicitly created
+- **Fail Fast**: Silent warnings hide bugs; throwing forces immediate investigation
+- **Testing**: Makes state inconsistencies immediately detectable in tests
+
+**Error Flow:**
+
+```
+Backend sends update → routeUpdateMessage() → No subscription found
+    ↓
+throw Error("No active subscription...")
+    ↓
+window.onunhandledrejection (if uncaught)
+    ↓
+errorService.handle() → Toast notification
+```
+
+**Prevention:**
+
+- Ensure proper subscription lifecycle management (subscribe before expecting updates)
+- Clean up subscriptions via `unsubscribe()` when no longer needed
+- Use `subscription.confirmed` checks before assuming updates will arrive
 ```
 
 ### Backend Integration
@@ -1541,10 +1652,16 @@ See [Frontend Error Management](./ERROR-MANAGEMENT.md) for error class hierarchy
 
 ---
 
-**Version**: 3.3.0 (Global Error Handler Integration)  
-**Date**: December 19, 2025  
+**Version**: 3.4.0 (Missing Subscription Error Handling)  
+**Date**: January 16, 2026  
 **Status**: ✅ Production Ready  
 **Maintainers**: Development Team
+
+**Version History:**
+
+- 3.4.0: Missing Subscription Errors (throw instead of warn, added January 2026)
+- 3.3.0: Global Error Handler Integration (added December 2025)
+- 3.2.0: Subscription Error Handling (added December 2025)
 
 **Note**: This document consolidates the previous separate documents:
 

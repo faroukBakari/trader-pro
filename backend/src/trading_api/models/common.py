@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any, Generic, Literal, Optional, Protocol, TypeVar
 
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
 
 
 class ExceptionLike(Protocol):
@@ -160,8 +161,8 @@ __all__ = [
 # Provider/Capability System Models
 # ==============================================================================
 
-# Capability name for auth, datafeed (future: "broker", etc.)
-CapabilityName = Literal["auth", "datafeed"]
+# Capability name for auth, broker, datafeed
+CapabilityName = Literal["auth", "broker", "datafeed"]
 
 
 @dataclass(frozen=True)
@@ -213,7 +214,7 @@ class CapabilitySpec:
         return f"{self.name}:{self.version}" if self.version else self.name
 
 
-class ProviderConfig(BaseModel):
+class ProviderConfig(BaseSettings):
     """Base configuration for all providers.
 
     [EXTENSIBLE]: Each provider subclasses to add specific config fields.

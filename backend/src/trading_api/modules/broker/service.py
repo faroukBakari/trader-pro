@@ -1,43 +1,25 @@
 """
-Broker service implementation for Trading Terminal
+Broker service - BFF layer for broker operations.
 
-This module provides mock broker functionality for development:
-- Order management (place, modify, cancel)
-- Position tracking
-- Execution simulation
-- Account information
-- FIFO event pipes for real-time updates
+This service acts as a Backend-For-Frontend (BFF) layer that:
+- Translates WebSocket topics to provider subscriptions
+- Delegates all business logic to BrokerCapability provider
+- Handles error classification (recoverable vs non-recoverable)
 
-Event Pipes:
-    The service includes asyncio.Queue instances for each business object type,
-    enabling event-driven architecture for broadcasting updates to WebSocket clients
-    or other consumers. These FIFO pipes ensure ordered delivery of updates:
-
-    - bars_queue: Market bar/OHLC updates
-    - quotes_queue: Real-time quote updates
-    - orders_queue: Order status changes
-    - positions_queue: Position updates
-    - executions_queue: Trade execution events
-    - equity_queue: Account equity/balance updates
-    - broker_connection_queue: Broker connection status changes
-
-Note: This is a mock implementation. In production, this would integrate
-with a real broker API.
+Pattern mirrors DatafeedService exactly.
 """
 
-import asyncio
+import json
 import logging
-import random
 import time
-import uuid
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+from trading_api.capabilities.broker import BrokerCapability
 from trading_api.models.broker import (
     AccountMetainfo,
     Brackets,
     BrokerConnectionStatus,
-    EquityData,
     Execution,
     LeverageInfo,
     LeverageInfoParams,
@@ -45,18 +27,13 @@ from trading_api.models.broker import (
     LeverageSetParams,
     LeverageSetResult,
     OrderPreviewResult,
-    OrderPreviewSection,
-    OrderPreviewSectionRow,
-    OrderStatus,
-    OrderType,
     PlacedOrder,
     PlaceOrderResult,
     Position,
     PreOrder,
-    Side,
 )
 from trading_api.models.common import CapabilitySpec
-from trading_api.models.exceptions import ServiceException
+from trading_api.models.exceptions import ServiceException, TradingApiException
 from trading_api.shared.ws.ws_router import (
     ProviderUpdateCallback,
     TopicErrorCallback,
@@ -66,715 +43,231 @@ from trading_api.shared.ws.ws_router import (
 logger = logging.getLogger(__name__)
 
 
+# ============================================================================
+# Recoverable Error Configuration
+# ============================================================================
+# Default behavior: ALL errors are non-recoverable (connection closes)
+# Only exceptions in this set will keep the connection open and broadcast
+# a SubscriptionError message instead.
+
+_RECOVERABLE_ERROR_CODES: frozenset[str] = frozenset(
+    {
+        "PROVIDER_BROKER_TIMEOUT",
+        "PROVIDER_BROKER_CONNECTION_LOST",
+        "PROVIDER_BROKER_RATE_LIMIT",
+    }
+)
+
+_DEFAULT_RETRY_AFTER_MS = 5000
+
+
 class BrokerService(WsRouteService):
     """
-    Mock broker service for development
+    BFF layer for broker operations.
 
-    Provides broker operations and maintains FIFO event pipes for real-time updates.
+    Delegates all business logic to BrokerCapability provider.
+    Handles WebSocket topic routing and error classification.
 
-    Attributes:
-        _orders: Dictionary of active orders keyed by order ID
-        _positions: Dictionary of open positions keyed by position ID
-        _executions: List of all trade executions
-        _order_counter: Counter for generating unique order IDs
-        _account_id: Demo account identifier
-        _account_name: Demo account display name
-        _leverage_settings: Per-symbol leverage settings
-
-    Event Pipes (FIFO Queues):
-        _bars_queue: Queue[Bar] - Market bar updates
-        _quotes_queue: Queue[QuoteData] - Real-time quote updates
-        _orders_queue: Queue[PlacedOrder] - Order status changes
-        _positions_queue: Queue[Position] - Position updates
-        _executions_queue: Queue[Execution] - Trade execution events
-        _equity_queue: Queue[EquityData] - Account equity/balance updates
-        _broker_connection_queue: Queue[BrokerConnectionStatus] - Connection status changes
-
-    The event pipes enable decoupled, async broadcasting of business object updates
-    to WebSocket clients, background tasks, or other consumers. Updates are not yet
-    automatically enqueued; integration will be added in future work.
-
-    Single execution loop → triggers cascade of updates → callbacks broadcast changes:
-
-        WebSocket Subscriptions → create_topic() → Register callbacks
-                    ↓
-        Start _execution_simulator() (if first subscription)
-                    ↓
-        ┌───────────────────────────┐
-        │  Execution Simulator Loop │
-        │  (1-2 second intervals)   │
-        └───────────────────────────┘
-                    ↓
-        Pick random WORKING order
-                    ↓
-        _simulate_execution(order_id)
-                    ↓
-        ┌───────────────────────────┐
-        │   Execution Created       │ → callbacks["executions"](execution)
-        └───────────────────────────┘
-                    ↓
-        ┌───────────────────────────┐
-        │   Order Status = FILLED   │ → callbacks["orders"](order)
-        └───────────────────────────┘
-                    ↓
-        _update_equity(execution)
-                    ↓
-        ┌───────────────────────────┐
-        │   Equity Updated          │ → callbacks["equity"](equity)
-        └───────────────────────────┘
-                    ↓
-        _update_position(execution)
-                    ↓
-        ┌───────────────────────────┐
-        │   Position Updated        │ → callbacks["positions"](position)
-        └───────────────────────────┘
-
+    Pattern matches DatafeedService exactly:
+    - Capability declaration via capabilities() classmethod
+    - Cached provider access via broker_provider property
+    - Topic → subscription tracking via _topic_to_subscription_id
+    - Error wrapping with recoverable/retry_after logic
     """
 
     @classmethod
     def capabilities(cls) -> list[CapabilitySpec]:
         """Return required capabilities for broker service.
 
-        Broker service doesn't require any capabilities (no auth/external providers).
+        Requires broker capability from provider (e.g., FakeBrokerProvider).
 
         Returns:
-            Empty list - no capabilities required
+            List with broker capability requirement
         """
-        return []
+        return [CapabilitySpec(name="broker")]
+
+    @property
+    def broker_provider(self) -> BrokerCapability:
+        """Cached O(1) lookup - type-safe provider access.
+
+        Returns:
+            BrokerCapability provider instance
+
+        Raises:
+            RuntimeError: If broker provider not available
+        """
+        provider = self.get_capability_provider("broker")  # , "fakebroker"
+        # Type assertion: provider must implement BrokerCapability (validated at init)
+        assert isinstance(provider, BrokerCapability)
+        return provider
 
     def __init__(
         self,
         module_dir: Path,
         *,  # Force keyword-only arguments
-        execution_delay: float | None = None,
         providers: list | None = None,
     ) -> None:
         """Initialize broker service.
 
         Args:
             module_dir: Path to the module directory
-            execution_delay: Delay between executions in seconds (default: None)
-            providers: Provider instances for capabilities (unused, for interface compatibility)
+            providers: Provider instances for capabilities
         """
         super().__init__(module_dir, providers=providers)
-        self._orders: Dict[str, PlacedOrder] = {}
-        self._positions: Dict[str, Position] = {}
-        self._executions: List[Execution] = []
-        self._order_counter = 1
-        self._account_id = "DEMO-ACCOUNT"
-        self._account_name = "Demo Trading Account"
-        self._leverage_settings: Dict[str, float] = {}
-        self.unrealizedPL: Dict[str, float] = {}
-        self.accounting: EquityData = EquityData(
-            equity=100000.0,
-            balance=100000.0,
-            unrealizedPL=0.0,
-            realizedPL=0.0,
-        )
 
-        # WebSocket callback registry (one per topic type)
-        self._update_callbacks: dict[str, Callable[[Any], Awaitable[None]]] = {}
+        # Track provider subscription IDs for each topic (for cleanup)
+        self._topic_to_subscription_id: dict[str, str] = {}
 
-        # Single execution simulation task
-        self._execution_simulator_task: Optional[asyncio.Task] = None
+    # ================================ GETTERS (delegate to provider) =========
 
-        # Execution simulator configuration
-        self._execution_delay = execution_delay
+    async def get_orders(self, user_id: str) -> List[PlacedOrder]:
+        """Get all orders for a user.
 
-    # ================================ GETTERS =================================#
-
-    async def get_orders(self) -> List[PlacedOrder]:
+        Args:
+            user_id: User ID for scoping (unused for now)
         """
-        Get all orders
+        return await self.broker_provider.get_orders()
 
-        Returns:
-            List[PlacedOrder]: List of all orders
-        """
-        return list(self._orders.values())
+    async def get_positions(self, user_id: str) -> List[Position]:
+        """Get all positions for a user.
 
-    async def get_positions(self) -> List[Position]:
+        Args:
+            user_id: User ID for scoping (unused for now)
         """
-        Get all positions
+        return await self.broker_provider.get_positions()
 
-        Returns:
-            List[Position]: List of all open positions
-        """
-        return list(self._positions.values())
-
-    async def get_executions(self, symbol: str) -> List[Execution]:
-        """
-        Get execution history for a specific symbol
+    async def get_executions(self, symbol: str, user_id: str) -> List[Execution]:
+        """Get execution history for a symbol.
 
         Args:
             symbol: Symbol to get executions for
-
-        Returns:
-            List[Execution]: List of trade executions for the specified symbol
+            user_id: User ID for scoping (unused for now)
         """
-        return [e for e in self._executions if e.symbol == symbol]
+        return await self.broker_provider.get_executions(symbol)
 
-    async def get_account_info(self) -> AccountMetainfo:
-        """
-        Get account metadata
+    async def get_account_info(self, user_id: str) -> AccountMetainfo:
+        """Get account metadata for a user.
 
-        Returns:
-            AccountMetainfo: Account metadata including ID and name
+        Args:
+            user_id: User ID for scoping (unused for now)
         """
-        return AccountMetainfo(id=self._account_id, name=self._account_name)
+        return await self.broker_provider.get_account_info()
 
-    async def preview_order(self, order: PreOrder) -> OrderPreviewResult:
-        """
-        Preview order costs and requirements without placing it
+    async def preview_order(self, order: PreOrder, user_id: str) -> OrderPreviewResult:
+        """Preview order costs and requirements.
 
         Args:
             order: Order to preview
-
-        Returns:
-            OrderPreviewResult: Estimated costs, fees, and requirements
+            user_id: User ID for scoping (unused for now)
         """
-        # Calculate order value and costs
-        # For limit/stop orders, use specified price; for market, use last known price
-        estimated_price = order.limitPrice or order.stopPrice or 100.0  # Mock price
-        order_value = order.qty * estimated_price
-
-        # Calculate mock fees (0.1% commission)
-        commission = order_value * 0.001
-
-        # Calculate margin requirement (assuming 2:1 leverage = 50% margin)
-        margin_required = order_value * 0.5
-
-        # Build preview sections
-        sections = []
-
-        # Section 1: Order Details
-        order_type_map = {
-            OrderType.MARKET: "Market",
-            OrderType.LIMIT: "Limit",
-            OrderType.STOP: "Stop",
-            OrderType.STOP_LIMIT: "Stop Limit",
-        }
-
-        order_details_rows = [
-            OrderPreviewSectionRow(title="Symbol", value=order.symbol),
-            OrderPreviewSectionRow(
-                title="Side", value="Buy" if order.side == Side.BUY else "Sell"
-            ),
-            OrderPreviewSectionRow(title="Quantity", value=f"{order.qty:.2f}"),
-            OrderPreviewSectionRow(
-                title="Order Type", value=order_type_map.get(order.type, "Unknown")
-            ),
-        ]
-
-        if order.limitPrice:
-            order_details_rows.append(
-                OrderPreviewSectionRow(
-                    title="Limit Price", value=f"${order.limitPrice:.2f}"
-                )
-            )
-        if order.stopPrice:
-            order_details_rows.append(
-                OrderPreviewSectionRow(
-                    title="Stop Price", value=f"${order.stopPrice:.2f}"
-                )
-            )
-
-        sections.append(
-            OrderPreviewSection(header="Order Details", rows=order_details_rows)
-        )
-
-        # Section 2: Cost Analysis
-        cost_section = OrderPreviewSection(
-            header="Cost Analysis",
-            rows=[
-                OrderPreviewSectionRow(
-                    title="Estimated Price", value=f"${estimated_price:.2f}"
-                ),
-                OrderPreviewSectionRow(
-                    title="Order Value", value=f"${order_value:.2f}"
-                ),
-                OrderPreviewSectionRow(title="Commission", value=f"${commission:.2f}"),
-                OrderPreviewSectionRow(
-                    title="Margin Required", value=f"${margin_required:.2f}"
-                ),
-                OrderPreviewSectionRow(
-                    title="Total Cost", value=f"${order_value + commission:.2f}"
-                ),
-            ],
-        )
-        sections.append(cost_section)
-
-        # Section 3: Bracket Orders (if applicable)
-        if order.takeProfit or order.stopLoss or order.guaranteedStop:
-            bracket_rows = []
-
-            if order.takeProfit:
-                potential_profit = abs((order.takeProfit - estimated_price) * order.qty)
-                bracket_rows.append(
-                    OrderPreviewSectionRow(
-                        title="Take Profit",
-                        value=f"${order.takeProfit:.2f} (+${potential_profit:.2f})",
-                    )
-                )
-
-            if order.stopLoss:
-                potential_loss = abs((order.stopLoss - estimated_price) * order.qty)
-                bracket_rows.append(
-                    OrderPreviewSectionRow(
-                        title="Stop Loss",
-                        value=f"${order.stopLoss:.2f} (-${potential_loss:.2f})",
-                    )
-                )
-
-            if order.guaranteedStop:
-                bracket_rows.append(
-                    OrderPreviewSectionRow(
-                        title="Guaranteed Stop", value=f"${order.guaranteedStop:.2f}"
-                    )
-                )
-
-            if order.trailingStopPips:
-                bracket_rows.append(
-                    OrderPreviewSectionRow(
-                        title="Trailing Stop",
-                        value=f"{order.trailingStopPips:.1f} pips",
-                    )
-                )
-
-            if bracket_rows:
-                sections.append(
-                    OrderPreviewSection(header="Risk Management", rows=bracket_rows)
-                )
-
-        # Generate unique confirmation ID
-        confirm_id = str(uuid.uuid4())
-
-        # Add warnings/validation
-        warnings: list[str] = []
-        errors: list[str] = []
-
-        # Example validation: check for risky orders
-        if order.type == OrderType.MARKET:
-            warnings.append("Market orders execute immediately at current market price")
-
-        if order.qty > 1000:
-            warnings.append("Large order size may experience slippage")
-
-        return OrderPreviewResult(
-            sections=sections,
-            confirmId=confirm_id,
-            warnings=warnings if warnings else None,
-            errors=errors if errors else None,
-        )
+        return await self.broker_provider.preview_order(order)
 
     async def preview_leverage(
-        self, params: LeverageSetParams
+        self, params: LeverageSetParams, user_id: str
     ) -> LeveragePreviewResult:
-        """
-        Preview leverage changes before applying
+        """Preview leverage changes.
 
         Args:
-            params: Leverage set parameters
-
-        Returns:
-            LeveragePreviewResult: Preview messages (infos, warnings, errors)
+            params: Leverage parameters
+            user_id: User ID for scoping (unused for now)
         """
-        warnings: List[str] = []
-        errors: List[str] = []
-        infos: List[str] = []
+        return await self.broker_provider.preview_leverage(params)
 
-        # Validate range
-        if params.leverage < 1.0:
-            errors.append("Leverage must be at least 1.0")
-        elif params.leverage > 100.0:
-            errors.append("Leverage cannot exceed 100.0")
-        else:
-            # Calculate margin requirement
-            margin_percent = 100.0 / params.leverage
-            infos.append(f"Margin requirement: {margin_percent:.2f}%")
-
-            # Add warnings for high leverage
-            if params.leverage > 50:
-                warnings.append(
-                    f"High leverage ({params.leverage}x) significantly increases risk. "
-                    "You may lose more than your initial investment."
-                )
-            elif params.leverage > 20:
-                warnings.append(
-                    f"Moderate leverage ({params.leverage}x) increases risk. "
-                    "Ensure adequate risk management."
-                )
-
-            # Additional info
-            if params.leverage == 1.0:
-                infos.append("No leverage applied (1:1 ratio)")
-            else:
-                infos.append(
-                    f"With {params.leverage}x leverage, a $1,000 investment "
-                    f"controls ${1000 * params.leverage:.2f} in assets"
-                )
-
-        return LeveragePreviewResult(
-            infos=infos if infos else None,
-            warnings=warnings if warnings else None,
-            errors=errors if errors else None,
-        )
-
-    async def leverage_info(self, params: LeverageInfoParams) -> LeverageInfo:
-        """
-        Get leverage information for symbol
+    async def leverage_info(
+        self, params: LeverageInfoParams, user_id: str
+    ) -> LeverageInfo:
+        """Get leverage information for symbol.
 
         Args:
-            params: Leverage info request parameters
-
-        Returns:
-            LeverageInfo: Leverage settings and constraints
+            params: Leverage info parameters
+            user_id: User ID for scoping (unused for now)
         """
-        # Get current leverage or default
-        current_leverage = self._leverage_settings.get(params.symbol, 10.0)
+        return await self.broker_provider.get_leverage_info(params)
 
-        return LeverageInfo(
-            title=f"Leverage for {params.symbol}",
-            leverage=current_leverage,
-            min=1.0,
-            max=100.0,
-            step=1.0,
-        )
+    # ================================ SETTERS (delegate to provider) =========
 
-    # ================================ SETTERS =================================#
-
-    async def place_order(self, order: PreOrder) -> PlaceOrderResult:
-        """
-        Place a new order
+    async def place_order(
+        self, order: PreOrder, user_id: str, confirm_id: str | None = None
+    ) -> PlaceOrderResult:
+        """Place a new order.
 
         Args:
-            order: Order request from client
-
-        Returns:
-            PlaceOrderResult: Result containing the generated order ID
+            order: Order to place
+            user_id: User ID for scoping (unused for now)
+            confirm_id: Optional confirmation ID from preview_order (for audit trail)
         """
-        order_id = f"ORDER-{self._order_counter}"
-        self._order_counter += 1
+        return await self.broker_provider.place_order(order, confirm_id=confirm_id)
 
-        # Determine limit price: use explicit limitPrice, then seenPrice, then current quotes
-        limit_price = order.limitPrice
-        if limit_price is None:
-            limit_price = order.seenPrice
-        if limit_price is None and order.currentQuotes is not None:
-            limit_price = (
-                order.currentQuotes.ask
-                if order.side == Side.BUY
-                else order.currentQuotes.bid
-            )
-
-        placed_order = PlacedOrder(
-            id=order_id,
-            symbol=order.symbol,
-            type=order.type,
-            side=order.side,
-            qty=order.qty,
-            status=OrderStatus.WORKING,
-            limitPrice=limit_price,
-            stopPrice=order.stopPrice,
-            takeProfit=order.takeProfit,
-            stopLoss=order.stopLoss,
-            guaranteedStop=order.guaranteedStop,
-            trailingStopPips=order.trailingStopPips,
-            stopType=order.stopType,
-            filledQty=0.0,
-            avgPrice=None,
-            updateTime=int(time.time() * 1000),
-        )
-
-        self._orders[order_id] = placed_order
-
-        return PlaceOrderResult(orderId=order_id)
-
-    async def modify_order(self, order_id: str, order: PreOrder) -> None:
-        """
-        Modify an existing order
+    async def modify_order(self, order_id: str, order: PreOrder, user_id: str) -> None:
+        """Modify an existing order.
 
         Args:
-            order_id: ID of the order to modify
+            order_id: ID of order to modify
             order: Updated order details
+            user_id: User ID for scoping (unused for now)
         """
-        existing_order = self._orders.get(order_id)
-        if not existing_order:
-            raise ServiceException(
-                module="broker",
-                code="SERVICE_BROKER_ORDER_NOT_FOUND",
-                message=f"Order {order_id} not found",
-            )
+        await self.broker_provider.modify_order(order_id, order)
 
-        if existing_order.status not in [OrderStatus.WORKING, OrderStatus.PLACING]:
-            raise ServiceException(
-                module="broker",
-                code="SERVICE_BROKER_ORDER_INVALID_STATUS",
-                message=f"Cannot modify order {order_id} with status {existing_order.status}",
-            )
-
-        # Determine limit price: use explicit limitPrice, then seenPrice, then current quotes
-        limit_price = order.limitPrice
-        if limit_price is None:
-            limit_price = order.seenPrice
-        if limit_price is None and order.currentQuotes is not None:
-            limit_price = (
-                order.currentQuotes.ask
-                if order.side == Side.BUY
-                else order.currentQuotes.bid
-            )
-
-        existing_order.qty = order.qty
-        existing_order.limitPrice = limit_price
-        existing_order.stopPrice = order.stopPrice
-        existing_order.takeProfit = order.takeProfit
-        existing_order.stopLoss = order.stopLoss
-        existing_order.guaranteedStop = order.guaranteedStop
-        existing_order.trailingStopPips = order.trailingStopPips
-        existing_order.stopType = order.stopType
-        existing_order.updateTime = int(time.time() * 1000)
-
-    async def cancel_order(self, order_id: str) -> None:
-        """
-        Cancel an order
+    async def cancel_order(self, order_id: str, user_id: str) -> None:
+        """Cancel an order.
 
         Args:
-            order_id: ID of the order to cancel
+            order_id: ID of order to cancel
+            user_id: User ID for scoping (unused for now)
         """
-        order = self._orders.get(order_id)
-        if not order:
-            raise ServiceException(
-                module="broker",
-                code="SERVICE_BROKER_ORDER_NOT_FOUND",
-                message=f"Order {order_id} not found",
-            )
-
-        if order.status not in [
-            OrderStatus.WORKING,
-            OrderStatus.PLACING,
-            OrderStatus.FILLED,
-        ]:
-            raise ServiceException(
-                module="broker",
-                code="SERVICE_BROKER_ORDER_INVALID_STATUS",
-                message=f"Cannot cancel order {order_id} with status {order.status}",
-            )
-
-        order.status = OrderStatus.CANCELED
-        order.updateTime = int(time.time() * 1000)
+        await self.broker_provider.cancel_order(order_id)
 
     async def close_position(
-        self, position_id: str, amount: Optional[float] = None
+        self, position_id: str, user_id: str, amount: Optional[float] = None
     ) -> None:
-        """
-        Close position (full or partial) by creating a closing order
+        """Close position (full or partial).
 
         Args:
-            position_id: ID of the position to close
-            amount: Amount to close (if None, closes entire position)
-
-        Raises:
-            ValueError: If position not found or invalid amount
+            position_id: ID of position to close
+            user_id: User ID for scoping (unused for now)
+            amount: Amount to close (None for full close)
         """
-        position = self._positions.get(position_id)
-        if not position:
-            raise ServiceException(
-                module="broker",
-                code="SERVICE_BROKER_POSITION_NOT_FOUND",
-                message=f"Position {position_id} not found",
-            )
-
-        # Determine quantity to close
-        close_qty = amount if amount is not None else position.qty
-
-        if close_qty <= 0:
-            raise ServiceException(
-                module="broker",
-                code="SERVICE_BROKER_INVALID_AMOUNT",
-                message="Amount must be positive",
-            )
-        if close_qty > position.qty:
-            raise ServiceException(
-                module="broker",
-                code="SERVICE_BROKER_INVALID_AMOUNT",
-                message=f"Amount {close_qty} exceeds position quantity {position.qty}",
-            )
-
-        # Create a closing order (opposite side of the position)
-        closing_side = Side.SELL if position.side == Side.BUY else Side.BUY
-
-        closing_order = PreOrder(
-            symbol=position.symbol,
-            type=OrderType.MARKET,
-            side=closing_side,
-            qty=close_qty,
-            limitPrice=None,
-            stopPrice=None,
-            takeProfit=None,
-            stopLoss=None,
-            guaranteedStop=None,
-            trailingStopPips=None,
-            stopType=None,
-            seenPrice=None,
-            currentQuotes=None,
-        )
-
-        # Place the closing order - execution will be simulated via normal flow
-        await self.place_order(closing_order)
+        await self.broker_provider.close_position(position_id, amount)
 
     async def edit_position_brackets(
         self,
         position_id: str,
         brackets: Brackets,
+        user_id: str,
         custom_fields: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """
-        Update position brackets (stop-loss, take-profit) by creating bracket orders
+        """Update position brackets.
 
         Args:
-            position_id: ID of the position to modify
+            position_id: ID of position to update
             brackets: New bracket values
-            custom_fields: Optional custom fields
-
-        Raises:
-            ValueError: If position not found
+            user_id: User ID for scoping (unused for now)
+            custom_fields: Optional custom fields (ignored)
         """
-        position = self._positions.get(position_id)
-        if not position:
-            raise ServiceException(
-                module="broker",
-                code="SERVICE_BROKER_POSITION_NOT_FOUND",
-                message=f"Position {position_id} not found",
-            )
+        # custom_fields ignored for now (provider doesn't use it)
+        await self.broker_provider.edit_position_brackets(position_id, brackets)
 
-        # Cancel existing bracket orders for this position
-        # Bracket orders are identified by symbol and opposite side
-        opposite_side = Side.SELL if position.side == Side.BUY else Side.BUY
-        for order_id, order in list(self._orders.items()):
-            if (
-                order.symbol == position.symbol
-                and order.side == opposite_side
-                and order.status in [OrderStatus.WORKING, OrderStatus.PLACING]
-                and (order.stopPrice is not None or order.limitPrice is not None)
-            ):
-                order.status = OrderStatus.CANCELED
-                order.updateTime = int(time.time() * 1000)
-
-        # Create new bracket orders based on the brackets parameter
-        # Stop Loss order (market order triggered at stop price)
-        if brackets.stopLoss is not None:
-            stop_loss_order = PreOrder(
-                symbol=position.symbol,
-                type=OrderType.STOP,
-                side=opposite_side,
-                qty=position.qty,
-                limitPrice=None,
-                stopPrice=brackets.stopLoss,
-                takeProfit=None,
-                stopLoss=None,
-                guaranteedStop=None,
-                trailingStopPips=None,
-                stopType=None,
-                seenPrice=None,
-                currentQuotes=None,
-            )
-            await self.place_order(stop_loss_order)
-
-        # Take Profit order (limit order at take profit price)
-        if brackets.takeProfit is not None:
-            take_profit_order = PreOrder(
-                symbol=position.symbol,
-                type=OrderType.LIMIT,
-                side=opposite_side,
-                qty=position.qty,
-                limitPrice=brackets.takeProfit,
-                stopPrice=None,
-                takeProfit=None,
-                stopLoss=None,
-                guaranteedStop=None,
-                trailingStopPips=None,
-                stopType=None,
-                seenPrice=None,
-                currentQuotes=None,
-            )
-            await self.place_order(take_profit_order)
-
-    async def set_leverage(self, params: LeverageSetParams) -> LeverageSetResult:
-        """
-        Set leverage for symbol
+    async def set_leverage(
+        self, params: LeverageSetParams, user_id: str
+    ) -> LeverageSetResult:
+        """Set leverage for symbol.
 
         Args:
-            params: Leverage set parameters
-
-        Returns:
-            LeverageSetResult: Confirmed leverage value
-
-        Raises:
-            ServiceException: If leverage value is out of range
+            params: Leverage parameters
+            user_id: User ID for scoping (unused for now)
         """
-        # Validate leverage range
-        if params.leverage < 1.0:
-            raise ServiceException(
-                module="broker",
-                code="SERVICE_BROKER_INVALID_LEVERAGE",
-                message="Leverage must be at least 1.0",
-            )
-        if params.leverage > 100.0:
-            raise ServiceException(
-                module="broker",
-                code="SERVICE_BROKER_INVALID_LEVERAGE",
-                message="Leverage cannot exceed 100.0",
-            )
-
-        # Store leverage setting
-        self._leverage_settings[params.symbol] = params.leverage
-
-        return LeverageSetResult(leverage=params.leverage)
-
-    def reset(self) -> None:
-        """Reset the broker service to initial state (for testing)"""
-        # Cancel execution simulator
-        if self._execution_simulator_task:
-            self._execution_simulator_task.cancel()
-            self._execution_simulator_task = None
-
-        # Clear all state
-        self._orders = {}
-        self._positions = {}
-        self._executions = []
-        self._order_counter = 1
-        self._account_id = "DEMO-ACCOUNT"
-        self._account_name = "Demo Trading Account"
-        self._leverage_settings = {}
-        self.unrealizedPL = {}
-        self.initial_balance = 100000.0
-        self.accounting = EquityData(
-            equity=0.0,
-            balance=100000.0,
-            unrealizedPL=0.0,
-            realizedPL=0.0,
-        )
-        self._update_callbacks = {}
-
-    async def execute_all_working_orders(self) -> None:
-        """Execute all working orders immediately (for testing purposes)."""
-        working_order_ids = [
-            order_id
-            for order_id, order in self._orders.items()
-            if order.status == OrderStatus.WORKING
-        ]
-
-        for order_id in working_order_ids:
-            await self._simulate_execution(order_id)
+        return await self.broker_provider.set_leverage(params)
 
     # ========================== WEBSOCKET STREAMING ==========================#
 
-    def create_topic(
+    async def create_topic(
         self,
         topic: str,
         topic_update: ProviderUpdateCallback,
         topic_error: TopicErrorCallback,
+        user_id: str,
     ) -> None:
-        """Register callback for topic type and start execution simulator if needed.
+        """Parse topic and create appropriate provider subscription.
 
         Topic formats:
             - orders:{"accountId":"DEMO-ACCOUNT"}
@@ -785,367 +278,122 @@ class BrokerService(WsRouteService):
 
         Args:
             topic: Topic string in format "topic_type:{json_params}"
-            topic_update: Callback to broadcast updates
-            topic_error: Callback to broadcast errors (not used in mock broker)
+            topic_update: Callback to broadcast data updates to subscribers
+            topic_error: Callback to broadcast errors to subscribers.
+            user_id: Authenticated user ID for user-scoped data access (unused for now).
 
         Raises:
-            ServiceException: If topic format is invalid
+            ServiceException: If topic format is invalid or unknown
         """
-        # Note: topic_error is accepted but not used in mock broker implementation
-        # Real broker integration would forward provider errors through this callback
-        _ = topic_error  # Acknowledge parameter (unused in mock)
+        if topic in self._topic_to_subscription_id:
+            raise ServiceException(
+                code="SERVICE_BROKER_TOPIC_EXISTS",
+                message=f"Topic already exists: {topic}",
+                module="broker",
+            )
 
         if ":" not in topic:
             raise ServiceException(
-                module="broker",
                 code="SERVICE_BROKER_INVALID_TOPIC_FORMAT",
                 message=f"Invalid topic format: {topic}",
+                module="broker",
             )
 
-        topic_type, _ = topic.split(":", 1)
+        topic_type, params_json = topic.split(":", 1)
 
-        # we are ignoring accountId param for now. Note that if accountId changes on the frontend,
-        # this topic update callback would have no listener due to topic filtering on FastWS side.
-        # Register callback for this topic type (single callback per type for now)
+        # Wrap error callback to compute recoverable/retry at service level
+        async def on_provider_error(exc: TradingApiException) -> None:
+            """Handle provider errors - determine recoverable status and forward."""
+            recoverable = self._is_error_recoverable(exc)
+            if not recoverable:
+                logger.error(f"Non-recoverable error on topic {topic}: {exc!r}")
+                self._topic_to_subscription_id.pop(topic, None)
 
-        # Temperary glut - will be fixed with broker provider / broker capabilities
-        if topic_type not in self._update_callbacks:
-            logger.info(f"Registering callback for topic type: {topic_type}")
-            self._update_callbacks[topic_type] = topic_update
+            retry_after_ms = _DEFAULT_RETRY_AFTER_MS if recoverable else None
+            await topic_error(exc, recoverable, retry_after_ms)
 
-            # Send initial connection status if broker-connection topic
-            if topic_type == "broker-connection":
-                status = BrokerConnectionStatus(
-                    status=1,  # 1 = Connected
-                    message="Connected to demo broker",
-                    disconnectType=None,
-                    timestamp=int(time.time() * 1000),
-                )
-                asyncio.create_task(topic_update(status))  # type: ignore[arg-type]
+        logger.info(f"Creating topic: {topic}")
 
-        # Start execution simulator if not already running and we have orders topic
-        if self._execution_simulator_task is None and len(self._update_callbacks) > 0:
-            logger.info("Starting execution simulator task")
-            self._execution_simulator_task = asyncio.create_task(
-                self._execution_simulator()
+        if topic_type == "orders":
+            subscription_id = await self.broker_provider.subscribe_orders(
+                callback=topic_update,
+                on_error=on_provider_error,
             )
+            self._topic_to_subscription_id[topic] = subscription_id
+
+        elif topic_type == "positions":
+            subscription_id = await self.broker_provider.subscribe_positions(
+                callback=topic_update,
+                on_error=on_provider_error,
+            )
+            self._topic_to_subscription_id[topic] = subscription_id
+
+        elif topic_type == "executions":
+            params_dict = json.loads(params_json)
+            symbol = params_dict.get("symbol", "")  # Empty = all symbols
+
+            subscription_id = await self.broker_provider.subscribe_executions(
+                symbol=symbol,
+                callback=topic_update,
+                on_error=on_provider_error,
+            )
+            self._topic_to_subscription_id[topic] = subscription_id
+
+        elif topic_type == "equity":
+            subscription_id = await self.broker_provider.subscribe_equity(
+                callback=topic_update,
+                on_error=on_provider_error,
+            )
+            self._topic_to_subscription_id[topic] = subscription_id
+
+        elif topic_type == "broker-connection":
+            # Special case: broker-connection sends immediate status
+            # No provider subscription needed - just send connected status
+            import asyncio
+
+            status = BrokerConnectionStatus(
+                status=1,  # 1 = Connected
+                message="Connected to broker",
+                disconnectType=None,
+                timestamp=int(time.time() * 1000),
+            )
+            asyncio.create_task(topic_update(status))
+            # Use placeholder subscription ID for broker-connection
+            self._topic_to_subscription_id[topic] = "broker-connection-placeholder"
+
+        else:
+            raise ServiceException(
+                code="SERVICE_BROKER_UNKNOWN_TOPIC_TYPE",
+                message=f"Unknown topic type: {topic_type}",
+                module="broker",
+            )
+
+    def _is_error_recoverable(self, exc: TradingApiException) -> bool:
+        """Determine if error is transient and streaming should continue.
+
+        Default: ALL errors are non-recoverable (strict approach).
+        Only errors in _RECOVERABLE_ERROR_CODES will keep the connection open.
+
+        Args:
+            exc: The exception to check
+
+        Returns:
+            True if error is recoverable, False otherwise
+        """
+        return exc.code in _RECOVERABLE_ERROR_CODES
 
     def remove_topic(self, topic: str) -> None:
-        """Unregister callback for topic type and stop simulator if no subscribers.
+        """Remove topic and cleanup provider subscription.
 
         Args:
             topic: Topic to remove
         """
-        if ":" not in topic:
-            return
+        logger.info(f"Removing topic: {topic}")
 
-        topic_type, _ = topic.split(":", 1)
-
-        # Remove callback for this topic type
-        logger.info(f"Removing callback for topic type: {topic_type}")
-        self._update_callbacks.pop(topic_type, None)
-
-        # Stop execution simulator if no more subscribers
-        if len(self._update_callbacks) == 0 and self._execution_simulator_task:
-            logger.info("Stopping execution simulator task (no subscribers)")
-            self._execution_simulator_task.cancel()
-            self._execution_simulator_task = None
-
-    # ================================ SIMULATION =============================#
-
-    async def _execution_simulator(self) -> None:
-        """
-        Simulate random order executions with 1-2 second intervals.
-
-        This is the ONLY background task. It triggers the execution cascade:
-            1. Pick random WORKING order
-            2. Call _simulate_execution()
-            3. Execution updates trigger all downstream broadcasts
-        """
-        logger.info("Execution simulator started")
-
-        while True:
-            try:
-                # Random delay between executions
-                delay = self._execution_delay or random.uniform(1, 2)
-                await asyncio.sleep(delay)
-
-                # Find all WORKING orders
-                working_orders = [
-                    order_id
-                    for order_id, order in self._orders.items()
-                    if order.status == OrderStatus.WORKING
-                ]
-
-                if working_orders:
-                    # Pick a random order to execute
-                    order_id = random.choice(working_orders)
-                    logger.info(f"Simulating execution for order: {order_id}")
-
-                    # Trigger execution cascade
-                    await self._simulate_execution(order_id)
-                else:
-                    logger.debug("No working orders to execute")
-
-            except asyncio.CancelledError:
-                logger.info("Execution simulator cancelled")
-                break
-            except Exception as e:
-                logger.exception(f"Error in execution simulator: {e}")
-                # Continue running despite errors
-
-    def _get_execution_price(self, order: PlacedOrder) -> float:
-        """
-        Determine execution price based on order type
-
-        Args:
-            order: Order to get execution price for
-
-        Returns:
-            float: Execution price
-        """
-        if order.type == OrderType.MARKET:
-            # TODO: need to inject datafeed service to get current market price
-            return order.limitPrice if order.limitPrice is not None else 100.0
-        elif order.type == OrderType.LIMIT and order.limitPrice is not None:
-            return order.limitPrice
-        elif order.type == OrderType.STOP and order.stopPrice is not None:
-            return order.stopPrice
-        elif order.type == OrderType.STOP_LIMIT:
-            if order.limitPrice is not None:
-                return order.limitPrice
-            elif order.stopPrice is not None:
-                return order.stopPrice
-        return 100.0
-
-    async def _simulate_execution(self, order_id: str) -> None:
-        """
-        Simulate order execution and trigger update cascade.
-
-        Broadcast flow:
-            1. Create execution → broadcast to "executions" subscribers
-            2. Update order status → broadcast to "orders" subscribers
-            3. Update equity → broadcast to "equity" subscribers
-            4. Update position → broadcast to "positions" subscribers
-
-        Args:
-            order_id: ID of the order to execute
-        """
-        await asyncio.sleep(0.2)  # Small delay for realism
-
-        order = self._orders.get(order_id)
-        if not order or order.status != OrderStatus.WORKING:
-            return
-
-        execution_price = self._get_execution_price(order)
-
-        # Create execution object
-        execution = Execution(
-            symbol=order.symbol,
-            price=execution_price,
-            qty=order.qty,
-            side=order.side,
-            time=int(time.time() * 1000),
-        )
-        self._executions.append(execution)
-
-        # 1. Broadcast execution update
-        if "executions" in self._update_callbacks:
-            logger.info(f"Broadcasting execution: {execution.symbol}")
-            await self._update_callbacks["executions"](execution)
-
-        # Update order status
-        order.status = OrderStatus.FILLED
-        order.filledQty = order.qty
-        order.avgPrice = execution_price
-        order.updateTime = execution.time
-
-        # 2. Broadcast order update
-        if "orders" in self._update_callbacks:
-            logger.info(f"Broadcasting order update: {order.id}")
-            await self._update_callbacks["orders"](order)
-
-        # 3. Trigger equity update (which broadcasts)
-        await self._update_equity(execution)
-
-    async def _update_equity(self, execution: Execution) -> None:
-        """
-        Update equity after execution and broadcast changes.
-
-        P/L Calculation Rules:
-        - Long position: P/L = (exit_price - entry_price) * qty
-        - Short position: P/L = (entry_price - exit_price) * qty
-
-        Args:
-            execution: Execution that affects equity
-        """
-        position = self._positions.get(execution.symbol)
-
-        if position is not None and position.qty != 0:
-            # Check if this execution is closing/reducing position or adding to it
-            if position.side == execution.side:
-                # Adding to existing position - no realized P/L, only unrealized
-                # Unrealized P/L will be recalculated after position update
-                pass
-            else:
-                # Closing or reducing position - realize P/L
-                qty_to_close = min(execution.qty, position.qty)
-
-                # Calculate realized P/L based on position type
-                if position.side == Side.BUY:
-                    # Closing long: P/L = (exit_price - entry_price) * qty
-                    pnl = (execution.price - position.avgPrice) * qty_to_close
-                else:
-                    # Closing short: P/L = (entry_price - exit_price) * qty
-                    pnl = (position.avgPrice - execution.price) * qty_to_close
-
-                self.accounting.balance += pnl
-                self.accounting.realizedPL += pnl
-
-                # Clear or reduce unrealized P/L for closed portion
-                remaining_qty = position.qty - qty_to_close
-                if remaining_qty == 0:
-                    # Position fully closed
-                    if execution.symbol in self.unrealizedPL:
-                        del self.unrealizedPL[execution.symbol]
-                # Unrealized P/L for remaining position will be recalculated after position update
-
-        # Broadcast equity update
-        if "equity" in self._update_callbacks:
-            logger.info(f"Broadcasting equity update: {self.accounting}")
-            await self._update_callbacks["equity"](self.accounting)
-
-        # Trigger position update (which broadcasts and recalculates unrealized P/L)
-        await self._update_position(execution)
-
-    async def _update_position(self, execution: Execution) -> None:
-        """
-        Update position from execution and broadcast changes.
-
-        Position Update Rules:
-        1. Same side: Add to position, calculate weighted average price
-        2. Opposite side (partial close): Reduce qty, keep original avg price
-        3. Opposite side (full close): Set qty to 0, delete position
-        4. Opposite side (reverse): Close existing, open new opposite position
-
-        Args:
-            execution: Execution to update position from
-        """
-        existing = self._positions.get(execution.symbol)
-
-        if existing:
-            if existing.side == execution.side:
-                # Adding to position - weighted average price
-                total_cost = (existing.qty * existing.avgPrice) + (
-                    execution.qty * execution.price
-                )
-                total_qty = existing.qty + execution.qty
-
-                existing.qty = total_qty
-                existing.avgPrice = total_cost / total_qty
-
-                # Calculate unrealized P/L for the new position
-                # Using execution price as current market price
-                if existing.side == Side.BUY:
-                    unrealized = (execution.price - existing.avgPrice) * existing.qty
-                else:
-                    unrealized = (existing.avgPrice - execution.price) * existing.qty
-
-                self.unrealizedPL[execution.symbol] = unrealized
-                self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
-                self.accounting.equity = (
-                    self.accounting.balance + self.accounting.unrealizedPL
-                )
-
-                # Broadcast position update
-                if "positions" in self._update_callbacks:
-                    logger.info(f"Broadcasting position update: {existing.symbol}")
-                    await self._update_callbacks["positions"](existing)
-            else:
-                # Opposite side - closing or reversing
-                if execution.qty < existing.qty:
-                    # Partial close - reduce quantity, keep avg price
-                    existing.qty -= execution.qty
-
-                    # Recalculate unrealized P/L for remaining position
-                    # Using execution price as current market price
-                    if existing.side == Side.BUY:
-                        unrealized = (
-                            execution.price - existing.avgPrice
-                        ) * existing.qty
-                    else:
-                        unrealized = (
-                            existing.avgPrice - execution.price
-                        ) * existing.qty
-
-                    self.unrealizedPL[execution.symbol] = unrealized
-                    self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
-                    self.accounting.equity = (
-                        self.accounting.balance + self.accounting.unrealizedPL
-                    )
-
-                    # Broadcast position update
-                    if "positions" in self._update_callbacks:
-                        logger.info(f"Broadcasting position update: {existing.symbol}")
-                        await self._update_callbacks["positions"](existing)
-
-                elif execution.qty == existing.qty:
-                    # Full close - position eliminated
-                    existing.qty = 0
-
-                    # Clear unrealized P/L
-                    if execution.symbol in self.unrealizedPL:
-                        del self.unrealizedPL[execution.symbol]
-                    self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
-                    self.accounting.equity = (
-                        self.accounting.balance + self.accounting.unrealizedPL
-                    )
-
-                    # Broadcast position closure
-                    if "positions" in self._update_callbacks:
-                        logger.info(f"Broadcasting position closure: {existing.symbol}")
-                        await self._update_callbacks["positions"](existing)
-
-                    del self._positions[execution.symbol]
-
-                else:
-                    # Reverse - close existing and open new opposite position
-                    new_qty = execution.qty - existing.qty
-
-                    existing.side = execution.side
-                    existing.qty = new_qty
-                    existing.avgPrice = execution.price
-
-                    # New position starts with 0 unrealized P/L
-                    self.unrealizedPL[execution.symbol] = 0.0
-                    self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
-                    self.accounting.equity = (
-                        self.accounting.balance + self.accounting.unrealizedPL
-                    )
-
-                    # Broadcast position update
-                    if "positions" in self._update_callbacks:
-                        logger.info(f"Broadcasting position update: {existing.symbol}")
-                        await self._update_callbacks["positions"](existing)
+        subscription_id = self._topic_to_subscription_id.pop(topic, None)
+        if subscription_id is not None:
+            # Don't unsubscribe placeholder IDs
+            if subscription_id != "broker-connection-placeholder":
+                self.broker_provider.unsubscribe(subscription_id)
         else:
-            # New position created
-            new_position = Position(
-                id=execution.symbol,
-                symbol=execution.symbol,
-                qty=execution.qty,
-                side=execution.side,
-                avgPrice=execution.price,
-            )
-            self._positions[execution.symbol] = new_position
-
-            # New position starts with 0 unrealized P/L
-            self.unrealizedPL[execution.symbol] = 0.0
-            self.accounting.unrealizedPL = sum(self.unrealizedPL.values())
-            self.accounting.equity = (
-                self.accounting.balance + self.accounting.unrealizedPL
-            )
-
-            # Broadcast new position
-            if "positions" in self._update_callbacks:
-                logger.info(f"Broadcasting new position: {new_position.symbol}")
-                await self._update_callbacks["positions"](new_position)
+            logger.warning(f"No subscription_id found for topic: {topic}")

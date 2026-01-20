@@ -1,3 +1,10 @@
+---
+agent: "agent"
+model: "Claude Opus 4.5"
+name: "ask"
+description: "High-level technical consultation and project analysis without implementation."
+---
+
 # Backend Architecture Code Review
 
 **Date:** December 8, 2025  
@@ -128,7 +135,7 @@ SHA256 is not designed for password/token hashing - it's fast by design, making 
 
 ## 3. Major Issues
 
-### 3.1 Broad Exception Handling in TWSProvider
+### 3.1 Broad Exception Handling in TWSDatafeedProvider
 
 **Severity:** 🟠 Major  
 **Location:** `backend/src/trading_api/providers/tws/tws_provider.py`
@@ -357,7 +364,7 @@ limiter = Limiter(key_func=get_remote_address)
 
 ### 5.2 No Circuit Breaker for External Services
 
-**Impact:** TWSProvider and GoogleProvider failures cascade to all requests.
+**Impact:** TWSDatafeedProvider and GoogleProvider failures cascade to all requests.
 
 **Recommendation:** Implement circuit breaker pattern:
 

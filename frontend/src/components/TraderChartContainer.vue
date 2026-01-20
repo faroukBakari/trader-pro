@@ -16,12 +16,22 @@ import { ihmController } from '@/services/ihmControllerService'
 import type { ToolSchema } from '@/types/ihmController'
 import { widget } from '@public/trading_terminal'
 import type {
+  Brackets,
   IChartingLibraryWidget,
-  ResolutionString,
+  IndividualPosition,
   LanguageCode,
+  Order,
+  OrderTicketFocusControl,
+  Position,
+  ResolutionString,
   TradingTerminalWidgetOptions,
   IBrokerConnectionAdapterHost,
 } from '@public/trading_terminal'
+import { ParentType } from '@public/trading_terminal'
+
+const filterEmptyFields = (obj: object) => {
+  return Object.fromEntries(Object.entries(obj).filter(([_, v]) => v != null))
+}
 
 function getLanguageFromURL() {
   const regex = new RegExp('[\\?&]lang=([^&#]*)')
@@ -33,7 +43,7 @@ function getLanguageFromURL() {
 
 const props = defineProps({
   symbol: {
-    default: 'GOOGL:NASDAQ:STK-208813719',
+    default: 'NASDAQ:GOOGL',
     type: String,
   },
   interval: {
@@ -147,7 +157,7 @@ onMounted(() => {
 
       locale: getLanguageFromURL() || 'en',
       theme: 'dark',
-      // enabled_features: ['use_localstorage_for_settings'],
+      enabled_features: ['pre_post_market_sessions'], // Extended sessions support
       disabled_features: ['study_templates', 'adaptive_logo'], // , 'use_localstorage_for_settings'
 
       // System color scheme overrides
@@ -207,6 +217,47 @@ onMounted(() => {
             supportPlaceOrderPreview: true,
             supportLeverage: true,
             supportLeverageButton: true,
+          },
+          // Custom UI hook to fix TradingView's position brackets preset bug
+          // When user clicks edit from Account Manager, brackets are empty - we fetch them from orders
+          customUI: {
+            showPositionDialog: async (
+              position: Position | IndividualPosition,
+              newBrackets: Brackets,
+              focus?: OrderTicketFocusControl,
+            ): Promise<boolean> => {
+              // If brackets are empty, fetch bracket orders for this position
+              let existingBrackets = {}
+              try {
+                const orders: Order[] = await brokerService!.orders()
+                const bracketOrders = orders.filter(
+                  (o) =>
+                    'parentId' in o &&
+                    o.parentId === position.id &&
+                    o.parentType === ParentType.Position,
+                )
+                // Find stop loss (has stopPrice) and take profit (has limitPrice)
+                const stopLossOrder = bracketOrders.find((o) => o.stopPrice !== undefined)
+                const takeProfitOrder = bracketOrders.find(
+                  (o) => o.limitPrice !== undefined && o.stopPrice === undefined,
+                )
+
+                existingBrackets = {
+                  ...(stopLossOrder?.stopPrice && { stopLoss: stopLossOrder?.stopPrice }),
+                  ...(takeProfitOrder?.limitPrice && { takeProfit: takeProfitOrder?.limitPrice }),
+                }
+                console.log(
+                  `[customUI.showPositionDialog] Enriched brackets for position ${position.id}:`,
+                  existingBrackets,
+                )
+              } catch (e) {
+                console.warn(`[customUI.showPositionDialog] Failed to fetch bracket orders:`, e)
+              }
+
+              const brackets = { ...existingBrackets, ...filterEmptyFields(newBrackets) } // Merge existing brackets
+
+              return brokerService!.showPositionBracketsDialog(position, brackets, focus)
+            },
           },
         },
       }),

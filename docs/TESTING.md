@@ -25,8 +25,54 @@ Trading Pro uses a multi-tier testing approach that enables independent testing 
 
 ```bash
 cd backend
-make test      # Run all tests
-make test-cov  # With coverage report
+make test           # Run all tests (boundaries + providers + modules + integration)
+make test-cov       # With coverage report
+make test-modules   # Module tests only
+make test-providers # Provider tests only
+make test-integration # Integration tests only
+```
+
+### Test Structure
+
+```
+backend/
+├── tests/
+│   ├── conftest.py                    # Global fixtures
+│   ├── unit/                          # Unit tests
+│   │   ├── test_auth_middleware.py
+│   │   ├── test_error_models.py
+│   │   └── test_module_codegen.py
+│   └── integration/                   # Integration tests
+│       ├── conftest.py
+│       ├── test_auth_integration.py
+│       ├── test_broker_equity_computation.py
+│       └── test_provider_integration.py
+│
+├── src/trading_api/modules/
+│   ├── broker/tests/                  # Module-specific tests
+│   ├── datafeed/tests/
+│   └── auth/tests/
+│
+└── src/trading_api/providers/
+    ├── fakebroker/tests/              # Provider-specific tests
+    ├── fakedatafeed/tests/
+    └── tws/tests/
+```
+
+### Provider Testing
+
+Provider tests verify capability implementations work correctly:
+
+```bash
+# All provider tests
+make test-providers
+
+# Provider registry/capability core tests
+make test-providers-core
+
+# Specific provider (e.g., tws, fakebroker)
+make test-provider-tws
+make test-provider-fakebroker
 ```
 
 ### Test Framework
@@ -113,6 +159,26 @@ Frontend uses mock data when:
 - Generated clients unavailable
 - Backend not running
 - During unit tests
+
+### Test Environment Auto-Detection
+
+Services can detect test environment via `process.env.VITEST`:
+
+```typescript
+// Pattern: Auto-detect Vitest in constructor
+constructor(mock: boolean = !!process.env.VITEST) {
+  this.mock = mock
+}
+```
+
+**Benefits:**
+
+- ✅ No `vi.mock()` boilerplate needed
+- ✅ Same code paths tested as production
+- ✅ Realistic mock data with network delays
+- ✅ Component tests work without backend
+
+**Reference:** See `apiService.ts` for implementation example.
 
 ## Integration Testing
 
@@ -612,10 +678,25 @@ expect(wrapper.vm.isConnected).toBe(true);
 
 ```
 backend/tests/
-├── test_api_health.py
-├── test_api_versioning.py
-├── test_ws_datafeed.py
-└── test_bar_broadcaster.py
+├── unit/                      # Core unit tests
+│   ├── test_auth_middleware.py
+│   ├── test_error_models.py
+│   └── test_module_codegen.py
+├── integration/               # Integration tests
+│   ├── test_auth_integration.py
+│   └── test_provider_integration.py
+├── test_module_registry.py
+└── conftest.py
+
+backend/src/trading_api/modules/
+├── broker/tests/              # Broker module tests
+├── datafeed/tests/            # Datafeed module tests
+└── auth/tests/                # Auth module tests
+
+backend/src/trading_api/providers/
+├── fakebroker/tests/          # Fakebroker provider tests
+├── fakedatafeed/tests/        # Fakedatafeed provider tests
+└── tws/tests/                 # TWS provider tests
 ```
 
 ### Frontend Structure

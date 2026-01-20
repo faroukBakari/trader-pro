@@ -14,11 +14,24 @@ BOUNDARY_RULES = {
         "forbidden_patterns": ["trading_api.*"],
         "description": "Models are pure data - no trading_api imports allowed",
     },
+    "capabilities/*": {
+        "allowed_patterns": [
+            "trading_api.models.*",
+            "trading_api.capabilities.*",  # Capabilities can reference each other
+        ],
+        "forbidden_patterns": [
+            "trading_api.modules.*",
+            "trading_api.providers.*",
+            "trading_api.shared.*",
+        ],
+        "description": "Capabilities are pure ABCs - only models and other capabilities allowed",
+    },
     "providers/*": {
         "allowed_patterns": [
             "trading_api.models.*",
             "trading_api.shared.*",
             "trading_api.providers.*",  # Providers can import other providers
+            "trading_api.capabilities.*",  # Providers implement capabilities
         ],
         "forbidden_patterns": ["trading_api.modules.*"],
         "description": "Providers can import models, config, and other providers, but not modules",
@@ -28,6 +41,7 @@ BOUNDARY_RULES = {
             "trading_api.models.*",
             "trading_api.shared.*",
             "trading_api.providers.*",  # Tests can import concrete providers for DI
+            "trading_api.capabilities.*",
             "trading_api.app_factory",
         ],
         "forbidden_patterns": ["trading_api.modules.*"],  # Block cross-module imports
@@ -43,16 +57,20 @@ BOUNDARY_RULES = {
         "forbidden_patterns": [
             "trading_api.modules.*",
             "trading_api.providers.google",  # Block concrete providers
-            "trading_api.providers.capabilities.*",  # Block capability interfaces
+            "trading_api.capabilities.*",  # Block capability interfaces
         ],
-        "description": "Shared can import models, Provider ABC (types only), but not modules or capability interfaces",
+        "exception_patterns": [
+            # Generated HTTP clients for inter-module communication
+            "trading_api.modules.*.client_generated*",
+        ],
+        "description": "Shared can only import models, Provider ABC (types only) and generated clients",
     },
     "modules/*": {
         "allowed_patterns": [
             "trading_api.models.*",
             "trading_api.shared.*",
             "trading_api.providers.base",  # Provider ABC for types
-            "trading_api.providers.capabilities.*",  # Capability interfaces
+            "trading_api.capabilities.*",  # Capability interfaces
             "trading_api.app_factory",
         ],
         "forbidden_patterns": [
@@ -67,6 +85,7 @@ BOUNDARY_RULES = {
             "trading_api.models.*",
             "trading_api.shared.*",
             "trading_api.providers.*",  # Tests can import concrete providers for DI
+            "trading_api.capabilities.*",  # Capability interfaces
             "trading_api.app_factory",
         ],
         "forbidden_patterns": [
@@ -124,6 +143,7 @@ def validate_import(
     allowed: list[str],
     forbidden: list[str],
     file_path: str = "",
+    exceptions: list[str] | None = None,
 ) -> bool:
     """Check if import violates boundary rules.
 
@@ -132,12 +152,27 @@ def validate_import(
         allowed: List of allowed import patterns
         forbidden: List of forbidden import patterns
         file_path: Relative path of the file being checked (for context-aware rules)
+        exceptions: List of exception patterns that override forbidden rules
 
     Rules:
         - Modules can import from their own components (self-imports allowed)
         - Test files can import from their own module
         - Cross-module imports are forbidden (e.g., auth importing from broker)
+        - Exception patterns override forbidden rules (e.g., client_generated imports)
     """
+    # Check exception patterns first - these override forbidden rules
+    if exceptions:
+        for pattern in exceptions:
+            if fnmatch.fnmatch(import_name, pattern):
+                return True
+            # Also check prefix matching for patterns like trading_api.modules.*.client_generated*
+            # Convert glob pattern to check: replace * with regex-like matching
+            pattern_parts = pattern.split("*")
+            if len(pattern_parts) >= 2:
+                # Check if import contains "client_generated" for this specific case
+                if "client_generated" in pattern and "client_generated" in import_name:
+                    return True
+
     # Allow modules to import from themselves (not just in tests)
     if "modules/" in file_path:
         # Extract module name from file path (e.g., "modules/auth/service.py" -> "auth")
@@ -203,6 +238,7 @@ def test_import_boundaries():
                 rule["allowed_patterns"],
                 rule["forbidden_patterns"],
                 relative_path,
+                rule.get("exception_patterns"),
             )
 
             if not is_valid:

@@ -11,6 +11,7 @@ import type {
   IBrokerConnectionAdapterHost,
   IBrokerWithoutRealtime,
   IDatafeedQuotesApi,
+  IndividualPosition,
   InstrumentInfo,
   INumberFormatter,
   IsTradableResult,
@@ -22,11 +23,15 @@ import type {
   LeverageSetResult,
   Order,
   OrderPreviewResult,
+  PlacedOrder,
   PlaceOrderResult,
   Position,
   PreOrder,
   TradeContext,
 } from '@public/trading_terminal'
+
+// Import enum as value (not type-only) since we use it as a value
+import { OrderTicketFocusControl } from '@public/trading_terminal'
 
 import { WebSocketError } from '@/errors'
 import { ApiAdapter, type ApiPromise } from '@/plugins/apiAdapter'
@@ -34,11 +39,15 @@ import { WsAdapter, WsFallback, type BrokerConnectionStatus, type EquityData, ty
 import type { SubscriptionError } from '@/plugins/wsClientBase'
 import { ConnectionStatus, NotificationType, OrderStatus, Side, StandardFormatterName } from '@public/trading_terminal'
 
+const omitNullish = <T extends Record<string, unknown>>(obj: T): Partial<T> =>
+  Object.fromEntries(
+    Object.entries(obj).filter(([_, v]) => v != null)
+  ) as Partial<T>
 
 export interface ApiInterface {
   // Order operations
   previewOrder(order: PreOrder): ApiPromise<OrderPreviewResult>
-  placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult>
+  placeOrder(order: PreOrder, confirmId?: string): ApiPromise<PlaceOrderResult>
   modifyOrder(order: Order, confirmId?: string): ApiPromise<void>
   cancelOrder(orderId: string): ApiPromise<void>
   getOrders(): ApiPromise<Order[]>
@@ -381,8 +390,8 @@ class ApiFallback implements ApiInterface {
     }
   }
 
-  async placeOrder(order: PreOrder): ApiPromise<PlaceOrderResult> {
-    const orderId = `ORDER-${this.brokerMock.getOrders().length + 1}`
+  async placeOrder(order: PreOrder, confirmId?: string): ApiPromise<PlaceOrderResult> {
+    const orderId = confirmId ?? `ORDER-${this.brokerMock.getOrders().length + 1}`
 
     const newOrder: Order = {
       id: orderId,
@@ -596,8 +605,6 @@ class ApiFallback implements ApiInterface {
 export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private readonly _hostAdapter: IBrokerConnectionAdapterHost
 
-  private readonly _quotesProvider: IDatafeedQuotesApi
-
   // Client adapters
   private readonly _apiFallback?: ApiInterface
   private readonly apiAdapter: ApiInterface
@@ -609,17 +616,16 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   private equity: IWatchedValue<number>
   private readonly startingBalance = 100000
 
-  private readonly accountId: string
   private brokerConnectionStatus: ConnectionStatusType = ConnectionStatus.Disconnected
-  private subscriptionTopics: string[] = []
+
+  private accountId: AccountId = 'UNKNOWN' as AccountId
 
   constructor(
     host: IBrokerConnectionAdapterHost,
-    quotesProvider: IDatafeedQuotesApi,
+    _quotesProvider: IDatafeedQuotesApi,
     brokerMock?: BrokerMock,
   ) {
     this._hostAdapter = host
-    this._quotesProvider = quotesProvider
     this.apiAdapter = new ApiAdapter()
     this._wsAdapter = new WsAdapter()
 
@@ -634,17 +640,24 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
     // KNOWN ISSUE: listenerId must match currentAccount() return value
     // See BROKER-TERMINAL-SERVICE.md "Known Issues" section
-    this.accountId = "ACCOUNT-01" // `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
+    // this.accountId = "ACCOUNT-01" // `ACCOUNT-${Math.random().toString(36).substring(2, 15)}`
 
-    this.setupWebSocketHandlers()
-      .then(() => {
-        this.brokerConnectionStatus = ConnectionStatus.Connected
-        console.log('[BrokerTerminalService] WebSocket subscriptions ready')
-        this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
-          message: 'Broker data subscriptions established'
+    this._initAccountId()
+      .then(() => this.setupWebSocketHandlers()
+        .then(() => {
+          this.brokerConnectionStatus = ConnectionStatus.Connected
+          console.log('[BrokerTerminalService] WebSocket subscriptions ready')
+          this._hostAdapter.connectionStatusUpdate(this.brokerConnectionStatus, {
+            message: 'Broker data subscriptions established'
+          })
+        }).catch((error) => {
+          console.error('[BrokerTerminalService] Failed to setup WebSocket handlers:', error)
+          this._hostAdapter.connectionStatusUpdate(ConnectionStatus.Error, {
+            message: 'Failed to establish broker data subscriptions'
+          })
+        })).catch(err => {
+          console.error('[BrokerTerminalService] Failed to initialize account ID:', err)
         })
-      })
-
   }
 
   private _getApiAdapter(): ApiInterface {
@@ -676,9 +689,9 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
       this._getWsAdapter().orders?.subscribe(
         'orders',
         { accountId: this.accountId },
-        (order: Order) => {
-          console.log('Received order update via WebSocket:', order)
-          this._hostAdapter.orderUpdate(order)
+        (order: PlacedOrder) => {
+          console.warn('Received order update via WebSocket: ' + JSON.stringify(order))
+          this._hostAdapter.orderUpdate(omitNullish(order) as Order)
 
           // Show notification on fill
           if (order.status === OrderStatus.Filled) {
@@ -712,7 +725,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         'executions',
         { accountId: this.accountId },
         (execution: Execution) => {
-          console.log('Received execution update via WebSocket:', execution)
+          console.warn('Received execution update via WebSocket:', execution)
           this._hostAdapter.executionUpdate(execution)
         },
         (error) => this.handleSubscriptionError('Executions', error)
@@ -728,11 +741,9 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
           // Update reactive balance/equity values
           if (data.balance !== undefined && data.balance !== null) {
-            console.log('Updating balance to:', data.balance)
             this.balance.setValue(data.balance)
           }
           if (data.equity !== undefined && data.equity !== null) {
-            console.log('Updating equity to:', data.equity)
             this.equity.setValue(data.equity)
           }
         },
@@ -833,6 +844,18 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
           formatter: StandardFormatterName.FormatQuantity,
         },
         {
+          label: 'Limit',
+          id: 'limitPrice',
+          dataFields: ['limitPrice'],
+          formatter: StandardFormatterName.FormatPrice,
+        },
+        {
+          label: 'Stop',
+          id: 'stopPrice',
+          dataFields: ['stopPrice'],
+          formatter: StandardFormatterName.FormatPrice,
+        },
+        {
           label: 'Status',
           id: 'status',
           dataFields: ['status'],
@@ -869,17 +892,26 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     }
   }
 
+  private async _initAccountId(): Promise<void> {
+    const accounts = await this.accountsMetainfo()
+    this.accountId = accounts[0]?.id ?? 'DEMO-ACCOUNT'
+  }
+
   async accountsMetainfo(): Promise<AccountMetainfo[]> {
     const response = await this._getApiAdapter().getAccountInfo()
     const result = [response.data]
     console.log(`BrokerTerminalService.accountsMetainfo() => `, result)
+    if (result.length > 0) {
+      this.accountId = result[0].id
+    }
     return result
   }
 
   async orders(): Promise<Order[]> {
     const response = await this._getApiAdapter().getOrders()
     console.log(`BrokerTerminalService.orders() => `, response.data)
-    return response.data
+    const orders = response.data.map(order => omitNullish(order) as Order)
+    return orders
   }
 
   async positions(): Promise<Position[]> {
@@ -890,7 +922,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   async executions(symbol: string): Promise<Execution[]> {
     const response = await this._getApiAdapter().getExecutions(symbol)
-    console.log(`BrokerTerminalService.executions[${symbol}] => `, response.data)
+    console.warn(`BrokerTerminalService.executions[${symbol}] => ${JSON.stringify(response.data)}`)
     return response.data
   }
 
@@ -921,14 +953,15 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     return response.data
   }
 
-  async placeOrder(order: PreOrder): Promise<PlaceOrderResult> {
-    const response = await this._getApiAdapter().placeOrder(order)
-    console.log(`BrokerTerminalService.placeOrder[${JSON.stringify(order)}] => `, response.data)
+  async placeOrder(order: PreOrder, confirmId?: string): Promise<PlaceOrderResult> {
+    const response = await this._getApiAdapter().placeOrder(order, confirmId)
+    console.log(`BrokerTerminalService.placeOrder[${JSON.stringify(order)}, confirmId: ${confirmId}] => `, response.data)
     return response.data
   }
 
   async modifyOrder(order: Order, confirmId?: string): Promise<void> {
     await this._getApiAdapter().modifyOrder(order, confirmId)
+    this._hostAdapter.orderUpdate(order)
     console.log(`BrokerTerminalService.modifyOrder[order: ${JSON.stringify(order)}, confirmId: ${confirmId}] => completed`)
   }
 
@@ -952,7 +985,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   async formatter(symbol: string, alignToMinMove: boolean): Promise<INumberFormatter> {
-    const timeoutMs = 5000;
+    const timeoutMs = 10000;
     return await Promise.race([
       this._hostAdapter.defaultFormatter(symbol, alignToMinMove),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
@@ -960,15 +993,7 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   }
 
   currentAccount(): AccountId {
-    // KNOWN ISSUE: This returns 'DEMO-ACCOUNT' but listenerId is dynamic (e.g., 'ACCOUNT-abc123')
-    // causing AccountId mismatch between currentAccount() and WebSocket subscriptions.
-    // This breaks Account Manager rendering with "Value is undefined" error.
-    // See BROKER-TERMINAL-SERVICE.md "Known Issues" section for details.
-    //
-    // Must be synchronous (TradingView requirement) - cannot await backend call.
-    // TODO: Fetch AccountId from backend during app initialization, store it,
-    // and use the same value here and in WebSocket subscriptions.
-    return 'DEMO-ACCOUNT' as AccountId
+    return this.accountId as AccountId
   }
 
   connectionStatus(): ConnectionStatusType {
@@ -1001,5 +1026,20 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     const response = await this._getApiAdapter().previewLeverage(leverageSetParams)
     console.log(`BrokerTerminalService.previewLeverage[${JSON.stringify(leverageSetParams)}] => ${JSON.stringify(response.data)}`)
     return response.data
+  }
+
+  /**
+   * Delegates to host adapter's showPositionBracketsDialog.
+   * Used by customUI.showPositionDialog hook to fix TradingView's bracket preset bug.
+   */
+  showPositionBracketsDialog(
+    position: Position | IndividualPosition,
+    brackets: Brackets,
+    focus?: OrderTicketFocusControl
+  ): Promise<boolean> {
+    console.log(`BrokerTerminalService.showPositionBracketsDialog[${position.id}] => brackets: ${JSON.stringify(brackets)}, focus: ${focus}`)
+    // TradingView's showPositionBracketsDialog requires focus parameter (not optional)
+    // Default to StopLoss if not provided
+    return this._hostAdapter.showPositionBracketsDialog(position, brackets, focus ?? OrderTicketFocusControl.StopLoss)
   }
 }

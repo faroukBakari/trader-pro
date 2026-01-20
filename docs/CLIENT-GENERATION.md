@@ -1,57 +1,46 @@
 # API Client Generation
 
-**Last Updated**: November 30, 2025  
-**Status**: ✅ Implemented | **Mode**: Offline Generation
+**Last Updated**: January 2, 2026  
+**Status**: ✅ Implemented | **Mode**: Per-Module Generation
 
 ## Overview
 
-The Trading Pro frontend automatically generates type-safe TypeScript clients from backend API specifications using an **offline generation** approach that doesn't require a running backend server.
+The Trading Pro frontend automatically generates type-safe TypeScript clients from backend API specifications. Specs are generated **per-module** in `backend/src/trading_api/modules/{module}/specs_generated/` and frontend clients are generated from these specs.
 
 ## How It Works
 
-### Offline Generation Mode
+### Per-Module Generation
 
 ```bash
-Frontend Build → Export Backend Specs → Generate Clients → Build/Dev
+Backend: make generate → Per-module specs → Frontend: make generate → TypeScript clients
 ```
 
 **Key Features:**
 
-- ✅ No backend server needed during client generation
-- ✅ Fast spec export (< 1 second)
-- ✅ Reliable in all environments (local, CI, production)
+- ✅ Per-module spec generation (`modules/{module}/specs_generated/`)
+- ✅ Versioned spec files (`{module}_v{N}_openapi.json`)
 - ✅ Type-safe TypeScript clients auto-generated
+- ✅ Works in all environments (local, CI)
 
 ### Generation Process
 
 ```
 ┌─────────────────────────────────────────┐
+│ Backend: make generate                  │
+│ • Runs scripts/module_codegen.py        │
+│ • Generates per-module specs            │
+│ • modules/broker/specs_generated/       │
+│   ├── broker_v1_openapi.json            │
+│   └── broker_v1_asyncapi.json           │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
 │ Frontend: make generate                 │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│ Backend: make export-openapi-offline    │
-│ • Runs scripts/export_openapi.py        │
-│ • Generates openapi.json                │
-│ • Generates asyncapi.json               │
-│ • No server startup needed              │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│ Backend: Validate Package Names         │
-│ • Runs scripts/validate_modules.py│
-│ • Checks package name uniqueness        │
-│ • Validates module name correspondence  │
-│ • Prevents naming conflicts             │
-└────────────────┬────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────┐
-│ Frontend: Generate TypeScript Clients   │
-│ • REST Client (OpenAPI spec)            │
-│ • WebSocket Types (AsyncAPI spec)       │
+│ • Reads per-module specs                │
+│ • Generates TypeScript REST clients     │
+│ • Generates WebSocket types             │
+│ • Output: clients_generated/            │
 └─────────────────────────────────────────┘
 ```
 
@@ -492,8 +481,9 @@ generate-asyncapi-types:
 
 ```bash
 cd backend
-make export-openapi-offline
-# Check for openapi.json and asyncapi.json
+make generate
+# Check modules/{module}/specs_generated/ directories
+ls -la src/trading_api/modules/*/specs_generated/
 ```
 
 ### Client Generation Fails
@@ -515,6 +505,6 @@ npm run type-check
 
 ## Related Documentation
 
-- **Backend Spec Export**: See `backend/Makefile` (`export-openapi-offline` target)
-- **WebSocket Architecture**: See `frontend/docs/WEBSOCKET-ARCHITECTURE.md`
-- **Architecture**: See `ARCHITECTURE.md`
+- **Backend Spec Generation**: See [backend/docs/SPECS_AND_CLIENT_GEN.md](../backend/docs/SPECS_AND_CLIENT_GEN.md)
+- **WebSocket Architecture**: See [frontend/docs/WEBSOCKET-ARCHITECTURE.md](../frontend/docs/WEBSOCKET-ARCHITECTURE.md)
+- **Architecture**: See [ARCHITECTURE.md](ARCHITECTURE.md)

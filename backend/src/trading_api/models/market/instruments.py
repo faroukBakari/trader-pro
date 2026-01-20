@@ -5,16 +5,35 @@ This module contains models related to financial instruments,
 symbols, exchanges, and symbol metadata.
 """
 
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 from .bars import Resolution
 
 
-class SymbolInfo(BaseModel):
-    """Symbol information model matching LibrarySymbolInfo interface"""
+class SubsessionInfo(BaseModel):
+    """Subsession information for TradingView extended sessions.
 
+    Matches TradingView's LibrarySubsessionInfo interface.
+    Used to define regular, extended, premarket, postmarket, and overnight sessions.
+    """
+
+    id: Literal["regular", "extended", "premarket", "postmarket", "overnight"] = Field(
+        ..., description="Subsession identifier"
+    )
+    session: str = Field(..., description="Session hours (e.g., '0930-1600')")
+    description: str = Field(..., description="Human-readable description")
+
+
+class SymbolInfo(BaseModel):
+    """Symbol information model matching LibrarySymbolInfo interface.
+
+    Enhanced to support TradingView's full LibrarySymbolInfo feature set
+    with additional fields from TWS ContractDetails.
+    """
+
+    # Required fields (TradingView core)
     name: str = Field(..., description="Symbol name")
     description: str = Field(..., description="Symbol description")
     type: str = Field(..., description="Symbol type (stock, crypto, forex, etc.)")
@@ -34,6 +53,42 @@ class SymbolInfo(BaseModel):
     volume_precision: int = Field(..., description="Volume precision")
     data_status: Literal["streaming", "endofday", "delayed_streaming"] = Field(
         ..., description="Data status"
+    )
+
+    # P0 - Critical for trading (currency handling)
+    currency_code: Optional[str] = Field(
+        default=None, description="Trading currency (USD, EUR, etc.)"
+    )
+
+    original_currency_code: Optional[str] = Field(
+        default=None, description="Original trading currency (USD, EUR, etc.)"
+    )
+
+    # P1 - Derivatives support (FUT/OPT contracts)
+    expired: Optional[bool] = Field(
+        default=None, description="Whether contract is expired"
+    )
+    expiration_date: Optional[int] = Field(
+        default=None, description="Expiration timestamp in ms (FUT/OPT)"
+    )
+
+    # P1 - Categorization (for search/filtering)
+    industry: Optional[str] = Field(default=None, description="Industry classification")
+    sector: Optional[str] = Field(default=None, description="Sector/category")
+
+    # P2 - Enhanced metadata
+    con_id: Optional[int] = Field(default=None, description="IB unique contract ID")
+    has_weekly_and_monthly: bool = Field(
+        default=True, description="Supports weekly/monthly bars"
+    )
+    delay: int = Field(default=0, description="Data delay in minutes (0=realtime)")
+
+    # P2 - Extended session support (TradingView subsessions)
+    subsession_id: Optional[Literal["regular", "extended"]] = Field(
+        default=None, description="Active subsession type (regular or extended)"
+    )
+    subsessions: Optional[List["SubsessionInfo"]] = Field(
+        default=None, description="Subsession definitions for extended hours"
     )
 
 
@@ -67,6 +122,7 @@ class DatafeedSymbolType(BaseModel):
 
 
 __all__ = [
+    "SubsessionInfo",
     "SymbolInfo",
     "SearchSymbolResultItem",
     "Exchange",
