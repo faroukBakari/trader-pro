@@ -808,38 +808,36 @@ class BarsTracker:
             bar_data: BarData from TWS
         """
 
-        with self.tracker_lock:
-            bar_request = self._bar_requests.get(req_id)
+        # with self.tracker_lock: <- disabled for performance
+        bar_request = self._bar_requests.get(req_id)
 
-            if bar_request is None:
-                logger.warning(f"Received bar update for unknown req_id {req_id}")
-                return
-            bar_request.upsert(bar_data)
+        if bar_request is None:
+            logger.warning(f"Received bar update for unknown req_id {req_id}")
+            return
+        bar_request.upsert(bar_data)
 
-            bar_request_snapshot_hooks = list(
-                self._snapshot_hooks.get(req_id, {}).values()
+        bar_request_snapshot_hooks = list(self._snapshot_hooks.get(req_id, {}).values())
+        bar_request_stream_hooks = list(self._stream_hooks.get(req_id, {}).values())
+
+        # If no longer used, debounce cancel
+        if not (bar_request_snapshot_hooks or bar_request_stream_hooks):
+            logger.warning(
+                f"update: Unused bar_request subscription for req_id "
+                f"{req_id} --> {bar_request.description}"
             )
-            bar_request_stream_hooks = list(self._stream_hooks.get(req_id, {}).values())
+            return
 
-            # If no longer used, debounce cancel
-            if not (bar_request_snapshot_hooks or bar_request_stream_hooks):
-                logger.warning(
-                    f"update: Unused bar_request subscription for req_id "
-                    f"{req_id} --> {bar_request.description}"
-                )
-                return
+        # Resolve snapshot hooks if ready
+        if bar_request.is_ready:
+            for loop, future in bar_request_snapshot_hooks:
+                loop.call_soon_threadsafe(resolve_snapshot, future, bar_request)
 
-            # Resolve snapshot hooks if ready
-            if bar_request.is_ready:
-                for loop, future in bar_request_snapshot_hooks:
-                    loop.call_soon_threadsafe(resolve_snapshot, future, bar_request)
-
-            # Dispatch to stream hooks
-            for loop, callback, _ in bar_request_stream_hooks:
-                loop.call_soon_threadsafe(
-                    loop.create_task,
-                    dispatch_update(callback, bar_request),
-                )
+        # Dispatch to stream hooks
+        for loop, callback, _ in bar_request_stream_hooks:
+            loop.call_soon_threadsafe(
+                loop.create_task,
+                dispatch_update(callback, bar_request),
+            )
 
     def raise_error(self, req_id: int, exception: ProviderException) -> bool:
         """Dispatch error to a BarsRequest's hooks.
@@ -853,38 +851,36 @@ class BarsTracker:
         Returns:
             True if error was handled, False if no matching request
         """
-        with self.tracker_lock:
-            bar_request = self._bar_requests.get(req_id)
+        # with self.tracker_lock:  <- disabled for performance
+        bar_request = self._bar_requests.get(req_id)
 
-            if bar_request is None:
-                return False
+        if bar_request is None:
+            return False
 
-            bar_request.flag_request_failed(exception)
+        bar_request.flag_request_failed(exception)
 
-            bar_request_snapshot_hooks = list(
-                self._snapshot_hooks.get(req_id, {}).values()
+        bar_request_snapshot_hooks = list(self._snapshot_hooks.get(req_id, {}).values())
+        bar_request_stream_hooks = list(self._stream_hooks.get(req_id, {}).values())
+
+        # If no longer used, debounce cancel
+        if not (bar_request_snapshot_hooks or bar_request_stream_hooks):
+            logger.warning(
+                f"raise_error: Unused bar_request subscription for req_id "
+                f"{req_id} --> {bar_request.description}"
             )
-            bar_request_stream_hooks = list(self._stream_hooks.get(req_id, {}).values())
-
-            # If no longer used, debounce cancel
-            if not (bar_request_snapshot_hooks or bar_request_stream_hooks):
-                logger.warning(
-                    f"raise_error: Unused bar_request subscription for req_id "
-                    f"{req_id} --> {bar_request.description}"
-                )
-                return True
-
-            # Dispatch to snapshot hooks
-            for loop, future in bar_request_snapshot_hooks:
-                loop.call_soon_threadsafe(reject_snapshot, future, exception)
-
-            # Dispatch to stream hooks
-            for loop, _, on_error in bar_request_stream_hooks:
-                loop.call_soon_threadsafe(
-                    loop.create_task,
-                    on_error(exception),
-                )
             return True
+
+        # Dispatch to snapshot hooks
+        for loop, future in bar_request_snapshot_hooks:
+            loop.call_soon_threadsafe(reject_snapshot, future, exception)
+
+        # Dispatch to stream hooks
+        for loop, _, on_error in bar_request_stream_hooks:
+            loop.call_soon_threadsafe(
+                loop.create_task,
+                on_error(exception),
+            )
+        return True
 
     def flag_complete(self, req_id: int, start: str, end: str) -> None:
         """Mark a bar request as complete and dispatch to hooks.
