@@ -56,10 +56,10 @@ def _setup_mock_client_with_contracts(
 ) -> None:
     """Setup mock_client methods to return valid contracts.
 
-    Sets up req_ticker_details and reqContractDetails since the implementation
-    calls req_ticker_details which is now on TWSClient.
+    Sets up reqTickerDetails and reqContractDetails since the implementation
+    calls reqTickerDetails which is now on TWSClient.
 
-    Note: Does NOT overwrite req_ticker_details or reqContractDetails if already
+    Note: Does NOT overwrite reqTickerDetails or reqContractDetails if already
     explicitly configured with a tuple/list return_value (for custom test cases).
 
     Args:
@@ -90,9 +90,9 @@ def _setup_mock_client_with_contracts(
     contract_details.tradingHours = f"{today_str}:0000-{today_str}:2359"
     contract_details.timeZoneId = "US/Eastern"
 
-    # Setup req_ticker_details (returns CachedContract)
+    # Setup reqTickerDetails (returns CachedContract)
     # Only if not already configured with an explicit return_value
-    existing_cache_mock = getattr(mock_client, "req_ticker_details", None)
+    existing_cache_mock = getattr(mock_client, "reqTickerDetails", None)
     should_setup_cache = True
     if existing_cache_mock is not None and isinstance(existing_cache_mock, AsyncMock):
         if isinstance(existing_cache_mock.return_value, CachedContract):
@@ -100,7 +100,7 @@ def _setup_mock_client_with_contracts(
 
     cached_contract = CachedContract.from_contract_details(contract_details)
     if should_setup_cache:
-        mock_client.req_ticker_details = AsyncMock(return_value=cached_contract)
+        mock_client.reqTickerDetails = AsyncMock(return_value=cached_contract)
 
     # Setup reqContractDetails for any direct calls
     # Only if not already configured with an explicit list return_value
@@ -259,9 +259,9 @@ class TestGetSymbolInfo:
         details.tradingHours = "20231120:0930-20231120:1600"
         details.timeZoneId = "America/New_York"
 
-        # Mock TWSClient.req_ticker_details to return our test data
+        # Mock TWSClient.reqTickerDetails to return our test data
         mock_client = Mock()
-        mock_client.req_ticker_details = AsyncMock(
+        mock_client.reqTickerDetails = AsyncMock(
             return_value=CachedContract.from_contract_details(details)
         )
 
@@ -275,7 +275,7 @@ class TestGetSymbolInfo:
             result = await provider.get_symbol_info("NASDAQ:MSFT")
 
         # Verify async method was called with ticker
-        mock_client.req_ticker_details.assert_called_once_with("NASDAQ:MSFT")
+        mock_client.reqTickerDetails.assert_called_once_with("NASDAQ:MSFT")
 
         # Verify domain model returned
         assert isinstance(result, SymbolInfo)
@@ -303,7 +303,7 @@ class TestGetSymbolInfo:
         details.minTick = 0.01
 
         mock_client = Mock()
-        mock_client.req_ticker_details = AsyncMock(
+        mock_client.reqTickerDetails = AsyncMock(
             return_value=CachedContract.from_contract_details(details)
         )
 
@@ -315,15 +315,15 @@ class TestGetSymbolInfo:
             # Use composite ticker format (exchange already in ticker)
             await provider.get_symbol_info("NASDAQ:AAPL")
 
-        # Verify req_ticker_details was called with correct ticker
-        mock_client.req_ticker_details.assert_called_once_with("NASDAQ:AAPL")
+        # Verify reqTickerDetails was called with correct ticker
+        mock_client.reqTickerDetails.assert_called_once_with("NASDAQ:AAPL")
 
     @pytest.mark.asyncio
     async def test_get_symbol_info_not_found_raises_error(self) -> None:
         """Test get_symbol_info raises ProviderException when symbol not found."""
         mock_client = Mock()
-        # req_ticker_details raises ProviderException when symbol not found
-        mock_client.req_ticker_details = AsyncMock(
+        # reqTickerDetails raises ProviderException when symbol not found
+        mock_client.reqTickerDetails = AsyncMock(
             side_effect=ProviderException(
                 code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
                 message="Symbol not found: SMART:NONEXISTENT",
@@ -345,7 +345,7 @@ class TestGetSymbolInfo:
     @pytest.mark.asyncio
     async def test_get_symbol_info_uses_first_result(self) -> None:
         """Test get_symbol_info returns CachedContract data."""
-        # req_ticker_details now returns a single CachedContract
+        # reqTickerDetails now returns a single CachedContract
         contract1 = Contract()
         contract1.symbol = "AAPL"
         contract1.secType = "STK"
@@ -358,8 +358,8 @@ class TestGetSymbolInfo:
         details1.minTick = 0.01
 
         mock_client = Mock()
-        # req_ticker_details returns CachedContract
-        mock_client.req_ticker_details = AsyncMock(
+        # reqTickerDetails returns CachedContract
+        mock_client.reqTickerDetails = AsyncMock(
             return_value=CachedContract.from_contract_details(details1)
         )
 

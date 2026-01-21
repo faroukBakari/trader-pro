@@ -98,7 +98,7 @@ def _create_mock_contract_details(
     valid_exchanges: str = "SMART,NASDAQ",
     overnight_hours: str | None = None,
 ) -> CachedContract:
-    """Create a mock CachedContract for req_ticker_details return value.
+    """Create a mock CachedContract for reqTickerDetails return value.
 
     Args:
         contract: Contract to embed (uses default if None)
@@ -172,9 +172,9 @@ class TestPlaceOrder:
     def mock_client(self) -> Mock:
         """Create mock TWSClient with AsyncMock methods."""
         mock = Mock()
-        # req_ticker_details returns CachedContract
+        # reqTickerDetails returns CachedContract
         contract_details = _create_mock_contract_details()
-        mock.req_ticker_details = AsyncMock(return_value=contract_details)
+        mock.reqTickerDetails = AsyncMock(return_value=contract_details)
         # placeOrderGroup returns (parent_tracked, children_tracked)
         mock.placeOrderGroup = AsyncMock(
             return_value=(_create_tracked_order(12345), [])
@@ -213,7 +213,7 @@ class TestPlaceOrder:
     async def test_place_order_calls_cache_contracts(
         self, provider: TWSBrokerProvider, mock_client: Mock
     ) -> None:
-        """Test place_order calls req_ticker_details with symbol."""
+        """Test place_order calls reqTickerDetails with symbol."""
         pre_order = PreOrder(
             symbol="NASDAQ:AAPL",
             side=Side.BUY,
@@ -223,8 +223,8 @@ class TestPlaceOrder:
 
         await provider.place_order(pre_order)
 
-        mock_client.req_ticker_details.assert_called_once()
-        call_args = mock_client.req_ticker_details.call_args
+        mock_client.reqTickerDetails.assert_called_once()
+        call_args = mock_client.reqTickerDetails.call_args
         assert call_args[0][0] == "NASDAQ:AAPL"
 
     @pytest.mark.asyncio
@@ -291,7 +291,7 @@ class TestPlaceOrderWithBrackets:
         """Create mock TWSClient with bracket order support."""
         mock = Mock()
         contract_details = _create_mock_contract_details()
-        mock.req_ticker_details = AsyncMock(return_value=contract_details)
+        mock.reqTickerDetails = AsyncMock(return_value=contract_details)
         mock.reqContractDetails = AsyncMock(return_value=[contract_details])
 
         # Parent + 2 children for full bracket
@@ -452,7 +452,7 @@ class TestModifyOrder:
         """Create mock TWSClient with AsyncMock methods."""
         mock = Mock()
         contract_details = _create_mock_contract_details()
-        mock.req_ticker_details = AsyncMock(return_value=contract_details)
+        mock.reqTickerDetails = AsyncMock(return_value=contract_details)
         mock.reqContractDetails = AsyncMock(return_value=[contract_details])
         mock.placeOrderGroup = AsyncMock(
             return_value=(_create_tracked_order(12345), [])
@@ -539,7 +539,7 @@ class TestModifyOrderWithBrackets:
         """Create mock TWSClient for bracket modification."""
         mock = Mock()
         contract_details = _create_mock_contract_details()
-        mock.req_ticker_details = AsyncMock(return_value=contract_details)
+        mock.reqTickerDetails = AsyncMock(return_value=contract_details)
         mock.reqContractDetails = AsyncMock(return_value=[contract_details])
 
         parent_tracked = _create_tracked_order(100)
@@ -680,7 +680,7 @@ class TestResolveTradingContract:
             overnight_hours=f"{today_str}:0000-{today_str}:2359",  # darkpool also open
         )
 
-        mock_client.req_ticker_details = AsyncMock(return_value=session_details)
+        mock_client.reqTickerDetails = AsyncMock(return_value=session_details)
 
         result = await provider._resolve_trading_contract("NASDAQ:AAPL")
 
@@ -705,7 +705,7 @@ class TestResolveTradingContract:
             overnight_hours=f"{today_str}:0000-{today_str}:2359",  # darkpool open
         )
 
-        mock_client.req_ticker_details = AsyncMock(return_value=session_details)
+        mock_client.reqTickerDetails = AsyncMock(return_value=session_details)
 
         result = await provider._resolve_trading_contract("NASDAQ:AAPL")
 
@@ -724,7 +724,7 @@ class TestResolveTradingContract:
             valid_exchanges="SMART,NASDAQ",  # No OVERNIGHT available
         )
 
-        mock_client.req_ticker_details = AsyncMock(return_value=session_details)
+        mock_client.reqTickerDetails = AsyncMock(return_value=session_details)
 
         result = await provider._resolve_trading_contract("NASDAQ:AAPL")
 
@@ -735,9 +735,9 @@ class TestResolveTradingContract:
     async def test_raises_when_contract_not_found(
         self, provider: TWSBrokerProvider, mock_client: Mock
     ) -> None:
-        """Test raises ProviderException when req_ticker_details fails."""
-        # Mock req_ticker_details to raise ProviderException (symbol not found)
-        mock_client.req_ticker_details = AsyncMock(
+        """Test raises ProviderException when reqTickerDetails fails."""
+        # Mock reqTickerDetails to raise ProviderException (symbol not found)
+        mock_client.reqTickerDetails = AsyncMock(
             side_effect=ProviderException(
                 code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
                 message="Symbol not found: EXCHANGE:INVALID",
@@ -760,9 +760,9 @@ class TestEditPositionBrackets:
         """Create mock TWSClient for edit_position_brackets."""
         mock = Mock()
 
-        # Mock req_ticker_details
+        # Mock reqTickerDetails
         contract_details = _create_mock_contract_details()
-        mock.req_ticker_details = AsyncMock(return_value=contract_details)
+        mock.reqTickerDetails = AsyncMock(return_value=contract_details)
 
         # Mock placeOcaGroup to return tracked orders with unique IDs
         def create_oca_result(
@@ -947,9 +947,9 @@ class TestPreviewOrder:
         """Create mock TWSClient with whatIf support."""
         mock = Mock()
 
-        # Mock req_ticker_details
+        # Mock reqTickerDetails
         contract_details = _create_mock_contract_details()
-        mock.req_ticker_details = AsyncMock(return_value=contract_details)
+        mock.reqTickerDetails = AsyncMock(return_value=contract_details)
 
         return mock
 
@@ -1080,8 +1080,8 @@ class TestPreviewOrder:
         self, provider: TWSBrokerProvider, mock_client: Mock
     ) -> None:
         """Test preview_order raises ProviderException when contract not found."""
-        # Mock req_ticker_details to raise ProviderException (symbol not found)
-        mock_client.req_ticker_details = AsyncMock(
+        # Mock reqTickerDetails to raise ProviderException (symbol not found)
+        mock_client.reqTickerDetails = AsyncMock(
             side_effect=ProviderException(
                 code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
                 message="Symbol not found: EXCHANGE:INVALID",

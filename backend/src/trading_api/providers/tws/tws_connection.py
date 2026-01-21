@@ -2205,7 +2205,7 @@ class TWSClient:
         # return cached data
         return self._get_cached_details(contract)
 
-    async def req_ticker_details(
+    async def reqTickerDetails(
         self,
         ticker: str,
         **kwargs: Any,
@@ -2722,7 +2722,7 @@ class TWSClient:
 
         return stream_key
 
-    def cancel_broker_stream(self, stream_key: str) -> None:
+    def cancelBrokerStream(self, stream_key: str) -> None:
         """Cancel a real-time broker subscription (orders, positions, or accounts)."""
         self.ibsocket.order_tracker.remove_stream_hook(stream_key)
         self.ibsocket.position_tracker.remove_stream_hook(stream_key)

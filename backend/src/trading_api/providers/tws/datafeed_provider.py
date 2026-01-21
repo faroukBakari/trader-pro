@@ -156,7 +156,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             ProviderException: If symbol not found or request fails
         """
 
-        session_details = await self._tws_client.req_ticker_details(ticker_name)
+        session_details = await self._tws_client.reqTickerDetails(ticker_name)
 
         # Use first match (most common case is single result)
         # FIXME: could improve by matching exchange if multiple results
@@ -205,7 +205,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
         else:
             end_dt_str = end_time_utc.strftime("%Y%m%d %H:%M:%S UTC")
 
-        cached = await self._tws_client.req_ticker_details(ticker_name)
+        cached = await self._tws_client.reqTickerDetails(ticker_name)
 
         # Build list of exchanges to request - always SMART, plus darkpool if available
         contracts = [cached.build_session_contract()]
@@ -250,7 +250,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
 
         cached_list = await asyncio.gather(
             *[
-                self._tws_client.req_ticker_details(ticker_name)
+                self._tws_client.reqTickerDetails(ticker_name)
                 for ticker_name in ticker_names
             ]
         )
@@ -308,7 +308,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             ProviderException: If subscription fails or resolution not supported
         """
         bar_size = map_resolution_to_tws_bar_size(resolution)
-        details = await self._tws_client.req_ticker_details(ticker_name)
+        details = await self._tws_client.reqTickerDetails(ticker_name)
         contract = details.build_best_contract()
 
         return self._tws_client.reqBarDataStream(
@@ -341,7 +341,7 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
             ProviderException: If subscription fails
         """
 
-        cached = await self._tws_client.req_ticker_details(ticker_name)
+        cached = await self._tws_client.reqTickerDetails(ticker_name)
 
         return self._tws_client.reqMktDataStream(
             cached, callback, on_error=on_error, **kwargs
