@@ -95,6 +95,7 @@ from trading_api.providers.tws.tws_models import (
     get_bar_duration_seconds,
 )
 from trading_api.providers.tws.wiring_interfaces import (
+    BarsTrackerCBWiringInterface,
     IbSocketWiringInterface,
     QuoteTrackerCBWiringInterface,
 )
@@ -221,17 +222,10 @@ class IBSocketState:
 
 
 class IBSocket(EWrapper, IbSocketWiringInterface):
-    def __init__(
-        self,
-        bars_cb: Callable[[int, BarData], None] | None = None,
-        bars_complete_cb: Callable[[int, str, str], None] | None = None,
-        bars_err: Callable[[int, ProviderException], bool] | None = None,
-    ) -> None:
+    def __init__(self) -> None:
         # socket related attributes
         self.__quote_tracker: QuoteTrackerCBWiringInterface | None = None
-        self.bars_cb = bars_cb
-        self.bars_complete_cb = bars_complete_cb
-        self.bars_err = bars_err
+        self.__bars_tracker: BarsTrackerCBWiringInterface | None = None
         self._req_id_count: count[int] = count()
         self._socket_lock = threading.Lock()
         self._state = IBSocketState.READY
@@ -300,6 +294,11 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         self, tracker_interface: QuoteTrackerCBWiringInterface
     ) -> None:
         self.__quote_tracker = tracker_interface
+
+    def wire_bars_tracker(
+        self, tracker_interface: BarsTrackerCBWiringInterface
+    ) -> None:
+        self.__bars_tracker = tracker_interface
 
     def _dispatchMessage(self, fnName: str, fnParams: dict) -> None:
         if DEBUG_TWS_DISPATCH:
@@ -1424,21 +1423,21 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         TWS sends one historicalData callback per bar.
         Results are accumulated until historicalDataEnd is called.
         """
-        # Route to BarsTracker via callback
-        if self.bars_cb is not None:
-            self.bars_cb(reqId, bar)
+        # Route to BarsTracker via wired interface
+        if self.__bars_tracker is not None:
+            self.__bars_tracker.update(reqId, bar)
 
     def historicalDataUpdate(self, reqId: int, bar: BarData) -> None:
         """Returns updates in real time when keepUpToDate is set to True."""
-        # Route to BarsTracker via callback
-        if self.bars_cb is not None:
-            self.bars_cb(reqId, bar)
+        # Route to BarsTracker via wired interface
+        if self.__bars_tracker is not None:
+            self.__bars_tracker.update(reqId, bar)
 
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:
         """End signal for historical data - resolve Future with accumulated results."""
-        # Route to BarsTracker via callback
-        if self.bars_complete_cb is not None:
-            self.bars_complete_cb(reqId, start, end)
+        # Route to BarsTracker via wired interface
+        if self.__bars_tracker is not None:
+            self.__bars_tracker.flag_complete(reqId, start, end)
 
     # === Market data (accumulation pattern) ===
 
@@ -1823,11 +1822,13 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
                 ),
             )
 
-            # Try BarsTracker first via callback
-            if self.bars_err is not None and self.bars_err(reqId, datafeed_error):
+            # Try BarsTracker first via wired interface
+            if self.__bars_tracker is not None and self.__bars_tracker.raise_error(
+                reqId, datafeed_error
+            ):
                 return
 
-            # Try QuoteTracker via callback
+            # Try QuoteTracker via wired interface
             if self.__quote_tracker is not None and self.__quote_tracker.raise_error(
                 reqId, datafeed_error
             ):
@@ -1908,11 +1909,7 @@ class TWSClient:
             if self.__bars_tracker:
                 self.__bars_tracker.reset()
                 self.__bars_tracker = None
-            self.__ibsocket = IBSocket(
-                self._barsUpdate,
-                self._barsComplete,
-                self._barsError,
-            )
+            self.__ibsocket = IBSocket()
             self.__ibsocket.connect(
                 host=self._host,
                 port=self._port,
@@ -1934,59 +1931,8 @@ class TWSClient:
     def bars_tracker(self) -> BarsTracker:
         """Lazy-initialized BarsTracker for historical/streaming bar data."""
         if self.__bars_tracker is None:
-            self.__bars_tracker = BarsTracker(
-                self._reqBars, self._cancelBars, self._timeout
-            )
+            self.__bars_tracker = BarsTracker(self.ibsocket, self._timeout)
         return self.__bars_tracker
-
-    # === quote hooks and callbacks ===
-
-    def _quoteUpdate(self, req_id: int, updates: dict[str, int | float | str]) -> None:
-        self.quote_tracker.update(req_id, updates)
-
-    def _quoteError(self, req_id: int, error: ProviderException) -> bool:
-        return self.quote_tracker.raise_error(req_id, error)
-
-    # === bars hooks and callbacks ===
-
-    def _reqBars(
-        self,
-        contract: Contract,
-        bar_size: str,
-        end_date_time: str | None,
-        duration_str: str | None,
-    ) -> int:
-        """Request historical bars via IBSocket.reqBars."""
-        req_id = self.ibsocket.next_req_id
-        self.ibsocket.reqBars(
-            reqId=req_id,
-            contract=contract,
-            end_date_time=end_date_time or "",
-            duration_str=duration_str or "1 D",
-            bar_size=bar_size,
-            useRTH=0,  # Include extended hours
-            format_date=2,  # Unix timestamps
-        )
-        return req_id
-
-    def _cancelBars(self, req_id: int) -> None:
-        """Cancel historical data request."""
-        VERSION = 1
-        self.ibsocket.send_message(OUT.CANCEL_HISTORICAL_DATA, [VERSION, req_id])
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"canceled bar data for reqId {req_id}")
-
-    def _barsUpdate(self, req_id: int, bar: BarData) -> None:
-        """Forward bar data to BarsTracker (called from reader thread)."""
-        self.bars_tracker.update(req_id, bar)
-
-    def _barsComplete(self, req_id: int, start: str, end: str) -> None:
-        """Forward completion signal to BarsTracker (called from reader thread)."""
-        self.bars_tracker.flag_complete(req_id, start, end)
-
-    def _barsError(self, req_id: int, error: ProviderException) -> bool:
-        """Forward error to BarsTracker (called from reader thread)."""
-        return self.bars_tracker.raise_error(req_id, error)
 
     # === Contract resolution and caching ===
 
