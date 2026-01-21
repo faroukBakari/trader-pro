@@ -23,13 +23,20 @@ from zoneinfo import ZoneInfo
 
 from ibapi.common import BarData
 from ibapi.contract import Contract
+from ibapi.message import OUT
 
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import Bar
+from trading_api.providers.tws.tws_models import get_asset_config
+from trading_api.providers.tws.wiring_interfaces import (
+    BarsTrackerCBWiringInterface,
+    IbSocketWiringInterface,
+)
 
 logger = logging.getLogger(__name__)
 
 DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
+DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
 
 # Default cache location
 DEFAULT_CACHE_PATH = ".cache/bars.db"
@@ -515,7 +522,7 @@ async def dispatch_update(
     await callback(last.to_domain())
 
 
-class BarsTracker:
+class BarsTracker(BarsTrackerCBWiringInterface):
     """Manages bar subscriptions and dispatches bar updates to BarsRequests.
 
     Provides a unified interface for bar data access:
@@ -528,24 +535,33 @@ class BarsTracker:
     Thread Safety:
         - Lookup methods (request, subscribe): main thread
         - Update methods (update, raise_error): reader thread via IBSocket callbacks
+
+    Usage:
+        tracker = BarsTracker(ibsocket)
+
+        # Snapshot pattern
+        bars = await tracker.request(contract, "5 mins", end_date_time, duration_str)
+
+        # Streaming pattern
+        key = tracker.subscribe(contract, "5 mins", on_update, on_error)
+        # ... receive updates via on_update callback ...
+        tracker.unsubscribe(key)
     """
 
     def __init__(
         self,
-        bars_request_hook: Callable[[Contract, str, str | None, str | None], int],
-        bars_cancel_hook: Callable[[int], None],
+        ibsocket: IbSocketWiringInterface,
         timeout: float = 11.0,
     ) -> None:
         """Initialize BarsTracker.
 
         Args:
-            bars_request_hook: Callable to request bars given a Contract and params
-            bars_cancel_hook: Callable to cancel a bar request given a request ID
+            ibsocket: Interface for TWS socket operations (request ID allocation, message sending)
             timeout: Default timeout in seconds for snapshot requests
         """
         self.tracker_lock = threading.Lock()
-        self._bars_request_hook = bars_request_hook
-        self._bars_cancel_hook = bars_cancel_hook
+        ibsocket.wire_bars_tracker(self)
+        self.ibsocket = ibsocket
         self._timeout = timeout
 
         # Bar request storage
@@ -574,6 +590,82 @@ class BarsTracker:
             self._snapshot_hooks.get(req_id, {}) or self._stream_hooks.get(req_id, {})
         )
         return in_use
+
+    def _bars_request_hook(
+        self,
+        contract: Contract,
+        bar_size: str,
+        end_date_time: str | None,
+        duration_str: str | None,
+    ) -> int:
+        """Request historical bars via IBSocket.
+
+        Builds and sends OUT.REQ_HISTORICAL_DATA message to TWS.
+
+        Args:
+            contract: Contract to request bars for
+            bar_size: TWS bar size string (e.g., "5 mins")
+            end_date_time: End datetime for historical request
+            duration_str: Duration string (e.g., "1 D")
+
+        Returns:
+            req_id: TWS request ID allocated for this request
+        """
+        assert (
+            isinstance(contract, Contract) and contract.conId != 0
+        ), "contract must be an instance of Contract with a non-zero conId."
+
+        req_id = self.ibsocket.next_req_id
+        asset_config = get_asset_config(contract.secType)
+        what_to_show = asset_config.what_to_show_live
+
+        # Build message fields (matches IBSocket.reqBars protocol)
+        fields: list[object] = [
+            req_id,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            contract.includeExpired,
+            end_date_time or "",
+            bar_size,
+            duration_str or "1 D",
+            0,  # useRTH (0 = include extended hours)
+            what_to_show,
+            2,  # formatDate (1=string, 2=unix)
+            not end_date_time,  # keepUpToDate only if end_date_time is empty
+            [],  # chartOptions (empty list)
+        ]
+
+        self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, fields)
+        if DEBUG_TWS_REQUEST:
+            logger.debug(
+                f"requested bar data for reqId {req_id}, "
+                f"symbol='{contract.symbol}', exchange='{contract.exchange}', "
+                f"end_date_time='{end_date_time}', duration='{duration_str}', barSize='{bar_size}'"
+            )
+        return req_id
+
+    def _bars_cancel_hook(self, req_id: int) -> None:
+        """Cancel a historical data request.
+
+        Sends OUT.CANCEL_HISTORICAL_DATA message to TWS.
+
+        Args:
+            req_id: TWS request ID to cancel
+        """
+        VERSION = 1
+        self.ibsocket.send_message(OUT.CANCEL_HISTORICAL_DATA, [VERSION, req_id])
+        if DEBUG_TWS_REQUEST:
+            logger.debug(f"canceled bar data for reqId {req_id}")
 
     def _get_or_create_bar_req(
         self,

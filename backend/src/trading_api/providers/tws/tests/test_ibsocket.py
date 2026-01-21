@@ -686,12 +686,18 @@ class TestIBSocketNotifyStream:
 
 
 class TestIBSocketHistoricalCallbacks:
-    """Test historicalData and historicalDataEnd route to bars_cb/bars_complete_cb."""
+    """Test historicalData and historicalDataEnd route to wired BarsTracker.
 
-    def test_historical_data_calls_bars_cb(self) -> None:
-        """Test historicalData routes to bars_cb callback."""
-        mock_bars_cb = MagicMock()
-        sock = IBSocket(bars_cb=mock_bars_cb)
+    With the dependency inversion pattern, IBSocket receives callbacks from
+    BarsTracker via wire_bars_tracker(). These tests verify that TWS callbacks
+    are properly routed to the wired BarsTrackerCBWiringInterface.
+    """
+
+    def test_historical_data_calls_bars_tracker_update(self) -> None:
+        """Test historicalData routes to wired bars_tracker.update()."""
+        mock_bars_tracker = MagicMock()
+        sock = IBSocket()
+        sock.wire_bars_tracker(mock_bars_tracker)
         sock._state = IBSocketState.RUNNING
 
         bar = BarData()
@@ -703,11 +709,11 @@ class TestIBSocketHistoricalCallbacks:
 
         sock.historicalData(123, bar)
 
-        mock_bars_cb.assert_called_once_with(123, bar)
+        mock_bars_tracker.update.assert_called_once_with(123, bar)
 
-    def test_historical_data_does_nothing_without_bars_cb(self) -> None:
-        """Test historicalData does nothing when bars_cb not set."""
-        sock = IBSocket()  # No bars_cb
+    def test_historical_data_does_nothing_without_wired_tracker(self) -> None:
+        """Test historicalData does nothing when bars_tracker not wired."""
+        sock = IBSocket()  # No wire_bars_tracker called
         sock._state = IBSocketState.RUNNING
 
         bar = BarData()
@@ -717,20 +723,24 @@ class TestIBSocketHistoricalCallbacks:
         # Should not raise
         sock.historicalData(123, bar)
 
-    def test_historical_data_end_calls_bars_complete_cb(self) -> None:
-        """Test historicalDataEnd routes to bars_complete_cb callback."""
-        mock_bars_complete_cb = MagicMock()
-        sock = IBSocket(bars_complete_cb=mock_bars_complete_cb)
+    def test_historical_data_end_calls_bars_tracker_flag_complete(self) -> None:
+        """Test historicalDataEnd routes to wired bars_tracker.flag_complete()."""
+        mock_bars_tracker = MagicMock()
+        sock = IBSocket()
+        sock.wire_bars_tracker(mock_bars_tracker)
         sock._state = IBSocketState.RUNNING
 
         sock.historicalDataEnd(123, "20231215", "20231216")
 
-        mock_bars_complete_cb.assert_called_once_with(123, "20231215", "20231216")
+        mock_bars_tracker.flag_complete.assert_called_once_with(
+            123, "20231215", "20231216"
+        )
 
-    def test_historical_data_update_calls_bars_cb(self) -> None:
-        """Test historicalDataUpdate routes to bars_cb callback for real-time updates."""
-        mock_bars_cb = MagicMock()
-        sock = IBSocket(bars_cb=mock_bars_cb)
+    def test_historical_data_update_calls_bars_tracker_update(self) -> None:
+        """Test historicalDataUpdate routes to wired bars_tracker.update() for real-time."""
+        mock_bars_tracker = MagicMock()
+        sock = IBSocket()
+        sock.wire_bars_tracker(mock_bars_tracker)
         sock._state = IBSocketState.RUNNING
 
         bar = BarData()
@@ -743,7 +753,7 @@ class TestIBSocketHistoricalCallbacks:
 
         sock.historicalDataUpdate(123, bar)
 
-        mock_bars_cb.assert_called_once_with(123, bar)
+        mock_bars_tracker.update.assert_called_once_with(123, bar)
 
 
 # =============================================================================

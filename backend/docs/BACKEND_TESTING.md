@@ -800,6 +800,96 @@ async def test_quote_subscription(mock_ibsocket):
 
 ---
 
+**BarsTracker Testing (Interface-Based Mocking):**
+
+BarsTracker uses the same dependency inversion pattern as QuoteTracker with `IbSocketWiringInterface` and `BarsTrackerCBWiringInterface`:
+
+**IBSocket Callback Verification:**
+
+```python
+# test_ibsocket.py - Verify callbacks route to wired interface
+from unittest.mock import MagicMock
+from ibapi.common import BarData
+
+def test_historical_data_routes_to_bars_tracker():
+    """Test historicalData routes to wired bars_tracker.update()."""
+    mock_bars_tracker = MagicMock()  # ← Implements BarsTrackerCBWiringInterface
+    sock = IBSocket()
+    sock.wire_bars_tracker(mock_bars_tracker)  # ← Bidirectional wiring
+
+    bar = BarData()
+    bar.date = "20231215"
+    bar.open = 150.0
+    bar.high = 151.0
+    bar.low = 149.0
+    bar.close = 150.5
+
+    sock.historicalData(123, bar)
+
+    mock_bars_tracker.update.assert_called_once_with(123, bar)
+
+def test_historical_data_end_routes_to_bars_tracker():
+    """Test historicalDataEnd routes to wired bars_tracker.flag_complete()."""
+    mock_bars_tracker = MagicMock()
+    sock = IBSocket()
+    sock.wire_bars_tracker(mock_bars_tracker)
+
+    sock.historicalDataEnd(123, "20231215", "20231216")
+
+    mock_bars_tracker.flag_complete.assert_called_once_with(123, "20231215", "20231216")
+```
+
+**Key Testing Differences from QuoteTracker:**
+
+| Aspect              | QuoteTracker                       | BarsTracker                         |
+| ------------------- | ---------------------------------- | ----------------------------------- |
+| Wiring Method       | `wire_quote_tracker(tracker)`      | `wire_bars_tracker(tracker)`        |
+| Update Callback     | `update(req_id, tick_type, value)` | `update(req_id, bar_data)`          |
+| Completion Callback | _(none - continuous streaming)_    | `flag_complete(req_id, start, end)` |
+| Error Callback      | `raise_error(req_id, exception)`   | `raise_error(req_id, exception)`    |
+| Request Message     | `OUT.REQ_MKT_DATA`                 | `OUT.REQ_HISTORICAL_DATA`           |
+| Cancel Message      | `OUT.CANCEL_MKT_DATA`              | `OUT.CANCEL_HISTORICAL_DATA`        |
+
+**BarsTracker Test Pattern:**
+
+```python
+# test_bars_tracker.py - Test BarsTracker with mocked IBSocket
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IBSocket implementing IbSocketWiringInterface."""
+    mock_socket = MagicMock(spec=IbSocketWiringInterface)
+
+    counter = {"value": 0}
+    def get_next_id():
+        counter["value"] += 1
+        return counter["value"]
+
+    type(mock_socket).next_req_id = PropertyMock(side_effect=get_next_id)
+    mock_socket.send_message = MagicMock()
+
+    return mock_socket
+
+@pytest.mark.asyncio
+async def test_bars_request_sends_correct_message(mock_ibsocket):
+    """Test BarsTracker.request() sends OUT.REQ_HISTORICAL_DATA message."""
+    tracker = BarsTracker(mock_ibsocket, timeout=30)
+
+    # Trigger request
+    await tracker.request(contract, "1 min", "1 D", ...)
+
+    # Verify message construction
+    mock_ibsocket.send_message.assert_called_once()
+    args = mock_ibsocket.send_message.call_args[0]
+    assert args[0] == OUT.REQ_HISTORICAL_DATA
+```
+
+**See:** `providers/tws/tests/test_ibsocket.py::TestIBSocketHistoricalCallbacks` for callback routing tests
+
+---
+
 ## 5. Testing Patterns
 
 # Test provider-level integration
@@ -1944,6 +2034,7 @@ Benefits:
 **QuoteTracker Wiring Pattern:**
 
 The `mock_ibsocket` fixture must implement the bidirectional wiring mechanism:
+
 1. QuoteTracker constructor calls `mock_ibsocket.wire_quote_tracker(self)`
 2. Mock must store the tracker reference internally: `self.__quote_tracker = tracker_interface`
 3. Tests can then simulate reader thread tick callbacks: `mock_ibsocket.__quote_tracker.update(req_id, updates)`
