@@ -865,6 +865,8 @@ The broker's capabilities are defined via `broker_config.configFlags`:
 - ✅ **Execution History**: Complete trade record with timestamps
 - ✅ **Symbol Filtering**: Query executions by symbol
 - ✅ **Execution Details**: Price, quantity, side, time for each trade
+- ✅ **Execution History Display**: Custom Account Manager "Trades" page with real-time WebSocket updates
+- ✅ **Commission Display**: Two-phase commission enrichment from TWS integration
 
 #### Account Information
 
@@ -907,6 +909,7 @@ The broker's capabilities are defined via `broker_config.configFlags`:
 - ✅ **WebSocket Subscriptions**: 5 broker event subscriptions (orders, positions, executions, equity, connection status)
 - ✅ **Smart Client Selection**: `_getWsAdapter()` method for fallback/real WebSocket switching
 - ✅ **Backend Broadcasting**: WebSocket event broadcasting implemented
+- ✅ **Custom Account Pages**: "Trades" tab with execution history, commission display, and counter badge
 
 ### ❌ Not Implemented (Future)
 
@@ -926,7 +929,7 @@ The broker's capabilities are defined via `broker_config.configFlags`:
 #### Advanced Features
 
 - ❌ **Order Depth (DOM)**: Level 2 market data
-- ❌ **Order History**: Historical filled/canceled orders
+- 🟡 **Order History**: Historical filled/canceled orders (partially implemented via Trades tab for executions only)
 - ❌ **Multiple Accounts**: Multi-account support
 - ❌ **Risk Management**: Margin calculations, leverage limits
 - ❌ **Real-time Subscriptions**: `subscribeRealtime()` / `unsubscribeRealtime()`
@@ -959,7 +962,30 @@ accountManagerInfo(): AccountManagerInfo {
     ],
     orderColumns: [...],  // Order panel column configuration
     positionColumns: [...], // Position panel: Symbol, Side, Qty, AvgPrice, Limit, Stop, PnL
-    pages: [],            // Custom account pages (empty)
+    pages: [
+      {
+        id: 'executions',
+        title: 'Trades',
+        displayCounterInTab: true,  // Shows "Trades 5" counter
+        tables: [{
+          id: 'executions-table',
+          columns: [
+            { id: 'symbol', label: 'Symbol', dataFields: ['symbol', 'symbol'], formatter: StandardFormatterName.Symbol },
+            { id: 'side', label: 'Side', dataFields: ['side'], formatter: StandardFormatterName.Side },
+            { id: 'qty', label: 'Qty', dataFields: ['qty'], formatter: StandardFormatterName.FormatQuantity },
+            { id: 'price', label: 'Price', dataFields: ['price'], formatter: StandardFormatterName.FormatPrice },
+            { id: 'time', label: 'Time', dataFields: ['time'], formatter: StandardFormatterName.LocalDate },
+            { id: 'commission', label: 'Commission', dataFields: ['commission'], formatter: StandardFormatterName.Fixed },
+          ],
+          getData: async () => {
+            const response = await this._getApiAdapter().getAllExecutions()
+            return response.data
+          },
+          changeDelegate: this._executionChangeDelegate,
+          deleteDelegate: this._executionDeleteDelegate,
+        }],
+      },
+    ],  // Custom account pages
   }
 }
 ```
@@ -976,6 +1002,35 @@ async accountsMetainfo(): Promise<AccountMetainfo[]> {
   ]
 }
 ```
+
+#### Custom Account Pages
+
+The "Trades" custom page displays execution history with commission data in a dedicated Account Manager tab.
+
+**Implementation Pattern**:
+- **Tab Counter**: `displayCounterInTab: true` shows execution count (e.g., "Trades 5") similar to Orders/Positions tabs
+- **Data Source**: `getData()` calls `getAllExecutions()` REST endpoint (SSOT pattern - no local cache)
+- **Real-Time Updates**: `changeDelegate` receives WebSocket execution updates via `this._executionChangeDelegate.fire(execution)`
+- **TWS Two-Phase Dispatch**: Table receives TWO updates per execution (immediate fill + commission enrichment ~50-200ms later). TradingView uses `execution.id` for row deduplication, so second fire updates the commission column.
+
+**Delegates**:
+```typescript
+// Initialize in constructor
+this._executionChangeDelegate = this._hostAdapter.factory.createDelegate()
+this._executionDeleteDelegate = this._hostAdapter.factory.createDelegate()
+
+// Fire updates from WebSocket handler
+this.executionsClient.subscribe(
+  { accountId: this.accountId },
+  (execution: Execution) => {
+    this._executionChangeDelegate.fire(execution)  // Updates table row
+    this._hostAdapter.executionUpdate(execution)   // Chart markers
+  },
+  (error) => this.handleSubscriptionError('Executions', error)
+)
+```
+
+**Reference**: See [broker-api.d.ts](../public/trading_terminal/broker-api.d.ts) `AccountManagerPage` interface for full API.
 
 ### 2. Order Operations
 
@@ -1166,6 +1221,30 @@ Returns all open positions.
 ###### `executions(symbol: string): Promise<Execution[]>`
 
 Returns execution history for a specific symbol.
+
+###### `getAllExecutions(): Promise<Execution[]>`
+
+Returns ALL execution history across all symbols (no filter).
+
+**Usage**:
+- Called by custom "Trades" page `getData()` function
+- Backend returns all executions from ExecutionTracker
+- Each execution has unique `id` field for TradingView table deduplication
+
+**Implementation**:
+```typescript
+async getAllExecutions(): ApiPromise<Execution[]> {
+  const response = await this.brokerApi.getAllExecutions()
+  return {
+    status: response.status,
+    data: response.data.map(execution => ({
+      ...execution,
+      side: execution.side as unknown as Execution['side'],
+      commission: execution.commission ?? undefined,  // null → undefined
+    })),
+  }
+}
+```
 
 ##### Symbol Methods
 

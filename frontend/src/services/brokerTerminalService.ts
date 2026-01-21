@@ -11,6 +11,7 @@ import type {
   IBrokerConnectionAdapterHost,
   IBrokerWithoutRealtime,
   IDatafeedQuotesApi,
+  IDelegate,
   IndividualPosition,
   InstrumentInfo,
   INumberFormatter,
@@ -53,6 +54,7 @@ export interface ApiInterface {
   getOrders(): ApiPromise<Order[]>
   getPositions(): ApiPromise<Position[]>
   getExecutions(symbol: string): ApiPromise<Execution[]>
+  getAllExecutions(): ApiPromise<Execution[]>
   getAccountInfo(): ApiPromise<AccountMetainfo>
 
   // Position operations
@@ -487,6 +489,13 @@ class ApiFallback implements ApiInterface {
     }
   }
 
+  async getAllExecutions(): ApiPromise<Execution[]> {
+    return {
+      status: 200,
+      data: this.brokerMock.getExecutions(),
+    }
+  }
+
   async getAccountInfo(): ApiPromise<AccountMetainfo> {
     return {
       status: 200,
@@ -620,6 +629,11 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   private accountId: AccountId = 'UNKNOWN' as AccountId
 
+  // Delegates for Account Manager custom executions page
+  // These fire to TradingView's table for real-time updates (no local cache needed)
+  private _executionChangeDelegate!: IDelegate<(data: object) => void>
+  private _executionDeleteDelegate!: IDelegate<(id: string) => void>
+
   constructor(
     host: IBrokerConnectionAdapterHost,
     _quotesProvider: IDatafeedQuotesApi,
@@ -637,6 +651,10 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
     // Initialize balance and equity first to ensure they exist before any UI calls
     this.balance = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
     this.equity = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
+
+    // Initialize delegates for Account Manager custom executions page
+    this._executionChangeDelegate = this._hostAdapter.factory.createDelegate()
+    this._executionDeleteDelegate = this._hostAdapter.factory.createDelegate()
 
     // KNOWN ISSUE: listenerId must match currentAccount() return value
     // See BROKER-TERMINAL-SERVICE.md "Known Issues" section
@@ -726,6 +744,11 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         { accountId: this.accountId },
         (execution: Execution) => {
           console.warn('Received execution update via WebSocket:', execution)
+          // Fire to custom Executions page table (real-time updates)
+          // TWS two-phase dispatch: may fire twice (with/without commission)
+          // TradingView table uses `id` for dedup, so second fire updates the row
+          this._executionChangeDelegate.fire(execution)
+          // Fire to chart markers (existing behavior)
           this._hostAdapter.executionUpdate(execution)
         },
         (error) => this.handleSubscriptionError('Executions', error)
@@ -888,7 +911,105 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
           formatter: StandardFormatterName.FormatPrice,
         },
       ],
-      pages: [],
+      historyColumns: [
+        {
+          label: 'Symbol',
+          id: 'symbol',
+          dataFields: ['symbol', 'symbol'],
+          formatter: StandardFormatterName.Symbol,
+        },
+        {
+          label: 'Side',
+          id: 'side',
+          dataFields: ['side'],
+          formatter: StandardFormatterName.Side,
+        },
+        {
+          label: 'Qty',
+          id: 'qty',
+          dataFields: ['qty'],
+          formatter: StandardFormatterName.FormatQuantity,
+        },
+        {
+          label: 'Price',
+          id: 'price',
+          dataFields: ['price'],
+          formatter: StandardFormatterName.FormatPrice,
+        },
+        {
+          label: 'Time',
+          id: 'time',
+          dataFields: ['time'],
+          formatter: StandardFormatterName.LocalDateOrDateTime,
+        },
+        {
+          label: 'Commission',
+          id: 'commission',
+          dataFields: ['commission'],
+          formatter: StandardFormatterName.Fixed,
+        },
+        {
+          label: 'Net Amount',
+          id: 'netAmount',
+          dataFields: ['netAmount'],
+          formatter: StandardFormatterName.Fixed,
+        },
+      ],
+      pages: [
+        {
+          id: 'executions',
+          title: 'Trades',
+          displayCounterInTab: true,
+          tables: [{
+            id: 'executions-table',
+            columns: [
+              {
+                id: 'symbol',
+                label: 'Symbol',
+                dataFields: ['symbol', 'symbol'],
+                formatter: StandardFormatterName.Symbol,
+              },
+              {
+                id: 'side',
+                label: 'Side',
+                dataFields: ['side'],
+                formatter: StandardFormatterName.Side,
+              },
+              {
+                id: 'qty',
+                label: 'Qty',
+                dataFields: ['qty'],
+                formatter: StandardFormatterName.FormatQuantity,
+              },
+              {
+                id: 'price',
+                label: 'Price',
+                dataFields: ['price'],
+                formatter: StandardFormatterName.FormatPrice,
+              },
+              {
+                id: 'time',
+                label: 'Time',
+                dataFields: ['time'],
+                formatter: StandardFormatterName.LocalDate,
+              },
+              {
+                id: 'commission',
+                label: 'Commission',
+                dataFields: ['commission'],
+                formatter: StandardFormatterName.Fixed,
+              },
+            ],
+            // getData fetches ALL executions from backend (SSOT pattern - no local cache)
+            getData: async () => {
+              const response = await this._getApiAdapter().getAllExecutions()
+              return response.data
+            },
+            changeDelegate: this._executionChangeDelegate,
+            deleteDelegate: this._executionDeleteDelegate,
+          }],
+        },
+      ],
     }
   }
 

@@ -90,6 +90,9 @@ class MockBrokerProvider(Provider, BrokerCapability):
     async def get_executions(self, symbol: str) -> list[Execution]:
         return []
 
+    async def get_all_executions(self) -> list[Execution]:
+        return []
+
     async def get_account_info(self) -> AccountMetainfo:
         return AccountMetainfo(id="MOCK", name="Mock Account")
 

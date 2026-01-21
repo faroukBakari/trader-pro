@@ -19,6 +19,7 @@ from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ibapi.contract import Contract
 from ibapi.execution import Execution as TWSExecution
@@ -30,26 +31,36 @@ from trading_api.models.exceptions import ProviderException
 def _parse_tws_execution_time(time_str: str) -> int:
     """Parse TWS execution time to unix milliseconds.
 
-    TWS format: "YYYYMMDD-HH:MM:SS" or "YYYYMMDD HH:MM:SS" (exchange timezone).
-    We treat it as UTC for now (TWS typically sends in exchange local time,
-    but for executions we get a consistent format).
+    TWS format: "YYYYMMDD HH:MM:SS TZ" where TZ is IANA timezone (e.g., "US/Eastern").
+    Also handles legacy formats: "YYYYMMDD-HH:MM:SS" or "YYYYMMDD HH:MM:SS" (no timezone).
 
     Args:
-        time_str: TWS execution time string
+        time_str: TWS execution time string (e.g., "20260120 07:10:09 US/Eastern")
 
     Returns:
-        Unix timestamp in milliseconds
+        Unix timestamp in milliseconds (UTC)
     """
-    # TWS execution time format: "20240115-14:30:45" or "20240115 14:30:45"
-    # Normalize separator
+    # Normalize separator: "20240115-14:30:45" → "20240115 14:30:45"
     normalized = time_str.replace("-", " ").replace("  ", " ")
 
+    # Split into parts: ['20260120', '07:10:09', 'US/Eastern'] or ['20260120', '07:10:09']
+    parts = normalized.split(" ")
+
     try:
-        dt = datetime.strptime(normalized, "%Y%m%d %H:%M:%S")
-        # Treat as UTC (TWS may send in different timezones depending on config)
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt_str = f"{parts[0]} {parts[1]}"
+        dt = datetime.strptime(dt_str, "%Y%m%d %H:%M:%S")
+
+        # Apply timezone if provided, otherwise assume UTC
+        if len(parts) >= 3:
+            tz_name = " ".join(parts[2:])  # Handle "US/Eastern" or multi-word TZ
+            tz = ZoneInfo(tz_name)
+            dt = dt.replace(tzinfo=tz)
+        else:
+            dt = dt.replace(tzinfo=timezone.utc)
+
+        # Convert to UTC milliseconds
         return int(dt.timestamp() * 1000)
-    except ValueError:
+    except (ValueError, KeyError, IndexError):
         # Fallback: return current time if parsing fails
         return int(datetime.now(timezone.utc).timestamp() * 1000)
 
@@ -93,6 +104,7 @@ class TrackedExecution:
         """
 
         return Execution(
+            id=self.exec_id,
             symbol=self.symbol,
             price=self.execution.price,
             qty=float(self.execution.shares),

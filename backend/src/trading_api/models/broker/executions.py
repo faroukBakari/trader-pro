@@ -13,6 +13,7 @@ class Execution(BaseModel):
     Trade execution record (matching TradingView Execution)
     """
 
+    id: str = Field(..., description="Unique execution ID")
     symbol: str = Field(..., description="Symbol name")
     price: float = Field(..., description="Execution price")
     qty: float = Field(..., description="Execution quantity", gt=0)

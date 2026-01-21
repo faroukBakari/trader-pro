@@ -547,6 +547,22 @@ export class ApiAdapter {
     }
   }
 
+  @ApiErrorHandler('/executions')
+  async getAllExecutions(): ApiPromise<Execution[]> {
+    const response = await this.brokerApi.getAllExecutions()
+
+    return {
+      status: response.status,
+      data: response.data.map(execution => ({
+        ...execution,
+        side: execution.side as unknown as Execution['side'],
+        // Commission field: Convert backend null → TradingView undefined
+        // Backend may return null if commissionAndFeesReport hasn't fired yet (TWS two-phase dispatch)
+        commission: execution.commission ?? undefined,
+      })),
+    }
+  }
+
   @ApiErrorHandler('/accounts')
   async getAccountInfo(): ApiPromise<AccountMetainfo> {
     const response = await this.brokerApi.getAccountInfo()

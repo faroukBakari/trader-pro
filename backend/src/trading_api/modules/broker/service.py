@@ -145,6 +145,14 @@ class BrokerService(WsRouteService):
         """
         return await self.broker_provider.get_executions(symbol)
 
+    async def get_all_executions(self, user_id: str) -> List[Execution]:
+        """Get all execution history (across all symbols).
+
+        Args:
+            user_id: User ID for scoping (unused for now)
+        """
+        return await self.broker_provider.get_all_executions()
+
     async def get_account_info(self, user_id: str) -> AccountMetainfo:
         """Get account metadata for a user.
 

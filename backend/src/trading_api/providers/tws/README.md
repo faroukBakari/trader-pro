@@ -960,6 +960,49 @@ else:
 - **Main Thread:** `all_executions()`, `create_stream_hook()`, `reset()`
 - **No Locks Needed:** Reader thread writes, main thread reads via asyncio dispatch
 
+**Execution Model Update:**
+
+`TrackedExecution.to_domain()` now populates the `id` field for TradingView Account Manager deduplication:
+
+```python
+def to_domain(self) -> Execution:
+    """Convert to domain Execution model."""
+    return Execution(
+        id=self.exec_id,  # TWS exec_id maps to domain id
+        symbol=self.symbol,
+        price=self.execution.price,
+        # ... other fields
+    )
+```
+
+**Rationale:** TradingView custom Account Manager pages require unique `id` field for row deduplication. Since TWS may fire two updates per execution (fill → commission enrichment), the `id` ensures the second update modifies the existing row instead of creating a duplicate.
+
+**Timezone-Aware Time Parsing:**
+
+TWS execution times now support IANA timezones (e.g., `"20260120 07:10:09 US/Eastern"`):
+
+```python
+def _parse_tws_execution_time(time_str: str) -> int:
+    """Parse TWS execution time to unix milliseconds (UTC).
+    
+    TWS format: "YYYYMMDD HH:MM:SS TZ" where TZ is IANA timezone.
+    Legacy formats: "YYYYMMDD-HH:MM:SS" or "YYYYMMDD HH:MM:SS" (no TZ).
+    """
+    parts = time_str.replace("-", " ").split(" ")
+    dt = datetime.strptime(f"{parts[0]} {parts[1]}", "%Y%m%d %H:%M:%S")
+    
+    # Apply timezone if provided (e.g., "US/Eastern"), else assume UTC
+    if len(parts) >= 3:
+        tz = ZoneInfo(" ".join(parts[2:]))  # Handle multi-word TZ
+        dt = dt.replace(tzinfo=tz)
+    else:
+        dt = dt.replace(tzinfo=timezone.utc)
+    
+    return int(dt.timestamp() * 1000)  # Convert to UTC milliseconds
+```
+
+**Exception Handling:** Falls back to current UTC time on `ValueError`, `KeyError`, or `IndexError` (malformed time strings).
+
 **API:**
 
 ```python
@@ -985,12 +1028,12 @@ class ExecutionTracker:
         """Unregister execution callback."""
 ```
 
-**Usage Example (BrokerProvider):**
+**TWSBrokerProvider Integration:**
 
 ```python
 class TWSBrokerProvider:
     async def get_executions(self, symbol: str | None = None) -> list[DomainExecution]:
-        """Get all executions with optional symbol filter."""
+        """Get executions with optional symbol filter."""
         # Trigger snapshot if needed
         self._tws_client.socket.execution_tracker.ensure_snapshot_requested(
             lambda: self._tws_client.socket.reqExecutions(ExecutionFilter())
@@ -1000,6 +1043,10 @@ class TWSBrokerProvider:
             filter_symbol=f"EXCHANGE:{symbol}" if symbol else ""
         )
         return [t.to_domain() for t in tracked]
+    
+    async def get_all_executions(self) -> list[DomainExecution]:
+        """Get ALL execution history (no symbol filter)."""
+        return await self.get_executions("")  # Empty string = all symbols
 
     async def subscribe_executions(self, callback, on_error, symbol: str | None = None) -> str:
         """Subscribe to execution stream (with commission enrichment)."""
