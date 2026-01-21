@@ -8,23 +8,24 @@
 
 ## Quick Reference
 
-| Layer                       | File                                  | Responsibility                                                                   |
-| --------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- |
-| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion                                       |
-| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management                                 |
-| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket                                 |
-| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                    |
-| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                    |
-| **ContractTracker**         | `contract_tracker.py`                 | Contract persistence with SQLite + lazy loading                                  |
-| **QuoteTracker**            | `quote_tracker.py`                    | Quote subscription management, centralized snapshot/stream hooks, refcount logic |
-| **BarsTracker**             | `bars_tracker.py`                     | Bar data management, timezone-aware conversion, snapshot/stream patterns         |
-| **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch  |
-| **PositionTracker**         | `position_tracker.py`                 | Position state tracking, thread-safe snapshot/stream pattern                     |
-| **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL        |
-| **ExecutionTracker**        | `execution_tracker.py`                | Execution tracking with commission joining, two-phase dispatch pattern           |
-| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                    |
-| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                                |
-| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                              |
+| Layer                       | File                                  | Responsibility                                                                                               |
+| --------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion                                                                   |
+| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management                                                             |
+| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket                                                             |
+| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                                                |
+| **Wiring Interfaces**       | `wiring_interfaces.py`                | Abstract interfaces for component composition (IbSocketWiringInterface, QuoteTrackerCBWiringInterface)       |
+| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                                                |
+| **ContractTracker**         | `contract_tracker.py`                 | Contract persistence with SQLite + lazy loading                                                              |
+| **QuoteTracker**            | `quote_tracker.py`                    | Quote subscription management with interface-based wiring, centralized snapshot/stream hooks, refcount logic |
+| **BarsTracker**             | `bars_tracker.py`                     | Bar data management, timezone-aware conversion, snapshot/stream patterns                                     |
+| **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch                              |
+| **PositionTracker**         | `position_tracker.py`                 | Position state tracking, thread-safe snapshot/stream pattern                                                 |
+| **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL                                    |
+| **ExecutionTracker**        | `execution_tracker.py`                | Execution tracking with commission joining, two-phase dispatch pattern                                       |
+| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                                                |
+| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                                                            |
+| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                                                          |
 
 **Tests:** `providers/tws/tests/test_{client,ibsocket,mappers,models,datafeed_provider,broker_provider,cached_contract,contract_tracker,quote_tracker,config}.py`
 
@@ -95,6 +96,33 @@ callback(data) ◄────────────────────�
 - **Snapshot Hooks**: `_snapshot_hooks[tws_key]` holds list of (loop, Future) for one-shot requests
 - **Stream Hooks**: `_stream_hooks[tws_key]` holds list of (loop, callback, on_error) for continuous updates
 - **Deduplication**: `create_snapshot()`/`create_stream()` return `None` reqId if reusing existing request
+
+**Dependency Inversion Pattern (January 2026):**
+
+Components now communicate via abstract interfaces instead of callback injection:
+
+- **IbSocketWiringInterface**: Socket abstraction providing `next_req_id` property and `send_message()` method
+- **QuoteTrackerCBWiringInterface**: Tracker callback contract defining `update()` and `raise_error()` methods
+- **Benefits**: Cleaner testing (mock interfaces), single source of truth for TWS protocol logic, reduced coupling
+
+**Before (Hook Injection):**
+
+```python
+quote_tracker = QuoteTracker(
+    quote_request_hook=lambda c: ibsocket._reqQuote(c),
+    quote_cancel_hook=lambda rid: ibsocket._cancelQuote(rid),
+    timeout=10
+)
+```
+
+**After (Interface Composition):**
+
+```python
+# IBSocket implements IbSocketWiringInterface
+quote_tracker = QuoteTracker(ibsocket=self.ibsocket, timeout=10)
+```
+
+See: `wiring_interfaces.py` for interface definitions, section 2.5 for QuoteTracker implementation details
 
 **Quote Subscription Pattern:**
 
@@ -209,7 +237,98 @@ _business_to_tws_key: dict[str, str] = {
 
 ---
 
-## 2.3 Contract Caching & Persistence
+## 2.3 Wiring Interfaces (Dependency Inversion)
+
+**File:** `wiring_interfaces.py`
+
+Abstract interfaces enabling component composition via dependency inversion principle.
+
+### IbSocketWiringInterface
+
+Socket abstraction for TWS communication:
+
+```python
+class IbSocketWiringInterface(ABC):
+    """Socket wiring contract for tracker components."""
+
+    @property
+    @abstractmethod
+    def next_req_id(self) -> int:
+        """Allocate and return next TWS request ID (thread-safe)."""
+        pass
+
+    @abstractmethod
+    def send_message(self, msgId: int, values: list[object]) -> None:
+        """Send TWS protocol message (thread-safe).
+
+        Args:
+            msgId: TWS message identifier (e.g., OUT.REQ_MKT_DATA)
+            values: Message field values per TWS protocol spec
+        """
+        pass
+```
+
+**Implementors:**
+
+- `IBSocket` in `tws_connection.py` (production)
+- `mock_ibsocket` fixture in tests (testing)
+
+**Usage Example:**
+
+```python
+# Allocate request ID
+req_id = self.ibsocket.next_req_id
+
+# Build TWS message
+fields = [2, req_id, contract.conId, contract.symbol, ...]
+
+# Send to TWS
+self.ibsocket.send_message(OUT.REQ_MKT_DATA, fields)
+```
+
+### QuoteTrackerCBWiringInterface
+
+Tracker callback contract for quote updates:
+
+```python
+class QuoteTrackerCBWiringInterface(ABC):
+    """Quote tracker callback contract."""
+
+    @abstractmethod
+    def update(self, req_id: int, updates: dict[str, int | float | str]) -> None:
+        """Dispatch quote field updates to registered hooks (thread-safe).
+
+        Called from reader thread (TWS callbacks).
+        """
+        pass
+
+    @abstractmethod
+    def raise_error(self, req_id: int, exception: ProviderException) -> bool:
+        """Dispatch subscription-level errors to hooks (thread-safe).
+
+        Returns: True if error handlers found, False otherwise
+        """
+        pass
+```
+
+**Implementors:**
+
+- `QuoteTracker` in `quote_tracker.py`
+
+**Rationale:**
+
+This pattern enables:
+
+1. **Single Source of Truth**: TWS protocol logic lives in tracker, not duplicated in IBSocket
+2. **Cleaner Testing**: Mock interfaces instead of complex hook injection
+3. **Reduced Coupling**: Components depend on abstractions, not concrete implementations
+4. **Future Extensibility**: Other trackers (BarsTracker, OrderTracker) can adopt same pattern
+
+**See:** Section 2.7 for QuoteTracker implementation using these interfaces
+
+---
+
+## 2.5 Contract Caching & Persistence
 
 **Files:** `cached_contract.py`, `contract_tracker.py`
 
@@ -371,7 +490,7 @@ async def reqTickerDetails(self, ticker: str, **kwargs) -> CachedContract:
 
 ---
 
-## 2.4 Account Tracking
+## 2.6 Account Tracking
 
 **File:** `account_tracker.py`
 
@@ -626,18 +745,63 @@ def isUnset(value: Any) -> bool:
 
 ---
 
-## 2.5 Quote Tracking
+## 2.7 Quote Tracking
 
 **File:** `quote_tracker.py`
 
 The `QuoteTracker` manages real-time market data subscriptions with centralized hook management:
 
 ```python
-class QuoteTracker:
+class QuoteTracker(QuoteTrackerCBWiringInterface):
+    # Constructor (interface-based composition)
+    def __init__(self, ibsocket: IbSocketWiringInterface, timeout: float = 10):
+        """Initialize with socket interface instead of hook functions."""
+        self.ibsocket = ibsocket
+        self.timeout = timeout
+        # ... state initialization
+
+**Initialization Flow (Bidirectional Wiring):**
+
+```
+1. Constructor receives ibsocket: IbSocketWiringInterface parameter
+   │
+2. Immediately calls ibsocket.wire_quote_tracker(self)
+   │
+   ├─► IBSocket stores reference: self.__quote_tracker = tracker_interface
+   │
+3. All tick callbacks now route through stored reference:
+   │
+   ├─► tickPrice() → self.__quote_tracker.update(reqId, {"bid": price})
+   ├─► tickSize() → self.__quote_tracker.update(reqId, {"bid_size": size})
+   ├─► tickString() → self.__quote_tracker.update(reqId, {"rt_volume": value})
+   └─► error() → self.__quote_tracker.raise_error(reqId, exception)
+```
+
+**Thread Safety:** IBSocket's private `__quote_tracker` attribute prevents external mutation. Only IBSocket reader thread can invoke the stored interface methods.
+
+**See:** `quote_tracker.py` lines 514-517 for initialization, `tws_connection.py` IBSocket class for `wire_quote_tracker()` implementation and tick callback routing.
+
+    # Internal State
     _quotes: dict[str, TrackedQuote]              # ticker_name → TrackedQuote
     _snapshot_hooks: dict[str, list[...]]         # tws_key → [(loop, Future)]
     _stream_hooks: dict[str, list[...]]           # tws_key → [(loop, callback, on_error)]
     _lock: threading.Lock
+
+    # Internal TWS Protocol Methods (encapsulated)
+    def _quote_request_hook(self, contract: Contract) -> int:
+        """Build and send REQ_MKT_DATA message via ibsocket interface.
+
+        Encapsulates TWS market data request protocol:
+        - Allocates reqId from ibsocket.next_req_id
+        - Determines genericTickList from asset type
+        - Constructs TWS message fields
+        - Sends via ibsocket.send_message()
+
+        Returns: TWS reqId for subscription tracking
+        """
+
+    def _quote_cancel_hook(self, req_id: int) -> None:
+        """Build and send CANCEL_MKT_DATA message via ibsocket interface."""
 
     # Snapshot Pattern (one-time fetch)
     async def request(self, ticker_name: str, timeout: float = 10) -> Quote:
@@ -653,6 +817,47 @@ class QuoteTracker:
     # Update Dispatch (called from reader thread)
     def update(self, tws_key: str, tick_data: dict[str, Any]) -> None:
         """Dispatch tick updates to registered hooks (thread-safe)."""
+```
+
+**Interface Implementation:**
+
+- **Implements**: `QuoteTrackerCBWiringInterface` for callback contract (`update()`, `raise_error()`)
+- **Depends On**: `IbSocketWiringInterface` for socket communication (injected via constructor)
+- **TWS Protocol Ownership**: `_quote_request_hook()` and `_quote_cancel_hook()` internalize TWS message construction
+  - Previously: TWSClient hook functions built messages
+  - Now: QuoteTracker owns complete market data request lifecycle
+- **Thread Safety**: Added `with self.tracker_lock:` around hook lookups in `update()` and `raise_error()` methods
+
+**Constructor Change:**
+
+**OLD (callback injection):**
+
+```python
+QuoteTracker(
+    quote_request_hook: Callable[[Contract], int],
+    quote_cancel_hook: Callable[[int], None],
+    timeout: float
+)
+```
+
+**NEW (interface composition):**
+
+```python
+QuoteTracker(
+    ibsocket: IbSocketWiringInterface,
+    timeout: float
+)
+```
+
+**Wiring in TWSClient:**
+
+```python
+class TWSClient:
+    @property
+    def quote_tracker(self) -> QuoteTracker:
+        if not hasattr(self, "_quote_tracker"):
+            self._quote_tracker = QuoteTracker(self.ibsocket, self._timeout)
+        return self._quote_tracker
 ```
 
 **Architecture:**
@@ -675,12 +880,15 @@ export DEBUG_TWS_DATAFEED=true  # Enables verbose quote tracking logs
 
 **Reference:**
 
-- **Tests**: `providers/tws/tests/test_quote_tracker.py` (28 test methods)
+- **Tests**: `providers/tws/tests/test_quote_tracker.py` (28 test methods with `mock_ibsocket` fixture)
 - **Usage**: Used by `TWSDatafeedProvider.subscribe_market_data()`
+- **Testing Pattern**: Mock `IbSocketWiringInterface` with PropertyMock for auto-incrementing req_id behavior (see BACKEND_TESTING.md)
+
+See: `quote_tracker.py` lines 1-115 for implementation, `wiring_interfaces.py` for interface contracts
 
 ---
 
-## 2.6 Bar Data Management (BarsTracker)
+## 2.8 Bar Data Management (BarsTracker)
 
 **File:** `bars_tracker.py`
 
@@ -860,7 +1068,7 @@ def _barsComplete(self, req_id: int, start: str, end: str) -> None:
 
 ---
 
-## 2.7 Crypto-Specific Handling
+## 2.9 Crypto-Specific Handling
 
 **[CRYPTO SUPPORT - January 19, 2026]**: Special handling for cryptocurrency assets (CRYPTO secType).
 
@@ -914,7 +1122,7 @@ else:
 
 ---
 
-## 2.8 ExecutionTracker: Commission Joining Pattern
+## 2.10 ExecutionTracker: Commission Joining Pattern
 
 **Purpose:** Track trade executions with commission enrichment via two-phase dispatch.
 

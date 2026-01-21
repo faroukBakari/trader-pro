@@ -723,8 +723,91 @@ async def test_execution_tracker_two_phase_dispatch():
 # Test provider-level integration
 @pytest.mark.asyncio
 async def test_subscribe_executions_with_symbol_filter(mock_socket):
-    tracker = mock_socket.execution_tracker
-    callback_mock = AsyncMock()
+```
+
+---
+
+**QuoteTracker Testing (Interface-Based Mocking):**
+
+QuoteTracker uses dependency inversion with `IbSocketWiringInterface` - tests mock the interface instead of hook functions:
+
+**Test Fixture Pattern:**
+
+```python
+# test_quote_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IBSocket with auto-incrementing req_id counter."""
+    mock_socket = MagicMock(spec=IbSocketWiringInterface)
+
+    # Auto-increment req_id property (simulates next_req_id allocation)
+    counter = {"value": 0}
+    def get_next_id():
+        counter["value"] += 1
+        return counter["value"]
+
+    type(mock_socket).next_req_id = PropertyMock(side_effect=get_next_id)
+    mock_socket.send_message = MagicMock()
+
+    return mock_socket
+```
+
+**Test Method Pattern:**
+
+```python
+@pytest.mark.asyncio
+async def test_quote_subscription(mock_ibsocket):
+    """Test QuoteTracker with mocked socket interface."""
+    tracker = QuoteTracker(mock_ibsocket)  # ← Interface injection
+
+    # Perform operation
+    subscription_id = tracker.subscribe("NASDAQ:AAPL", callback, on_error)
+
+    # Verify interface interaction
+    mock_ibsocket.send_message.assert_called_once()
+    args = mock_ibsocket.send_message.call_args[0]
+    assert args[0] == OUT.REQ_MKT_DATA  # Message type
+    assert args[1][2] == 1  # First req_id from counter
+```
+
+**Key Testing Changes:**
+
+| Old Pattern (Hook Injection)                       | New Pattern (Interface Mocking)                           |
+| -------------------------------------------------- | --------------------------------------------------------- |
+| `request_hook = MagicMock(return_value=1)`         | `mock_ibsocket = MagicMock(spec=IbSocketWiringInterface)` |
+| `cancel_hook = MagicMock()`                        | _(removed - encapsulated in tracker)_                     |
+| `QuoteTracker(request_hook, cancel_hook, timeout)` | `QuoteTracker(mock_ibsocket)`                             |
+| `request_hook.assert_called_once()`                | `mock_ibsocket.send_message.assert_called_once()`         |
+
+**Benefits:**
+
+1. **Realistic Behavior**: `PropertyMock` for `next_req_id` simulates actual IBSocket behavior
+2. **Fewer Mocks**: Single interface mock replaces multiple hook function mocks
+3. **Protocol Verification**: Assert on `send_message()` calls to verify TWS message construction
+
+**Migration Checklist:**
+
+- [ ] Replace `request_hook`/`cancel_hook` mocks with `mock_ibsocket` fixture
+- [ ] Use `PropertyMock` with side_effect for auto-incrementing `next_req_id`
+- [ ] Update constructor: `QuoteTracker(mock_ibsocket)` instead of `QuoteTracker(request_hook, cancel_hook)`
+- [ ] Change assertions: `mock_ibsocket.send_message.assert_called_once()` instead of `request_hook.assert_called_once()`
+- [ ] Add `spec=IbSocketWiringInterface` to enforce interface contract
+
+**See:** `providers/tws/tests/test_quote_tracker.py` for complete examples (all 28 tests use this pattern)
+
+---
+
+## 5. Testing Patterns
+
+# Test provider-level integration
+
+@pytest.mark.asyncio
+async def test_subscribe_executions_with_symbol_filter(mock_socket):
+tracker = mock_socket.execution_tracker
+callback_mock = AsyncMock()
 
     # Subscribe with symbol filter
     hook_key = await provider.subscribe_executions(
@@ -745,7 +828,8 @@ async def test_subscribe_executions_with_symbol_filter(mock_socket):
     await asyncio.sleep(0.01)
     # Only AAPL executions should be dispatched
     callback_mock.assert_called_once()
-```
+
+````
 
 **ExecutionTracker Key Points:**
 
@@ -782,7 +866,7 @@ def datafeed_only_app() -> ModularApp:
 def no_modules_app() -> ModularApp:
     """Application with no modules."""
     return create_test_app(enabled_modules=[])
-```
+````
 
 **Function-scoped (new instance per test):**
 
@@ -1850,6 +1934,23 @@ Benefits:
 **Overview**: TWS provider tests use mocks for external TWS API interactions and domain models for callback testing.
 
 **Key Testing Patterns:**
+
+| Component        | Mock Target               | Key Pattern                                    |
+| ---------------- | ------------------------- | ---------------------------------------------- |
+| QuoteTracker     | `IbSocketWiringInterface` | Mock socket with PropertyMock for next_req_id  |
+| BarsTracker      | `bars_tracker.request()`  | Mock AsyncMock returning Bar objects           |
+| ExecutionTracker | Callback routing          | Two-phase dispatch testing (exec → commission) |
+
+**QuoteTracker Wiring Pattern:**
+
+The `mock_ibsocket` fixture must implement the bidirectional wiring mechanism:
+1. QuoteTracker constructor calls `mock_ibsocket.wire_quote_tracker(self)`
+2. Mock must store the tracker reference internally: `self.__quote_tracker = tracker_interface`
+3. Tests can then simulate reader thread tick callbacks: `mock_ibsocket.__quote_tracker.update(req_id, updates)`
+
+This pattern tests the actual production wiring flow where IBSocket callbacks route through the stored tracker reference. See "QuoteTracker Testing (Interface-Based Mocking)" section above (line 730) for complete fixture implementation with all 28 tests following this pattern.
+
+**General Approach:**
 
 1. **Mock TWSClient methods** - Not low-level TWS API calls
 2. **Use domain models** - Bar objects, not TWS BarData

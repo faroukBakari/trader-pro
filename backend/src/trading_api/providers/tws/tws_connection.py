@@ -94,6 +94,10 @@ from trading_api.providers.tws.tws_models import (
     get_asset_config,
     get_bar_duration_seconds,
 )
+from trading_api.providers.tws.wiring_interfaces import (
+    IbSocketWiringInterface,
+    QuoteTrackerCBWiringInterface,
+)
 
 logger = logging.getLogger(__name__)
 DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
@@ -216,18 +220,15 @@ class IBSocketState:
     CLOSED = 5
 
 
-class IBSocket(EWrapper):
+class IBSocket(EWrapper, IbSocketWiringInterface):
     def __init__(
         self,
-        quote_cb: Callable[[int, dict[str, int | float | str]], None] | None = None,
-        quote_err: Callable[[int, ProviderException], bool] | None = None,
         bars_cb: Callable[[int, BarData], None] | None = None,
         bars_complete_cb: Callable[[int, str, str], None] | None = None,
         bars_err: Callable[[int, ProviderException], bool] | None = None,
     ) -> None:
         # socket related attributes
-        self.quote_cb = quote_cb
-        self.quote_err = quote_err
+        self.__quote_tracker: QuoteTrackerCBWiringInterface | None = None
         self.bars_cb = bars_cb
         self.bars_complete_cb = bars_complete_cb
         self.bars_err = bars_err
@@ -294,6 +295,11 @@ class IBSocket(EWrapper):
         )  # Signals when IBKR connection is fully established
 
     # == infrastructure methods (internal) ==
+
+    def wire_quote_tracker(
+        self, tracker_interface: QuoteTrackerCBWiringInterface
+    ) -> None:
+        self.__quote_tracker = tracker_interface
 
     def _dispatchMessage(self, fnName: str, fnParams: dict) -> None:
         if DEBUG_TWS_DISPATCH:
@@ -1449,8 +1455,8 @@ class IBSocket(EWrapper):
         if field_name is None:
             return
 
-        if self.quote_cb is not None:
-            self.quote_cb(reqId, {field_name: price})
+        if self.__quote_tracker is not None:
+            self.__quote_tracker.update(reqId, {field_name: price})
 
     def tickSize(self, reqId: int, tickType: int, size: Decimal) -> None:
         """Accumulate size ticks for market data snapshot."""
@@ -1462,16 +1468,16 @@ class IBSocket(EWrapper):
         field_name = TICK_TYPE_TO_FIELD.get(tick_name)  # type: ignore[arg-type]
         if field_name is None:
             return
-        if self.quote_cb is not None:
-            self.quote_cb(reqId, {field_name: float(size)})
+        if self.__quote_tracker is not None:
+            self.__quote_tracker.update(reqId, {field_name: float(size)})
 
     def marketDataType(self, reqId: int, marketDataType: int) -> None:
         """Set market data type for the request."""
         if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-        if self.quote_cb is not None:
-            self.quote_cb(reqId, {"market_data_type": marketDataType})
+        if self.__quote_tracker is not None:
+            self.__quote_tracker.update(reqId, {"market_data_type": marketDataType})
 
     def tickReqParams(
         self, tickerId: int, minTick: float, bboExchange: str, snapshotPermissions: int
@@ -1481,8 +1487,8 @@ class IBSocket(EWrapper):
         if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-        if self.quote_cb is not None:
-            self.quote_cb(
+        if self.__quote_tracker is not None:
+            self.__quote_tracker.update(
                 tickerId,
                 {
                     "min_tick": minTick,
@@ -1501,8 +1507,8 @@ class IBSocket(EWrapper):
         if field_name is None:
             return
 
-        if self.quote_cb is not None:
-            self.quote_cb(reqId, {field_name: value})
+        if self.__quote_tracker is not None:
+            self.__quote_tracker.update(reqId, {field_name: value})
 
     def tickGeneric(self, reqId: int, tickType: int, value: float) -> None:
         """Generic float tick for market data snapshot."""
@@ -1514,8 +1520,8 @@ class IBSocket(EWrapper):
         if field_name is None:
             return
 
-        if self.quote_cb is not None:
-            self.quote_cb(reqId, {field_name: value})
+        if self.__quote_tracker is not None:
+            self.__quote_tracker.update(reqId, {field_name: value})
 
     def tickSnapshotEnd(self, reqId: int) -> None:
         """When requesting market data snapshots, this market will indicate the
@@ -1524,8 +1530,8 @@ class IBSocket(EWrapper):
         if DEBUG_TWS_DATAFEED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
 
-        if self.quote_cb is not None:
-            self.quote_cb(reqId, {"snapshot_complete": True})
+        if self.__quote_tracker is not None:
+            self.__quote_tracker.update(reqId, {"snapshot_complete": True})
 
     # === Order management ===
 
@@ -1822,7 +1828,9 @@ class IBSocket(EWrapper):
                 return
 
             # Try QuoteTracker via callback
-            if self.quote_err and self.quote_err(reqId, datafeed_error):
+            if self.__quote_tracker is not None and self.__quote_tracker.raise_error(
+                reqId, datafeed_error
+            ):
                 return
 
             # Fallback: legacy request error handling
@@ -1901,8 +1909,6 @@ class TWSClient:
                 self.__bars_tracker.reset()
                 self.__bars_tracker = None
             self.__ibsocket = IBSocket(
-                self._quoteUpdate,
-                self._quoteError,
                 self._barsUpdate,
                 self._barsComplete,
                 self._barsError,
@@ -1920,9 +1926,7 @@ class TWSClient:
     @property
     def quote_tracker(self) -> QuoteTracker:
         if self.__quote_tracker is None:
-            self.__quote_tracker = QuoteTracker(
-                self._reqQuote, self._cancelQuote, self._timeout
-            )
+            self.__quote_tracker = QuoteTracker(self.ibsocket, self._timeout)
 
         return self.__quote_tracker
 
@@ -1936,52 +1940,6 @@ class TWSClient:
         return self.__bars_tracker
 
     # === quote hooks and callbacks ===
-
-    def _reqQuote(self, contract: Contract) -> int:
-        assert (
-            isinstance(contract, Contract) and contract.conId != 0
-        ), "contract must be an instance of Contract with a non-zero conId."
-        reqId = self.ibsocket.next_req_id
-        VERSION = 11
-        # Build message fields for REQ_MKT_DATA
-        mkt_data_fields: list[object] = [
-            VERSION,
-            reqId,
-            contract.conId,
-            contract.symbol,
-            contract.secType,
-            contract.lastTradeDateOrContractMonth,
-            contract.strike if contract.strike else "",
-            contract.right,
-            contract.multiplier,
-            contract.exchange,
-            contract.primaryExchange,
-            contract.currency,
-            contract.localSymbol,
-            contract.tradingClass,
-            0,  # contract.deltaNeutralContract (False = no delta neutral)
-            (
-                get_asset_config(contract.secType).generic_tick_list_str
-                if contract.exchange != "OVERNIGHT"
-                else ""
-            ),  # Asset-type-specific tick list
-            0,  # snapshot
-            0,  # regulatorySnapshot
-            [],  # mktDataOptions (empty list)
-        ]
-
-        self.ibsocket.send_message(OUT.REQ_MKT_DATA, mkt_data_fields)
-        if DEBUG_TWS_REQUEST:
-            debug_log(
-                f"requested quote data for reqId {reqId} symbol='{contract.symbol}'"
-            )
-        return reqId
-
-    def _cancelQuote(self, reqId: int) -> None:
-        VERSION = 2
-        self.ibsocket.send_message(OUT.CANCEL_MKT_DATA, [VERSION, reqId])
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"canceled quote data for reqId {reqId}'")
 
     def _quoteUpdate(self, req_id: int, updates: dict[str, int | float | str]) -> None:
         self.quote_tracker.update(req_id, updates)
