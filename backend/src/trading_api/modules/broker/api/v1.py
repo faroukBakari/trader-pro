@@ -222,6 +222,29 @@ class BrokerApi(APIRouterInterface):
             return await self.service.get_executions(symbol, user_data.user_id)
 
         @self.get(
+            "/executions",
+            response_model=List[Execution],
+            summary="Get all executions",
+            operation_id="getAllExecutions",
+        )
+        async def getAllExecutions(
+            user_data: Annotated[UserData, Depends(get_current_user)],
+        ) -> List[Execution]:
+            """
+            Get all execution history.
+
+            Requires authentication. Returns all user's executions across all symbols.
+            Used by Account Manager custom "Trades" page to display commission data.
+
+            Args:
+                user_data: Authenticated user data (injected by middleware)
+
+            Returns:
+                List[Execution]: List of all user's trade executions
+            """
+            return await self.service.get_all_executions(user_data.user_id)
+
+        @self.get(
             "/account",
             response_model=AccountMetainfo,
             summary="Get account information",

@@ -184,6 +184,7 @@ export function mapPosition(position: Position_Ws_Backend): Position {
  */
 export function mapExecution(execution: Execution_Ws_Backend): Execution {
   return {
+    id: execution.id,
     symbol: execution.symbol,
     price: execution.price,
     qty: execution.qty,

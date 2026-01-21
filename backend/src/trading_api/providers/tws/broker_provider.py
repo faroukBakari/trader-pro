@@ -383,6 +383,14 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         return executions
 
+    async def get_all_executions(self) -> list[Execution]:
+        """Get all execution history from TWS (no symbol filter).
+
+        Returns:
+            List of all Execution objects
+        """
+        return await self.get_executions("")
+
     async def get_account_info(self) -> AccountMetainfo:
         """Get account metadata from TWS.
 

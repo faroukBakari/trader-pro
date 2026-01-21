@@ -1535,6 +1535,83 @@ export class BrokerService implements IBrokerWithoutRealtime {
 
 ---
 
+### Custom Account Manager Pages
+
+TradingView supports custom tabs in the Account Manager via the `pages` array in `AccountManagerInfo`.
+
+**Type Definition**:
+```typescript
+export interface AccountManagerPage {
+  id: string;                  // Unique page identifier
+  title: string;               // Tab label
+  tables: AccountManagerTable[];  // One or more data tables
+  displayCounterInTab?: boolean;  // Show item count badge (e.g., "Trades 5")
+}
+
+export interface AccountManagerTable {
+  id: string;
+  columns: AccountManagerColumn[];
+  getData(paginationLastId?: string | number): Promise<{}[]>;  // Data source
+  changeDelegate: IDelegate<(data: object) => void>;  // Row update events
+  deleteDelegate?: IDelegate<(id: string) => void>;   // Row deletion events
+}
+```
+
+**Example - Execution History Tab**:
+```typescript
+accountManagerInfo(): AccountManagerInfo {
+  return {
+    accountTitle: 'Trading Account',
+    summary: [/* ... */],
+    pages: [
+      {
+        id: 'executions',
+        title: 'Trades',
+        displayCounterInTab: true,  // ✅ Enables counter badge
+        tables: [{
+          id: 'executions-table',
+          columns: [
+            { id: 'symbol', label: 'Symbol', dataFields: ['symbol', 'symbol'], formatter: StandardFormatterName.Symbol },
+            { id: 'commission', label: 'Commission', dataFields: ['commission'], formatter: StandardFormatterName.Fixed },
+            // ... more columns
+          ],
+          getData: async () => {
+            // Backend call - SSOT pattern (no local cache)
+            const response = await this._getApiAdapter().getAllExecutions()
+            return response.data
+          },
+          changeDelegate: this._executionChangeDelegate,  // Real-time updates
+          deleteDelegate: this._executionDeleteDelegate,
+        }],
+      },
+    ],
+  }
+}
+```
+
+**Real-Time Updates**:
+```typescript
+// In WebSocket handler
+this.executionsClient.subscribe(
+  { accountId: this.accountId },
+  (execution: Execution) => {
+    // Fire to custom page table (row upsert by execution.id)
+    this._executionChangeDelegate.fire(execution)
+  }
+)
+```
+
+**Key Patterns**:
+- **Counter Badge**: `displayCounterInTab: true` displays item count like "Trades 5"
+- **SSOT Principle**: `getData()` fetches from backend (no frontend cache)
+- **IDelegate Pattern**: `changeDelegate.fire(data)` triggers table row upsert
+- **Row Identification**: Each row MUST have unique `id` field for deduplication
+- **Two-Phase Updates**: For TWS executions, table receives 2 fires (fill → commission). TradingView deduplicates by `id`.
+
+**Reference**: [broker-api.d.ts](../../../public/trading_terminal/broker-api.d.ts) lines 308-366 for `AccountManagerPage` API.
+
+---
+
 ## Best Practices
 
 ### ✅ Do's

@@ -146,6 +146,15 @@ class BrokerCapability(ABC):
         ...
 
     @abstractmethod
+    async def get_all_executions(self) -> list[Execution]:
+        """Get all execution history (across all symbols).
+
+        Returns:
+            List of all executions
+        """
+        ...
+
+    @abstractmethod
     async def get_account_info(self) -> AccountMetainfo:
         """Get account metadata.
 

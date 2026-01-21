@@ -73,6 +73,11 @@ describe('BrokerTerminalService', () => {
           }
           return mock
         }),
+        createDelegate: vi.fn(() => ({
+          subscribe: vi.fn(),
+          unsubscribe: vi.fn(),
+          fire: vi.fn(),
+        })),
       },
       // WebSocket handler methods
       orderUpdate: vi.fn(),
@@ -1296,6 +1301,11 @@ describe('BrokerTerminalService', () => {
             }
             return mock
           }),
+          createDelegate: vi.fn(() => ({
+            subscribe: vi.fn(),
+            unsubscribe: vi.fn(),
+            fire: vi.fn(),
+          })),
         },
         // Track WebSocket callbacks
         orderUpdate: vi.fn((order: Order) => orderUpdateCalls.push(order)),

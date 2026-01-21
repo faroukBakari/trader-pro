@@ -273,6 +273,18 @@ async def test_get_executions_endpoint(
 
 
 @pytest.mark.asyncio
+async def test_get_all_executions_endpoint(
+    async_client: AsyncClient, auth_cookies: dict[str, str]
+) -> None:
+    """Test getting all executions (no symbol filter)"""
+    response = await async_client.get("/api/v1/broker/executions", cookies=auth_cookies)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+
+
+@pytest.mark.asyncio
 async def test_get_account_info_endpoint(
     async_client: AsyncClient, auth_cookies: dict[str, str]
 ) -> None:

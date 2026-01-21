@@ -83,6 +83,7 @@ All endpoints require authentication via JWT in HttpOnly cookie.
 | GET    | `/api/broker/v1/orders`                  | `getOrders`            | Get all user orders                             |
 | GET    | `/api/broker/v1/positions`               | `getPositions`         | Get all open positions                          |
 | GET    | `/api/broker/v1/executions/{symbol}`     | `getExecutions`        | Get executions for symbol                       |
+| GET    | `/api/broker/v1/executions`              | `getAllExecutions`²    | Get all execution history (all symbols)         |
 | DELETE | `/api/broker/v1/positions/{id}`          | `closePosition`        | Close position (full/partial)                   |
 | PUT    | `/api/broker/v1/positions/{id}/brackets` | `editPositionBrackets` | Update SL/TP brackets                           |
 | GET    | `/api/broker/v1/account`                 | `getAccountInfo`       | Get account metadata (id, name, currency, sign) |
@@ -91,6 +92,8 @@ All endpoints require authentication via JWT in HttpOnly cookie.
 | POST   | `/api/broker/v1/leverage/preview`        | `previewLeverage`      | Preview leverage changes                        |
 
 ¹ **Preview-to-Place Flow:** The `confirmId` returned by `previewOrder` can be passed as a query parameter to `placeOrder` for audit trail correlation. This links the preview and execution for logging/compliance purposes.
+
+² **Trades Page Endpoint:** `getAllExecutions` returns all user executions across all symbols. Used by Account Manager custom "Trades" page to display commission data. Each execution has unique `id` field for table row deduplication (TWS two-phase dispatch may fire updates twice).
 
 ---
 
@@ -228,12 +231,14 @@ Key Pydantic models used by this module (defined in `trading_api/models/broker/`
 | `PlacedOrder`            | Order with status and timestamps |
 | `PlaceOrderResult`       | Result of placing an order       |
 | `Position`               | Open position with P&L           |
-| `Execution`              | Trade execution record           |
+| `Execution`              | Trade execution record (with unique `id`) |
 | `Brackets`               | Stop-loss and take-profit levels |
 | `AccountMetainfo`        | Account metadata (ID, name)      |
 | `LeverageInfo`           | Leverage constraints for symbol  |
 | `BrokerConnectionStatus` | Broker connection state          |
 | `EquityData`             | Account balance and equity       |
+
+**Execution ID Field:** As of v1.1.0, `Execution` includes `id` field (string) for unique identification. This enables TradingView Account Manager custom pages to deduplicate rows when TWS sends two-phase updates (fill notification → commission enrichment). Provider implementations must populate `id` (e.g., FakeBrokerProvider uses `EXEC-{counter}`, TWSBrokerProvider uses TWS `exec_id`).
 
 ---
 

@@ -63,6 +63,7 @@ class FakebrokerProvider(Provider, BrokerCapability):
         self._positions: dict[str, Position] = {}
         self._executions: list[Execution] = []
         self._order_counter = 1
+        self._execution_counter = 1
         self._leverage_settings: dict[str, float] = {}
 
         # P&L tracking
@@ -356,6 +357,10 @@ class FakebrokerProvider(Provider, BrokerCapability):
     async def get_executions(self, symbol: str) -> list[Execution]:
         """Get execution history for a symbol."""
         return [e for e in self._executions if e.symbol == symbol]
+
+    async def get_all_executions(self) -> list[Execution]:
+        """Get all execution history (no symbol filter)."""
+        return list(self._executions)
 
     async def get_account_info(self) -> AccountMetainfo:
         """Get account metadata."""
@@ -753,8 +758,11 @@ class FakebrokerProvider(Provider, BrokerCapability):
 
         execution_price = self._get_execution_price(order)
 
-        # Create execution
+        # Create execution with unique ID
+        exec_id = f"EXEC-{self._execution_counter}"
+        self._execution_counter += 1
         execution = Execution(
+            id=exec_id,
             symbol=order.symbol,
             price=execution_price,
             qty=order.qty,
@@ -957,6 +965,7 @@ class FakebrokerProvider(Provider, BrokerCapability):
         self._positions = {}
         self._executions = []
         self._order_counter = 1
+        self._execution_counter = 1
         self._leverage_settings = {}
         self._unrealized_pl = {}
         self._equity = EquityData(
