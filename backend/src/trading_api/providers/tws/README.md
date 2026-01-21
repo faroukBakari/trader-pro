@@ -351,8 +351,8 @@ async def reqContractDetails(self, contract: Contract) -> list[CachedContract]:
 
     # 5. Cache all details via ContractTracker.upsert_details()
 
-# TWSClient.req_ticker_details() - Simplified public API
-async def req_ticker_details(self, ticker: str, **kwargs) -> CachedContract:
+# TWSClient.reqTickerDetails() - Simplified public API
+async def reqTickerDetails(self, ticker: str, **kwargs) -> CachedContract:
     """Get single CachedContract for ticker (uses parse_ticker internally)."""
     symbol, primaryExchange, sec_type, _ = parse_ticker(ticker)
     # ... builds Contract and delegates to reqContractDetails()
@@ -984,20 +984,20 @@ TWS execution times now support IANA timezones (e.g., `"20260120 07:10:09 US/Eas
 ```python
 def _parse_tws_execution_time(time_str: str) -> int:
     """Parse TWS execution time to unix milliseconds (UTC).
-    
+
     TWS format: "YYYYMMDD HH:MM:SS TZ" where TZ is IANA timezone.
     Legacy formats: "YYYYMMDD-HH:MM:SS" or "YYYYMMDD HH:MM:SS" (no TZ).
     """
     parts = time_str.replace("-", " ").split(" ")
     dt = datetime.strptime(f"{parts[0]} {parts[1]}", "%Y%m%d %H:%M:%S")
-    
+
     # Apply timezone if provided (e.g., "US/Eastern"), else assume UTC
     if len(parts) >= 3:
         tz = ZoneInfo(" ".join(parts[2:]))  # Handle multi-word TZ
         dt = dt.replace(tzinfo=tz)
     else:
         dt = dt.replace(tzinfo=timezone.utc)
-    
+
     return int(dt.timestamp() * 1000)  # Convert to UTC milliseconds
 ```
 
@@ -1043,7 +1043,7 @@ class TWSBrokerProvider:
             filter_symbol=f"EXCHANGE:{symbol}" if symbol else ""
         )
         return [t.to_domain() for t in tracked]
-    
+
     async def get_all_executions(self) -> list[DomainExecution]:
         """Get ALL execution history (no symbol filter)."""
         return await self.get_executions("")  # Empty string = all symbols
@@ -1249,7 +1249,7 @@ class BrokerCapability(ABC):
 
 **TWS-Specific Notes:**
 
-- **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `req_ticker_details()`. Order streaming (`subscribe_orders()`) is fully TWS-backed via `OrderTracker`. Execution tracking (`get_executions()`, `subscribe_executions()`) is TWS-backed via `ExecutionTracker` with commission joining pattern. Some features (positions, equity streaming) still use in-memory state.
+- **Current Implementation**: `TWSBrokerProvider` has real TWS integration for order operations via `_submit_order()` which uses `TWSClient.placeOrderGroup()` and `reqTickerDetails()`. Order streaming (`subscribe_orders()`) is fully TWS-backed via `OrderTracker`. Execution tracking (`get_executions()`, `subscribe_executions()`) is TWS-backed via `ExecutionTracker` with commission joining pattern. Some features (positions, equity streaming) still use in-memory state.
 - **Order Streaming**: `subscribe_orders()` delegates to `TWSClient.reqOrdersStream()` which registers callbacks via `OrderTracker.create_stream_hook()`. Initial snapshot is triggered via `reqOpenOrders()` on subscription. Domain conversion uses `tracked_order_to_placed_order()`.
 - **Execution Streaming**: `subscribe_executions()` delegates to `ExecutionTracker.create_stream_hook()` with two-phase dispatch (immediate on execDetails, re-dispatch on commissionAndFeesReport). Snapshot triggered via `reqExecutions(ExecutionFilter())`. Optional symbol filtering at provider layer (TrackedExecution.symbol format: "EXCHANGE:SYMBOL").
 - **Session-Aware Routing**: Orders are routed via `_resolve_trading_contract()` which uses `CachedContract.build_best_contract()` to select SMART or OVERNIGHT exchange based on market hours.
@@ -1270,7 +1270,7 @@ The `preview_order()` method uses TWS's native `whatIf` mode to obtain real marg
 preview_order(PreOrder)
         │
         ├── 1. _resolve_trading_contract(symbol)
-        │       └── req_ticker_details(ticker) → CachedContract
+        │       └── reqTickerDetails(ticker) → CachedContract
         │       └── cached.build_best_contract() → Contract (SMART or OVERNIGHT)
         │
         ├── 2. preorder_to_tws(order)  →  TWS Order (entry only, no brackets)
@@ -1298,7 +1298,7 @@ async def _resolve_trading_contract(self, ticker: str) -> Contract:
     Uses SMART by default. If regular session closed AND darkpool
     available, opportunistically routes to OVERNIGHT exchange (Blue Ocean ATS).
     """
-    details = await self._tws_client.req_ticker_details(ticker)
+    details = await self._tws_client.reqTickerDetails(ticker)
     return details.build_best_contract()  # SMART or OVERNIGHT
 ```
 
@@ -1959,7 +1959,7 @@ async def subscribe_realtime_bars(self, ticker_name: str, resolution: Resolution
     async def bar_callback(rt_data: dict[str, Any], fields: list[str] | None) -> None:
         await callback(tws_ticks_to_bar(rt_data))
 
-    cached = await self._tws_client.req_ticker_details(ticker_name)
+    cached = await self._tws_client.reqTickerDetails(ticker_name)
     contract = cached[0].contract
     return self._tws_client.reqBarDataStream(contract, bar_size, bar_callback, on_error=on_error)
 ```

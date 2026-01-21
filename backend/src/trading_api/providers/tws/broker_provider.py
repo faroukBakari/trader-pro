@@ -131,7 +131,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         Raises:
             ProviderException: If contract not found
         """
-        details = await self._tws_client.req_ticker_details(ticker)
+        details = await self._tws_client.reqTickerDetails(ticker)
 
         return details.build_best_contract()
 
@@ -624,7 +624,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             LeverageInfo with computed leverage based on margin requirements
         """
         # Resolve contract via TWSClient (cached, session-aware)
-        cached_contract = await self._tws_client.req_ticker_details(params.symbol)
+        cached_contract = await self._tws_client.reqTickerDetails(params.symbol)
         contract = cached_contract.build_best_contract()
 
         # Crypto is cash-only, no margin/leverage
@@ -836,7 +836,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     def unsubscribe(self, subscription_id: str) -> None:
         """Unsubscribe from a stream."""
         # Delegate to TWSClient to cancel all broker streams
-        self._tws_client.cancel_broker_stream(subscription_id)
+        self._tws_client.cancelBrokerStream(subscription_id)
 
         logger.info(f"Unsubscribed: {subscription_id}")
 
