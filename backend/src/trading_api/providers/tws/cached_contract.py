@@ -11,9 +11,10 @@ from zoneinfo import ZoneInfo
 
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
-from trading_api.models.market.instruments import SearchSymbolResultItem
+from trading_api.models.market.instruments import SearchSymbolResultItem, SymbolInfo
 from trading_api.providers.tws.tws_mappers import (
     clone_contract,
+    contract_details_to_symbol_info,
     normalize_timezone,
     ticker_name,
 )
@@ -219,6 +220,18 @@ class CachedContract(ContractDetails):
             ticker=ticker,
             type=type,
         )
+
+    def to_symbol_info(self) -> SymbolInfo:
+        """Map TWS ContractDetails → domain SymbolInfo.
+
+        Args:
+            details: TWS ContractDetails from contractDetails callback
+
+        Returns:
+            Domain SymbolInfo for frontend consumption (TradingView LibrarySymbolInfo)
+        """
+
+        return contract_details_to_symbol_info(self.to_contract_details())
 
     def update_from_details(self, details: ContractDetails) -> None:
         """Update this CachedContract with full details.
