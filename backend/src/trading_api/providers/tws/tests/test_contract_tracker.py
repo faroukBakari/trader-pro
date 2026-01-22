@@ -122,9 +122,9 @@ class TestSQLiteContractCacheUpsertMany:
         }
         cache.upsert_many([desc_dict])
 
-        result = cache.get_by_con_id(265598)
-        assert result is not None
-        assert result["symbol"] == "AAPL"
+        results = cache.get_by_symbol_prefix("AAPL")
+        assert len(results) == 1
+        assert results[0]["symbol"] == "AAPL"
         cache.close()
 
     def test_inserts_multiple_descriptions(self, tmp_path: Path) -> None:
@@ -154,8 +154,8 @@ class TestSQLiteContractCacheUpsertMany:
         ]
         cache.upsert_many(descs)
 
-        assert cache.get_by_con_id(265598) is not None
-        assert cache.get_by_con_id(272093) is not None
+        assert len(cache.get_by_symbol_prefix("AAPL")) == 1
+        assert len(cache.get_by_symbol_prefix("MSFT")) == 1
         cache.close()
 
     def test_upsert_replaces_existing(self, tmp_path: Path) -> None:
@@ -193,8 +193,9 @@ class TestSQLiteContractCacheUpsertMany:
             ]
         )
 
-        result = cache.get_by_con_id(265598)
-        assert result is not None
+        results = cache.get_by_symbol_prefix("AAPL")
+        assert len(results) == 1
+        result = results[0]
         assert result["description"] == "Updated"
         assert result["derivative_sec_types"] == ["OPT"]
         cache.close()
@@ -206,45 +207,6 @@ class TestSQLiteContractCacheUpsertMany:
 
         cache.upsert_many([])  # Should not raise
 
-        cache.close()
-
-
-class TestSQLiteContractCacheGetByConId:
-    """Test SQLiteContractCache.get_by_con_id method."""
-
-    def test_returns_dict_for_existing_con_id(self, tmp_path: Path) -> None:
-        """Test get_by_con_id returns dict for existing entry."""
-        db_path = str(tmp_path / "test.db")
-        cache = SQLiteContractCache(db_path)
-
-        cache.upsert_many(
-            [
-                {
-                    "con_id": 265598,
-                    "symbol": "AAPL",
-                    "sec_type": "STK",
-                    "primary_exchange": "NASDAQ",
-                    "currency": "USD",
-                    "derivative_sec_types": ["OPT", "FUT"],
-                    "description": "Apple Inc",
-                }
-            ]
-        )
-
-        result = cache.get_by_con_id(265598)
-        assert result is not None
-        assert result["con_id"] == 265598
-        assert result["symbol"] == "AAPL"
-        assert result["derivative_sec_types"] == ["OPT", "FUT"]
-        cache.close()
-
-    def test_returns_none_for_missing_con_id(self, tmp_path: Path) -> None:
-        """Test get_by_con_id returns None for missing entry."""
-        db_path = str(tmp_path / "test.db")
-        cache = SQLiteContractCache(db_path)
-
-        result = cache.get_by_con_id(999999)
-        assert result is None
         cache.close()
 
 
@@ -320,81 +282,6 @@ class TestSQLiteContractCacheGetBySymbolPrefix:
         cache.close()
 
 
-class TestSQLiteContractCacheGetByTicker:
-    """Test SQLiteContractCache.get_by_ticker method."""
-
-    def test_returns_dict_for_exact_ticker_match(self, tmp_path: Path) -> None:
-        """Test get_by_ticker returns dict for exact ticker match."""
-        db_path = str(tmp_path / "test.db")
-        cache = SQLiteContractCache(db_path)
-
-        cache.upsert_many(
-            [
-                {
-                    "con_id": 265598,
-                    "symbol": "AAPL",
-                    "sec_type": "STK",
-                    "primary_exchange": "NASDAQ",
-                    "currency": "USD",
-                    "derivative_sec_types": [],
-                    "description": "",
-                }
-            ]
-        )
-
-        result = cache.get_by_ticker("NASDAQ:AAPL")
-        assert result is not None
-        assert result["con_id"] == 265598
-        cache.close()
-
-    def test_returns_none_for_wrong_exchange(self, tmp_path: Path) -> None:
-        """Test get_by_ticker returns None for wrong exchange."""
-        db_path = str(tmp_path / "test.db")
-        cache = SQLiteContractCache(db_path)
-
-        cache.upsert_many(
-            [
-                {
-                    "con_id": 265598,
-                    "symbol": "AAPL",
-                    "sec_type": "STK",
-                    "primary_exchange": "NASDAQ",
-                    "currency": "USD",
-                    "derivative_sec_types": [],
-                    "description": "",
-                }
-            ]
-        )
-
-        result = cache.get_by_ticker("NYSE:AAPL")
-        assert result is None
-        cache.close()
-
-    def test_handles_symbol_only_ticker(self, tmp_path: Path) -> None:
-        """Test get_by_ticker handles symbol-only ticker."""
-        db_path = str(tmp_path / "test.db")
-        cache = SQLiteContractCache(db_path)
-
-        cache.upsert_many(
-            [
-                {
-                    "con_id": 265598,
-                    "symbol": "AAPL",
-                    "sec_type": "STK",
-                    "primary_exchange": "NASDAQ",
-                    "currency": "USD",
-                    "derivative_sec_types": [],
-                    "description": "",
-                }
-            ]
-        )
-
-        result = cache.get_by_ticker("AAPL")
-        assert result is not None
-        assert result["con_id"] == 265598
-        cache.close()
-
-
 # === ContractTracker Tests ===
 
 
@@ -403,103 +290,6 @@ def tracker(tmp_path: Path) -> ContractTracker:
     """Create a ContractTracker with temp database."""
     db_path = str(tmp_path / "contracts.db")
     return ContractTracker(db_path=db_path)
-
-
-class TestContractTrackerGetByConId:
-    """Test ContractTracker.get_by_con_id lazy loading."""
-
-    def test_returns_from_memory_details(self, tracker: ContractTracker) -> None:
-        """Test get_by_con_id returns from in-memory details first."""
-        details = _make_details(con_id=265598)
-        tracker.upsert_details(details)
-
-        result = tracker.get_by_con_id(265598)
-
-        assert result is not None
-        assert result.has_full_details is True
-        assert result.longName == "Apple Inc"
-
-    def test_returns_from_memory_descriptions(self, tracker: ContractTracker) -> None:
-        """Test get_by_con_id returns from in-memory descriptions."""
-        desc = _make_description(con_id=265598)
-        tracker.upsert_descriptions([desc])
-
-        result = tracker.get_by_con_id(265598)
-
-        assert result is not None
-        assert result.has_full_details is False
-
-    def test_loads_from_sqlite_on_memory_miss(self, tracker: ContractTracker) -> None:
-        """Test get_by_con_id loads from SQLite when not in memory."""
-        # Insert directly to SQLite
-        tracker._sqlite.upsert_many(
-            [
-                {
-                    "con_id": 265598,
-                    "symbol": "AAPL",
-                    "sec_type": "STK",
-                    "primary_exchange": "NASDAQ",
-                    "currency": "USD",
-                    "derivative_sec_types": [],
-                    "description": "",
-                }
-            ]
-        )
-
-        # Not in memory yet
-        assert 265598 not in tracker._descriptions
-
-        result = tracker.get_by_con_id(265598)
-
-        assert result is not None
-        assert result.contract.symbol == "AAPL"
-        # Now cached in memory
-        assert 265598 in tracker._descriptions
-
-    def test_returns_none_when_not_found(self, tracker: ContractTracker) -> None:
-        """Test get_by_con_id returns None when not found anywhere."""
-        result = tracker.get_by_con_id(999999)
-        assert result is None
-
-
-class TestContractTrackerGetByTicker:
-    """Test ContractTracker.get_by_ticker lazy loading."""
-
-    def test_returns_from_memory(self, tracker: ContractTracker) -> None:
-        """Test get_by_ticker returns from in-memory cache."""
-        desc = _make_description(symbol="AAPL", primary_exchange="NASDAQ")
-        tracker.upsert_descriptions([desc])
-
-        result = tracker.get_by_ticker("NASDAQ:AAPL")
-
-        assert result is not None
-        assert result.contract.symbol == "AAPL"
-
-    def test_loads_from_sqlite_on_memory_miss(self, tracker: ContractTracker) -> None:
-        """Test get_by_ticker loads from SQLite when not in memory."""
-        tracker._sqlite.upsert_many(
-            [
-                {
-                    "con_id": 265598,
-                    "symbol": "AAPL",
-                    "sec_type": "STK",
-                    "primary_exchange": "NASDAQ",
-                    "currency": "USD",
-                    "derivative_sec_types": [],
-                    "description": "",
-                }
-            ]
-        )
-
-        result = tracker.get_by_ticker("NASDAQ:AAPL")
-
-        assert result is not None
-        assert 265598 in tracker._descriptions
-
-    def test_returns_none_when_not_found(self, tracker: ContractTracker) -> None:
-        """Test get_by_ticker returns None when not found."""
-        result = tracker.get_by_ticker("NASDAQ:UNKNOWN")
-        assert result is None
 
 
 class TestContractTrackerGetBySymbolPrefix:
@@ -575,8 +365,8 @@ class TestContractTrackerUpsertDescriptions:
 
         # In SQLite (via fresh lookup)
         tracker._descriptions.clear()
-        loaded = tracker.get_by_con_id(265598)
-        assert loaded is not None
+        loaded = tracker.get_by_symbol_prefix("AAPL")
+        assert len(loaded) == 1
 
     def test_skips_invalid_con_ids(self, tracker: ContractTracker) -> None:
         """Test upsert_descriptions skips entries with invalid conId."""
@@ -605,9 +395,9 @@ class TestContractTrackerUpsertDetails:
         assert result.has_full_details is True
         assert 265598 in tracker._details
 
-        # NOT in SQLite
-        sqlite_result = tracker._sqlite.get_by_con_id(265598)
-        assert sqlite_result is None
+        # NOT in SQLite (details never persisted to SQLite)
+        sqlite_result = tracker._sqlite.get_by_symbol_prefix("AAPL")
+        assert sqlite_result == []
 
     def test_stores_overnight_hours(self, tracker: ContractTracker) -> None:
         """Test upsert_details stores overnight hours."""
@@ -626,7 +416,7 @@ class TestContractTrackerGetFullDetails:
         details = _make_details(con_id=265598)
         tracker.upsert_details(details)
 
-        result = tracker.get_full_details(265598)
+        result = tracker.get_details_from_cache(265598)
 
         assert result is not None
         assert result.has_full_details is True
@@ -636,13 +426,13 @@ class TestContractTrackerGetFullDetails:
         desc = _make_description(con_id=265598)
         tracker.upsert_descriptions([desc])
 
-        result = tracker.get_full_details(265598)
+        result = tracker.get_details_from_cache(265598)
 
         assert result is None  # Only descriptions in cache
 
     def test_returns_none_when_not_found(self, tracker: ContractTracker) -> None:
         """Test get_full_details returns None when not found."""
-        result = tracker.get_full_details(999999)
+        result = tracker.get_details_from_cache(999999)
         assert result is None
 
 
@@ -677,11 +467,11 @@ class TestContractTrackerSessionManagement:
 
     def test_reset_preserves_sqlite_data(self, tracker: ContractTracker) -> None:
         """Test reset preserves SQLite data."""
-        desc = _make_description(con_id=265598)
+        desc = _make_description(con_id=265598, symbol="AAPL")
         tracker.upsert_descriptions([desc])
 
         tracker.reset()
 
         # SQLite data still available via lazy load
-        result = tracker.get_by_con_id(265598)
-        assert result is not None
+        results = tracker.get_by_symbol_prefix("AAPL")
+        assert len(results) == 1

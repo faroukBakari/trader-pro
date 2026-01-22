@@ -4,27 +4,38 @@ Provides caching for contract data with two-tier storage:
 - SQLite: Persists ContractDescriptions (immutable instrument identity)
 - In-Memory: ContractDetails (session-dependent, mutable metadata)
 
-Follows the Tracker pattern established by OrderTracker/PositionTracker/AccountTracker.
+Follows the Tracker pattern established by QuoteTracker/BarsTracker with wiring interface.
 SQLiteContractCache is internal and not exposed outside this module.
 """
 
-from __future__ import annotations
-
+import asyncio
 import json
 import logging
 import os
 import sqlite3
 import threading
-from typing import TYPE_CHECKING, cast
+import uuid
+from typing import TYPE_CHECKING, Any, cast
 
-from ibapi.contract import ContractDescription, ContractDetails
+from anyio import key
+from ibapi.contract import Contract, ContractDescription, ContractDetails
+from ibapi.message import OUT
 
+from trading_api.models.exceptions import ProviderException
 from trading_api.providers.tws.cached_contract import CachedContract
+from trading_api.providers.tws.tws_mappers import ticker_name
+from trading_api.providers.tws.wiring_interfaces import (
+    ContractTrackerCBWiringInterface,
+    IbSocketWiringInterface,
+)
 
 if TYPE_CHECKING:
     from typing import Any
 
 logger = logging.getLogger(__name__)
+
+DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
+DEBUG_TWS_CACHE = os.environ.get("DEBUG_TWS_CACHE") == "true"
 
 # Default cache location
 DEFAULT_CACHE_PATH = ".cache/contracts.db"
@@ -131,25 +142,6 @@ class SQLiteContractCache:
         )
         conn.commit()
 
-    def get_by_con_id(self, con_id: int) -> dict[str, Any] | None:
-        """Get contract description by conId.
-
-        Args:
-            con_id: Contract ID
-
-        Returns:
-            Dict suitable for CachedContract.from_dict(), or None if not found
-        """
-        conn = self._get_connection()
-        cursor = conn.execute(
-            "SELECT * FROM contract_descriptions WHERE con_id = ?",
-            (con_id,),
-        )
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return self._row_to_dict(row)
-
     def get_by_symbol_prefix(self, prefix: str) -> list[dict[str, Any]]:
         """Get contract descriptions matching symbol prefix.
 
@@ -165,43 +157,6 @@ class SQLiteContractCache:
             (prefix,),
         )
         return [self._row_to_dict(row) for row in cursor.fetchall()]
-
-    def get_by_ticker(self, ticker: str) -> dict[str, Any] | None:
-        """Get contract description by exact ticker match.
-
-        Ticker format: "PRIMARY_EXCHANGE:SYMBOL" (e.g., "NASDAQ:AAPL")
-
-        Args:
-            ticker: Ticker string
-
-        Returns:
-            Dict suitable for CachedContract.from_dict(), or None if not found
-        """
-        # Parse ticker: "EXCHANGE:SYMBOL" or just "SYMBOL"
-        if ":" in ticker:
-            parts = ticker.split(":")
-            primary_exchange = parts[0]
-            symbol = parts[1]
-        else:
-            primary_exchange = None
-            symbol = ticker
-
-        conn = self._get_connection()
-        if primary_exchange:
-            cursor = conn.execute(
-                """SELECT * FROM contract_descriptions
-                   WHERE symbol = ? AND primary_exchange = ?""",
-                (symbol, primary_exchange),
-            )
-        else:
-            cursor = conn.execute(
-                "SELECT * FROM contract_descriptions WHERE symbol = ?",
-                (symbol,),
-            )
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return self._row_to_dict(row)
 
     def _row_to_dict(self, row: sqlite3.Row) -> dict[str, Any]:
         """Convert SQLite row to dict for CachedContract.from_dict()."""
@@ -222,97 +177,354 @@ class SQLiteContractCache:
             self._local.conn = None
 
 
-class ContractTracker:
+def compute_routed_description(
+    contract: Contract,
+) -> str:
+    """Compute routing exchange aware description as business identifier."""
+    ticker = ticker_name(contract)
+    route_description = f"{contract.exchange or contract.primaryExchange}>>{ticker}"
+    return route_description
+
+
+def resolve_snapshot(
+    fut: asyncio.Future[list[CachedContract]], cached: list[CachedContract]
+) -> None:
+    if not fut.done():
+        fut.set_result(cached)
+
+
+class ContractTracker(ContractTrackerCBWiringInterface):
     """Contract tracking with SQLite persistence for descriptions.
 
-    Follows the Tracker pattern (like OrderTracker/PositionTracker):
-    - IBSocket owns ContractTracker
-    - Callbacks populate tracker from reader thread
+    Follows the Tracker pattern (like QuoteTracker/BarsTracker):
+    - TWSClient owns ContractTracker
+    - IBSocket routes callbacks via wired interface
     - Main thread queries tracker for cached data
 
     Two-tier caching:
     - _descriptions: In-memory cache of ContractDescriptions (loaded from SQLite)
     - _details: In-memory cache of ContractDetails (session-only, not persisted)
 
-    Lazy Loading Flow:
-        get_by_*() → in-memory → SQLite → return None (caller fetches from IB API)
+    Request Patterns:
+    - Descriptions: request_descriptions(pattern) → symbolSamples callback
+    - Details: request_details(contract) → contractDetails/contractDetailsEnd callbacks
 
     Thread Safety:
         - Envelope (reset, close): main thread
-        - Content (upsert): reader thread writes, main thread reads
+        - Content (upsert): reader thread writes via wired interface
         - SQLite: thread-local connections
+        - Pending requests: protected by tracker_lock
     """
 
-    def __init__(self, db_path: str | None = None) -> None:
+    def __init__(
+        self, ibsocket: IbSocketWiringInterface, db_path: str | None = None
+    ) -> None:
         """Initialize ContractTracker.
 
         Args:
+            ibsocket: IbSocketWiringInterface for TWS communication and wiring
             db_path: Path to SQLite database. Defaults to TWS_CONTRACT_CACHE_PATH
                      env var or ".cache/contracts.db"
         """
+        self.tracker_lock = threading.Lock()
+        ibsocket.wire_contract_tracker(self)
+        self.ibsocket = ibsocket
+
         self._db_path = db_path or os.environ.get(
             "TWS_CONTRACT_CACHE_PATH", DEFAULT_CACHE_PATH
         )
         assert self._db_path, "Contract cache path must be specified"
         self._sqlite = SQLiteContractCache(self._db_path)
 
-        # In-memory caches: conId → CachedContract
-        self._descriptions: dict[int, CachedContract] = {}  # From SQLite + API
-        self._details: dict[int, CachedContract] = {}  # Full details (memory-only)
+        self._cached_contracts: dict[str, CachedContract] = (
+            {}
+        )  # in-memory cache of CachedContract by ticker
+
+        # contract description requests
+        self._descriptions: dict[int, CachedContract] = (
+            {}
+        )  # Full descriptions (memory-only) req_id → list of CachedContract
+        self._pending_descriptions: dict[
+            int,
+            dict[
+                str,
+                tuple[asyncio.AbstractEventLoop, asyncio.Future[list[CachedContract]]],
+            ],
+        ] = {}
+        self._descriptions_to_req_id: dict[str, int] = {}
+
+        # contract details requests
+        self._details: dict[int, list[CachedContract]] = (
+            {}
+        )  # contract details (memory-only) req_id → list of CachedContract
+        self._completed_details_request_ids: set[int] = set()
+        self._pending_details: dict[
+            int,
+            dict[
+                str,
+                tuple[
+                    asyncio.AbstractEventLoop,
+                    asyncio.Future[list[CachedContract]],
+                ],
+            ],
+        ] = {}
+        self._details_to_req_id: dict[str, int] = {}
+
+    # === TWS Protocol Hooks (called by main thread) ===
+
+    def _request_descriptions(self, pattern: str) -> int:
+        """Request symbol matching from TWS.
+
+        Internalizes OUT.REQ_MATCHING_SYMBOLS protocol.
+
+        Args:
+            pattern: Symbol pattern to search for
+
+        Returns:
+            req_id: TWS request ID allocated for this request
+        """
+        req_id = self._descriptions_to_req_id.get(pattern)
+        if req_id is not None:
+            if DEBUG_TWS_CACHE:
+                logger.debug(f"in-memory cache hit for pattern='{pattern}'")
+            return req_id
+
+        with self.tracker_lock:
+            req_id = self._descriptions_to_req_id[pattern] = self.ibsocket.next_req_id
+
+        self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [req_id, pattern])
+        if DEBUG_TWS_REQUEST:
+            logger.debug(f"requested symbolSamples reqId={req_id} pattern='{pattern}'")
+
+        return req_id
+
+    def _request_details(self, contract: Contract) -> int:
+        """Request contract details from TWS.
+
+        Internalizes OUT.REQ_CONTRACT_DATA protocol.
+
+        Args:
+            contract: Contract to request details for
+
+        Returns:
+            req_id: TWS request ID allocated for this request
+        """
+
+        business_key = compute_routed_description(contract)
+        req_id = self._details_to_req_id.get(business_key)
+        if req_id is not None:
+            if DEBUG_TWS_CACHE:
+                logger.debug(
+                    f"in-memory cache hit for routed_description='{business_key}'"
+                )
+            return req_id
+
+        req_id = self.ibsocket.next_req_id
+        with self.tracker_lock:
+            req_id = self._details_to_req_id[business_key] = self.ibsocket.next_req_id
+
+        VERSION = 8
+        fields: list[object] = [
+            VERSION,
+            req_id,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            contract.includeExpired,
+            contract.secIdType,
+            contract.secId,
+            contract.issuerId,
+        ]
+        self.ibsocket.send_message(OUT.REQ_CONTRACT_DATA, fields)
+        if DEBUG_TWS_REQUEST:
+            logger.debug(
+                f"requested contractDetails reqId={req_id} symbol='{contract.symbol}'"
+            )
+
+        return req_id
+
+    # === Wiring Interface Implementation (reader thread callbacks) ===
+
+    def update_descriptions(
+        self, req_id: int, descriptions: list[ContractDescription]
+    ) -> None:
+        """Handle symbolSamples callback from IBSocket.
+
+        Persists to SQLite, updates in-memory cache, resolves pending Future.
+
+        Args:
+            req_id: TWS request ID
+            descriptions: List of ContractDescription from TWS
+        """
+        # Auto Persist to cache (same logic as old upsert_descriptions)
+        result = self.cache_descriptions(descriptions)
+
+        # Resolve pending Future
+        with self.tracker_lock:
+            pending_descriptions_hooks = list(
+                self._pending_descriptions.setdefault(req_id, {}).values()
+            )
+
+        for loop, future in pending_descriptions_hooks:
+            loop.call_soon_threadsafe(resolve_snapshot, future, result)
+
+    def update_details(self, req_id: int, details: ContractDetails) -> None:
+        """Handle contractDetails callback from IBSocket.
+
+        Accumulates details until flag_details_complete is called.
+
+        Args:
+            req_id: TWS request ID
+            details: ContractDetails from TWS
+        """
+        # No auto-caching here - caller must invoke cache_details explicitly
+        # Accumulate details
+        results = CachedContract.from_contract_details(details)
+        with self.tracker_lock:
+            accumulated = self._details.setdefault(req_id, [])
+        accumulated.append(results)
+
+    def flag_details_complete(self, req_id: int) -> None:
+        """Handle contractDetailsEnd callback from IBSocket.
+
+        Resolves pending Future with accumulated details.
+
+        Args:
+            req_id: TWS request ID
+        """
+        with self.tracker_lock:
+            pending_details_hooks = list(
+                self._pending_details.setdefault(req_id, {}).values()
+            )
+            accumulated = self._details.setdefault(req_id, [])
+            self._completed_details_request_ids.add(req_id)
+
+        for loop, future in pending_details_hooks:
+            loop.call_soon_threadsafe(resolve_snapshot, future, accumulated)
+
+    def raise_error(self, req_id: int, exception: ProviderException) -> bool:
+        """Handle error callback from IBSocket.
+
+        Propagates error to pending Future.
+
+        Args:
+            req_id: TWS request ID
+            exception: ProviderException to propagate
+
+        Returns:
+            True if error was handled (pending request found), False otherwise
+        """
+        with self.tracker_lock:
+            pending_description = list(
+                self._pending_descriptions.pop(req_id, {}).values()
+            )
+            pending_detail = list(self._pending_details.pop(req_id, {}).values())
+            self._completed_details_request_ids.discard(req_id)
+            self._descriptions.pop(req_id, None)
+            self._details.pop(req_id, None)
+            business_key = next(
+                iter(
+                    (k for k, v in self._descriptions_to_req_id.items() if v == req_id),
+                ),
+                None,
+            )
+            if business_key:
+                self._descriptions_to_req_id.pop(business_key, None)
+            business_key = next(
+                iter(
+                    (k for k, v in self._details_to_req_id.items() if v == req_id),
+                ),
+                None,
+            )
+            if business_key:
+                self._details_to_req_id.pop(business_key, None)
+
+        if pending_description:
+            for loop, future in pending_description:
+                loop.call_soon_threadsafe(future.set_exception, exception)
+            return True
+
+        if pending_detail:
+            for loop, future in pending_detail:
+                loop.call_soon_threadsafe(future.set_exception, exception)
+            return True
+
+        return False
+
+    # === Public Request Methods (main thread) ===
+
+    async def request_descriptions(
+        self, pattern: str, timeout: float = 10.0
+    ) -> list[CachedContract]:
+        """Request symbol matching from TWS and wait for results.
+
+        Args:
+            pattern: Symbol pattern to search for
+            timeout: Timeout in seconds
+
+        Returns:
+            List of matching CachedContracts
+        """
+        key = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[list[CachedContract]] = loop.create_future()
+
+        req_id = self._request_descriptions(pattern)
+
+        with self.tracker_lock:
+            pending_descriptions = self._pending_descriptions.setdefault(req_id, {})
+            pending_descriptions[key] = (loop, future)
+
+        if req_id in self._descriptions:
+            future.set_result([self._descriptions[req_id]])
+
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        finally:
+            with self.tracker_lock:
+                pending_descriptions.pop(key, None)
+
+    async def request_details(
+        self, contract: Contract, timeout: float = 10.0
+    ) -> list[CachedContract]:
+        """Request contract details from TWS and wait for results.
+
+        Args:
+            contract: Contract to request details for
+            timeout: Timeout in seconds
+
+        Returns:
+            List of CachedContracts with full details
+        """
+        key = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[list[CachedContract]] = loop.create_future()
+
+        req_id = self._request_details(contract)
+
+        with self.tracker_lock:
+            pending_details = self._pending_details.setdefault(req_id, {})
+            pending_details[key] = (loop, future)
+
+        if req_id in self._details:
+            future.set_result(self._details[req_id])
+
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        finally:
+            with self.tracker_lock:
+                pending_details.pop(key, None)
 
     # === Lookup Methods (main thread) ===
-
-    def get_by_con_id(self, con_id: int) -> CachedContract | None:
-        """Get contract by conId (lazy loading: memory → SQLite).
-
-        Args:
-            con_id: Contract ID
-
-        Returns:
-            CachedContract or None if not found anywhere
-        """
-        # 1. Check in-memory (full details first)
-        if con_id in self._details:
-            return self._details[con_id]
-        if con_id in self._descriptions:
-            return self._descriptions[con_id]
-
-        # 2. Check SQLite
-        data = self._sqlite.get_by_con_id(con_id)
-        if data:
-            cached = CachedContract.from_dict(data)
-            self._descriptions[con_id] = cached
-            return cached
-
-        # 3. Not found - caller should fetch from IB API
-        return None
-
-    def get_by_ticker(self, ticker: str) -> CachedContract | None:
-        """Get contract by exact ticker match (lazy loading: memory → SQLite).
-
-        Ticker format: "PRIMARY_EXCHANGE:SYMBOL" (e.g., "NASDAQ:AAPL")
-
-        Args:
-            ticker: Ticker string
-
-        Returns:
-            CachedContract or None if not found anywhere
-        """
-        # 1. Check in-memory (full details first, then descriptions)
-        for cache in (self._details, self._descriptions):
-            for cached in cache.values():
-                if cached.ticker == ticker:
-                    return cached
-
-        # 2. Check SQLite
-        data = self._sqlite.get_by_ticker(ticker)
-        if data:
-            cached = CachedContract.from_dict(data)
-            self._descriptions[cached.con_id] = cached
-            return cached
-
-        # 3. Not found
-        return None
 
     def get_by_symbol_prefix(self, prefix: str) -> list[CachedContract]:
         """Get contracts matching symbol prefix (lazy loading: memory → SQLite).
@@ -345,22 +557,24 @@ class ContractTracker:
         # 3. Not found - caller should fetch from IB API
         return []
 
-    def get_full_details(self, con_id: int) -> CachedContract | None:
+    def get_details_from_cache(self, contract: Contract) -> CachedContract | None:
         """Get contract with full details (memory-only, no SQLite fallback).
 
         Use for operations requiring tradingHours, validExchanges, etc.
 
         Args:
-            con_id: Contract ID
+            contract: Contract object
 
         Returns:
-            CachedContract with has_full_details=True, or None
+            CachedContract with full details or None if not found
         """
-        return self._details.get(con_id)
+        ticker = ticker_name(contract)
+        cached = self._cached_contracts.get(ticker)
+        return cached if cached and cached.has_full_details else None
 
-    # === Upsert Methods (reader thread via callbacks) ===
+    # === Internal Upsert Methods (used by wiring interface callbacks) ===
 
-    def upsert_descriptions(
+    def cache_descriptions(
         self, descriptions: list[ContractDescription]
     ) -> list[CachedContract]:
         """Upsert ContractDescriptions from symbolSamples callback.
@@ -377,20 +591,23 @@ class ContractTracker:
         if not descriptions:
             return []
 
-        result: list[CachedContract] = []
-        dicts_to_persist: list[dict[str, Any]] = []
+        result = [
+            CachedContract.from_contract_description(desc)
+            for desc in descriptions
+            if desc.contract.conId > 0
+        ]
 
-        for desc in descriptions:
-            if desc.contract.conId <= 0:
-                continue  # Skip invalid conIds
+        to_cache = [
+            desc for desc in result if desc.ticker not in self._cached_contracts
+        ]
 
-            cached = CachedContract.from_contract_description(desc)
-            self._descriptions[cached.con_id] = cached
-            dicts_to_persist.append(cached.to_dict())
-            result.append(cached)
-
-        # Persist to SQLite
-        if dicts_to_persist:
+        if to_cache:
+            # Update in-memory cache
+            self._cached_contracts.update(
+                {cached.ticker: cached for cached in to_cache}
+            )
+            # Persist to SQLite
+            dicts_to_persist = [cached.to_dict() for cached in to_cache]
             try:
                 self._sqlite.upsert_many(dicts_to_persist)
             except Exception as e:
@@ -400,23 +617,19 @@ class ContractTracker:
 
         return result
 
-    def upsert_details(
+    def cache_details(
         self, details: ContractDetails, overnight_hours: str | None = None
     ) -> CachedContract:
-        """Upsert ContractDetails from contractDetails callback.
-
-        In-memory only - NOT persisted to SQLite (ContractDetails are mutable).
-        Called from reader thread (contractDetails callback).
-
+        """Cache full ContractDetails in in-memory cache.
         Args:
-            details: ContractDetails from TWS callback
-            overnight_hours: Optional overnight trading hours (from OVERNIGHT exchange)
-
+            details: ContractDetails from TWS
+            overnight_hours: Optional trading hours string for overnight sessions
         Returns:
-            CachedContract with full details
+            CachedContract instance
         """
         cached = CachedContract.from_contract_details(details, overnight_hours)
-        self._details[cached.con_id] = cached
+        self._cached_contracts[cached.ticker] = cached
+
         return cached
 
     # === Session Management ===
@@ -436,7 +649,11 @@ class ContractTracker:
         """
         self._descriptions.clear()
         self._details.clear()
+        with self.tracker_lock:
+            self._pending_descriptions.clear()
+            self._pending_details.clear()
 
     def close(self) -> None:
         """Close SQLite connection."""
+        self._sqlite.close()
         self._sqlite.close()

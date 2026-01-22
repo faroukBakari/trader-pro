@@ -1,8 +1,12 @@
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from ibapi.common import BarData
 
 from trading_api.models.exceptions import ProviderException
+
+if TYPE_CHECKING:
+    from ibapi.contract import Contract, ContractDescription, ContractDetails
 
 
 class QuoteTrackerCBWiringInterface(ABC):
@@ -24,6 +28,22 @@ class BarsTrackerCBWiringInterface(ABC):
     def flag_complete(self, req_id: int, start: str, end: str) -> None: ...
 
 
+class ContractTrackerCBWiringInterface(ABC):
+    @abstractmethod
+    def update_descriptions(
+        self, req_id: int, descriptions: list["ContractDescription"]
+    ) -> None: ...
+
+    @abstractmethod
+    def update_details(self, req_id: int, details: "ContractDetails") -> None: ...
+
+    @abstractmethod
+    def flag_details_complete(self, req_id: int) -> None: ...
+
+    @abstractmethod
+    def raise_error(self, req_id: int, exception: ProviderException) -> bool: ...
+
+
 class IbSocketWiringInterface(ABC):
     @property
     @abstractmethod
@@ -42,4 +62,10 @@ class IbSocketWiringInterface(ABC):
     def wire_bars_tracker(
         self,
         tracker_interface: BarsTrackerCBWiringInterface,
+    ) -> None: ...
+
+    @abstractmethod
+    def wire_contract_tracker(
+        self,
+        tracker_interface: ContractTrackerCBWiringInterface,
     ) -> None: ...
