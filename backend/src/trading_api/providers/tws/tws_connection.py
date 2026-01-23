@@ -51,11 +51,7 @@ from ibapi.wrapper import EWrapper, current_fn_name
 
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import Bar, QuoteData
-from trading_api.providers.tws.account_tracker import (
-    TWS_TAG_TO_FIELD,
-    AccountTracker,
-    TrackedAccount,
-)
+from trading_api.providers.tws.account_tracker import AccountTracker, TrackedAccount
 from trading_api.providers.tws.bars_tracker import BarsTracker
 from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.contract_tracker import ContractTracker
@@ -75,6 +71,7 @@ from trading_api.providers.tws.tws_models import (
     get_bar_duration_seconds,
 )
 from trading_api.providers.tws.wiring_interfaces import (
+    AccountTrackerCBWiringInterface,
     BarsTrackerCBWiringInterface,
     ContractTrackerCBWiringInterface,
     ExecutionTrackerCBWiringInterface,
@@ -214,8 +211,10 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         self.__position_tracker: PositionTrackerCBWiringInterface | None = None
         self.__execution_tracker: ExecutionTrackerCBWiringInterface | None = None
         self.__order_tracker: OrderTrackerCBWiringInterface | None = None
+        self.__account_tracker: AccountTrackerCBWiringInterface | None = None
         self._req_id_count: count[int] = count()
         self.__next_order_id: int | None = None
+        self.__accounts_list: str | None = None
         self._socket_lock = threading.Lock()
         self._state = IBSocketState.READY
         self._socket = socket()
@@ -224,10 +223,6 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         self._server_version: str = ""
         self._connection_time: str = ""
 
-        # Data tracking attributes
-        self.account_tracker: AccountTracker = AccountTracker(
-            self.reqAccountSubscriptions, self.cancelAccountSubscriptions
-        )
         self._ready_event = (
             threading.Event()
         )  # Signals when IBKR connection is fully established
@@ -264,6 +259,15 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
     ) -> int | None:
         self.__order_tracker = tracker_interface
         return self.__next_order_id
+
+    def wire_account_tracker(
+        self, tracker_interface: AccountTrackerCBWiringInterface
+    ) -> str:
+        self.__account_tracker = tracker_interface
+        assert (
+            self.__accounts_list is not None
+        ), "Accounts list should be set as part of the socket connection setup."
+        return self.__accounts_list
 
     def _dispatchMessage(self, fnName: str, fnParams: dict) -> None:
         if DEBUG_TWS_DISPATCH:
@@ -580,95 +584,10 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
     # =============== Request Methods ================
     # ================================================
 
-    # Note: reqMatchingSymbols and reqContractDetails have been internalized
-    # into ContractTracker via the wiring interface pattern.
+    # Note: reqMatchingSymbols, reqContractDetails, and account-related requests
+    # have been internalized into their respective trackers via the wiring interface pattern.
     # Use ContractTracker.request_descriptions() and request_details() instead.
-
-    def reqAccountSummary(self) -> None:
-        def request_cb() -> int:
-            VERSION = 1
-            reqId = self.next_req_id
-            self.send_message(
-                OUT.REQ_ACCOUNT_SUMMARY,
-                [VERSION, reqId, "All", ",".join(TWS_TAG_TO_FIELD.keys())],
-            )
-            if DEBUG_TWS_REQUEST:
-                debug_log("requested account summary")
-            return reqId
-
-        self.account_tracker.ensure_summary_requested(request_cb)
-
-    def _reqAccountUpdates(self, subscribe: bool, acctCode: str) -> None:
-        """Subscribe/unsubscribe to account updates.
-
-        Triggers callbacks:
-            - updateAccountValue() for each account metric
-            - updatePortfolio() for each position
-            - updateAccountTime() with timestamp
-            - accountDownloadEnd() when batch complete
-
-        Args:
-            subscribe: True to subscribe, False to unsubscribe
-            acctCode: Account code (required for FA accounts)
-        """
-        VERSION = 2
-        self.send_message(OUT.REQ_ACCT_DATA, [VERSION, subscribe, acctCode])
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"reqAccountUpdates subscribe={subscribe}, acct={acctCode}")
-
-    def _reqPnL(self, reqId: int, account: str, modelCode: str = "") -> None:
-        """Subscribe to real-time P&L updates.
-
-        Triggers pnl() callback with dailyPnL, unrealizedPnL, realizedPnL.
-        Updates are pushed in real-time (not on 3-min interval like reqAccountUpdates).
-
-        Args:
-            reqId: Request ID for tracking
-            account: Account code
-            modelCode: Model code (empty string for default)
-        """
-        self.send_message(OUT.REQ_PNL, [reqId, account, modelCode])
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"reqPnL reqId={reqId}, account={account}")
-
-    def reqAccountSubscriptions(self, account: str) -> int:
-        """Subscribe to account updates with P&L.
-
-        Combines _reqAccountUpdates and _reqPnL for comprehensive account tracking.
-
-        Args:
-            account: Account code
-        Returns:
-            Request ID for P&L subscription
-        """
-
-        self._reqAccountUpdates(True, account)
-        reqId = self.next_req_id
-        self._reqPnL(reqId, account)
-
-        return reqId
-
-    def _cancelPnL(self, reqId: int) -> None:
-        """Cancel P&L subscription.
-
-        Args:
-            reqId: Request ID from reqPnL()
-        """
-        self.send_message(OUT.CANCEL_PNL, [reqId])
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"cancelPnL reqId={reqId}")
-
-    def cancelAccountSubscriptions(self, reqId: int) -> None:
-        """Subscribe to account updates with P&L.
-
-        Combines _reqAccountUpdates and _reqPnL for comprehensive account tracking.
-
-        Args:
-            account: Account code
-        Returns:
-            Request ID for P&L subscription
-        """
-        self._cancelPnL(reqId)
+    # Use AccountTracker for account summary and P&L subscriptions.
 
     # ================================================
     # == Dispatch handlers for subscription events ===
@@ -679,10 +598,15 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
     def managedAccounts(self, accountsList: str) -> None:
         if DEBUG_TWS_ACCOUNT:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
-        # should be sent upon connection
-        accounts = accountsList.split(",")
-        for account in accounts:
-            self.account_tracker.upsert_account(account)
+        # should be sent upon connection - route to wired AccountTracker
+        assert (
+            self.__account_tracker is not None or self.__accounts_list is None
+        ), "Unexpected nextValidId callback: order tracker already wired."
+        self.__accounts_list = accountsList
+        if self.__account_tracker is not None:
+            accounts = accountsList.split(",")
+            for account in accounts:
+                self.__account_tracker.upsert_account(account)
 
     def accountSummary(
         self, reqId: int, account: str, tag: str, value: str, currency: str
@@ -704,7 +628,8 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
                 f"tag={tag}, value={value}, currency={currency}"
             )
 
-        self.account_tracker.update_account(account, tag, value, currency)
+        if self.__account_tracker is not None:
+            self.__account_tracker.update_account(account, tag, value, currency)
 
     def accountSummaryEnd(self, reqId: int) -> None:
         """End signal for account summary request.
@@ -716,7 +641,8 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             debug_log(f"{current_fn_name()}")
 
         # Mark snapshot complete and resolve pending futures
-        self.account_tracker.mark_snapshot_complete()
+        if self.__account_tracker is not None:
+            self.__account_tracker.mark_summary_complete()
 
     # === Account Updates (reqAccountUpdates callbacks) ===
 
@@ -736,7 +662,9 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         """
         if DEBUG_TWS_ACCOUNT:
             debug_log(f"{current_fn_name()}: {key}={val} {currency} for {accountName}")
-        self.account_tracker.update_account(accountName, key, val, currency)
+
+        if self.__account_tracker is not None:
+            self.__account_tracker.update_account(accountName, key, val, currency)
 
     def updatePortfolio(
         self,
@@ -782,9 +710,9 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         """
         if DEBUG_TWS_ACCOUNT:
             debug_log(f"{current_fn_name()}: {timeStamp}")
-        # Update last_update_time on tracked accounts
-        for tracked in self.account_tracker._accounts.values():
-            tracked.last_update_time = timeStamp
+
+        if self.__account_tracker is not None:
+            self.__account_tracker.update_account_time(timeStamp)
 
     def accountDownloadEnd(self, accountName: str) -> None:
         """End signal for reqAccountUpdates() batch.
@@ -797,7 +725,9 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         """
         if DEBUG_TWS_ACCOUNT:
             debug_log(f"{current_fn_name()}: {accountName}")
-        self.account_tracker.mark_snapshot_complete()
+
+        if self.__account_tracker is not None:
+            self.__account_tracker.mark_summary_complete()
 
     # === Real-time P&L (reqPnL callback) ===
 
@@ -820,7 +750,10 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
                 f"{current_fn_name()}: reqId={reqId} daily={dailyPnL} "
                 f"unrealized={unrealizedPnL} realized={realizedPnL}"
             )
-        self.account_tracker.update_pnl(reqId, dailyPnL, unrealizedPnL, realizedPnL)
+        if self.__account_tracker is not None:
+            self.__account_tracker.update_pnl(
+                reqId, dailyPnL, unrealizedPnL, realizedPnL
+            )
 
     # === symbolSamples ===
 
@@ -1341,6 +1274,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         self.error(reqId, errorTime, errorCode, errorMsg, advancedOrderRejectJson)
 
 
+# TODO: optimize trackers for datafeed / broker capabilities (accout / order trackers are not lazy)
 class TWSClient:
     def __init__(
         self,
@@ -1365,6 +1299,7 @@ class TWSClient:
         self.__position_tracker: PositionTracker | None = None
         self.__execution_tracker: ExecutionTracker | None = None
         self.__order_tracker: OrderTracker | None = None
+        self.__account_tracker: AccountTracker | None = None
 
     @property
     def ibsocket(self) -> IBSocket:
@@ -1389,6 +1324,9 @@ class TWSClient:
             if self.__execution_tracker:
                 self.__execution_tracker.reset()
                 self.__execution_tracker = None
+            if self.__account_tracker:
+                self.__account_tracker.reset()
+                self.__account_tracker = None
             self.__ibsocket = IBSocket()
             self.__ibsocket.connect(
                 host=self._host,
@@ -1438,6 +1376,13 @@ class TWSClient:
         if self.__order_tracker is None:
             self.__order_tracker = OrderTracker(self.ibsocket)
         return self.__order_tracker
+
+    @property
+    def account_tracker(self) -> AccountTracker:
+        """Lazy-initialized AccountTracker for account tracking."""
+        if self.__account_tracker is None:
+            self.__account_tracker = AccountTracker(self.ibsocket)
+        return self.__account_tracker
 
     # === Contract resolution and caching ===
 
@@ -1702,9 +1647,7 @@ class TWSClient:
         Returns:
             List of TrackedPosition objects (one per position)
         """
-        self.ibsocket.reqAccountSummary()
-
-        return await self.ibsocket.account_tracker.all_accounts(
+        return await self.account_tracker.reqAccountSummary(
             timeout=timeout or self._timeout
         )
 
@@ -1765,16 +1708,10 @@ class TWSClient:
         callback: Callable[[TrackedAccount], Coroutine[Any, Any, None]],
         on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
     ) -> str:
-        # 1. Register with AccountTracker
-        stream_key = self.ibsocket.account_tracker.create_stream_hook(
-            asyncio.get_event_loop(),
+        stream_key = self.account_tracker.create_stream_hook(
             callback,
             on_error,
         )
-
-        # 2. Trigger initial snapshot (existing orders)
-        self.ibsocket.reqAccountSummary()
-
         return stream_key
 
     def reqExecutionsStream(
@@ -1796,11 +1733,11 @@ class TWSClient:
         self.position_tracker.remove_stream_hook(stream_key)
         self.execution_tracker.remove_stream_hook(stream_key)
         self.order_tracker.remove_stream_hook(stream_key)
-        self.ibsocket.account_tracker.remove_stream_hook(stream_key)
+        self.account_tracker.remove_stream_hook(stream_key)
 
         # Cancel underlying TWS subscriptions if this was an account stream
         # TODO: Track stream_key → pnl_req_id mapping to cancel P&L subscription
-        # self.ibsocket.cancelAccountSubscriptions(pnl_req_id)
+        # self.account_tracker.___cancel_account_subscriptions(pnl_req_id)
 
     def shutdown(self) -> None:
         """Shutdown the TWSClient and underlying IBSocket."""

@@ -211,13 +211,47 @@ class TestIBSocketErrorCallback:
 class TestIBSocketManagedAccounts:
     """Test managedAccounts and nextValidId callbacks."""
 
-    def test_managed_accounts_parses_list(self, running_ibsocket: IBSocket) -> None:
-        """Test managedAccounts parses comma-separated account list."""
-        # Mock the subscription callbacks to avoid sending messages
-        running_ibsocket.account_tracker.account_sub_cb = Mock(return_value=1)
-        running_ibsocket.account_tracker.account_unsub_cb = Mock(return_value=None)
+    def test_managed_accounts_stores_list_before_wiring(
+        self, running_ibsocket: IBSocket
+    ) -> None:
+        """Test managedAccounts stores account list during connection setup.
 
+        managedAccounts is called by TWS during connection, before any tracker
+        wiring. The accounts list is stored for later retrieval when
+        wire_account_tracker is called.
+        """
+        # Simulate TWS connection callback (before wiring)
         running_ibsocket.managedAccounts("U123,U456,U789")
+
+        # Wire tracker - should return the stored accounts list
+        mock_account_tracker = Mock()
+        accounts_list = running_ibsocket.wire_account_tracker(mock_account_tracker)
+
+        assert accounts_list == "U123,U456,U789"
+
+    def test_managed_accounts_routes_to_tracker_when_wired(
+        self, running_ibsocket: IBSocket
+    ) -> None:
+        """Test managedAccounts routes to tracker if already wired.
+
+        If tracker is wired and managedAccounts is called again (e.g., reconnect),
+        it should route accounts to the tracker.
+        """
+        # First call during connection setup
+        running_ibsocket.managedAccounts("U123,U456")
+
+        # Wire the tracker
+        mock_account_tracker = Mock()
+        running_ibsocket.wire_account_tracker(mock_account_tracker)
+
+        # Subsequent call (e.g., reconnect scenario) routes to tracker
+        running_ibsocket.managedAccounts("U123,U456,U789")
+
+        # Verify upsert_account was called for each account
+        assert mock_account_tracker.upsert_account.call_count == 3
+        mock_account_tracker.upsert_account.assert_any_call("U123")
+        mock_account_tracker.upsert_account.assert_any_call("U456")
+        mock_account_tracker.upsert_account.assert_any_call("U789")
 
     def test_next_valid_id_sets_ready_event(self, running_ibsocket: IBSocket) -> None:
         """Test nextValidId sets the ready event and stores order ID."""

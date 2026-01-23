@@ -4,6 +4,7 @@ Tests tag name mapping (PascalCase → snake_case) and P&L update functionality.
 """
 
 from decimal import Decimal
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,28 +13,44 @@ from trading_api.providers.tws.account_tracker import (
     AccountTracker,
     TrackedAccount,
 )
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
 
 
 @pytest.fixture
-def mock_account_callbacks() -> tuple:
-    """Provide mock callbacks for AccountTracker initialization.
+def mock_ibsocket() -> IbSocketWiringInterface:
+    """Provide a mock IbSocketWiringInterface for AccountTracker initialization.
 
-    Returns tuple of (account_sub_cb, account_unsub_cb) that match the
-    expected signatures for AccountTracker.__init__().
+    The mock implements the wiring interface methods needed by AccountTracker:
+    - wire_account_tracker: stores the tracker reference
+    - next_req_id: returns incrementing request IDs
+    - send_message: no-op (captures outgoing TWS messages)
     """
-    # Track request ID counter for unique IDs per account
+    mock = MagicMock(spec=IbSocketWiringInterface)
+
+    # Track request ID counter for unique IDs
     req_id_counter = {"value": 1}
 
-    def mock_sub(account: str) -> int:
-        """Mock account subscription callback - returns unique request ID."""
+    def get_next_req_id() -> int:
+        """Return incrementing request IDs."""
         req_id = req_id_counter["value"]
         req_id_counter["value"] += 1
         return req_id
 
-    def mock_unsub(reqId: int) -> None:
-        """Mock account unsubscription callback - no-op."""
+    # Configure mock properties and methods
+    mock.wire_account_tracker = MagicMock()
+    mock.send_message = MagicMock()
+    # Use PropertyMock for next_req_id property
+    type(mock).next_req_id = property(lambda self: get_next_req_id())
 
-    return (mock_sub, mock_unsub)
+    return mock
+
+
+@pytest.fixture
+def mock_account_callbacks(
+    mock_ibsocket: IbSocketWiringInterface,
+) -> IbSocketWiringInterface:
+    """Alias for backward compatibility - returns the mock IbSocketWiringInterface."""
+    return mock_ibsocket
 
 
 class TestTWSTagToFieldMapping:
@@ -74,63 +91,65 @@ class TestAccountTrackerUpdateAccount:
     """Test AccountTracker.update_account() method."""
 
     def test_update_account_creates_tracked_account(
-        self, mock_account_callbacks: tuple
+        self, mock_ibsocket: IbSocketWiringInterface
     ) -> None:
         """Verify update_account creates TrackedAccount if not exists."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.update_account("DU123", "NetLiquidation", "100000.50", "USD")
         assert "DU123" in tracker._accounts
         assert tracker._accounts["DU123"].net_liquidation == Decimal("100000.50")
 
     def test_update_account_updates_existing(
-        self, mock_account_callbacks: tuple
+        self, mock_ibsocket: IbSocketWiringInterface
     ) -> None:
         """Verify update_account updates existing TrackedAccount."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.upsert_account("DU123")
         tracker.update_account("DU123", "NetLiquidation", "100000.50", "USD")
         assert tracker._accounts["DU123"].net_liquidation == Decimal("100000.50")
 
     def test_update_account_ignores_unknown_tags(
-        self, mock_account_callbacks: tuple
+        self, mock_ibsocket: IbSocketWiringInterface
     ) -> None:
         """Verify unknown tags are silently ignored (no crash)."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.upsert_account("DU123")
         # Unknown tag should not raise
         tracker.update_account("DU123", "UnknownTag", "12345", "USD")
         # Account should still exist but no field should be modified
         assert "DU123" in tracker._accounts
 
-    def test_update_account_sets_currency(self, mock_account_callbacks: tuple) -> None:
+    def test_update_account_sets_currency(
+        self, mock_ibsocket: IbSocketWiringInterface
+    ) -> None:
         """Verify currency is set from callback."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.update_account("DU123", "NetLiquidation", "100000", "EUR")
         assert tracker._accounts["DU123"].currency == "EUR"
 
     def test_update_account_currency_only_if_provided(
-        self, mock_account_callbacks: tuple
+        self, mock_ibsocket: IbSocketWiringInterface
     ) -> None:
         """Verify currency is not overwritten with empty string."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.update_account("DU123", "NetLiquidation", "100000", "EUR")
         tracker.update_account("DU123", "AccountReady", "true", "")
         # Currency should still be EUR (not overwritten)
         assert tracker._accounts["DU123"].currency == "EUR"
 
     def test_update_account_parses_decimal_values(
-        self, mock_account_callbacks: tuple
+        self, mock_ibsocket: IbSocketWiringInterface
     ) -> None:
         """Verify numeric values are parsed as Decimal."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.update_account("DU123", "NetLiquidation", "123456.789", "USD")
         assert tracker._accounts["DU123"].net_liquidation == Decimal("123456.789")
 
     def test_update_account_parses_boolean_account_ready(
-        self, mock_account_callbacks: tuple
+        self, mock_ibsocket: IbSocketWiringInterface
     ) -> None:
         """Verify AccountReady is parsed as boolean."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.update_account("DU123", "AccountReady", "true", "")
         assert tracker._accounts["DU123"].account_ready is True
 
@@ -138,10 +157,10 @@ class TestAccountTrackerUpdateAccount:
         assert tracker._accounts["DU123"].account_ready is False
 
     def test_update_account_parses_integer_day_trades(
-        self, mock_account_callbacks: tuple
+        self, mock_ibsocket: IbSocketWiringInterface
     ) -> None:
         """Verify DayTradesRemaining is parsed as integer."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.update_account("DU123", "DayTradesRemaining", "3", "")
         assert tracker._accounts["DU123"].day_trades_remaining == 3
 
@@ -149,9 +168,11 @@ class TestAccountTrackerUpdateAccount:
         tracker.update_account("DU123", "DayTradesRemaining", "-1", "")
         assert tracker._accounts["DU123"].day_trades_remaining == -1
 
-    def test_update_account_string_values(self, mock_account_callbacks: tuple) -> None:
+    def test_update_account_string_values(
+        self, mock_ibsocket: IbSocketWiringInterface
+    ) -> None:
         """Verify string values are stored as strings."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.update_account("DU123", "AccountType", "INDIVIDUAL", "")
         assert tracker._accounts["DU123"].account_type == "INDIVIDUAL"
 
@@ -159,11 +180,13 @@ class TestAccountTrackerUpdateAccount:
 class TestAccountTrackerUpdatePnl:
     """Test AccountTracker.update_pnl() method."""
 
-    def test_update_pnl_updates_account(self, mock_account_callbacks: tuple) -> None:
+    def test_update_pnl_updates_account(
+        self, mock_ibsocket: IbSocketWiringInterface
+    ) -> None:
         """Verify update_pnl updates P&L fields on TrackedAccount."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.upsert_account("DU123")
-        # upsert_account auto-assigns pnl_req_id via account_sub_cb (returns 1 for first account)
+        # upsert_account auto-assigns pnl_req_id via reqPnL (returns 1 for first account)
         req_id = tracker._accounts["DU123"].pnl_req_id
         assert req_id is not None
 
@@ -173,9 +196,11 @@ class TestAccountTrackerUpdatePnl:
         assert tracker._accounts["DU123"].unrealized_pnl == Decimal("1200.50")
         assert tracker._accounts["DU123"].realized_pnl == Decimal("-300.00")
 
-    def test_update_pnl_uses_pnl_req_id(self, mock_account_callbacks: tuple) -> None:
+    def test_update_pnl_uses_pnl_req_id(
+        self, mock_ibsocket: IbSocketWiringInterface
+    ) -> None:
         """Verify update_pnl matches account by pnl_req_id."""
-        tracker = AccountTracker(*mock_account_callbacks)
+        tracker = AccountTracker(mock_ibsocket)
         tracker.upsert_account("DU123")  # Gets req_id=1
         tracker.upsert_account("DU456")  # Gets req_id=2
 

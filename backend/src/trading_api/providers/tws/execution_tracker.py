@@ -128,6 +128,7 @@ class TrackedExecution:
         )
 
 
+# TODO: group smart/overnight executions
 class ExecutionTracker(ExecutionTrackerCBWiringInterface):
     """Manages execution state for IBSocket. Thread-safe via asyncio dispatch.
 

@@ -189,6 +189,7 @@ def resolve_snapshot(
         fut.set_result(cached)
 
 
+# TODO: wire is tradable calls here maybe
 class ContractTracker(ContractTrackerCBWiringInterface):
     """Contract tracking with SQLite persistence for descriptions.
 
