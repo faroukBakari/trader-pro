@@ -821,7 +821,6 @@ class GoogleProviderV2(Provider, AuthCapability):
    ```
 
 2. Verify naming convention:
-
    - Directory: `providers/myProvider/` ❌ → `providers/myprovider/` ✅
    - Class: `MyProvider` ❌ → `MyproviderProvider` ✅
 
@@ -941,6 +940,68 @@ class MyProvider(Provider):
             raise
 ```
 
+### 7.4 Provider Observability
+
+Providers include structured logging for production debugging and health monitoring.
+
+#### TWS Provider Logging
+
+**Connection Lifecycle:**
+
+- **Socket creation**: `WARNING` level logs when IBSocket is created/recreated
+- **Connection state**: Tracks client_id to distinguish datafeed (1) vs. broker (2) connections
+
+**Contract Resolution:**
+
+- **Empty results**: `WARNING` logged when contract searches return no matches
+- **Cache hits**: `DEBUG` level logs for cache performance monitoring (SQLite vs. memory)
+
+**Market Data:**
+
+- **Quote staleness**: `WARNING` logged when quotes are stale (>30 seconds old)
+- **Quote liveness**: `DEBUG` level periodic logging (every 5s) to verify subscription health
+- **Empty bars**: `WARNING` logged when historical bars request returns no data
+
+**Error Classification:**
+
+- **Rate limiting**: Error 162 now raises `ProviderException` (previously swallowed)
+- **Not found**: Error 200/354 treated as informational (empty results, no exception)
+
+#### Logging Strategy
+
+| Component        | Event                | Level   | Frequency      | Purpose                       |
+| ---------------- | -------------------- | ------- | -------------- | ----------------------------- |
+| IBSocket         | Socket creation      | WARNING | Once           | Track connection lifecycle    |
+| ContractTracker  | Empty search results | WARNING | Per request    | Alert to data availability    |
+| QuoteTracker     | Quote staleness      | WARNING | Per access     | Alert to delayed updates      |
+| QuoteTracker     | Quote liveness       | DEBUG   | Every 5s       | Verify subscription health    |
+| DatafeedProvider | Empty bars response  | WARNING | Per request    | Distinguish no-data vs. error |
+| TWSModels        | Error code 162       | ERROR   | Per occurrence | Rate limiting should retry    |
+
+**Rationale**: `WARNING` level for lifecycle events and data quality issues enables passive monitoring without DEBUG verbosity. Periodic DEBUG logging (quote liveness) provides health signals for active debugging sessions.
+
+#### Debugging Workflows
+
+**Scenario 1: Quote Not Updating**
+
+1. Check logs for "Quote staleness" warnings → indicates TWS is not sending updates
+2. Check logs for "Quote is live" DEBUG messages → verify subscription active
+3. Check IBSocket recreation warnings → may indicate connection instability
+
+**Scenario 2: Empty Historical Data**
+
+1. Check logs for "No bars returned" warning → includes ticker, duration, end time
+2. Verify symbol is valid for requested time range
+3. Check TWS error logs for rate limiting (error 162) or invalid requests
+
+**Scenario 3: Contract Resolution Failures**
+
+1. Check logs for IBSocket creation → verify connection established
+2. Check ContractTracker cache search → verify SQLite persistence working
+3. Check TWS error logs for "No security definition" (error 200)
+
+**Cross-Reference**: See [CI-TROUBLESHOOTING.md](../../docs/CI-TROUBLESHOOTING.md) for CI-specific debugging patterns.
+
 ---
 
 ## 8. Best Practices
@@ -966,7 +1027,6 @@ class MyProvider(Provider):
    ```
 
 2. **Use secrets management in production:**
-
    - Development: `.env.local` (git-ignored)
    - Production: Environment variables, Kubernetes Secrets, AWS Secrets Manager
 

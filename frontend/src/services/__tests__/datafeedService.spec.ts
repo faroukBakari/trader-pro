@@ -152,19 +152,11 @@ describe('DatafeedService', () => {
   })
 
   describe('Symbol Search', () => {
-    it('should search symbols with empty query', async () => {
+    it('should not search symbols with empty query', async () => {
       const results = await searchSymbolsPromise('', '', '')
 
       expect(Array.isArray(results)).toBe(true)
-      expect(results.length).toBeGreaterThan(0)
-
-      // Verify result structure
-      results.forEach((result) => {
-        expect(result).toHaveProperty('symbol')
-        expect(result).toHaveProperty('description')
-        expect(result).toHaveProperty('exchange')
-        expect(result).toHaveProperty('type')
-      })
+      expect(results.length).toBe(0)
     })
 
     it('should search symbols by name', async () => {

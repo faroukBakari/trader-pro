@@ -23,11 +23,8 @@ from trading_api.models.broker import (
     OrderPreviewSection,
     OrderPreviewSectionRow,
     OrderType,
-    ParentType,
-    PlacedOrder,
     PreOrder,
     Side,
-    StopType,
 )
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import (
@@ -38,7 +35,6 @@ from trading_api.models.market import (
     SubsessionInfo,
     SymbolInfo,
 )
-from trading_api.providers.tws.order_tracker import TrackedOrder
 
 # TWS secType → TradingView-style symbol type
 SEC_TYPE_MAP: dict[str, str] = {
@@ -1008,113 +1004,6 @@ def preorder_to_tws(
     return parent, stop_loss_order, take_profit_order
 
 
-def tracked_order_to_placed_order(
-    tracked: TrackedOrder,
-    contract: Contract | None = None,
-    bracket_context: BracketContext | None = None,
-) -> PlacedOrder:
-    """Convert TrackedOrder to domain PlacedOrder.
-
-    Extracts data directly from raw TWS objects (Contract, Order, OrderState)
-    stored in TrackedOrder without relying on flattened dict fields.
-
-    Args:
-        tracked: TrackedOrder wrapping raw TWS objects
-        bracket_context: Optional bracket info from original PreOrder.
-            TWS doesn't return bracket prices in callbacks, so this
-            preserves the original stopLoss/takeProfit/trailingStopPips.
-
-    Returns:
-        Domain PlacedOrder model
-    """
-
-    contract = contract or tracked.contract
-    order = tracked.order
-
-    # Build symbol from contract
-    symbol = ticker_name(contract)
-
-    # Order type
-    order_type_str = order.orderType
-    order_type = OrderType(TWS_TO_ORDER_TYPE.get(order_type_str, 2))
-
-    # Side from action
-    side = Side(TWS_ACTION_TO_SIDE.get(order.action, 1))
-
-    # Quantity
-    qty = float(order.totalQuantity)
-
-    # Status with history-aware resolution
-    status = tracked.domain_status
-
-    # Prices
-    limit_price: float | None = None
-    stop_price: float | None = None
-    if order.lmtPrice and order.lmtPrice > 0:
-        limit_price = order.lmtPrice
-    if order.auxPrice and order.auxPrice > 0:
-        stop_price = order.auxPrice
-
-    # Filled quantity from order object (mutated by orderStatus callback)
-    filled_qty = 0.0 if isUnset(order.filledQuantity) else float(order.filledQuantity)
-
-    # Average fill price from fills history (last fill's avgFillPrice)
-    avg_price: float | None = None
-    if tracked.fills and filled_qty > 0:
-        avg_price = tracked.fills[-1].avgFillPrice
-
-    # Bracket fields from context (TWS doesn't return these in callbacks)
-    take_profit: float | None = None
-    stop_loss: float | None = None
-    trailing_stop_pips: float | None = None
-    stop_type: StopType | None = None
-
-    if bracket_context:
-        take_profit = bracket_context.take_profit
-        stop_loss = bracket_context.stop_loss
-        trailing_stop_pips = bracket_context.trailing_stop_pips
-        if bracket_context.stop_type is not None:
-            stop_type = StopType(bracket_context.stop_type)
-
-    # Parent order linking (for bracket child orders)
-    # TWS sets order.parentId > 0 for child orders (TP/SL)
-    parent_id: str | None = None
-    parent_type: ParentType | None = None
-    if tracked.parent_filled:
-        parent_id = symbol
-        parent_type = ParentType.POSITION
-    elif order.parentId and order.parentId > 0:
-        parent_id = str(order.parentId)
-        parent_type = ParentType.ORDER
-    else:
-        # Try to parse parentId from OCA group for position brackets
-        parsed_parent_id, parsed_parent_type = tracked.brackets_info
-        if parsed_parent_id and parsed_parent_type == ParentType.POSITION:
-            parent_id = parsed_parent_id
-            parent_type = ParentType.POSITION
-
-    return PlacedOrder(
-        id=str(tracked.orderId),
-        symbol=symbol,
-        type=order_type,
-        side=side,
-        qty=qty if qty > 0 else 1,  # Ensure positive qty
-        status=status,
-        limitPrice=limit_price,
-        stopPrice=stop_price,
-        takeProfit=take_profit,
-        stopLoss=stop_loss,
-        guaranteedStop=None,  # Not supported by TWS
-        trailingStopPips=trailing_stop_pips,
-        stopType=stop_type,
-        filledQty=filled_qty if filled_qty > 0 else None,
-        avgPrice=avg_price,
-        updateTime=None,  # Could add timestamp from last fill
-        parentId=parent_id,
-        parentType=parent_type,
-    )
-
-
 # UNSET_DOUBLE sentinel from ibapi (~1.7976931348623157e+308)
 _UNSET_DOUBLE = 1.7976931348623157e308
 
@@ -1370,6 +1259,5 @@ __all__ = [
     "TWS_ACTION_TO_SIDE",
     "brackets_to_tws",
     "preorder_to_tws",
-    "tracked_order_to_placed_order",
     "order_state_to_preview_result",
 ]

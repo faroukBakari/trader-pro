@@ -13,6 +13,8 @@ Commission Joining Strategy:
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import threading
 import uuid
 from collections.abc import Callable, Coroutine
@@ -21,11 +23,23 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ibapi.client_utils import createExecutionRequestProto
+from ibapi.common import PROTOBUF_MSG_ID
 from ibapi.contract import Contract
 from ibapi.execution import Execution as TWSExecution
+from ibapi.execution import ExecutionFilter
+from ibapi.message import OUT
 
 from trading_api.models.broker import Execution, Side
 from trading_api.models.exceptions import ProviderException
+from trading_api.providers.tws.wiring_interfaces import (
+    ExecutionTrackerCBWiringInterface,
+    IbSocketWiringInterface,
+)
+
+logger = logging.getLogger(__name__)
+
+DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
 
 
 def _parse_tws_execution_time(time_str: str) -> int:
@@ -114,7 +128,8 @@ class TrackedExecution:
         )
 
 
-class ExecutionTracker:
+# TODO: group smart/overnight executions
+class ExecutionTracker(ExecutionTrackerCBWiringInterface):
     """Manages execution state for IBSocket. Thread-safe via asyncio dispatch.
 
     Follows the tracker pattern (OrderTracker, PositionTracker):
@@ -132,11 +147,11 @@ class ExecutionTracker:
         - Dispatch (callbacks): reader thread schedules, main thread executes
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ibsocket: IbSocketWiringInterface) -> None:
+        ibsocket.wire_execution_tracker(self)
+        self.ibsocket = ibsocket
         self._snapshot_requested = threading.Event()
         self._snapshot_complete = threading.Event()
-
-        self.tracker_lock = threading.Lock()
         self._executions: dict[str, TrackedExecution] = {}  # exec_id → TrackedExecution
         self._snapshot_hooks: dict[
             str,
@@ -155,11 +170,23 @@ class ExecutionTracker:
     # Reader Thread Methods (called from IBSocket callbacks)
     # =========================================================================
 
-    def ensure_snapshot_requested(self, request_cb: Callable[[], None]) -> None:
-        """Ensure snapshot request is made only once."""
+    def ensure_snapshot_requested(self) -> None:
+        """Send reqExecutions() if not already requested.
+
+        Internalizes TWS protocol: sends OUT.REQ_EXECUTIONS via protobuf.
+        Called from main thread before snapshot/stream operations.
+        """
         if not self._snapshot_requested.is_set():
-            request_cb()
+            reqId = self.ibsocket.next_req_id
+            exec_filter = ExecutionFilter()
+            exec_request_proto = createExecutionRequestProto(reqId, exec_filter)
+            serialized = exec_request_proto.SerializeToString()
+            self.ibsocket.send_protobuf(
+                OUT.REQ_EXECUTIONS + PROTOBUF_MSG_ID, serialized
+            )
             self._snapshot_requested.set()
+            if DEBUG_TWS_REQUEST:
+                logger.info(f"requested executions reqId={reqId}")
 
     def upsert_execution(
         self,
@@ -257,12 +284,11 @@ class ExecutionTracker:
         Clears all executions, snapshot state, and hooks.
         Called from main thread before new snapshot request.
         """
-        with self.tracker_lock:
-            self._executions.clear()
-            self._snapshot_requested.clear()
-            self._snapshot_complete.clear()
-            self._snapshot_hooks.clear()
-            self._stream_hooks.clear()
+        self._executions.clear()
+        self._snapshot_requested.clear()
+        self._snapshot_complete.clear()
+        self._snapshot_hooks.clear()
+        self._stream_hooks.clear()
 
     async def all_executions(
         self, filter_symbol: str = "", timeout: float | None = None
@@ -279,28 +305,28 @@ class ExecutionTracker:
         Returns:
             List of TrackedExecution objects, optionally filtered
         """
+        self.ensure_snapshot_requested()
+
         loop = asyncio.get_running_loop()
         future: asyncio.Future[list[TrackedExecution]] = loop.create_future()
 
         if self._snapshot_complete.is_set():
-            future.set_result(list(self._executions.values()))
-
-        key = str(uuid.uuid4())
-        with self.tracker_lock:
+            executions = list(self._executions.values())
+        else:
+            key = str(uuid.uuid4())
             self._snapshot_hooks[key] = (loop, future)
 
-        try:
-            executions = await asyncio.wait_for(future, timeout)
-            if filter_symbol:
-                executions = [e for e in executions if e.symbol == filter_symbol]
-            return executions
-        finally:
-            with self.tracker_lock:
+            try:
+                executions = await asyncio.wait_for(future, timeout)
+            finally:
                 self._snapshot_hooks.pop(key, None)
+
+        if filter_symbol:
+            executions = [e for e in executions if e.symbol == filter_symbol]
+        return executions
 
     def create_stream_hook(
         self,
-        loop: asyncio.AbstractEventLoop,
         callback: Callable[[TrackedExecution], Coroutine[Any, Any, None]],
         on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
     ) -> str:
@@ -311,22 +337,22 @@ class ExecutionTracker:
         2. When commissionAndFeesReport arrives (commission enriched)
 
         Args:
-            loop: Event loop for callbacks
             callback: Called for each execution update
             on_error: Error callback
 
         Returns:
             Unique key for unsubscription
         """
+        self.ensure_snapshot_requested()
+
+        loop = asyncio.get_event_loop()
         key = str(uuid.uuid4())
-        with self.tracker_lock:
-            self._stream_hooks[key] = (loop, callback, on_error)
+        self._stream_hooks[key] = (loop, callback, on_error)
         return key
 
     def remove_stream_hook(self, key: str) -> None:
         """Unregister execution update callback."""
-        with self.tracker_lock:
-            self._stream_hooks.pop(key, None)
+        self._stream_hooks.pop(key, None)
 
     # =========================================================================
     # Internal

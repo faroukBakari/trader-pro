@@ -2,6 +2,9 @@
 
 Implements BrokerCapability with in-memory state and simulated execution.
 All business logic (orders, positions, P&L) is encapsulated here.
+
+Internal property accessors (_balance, _unrealized_pl_total, _realized_pl)
+provide safe access to nullable EquityData fields with 0.0 fallback.
 """
 
 import asyncio
@@ -91,6 +94,40 @@ class FakebrokerProvider(Provider, BrokerCapability):
 
         # Execution simulator task
         self._execution_simulator_task: asyncio.Task | None = None
+
+    # =========================================================================
+    # Internal Helpers (safe access to nullable EquityData fields)
+    # =========================================================================
+
+    @property
+    def _balance(self) -> float:
+        """Get current balance (defaults to 0.0 if None)."""
+        return self._equity.balance or 0.0
+
+    @_balance.setter
+    def _balance(self, value: float) -> None:
+        """Set balance."""
+        self._equity.balance = value
+
+    @property
+    def _unrealized_pl_total(self) -> float:
+        """Get total unrealized P&L (defaults to 0.0 if None)."""
+        return self._equity.unrealizedPL or 0.0
+
+    @_unrealized_pl_total.setter
+    def _unrealized_pl_total(self, value: float) -> None:
+        """Set unrealized P&L."""
+        self._equity.unrealizedPL = value
+
+    @property
+    def _realized_pl(self) -> float:
+        """Get realized P&L (defaults to 0.0 if None)."""
+        return self._equity.realizedPL or 0.0
+
+    @_realized_pl.setter
+    def _realized_pl(self, value: float) -> None:
+        """Set realized P&L."""
+        self._equity.realizedPL = value
 
     # =========================================================================
     # Provider Protocol Implementation
@@ -840,8 +877,8 @@ class FakebrokerProvider(Provider, BrokerCapability):
                 else:
                     pnl = (position.avgPrice - execution.price) * qty_to_close
 
-                self._equity.balance += pnl
-                self._equity.realizedPL += pnl
+                self._balance += pnl
+                self._realized_pl += pnl
 
                 remaining_qty = position.qty - qty_to_close
                 if remaining_qty == 0:
@@ -876,8 +913,8 @@ class FakebrokerProvider(Provider, BrokerCapability):
                     unrealized = (existing.avgPrice - execution.price) * existing.qty
 
                 self._unrealized_pl[execution.symbol] = unrealized
-                self._equity.unrealizedPL = sum(self._unrealized_pl.values())
-                self._equity.equity = self._equity.balance + self._equity.unrealizedPL
+                self._unrealized_pl_total = sum(self._unrealized_pl.values())
+                self._equity.equity = self._balance + self._unrealized_pl_total
 
                 await self._broadcast_position(existing)
             else:
@@ -896,10 +933,8 @@ class FakebrokerProvider(Provider, BrokerCapability):
                         ) * existing.qty
 
                     self._unrealized_pl[execution.symbol] = unrealized
-                    self._equity.unrealizedPL = sum(self._unrealized_pl.values())
-                    self._equity.equity = (
-                        self._equity.balance + self._equity.unrealizedPL
-                    )
+                    self._unrealized_pl_total = sum(self._unrealized_pl.values())
+                    self._equity.equity = self._balance + self._unrealized_pl_total
 
                     await self._broadcast_position(existing)
 
@@ -909,10 +944,8 @@ class FakebrokerProvider(Provider, BrokerCapability):
 
                     if execution.symbol in self._unrealized_pl:
                         del self._unrealized_pl[execution.symbol]
-                    self._equity.unrealizedPL = sum(self._unrealized_pl.values())
-                    self._equity.equity = (
-                        self._equity.balance + self._equity.unrealizedPL
-                    )
+                    self._unrealized_pl_total = sum(self._unrealized_pl.values())
+                    self._equity.equity = self._balance + self._unrealized_pl_total
 
                     await self._broadcast_position(existing)
                     del self._positions[execution.symbol]
@@ -926,10 +959,8 @@ class FakebrokerProvider(Provider, BrokerCapability):
                     existing.avgPrice = execution.price
 
                     self._unrealized_pl[execution.symbol] = 0.0
-                    self._equity.unrealizedPL = sum(self._unrealized_pl.values())
-                    self._equity.equity = (
-                        self._equity.balance + self._equity.unrealizedPL
-                    )
+                    self._unrealized_pl_total = sum(self._unrealized_pl.values())
+                    self._equity.equity = self._balance + self._unrealized_pl_total
 
                     await self._broadcast_position(existing)
         else:
@@ -944,8 +975,8 @@ class FakebrokerProvider(Provider, BrokerCapability):
             self._positions[execution.symbol] = new_position
 
             self._unrealized_pl[execution.symbol] = 0.0
-            self._equity.unrealizedPL = sum(self._unrealized_pl.values())
-            self._equity.equity = self._equity.balance + self._equity.unrealizedPL
+            self._unrealized_pl_total = sum(self._unrealized_pl.values())
+            self._equity.equity = self._balance + self._unrealized_pl_total
 
             await self._broadcast_position(new_position)
 

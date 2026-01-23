@@ -49,7 +49,6 @@ from trading_api.providers.tws.tws_mappers import (
     brackets_to_tws,
     order_state_to_preview_result,
     preorder_to_tws,
-    tracked_order_to_placed_order,
 )
 from trading_api.shared import Provider
 from trading_api.shared.client_factory import InterModuleClients
@@ -131,7 +130,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         Raises:
             ProviderException: If contract not found
         """
-        details = await self._tws_client.req_ticker_details(ticker)
+        details = await self._tws_client.reqTickerDetails(ticker)
 
         return details.build_best_contract()
 
@@ -232,15 +231,11 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         # Build map: conId → full Contract (with all details)
         details_map: dict[int, Contract] = {
-            cached.contract.conId: cached.contract
-            for cached_list in details_lists
-            for cached in cached_list
+            cached.contract.conId: cached.contract for cached in details_lists
         }
 
         return [
-            tracked_order_to_placed_order(
-                o, details_map.get(o.contract.conId, o.contract)
-            )
+            o.to_domain(contract=details_map.get(o.contract.conId, o.contract))
             for o in real_orders
         ]
 
@@ -624,7 +619,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             LeverageInfo with computed leverage based on margin requirements
         """
         # Resolve contract via TWSClient (cached, session-aware)
-        cached_contract = await self._tws_client.req_ticker_details(params.symbol)
+        cached_contract = await self._tws_client.reqTickerDetails(params.symbol)
         contract = cached_contract.build_best_contract()
 
         # Crypto is cash-only, no margin/leverage
@@ -726,8 +721,8 @@ class TWSBrokerProvider(Provider, BrokerCapability):
                 return  # Ignore whatIf orders
             details = await self._tws_client.reqContractDetails(tracked.contract)
             if details:
-                contract = next(iter(details)).contract
-                placed = tracked_order_to_placed_order(tracked, contract)
+                contract = details.contract
+                placed = tracked.to_domain(contract=contract)
                 await callback(placed)
 
         async def tws_on_error(exc: ProviderException) -> None:
@@ -836,7 +831,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
     def unsubscribe(self, subscription_id: str) -> None:
         """Unsubscribe from a stream."""
         # Delegate to TWSClient to cancel all broker streams
-        self._tws_client.cancel_broker_stream(subscription_id)
+        self._tws_client.cancelBrokerStream(subscription_id)
 
         logger.info(f"Unsubscribed: {subscription_id}")
 

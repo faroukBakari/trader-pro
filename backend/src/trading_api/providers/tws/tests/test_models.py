@@ -278,7 +278,7 @@ class TestClassifyErrorNature:
             101,  # Max number of tickers reached
             102,  # Duplicate ticker ID
             162,  # Historical market data service error
-            200,  # No security definition found
+            # 200 moved to POSITION nature for position-specific handling
             300,  # Can't find ticker ID
             309,  # Max market depth requests reached
             354,  # Not subscribed to market data
@@ -296,6 +296,23 @@ class TestClassifyErrorNature:
         """Test request-related error codes return REQUEST nature."""
         nature, category, recoverable = classify_error(error_code)
         assert nature == TWSErrorNature.REQUEST
+
+    # =========================================================================
+    # POSITION Nature - Error is position-related (global subscription, no reqId)
+    # =========================================================================
+
+    @pytest.mark.parametrize(
+        "error_code",
+        [
+            200,  # No security definition found (position contract unknown)
+            321,  # Server error validating request (position request validation)
+            322,  # Server error processing request (position request processing)
+        ],
+    )
+    def test_position_nature_codes(self, error_code: int) -> None:
+        """Test position-related error codes return POSITION nature."""
+        nature, category, recoverable = classify_error(error_code)
+        assert nature == TWSErrorNature.POSITION
 
     # =========================================================================
     # SYSTEM Nature - Error is system-wide (no specific req/order ID)

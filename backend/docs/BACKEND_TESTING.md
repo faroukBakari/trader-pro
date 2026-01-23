@@ -610,13 +610,16 @@ result = await tws_client.reqHistoricalData(contract, "1 min", ...)
 mock_bars_tracker.request.assert_called_once_with(contract, "1 min", ...)
 ```
 
-**❌ OLD Pattern (deprecated):**
+**❌ OLD Pattern (removed Jan 2026):**
 
 ```python
-# Don't mock _stream_data or create_snapshot
-mock_ibsocket.create_snapshot.return_value = [  # ❌ Obsolete API
-    {"time": datetime(...), "open": 150.0, ...}  # ❌ Dict mocks
-]
+# Don't mock removed IBSocket methods
+mock_ibsocket.create_snapshot.return_value = ...  # ❌ Method removed Jan 2026
+mock_ibsocket.create_stream.return_value = ...    # ❌ Method removed Jan 2026
+
+# ✅ DO mock tracker methods instead
+mock_quote_tracker.request.return_value = Quote(...)
+mock_bars_tracker.request.return_value = [Bar(...)]
 ```
 
 **Key Changes:**
@@ -624,7 +627,12 @@ mock_ibsocket.create_snapshot.return_value = [  # ❌ Obsolete API
 1. **Domain Models**: Use `Bar` Pydantic models, not dicts
 2. **Int Timestamps**: `time=1702641000000` (milliseconds), not `datetime` objects
 3. **Int Volume**: `volume=1000000` (int), not `float` or `Decimal`
-4. **Tracker Mocking**: Mock `bars_tracker.request()` (AsyncMock), not `ibsocket.create_snapshot()`
+4. **Tracker Mocking**: Mock tracker public APIs, not removed IBSocket methods:
+   - QuoteTracker: Mock `quote_tracker.request()` / `subscribe()` / `unsubscribe()`
+   - BarsTracker: Mock `bars_tracker.request()` / `subscribe()` / `unsubscribe()`
+   - ContractTracker: Mock `contract_tracker.get_descriptions()` / `get_details()`
+   - OrderTracker: Mock `order_tracker.add_order()` / `find_tracked_order()` / `find_oca_group()`
+   - **Never mock**: `ibsocket.create_snapshot()`, `ibsocket.create_stream()`, `ibsocket.remove_stream()` (removed Jan 2026)
 5. **Callback Routing Tests**: Verify `bars_cb(reqId, bar)` calls, not `_stream_data` accumulation
 6. **No Async in IBSocket Tests**: Callback verification is synchronous (no `async def`, no `await`)
 
@@ -671,60 +679,771 @@ async def test_get_historical_bars_returns_bars(mock_client):
 - [ ] Use `volume: int`, not `float` or `Decimal`
 - [ ] Mock tracker methods (`bars_tracker.request()`), not IBSocket internals
 - [ ] Import `AsyncMock` from `unittest.mock` for async method mocking
-- [ ] Remove `_stream_data` / `create_snapshot` references
 - [ ] Verify callback routing (`bars_cb`, `bars_complete_cb`), not accumulation
 
-**ExecutionTracker Testing (Two-Phase Dispatch):**
+**ExecutionTracker Testing (Interface-Based Two-Phase Dispatch):**
 
-ExecutionTracker follows the same pattern as BarsTracker but adds commission joining via two-phase dispatch:
+ExecutionTracker uses the same dependency inversion pattern as PositionTracker with additional two-phase dispatch for commission joining:
+
+**Test Fixture Pattern:**
 
 ```python
-from unittest.mock import Mock, AsyncMock
-from ibapi.contract import Contract
-from ibapi.execution import Execution as TWSExecution
-from trading_api.providers.tws.execution_tracker import TrackedExecution, ExecutionTracker
+# test_execution_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
 
-# Test two-phase dispatch pattern
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IbSocketWiringInterface for ExecutionTracker tests."""
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    counter = {"value": 1000}
+    def get_next_id():
+        counter["value"] += 1
+        return counter["value"]
+    type(mock).next_req_id = PropertyMock(side_effect=get_next_id)
+    return mock
+```
+
+**Wiring Test:**
+
+```python
+def test_execution_tracker_wiring(mock_ibsocket):
+    """ExecutionTracker wires itself during __init__."""
+    from trading_api.providers.tws.execution_tracker import ExecutionTracker
+    tracker = ExecutionTracker(ibsocket=mock_ibsocket)
+    mock_ibsocket.wire_execution_tracker.assert_called_once_with(tracker)
+    assert tracker.ibsocket is mock_ibsocket
+```
+
+**Two-Phase Dispatch Test:**
+
+```python
 @pytest.mark.asyncio
-async def test_execution_tracker_two_phase_dispatch():
-    tracker = ExecutionTracker()
-    contract = Contract()
-    contract.symbol = "AAPL"
-    contract.exchange = "NASDAQ"
+async def test_two_phase_dispatch(mock_ibsocket):
+    """Test execution → commission joining workflow."""
+    from trading_api.providers.tws.execution_tracker import ExecutionTracker, TrackedExecution
+    tracker = ExecutionTracker(ibsocket=mock_ibsocket)
 
-    execution = TWSExecution()
-    execution.execId = "001"
-    execution.price = 150.0
-    execution.shares = 100
-    execution.side = "BOT"
-    execution.time = "20240115 14:30:45"
-
-    # Track dispatches
     dispatches = []
     async def on_execution(tracked: TrackedExecution):
         dispatches.append(tracked)
 
-    loop = asyncio.get_running_loop()
-    tracker.create_stream_hook(loop, on_execution, lambda e: None)
+    tracker.create_stream_hook(on_execution, lambda e: None)
 
     # Phase 1: execDetails (commission=None)
-    tracker.upsert_execution(contract, execution)
+    contract = Contract()
+    contract.symbol = "AAPL"
+    execution = TWSExecution()
+    execution.execId = "001"
+    tracker.upsert_execution(1, contract, execution)
     await asyncio.sleep(0.01)  # Allow dispatch
     assert len(dispatches) == 1
     assert dispatches[0].commission is None
 
-    # Phase 2: commissionAndFeesReport (commission enriched)
-    tracker.update_commission("001", 1.50)
+    # Phase 2: commissionAndFeesReport (enriched)
+    report = MagicMock()
+    report.commission = 1.50
+    tracker.update_commission("001", report)
     await asyncio.sleep(0.01)  # Allow dispatch
     assert len(dispatches) == 2
     assert dispatches[1].commission == 1.50
-    assert dispatches[1].exec_id == "001"
+```
+
+**Comparison with PositionTracker:**
+
+| Aspect              | PositionTracker                   | ExecutionTracker                       |
+| ------------------- | --------------------------------- | -------------------------------------- |
+| Constructor Wiring  | `wire_position_tracker`           | `wire_execution_tracker`               |
+| Request ID Needed   | No (global subscription)          | Yes (per-snapshot tracking)            |
+| Error Routing       | By nature (all hooks)             | By req_id                              |
+| Join Callback       | None                              | `update_commission(exec_id, report)`   |
+| Request Messages    | `send_message(OUT.REQ_POSITIONS)` | `send_protobuf(OUT.REQ_EXECUTIONS...)` |
+| Dispatch Pattern    | Single-phase                      | Two-phase (exec → commission join)     |
+| Lazy Initialization | Yes (`TWSClient.property`)        | Yes (`TWSClient.property`)             |
+
+**See:** `providers/tws/tests/test_client.py` (TWSClient delegation tests)
+
+**OrderTracker Testing (Interface-Based Order State Tracking):**
+
+OrderTracker follows the same dependency inversion pattern as PositionTracker/ExecutionTracker but with two unique aspects:
+
+1. **next_order_id Return Value**: `wire_order_tracker()` returns `int | None` (vs void for other trackers)
+2. **TWS Protocol Internalization**: OrderTracker sends `OUT.PLACE_ORDER` and `OUT.CANCEL_ORDER` messages directly (vs callback injection)
+
+**Test Fixture Pattern:**
+
+```python
+# test_order_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IbSocketWiringInterface for OrderTracker tests."""
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    # wire_order_tracker returns next_order_id (unique aspect)
+    mock.wire_order_tracker.return_value = 100
+    mock.send_protobuf = MagicMock()  # For PLACE_ORDER/CANCEL_ORDER
+    mock.send_message = MagicMock()   # For REQ_OPEN_ORDERS
+    return mock
+```
+
+**Wiring Test (next_order_id Return Value):**
+
+```python
+def test_order_tracker_wiring_returns_next_order_id(mock_ibsocket):
+    """OrderTracker wiring captures next_order_id return value."""
+    from trading_api.providers.tws.order_tracker import OrderTracker
+    mock_ibsocket.wire_order_tracker.return_value = 200
+    tracker = OrderTracker(ibsocket=mock_ibsocket)
+    mock_ibsocket.wire_order_tracker.assert_called_once_with(tracker)
+    assert tracker.next_order_id == 200  # Unique: wire_order_tracker returns order ID
+```
+
+**Order Callback Test:**
+
+```python
+@pytest.mark.asyncio
+async def test_order_updates_dispatched(mock_ibsocket):
+    """Test order upsert and status update callbacks."""
+    from trading_api.providers.tws.order_tracker import OrderTracker
+    tracker = OrderTracker(ibsocket=mock_ibsocket)
+
+    dispatches = []
+    async def on_order(tracked):
+        dispatches.append(tracked)
+
+    tracker.subscribe_orders(on_order, lambda e: None)
+
+    # Upsert callback (from IBSocket.openOrder)
+    contract = Contract()
+    contract.symbol = "AAPL"
+    order = Order()
+    order.orderId = 100
+    orderState = OrderState()
+    tracker.upsert_order(100, contract, order, orderState)
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 1
+    assert dispatches[0].orderId == 100
+
+    # Status update callback (from IBSocket.orderStatus)
+    tracker.update_status(100, "Filled", Decimal("100"), Decimal("0"), 150.0, 1, 0, 150.0, 1, "", 0.0)
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 2
+    assert dispatches[1].status == "Filled"
+```
+
+**Order Submission Test (TWS Protocol Internalization):**
+
+```python
+@pytest.mark.asyncio
+async def test_order_submission_sends_protobuf(mock_ibsocket):
+    """Test OrderTracker sends PLACE_ORDER protobuf message."""
+    from trading_api.providers.tws.order_tracker import OrderTracker
+    from trading_api.models.broker.preorder import PreOrder, OrderSide, OrderType
+    tracker = OrderTracker(ibsocket=mock_ibsocket)
+
+    preorder = PreOrder(
+        symbol="NASDAQ:AAPL",
+        side=OrderSide.BUY,
+        type=OrderType.LMT,
+        qty=100,
+        limitPrice=150.0
+    )
+    placed_order = tracker.place_order(preorder)
+
+    # Verify PLACE_ORDER protobuf sent
+    mock_ibsocket.send_protobuf.assert_called_once()
+    call_args = mock_ibsocket.send_protobuf.call_args[0]
+    assert call_args[0].startswith(OUT.PLACE_ORDER)  # Message type
+    assert isinstance(call_args[1], bytes)           # Protobuf payload
+    assert placed_order.id == "100"  # next_order_id = 100
+```
+
+**TWSClient Mock Pattern (Delegation Tests):**
+
+```python
+# test_client.py
+@pytest.mark.asyncio
+async def test_tws_client_place_order_delegates(mock_ibsocket):
+    """TWSClient.place_order delegates to OrderTracker."""
+    from trading_api.providers.tws.client import TWSClient
+    from unittest.mock import patch
+
+    client = TWSClient(config=mock_config, ibsocket=mock_ibsocket)
+
+    # Mock OrderTracker.place_order
+    with patch.object(client.order_tracker, "place_order") as mock_place:
+        mock_place.return_value = PlacedOrder(id="100", symbol="AAPL", ...)
+        result = await client.place_order(preorder)
+        mock_place.assert_called_once_with(preorder)
+        assert result.id == "100"
+```
+
+**Comparison with PositionTracker/ExecutionTracker:**
+
+| Aspect              | OrderTracker                                | PositionTracker                 | ExecutionTracker                       |
+| ------------------- | ------------------------------------------- | ------------------------------- | -------------------------------------- |
+| Constructor Wiring  | `wire_order_tracker`                        | `wire_position_tracker`         | `wire_execution_tracker`               |
+| **Wiring Returns**  | **next_order_id (int \| None)**             | _(void)_                        | _(void)_                               |
+| Request ID Needed   | No (global subscription)                    | No (global subscription)        | Yes (per-snapshot tracking)            |
+| Update Callback     | `upsert_order(orderId, contract, ...)`      | `upsert_position(account, ...)` | `upsert_execution(req_id, ...)`        |
+| Join Callback       | _(none)_                                    | _(none)_                        | `update_commission(exec_id, report)`   |
+| Status Callback     | `update_status(orderId, status, ...)`       | _(none)_                        | _(none)_                               |
+| Error Routing       | By nature (all hooks, no req_id)            | By nature (all hooks)           | By req_id                              |
+| **TWS Messages**    | **OUT.PLACE_ORDER, OUT.CANCEL_ORDER (TWS)** | `OUT.REQ_POSITIONS`             | `OUT.REQ_EXECUTIONS + PROTOBUF_MSG_ID` |
+| Dispatch Pattern    | Single-phase                                | Single-phase                    | Two-phase (exec → commission join)     |
+| Lazy Initialization | Yes (`TWSClient.order_tracker` property)    | Yes (`TWSClient.property`)      | Yes (`TWSClient.property`)             |
+
+**Anti-Pattern Note:**
+
+**TestSubmitOrder Class Deleted** (January 24, 2026): The old `TestSubmitOrder` test class tested the private `__submit_order()` method directly, which is an anti-pattern (tests should target public APIs, not internals). Replaced with:
+
+- **Integration Tests**: `test_client.py` delegation tests verify `TWSClient.place_order()` → `OrderTracker.place_order()` flow
+- **Order Submission Tests**: Verify `send_protobuf()` calls with correct message type and payload
+- **Callback Tests**: Verify `upsert_order()` and `update_status()` dispatch to hooks
+
+**Key Testing Pattern:**
+
+- Mock `IbSocketWiringInterface` with `wire_order_tracker.return_value = 100`
+- Verify `send_protobuf()` calls for `OUT.PLACE_ORDER` / `OUT.CANCEL_ORDER`
+- Test callbacks (`upsert_order`, `update_status`) with asyncio dispatch
+- Use delegation tests in `test_client.py` for TWSClient integration
+
+**See:** `providers/tws/tests/test_order_tracker.py` (unit tests), `test_client.py` (delegation tests)
+
+---
+
+**AccountTracker Testing (Interface-Based Account State Tracking):**
+
+AccountTracker follows the same dependency inversion pattern as other trackers with unique characteristics:
+
+1. **Accounts List Return Value**: `wire_account_tracker()` returns `str` (comma-separated accounts from `managedAccounts`)
+2. **Multiple Update Callbacks**: Separate callbacks for account values, P&L, and timestamp (vs single update callback)
+3. **TWS Protocol Internalization**: Private `__req_account_summary()`, `__req_account_updates()`, `__req_pnl()` methods send TWS messages
+4. **No Request ID for Identification**: Uses account ID instead of request ID for tracking
+
+**Test Fixture Pattern:**
+
+```python
+# test_account_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IbSocketWiringInterface for AccountTracker tests."""
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    # wire_account_tracker returns comma-separated accounts list
+    mock.wire_account_tracker.return_value = "DEMO123,LIVE456"
+    counter = {"value": 1000}
+    def get_next_id():
+        counter["value"] += 1
+        return counter["value"]
+    type(mock).next_req_id = PropertyMock(side_effect=get_next_id)
+    mock.send_message = MagicMock()
+    return mock
+```
+
+**Wiring Test (Accounts List Return Value):**
+
+```python
+def test_account_tracker_wiring_returns_accounts_list(mock_ibsocket):
+    """AccountTracker wiring receives accounts list from managedAccounts."""
+    from trading_api.providers.tws.account_tracker import AccountTracker
+    mock_ibsocket.wire_account_tracker.return_value = "DEMO123,LIVE456"
+    tracker = AccountTracker(ibsocket=mock_ibsocket)
+    mock_ibsocket.wire_account_tracker.assert_called_once_with(tracker)
+    # Verify accounts were created
+    assert "DEMO123" in tracker._accounts
+    assert "LIVE456" in tracker._accounts
+```
+
+**Account Callback Tests:**
+
+```python
+@pytest.mark.asyncio
+async def test_account_updates_dispatched(mock_ibsocket):
+    """Test account summary and P&L callbacks."""
+    from trading_api.providers.tws.account_tracker import AccountTracker
+    tracker = AccountTracker(ibsocket=mock_ibsocket)
+
+    dispatches = []
+    async def on_account(tracked):
+        dispatches.append(tracked)
+
+    tracker.create_stream_hook(on_account, lambda e: None)
+
+    # Update account values (from IBSocket.accountSummary)
+    tracker.update_account("DEMO123", "NetLiquidation", "100000.0", "USD")
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 1
+    assert dispatches[0].net_liquidation is not None
+
+    # Update P&L (from IBSocket.pnl)
+    tracker.update_pnl(1001, 150.0, 500.0, -200.0)
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 2
+    assert dispatches[1].daily_pnl is not None
+
+    # Update timestamp (from IBSocket.updateAccountTime)
+    tracker.update_account_time("20260124 12:00:00")
+    # Note: timestamp update doesn't trigger dispatch, only updates field
+```
+
+**Request Internalization Tests:**
+
+```python
+def test_req_account_summary_internalized(mock_ibsocket):
+    """Verify __req_account_summary sends TWS message via ibsocket."""
+    from trading_api.providers.tws.account_tracker import AccountTracker
+    tracker = AccountTracker(ibsocket=mock_ibsocket)
+
+    # Trigger request (internal method called via reqAccountSummary)
+    asyncio.run(tracker.reqAccountSummary(timeout=1.0))
+
+    # Verify TWS message sent
+    mock_ibsocket.send_message.assert_called()
+    call_args = mock_ibsocket.send_message.call_args[0]
+    assert call_args[0] == OUT.REQ_ACCOUNT_SUMMARY  # Message type
+    assert "All" in call_args[1]  # Group parameter
+```
+
+**Comparison with OrderTracker/PositionTracker:**
+
+| Aspect              | AccountTracker                        | OrderTracker                           | PositionTracker                    |
+| ------------------- | ------------------------------------- | -------------------------------------- | ---------------------------------- |
+| Constructor Wiring  | `wire_account_tracker`                | `wire_order_tracker`                   | `wire_position_tracker`            |
+| **Wiring Returns**  | **accounts list (str)**               | **next_order_id (int \| None)**        | _(void)_                           |
+| Request ID Needed   | No (uses account ID)                  | No (global subscription)               | No (global subscription)           |
+| Update Callback     | `update_account(account, tag, ...)`   | `upsert_order(orderId, contract, ...)` | `upsert_position(account, ...)`    |
+| P&L Callback        | `update_pnl(reqId, daily, unr, real)` | _(none)_                               | _(none)_                           |
+| Time Callback       | `update_account_time(timestamp)`      | _(none)_                               | _(none)_                           |
+| Error Routing       | By nature (all hooks, no req_id)      | By nature (all hooks)                  | By nature (all hooks)              |
+| **TWS Messages**    | **OUT.REQ_ACCOUNT_SUMMARY, REQ_PNL**  | **OUT.PLACE_ORDER, OUT.CANCEL_ORDER**  | `OUT.REQ_POSITIONS`                |
+| Dispatch Pattern    | Multiple specialized callbacks        | Single-phase                           | Single-phase                       |
+| Lazy Initialization | Yes (`TWSClient.account_tracker`)     | Yes (`TWSClient.order_tracker`)        | Yes (`TWSClient.position_tracker`) |
+
+**Anti-Pattern Note:**
+
+**Do NOT test private `__req_*` methods directly** - verify via IBSocket callback integration tests. Private methods are implementation details; test public APIs (`reqAccountSummary()`, `create_stream_hook()`) instead.
+
+**Key Testing Patterns:**
+
+- Mock `IbSocketWiringInterface` with `wire_account_tracker.return_value = "DEMO123,LIVE456"`
+- Verify `send_message()` calls for `OUT.REQ_ACCOUNT_SUMMARY`, `OUT.REQ_ACCT_DATA`, `OUT.REQ_PNL`
+- Test callbacks (`update_account`, `update_pnl`, `update_account_time`) with asyncio dispatch
+- Verify account creation from comma-separated accounts list
+
+**See:** `providers/tws/tests/test_account_tracker.py`, `test_ibsocket.py` (callback routing), `test_client.py` (delegation tests)
+
+---
+
+**QuoteTracker Testing (Interface-Based Mocking):**
+
+QuoteTracker uses dependency inversion with `IbSocketWiringInterface` - tests mock the interface instead of hook functions:
+
+**Test Fixture Pattern:**
+
+```python
+# test_quote_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IBSocket with auto-incrementing req_id counter."""
+    mock_socket = MagicMock(spec=IbSocketWiringInterface)
+
+    # Auto-increment req_id property (simulates next_req_id allocation)
+    counter = {"value": 0}
+    def get_next_id():
+        counter["value"] += 1
+        return counter["value"]
+
+    type(mock_socket).next_req_id = PropertyMock(side_effect=get_next_id)
+    mock_socket.send_message = MagicMock()
+
+    return mock_socket
+```
+
+**Test Method Pattern:**
+
+```python
+@pytest.mark.asyncio
+async def test_quote_subscription(mock_ibsocket):
+    """Test QuoteTracker with mocked socket interface."""
+    tracker = QuoteTracker(mock_ibsocket)  # ← Interface injection
+
+    # Perform operation
+    subscription_id = tracker.subscribe("NASDAQ:AAPL", callback, on_error)
+
+    # Verify interface interaction
+    mock_ibsocket.send_message.assert_called_once()
+    args = mock_ibsocket.send_message.call_args[0]
+    assert args[0] == OUT.REQ_MKT_DATA  # Message type
+    assert args[1][2] == 1  # First req_id from counter
+```
+
+**Key Testing Changes:**
+
+| Old Pattern (Hook Injection)                       | New Pattern (Interface Mocking)                           |
+| -------------------------------------------------- | --------------------------------------------------------- |
+| `request_hook = MagicMock(return_value=1)`         | `mock_ibsocket = MagicMock(spec=IbSocketWiringInterface)` |
+| `cancel_hook = MagicMock()`                        | _(removed - encapsulated in tracker)_                     |
+| `QuoteTracker(request_hook, cancel_hook, timeout)` | `QuoteTracker(mock_ibsocket)`                             |
+| `request_hook.assert_called_once()`                | `mock_ibsocket.send_message.assert_called_once()`         |
+
+**Benefits:**
+
+1. **Realistic Behavior**: `PropertyMock` for `next_req_id` simulates actual IBSocket behavior
+2. **Fewer Mocks**: Single interface mock replaces multiple hook function mocks
+3. **Protocol Verification**: Assert on `send_message()` calls to verify TWS message construction
+
+**Migration Checklist:**
+
+- [ ] Replace `request_hook`/`cancel_hook` mocks with `mock_ibsocket` fixture
+- [ ] Use `PropertyMock` with side_effect for auto-incrementing `next_req_id`
+- [ ] Update constructor: `QuoteTracker(mock_ibsocket)` instead of `QuoteTracker(request_hook, cancel_hook)`
+- [ ] Change assertions: `mock_ibsocket.send_message.assert_called_once()` instead of `request_hook.assert_called_once()`
+- [ ] Add `spec=IbSocketWiringInterface` to enforce interface contract
+
+**See:** `providers/tws/tests/test_quote_tracker.py` for complete examples (all 28 tests use this pattern)
+
+---
+
+**BarsTracker Testing (Interface-Based Mocking):**
+
+BarsTracker uses the same dependency inversion pattern as QuoteTracker with `IbSocketWiringInterface` and `BarsTrackerCBWiringInterface`:
+
+**IBSocket Callback Verification:**
+
+```python
+# test_ibsocket.py - Verify callbacks route to wired interface
+from unittest.mock import MagicMock
+from ibapi.common import BarData
+
+def test_historical_data_routes_to_bars_tracker():
+    """Test historicalData routes to wired bars_tracker.update()."""
+    mock_bars_tracker = MagicMock()  # ← Implements BarsTrackerCBWiringInterface
+    sock = IBSocket()
+    sock.wire_bars_tracker(mock_bars_tracker)  # ← Bidirectional wiring
+
+    bar = BarData()
+    bar.date = "20231215"
+    bar.open = 150.0
+    bar.high = 151.0
+    bar.low = 149.0
+    bar.close = 150.5
+
+    sock.historicalData(123, bar)
+
+    mock_bars_tracker.update.assert_called_once_with(123, bar)
+
+def test_historical_data_end_routes_to_bars_tracker():
+    """Test historicalDataEnd routes to wired bars_tracker.flag_complete()."""
+    mock_bars_tracker = MagicMock()
+    sock = IBSocket()
+    sock.wire_bars_tracker(mock_bars_tracker)
+
+    sock.historicalDataEnd(123, "20231215", "20231216")
+
+    mock_bars_tracker.flag_complete.assert_called_once_with(123, "20231215", "20231216")
+```
+
+**Key Testing Differences from QuoteTracker:**
+
+| Aspect              | QuoteTracker                       | BarsTracker                         |
+| ------------------- | ---------------------------------- | ----------------------------------- |
+| Wiring Method       | `wire_quote_tracker(tracker)`      | `wire_bars_tracker(tracker)`        |
+| Update Callback     | `update(req_id, tick_type, value)` | `update(req_id, bar_data)`          |
+| Completion Callback | _(none - continuous streaming)_    | `flag_complete(req_id, start, end)` |
+| Error Callback      | `raise_error(req_id, exception)`   | `raise_error(req_id, exception)`    |
+| Request Message     | `OUT.REQ_MKT_DATA`                 | `OUT.REQ_HISTORICAL_DATA`           |
+| Cancel Message      | `OUT.CANCEL_MKT_DATA`              | `OUT.CANCEL_HISTORICAL_DATA`        |
+
+**BarsTracker Test Pattern:**
+
+```python
+# test_bars_tracker.py - Test BarsTracker with mocked IBSocket
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IBSocket implementing IbSocketWiringInterface."""
+    mock_socket = MagicMock(spec=IbSocketWiringInterface)
+
+    counter = {"value": 0}
+    def get_next_id():
+        counter["value"] += 1
+        return counter["value"]
+
+    type(mock_socket).next_req_id = PropertyMock(side_effect=get_next_id)
+    mock_socket.send_message = MagicMock()
+
+    return mock_socket
+
+@pytest.mark.asyncio
+async def test_bars_request_sends_correct_message(mock_ibsocket):
+    """Test BarsTracker.request() sends OUT.REQ_HISTORICAL_DATA message."""
+    tracker = BarsTracker(mock_ibsocket, timeout=30)
+
+    # Trigger request
+    await tracker.request(contract, "1 min", "1 D", ...)
+
+    # Verify message construction
+    mock_ibsocket.send_message.assert_called_once()
+    args = mock_ibsocket.send_message.call_args[0]
+    assert args[0] == OUT.REQ_HISTORICAL_DATA
+```
+
+**See:** `providers/tws/tests/test_ibsocket.py::TestIBSocketHistoricalCallbacks` for callback routing tests
+
+---
+
+**ContractTracker Testing (Interface-Based Mocking):**
+
+ContractTracker uses the same dependency inversion pattern as QuoteTracker/BarsTracker with `IbSocketWiringInterface` and `ContractTrackerCBWiringInterface`:
+
+**Test Fixture Pattern:**
+
+```python
+# test_contract_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IBSocket with auto-incrementing req_id counter."""
+    mock_socket = MagicMock(spec=IbSocketWiringInterface)
+
+    counter = {"value": 0}
+    def get_next_id():
+        counter["value"] += 1
+        return counter["value"]
+
+    type(mock_socket).next_req_id = PropertyMock(side_effect=get_next_id)
+    mock_socket.send_message = MagicMock()
+
+    return mock_socket
+
+@pytest.fixture
+def tracker(mock_ibsocket, tmp_path):
+    """ContractTracker with mocked socket and temp SQLite."""
+    db_path = str(tmp_path / "test_contracts.db")
+    return ContractTracker(mock_ibsocket, db_path)
+```
+
+**Wiring Verification Test:**
+
+```python
+def test_wires_to_ibsocket_on_init(mock_ibsocket, tmp_path):
+    """Test ContractTracker calls wire_contract_tracker() on init."""
+    db_path = str(tmp_path / "test.db")
+    tracker = ContractTracker(mock_ibsocket, db_path)
+
+    mock_ibsocket.wire_contract_tracker.assert_called_once_with(tracker)
+```
+
+**IBSocket Callback Routing Tests:**
+
+```python
+# test_ibsocket.py - Verify callbacks route to wired tracker
+def test_symbol_samples_routes_to_contract_tracker():
+    """Test symbolSamples routes to wired contract_tracker.update_descriptions()."""
+    mock_tracker = MagicMock()
+    sock = IBSocket()
+    sock.wire_contract_tracker(mock_tracker)
+
+    descriptions = [ContractDescription(...)]
+    sock.symbolSamples(123, descriptions)
+
+    mock_tracker.update_descriptions.assert_called_once_with(123, descriptions)
+
+def test_contract_details_routes_to_contract_tracker():
+    """Test contractDetails routes to wired contract_tracker.update_details()."""
+    mock_tracker = MagicMock()
+    sock = IBSocket()
+    sock.wire_contract_tracker(mock_tracker)
+
+    details = ContractDetails()
+    sock.contractDetails(123, details)
+
+    mock_tracker.update_details.assert_called_once_with(123, details)
+
+def test_contract_details_end_routes_to_contract_tracker():
+    """Test contractDetailsEnd routes to wired contract_tracker.flag_details_complete()."""
+    mock_tracker = MagicMock()
+    sock = IBSocket()
+    sock.wire_contract_tracker(mock_tracker)
+
+    sock.contractDetailsEnd(123)
+
+    mock_tracker.flag_details_complete.assert_called_once_with(123)
+```
+
+**Comparison with Other Trackers:**
+
+| Aspect              | QuoteTracker                     | BarsTracker                         | ContractTracker                                     |
+| ------------------- | -------------------------------- | ----------------------------------- | --------------------------------------------------- |
+| Wiring Method       | `wire_quote_tracker(tracker)`    | `wire_bars_tracker(tracker)`        | `wire_contract_tracker(tracker)`                    |
+| Update Callback     | `update(req_id, updates)`        | `update(req_id, bar_data)`          | `update_descriptions()` / `update_details()`        |
+| Completion Callback | _(none - continuous streaming)_  | `flag_complete(req_id, start, end)` | `flag_details_complete(req_id)`                     |
+| Error Callback      | `raise_error(req_id, exception)` | `raise_error(req_id, exception)`    | `raise_error(req_id, exception)`                    |
+| Request Messages    | `OUT.REQ_MKT_DATA`               | `OUT.REQ_HISTORICAL_DATA`           | `OUT.REQ_MATCHING_SYMBOLS`, `OUT.REQ_CONTRACT_DATA` |
+
+**Method Naming Updates (January 2026):**
+
+Internal method names were updated for clarity:
+
+| Old Method Name               | New Method Name      | Responsibility                               | Test Prefix              |
+| ----------------------------- | -------------------- | -------------------------------------------- | ------------------------ |
+| `_load_cached_descriptions()` | `_search_cache()`    | Multi-tier cache search with exchange filter | `test_search_cache_*`    |
+| `_load_and_cache_details()`   | `_fetch_and_cache()` | Fetch from TWS and cache to memory           | `test_fetch_and_cache_*` |
+
+**Rationale**: Test names should reflect actual method names for discoverability. Name changes improve clarity of method responsibilities (search vs. fetch).
+
+**Test Coverage:**
+
+| Test Group                | Focus Area                                         | Key Patterns                              |
+| ------------------------- | -------------------------------------------------- | ----------------------------------------- |
+| `test_search_cache_*`     | Cache search with exact match + exchange filtering | Mock SQLiteContractCache, in-memory cache |
+| `test_fetch_and_cache_*`  | TWS details fetching and memory caching            | Mock IBSocket, Future resolution          |
+| `test_get_descriptions_*` | End-to-end symbol search with SQLite fallback      | Mock TWS callbacks, timeout handling      |
+| `test_get_details_*`      | Full contract details resolution                   | Mock contractDetails callbacks            |
+
+**Key Testing Patterns:**
+
+1. **Exact Match Optimization**: Verify `_search_cache("NASDAQ:AAPL")` returns immediately if cached
+2. **Exchange Filtering**: Verify `_search_cache("NYSE:AA")` only returns NYSE contracts
+3. **Symbol Search**: Verify `_search_cache("AA")` returns all matching tickers
+4. **SQLite Fallback**: Verify cache miss triggers SQLite query before TWS request
+5. **Deduplication**: Verify concurrent requests for same pattern reuse Future
+
+See: `providers/tws/tests/test_contract_tracker.py` (39 test methods covering all code paths)
+
+**Migration Notes:**
+
+Old tests mocked individual methods:
+
+```python
+# OLD pattern
+mock_tracker.get_by_symbol_prefix = MagicMock(return_value=[cached])
+mock_tracker.upsert_descriptions = MagicMock()
+```
+
+New tests use `AsyncMock` for async API:
+
+```python
+# NEW pattern (in provider tests like test_client.py)
+mock_tracker.get_descriptions = AsyncMock(return_value=[cached])
+mock_tracker.get_details = AsyncMock(return_value=cached)  # Note: singular return
+```
+
+Protocol verification:
+
+```python
+# Verify TWS message construction
+mock_ibsocket.send_message.assert_called_once()
+args = mock_ibsocket.send_message.call_args[0]
+assert args[0] == OUT.REQ_MATCHING_SYMBOLS  # Message type
+assert args[1][1] == "AAPL"  # Pattern parameter
+```
+
+**See:** `providers/tws/tests/test_contract_tracker.py` (39 test methods), `test_ibsocket.py` (contract callback routing), `test_client.py` (TWSClient delegation pattern)
+
+---
+
+**PositionTracker Testing (Interface-Based Mocking):**
+
+PositionTracker uses the same dependency inversion pattern as QuoteTracker/BarsTracker/ContractTracker with unique characteristics:
+
+**Key Aspects:**
+
+1. **Wiring Verification**: Assert `wire_position_tracker()` called during `__init__`
+2. **Auto-Request Logic**: Verify `ensure_snapshot_requested()` sends `OUT.REQ_POSITIONS`
+3. **Error Nature Classification**: Test error codes 200, 321, 322 route to `TWSErrorNature.POSITION`
+4. **Global Error Dispatch**: Verify `raise_error()` dispatches to all hooks (no req_id parameter)
+
+**Test Fixture Pattern:**
+
+```python
+# test_position_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IbSocketWiringInterface for PositionTracker tests."""
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    type(mock).next_req_id = PropertyMock(side_effect=range(1000, 10000))
+    return mock
+```
+
+**Wiring Test:**
+
+```python
+def test_position_tracker_wiring(mock_ibsocket):
+    """PositionTracker wires itself during __init__."""
+    from trading_api.providers.tws.position_tracker import PositionTracker
+    tracker = PositionTracker(ibsocket=mock_ibsocket)
+    mock_ibsocket.wire_position_tracker.assert_called_once_with(tracker)
+    assert tracker.ibsocket is mock_ibsocket
+```
+
+**Auto-Request Test:**
+
+```python
+def test_ensure_snapshot_requested(mock_ibsocket):
+    """ensure_snapshot_requested() sends OUT.REQ_POSITIONS on first call."""
+    from ibapi.message import OUT
+    from trading_api.providers.tws.position_tracker import PositionTracker
+    tracker = PositionTracker(ibsocket=mock_ibsocket)
+    tracker.ensure_snapshot_requested()
+    mock_ibsocket.send_message.assert_called_once_with(OUT.REQ_POSITIONS, [1])
+```
+
+**Error Nature Classification Test:**
+
+```python
+def test_position_error_codes_classified():
+    """Codes 200, 321, 322 classified as POSITION nature."""
+    from trading_api.providers.tws.tws_models import TWSErrorNature, classify_error
+    assert classify_error(200, "No security definition") == TWSErrorNature.POSITION
+    assert classify_error(321, "Server error") == TWSErrorNature.POSITION
+    assert classify_error(322, "Client id in use") == TWSErrorNature.POSITION
+```
+
+**Comparison with Other Trackers:**
+
+| Aspect              | QuoteTracker         | BarsTracker         | ContractTracker         | PositionTracker                   |
+| ------------------- | -------------------- | ------------------- | ----------------------- | --------------------------------- |
+| Constructor Wiring  | `wire_quote_tracker` | `wire_bars_tracker` | `wire_contract_tracker` | `wire_position_tracker`           |
+| Request ID Needed   | Yes                  | Yes                 | Yes                     | No (global subscription)          |
+| Error Routing       | By req_id            | By req_id           | By req_id               | By nature (all hooks)             |
+| Auto-Request        | No                   | No                  | No                      | Yes (`ensure_snapshot_requested`) |
+| Completion Signal   | None (streaming)     | `flag_complete`     | `flag_details_complete` | `mark_snapshot_complete`          |
+| Lazy Initialization | No (IBSocket owns)   | No (IBSocket owns)  | No (IBSocket owns)      | Yes (`TWSClient.property`)        |
+
+**Migration Note:** When migrating to PositionTracker pattern:
+
+1. Remove `reqPositions()` explicit call (auto-requested on first callback)
+2. Route errors by nature (no req_id in error callbacks)
+3. Use lazy property pattern (`TWSClient.position_tracker`)
+
+**See:** `providers/tws/tests/test_position_tracker.py` for complete test suite
+
+---
+
+## 5. Testing Patterns
 
 # Test provider-level integration
+
 @pytest.mark.asyncio
 async def test_subscribe_executions_with_symbol_filter(mock_socket):
-    tracker = mock_socket.execution_tracker
-    callback_mock = AsyncMock()
+tracker = mock_socket.execution_tracker
+callback_mock = AsyncMock()
 
     # Subscribe with symbol filter
     hook_key = await provider.subscribe_executions(
@@ -745,7 +1464,8 @@ async def test_subscribe_executions_with_symbol_filter(mock_socket):
     await asyncio.sleep(0.01)
     # Only AAPL executions should be dispatched
     callback_mock.assert_called_once()
-```
+
+````
 
 **ExecutionTracker Key Points:**
 
@@ -754,7 +1474,7 @@ async def test_subscribe_executions_with_symbol_filter(mock_socket):
 - **Domain Conversion**: Use `TrackedExecution.to_domain()` → `Execution` Pydantic model
 - **Time Parsing**: TWS format "YYYYMMDD HH:MM:SS" → int milliseconds UTC
 - **Snapshot Pattern**: Mock `execution_tracker.all_executions()` with list of `TrackedExecution`
-- **Stream Hooks**: Verify `create_stream_hook()` registration and dispatch
+- **Stream Hooks**: Verify `subscribe()` registration and callback dispatch
 
 ---
 
@@ -782,7 +1502,7 @@ def datafeed_only_app() -> ModularApp:
 def no_modules_app() -> ModularApp:
     """Application with no modules."""
     return create_test_app(enabled_modules=[])
-```
+````
 
 **Function-scoped (new instance per test):**
 
@@ -1851,19 +2571,42 @@ Benefits:
 
 **Key Testing Patterns:**
 
+| Component        | Mock Target               | Key Pattern                                    |
+| ---------------- | ------------------------- | ---------------------------------------------- |
+| QuoteTracker     | `IbSocketWiringInterface` | Mock socket with PropertyMock for next_req_id  |
+| BarsTracker      | `IbSocketWiringInterface` | Mock socket with PropertyMock for next_req_id  |
+| ContractTracker  | `IbSocketWiringInterface` | Mock socket with PropertyMock for next_req_id  |
+| ExecutionTracker | Callback routing          | Two-phase dispatch testing (exec → commission) |
+
+**QuoteTracker Wiring Pattern:**
+
+The `mock_ibsocket` fixture must implement the bidirectional wiring mechanism:
+
+1. QuoteTracker constructor calls `mock_ibsocket.wire_quote_tracker(self)`
+2. Mock must store the tracker reference internally: `self.__quote_tracker = tracker_interface`
+3. Tests can then simulate reader thread tick callbacks: `mock_ibsocket.__quote_tracker.update(req_id, updates)`
+
+This pattern tests the actual production wiring flow where IBSocket callbacks route through the stored tracker reference. See "QuoteTracker Testing (Interface-Based Mocking)" section above (line 730) for complete fixture implementation with all 28 tests following this pattern.
+
+**ContractTracker Wiring Pattern:**
+
+Similar to QuoteTracker/BarsTracker. Constructor calls `mock_ibsocket.wire_contract_tracker(self)`. IBSocket callbacks (`symbolSamples`, `contractDetails`, `contractDetailsEnd`) route to stored tracker reference. See "ContractTracker Testing (Interface-Based Mocking)" section above (after line 900) for complete fixture implementation with wiring tests, callback routing tests, and comparison table.
+
+**General Approach:**
+
 1. **Mock TWSClient methods** - Not low-level TWS API calls
 2. **Use domain models** - Bar objects, not TWS BarData
-3. **Mock trackers** - Quote/bars trackers for subscription tests
+3. **Mock trackers** - Quote/bars/contract trackers for subscription tests
 4. **Test callbacks** - Verify domain model conversion and routing
 
 #### BarsTracker Test Migration (January 19, 2026)
 
 **Architectural Change**: `reqBarDataStream()` now delegates through `BarsTracker` for centralized registration.
 
-**OLD Pattern (Before):**
+**OLD Pattern (Pre-Jan 2026 - Method Removed):**
 
 ```python
-# ❌ OLD: Mock ibsocket.create_stream (bypassed BarsTracker)
+# ❌ OLD: Mock ibsocket.create_stream (method removed Jan 2026)
 @patch.object(IBSocket, "create_stream")
 async def test_reqBarDataStream_old(mock_create_stream):
     mock_create_stream.return_value = (42, lambda: None)  # (req_id, cancel_fn)
@@ -1893,9 +2636,9 @@ async def test_reqBarDataStream_new(mock_subscribe):
 
 **Why the Change:**
 
-- **Before**: `reqBarDataStream()` called `ibsocket.create_stream()` directly → bypassed BarsTracker registration → "unknown req_id" warnings
-- **After**: `reqBarDataStream()` calls `bars_tracker.subscribe()` → centralized registration → no warnings
-- **Test Impact**: Mock the new delegation point (`bars_tracker.subscribe`) instead of the old one (`ibsocket.create_stream`)
+- **Before (Pre-Jan 2026)**: `reqBarDataStream()` called `ibsocket.create_stream()` → bypassed BarsTracker
+- **After (Jan 2026)**: IBSocket no longer has `create_stream()` / `remove_stream()` methods - Tracker pattern handles all streaming
+- **Test Impact**: Mock `bars_tracker.subscribe()` public API, or use `wire_bars_tracker()` fixture pattern for callback verification
 
 **Callback Signature Change:**
 
@@ -1905,6 +2648,7 @@ async def test_reqBarDataStream_new(mock_subscribe):
 **Migration Checklist:**
 
 1. ✅ Replace `@patch.object(IBSocket, "create_stream")` with `@patch.object(BarsTracker, "subscribe")`
+   ⚠️ **Note**: `create_stream()`, `remove_stream()`, `create_snapshot()` removed from IBSocket (Jan 2026 cleanup)
 2. ✅ Update mock return value from `(req_id, cancel_fn)` to `None`
 3. ✅ Update callback assertions to expect `Bar` domain model signature
 4. ✅ Add mocks for `quote_tracker` and `ibsocket` if testing cancellation (prevents hanging)

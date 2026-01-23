@@ -74,26 +74,28 @@ class BrokerService(WsRouteService):
 
 All endpoints require authentication via JWT in HttpOnly cookie.
 
-| Method | Path                                     | Operation ID           | Description                                     |
-| ------ | ---------------------------------------- | ---------------------- | ----------------------------------------------- |
-| POST   | `/api/broker/v1/orders`                  | `placeOrder`           | Place a new order (accepts `confirmId`¹)        |
-| POST   | `/api/broker/v1/orders/preview`          | `previewOrder`         | Preview order costs/margin (returns confirmId)  |
-| PUT    | `/api/broker/v1/orders/{id}`             | `modifyOrder`          | Modify existing order                           |
-| DELETE | `/api/broker/v1/orders/{id}`             | `cancelOrder`          | Cancel an order                                 |
-| GET    | `/api/broker/v1/orders`                  | `getOrders`            | Get all user orders                             |
-| GET    | `/api/broker/v1/positions`               | `getPositions`         | Get all open positions                          |
-| GET    | `/api/broker/v1/executions/{symbol}`     | `getExecutions`        | Get executions for symbol                       |
-| GET    | `/api/broker/v1/executions`              | `getAllExecutions`²    | Get all execution history (all symbols)         |
-| DELETE | `/api/broker/v1/positions/{id}`          | `closePosition`        | Close position (full/partial)                   |
-| PUT    | `/api/broker/v1/positions/{id}/brackets` | `editPositionBrackets` | Update SL/TP brackets                           |
-| GET    | `/api/broker/v1/account`                 | `getAccountInfo`       | Get account metadata (id, name, currency, sign) |
-| GET    | `/api/broker/v1/leverage/info`           | `leverageInfo`         | Get leverage constraints                        |
-| PUT    | `/api/broker/v1/leverage/set`            | `setLeverage`          | Set leverage for symbol                         |
-| POST   | `/api/broker/v1/leverage/preview`        | `previewLeverage`      | Preview leverage changes                        |
+| Method | Path                                     | Operation ID           | Description                                                              |
+| ------ | ---------------------------------------- | ---------------------- | ------------------------------------------------------------------------ |
+| POST   | `/api/broker/v1/orders`                  | `placeOrder`           | Place a new order (accepts `confirmId`¹)                                 |
+| POST   | `/api/broker/v1/orders/preview`          | `previewOrder`         | Preview order costs/margin (returns confirmId)                           |
+| PUT    | `/api/broker/v1/orders/{id}`             | `modifyOrder`          | Modify existing order                                                    |
+| DELETE | `/api/broker/v1/orders/{id}`             | `cancelOrder`          | Cancel an order                                                          |
+| GET    | `/api/broker/v1/orders`                  | `getOrders`            | Get all user orders                                                      |
+| GET    | `/api/broker/v1/positions`               | `getPositions`         | Get all open positions                                                   |
+| GET    | `/api/broker/v1/executions/{symbol}`     | `getExecutions`        | Get executions for symbol                                                |
+| GET    | `/api/broker/v1/executions`              | `getAllExecutions`²    | Get all execution history (all symbols)                                  |
+| DELETE | `/api/broker/v1/positions/{id}`          | `closePosition`        | Close position (full/partial)                                            |
+| PUT    | `/api/broker/v1/positions/{id}/brackets` | `editPositionBrackets` | Update SL/TP brackets                                                    |
+| GET    | `/api/broker/v1/account`                 | `getAccountInfo`       | Get account metadata (id, name, currency, sign, optional equity fields³) |
+| GET    | `/api/broker/v1/leverage/info`           | `leverageInfo`         | Get leverage constraints                                                 |
+| PUT    | `/api/broker/v1/leverage/set`            | `setLeverage`          | Set leverage for symbol                                                  |
+| POST   | `/api/broker/v1/leverage/preview`        | `previewLeverage`      | Preview leverage changes                                                 |
 
 ¹ **Preview-to-Place Flow:** The `confirmId` returned by `previewOrder` can be passed as a query parameter to `placeOrder` for audit trail correlation. This links the preview and execution for logging/compliance purposes.
 
 ² **Trades Page Endpoint:** `getAllExecutions` returns all user executions across all symbols. Used by Account Manager custom "Trades" page to display commission data. Each execution has unique `id` field for table row deduplication (TWS two-phase dispatch may fire updates twice).
+
+³ **Account Optional Equity Fields:** The `/api/broker/v1/account` endpoint returns `AccountMetainfo` with optional `balance`, `equity`, `unrealizedPL`, and `realizedPL` fields. These are populated from initial TWS `reqAccountSummary()` calls for live accounts (mapping TWS tags: NetLiquidation→balance, EquityWithLoanValue→equity, UnrealizedPnL→unrealizedPL, RealizedPnL→realizedPL). Fields may be `None` for non-live accounts or during initial connection phase. Frontend initializes account metrics from this endpoint before subscribing to real-time `equity` WebSocket topic. Fields use `@field_serializer` for 2-decimal precision currency formatting.
 
 ---
 
@@ -106,7 +108,7 @@ Real-time streaming via WebSocket with topic-based routing.
 | `orders`            | `OrderSubscriptionRequest`            | `PlacedOrder`            | Order status changes                                                                                                                               |
 | `positions`         | `PositionSubscriptionRequest`         | `Position`               | Position updates                                                                                                                                   |
 | `executions`        | `ExecutionSubscriptionRequest`        | `Execution`              | Trade execution notifications (two-phase: immediate fill notification with commission=None, enriched update ~50-200ms later with commission value) |
-| `equity`            | `EquitySubscriptionRequest`           | `EquityData`             | Account balance/equity changes                                                                                                                     |
+| `equity`            | `EquitySubscriptionRequest`           | `EquityData`             | Account balance/equity changes (init from REST `/accounts`, subscribe for real-time)                                                               |
 | `broker-connection` | `BrokerConnectionSubscriptionRequest` | `BrokerConnectionStatus` | Broker connection status                                                                                                                           |
 
 **Implementation Note**: The `equity` topic streams real-time balance/equity updates via TWS `reqAccountSummary()` + `reqPnL()` integration. Provider pushes updates whenever account summary tags or P&L values change (typical update frequency: ~3 minutes for account summary, real-time for P&L).
@@ -225,18 +227,18 @@ async def test_orders_subscription(broker_ws_client):
 
 Key Pydantic models used by this module (defined in `trading_api/models/broker/`):
 
-| Model                    | Purpose                          |
-| ------------------------ | -------------------------------- |
-| `PreOrder`               | Order creation request           |
-| `PlacedOrder`            | Order with status and timestamps |
-| `PlaceOrderResult`       | Result of placing an order       |
-| `Position`               | Open position with P&L           |
+| Model                    | Purpose                                   |
+| ------------------------ | ----------------------------------------- |
+| `PreOrder`               | Order creation request                    |
+| `PlacedOrder`            | Order with status and timestamps          |
+| `PlaceOrderResult`       | Result of placing an order                |
+| `Position`               | Open position with P&L                    |
 | `Execution`              | Trade execution record (with unique `id`) |
-| `Brackets`               | Stop-loss and take-profit levels |
-| `AccountMetainfo`        | Account metadata (ID, name)      |
-| `LeverageInfo`           | Leverage constraints for symbol  |
-| `BrokerConnectionStatus` | Broker connection state          |
-| `EquityData`             | Account balance and equity       |
+| `Brackets`               | Stop-loss and take-profit levels          |
+| `AccountMetainfo`        | Account metadata (ID, name)               |
+| `LeverageInfo`           | Leverage constraints for symbol           |
+| `BrokerConnectionStatus` | Broker connection state                   |
+| `EquityData`             | Account balance and equity                |
 
 **Execution ID Field:** As of v1.1.0, `Execution` includes `id` field (string) for unique identification. This enables TradingView Account Manager custom pages to deduplicate rows when TWS sends two-phase updates (fill notification → commission enrichment). Provider implementations must populate `id` (e.g., FakeBrokerProvider uses `EXEC-{counter}`, TWSBrokerProvider uses TWS `exec_id`).
 
