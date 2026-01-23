@@ -394,6 +394,9 @@ class TrackedOrder:
         )
 
 
+# TODO: finer refactoring and cleanup
+# TODO: group smart/overnight orders
+# TODO: switch orders when switching smart/overnight exchange
 class OrderTracker(OrderTrackerCBWiringInterface):
     """Manages order state for IBSocket. Thread-safe via asyncio dispatch.
 

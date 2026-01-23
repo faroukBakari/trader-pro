@@ -137,6 +137,34 @@ class OrderTrackerCBWiringInterface(ABC):
         ...
 
 
+class AccountTrackerCBWiringInterface(ABC):
+    @abstractmethod
+    def upsert_account(self, account: str) -> None:
+        ...
+
+    @abstractmethod
+    def update_account(self, account: str, tag: str, value: str, currency: str) -> None:
+        ...
+
+    @abstractmethod
+    def update_pnl(
+        self, reqId: int, daily: float, unrealized: float, realized: float
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def update_account_time(self, timestamp: str) -> None:
+        ...
+
+    @abstractmethod
+    def mark_summary_complete(self) -> None:
+        ...
+
+    @abstractmethod
+    def raise_error(self, exception: ProviderException) -> None:
+        ...
+
+
 class IbSocketWiringInterface(ABC):
     @property
     @abstractmethod
@@ -191,4 +219,11 @@ class IbSocketWiringInterface(ABC):
         self,
         tracker_interface: OrderTrackerCBWiringInterface,
     ) -> int | None:
+        ...
+
+    @abstractmethod
+    def wire_account_tracker(
+        self,
+        tracker_interface: AccountTrackerCBWiringInterface,
+    ) -> str:
         ...

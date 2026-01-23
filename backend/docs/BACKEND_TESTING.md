@@ -912,7 +912,130 @@ async def test_tws_client_place_order_delegates(mock_ibsocket):
 
 **See:** `providers/tws/tests/test_order_tracker.py` (unit tests), `test_client.py` (delegation tests)
 
-````
+---
+
+**AccountTracker Testing (Interface-Based Account State Tracking):**
+
+AccountTracker follows the same dependency inversion pattern as other trackers with unique characteristics:
+
+1. **Accounts List Return Value**: `wire_account_tracker()` returns `str` (comma-separated accounts from `managedAccounts`)
+2. **Multiple Update Callbacks**: Separate callbacks for account values, P&L, and timestamp (vs single update callback)
+3. **TWS Protocol Internalization**: Private `__req_account_summary()`, `__req_account_updates()`, `__req_pnl()` methods send TWS messages
+4. **No Request ID for Identification**: Uses account ID instead of request ID for tracking
+
+**Test Fixture Pattern:**
+
+```python
+# test_account_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IbSocketWiringInterface for AccountTracker tests."""
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    # wire_account_tracker returns comma-separated accounts list
+    mock.wire_account_tracker.return_value = "DEMO123,LIVE456"
+    counter = {"value": 1000}
+    def get_next_id():
+        counter["value"] += 1
+        return counter["value"]
+    type(mock).next_req_id = PropertyMock(side_effect=get_next_id)
+    mock.send_message = MagicMock()
+    return mock
+```
+
+**Wiring Test (Accounts List Return Value):**
+
+```python
+def test_account_tracker_wiring_returns_accounts_list(mock_ibsocket):
+    """AccountTracker wiring receives accounts list from managedAccounts."""
+    from trading_api.providers.tws.account_tracker import AccountTracker
+    mock_ibsocket.wire_account_tracker.return_value = "DEMO123,LIVE456"
+    tracker = AccountTracker(ibsocket=mock_ibsocket)
+    mock_ibsocket.wire_account_tracker.assert_called_once_with(tracker)
+    # Verify accounts were created
+    assert "DEMO123" in tracker._accounts
+    assert "LIVE456" in tracker._accounts
+```
+
+**Account Callback Tests:**
+
+```python
+@pytest.mark.asyncio
+async def test_account_updates_dispatched(mock_ibsocket):
+    """Test account summary and P&L callbacks."""
+    from trading_api.providers.tws.account_tracker import AccountTracker
+    tracker = AccountTracker(ibsocket=mock_ibsocket)
+
+    dispatches = []
+    async def on_account(tracked):
+        dispatches.append(tracked)
+
+    tracker.create_stream_hook(on_account, lambda e: None)
+
+    # Update account values (from IBSocket.accountSummary)
+    tracker.update_account("DEMO123", "NetLiquidation", "100000.0", "USD")
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 1
+    assert dispatches[0].net_liquidation is not None
+
+    # Update P&L (from IBSocket.pnl)
+    tracker.update_pnl(1001, 150.0, 500.0, -200.0)
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 2
+    assert dispatches[1].daily_pnl is not None
+
+    # Update timestamp (from IBSocket.updateAccountTime)
+    tracker.update_account_time("20260124 12:00:00")
+    # Note: timestamp update doesn't trigger dispatch, only updates field
+```
+
+**Request Internalization Tests:**
+
+```python
+def test_req_account_summary_internalized(mock_ibsocket):
+    """Verify __req_account_summary sends TWS message via ibsocket."""
+    from trading_api.providers.tws.account_tracker import AccountTracker
+    tracker = AccountTracker(ibsocket=mock_ibsocket)
+
+    # Trigger request (internal method called via reqAccountSummary)
+    asyncio.run(tracker.reqAccountSummary(timeout=1.0))
+
+    # Verify TWS message sent
+    mock_ibsocket.send_message.assert_called()
+    call_args = mock_ibsocket.send_message.call_args[0]
+    assert call_args[0] == OUT.REQ_ACCOUNT_SUMMARY  # Message type
+    assert "All" in call_args[1]  # Group parameter
+```
+
+**Comparison with OrderTracker/PositionTracker:**
+
+| Aspect              | AccountTracker                        | OrderTracker                           | PositionTracker                    |
+| ------------------- | ------------------------------------- | -------------------------------------- | ---------------------------------- |
+| Constructor Wiring  | `wire_account_tracker`                | `wire_order_tracker`                   | `wire_position_tracker`            |
+| **Wiring Returns**  | **accounts list (str)**               | **next_order_id (int \| None)**        | _(void)_                           |
+| Request ID Needed   | No (uses account ID)                  | No (global subscription)               | No (global subscription)           |
+| Update Callback     | `update_account(account, tag, ...)`   | `upsert_order(orderId, contract, ...)` | `upsert_position(account, ...)`    |
+| P&L Callback        | `update_pnl(reqId, daily, unr, real)` | _(none)_                               | _(none)_                           |
+| Time Callback       | `update_account_time(timestamp)`      | _(none)_                               | _(none)_                           |
+| Error Routing       | By nature (all hooks, no req_id)      | By nature (all hooks)                  | By nature (all hooks)              |
+| **TWS Messages**    | **OUT.REQ_ACCOUNT_SUMMARY, REQ_PNL**  | **OUT.PLACE_ORDER, OUT.CANCEL_ORDER**  | `OUT.REQ_POSITIONS`                |
+| Dispatch Pattern    | Multiple specialized callbacks        | Single-phase                           | Single-phase                       |
+| Lazy Initialization | Yes (`TWSClient.account_tracker`)     | Yes (`TWSClient.order_tracker`)        | Yes (`TWSClient.position_tracker`) |
+
+**Anti-Pattern Note:**
+
+**Do NOT test private `__req_*` methods directly** - verify via IBSocket callback integration tests. Private methods are implementation details; test public APIs (`reqAccountSummary()`, `create_stream_hook()`) instead.
+
+**Key Testing Patterns:**
+
+- Mock `IbSocketWiringInterface` with `wire_account_tracker.return_value = "DEMO123,LIVE456"`
+- Verify `send_message()` calls for `OUT.REQ_ACCOUNT_SUMMARY`, `OUT.REQ_ACCT_DATA`, `OUT.REQ_PNL`
+- Test callbacks (`update_account`, `update_pnl`, `update_account_time`) with asyncio dispatch
+- Verify account creation from comma-separated accounts list
+
+**See:** `providers/tws/tests/test_account_tracker.py`, `test_ibsocket.py` (callback routing), `test_client.py` (delegation tests)
 
 ---
 
@@ -942,7 +1065,7 @@ def mock_ibsocket():
     mock_socket.send_message = MagicMock()
 
     return mock_socket
-````
+```
 
 **Test Method Pattern:**
 

@@ -21,7 +21,7 @@
 | **BarsTracker**             | `bars_tracker.py`                     | Bar data management with interface-based wiring, timezone-aware conversion, snapshot/stream patterns                                                                                    |
 | **OrderTracker**            | `order_tracker.py`                    | Order state tracking with interface-based wiring, TWS protocol internalization (placeOrder/cancelOrder), status mapping, OCA reconciliation, parent-child dispatch, lazy initialization |
 | **PositionTracker**         | `position_tracker.py`                 | Position state tracking with interface-based wiring, lazy initialization, snapshot/stream patterns                                                                                      |
-| **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL                                                                                                               |
+| **AccountTracker**          | `account_tracker.py`                  | Account state tracking with interface-based wiring, TWS protocol internalization (**req_account_summary/**req_pnl), snapshot/stream patterns, lazy initialization                       |
 | **ExecutionTracker**        | `execution_tracker.py`                | Execution tracking with interface-based wiring, commission joining, two-phase dispatch pattern, lazy initialization                                                                     |
 | **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                                                                                                                           |
 | **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                                                                                                                                       |
@@ -813,6 +813,143 @@ def error(self, reqId: int, errorCode: int, errorString: str, advancedOrderRejec
 4. **No Request ID**: Order subscription is global, errors dispatched to all hooks (like PositionTracker)
 5. **Internal Submission Logic**: Private `__submit_order()` handles reconciliation, no-op detection, immutable field guards
 
+### AccountTrackerCBWiringInterface
+
+Tracker callback contract for account updates:
+
+```python
+class AccountTrackerCBWiringInterface(ABC):
+    """Account tracker callback contract."""
+
+    @abstractmethod
+    def upsert_account(self, account: str) -> None:
+        """Create or update TrackedAccount from managedAccounts callback (thread-safe).
+
+        Called from reader thread (TWS callbacks).
+        """
+        pass
+
+    @abstractmethod
+    def update_account(self, account: str, tag: str, value: str, currency: str) -> None:
+        """Update TrackedAccount field from accountSummary callback (thread-safe).
+
+        Called from reader thread (TWS callbacks).
+        Maps TWS tag names to TrackedAccount fields.
+        """
+        pass
+
+    @abstractmethod
+    def update_pnl(
+        self, reqId: int, daily: float, unrealized: float, realized: float
+    ) -> None:
+        """Update TrackedAccount P&L from pnl callback (thread-safe).
+
+        Called from reader thread (TWS callbacks).
+        Real-time P&L updates from reqPnL subscription.
+        """
+        pass
+
+    @abstractmethod
+    def update_account_time(self, timestamp: str) -> None:
+        """Update last_update_time on all tracked accounts (thread-safe).
+
+        Called from reader thread (updateAccountTime callback).
+        """
+        pass
+
+    @abstractmethod
+    def mark_summary_complete(self) -> None:
+        """Signal account summary completion (thread-safe).
+
+        Called from reader thread (accountSummaryEnd callback).
+        """
+        pass
+
+    @abstractmethod
+    def raise_error(self, exception: ProviderException) -> None:
+        """Dispatch account request errors to hooks (thread-safe).
+
+        Called from reader thread when account request fails.
+        """
+        pass
+```
+
+**Implementors:**
+
+- `AccountTracker` in `account_tracker.py`
+
+**Bidirectional Wiring:**
+
+```python
+# AccountTracker constructor
+def __init__(self, ibsocket: IbSocketWiringInterface):
+    self.ibsocket = ibsocket
+    account_list = self.ibsocket.wire_account_tracker(self)  # ← Returns accounts list!
+    for account in account_list.split(","):
+        self.upsert_account(account)
+    # ...
+
+# IBSocket stores reference and returns accounts list
+def wire_account_tracker(self, tracker: AccountTrackerCBWiringInterface) -> str:
+    self.__account_tracker = tracker
+    assert (
+        self.__accounts_list is not None
+    ), "Accounts list should be set as part of the socket connection setup."
+    return self.__accounts_list  # Unique: returns accounts list from managedAccounts
+
+# IBSocket callbacks route to tracker
+def managedAccounts(self, accountsList: str):
+    # Store accounts list for wiring, route to tracker if wired
+    assert (
+        self.__account_tracker is not None or self.__accounts_list is None
+    ), "Unexpected managedAccounts callback: account tracker already wired."
+    self.__accounts_list = accountsList
+    if self.__account_tracker is not None:
+        accounts = accountsList.split(",")
+        for account in accounts:
+            self.__account_tracker.upsert_account(account)
+
+def accountSummary(self, reqId: int, account: str, tag: str, value: str, currency: str):
+    if self.__account_tracker is not None:
+        self.__account_tracker.update_account(account, tag, value, currency)
+
+def pnl(self, reqId: int, dailyPnL: float, unrealizedPnL: float, realizedPnL: float):
+    if self.__account_tracker is not None:
+        self.__account_tracker.update_pnl(reqId, dailyPnL, unrealizedPnL, realizedPnL)
+
+def updateAccountTime(self, timestamp: str):
+    if self.__account_tracker is not None:
+        self.__account_tracker.update_account_time(timestamp)
+
+def accountSummaryEnd(self, reqId: int):
+    if self.__account_tracker is not None:
+        self.__account_tracker.mark_summary_complete()
+```
+
+**Comparison - AccountTracker vs OrderTracker vs PositionTracker:**
+
+| Aspect              | AccountTracker                        | OrderTracker                           | PositionTracker                       |
+| ------------------- | ------------------------------------- | -------------------------------------- | ------------------------------------- |
+| Wiring Method       | `wire_account_tracker(tracker)`       | `wire_order_tracker(tracker)`          | `wire_position_tracker(tracker)`      |
+| **Wiring Returns**  | **accounts list (str)**               | **next_order_id (int \| None)**        | _(void)_                              |
+| Update Callback     | `update_account(account, tag, ...)`   | `upsert_order(orderId, contract, ...)` | `upsert_position(account, ...)`       |
+| P&L Callback        | `update_pnl(reqId, daily, unr, real)` | _(none)_                               | _(none)_                              |
+| Time Callback       | `update_account_time(timestamp)`      | _(none)_                               | _(none)_                              |
+| Completion Callback | `mark_summary_complete()`             | `mark_snapshot_complete()`             | `mark_snapshot_complete()`            |
+| Error Callback      | `raise_error(exception)` (no req_id)  | `raise_error(exception)` (no req_id)   | `raise_error(exception)` (no req_id)  |
+| Request Messages    | `OUT.REQ_ACCOUNT_SUMMARY`             | `OUT.REQ_OPEN_ORDERS`                  | `OUT.REQ_POSITIONS`                   |
+| Subscribe Messages  | `OUT.REQ_ACCT_DATA`, `OUT.REQ_PNL`    | _(none)_                               | _(none)_                              |
+| Dispatch Pattern    | Multiple specialized callbacks        | Single-phase                           | Single-phase                          |
+| Lazy Initialization | `TWSClient.account_tracker` property  | `TWSClient.order_tracker` property     | `TWSClient.position_tracker` property |
+
+**Unique Aspects of AccountTracker:**
+
+1. **Accounts List Return**: `wire_account_tracker()` returns `str` (comma-separated accounts from `managedAccounts`)
+2. **Multiple Update Callbacks**: Separate callbacks for account values, P&L, and timestamp (vs single update callback)
+3. **TWS Protocol Internalization**: Private `__req_account_summary()`, `__req_account_updates()`, `__req_pnl()` methods send TWS messages
+4. **No Request ID for Identification**: Uses account ID instead of request ID for tracking
+5. **Multi-Source Data**: Combines `accountSummary`, `pnl`, and `updateAccountTime` callbacks
+
 ---
 
 ## 2.5 Contract Caching & Persistence
@@ -1300,18 +1437,31 @@ def equity_data(self) -> EquityData:
 
 ```python
 def metainfo(self) -> AccountMetainfo:
-    """Convert to AccountMetainfo for account list.
+    """Convert TrackedAccount to AccountMetainfo for account list.
+
+    Includes equity data for initial display (before WebSocket streams).
 
     Returns:
-        AccountMetainfo with id, name, currency, currencySign
+        Domain AccountMetainfo model with optional equity fields
     """
+    equity_data = self.equity_data()
     return AccountMetainfo(
         id=self.id,
         name=self.id,  # TWS doesn't provide separate display name
         currency=self.currency or "USD",
         currencySign=self.currency_sign or "$",
+        equity=equity_data.equity if equity_data.equity != 0.0 else None,
+        balance=equity_data.balance if equity_data.balance != 0.0 else None,
+        unrealizedPL=equity_data.unrealizedPL
+        if equity_data.unrealizedPL != 0.0
+        else None,
+        realizedPL=equity_data.realizedPL
+        if equity_data.realizedPL != 0.0
+        else None,
     )
 ```
+
+**Note:** All equity metrics in TrackedAccount are stored as `Decimal | None` - use helper methods (`equity_data()`, `metainfo()`) for safe float access with 0.0 fallback.
 
 **Currency Support:**
 
@@ -1329,63 +1479,152 @@ def currency_sign(self) -> str | None:
 
 ### Snapshot/Stream Pattern
 
-**AccountTracker Architecture:**
+**AccountTracker Architecture (Interface-Based):**
 
 ```python
-class AccountTracker:
+class AccountTracker(AccountTrackerCBWiringInterface):
     """Manages account state for IBSocket. Thread-safe via asyncio dispatch.
+
+    Follows the wiring pattern used by other trackers:
+    - TWSClient owns the tracker instance
+    - IBSocket receives wired interface for callbacks
+    - Request methods are owned by the tracker
 
     Thread Ownership:
         - Envelope (hooks registration, reset): main thread
         - Content (accounts dict): reader thread writes, main thread reads
         - Dispatch (callbacks): reader thread schedules, main thread executes
     """
-    def __init__(
-        self,
-        account_sub_cb: Callable[[str], int],
-        account_unsub_cb: Callable[[int], None],
-    ):
-        self._snapshot_requested = threading.Event()
-        self._snapshot_complete = threading.Event()
+    def __init__(self, ibsocket: IbSocketWiringInterface):
+        self.ibsocket = ibsocket
+        self._account_summary_requested = threading.Event()
+        self._account_summary_complete = threading.Event()
         self._accounts: dict[str, TrackedAccount] = {}
         self._snapshot_hooks: dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Future]] = {}
         self._stream_hooks: dict[str, tuple[loop, callback, on_error]] = {}
-        self.summary_req_id: int | None = None
+
+        # Wire to IBSocket (returns comma-separated accounts list)
+        account_list = ibsocket.wire_account_tracker(self)
+        for account in account_list.split(","):
+            self.upsert_account(account)
+```
+
+**Internal Request Methods (TWS Protocol Internalization):**
+
+```python
+# Private methods send TWS messages directly
+def __req_account_summary(self) -> None:
+    """Send account summary request to TWS."""
+    if not self._account_summary_requested.is_set():
+        VERSION = 1
+        reqId = self.ibsocket.next_req_id
+        self.ibsocket.send_message(
+            OUT.REQ_ACCOUNT_SUMMARY,
+            [VERSION, reqId, "All", ",".join(TWS_TAG_TO_FIELD.keys())],
+        )
+        self._account_summary_requested.set()
+
+def __req_account_updates(self, subscribe: bool, acctCode: str) -> None:
+    """Subscribe/unsubscribe to account updates."""
+    VERSION = 2
+    self.ibsocket.send_message(OUT.REQ_ACCT_DATA, [VERSION, subscribe, acctCode])
+
+def __req_pnl(self, reqId: int, account: str, modelCode: str = "") -> None:
+    """Subscribe to real-time P&L updates."""
+    self.ibsocket.send_message(OUT.REQ_PNL, [reqId, account, modelCode])
+
+def __req_account_subscriptions(self, account: str) -> int:
+    """Subscribe to account updates with P&L.
+
+    Combines __req_account_updates and __req_pnl for comprehensive account tracking.
+    """
+    self.__req_account_updates(True, account)
+    reqId = self.ibsocket.next_req_id
+    self.__req_pnl(reqId, account)
+    return reqId
 ```
 
 **Usage Patterns:**
 
 ```python
 # Snapshot: Get all accounts (wait for summary if needed)
-accounts = await account_tracker.all_accounts(timeout=5.0)
+accounts = await account_tracker.reqAccountSummary(timeout=5.0)
 
 # Stream: Register callback for continuous updates
 key = account_tracker.create_stream_hook(
-    loop=asyncio.get_running_loop(),
     callback=async def on_update(tracked: TrackedAccount): ...,
     on_error=async def on_error(exc: ProviderException): ...,
 )
 account_tracker.remove_stream_hook(key)  # Cleanup
 ```
 
-**IBSocket Integration:**
+**Note:** `create_stream_hook()` signature changed - removed `loop` parameter (auto-detected via `asyncio.get_event_loop()`).
+
+**Public API Changes:**
+**Callback Methods (AccountTrackerCBWiringInterface):**
 
 ```python
-# Reader thread callbacks
-def managedAccounts(self, accountsList: str) -> None:
-    """Called on connection - creates TrackedAccount for each account."""
-    self._reader_accounts = accountsList.split(",")
-    for account in self._reader_accounts:
-        self.account_tracker.upsert_account(account)
+# Called from reader thread (IBSocket callbacks)
+def upsert_account(self, account: str) -> None:
+    """Create or update TrackedAccount from managedAccounts callback.
 
-def accountSummary(self, reqId: int, account: str, tag: str, value: str, currency: str):
-    """Called for each tag in reqAccountSummary() response."""
-    self.account_tracker.update_account(account, tag, value, currency)
+    Automatically subscribes to P&L updates for this account.
+    """
+    if account in self._accounts:
+        return  # Already exists
+
+    tracked = self._accounts.setdefault(account, TrackedAccount(id=account))
+    # Subscribe to P&L updates for this account
+    tracked.pnl_req_id = self.__req_account_subscriptions(tracked.id)
+    self.__notify_hooks(tracked.id)
+
+def update_account(self, account: str, tag: str, value: str, currency: str) -> None:
+    """Update TrackedAccount field from accountSummary callback.
+
+    Maps TWS tag names (e.g., "NetLiquidation") to TrackedAccount fields.
+    """
+    # ... field mapping logic
+    self.__notify_hooks(tracked.id)
+
+def update_pnl(self, reqId: int, daily: float, unrealized: float, realized: float) -> None:
+    """Update TrackedAccount P&L from pnl callback.
+
+    Real-time P&L updates from reqPnL subscription.
+    """
+    # ... update P&L fields
+    self.__notify_hooks(tracked.id)
+
+def update_account_time(self, timestamp: str) -> None:
+    """Update last_update_time on all tracked accounts."""
+    for tracked in self._accounts.values():
+        tracked.last_update_time = timestamp
+
+def mark_summary_complete(self) -> None:
+    """Mark snapshot as complete. Called from accountSummaryEnd callback."""
+    self._account_summary_complete.set()
+    # ... resolve snapshot hooks
+
+def raise_error(self, exception: ProviderException) -> None:
+    """Dispatch error to all hooks."""
+    # ... dispatch to error callbacks
+```
+
+**IBSocket Integration (via Wiring):**
+
+See [AccountTrackerCBWiringInterface section](#accounttrackercbwiringinterface) for complete wiring code examples showing:
+
+- `managedAccounts()` callback routing
+- `accountSummary()` callback routing
+- `pnl()` callback routing
+- `updateAccountTime()` callback routing
+- `accountSummaryEnd()` callback routing """Called for each tag in reqAccountSummary() response."""
+  self.account_tracker.update_account(account, tag, value, currency)
 
 def pnl(self, reqId: int, dailyPnL: float, unrealizedPnL: float, realizedPnL: float):
-    """Real-time P&L updates from reqPnL()."""
-    self.account_tracker.update_pnl(reqId, dailyPnL, unrealizedPnL, realizedPnL)
-```
+"""Real-time P&L updates from reqPnL()."""
+self.account_tracker.update_pnl(reqId, dailyPnL, unrealizedPnL, realizedPnL)
+
+````
 
 ### TWSBrokerProvider Integration
 
@@ -1398,7 +1637,7 @@ async def get_account_info(self) -> AccountMetainfo:
     tracked_account = next(iter(account_list), None)
     assert tracked_account is not None, "Account summary returned no data"
     return tracked_account.metainfo()
-```
+````
 
 **Get Equity Data:**
 
