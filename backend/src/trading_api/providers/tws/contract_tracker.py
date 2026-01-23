@@ -15,9 +15,8 @@ import os
 import sqlite3
 import threading
 import uuid
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
-from anyio import key
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.message import OUT
 
@@ -28,9 +27,6 @@ from trading_api.providers.tws.wiring_interfaces import (
     ContractTrackerCBWiringInterface,
     IbSocketWiringInterface,
 )
-
-if TYPE_CHECKING:
-    from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -236,14 +232,14 @@ class ContractTracker(ContractTrackerCBWiringInterface):
         assert self._db_path, "Contract cache path must be specified"
         self._sqlite = SQLiteContractCache(self._db_path)
 
-        self._cached_contracts: dict[str, CachedContract] = (
-            {}
-        )  # in-memory cache of CachedContract by ticker
+        self._cached_contracts: dict[
+            str, CachedContract
+        ] = {}  # in-memory cache of CachedContract by ticker
 
         # contract description requests
-        self._descriptions: dict[int, CachedContract] = (
-            {}
-        )  # Full descriptions (memory-only) req_id → list of CachedContract
+        self._descriptions: dict[
+            int, CachedContract
+        ] = {}  # Full descriptions (memory-only) req_id → list of CachedContract
         self._pending_descriptions: dict[
             int,
             dict[
@@ -254,9 +250,9 @@ class ContractTracker(ContractTrackerCBWiringInterface):
         self._descriptions_to_req_id: dict[str, int] = {}
 
         # contract details requests
-        self._details: dict[int, list[CachedContract]] = (
-            {}
-        )  # contract details (memory-only) req_id → list of CachedContract
+        self._details: dict[
+            int, list[CachedContract]
+        ] = {}  # contract details (memory-only) req_id → list of CachedContract
         self._completed_details_request_ids: set[int] = set()
         self._pending_details: dict[
             int,
@@ -270,9 +266,9 @@ class ContractTracker(ContractTrackerCBWiringInterface):
         ] = {}
         self._details_to_req_id: dict[str, int] = {}
 
-    # === TWS Protocol Hooks (called by main thread) ===
+    # === TWS Protocol Hooks (TWS Request building methods) ===
 
-    def _request_descriptions(self, pattern: str) -> int:
+    def _send_descriptions_req(self, pattern: str) -> int:
         """Request symbol matching from TWS.
 
         Internalizes OUT.REQ_MATCHING_SYMBOLS protocol.
@@ -286,7 +282,7 @@ class ContractTracker(ContractTrackerCBWiringInterface):
         req_id = self._descriptions_to_req_id.get(pattern)
         if req_id is not None:
             if DEBUG_TWS_CACHE:
-                logger.debug(f"in-memory cache hit for pattern='{pattern}'")
+                logger.info(f"in-memory cache hit for pattern='{pattern}'")
             return req_id
 
         with self.tracker_lock:
@@ -294,11 +290,11 @@ class ContractTracker(ContractTrackerCBWiringInterface):
 
         self.ibsocket.send_message(OUT.REQ_MATCHING_SYMBOLS, [req_id, pattern])
         if DEBUG_TWS_REQUEST:
-            logger.debug(f"requested symbolSamples reqId={req_id} pattern='{pattern}'")
+            logger.info(f"requested symbolSamples reqId={req_id} pattern='{pattern}'")
 
         return req_id
 
-    def _request_details(self, contract: Contract) -> int:
+    def _send_details_req(self, contract: Contract) -> int:
         """Request contract details from TWS.
 
         Internalizes OUT.REQ_CONTRACT_DATA protocol.
@@ -314,7 +310,7 @@ class ContractTracker(ContractTrackerCBWiringInterface):
         req_id = self._details_to_req_id.get(business_key)
         if req_id is not None:
             if DEBUG_TWS_CACHE:
-                logger.debug(
+                logger.info(
                     f"in-memory cache hit for routed_description='{business_key}'"
                 )
             return req_id
@@ -346,7 +342,7 @@ class ContractTracker(ContractTrackerCBWiringInterface):
         ]
         self.ibsocket.send_message(OUT.REQ_CONTRACT_DATA, fields)
         if DEBUG_TWS_REQUEST:
-            logger.debug(
+            logger.info(
                 f"requested contractDetails reqId={req_id} symbol='{contract.symbol}'"
             )
 
@@ -365,8 +361,11 @@ class ContractTracker(ContractTrackerCBWiringInterface):
             req_id: TWS request ID
             descriptions: List of ContractDescription from TWS
         """
-        # Auto Persist to cache (same logic as old upsert_descriptions)
-        result = self.cache_descriptions(descriptions)
+        result = [
+            CachedContract.from_contract_description(desc)
+            for desc in descriptions
+            if desc.contract.conId > 0
+        ]
 
         # Resolve pending Future
         with self.tracker_lock:
@@ -386,7 +385,7 @@ class ContractTracker(ContractTrackerCBWiringInterface):
             req_id: TWS request ID
             details: ContractDetails from TWS
         """
-        # No auto-caching here - caller must invoke cache_details explicitly
+        # No auto-caching here - Only qualified cache from _load_and_cache
         # Accumulate details
         results = CachedContract.from_contract_details(details)
         with self.tracker_lock:
@@ -460,9 +459,9 @@ class ContractTracker(ContractTrackerCBWiringInterface):
 
         return False
 
-    # === Public Request Methods (main thread) ===
+    # === Async TWS API Requests (main thread) ===
 
-    async def request_descriptions(
+    async def _request_descriptions(
         self, pattern: str, timeout: float = 10.0
     ) -> list[CachedContract]:
         """Request symbol matching from TWS and wait for results.
@@ -474,11 +473,12 @@ class ContractTracker(ContractTrackerCBWiringInterface):
         Returns:
             List of matching CachedContracts
         """
+
         key = str(uuid.uuid4())
         loop = asyncio.get_running_loop()
         future: asyncio.Future[list[CachedContract]] = loop.create_future()
 
-        req_id = self._request_descriptions(pattern)
+        req_id = self._send_descriptions_req(pattern)
 
         with self.tracker_lock:
             pending_descriptions = self._pending_descriptions.setdefault(req_id, {})
@@ -488,12 +488,13 @@ class ContractTracker(ContractTrackerCBWiringInterface):
             future.set_result([self._descriptions[req_id]])
 
         try:
-            return await asyncio.wait_for(future, timeout=timeout)
+            results = await asyncio.wait_for(future, timeout=timeout)
+            return results
         finally:
             with self.tracker_lock:
                 pending_descriptions.pop(key, None)
 
-    async def request_details(
+    async def _request_details(
         self, contract: Contract, timeout: float = 10.0
     ) -> list[CachedContract]:
         """Request contract details from TWS and wait for results.
@@ -509,7 +510,7 @@ class ContractTracker(ContractTrackerCBWiringInterface):
         loop = asyncio.get_running_loop()
         future: asyncio.Future[list[CachedContract]] = loop.create_future()
 
-        req_id = self._request_details(contract)
+        req_id = self._send_details_req(contract)
 
         with self.tracker_lock:
             pending_details = self._pending_details.setdefault(req_id, {})
@@ -524,90 +525,43 @@ class ContractTracker(ContractTrackerCBWiringInterface):
             with self.tracker_lock:
                 pending_details.pop(key, None)
 
-    # === Lookup Methods (main thread) ===
+    # === Cache management methods (main thread) ===
 
-    def get_by_symbol_prefix(self, prefix: str) -> list[CachedContract]:
-        """Get contracts matching symbol prefix (lazy loading: memory → SQLite).
-
-        Args:
-            prefix: Symbol prefix (e.g., "AAPL", "AA")
-
-        Returns:
-            List of matching CachedContracts (may be empty)
-        """
-        # 1. Check in-memory
-        memory_matches = [
-            cached
-            for cached in self._descriptions.values()
-            if cached.contract.symbol.startswith(prefix)
-        ]
-        if memory_matches:
-            return memory_matches
-
-        # 2. Check SQLite
-        rows = self._sqlite.get_by_symbol_prefix(prefix)
-        if rows:
-            result = []
-            for data in rows:
-                cached = CachedContract.from_dict(data)
-                self._descriptions[cached.con_id] = cached
-                result.append(cached)
-            return result
-
-        # 3. Not found - caller should fetch from IB API
-        return []
-
-    def get_details_from_cache(self, contract: Contract) -> CachedContract | None:
-        """Get contract with full details (memory-only, no SQLite fallback).
-
-        Use for operations requiring tradingHours, validExchanges, etc.
-
-        Args:
-            contract: Contract object
-
-        Returns:
-            CachedContract with full details or None if not found
-        """
-        ticker = ticker_name(contract)
-        cached = self._cached_contracts.get(ticker)
-        return cached if cached and cached.has_full_details else None
-
-    # === Internal Upsert Methods (used by wiring interface callbacks) ===
-
-    def cache_descriptions(
-        self, descriptions: list[ContractDescription]
-    ) -> list[CachedContract]:
+    def _cache_results(self, result: list[CachedContract]) -> None:
         """Upsert ContractDescriptions from symbolSamples callback.
 
         Persists to SQLite AND adds to in-memory cache.
         Called from reader thread (symbolSamples callback).
 
         Args:
-            descriptions: List of ContractDescription from TWS callback
+            descriptions: List of CachedContract from TWS callback
 
         Returns:
             List of CachedContracts created/updated
         """
-        if not descriptions:
-            return []
 
-        result = [
-            CachedContract.from_contract_description(desc)
-            for desc in descriptions
-            if desc.contract.conId > 0
+        to_extend = [
+            contract
+            for contract in result
+            if contract.has_full_details and contract.ticker in self._cached_contracts
         ]
 
-        to_cache = [
+        if to_extend:
+            for contract in to_extend:
+                cached = self._cached_contracts[contract.ticker]
+                cached.update_from_details(contract)
+
+        to_create = [
             desc for desc in result if desc.ticker not in self._cached_contracts
         ]
 
-        if to_cache:
+        if to_create:
             # Update in-memory cache
             self._cached_contracts.update(
-                {cached.ticker: cached for cached in to_cache}
+                {cached.ticker: cached for cached in to_create}
             )
             # Persist to SQLite
-            dicts_to_persist = [cached.to_dict() for cached in to_cache]
+            dicts_to_persist = [cached.to_dict() for cached in to_create]
             try:
                 self._sqlite.upsert_many(dicts_to_persist)
             except Exception as e:
@@ -615,31 +569,147 @@ class ContractTracker(ContractTrackerCBWiringInterface):
                     f"Failed to persist contract descriptions to SQLite: {e}"
                 )
 
+    async def _fetch_and_cache(
+        self, contract: Contract, timeout: float
+    ) -> CachedContract:
+        details_list = list(
+            {
+                d.contract.conId: d
+                for d in (await self._request_details(contract, timeout=timeout))
+            }.values()
+        )
+        # details.contract = con  # remove this! tests should not rely on it
+        cached_list = []
+        for details in details_list:
+            overnight_hours: str | None = None
+            if darkpool_contract := details.build_darkpool_contract():
+                darkpool_details = next(
+                    iter(
+                        await self._request_details(darkpool_contract, timeout=timeout)
+                    )
+                )
+                overnight_hours = darkpool_details.tradingHours
+            cached = CachedContract.from_contract_details(details, overnight_hours)
+            cached_list.append(cached)
+
+        self._cache_results(cached_list)
+        return next(iter(cached_list))
+
+    def _search_cache(self, pattern: str) -> list[CachedContract]:
+        """Get contracts matching symbol prefix (lazy loading: memory → SQLite).
+
+        Args:
+            pattern: Symbol prefix (e.g., "AAPL", "AA")
+        Returns:
+            List of matching CachedContracts (may be empty)
+        """
+
+        # 1- I feel lucky: exact match in-memory
+        exact_match = self._cached_contracts.get(pattern)
+        if exact_match:
+            return [exact_match]
+
+        parts = pattern.split(":", 1)
+        symbol = parts[-1]
+
+        # 1. In depth memory search
+        result = [
+            cached
+            for cached in self._cached_contracts.values()
+            if symbol in cached.ticker
+        ]
+
+        # 2. Check SQLite
+        if not result:
+            rows = self._sqlite.get_by_symbol_prefix(symbol)
+            result = [CachedContract.from_dict(data) for data in rows]
+            self._cached_contracts.update({cached.ticker: cached for cached in result})
+
+        # 3. Filter by exchange if provided
+        exchange = parts[0] if len(parts) == 2 else None
+        if exchange:
+            result = [
+                cached for cached in result if (exchange in cached.valid_exchanges)
+            ]
+
         return result
 
-    def cache_details(
-        self, details: ContractDetails, overnight_hours: str | None = None
-    ) -> CachedContract:
-        """Cache full ContractDetails in in-memory cache.
-        Args:
-            details: ContractDetails from TWS
-            overnight_hours: Optional trading hours string for overnight sessions
-        Returns:
-            CachedContract instance
-        """
-        cached = CachedContract.from_contract_details(details, overnight_hours)
-        self._cached_contracts[cached.ticker] = cached
+    # === Exposed Lookup Methods (main thread) ===
 
-        return cached
+    async def get_descriptions(
+        self, pattern: str, timeout: float = 10.0
+    ) -> list[CachedContract]:
+        """Request symbol matching from TWS and wait for results.
+
+        Args:
+            pattern: Symbol pattern to search for
+            timeout: Timeout in seconds
+
+        Returns:
+            List of matching CachedContracts
+        """
+
+        cached_list = self._search_cache(pattern)
+        if cached_list:
+            if DEBUG_TWS_CACHE:
+                logger.info(f"cache hit for pattern='{pattern}'")
+            return cached_list
+
+        cached_list = await self._request_descriptions(pattern, timeout=timeout)
+        self._cache_results(cached_list)
+
+        return cached_list
+
+    async def get_details(self, contract: Contract, timeout: float) -> CachedContract:
+        """Get detailed contract information.
+        args:
+            contract: Contract with symbol and exchange (or conId)
+            timeout: Optional timeout override
+        Returns:
+            CachedContract with full details
+        Raises:
+            ProviderException: If contract not found or request fails
+        """
+        assert contract.symbol, "Contract must have symbol"
+        assert (
+            contract.primaryExchange or contract.exchange
+        ), "Contract must have primaryExchange or exchange"
+
+        ticker = ticker_name(contract)
+
+        cached_list: list[CachedContract] = self._search_cache(ticker)
+        if cached_list:
+            details = next(iter([c for c in cached_list if c.has_full_details]), None)
+            if details:
+                if DEBUG_TWS_CACHE:
+                    logger.info(
+                        f"get_details cache hit for conId "
+                        f"{ticker} => ({details.contract.conId})"
+                    )
+                return details
+        else:
+            cached_list = await self.get_descriptions(contract.symbol, timeout=timeout)
+
+        cached_list = await asyncio.gather(
+            *[
+                self._fetch_and_cache(con, timeout=timeout)
+                for con in {
+                    cached.contract.conId: cached.contract for cached in cached_list
+                }.values()
+            ]
+        )
+
+        if not cached_list:
+            raise ProviderException(
+                code="PROVIDER_TWS_CONTRACT_NOT_FOUND",
+                message=f"Contract details not found for {ticker}",
+                provider="tws",
+                capability="datafeed",
+            )
+
+        return next(iter(cached_list))
 
     # === Session Management ===
-
-    def clear_details_cache(self) -> None:
-        """Clear in-memory ContractDetails cache.
-
-        Called at session end or on TTL expiry. Descriptions remain in SQLite.
-        """
-        self._details.clear()
 
     def reset(self) -> None:
         """Full reset - clear all in-memory caches.
@@ -647,13 +717,15 @@ class ContractTracker(ContractTrackerCBWiringInterface):
         SQLite data is preserved (immutable contract descriptions).
         Called from main thread.
         """
-        self._descriptions.clear()
-        self._details.clear()
         with self.tracker_lock:
+            self._descriptions.clear()
+            self._details.clear()
             self._pending_descriptions.clear()
             self._pending_details.clear()
+            self._descriptions_to_req_id.clear()
+            self._details_to_req_id.clear()
+            self._cached_contracts.clear()
 
     def close(self) -> None:
         """Close SQLite connection."""
-        self._sqlite.close()
         self._sqlite.close()

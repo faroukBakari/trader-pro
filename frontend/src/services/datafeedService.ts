@@ -443,6 +443,11 @@ export class DatafeedService implements IBasicDataFeed, IDatafeedQuotesApi {
     symbolType: string,
     onResult: SearchSymbolsCallback,
   ): void {
+    if (userInput.trim() === '') {
+      console.log('[Datafeed] searchSymbols called with empty input, returning no results')
+      onResult([])
+      return
+    }
     this.coalesce(`searchSymbols`, () =>
       this._getApiAdapter().searchSymbols(userInput, exchange, symbolType, 30)
     ).then((response) => {

@@ -232,9 +232,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
 
         # Build map: conId → full Contract (with all details)
         details_map: dict[int, Contract] = {
-            cached.contract.conId: cached.contract
-            for cached_list in details_lists
-            for cached in cached_list
+            cached.contract.conId: cached.contract for cached in details_lists
         }
 
         return [
@@ -726,7 +724,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
                 return  # Ignore whatIf orders
             details = await self._tws_client.reqContractDetails(tracked.contract)
             if details:
-                contract = next(iter(details)).contract
+                contract = details.contract
                 placed = tracked_order_to_placed_order(tracked, contract)
                 await callback(placed)
 

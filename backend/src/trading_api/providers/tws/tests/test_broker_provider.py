@@ -292,7 +292,7 @@ class TestPlaceOrderWithBrackets:
         mock = Mock()
         contract_details = _create_mock_contract_details()
         mock.reqTickerDetails = AsyncMock(return_value=contract_details)
-        mock.reqContractDetails = AsyncMock(return_value=[contract_details])
+        mock.reqContractDetails = AsyncMock(return_value=contract_details)
 
         # Parent + 2 children for full bracket
         parent_tracked = _create_tracked_order(100)
@@ -453,7 +453,7 @@ class TestModifyOrder:
         mock = Mock()
         contract_details = _create_mock_contract_details()
         mock.reqTickerDetails = AsyncMock(return_value=contract_details)
-        mock.reqContractDetails = AsyncMock(return_value=[contract_details])
+        mock.reqContractDetails = AsyncMock(return_value=contract_details)
         mock.placeOrderGroup = AsyncMock(
             return_value=(_create_tracked_order(12345), [])
         )
@@ -540,7 +540,7 @@ class TestModifyOrderWithBrackets:
         mock = Mock()
         contract_details = _create_mock_contract_details()
         mock.reqTickerDetails = AsyncMock(return_value=contract_details)
-        mock.reqContractDetails = AsyncMock(return_value=[contract_details])
+        mock.reqContractDetails = AsyncMock(return_value=contract_details)
 
         parent_tracked = _create_tracked_order(100)
         sl_tracked = _create_tracked_order(103)  # New child IDs
@@ -602,7 +602,7 @@ class TestCancelOrder:
         """Create mock TWSClient with cancelOrder."""
         mock = Mock()
         contract_details = _create_mock_contract_details()
-        mock.reqContractDetails = AsyncMock(return_value=[contract_details])
+        mock.reqContractDetails = AsyncMock(return_value=contract_details)
         cancelled_tracked = _create_tracked_order(
             12345,
             order_state=_create_mock_order_state("Cancelled"),
@@ -780,7 +780,7 @@ class TestEditPositionBrackets:
 
         mock.placeOcaGroup = AsyncMock(side_effect=create_oca_result)
         mock.cancelOrder = AsyncMock()
-        mock.reqContractDetails = AsyncMock(return_value=[contract_details])
+        mock.reqContractDetails = AsyncMock(return_value=contract_details)
         mock.reqOpenOrders = AsyncMock(return_value=[])
 
         # Mock reqPositions to return TrackedPosition matching the test position

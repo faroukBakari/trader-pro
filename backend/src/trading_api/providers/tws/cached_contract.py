@@ -4,7 +4,6 @@ This module provides a unified contract cache that can be populated from either
 ContractDescription (partial, from symbol search) or ContractDetails (full).
 """
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -37,7 +36,6 @@ SEC_TYPE_MAP: dict[str, str] = {
 }
 
 
-@dataclass
 class CachedContract(ContractDetails):
     """Combined contract description and details for caching.
 
@@ -49,10 +47,12 @@ class CachedContract(ContractDetails):
         has_full_details: True if populated from ContractDetails, False if from ContractDescription
     """
 
-    derivativeSecTypes: list[str] = field(default_factory=list)
-    has_full_details: bool = False
-    _ticker: str = ""
-    overnight_hours: str | None = None
+    def __init__(self) -> None:
+        super().__init__()
+        self.derivativeSecTypes: list[str] = []
+        self.has_full_details: bool = False
+        self._ticker: str = ""
+        self.overnight_hours: str | None = None  # From OVERNIGHT exchange tradingHours
 
     # === Factory Methods ===
 
@@ -262,6 +262,11 @@ class CachedContract(ContractDetails):
                 self._ticker = ticker_name(self.contract)
         finally:
             return self._ticker
+
+    @property
+    def valid_exchanges(self) -> list[str]:
+        """Get list of valid exchanges for this contract."""
+        return self.validExchanges.split(",") if self.validExchanges else []
 
     def matches(self, ticker: str) -> bool:
         """Check if this cached contract matches the given contract.

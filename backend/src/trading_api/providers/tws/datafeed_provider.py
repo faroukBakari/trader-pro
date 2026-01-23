@@ -35,11 +35,7 @@ from trading_api.models.providers.tws_configs import TWSDatafeedProviderConfig
 from trading_api.shared import Provider
 
 from .tws_connection import TWSClient
-from .tws_mappers import (
-    calculate_tws_duration,
-    contract_details_to_symbol_info,
-    map_resolution_to_tws_bar_size,
-)
+from .tws_mappers import calculate_tws_duration, map_resolution_to_tws_bar_size
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +222,12 @@ class TWSDatafeedProvider(Provider, DatafeedCapability):
 
         # Flatten results, filter out exceptions
         bars = [bar for r in results if not isinstance(r, BaseException) for bar in r]
+
+        if not bars:
+            logger.warning(
+                f"No historical bars returned for {ticker_name} "
+                f"({duration_str} ending {end_dt_str})"
+            )
 
         return sorted(bars, key=lambda bar: bar.time)
 

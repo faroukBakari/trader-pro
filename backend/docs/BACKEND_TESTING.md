@@ -890,6 +890,159 @@ async def test_bars_request_sends_correct_message(mock_ibsocket):
 
 ---
 
+**ContractTracker Testing (Interface-Based Mocking):**
+
+ContractTracker uses the same dependency inversion pattern as QuoteTracker/BarsTracker with `IbSocketWiringInterface` and `ContractTrackerCBWiringInterface`:
+
+**Test Fixture Pattern:**
+
+```python
+# test_contract_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IBSocket with auto-incrementing req_id counter."""
+    mock_socket = MagicMock(spec=IbSocketWiringInterface)
+
+    counter = {"value": 0}
+    def get_next_id():
+        counter["value"] += 1
+        return counter["value"]
+
+    type(mock_socket).next_req_id = PropertyMock(side_effect=get_next_id)
+    mock_socket.send_message = MagicMock()
+
+    return mock_socket
+
+@pytest.fixture
+def tracker(mock_ibsocket, tmp_path):
+    """ContractTracker with mocked socket and temp SQLite."""
+    db_path = str(tmp_path / "test_contracts.db")
+    return ContractTracker(mock_ibsocket, db_path)
+```
+
+**Wiring Verification Test:**
+
+```python
+def test_wires_to_ibsocket_on_init(mock_ibsocket, tmp_path):
+    """Test ContractTracker calls wire_contract_tracker() on init."""
+    db_path = str(tmp_path / "test.db")
+    tracker = ContractTracker(mock_ibsocket, db_path)
+
+    mock_ibsocket.wire_contract_tracker.assert_called_once_with(tracker)
+```
+
+**IBSocket Callback Routing Tests:**
+
+```python
+# test_ibsocket.py - Verify callbacks route to wired tracker
+def test_symbol_samples_routes_to_contract_tracker():
+    """Test symbolSamples routes to wired contract_tracker.update_descriptions()."""
+    mock_tracker = MagicMock()
+    sock = IBSocket()
+    sock.wire_contract_tracker(mock_tracker)
+
+    descriptions = [ContractDescription(...)]
+    sock.symbolSamples(123, descriptions)
+
+    mock_tracker.update_descriptions.assert_called_once_with(123, descriptions)
+
+def test_contract_details_routes_to_contract_tracker():
+    """Test contractDetails routes to wired contract_tracker.update_details()."""
+    mock_tracker = MagicMock()
+    sock = IBSocket()
+    sock.wire_contract_tracker(mock_tracker)
+
+    details = ContractDetails()
+    sock.contractDetails(123, details)
+
+    mock_tracker.update_details.assert_called_once_with(123, details)
+
+def test_contract_details_end_routes_to_contract_tracker():
+    """Test contractDetailsEnd routes to wired contract_tracker.flag_details_complete()."""
+    mock_tracker = MagicMock()
+    sock = IBSocket()
+    sock.wire_contract_tracker(mock_tracker)
+
+    sock.contractDetailsEnd(123)
+
+    mock_tracker.flag_details_complete.assert_called_once_with(123)
+```
+
+**Comparison with Other Trackers:**
+
+| Aspect              | QuoteTracker                     | BarsTracker                         | ContractTracker                                     |
+| ------------------- | -------------------------------- | ----------------------------------- | --------------------------------------------------- |
+| Wiring Method       | `wire_quote_tracker(tracker)`    | `wire_bars_tracker(tracker)`        | `wire_contract_tracker(tracker)`                    |
+| Update Callback     | `update(req_id, updates)`        | `update(req_id, bar_data)`          | `update_descriptions()` / `update_details()`        |
+| Completion Callback | _(none - continuous streaming)_  | `flag_complete(req_id, start, end)` | `flag_details_complete(req_id)`                     |
+| Error Callback      | `raise_error(req_id, exception)` | `raise_error(req_id, exception)`    | `raise_error(req_id, exception)`                    |
+| Request Messages    | `OUT.REQ_MKT_DATA`               | `OUT.REQ_HISTORICAL_DATA`           | `OUT.REQ_MATCHING_SYMBOLS`, `OUT.REQ_CONTRACT_DATA` |
+
+**Method Naming Updates (January 2026):**
+
+Internal method names were updated for clarity:
+
+| Old Method Name               | New Method Name      | Responsibility                               | Test Prefix              |
+| ----------------------------- | -------------------- | -------------------------------------------- | ------------------------ |
+| `_load_cached_descriptions()` | `_search_cache()`    | Multi-tier cache search with exchange filter | `test_search_cache_*`    |
+| `_load_and_cache_details()`   | `_fetch_and_cache()` | Fetch from TWS and cache to memory           | `test_fetch_and_cache_*` |
+
+**Rationale**: Test names should reflect actual method names for discoverability. Name changes improve clarity of method responsibilities (search vs. fetch).
+
+**Test Coverage:**
+
+| Test Group                | Focus Area                                         | Key Patterns                              |
+| ------------------------- | -------------------------------------------------- | ----------------------------------------- |
+| `test_search_cache_*`     | Cache search with exact match + exchange filtering | Mock SQLiteContractCache, in-memory cache |
+| `test_fetch_and_cache_*`  | TWS details fetching and memory caching            | Mock IBSocket, Future resolution          |
+| `test_get_descriptions_*` | End-to-end symbol search with SQLite fallback      | Mock TWS callbacks, timeout handling      |
+| `test_get_details_*`      | Full contract details resolution                   | Mock contractDetails callbacks            |
+
+**Key Testing Patterns:**
+
+1. **Exact Match Optimization**: Verify `_search_cache("NASDAQ:AAPL")` returns immediately if cached
+2. **Exchange Filtering**: Verify `_search_cache("NYSE:AA")` only returns NYSE contracts
+3. **Symbol Search**: Verify `_search_cache("AA")` returns all matching tickers
+4. **SQLite Fallback**: Verify cache miss triggers SQLite query before TWS request
+5. **Deduplication**: Verify concurrent requests for same pattern reuse Future
+
+See: `providers/tws/tests/test_contract_tracker.py` (39 test methods covering all code paths)
+
+**Migration Notes:**
+
+Old tests mocked individual methods:
+
+```python
+# OLD pattern
+mock_tracker.get_by_symbol_prefix = MagicMock(return_value=[cached])
+mock_tracker.upsert_descriptions = MagicMock()
+```
+
+New tests use `AsyncMock` for async API:
+
+```python
+# NEW pattern (in provider tests like test_client.py)
+mock_tracker.get_descriptions = AsyncMock(return_value=[cached])
+mock_tracker.get_details = AsyncMock(return_value=cached)  # Note: singular return
+```
+
+Protocol verification:
+
+```python
+# Verify TWS message construction
+mock_ibsocket.send_message.assert_called_once()
+args = mock_ibsocket.send_message.call_args[0]
+assert args[0] == OUT.REQ_MATCHING_SYMBOLS  # Message type
+assert args[1][1] == "AAPL"  # Pattern parameter
+```
+
+**See:** `providers/tws/tests/test_contract_tracker.py` (39 test methods), `test_ibsocket.py` (contract callback routing), `test_client.py` (TWSClient delegation pattern)
+
+---
+
 ## 5. Testing Patterns
 
 # Test provider-level integration
@@ -2028,7 +2181,8 @@ Benefits:
 | Component        | Mock Target               | Key Pattern                                    |
 | ---------------- | ------------------------- | ---------------------------------------------- |
 | QuoteTracker     | `IbSocketWiringInterface` | Mock socket with PropertyMock for next_req_id  |
-| BarsTracker      | `bars_tracker.request()`  | Mock AsyncMock returning Bar objects           |
+| BarsTracker      | `IbSocketWiringInterface` | Mock socket with PropertyMock for next_req_id  |
+| ContractTracker  | `IbSocketWiringInterface` | Mock socket with PropertyMock for next_req_id  |
 | ExecutionTracker | Callback routing          | Two-phase dispatch testing (exec → commission) |
 
 **QuoteTracker Wiring Pattern:**
@@ -2041,11 +2195,15 @@ The `mock_ibsocket` fixture must implement the bidirectional wiring mechanism:
 
 This pattern tests the actual production wiring flow where IBSocket callbacks route through the stored tracker reference. See "QuoteTracker Testing (Interface-Based Mocking)" section above (line 730) for complete fixture implementation with all 28 tests following this pattern.
 
+**ContractTracker Wiring Pattern:**
+
+Similar to QuoteTracker/BarsTracker. Constructor calls `mock_ibsocket.wire_contract_tracker(self)`. IBSocket callbacks (`symbolSamples`, `contractDetails`, `contractDetailsEnd`) route to stored tracker reference. See "ContractTracker Testing (Interface-Based Mocking)" section above (after line 900) for complete fixture implementation with wiring tests, callback routing tests, and comparison table.
+
 **General Approach:**
 
 1. **Mock TWSClient methods** - Not low-level TWS API calls
 2. **Use domain models** - Bar objects, not TWS BarData
-3. **Mock trackers** - Quote/bars trackers for subscription tests
+3. **Mock trackers** - Quote/bars/contract trackers for subscription tests
 4. **Test callbacks** - Verify domain model conversion and routing
 
 #### BarsTracker Test Migration (January 19, 2026)
