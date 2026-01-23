@@ -22,9 +22,7 @@ Architecture:
 
 import asyncio
 import logging
-import math
 import os
-import re
 import select
 import struct
 import threading
@@ -38,26 +36,14 @@ from socket import socket
 from socket import timeout as socketTimeout
 from typing import Any
 
-from ibapi.client_utils import (
-    createCancelOrderRequestProto,
-    createExecutionRequestProto,
-    createPlaceOrderRequestProto,
-)
 from ibapi.commission_and_fees_report import CommissionAndFeesReport
 from ibapi.common import PROTOBUF_MSG_ID, BarData, TickAttrib
-from ibapi.const import (
-    DOUBLE_INFINITY,
-    INFINITY_STR,
-    UNSET_DECIMAL,
-    UNSET_DOUBLE,
-    UNSET_INTEGER,
-)
+from ibapi.const import DOUBLE_INFINITY, INFINITY_STR, UNSET_DOUBLE, UNSET_INTEGER
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 from ibapi.decoder import Decoder
-from ibapi.execution import Execution, ExecutionFilter
+from ibapi.execution import Execution
 from ibapi.message import OUT
 from ibapi.order import Order
-from ibapi.order_cancel import OrderCancel
 from ibapi.order_state import OrderState
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum
@@ -80,20 +66,20 @@ from trading_api.providers.tws.execution_tracker import (
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
 from trading_api.providers.tws.position_tracker import PositionTracker, TrackedPosition
 from trading_api.providers.tws.quote_tracker import QuoteTracker
-from trading_api.providers.tws.tws_mappers import parse_ticker, ticker_name
+from trading_api.providers.tws.tws_mappers import parse_ticker
 from trading_api.providers.tws.tws_models import (
     TICK_TYPE_TO_FIELD,
-    StreamData,
     TWSErrorClassification,
     TWSErrorNature,
     classify_error,
-    get_asset_config,
     get_bar_duration_seconds,
 )
 from trading_api.providers.tws.wiring_interfaces import (
     BarsTrackerCBWiringInterface,
     ContractTrackerCBWiringInterface,
+    ExecutionTrackerCBWiringInterface,
     IbSocketWiringInterface,
+    OrderTrackerCBWiringInterface,
     PositionTrackerCBWiringInterface,
     QuoteTrackerCBWiringInterface,
 )
@@ -226,7 +212,10 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         self.__bars_tracker: BarsTrackerCBWiringInterface | None = None
         self.__contract_tracker: ContractTrackerCBWiringInterface | None = None
         self.__position_tracker: PositionTrackerCBWiringInterface | None = None
+        self.__execution_tracker: ExecutionTrackerCBWiringInterface | None = None
+        self.__order_tracker: OrderTrackerCBWiringInterface | None = None
         self._req_id_count: count[int] = count()
+        self.__next_order_id: int | None = None
         self._socket_lock = threading.Lock()
         self._state = IBSocketState.READY
         self._socket = socket()
@@ -236,11 +225,9 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         self._connection_time: str = ""
 
         # Data tracking attributes
-        self.order_tracker: OrderTracker = OrderTracker()
         self.account_tracker: AccountTracker = AccountTracker(
             self.reqAccountSubscriptions, self.cancelAccountSubscriptions
         )
-        self.execution_tracker: ExecutionTracker = ExecutionTracker()
         self._ready_event = (
             threading.Event()
         )  # Signals when IBKR connection is fully established
@@ -266,6 +253,17 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         self, tracker_interface: PositionTrackerCBWiringInterface
     ) -> None:
         self.__position_tracker = tracker_interface
+
+    def wire_execution_tracker(
+        self, tracker_interface: ExecutionTrackerCBWiringInterface
+    ) -> None:
+        self.__execution_tracker = tracker_interface
+
+    def wire_order_tracker(
+        self, tracker_interface: OrderTrackerCBWiringInterface
+    ) -> int | None:
+        self.__order_tracker = tracker_interface
+        return self.__next_order_id
 
     def _dispatchMessage(self, fnName: str, fnParams: dict) -> None:
         if DEBUG_TWS_DISPATCH:
@@ -410,8 +408,6 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         with self._socket_lock:
             self._ready_event.clear()
             self._req_id_count = count()
-            self.order_tracker.reset()
-            self.execution_tracker.reset()
 
     def _log_handled_error(
         self,
@@ -458,6 +454,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         port: int,
         client_id: int,
         block_interval: float = 0.01,
+        timeout: float = 5.0,
     ) -> None:
         assert self._state == IBSocketState.READY, "Socket already used!"
 
@@ -540,6 +537,10 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             daemon=False,
         ).start()
 
+        # Wait for nextValidId signal (connection fully ready)
+        if not self._ready_event.wait(timeout=timeout):
+            raise TimeoutError("Timeout waiting for TWS connection ready signal")
+
     def disconnect(self) -> None:
         try:
             with self._socket_lock:
@@ -582,66 +583,6 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
     # Note: reqMatchingSymbols and reqContractDetails have been internalized
     # into ContractTracker via the wiring interface pattern.
     # Use ContractTracker.request_descriptions() and request_details() instead.
-
-    def placeOrder(self, order_id: int, contract: Contract, order: Order) -> None:
-        # Use protobuf encoding for server version >= 203
-        assert (
-            isinstance(order_id, int) and order_id >= 0
-        ), "order_id must be a non-negative integer."
-        assert (
-            isinstance(contract, Contract) and contract.conId != 0
-        ), "contract must be an instance of Contract with a non-zero conId."
-        proto_msg = createPlaceOrderRequestProto(order_id, contract, order)
-        serialized = proto_msg.SerializeToString()
-        # Protobuf message ID = OUT.PLACE_ORDER + 200
-        proto_msg_id = OUT.PLACE_ORDER + PROTOBUF_MSG_ID
-        self.send_protobuf(proto_msg_id, serialized)
-        if DEBUG_TWS_REQUEST:
-            ticker = ticker_name(contract)
-            debug_log(
-                f"placed order (protobuf): id={order_id}, ticker={ticker}, Exchange={contract.exchange} "
-                f"action={order.action}, type={order.orderType} "
-                f"qty={order.totalQuantity}, type={order.lmtPrice or order.auxPrice} "
-            )
-
-    def reqOpenOrders(self) -> None:
-        def request_cb() -> None:
-            VERSION = 1
-            self.send_message(OUT.REQ_OPEN_ORDERS, [VERSION])
-            if DEBUG_TWS_REQUEST:
-                debug_log("requested open orders")
-
-        self.order_tracker.ensure_snapshot_requested(request_cb)
-
-    def cancelOrder(self, order_id: int) -> None:
-        orderCancel = OrderCancel()
-        cancelOrderRequestProto = createCancelOrderRequestProto(order_id, orderCancel)
-        serializedString = cancelOrderRequestProto.SerializeToString()
-
-        self.send_protobuf(OUT.CANCEL_ORDER + PROTOBUF_MSG_ID, serializedString)
-
-        if DEBUG_TWS_REQUEST:
-            debug_log(f"cancelled order: id={order_id}")
-
-    def reqExecutions(self) -> None:
-        """Request all executions for this client (snapshot).
-
-        Returns executions for the past 24 hours (or longer if Trade Log is open).
-        Each execution triggers execDetails() callback, then execDetailsEnd().
-
-        Uses an empty ExecutionFilter to get all executions.
-        """
-
-        def request_cb() -> None:
-            reqId = self.next_req_id
-            exec_filter = ExecutionFilter()
-            exec_request_proto = createExecutionRequestProto(reqId, exec_filter)
-            serialized = exec_request_proto.SerializeToString()
-            self.send_protobuf(OUT.REQ_EXECUTIONS + PROTOBUF_MSG_ID, serialized)
-            if DEBUG_TWS_REQUEST:
-                debug_log(f"requested executions reqId={reqId}")
-
-        self.execution_tracker.ensure_snapshot_requested(request_cb)
 
     def reqAccountSummary(self) -> None:
         def request_cb() -> int:
@@ -1040,7 +981,10 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         if DEBUG_TWS_SHARED:
             debug_log(f"{current_fn_name()}, {clean_self(vars())}")
         # Signals connection fully established - safe to make requests
-        self.order_tracker.set_next_order_id(orderId)
+        assert (
+            self.__order_tracker is not None or self.__next_order_id is None
+        ), "Unexpected nextValidId callback: order tracker already wired."
+        self.__next_order_id = orderId
         self._ready_event.set()
         debug_log(f"TWS connection ready for requests. Next order ID: {orderId}")
 
@@ -1069,12 +1013,13 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
                 f"symbol={contract.symbol}, status={orderState.status}"
             )
 
-        self.order_tracker.upsert_order(
-            orderId=orderId,
-            contract=contract,
-            order=order,
-            orderState=orderState,
-        )
+        if self.__order_tracker is not None:
+            self.__order_tracker.upsert_order(
+                orderId=orderId,
+                contract=contract,
+                order=order,
+                orderState=orderState,
+            )
 
     def orderStatus(
         self,
@@ -1117,19 +1062,20 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             )
 
         # Update TrackedOrder (mutates Order/OrderState, appends OrderFill)
-        self.order_tracker.update_status(
-            orderId,
-            status,
-            filled,
-            remaining,
-            avgFillPrice,
-            permId,
-            parentId,
-            lastFillPrice,
-            clientId,
-            whyHeld,
-            mktCapPrice,
-        )
+        if self.__order_tracker is not None:
+            self.__order_tracker.update_status(
+                orderId,
+                status,
+                filled,
+                remaining,
+                avgFillPrice,
+                permId,
+                parentId,
+                lastFillPrice,
+                clientId,
+                whyHeld,
+                mktCapPrice,
+            )
 
     def openOrderEnd(self) -> None:
         """End signal for open orders request.
@@ -1141,7 +1087,8 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             debug_log(f"{current_fn_name()}")
 
         # Mark snapshot complete and resolve pending futures
-        self.order_tracker.mark_snapshot_complete()
+        if self.__order_tracker is not None:
+            self.__order_tracker.mark_snapshot_complete()
 
     def position(
         self, account: str, contract: Contract, position: Decimal, avgCost: float
@@ -1195,7 +1142,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         1. Each execution after reqExecutions() is called
         2. Real-time when an order is filled
 
-        Routes to ExecutionTracker which dispatches to stream hooks.
+        Routes to ExecutionTracker via wired interface which dispatches to stream hooks.
         Commission arrives separately via commissionAndFeesReport().
 
         Args:
@@ -1211,7 +1158,8 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
                 f"price={execution.price}"
             )
 
-        self.execution_tracker.upsert_execution(contract, execution)
+        if self.__execution_tracker is not None:
+            self.__execution_tracker.upsert_execution(contract, execution)
 
     def execDetailsEnd(self, reqId: int) -> None:
         """End signal for executions request.
@@ -1225,7 +1173,8 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         if DEBUG_TWS_BROKER:
             debug_log(f"{current_fn_name()}, reqId={reqId}")
 
-        self.execution_tracker.mark_snapshot_complete()
+        if self.__execution_tracker is not None:
+            self.__execution_tracker.mark_snapshot_complete()
 
     def commissionAndFeesReport(
         self, commissionAndFeesReport: CommissionAndFeesReport
@@ -1249,10 +1198,11 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
                 f"currency={commissionAndFeesReport.currency}"
             )
 
-        self.execution_tracker.update_commission(
-            commissionAndFeesReport.execId,
-            commissionAndFeesReport.commissionAndFees,
-        )
+        if self.__execution_tracker is not None:
+            self.__execution_tracker.update_commission(
+                commissionAndFeesReport.execId,
+                commissionAndFeesReport.commissionAndFees,
+            )
 
     # === error handling ===
 
@@ -1297,14 +1247,15 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         # Route based on error nature
         if nature == TWSErrorNature.ORDER:
             # Order-related errors use order_{orderId} key format
-            self.order_tracker.raise_error(
-                ProviderException(
-                    provider="tws",
-                    capability="broker",
-                    code=f"PROVIDER_TWS_{errorCode}",
-                    message=message,
+            if self.__order_tracker is not None:
+                self.__order_tracker.raise_error(
+                    ProviderException(
+                        provider="tws",
+                        capability="broker",
+                        code=f"PROVIDER_TWS_{errorCode}",
+                        message=message,
+                    )
                 )
-            )
             return
 
         # Position-related errors (global subscription, no reqId)
@@ -1412,6 +1363,8 @@ class TWSClient:
         self.__bars_tracker: BarsTracker | None = None
         self.__contract_tracker: ContractTracker | None = None
         self.__position_tracker: PositionTracker | None = None
+        self.__execution_tracker: ExecutionTracker | None = None
+        self.__order_tracker: OrderTracker | None = None
 
     @property
     def ibsocket(self) -> IBSocket:
@@ -1433,15 +1386,15 @@ class TWSClient:
             if self.__position_tracker:
                 self.__position_tracker.reset()
                 self.__position_tracker = None
+            if self.__execution_tracker:
+                self.__execution_tracker.reset()
+                self.__execution_tracker = None
             self.__ibsocket = IBSocket()
             self.__ibsocket.connect(
                 host=self._host,
                 port=self._port,
                 client_id=self._client_id,
             )
-            # Wait for nextValidId signal (connection fully ready)
-            if not self.__ibsocket._ready_event.wait(timeout=self._timeout):
-                raise TimeoutError("Timeout waiting for TWS connection ready signal")
         return self.__ibsocket
 
     @property
@@ -1471,6 +1424,20 @@ class TWSClient:
         if self.__position_tracker is None:
             self.__position_tracker = PositionTracker(self.ibsocket)
         return self.__position_tracker
+
+    @property
+    def execution_tracker(self) -> ExecutionTracker:
+        """Lazy-initialized ExecutionTracker for execution tracking."""
+        if self.__execution_tracker is None:
+            self.__execution_tracker = ExecutionTracker(self.ibsocket)
+        return self.__execution_tracker
+
+    @property
+    def order_tracker(self) -> OrderTracker:
+        """Lazy-initialized orderTracker for order tracking."""
+        if self.__order_tracker is None:
+            self.__order_tracker = OrderTracker(self.ibsocket)
+        return self.__order_tracker
 
     # === Contract resolution and caching ===
 
@@ -1624,130 +1591,28 @@ class TWSClient:
 
     # === Order management ===
 
-    def _submit_order(
-        self,
-        contract: Contract,
-        order: Order,
-        parent_id: int = 0,
-        transmit: bool = False,
-    ) -> tuple[int, bool]:
-        order_id = order.orderId
-        place_flag = True
-        tracked: TrackedOrder | None = self.ibsocket.order_tracker.find_tracked_order(
-            order,
-        )
-        if tracked:
-            order_ori = tracked.clone_order()
-            order_id = tracked.orderId
-            # we only modify allowed fields. for more infos
-            # check 02-API-REFERENCE-CONTRACTS-ORDERS.md
-            assert (
-                tracked.contract.conId == contract.conId
-            ), f"Cannot change contract of an existing order {tracked.contract.conId} -> {contract.conId}"
-            assert (
-                not contract.exchange or tracked.contract.exchange == contract.exchange
-            ), f"Cannot change exchange of an existing order {tracked.contract.exchange} -> {contract.exchange}"
-            assert (
-                not parent_id or order_ori.parentId == parent_id
-            ), f"Cannot change parentId of an existing order {order_ori.parentId} -> {parent_id}"
-            place_flag = False
-            if order.lmtPrice != UNSET_DOUBLE and order_ori.lmtPrice != order.lmtPrice:
-                order_ori.lmtPrice = order.lmtPrice
-                place_flag = True
-            if order.auxPrice != UNSET_DOUBLE and order_ori.auxPrice != order.auxPrice:
-                order_ori.auxPrice = order.auxPrice
-                place_flag = True
-            if (
-                order.totalQuantity != UNSET_DECIMAL
-                and order_ori.totalQuantity != order.totalQuantity
-            ):
-                order_ori.totalQuantity = order.totalQuantity
-                place_flag = True
-            order = order_ori
-            order.tif = ""  # do not modify time-in-force for existing orders
-            order.transmit = True  # always transmit existing orders
-        else:
-            order_id = self.ibsocket.order_tracker.next_order_id
-            order.parentId = parent_id
-            order.transmit = transmit
-
-        if place_flag:
-            self.ibsocket.placeOrder(order_id, contract, order)
-
-        return order_id, place_flag
-
     async def placeOcaGroup(
         self,
         contract: Contract,
-        order_list: list[Order],
+        orders: list[Order],
         oca_group: str,
         oca_type: int = 1,
-        parent_id: int = 0,
         timeout: float | None = None,
     ) -> list[TrackedOrder]:
-        """Place multiple orders linked by OCA (One-Cancels-All) group.
-
-        Used for position brackets where no parent order exists.
-        When one order in the group fills, TWS automatically cancels the rest.
+        """Place an OCA (One-Cancels-All) order group via TWS.
 
         Args:
-            contract: The contract for all orders
-            orders: List of Order objects (e.g., stop loss + take profit)
-            oca_group: Unique OCA group identifier string
-            oca_type: OCA behavior type:
-                1 = Cancel all remaining with block (overfill protection) - RECOMMENDED
-                2 = Proportional reduce with block
-                3 = Proportional reduce no block
-
+            contract: Contract the orders are for
+            orders: List of orders in the OCA group
+            oca_group: OCA group name
+            oca_type: OCA type (1=Cancel with block, 2=Reduce with block, 3=Reduce without block)
+            timeout: Request timeout in seconds
         Returns:
-            List of TrackedOrder for each submitted order
+            List of TrackedOrder objects for the placed orders
         """
-        if not order_list:
-            return []
-
-        if not oca_group.startswith("brackets_"):
-            raise ValueError("oca_group must start with 'brackets_'")
-
-        # get or create unique OCA group name
-        transmit_all = False
-        signed_oca_group = self.ibsocket.order_tracker.find_oca_group(oca_group)
-        if signed_oca_group:
-            transmit_all = True
-        else:
-            signed_oca_group = f"{oca_group}@{int(time.time() * 1000)}"
-
-        # Assign OCA attributes to each order
-        for order in order_list:
-            order.ocaGroup = signed_oca_group
-            order.ocaType = oca_type
-
-        submit_results = [
-            self._submit_order(
-                contract, order, parent_id=parent_id, transmit=transmit_all
-            )
-            for order in order_list[:-1]
-        ]
-        submit_results.append(
-            self._submit_order(
-                contract, order_list[-1], parent_id=parent_id, transmit=True
-            )
+        return await self.order_tracker.placeOcaGroup(
+            contract, orders, oca_group, oca_type, timeout=timeout or self._timeout
         )
-
-        tracked_list = await asyncio.gather(
-            *[
-                self.ibsocket.order_tracker.order_update(
-                    oid, timeout=timeout or self._timeout
-                )
-                for oid, placed in submit_results
-                if placed
-            ]
-        ) + [
-            self.ibsocket.order_tracker.ensure_existing_order(oid)
-            for oid, placed in submit_results
-            if not placed
-        ]
-
-        return list(tracked_list)
 
     async def placeOrderGroup(
         self,
@@ -1756,81 +1621,26 @@ class TWSClient:
         children: list[Order],
         timeout: float | None = None,
     ) -> tuple[TrackedOrder, list[TrackedOrder]]:
-        """Place a parent order with optional child orders (bracket).
-
-        Allocates unique order IDs and submits orders atomically.
-        Parent is submitted first, children use transmit chain pattern.
+        """Place a parent-child order group via TWS.
 
         Args:
-            contract: Contract to trade
-            parent: Parent order (entry order)
-            children: Child orders (stop loss, take profit, etc.)
-
+            contract: Contract the orders are for
+            parent: Parent order
+            children: List of child orders
+            timeout: Request timeout in seconds
         Returns:
             Tuple of (parent TrackedOrder, list of child TrackedOrders)
         """
-        parent_id, placed = self._submit_order(
-            contract, parent, transmit=(not children)
+        return await self.order_tracker.placeOrderGroup(
+            contract, parent, children, timeout=timeout or self._timeout
         )
-
-        children_tracked: list[TrackedOrder] = []
-        if children:
-            children_tracked = await self.placeOcaGroup(
-                contract,
-                children,
-                oca_group=f"brackets_{parent_id}",
-                oca_type=1,
-                parent_id=parent_id,
-            )
-
-        parent_tracked = (
-            (
-                await self.ibsocket.order_tracker.order_update(
-                    parent_id, timeout=timeout or self._timeout
-                )
-            )
-            if placed
-            else self.ibsocket.order_tracker.ensure_existing_order(parent_id)
-        )
-
-        return parent_tracked, children_tracked
 
     async def placeWhatifOrder(
         self, contract: Contract, order: Order, timeout: float | None = None
     ) -> TrackedOrder:
-        """Place an order via TWS.
-
-        Allocates a unique order ID and submits the order. Order status updates
-        are delivered via openOrder() and orderStatus() callbacks.
-
-        Args:
-            contract: Contract to trade
-            order: Order parameters (type, side, quantity, price, etc.)
-
-        Returns:
-            The allocated order ID
-
-        Note:
-            For server version >= 203, uses protobuf encoding (required by TWS).
-            For older server versions, uses legacy message format.
-        """
-
-        if order.orderId != -1:
-            logger.warning(
-                "placeWhatifOrder called with pre-set order.orderId; "
-                "this may cause unexpected behavior"
-            )
-            order.orderId = -1
-        if not order.whatIf:
-            logger.warning(
-                "placeWhatifOrder called with order.whatIf=False; "
-                "proceeding to place a regular order"
-            )
-            order.whatIf = True
-        order_id = self.ibsocket.order_tracker.next_order_id
-        self.ibsocket.placeOrder(order_id, contract, order)
-        return await self.ibsocket.order_tracker.order_update(
-            order_id, timeout=timeout or self._timeout
+        """Place a what-if order via TWS (simulated order)."""
+        return await self.order_tracker.placeWhatifOrder(
+            contract, order, timeout=timeout or self._timeout
         )
 
     async def cancelOrder(
@@ -1842,9 +1652,7 @@ class TWSClient:
             order_id: Order ID to cancel
         """
 
-        self.ibsocket.order_tracker.ensure_existing_order(order_id)
-        self.ibsocket.cancelOrder(order_id)
-        return await self.ibsocket.order_tracker.order_update(
+        return await self.order_tracker.cancelOrder(
             order_id, timeout=timeout or self._timeout
         )
 
@@ -1862,11 +1670,7 @@ class TWSClient:
         """
         # Reset tracker and register snapshot hook
 
-        self.ibsocket.reqOpenOrders()
-
-        return await self.ibsocket.order_tracker.all_orders(
-            timeout=timeout or self._timeout
-        )
+        return await self.order_tracker.reqOpenOrders(timeout=timeout or self._timeout)
 
     async def reqPositions(self, timeout: float | None = None) -> list[TrackedPosition]:
         """Request all positions for this client (snapshot).
@@ -1918,9 +1722,7 @@ class TWSClient:
         Returns:
             List of TrackedExecution objects (one per execution)
         """
-        self.ibsocket.reqExecutions()
-
-        return await self.ibsocket.execution_tracker.all_executions(
+        return await self.execution_tracker.all_executions(
             timeout=timeout or self._timeout
         )
 
@@ -1936,14 +1738,11 @@ class TWSClient:
         Returns stream_key for later unsubscription.
         """
         # 1. Register with OrderTracker
-        stream_key = self.ibsocket.order_tracker.create_stream_hook(
+        stream_key = self.order_tracker.create_stream_hook(
             asyncio.get_event_loop(),
             callback,
             on_error,
         )
-
-        # 2. Trigger initial snapshot (existing orders)
-        self.ibsocket.reqOpenOrders()
 
         return stream_key
 
@@ -1987,24 +1786,17 @@ class TWSClient:
 
         Returns stream_key for later unsubscription.
         """
-        # 1. Register with ExecutionTracker
-        stream_key = self.ibsocket.execution_tracker.create_stream_hook(
-            asyncio.get_event_loop(),
+        return self.execution_tracker.create_stream_hook(
             callback,
             on_error,
         )
 
-        # 2. Trigger initial snapshot (existing executions)
-        self.ibsocket.reqExecutions()
-
-        return stream_key
-
     def cancelBrokerStream(self, stream_key: str) -> None:
         """Cancel a real-time broker subscription (orders, positions, or accounts)."""
         self.position_tracker.remove_stream_hook(stream_key)
-        self.ibsocket.order_tracker.remove_stream_hook(stream_key)
+        self.execution_tracker.remove_stream_hook(stream_key)
+        self.order_tracker.remove_stream_hook(stream_key)
         self.ibsocket.account_tracker.remove_stream_hook(stream_key)
-        self.ibsocket.execution_tracker.remove_stream_hook(stream_key)
 
         # Cancel underlying TWS subscriptions if this was an account stream
         # TODO: Track stream_key → pnl_req_id mapping to cancel P&L subscription

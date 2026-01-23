@@ -681,56 +681,238 @@ async def test_get_historical_bars_returns_bars(mock_client):
 - [ ] Import `AsyncMock` from `unittest.mock` for async method mocking
 - [ ] Verify callback routing (`bars_cb`, `bars_complete_cb`), not accumulation
 
-**ExecutionTracker Testing (Two-Phase Dispatch):**
+**ExecutionTracker Testing (Interface-Based Two-Phase Dispatch):**
 
-ExecutionTracker follows the same pattern as BarsTracker but adds commission joining via two-phase dispatch:
+ExecutionTracker uses the same dependency inversion pattern as PositionTracker with additional two-phase dispatch for commission joining:
+
+**Test Fixture Pattern:**
 
 ```python
-from unittest.mock import Mock, AsyncMock
-from ibapi.contract import Contract
-from ibapi.execution import Execution as TWSExecution
-from trading_api.providers.tws.execution_tracker import TrackedExecution, ExecutionTracker
+# test_execution_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
 
-# Test two-phase dispatch pattern
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IbSocketWiringInterface for ExecutionTracker tests."""
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    counter = {"value": 1000}
+    def get_next_id():
+        counter["value"] += 1
+        return counter["value"]
+    type(mock).next_req_id = PropertyMock(side_effect=get_next_id)
+    return mock
+```
+
+**Wiring Test:**
+
+```python
+def test_execution_tracker_wiring(mock_ibsocket):
+    """ExecutionTracker wires itself during __init__."""
+    from trading_api.providers.tws.execution_tracker import ExecutionTracker
+    tracker = ExecutionTracker(ibsocket=mock_ibsocket)
+    mock_ibsocket.wire_execution_tracker.assert_called_once_with(tracker)
+    assert tracker.ibsocket is mock_ibsocket
+```
+
+**Two-Phase Dispatch Test:**
+
+```python
 @pytest.mark.asyncio
-async def test_execution_tracker_two_phase_dispatch():
-    tracker = ExecutionTracker()
-    contract = Contract()
-    contract.symbol = "AAPL"
-    contract.exchange = "NASDAQ"
+async def test_two_phase_dispatch(mock_ibsocket):
+    """Test execution → commission joining workflow."""
+    from trading_api.providers.tws.execution_tracker import ExecutionTracker, TrackedExecution
+    tracker = ExecutionTracker(ibsocket=mock_ibsocket)
 
-    execution = TWSExecution()
-    execution.execId = "001"
-    execution.price = 150.0
-    execution.shares = 100
-    execution.side = "BOT"
-    execution.time = "20240115 14:30:45"
-
-    # Track dispatches
     dispatches = []
     async def on_execution(tracked: TrackedExecution):
         dispatches.append(tracked)
 
-    loop = asyncio.get_running_loop()
-    subscription_id = tracker.subscribe(callback=on_execution, on_error=lambda e: None)
+    tracker.create_stream_hook(on_execution, lambda e: None)
 
     # Phase 1: execDetails (commission=None)
-    tracker.upsert_execution(contract, execution)
+    contract = Contract()
+    contract.symbol = "AAPL"
+    execution = TWSExecution()
+    execution.execId = "001"
+    tracker.upsert_execution(1, contract, execution)
     await asyncio.sleep(0.01)  # Allow dispatch
     assert len(dispatches) == 1
     assert dispatches[0].commission is None
 
-    # Phase 2: commissionAndFeesReport (commission enriched)
-    tracker.update_commission("001", 1.50)
+    # Phase 2: commissionAndFeesReport (enriched)
+    report = MagicMock()
+    report.commission = 1.50
+    tracker.update_commission("001", report)
     await asyncio.sleep(0.01)  # Allow dispatch
     assert len(dispatches) == 2
     assert dispatches[1].commission == 1.50
-    assert dispatches[1].exec_id == "001"
-
-# Test provider-level integration
-@pytest.mark.asyncio
-async def test_subscribe_executions_with_symbol_filter(mock_socket):
 ```
+
+**Comparison with PositionTracker:**
+
+| Aspect              | PositionTracker                   | ExecutionTracker                       |
+| ------------------- | --------------------------------- | -------------------------------------- |
+| Constructor Wiring  | `wire_position_tracker`           | `wire_execution_tracker`               |
+| Request ID Needed   | No (global subscription)          | Yes (per-snapshot tracking)            |
+| Error Routing       | By nature (all hooks)             | By req_id                              |
+| Join Callback       | None                              | `update_commission(exec_id, report)`   |
+| Request Messages    | `send_message(OUT.REQ_POSITIONS)` | `send_protobuf(OUT.REQ_EXECUTIONS...)` |
+| Dispatch Pattern    | Single-phase                      | Two-phase (exec → commission join)     |
+| Lazy Initialization | Yes (`TWSClient.property`)        | Yes (`TWSClient.property`)             |
+
+**See:** `providers/tws/tests/test_client.py` (TWSClient delegation tests)
+
+**OrderTracker Testing (Interface-Based Order State Tracking):**
+
+OrderTracker follows the same dependency inversion pattern as PositionTracker/ExecutionTracker but with two unique aspects:
+
+1. **next_order_id Return Value**: `wire_order_tracker()` returns `int | None` (vs void for other trackers)
+2. **TWS Protocol Internalization**: OrderTracker sends `OUT.PLACE_ORDER` and `OUT.CANCEL_ORDER` messages directly (vs callback injection)
+
+**Test Fixture Pattern:**
+
+```python
+# test_order_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IbSocketWiringInterface for OrderTracker tests."""
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    # wire_order_tracker returns next_order_id (unique aspect)
+    mock.wire_order_tracker.return_value = 100
+    mock.send_protobuf = MagicMock()  # For PLACE_ORDER/CANCEL_ORDER
+    mock.send_message = MagicMock()   # For REQ_OPEN_ORDERS
+    return mock
+```
+
+**Wiring Test (next_order_id Return Value):**
+
+```python
+def test_order_tracker_wiring_returns_next_order_id(mock_ibsocket):
+    """OrderTracker wiring captures next_order_id return value."""
+    from trading_api.providers.tws.order_tracker import OrderTracker
+    mock_ibsocket.wire_order_tracker.return_value = 200
+    tracker = OrderTracker(ibsocket=mock_ibsocket)
+    mock_ibsocket.wire_order_tracker.assert_called_once_with(tracker)
+    assert tracker.next_order_id == 200  # Unique: wire_order_tracker returns order ID
+```
+
+**Order Callback Test:**
+
+```python
+@pytest.mark.asyncio
+async def test_order_updates_dispatched(mock_ibsocket):
+    """Test order upsert and status update callbacks."""
+    from trading_api.providers.tws.order_tracker import OrderTracker
+    tracker = OrderTracker(ibsocket=mock_ibsocket)
+
+    dispatches = []
+    async def on_order(tracked):
+        dispatches.append(tracked)
+
+    tracker.subscribe_orders(on_order, lambda e: None)
+
+    # Upsert callback (from IBSocket.openOrder)
+    contract = Contract()
+    contract.symbol = "AAPL"
+    order = Order()
+    order.orderId = 100
+    orderState = OrderState()
+    tracker.upsert_order(100, contract, order, orderState)
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 1
+    assert dispatches[0].orderId == 100
+
+    # Status update callback (from IBSocket.orderStatus)
+    tracker.update_status(100, "Filled", Decimal("100"), Decimal("0"), 150.0, 1, 0, 150.0, 1, "", 0.0)
+    await asyncio.sleep(0.01)  # Allow dispatch
+    assert len(dispatches) == 2
+    assert dispatches[1].status == "Filled"
+```
+
+**Order Submission Test (TWS Protocol Internalization):**
+
+```python
+@pytest.mark.asyncio
+async def test_order_submission_sends_protobuf(mock_ibsocket):
+    """Test OrderTracker sends PLACE_ORDER protobuf message."""
+    from trading_api.providers.tws.order_tracker import OrderTracker
+    from trading_api.models.broker.preorder import PreOrder, OrderSide, OrderType
+    tracker = OrderTracker(ibsocket=mock_ibsocket)
+
+    preorder = PreOrder(
+        symbol="NASDAQ:AAPL",
+        side=OrderSide.BUY,
+        type=OrderType.LMT,
+        qty=100,
+        limitPrice=150.0
+    )
+    placed_order = tracker.place_order(preorder)
+
+    # Verify PLACE_ORDER protobuf sent
+    mock_ibsocket.send_protobuf.assert_called_once()
+    call_args = mock_ibsocket.send_protobuf.call_args[0]
+    assert call_args[0].startswith(OUT.PLACE_ORDER)  # Message type
+    assert isinstance(call_args[1], bytes)           # Protobuf payload
+    assert placed_order.id == "100"  # next_order_id = 100
+```
+
+**TWSClient Mock Pattern (Delegation Tests):**
+
+```python
+# test_client.py
+@pytest.mark.asyncio
+async def test_tws_client_place_order_delegates(mock_ibsocket):
+    """TWSClient.place_order delegates to OrderTracker."""
+    from trading_api.providers.tws.client import TWSClient
+    from unittest.mock import patch
+
+    client = TWSClient(config=mock_config, ibsocket=mock_ibsocket)
+
+    # Mock OrderTracker.place_order
+    with patch.object(client.order_tracker, "place_order") as mock_place:
+        mock_place.return_value = PlacedOrder(id="100", symbol="AAPL", ...)
+        result = await client.place_order(preorder)
+        mock_place.assert_called_once_with(preorder)
+        assert result.id == "100"
+```
+
+**Comparison with PositionTracker/ExecutionTracker:**
+
+| Aspect              | OrderTracker                                | PositionTracker                 | ExecutionTracker                       |
+| ------------------- | ------------------------------------------- | ------------------------------- | -------------------------------------- |
+| Constructor Wiring  | `wire_order_tracker`                        | `wire_position_tracker`         | `wire_execution_tracker`               |
+| **Wiring Returns**  | **next_order_id (int \| None)**             | _(void)_                        | _(void)_                               |
+| Request ID Needed   | No (global subscription)                    | No (global subscription)        | Yes (per-snapshot tracking)            |
+| Update Callback     | `upsert_order(orderId, contract, ...)`      | `upsert_position(account, ...)` | `upsert_execution(req_id, ...)`        |
+| Join Callback       | _(none)_                                    | _(none)_                        | `update_commission(exec_id, report)`   |
+| Status Callback     | `update_status(orderId, status, ...)`       | _(none)_                        | _(none)_                               |
+| Error Routing       | By nature (all hooks, no req_id)            | By nature (all hooks)           | By req_id                              |
+| **TWS Messages**    | **OUT.PLACE_ORDER, OUT.CANCEL_ORDER (TWS)** | `OUT.REQ_POSITIONS`             | `OUT.REQ_EXECUTIONS + PROTOBUF_MSG_ID` |
+| Dispatch Pattern    | Single-phase                                | Single-phase                    | Two-phase (exec → commission join)     |
+| Lazy Initialization | Yes (`TWSClient.order_tracker` property)    | Yes (`TWSClient.property`)      | Yes (`TWSClient.property`)             |
+
+**Anti-Pattern Note:**
+
+**TestSubmitOrder Class Deleted** (January 24, 2026): The old `TestSubmitOrder` test class tested the private `__submit_order()` method directly, which is an anti-pattern (tests should target public APIs, not internals). Replaced with:
+
+- **Integration Tests**: `test_client.py` delegation tests verify `TWSClient.place_order()` → `OrderTracker.place_order()` flow
+- **Order Submission Tests**: Verify `send_protobuf()` calls with correct message type and payload
+- **Callback Tests**: Verify `upsert_order()` and `update_status()` dispatch to hooks
+
+**Key Testing Pattern:**
+
+- Mock `IbSocketWiringInterface` with `wire_order_tracker.return_value = 100`
+- Verify `send_protobuf()` calls for `OUT.PLACE_ORDER` / `OUT.CANCEL_ORDER`
+- Test callbacks (`upsert_order`, `update_status`) with asyncio dispatch
+- Use delegation tests in `test_client.py` for TWSClient integration
+
+**See:** `providers/tws/tests/test_order_tracker.py` (unit tests), `test_client.py` (delegation tests)
+
+````
 
 ---
 
@@ -760,7 +942,7 @@ def mock_ibsocket():
     mock_socket.send_message = MagicMock()
 
     return mock_socket
-```
+````
 
 **Test Method Pattern:**
 

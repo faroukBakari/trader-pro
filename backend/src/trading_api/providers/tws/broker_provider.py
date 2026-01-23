@@ -49,7 +49,6 @@ from trading_api.providers.tws.tws_mappers import (
     brackets_to_tws,
     order_state_to_preview_result,
     preorder_to_tws,
-    tracked_order_to_placed_order,
 )
 from trading_api.shared import Provider
 from trading_api.shared.client_factory import InterModuleClients
@@ -236,9 +235,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
         }
 
         return [
-            tracked_order_to_placed_order(
-                o, details_map.get(o.contract.conId, o.contract)
-            )
+            o.to_domain(contract=details_map.get(o.contract.conId, o.contract))
             for o in real_orders
         ]
 
@@ -725,7 +722,7 @@ class TWSBrokerProvider(Provider, BrokerCapability):
             details = await self._tws_client.reqContractDetails(tracked.contract)
             if details:
                 contract = details.contract
-                placed = tracked_order_to_placed_order(tracked, contract)
+                placed = tracked.to_domain(contract=contract)
                 await callback(placed)
 
         async def tws_on_error(exc: ProviderException) -> None:
