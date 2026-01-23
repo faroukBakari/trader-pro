@@ -23,13 +23,20 @@ from zoneinfo import ZoneInfo
 
 from ibapi.common import BarData
 from ibapi.contract import Contract
+from ibapi.message import OUT
 
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import Bar
+from trading_api.providers.tws.tws_models import get_asset_config
+from trading_api.providers.tws.wiring_interfaces import (
+    BarsTrackerCBWiringInterface,
+    IbSocketWiringInterface,
+)
 
 logger = logging.getLogger(__name__)
 
 DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
+DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
 
 # Default cache location
 DEFAULT_CACHE_PATH = ".cache/bars.db"
@@ -136,6 +143,28 @@ def bar_size_str_to_timedelta(bar_size_str: str) -> timedelta:
         value *= 30
 
     return timedelta(**{kwarg: value})
+
+
+# Duration pattern: "<number> <unit>" where unit is S/D/W/M/Y
+_DURATION_PATTERN = re.compile(r"^(\d+)\s+([SDWMY])$", re.IGNORECASE)
+
+_DURATION_UNIT_TO_KWARG = {
+    "S": ("seconds", 1),
+    "D": ("days", 1),
+    "W": ("weeks", 1),
+    "M": ("days", 30),  # Approximate
+    "Y": ("days", 365),  # Approximate
+}
+
+
+def duration_str_to_timedelta(duration_str: str) -> timedelta:
+    match = _DURATION_PATTERN.match(duration_str.strip())
+    if not match:
+        raise ValueError(f"Invalid duration format: '{duration_str}'")
+
+    value, unit = int(match.group(1)), match.group(2).upper()
+    kwarg, multiplier = _DURATION_UNIT_TO_KWARG[unit]
+    return timedelta(**{kwarg: value * multiplier})
 
 
 class SmartTwsBar:
@@ -367,6 +396,7 @@ class BarsRequest:
         # Live subscription tracking
         self.__last_update_time: float | None = None
         self.__last_index: datetime | None = None
+        self.__log_timer: float = time_.time()
 
         # Request state events
         self.__request_complete: threading.Event = threading.Event()
@@ -441,7 +471,14 @@ class BarsRequest:
         Args:
             bar: TWS BarData object
         """
-        self.__last_index = parse_tws_bar_date_as_datetime(bar.date)
+        current_index = parse_tws_bar_date_as_datetime(bar.date)
+        if time_.time() - self.__log_timer > 5.0:
+            self.__log_timer = time_.time()
+            logger.info(
+                f"Bar data is live for req_id {self.req_id} ({self.description}): {bar}"
+            )
+
+        self.__last_index = current_index
 
         if self.__last_index in self.__bars:
             self.__bars[self.__last_index].update_from_bardata(bar)
@@ -515,7 +552,7 @@ async def dispatch_update(
     await callback(last.to_domain())
 
 
-class BarsTracker:
+class BarsTracker(BarsTrackerCBWiringInterface):
     """Manages bar subscriptions and dispatches bar updates to BarsRequests.
 
     Provides a unified interface for bar data access:
@@ -528,24 +565,33 @@ class BarsTracker:
     Thread Safety:
         - Lookup methods (request, subscribe): main thread
         - Update methods (update, raise_error): reader thread via IBSocket callbacks
+
+    Usage:
+        tracker = BarsTracker(ibsocket)
+
+        # Snapshot pattern
+        bars = await tracker.request(contract, "5 mins", end_date_time, duration_str)
+
+        # Streaming pattern
+        key = tracker.subscribe(contract, "5 mins", on_update, on_error)
+        # ... receive updates via on_update callback ...
+        tracker.unsubscribe(key)
     """
 
     def __init__(
         self,
-        bars_request_hook: Callable[[Contract, str, str | None, str | None], int],
-        bars_cancel_hook: Callable[[int], None],
+        ibsocket: IbSocketWiringInterface,
         timeout: float = 11.0,
     ) -> None:
         """Initialize BarsTracker.
 
         Args:
-            bars_request_hook: Callable to request bars given a Contract and params
-            bars_cancel_hook: Callable to cancel a bar request given a request ID
+            ibsocket: Interface for TWS socket operations (request ID allocation, message sending)
             timeout: Default timeout in seconds for snapshot requests
         """
         self.tracker_lock = threading.Lock()
-        self._bars_request_hook = bars_request_hook
-        self._bars_cancel_hook = bars_cancel_hook
+        ibsocket.wire_bars_tracker(self)
+        self.ibsocket = ibsocket
         self._timeout = timeout
 
         # Bar request storage
@@ -574,6 +620,82 @@ class BarsTracker:
             self._snapshot_hooks.get(req_id, {}) or self._stream_hooks.get(req_id, {})
         )
         return in_use
+
+    def _bars_request_hook(
+        self,
+        contract: Contract,
+        bar_size: str,
+        end_date_time: str | None,
+        duration_str: str | None,
+    ) -> int:
+        """Request historical bars via IBSocket.
+
+        Builds and sends OUT.REQ_HISTORICAL_DATA message to TWS.
+
+        Args:
+            contract: Contract to request bars for
+            bar_size: TWS bar size string (e.g., "5 mins")
+            end_date_time: End datetime for historical request
+            duration_str: Duration string (e.g., "1 D")
+
+        Returns:
+            req_id: TWS request ID allocated for this request
+        """
+        assert (
+            isinstance(contract, Contract) and contract.conId != 0
+        ), "contract must be an instance of Contract with a non-zero conId."
+
+        req_id = self.ibsocket.next_req_id
+        asset_config = get_asset_config(contract.secType)
+        what_to_show = asset_config.what_to_show_live
+
+        # Build message fields (matches IBSocket.reqBars protocol)
+        fields: list[object] = [
+            req_id,
+            contract.conId,
+            contract.symbol,
+            contract.secType,
+            contract.lastTradeDateOrContractMonth,
+            contract.strike if contract.strike else "",
+            contract.right,
+            contract.multiplier,
+            contract.exchange,
+            contract.primaryExchange,
+            contract.currency,
+            contract.localSymbol,
+            contract.tradingClass,
+            contract.includeExpired,
+            end_date_time or "",
+            bar_size,
+            duration_str or "1 D",
+            0,  # useRTH (0 = include extended hours)
+            what_to_show,
+            2,  # formatDate (1=string, 2=unix)
+            not end_date_time,  # keepUpToDate only if end_date_time is empty
+            [],  # chartOptions (empty list)
+        ]
+
+        self.ibsocket.send_message(OUT.REQ_HISTORICAL_DATA, fields)
+        if DEBUG_TWS_REQUEST:
+            logger.debug(
+                f"requested bar data for reqId {req_id}, "
+                f"symbol='{contract.symbol}', exchange='{contract.exchange}', "
+                f"end_date_time='{end_date_time}', duration='{duration_str}', barSize='{bar_size}'"
+            )
+        return req_id
+
+    def _bars_cancel_hook(self, req_id: int) -> None:
+        """Cancel a historical data request.
+
+        Sends OUT.CANCEL_HISTORICAL_DATA message to TWS.
+
+        Args:
+            req_id: TWS request ID to cancel
+        """
+        VERSION = 1
+        self.ibsocket.send_message(OUT.CANCEL_HISTORICAL_DATA, [VERSION, req_id])
+        if DEBUG_TWS_REQUEST:
+            logger.debug(f"canceled bar data for reqId {req_id}")
 
     def _get_or_create_bar_req(
         self,
@@ -632,30 +754,22 @@ class BarsTracker:
         """Debounce unsubscribe - remove bar request if no active hooks."""
 
         def debounce_cancel(req_id: int) -> None:
-            with self.tracker_lock:
-                bar_request = self._bar_requests.get(req_id)
-                if bar_request is None:
-                    if DEBUG_TWS_DATAFEED:
-                        logger.info(
-                            f"debounce_cancel: No bar_request found for req_id {req_id}"
-                        )
-                    return
-                if not self._bar_req_in_use(req_id):
+            bar_request = self._bar_requests.get(req_id)
+            assert bar_request is not None, "bars should exist during debounce period"
+            if not self._bar_req_in_use(req_id):
+                with self.tracker_lock:
                     self._requests.pop(bar_request.description, None)
                     self._bars_cancel_hook(req_id)
                     self._bar_requests.pop(req_id, None)
-                elif DEBUG_TWS_DATAFEED:
-                    logger.info(
-                        f"debounce_cancel: Bar request {req_id} still in use {bar_request.description}, "
-                        f"snapshot_hooks={[key[-12:] for key in self._snapshot_hooks.get(req_id, {}).keys()]}, "
-                        f"stream_hooks={[key[-12:] for key in self._stream_hooks.get(req_id, {}).keys()]}"
-                    )
-                if DEBUG_TWS_DATAFEED:
-                    logger.info(
-                        f"Remaining bar requests: {list(self._requests.keys())}"
-                    )
+            else:
+                logger.info(
+                    f"debounce_cancel: Bar request {req_id} still in use {bar_request.description}, "
+                    f"snapshot_hooks={[key[-12:] for key in self._snapshot_hooks.get(req_id, {}).keys()]}, "
+                    f"stream_hooks={[key[-12:] for key in self._stream_hooks.get(req_id, {}).keys()]}"
+                )
+            logger.info(f"Remaining bar requests: {list(self._requests.keys())}")
 
-        asyncio.get_running_loop().call_later(1.0, debounce_cancel, req_id)
+        asyncio.get_running_loop().call_later(3.0, debounce_cancel, req_id)
 
     # === Lookup Methods (main thread) ===
 
@@ -723,7 +837,8 @@ class BarsTracker:
                     f"Unregistered snapshot hook for {bar_request.description} "
                     f"(req_id {bar_request.req_id}) => {key}"
                 )
-            self._debounce_cancel_bar_request(bar_request.req_id)
+            if not end_date_time:  # only cancel live subscriptions
+                self._debounce_cancel_bar_request(bar_request.req_id)
 
     # === Subscription Methods (main thread) ===
 
@@ -757,11 +872,10 @@ class BarsTracker:
                 bar_request.req_id, {}
             )
             bar_request_stream_hooks[key] = (loop, on_update, on_error)
-            if DEBUG_TWS_DATAFEED:
-                logger.info(
-                    f"Registered stream hook for {bar_request.description} "
-                    f"(req_id {bar_request.req_id}) => {key}"
-                )
+            logger.info(
+                f"Registered stream hook for {bar_request.description} "
+                f"(req_id {bar_request.req_id}) => {key}"
+            )
         sub_key = f"{bar_request.description}#{key}"
         return sub_key
 
@@ -787,11 +901,10 @@ class BarsTracker:
             if bar_request_stream_hooks is not None:
                 bar_request_stream_hooks.pop(sub_key, None)
 
-        if DEBUG_TWS_DATAFEED:
-            logger.info(
-                f"Unsubscribing from bar_request stream for "
-                f"{description} (req_id {req_id}) => {sub_key}"
-            )
+        logger.info(
+            f"Unsubscribing from bar_request stream for "
+            f"{description} (req_id {req_id}) => {sub_key}"
+        )
 
         self._debounce_cancel_bar_request(req_id)
 
@@ -851,11 +964,37 @@ class BarsTracker:
         Returns:
             True if error was handled, False if no matching request
         """
+
+        is_bar_data_cancelation = exception.code in (
+            162,
+            "PROVIDER_DATAFEED_162",
+            "PROVIDER_TWS_API_ERROR_162_NON_RECOVERABLE",
+        )
+
         # with self.tracker_lock:  <- disabled for performance
         bar_request = self._bar_requests.get(req_id)
-
         if bar_request is None:
-            return False
+            return is_bar_data_cancelation
+
+        # handle no data available case (code 162)
+        if is_bar_data_cancelation:
+            delta = (
+                duration_str_to_timedelta(bar_request.duration_str)
+                if bar_request.duration_str
+                else timedelta()
+            )
+            end_time = (
+                parse_tws_bar_date_as_datetime(bar_request.end_date_time)
+                if bar_request.end_date_time
+                else datetime.now(tz=ZoneInfo("UTC"))  # "" means "now"
+            )
+            start_time = end_time - delta
+            self.flag_complete(
+                req_id=req_id,
+                start=start_time.strftime("%Y%m%d %H:%M:%S") + " UTC",
+                end=end_time.strftime("%Y%m%d %H:%M:%S") + " UTC",
+            )
+            return True
 
         bar_request.flag_request_failed(exception)
 

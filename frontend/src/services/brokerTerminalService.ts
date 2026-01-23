@@ -101,6 +101,22 @@ export class BrokerMock {
     return this._accountName
   }
 
+  getEquity(): number {
+    return this._equity
+  }
+
+  getBalance(): number {
+    return this._balance
+  }
+
+  getUnrealizedPL(): number {
+    return this._unrealizedPL
+  }
+
+  getRealizedPL(): number {
+    return this._realizedPL
+  }
+
   getOrders(): Order[] {
     return Array.from(this._orderById.values()).map(order => ({ ...order }))
   }
@@ -502,6 +518,10 @@ class ApiFallback implements ApiInterface {
       data: {
         id: this.brokerMock.getAccountId(),
         name: this.brokerMock.getAccountName(),
+        equity: this.brokerMock.getEquity(),
+        balance: this.brokerMock.getBalance(),
+        unrealizedPL: this.brokerMock.getUnrealizedPL(),
+        realizedPL: this.brokerMock.getRealizedPL(),
       },
     }
   }
@@ -623,7 +643,8 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
   // UI state (managed by service, not client)
   private balance: IWatchedValue<number>
   private equity: IWatchedValue<number>
-  private readonly startingBalance = 100000
+  private realizedPL: IWatchedValue<number>
+  private unrealizedPL: IWatchedValue<number>
 
   private brokerConnectionStatus: ConnectionStatusType = ConnectionStatus.Disconnected
 
@@ -648,9 +669,11 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
       this._wsFallback = new WsFallback(brokerMock)
     }
 
-    // Initialize balance and equity first to ensure they exist before any UI calls
-    this.balance = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
-    this.equity = this._hostAdapter.factory.createWatchedValue(this.startingBalance)
+    // Initialize balance and equity with 0 - will be populated from REST then WebSocket
+    this.balance = this._hostAdapter.factory.createWatchedValue(0)
+    this.equity = this._hostAdapter.factory.createWatchedValue(0)
+    this.realizedPL = this._hostAdapter.factory.createWatchedValue(0)
+    this.unrealizedPL = this._hostAdapter.factory.createWatchedValue(0)
 
     // Initialize delegates for Account Manager custom executions page
     this._executionChangeDelegate = this._hostAdapter.factory.createDelegate()
@@ -760,7 +783,8 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         'equity',
         { accountId: this.accountId },
         (data: EquityData) => {
-          this._hostAdapter.equityUpdate(data.equity)
+          console.log(`Received equity update via WebSocket: ${JSON.stringify(data)}`)
+          if (data.equity) this._hostAdapter.equityUpdate(data.equity)
 
           // Update reactive balance/equity values
           if (data.balance !== undefined && data.balance !== null) {
@@ -843,6 +867,18 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
         {
           text: 'Equity',
           wValue: this.equity,
+          isDefault: true,
+          formatter: StandardFormatterName.FixedInCurrency,
+        },
+        {
+          text: 'Realized P/L',
+          wValue: this.realizedPL,
+          isDefault: true,
+          formatter: StandardFormatterName.FixedInCurrency,
+        },
+        {
+          text: 'Unrealized P/L',
+          wValue: this.unrealizedPL,
           isDefault: true,
           formatter: StandardFormatterName.FixedInCurrency,
         },
@@ -1015,7 +1051,13 @@ export class BrokerTerminalService implements IBrokerWithoutRealtime {
 
   private async _initAccountId(): Promise<void> {
     const accounts = await this.accountsMetainfo()
-    this.accountId = accounts[0]?.id ?? 'DEMO-ACCOUNT'
+    const account = accounts[0]
+    this.accountId = account?.id ?? 'DEMO-ACCOUNT'
+    // Initialize balance/equity from REST response (before WebSocket streams)
+    if (account?.equity != null) this.equity.setValue(account.equity)
+    if (account?.balance != null) this.balance.setValue(account.balance)
+    if (account?.unrealizedPL != null) this.unrealizedPL.setValue(account.unrealizedPL)
+    if (account?.realizedPL != null) this.realizedPL.setValue(account.realizedPL)
   }
 
   async accountsMetainfo(): Promise<AccountMetainfo[]> {

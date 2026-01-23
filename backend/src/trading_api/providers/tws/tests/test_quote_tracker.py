@@ -10,7 +10,7 @@ Tests cover:
 
 import asyncio
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 from ibapi.contract import Contract, ContractDetails
@@ -19,6 +19,7 @@ from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import QuoteData, QuoteValues
 from trading_api.providers.tws.cached_contract import CachedContract
 from trading_api.providers.tws.quote_tracker import QuoteTracker, TrackedQuote
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
 
 
 @pytest.fixture
@@ -33,6 +34,24 @@ def sample_cached_contract() -> CachedContract:
     contract_details.contract.conId = 265598
 
     return CachedContract.from_contract_details(contract_details)
+
+
+@pytest.fixture
+def mock_ibsocket() -> MagicMock:
+    """Create a mock IbSocketWiringInterface for QuoteTracker tests.
+
+    The mock returns incrementing req_ids starting from 1.
+    """
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    # Use a list to track call count for incrementing req_id
+    req_id_counter = [0]
+
+    def get_next_req_id() -> int:
+        req_id_counter[0] += 1
+        return req_id_counter[0]
+
+    type(mock).next_req_id = PropertyMock(side_effect=get_next_req_id)
+    return mock
 
 
 def _quote_values(quote_data: QuoteData) -> QuoteValues:
@@ -127,16 +146,14 @@ class TestTrackedQuoteUpdate:
 
     @pytest.mark.asyncio
     async def test_update_resolves_snapshot_hooks_when_ready(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Snapshot hooks should resolve when quote becomes ready via QuoteTracker.
 
         Note: Hook management is centralized in QuoteTracker, not per-TrackedQuote.
         This test verifies that QuoteTracker.update() resolves snapshot hooks.
         """
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         # Create quote and register snapshot hook via tracker
         quote = TrackedQuote(sample_cached_contract, req_id=1)
@@ -165,16 +182,14 @@ class TestTrackedQuoteUpdate:
 
     @pytest.mark.asyncio
     async def test_update_dispatches_to_stream_hooks(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Stream hooks should receive updates via QuoteTracker.
 
         Note: Hook management is centralized in QuoteTracker, not per-TrackedQuote.
         This test verifies that QuoteTracker.update() dispatches to stream hooks.
         """
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         # Create quote and register stream hook via tracker
         quote = TrackedQuote(sample_cached_contract, req_id=1)
@@ -217,12 +232,10 @@ class TestTrackedQuoteRaiseError:
 
     @pytest.mark.asyncio
     async def test_raise_error_resolves_snapshot_hooks(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Snapshot hooks should receive exceptions via QuoteTracker."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         # Create quote and register snapshot hook via tracker
         quote = TrackedQuote(sample_cached_contract, req_id=1)
@@ -251,12 +264,10 @@ class TestTrackedQuoteRaiseError:
 
     @pytest.mark.asyncio
     async def test_raise_error_dispatches_to_stream_hooks(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Stream error hooks should receive exceptions via QuoteTracker."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         # Create quote and register stream hook via tracker
         quote = TrackedQuote(sample_cached_contract, req_id=1)
@@ -296,12 +307,10 @@ class TestTrackedQuoteSnapshot:
 
     @pytest.mark.asyncio
     async def test_snapshot_resolves_immediately_when_ready(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Snapshot should resolve immediately if quote is already ready."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         # Pre-populate tracker with ready quote
         quote = TrackedQuote(sample_cached_contract, req_id=1)
@@ -319,12 +328,10 @@ class TestTrackedQuoteSnapshot:
 
     @pytest.mark.asyncio
     async def test_snapshot_wait_for_data(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Snapshot should wait for quote to become ready."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         async def request_task() -> QuoteData:
             return await tracker.request(sample_cached_contract, timeout=1.0)
@@ -349,12 +356,10 @@ class TestTrackedQuoteSnapshot:
 
     @pytest.mark.asyncio
     async def test_snapshot_times_out(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Snapshot should timeout if data not received."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         with pytest.raises(asyncio.TimeoutError):
             await tracker.request(sample_cached_contract, timeout=0.05)
@@ -415,12 +420,9 @@ class TestTrackedQuoteToDomain:
 class TestQuoteTrackerInitialization:
     """Test QuoteTracker initialization."""
 
-    def test_quote_tracker_initializes(self) -> None:
-        """QuoteTracker should initialize with hooks."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-
-        tracker = QuoteTracker(request_hook, cancel_hook, timeout=5.0)
+    def test_quote_tracker_initializes(self, mock_ibsocket: MagicMock) -> None:
+        """QuoteTracker should initialize with ibsocket."""
+        tracker = QuoteTracker(mock_ibsocket, timeout=5.0)
 
         assert tracker._timeout == 5.0
         assert len(tracker._quotes) == 0
@@ -432,12 +434,10 @@ class TestQuoteTrackerRequest:
 
     @pytest.mark.asyncio
     async def test_request_creates_new_quote(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Request should create TrackedQuote if not exists."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         async def request_task() -> QuoteData:
             return await tracker.request(sample_cached_contract, timeout=1.0)
@@ -459,16 +459,14 @@ class TestQuoteTrackerRequest:
 
         quote_values = _quote_values(quote_data)
         assert quote_values.bid == 150.0
-        request_hook.assert_called_once()
+        mock_ibsocket.send_message.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_request_reuses_existing_quote(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Request should reuse existing TrackedQuote."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         # Pre-populate tracker
         quote = TrackedQuote(sample_cached_contract, req_id=1)
@@ -481,7 +479,7 @@ class TestQuoteTrackerRequest:
         quote_values = _quote_values(quote_data)
 
         assert quote_values.bid == 150.0
-        request_hook.assert_not_called()  # Not called again
+        mock_ibsocket.send_message.assert_not_called()  # Not called again
 
 
 class TestQuoteTrackerSubscribe:
@@ -489,12 +487,10 @@ class TestQuoteTrackerSubscribe:
 
     @pytest.mark.asyncio
     async def test_subscribe_creates_new_quote(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Subscribe should create TrackedQuote if not exists."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         async def on_update(data: QuoteData) -> None:
             pass
@@ -506,16 +502,14 @@ class TestQuoteTrackerSubscribe:
 
         assert isinstance(sub_key, str)
         assert f"{sample_cached_contract.ticker}#" in sub_key
-        request_hook.assert_called_once()
+        mock_ibsocket.send_message.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_subscribe_reuses_existing_quote(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Multiple subscriptions should reuse same TrackedQuote."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         async def on_update(data: QuoteData) -> None:
             pass
@@ -529,7 +523,7 @@ class TestQuoteTrackerSubscribe:
         sub_key2 = tracker.subscribe(sample_cached_contract, on_update, on_error)
 
         assert sub_key1 != sub_key2
-        request_hook.assert_called_once()  # Only called once
+        mock_ibsocket.send_message.assert_called_once()  # Only called once
 
 
 class TestQuoteTrackerUnsubscribe:
@@ -537,12 +531,10 @@ class TestQuoteTrackerUnsubscribe:
 
     @pytest.mark.asyncio
     async def test_unsubscribe_removes_subscription(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Unsubscribe should remove subscription from TrackedQuote."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         async def on_update(data: QuoteData) -> None:
             pass
@@ -559,18 +551,17 @@ class TestQuoteTrackerUnsubscribe:
             tracker.unsubscribe(sub_key)
 
         # Quote should be cancelled and removed
-        cancel_hook.assert_called_once_with(1)
+        # send_message is called twice: once for subscribe (REQ_MKT_DATA), once for unsubscribe (CANCEL_MKT_DATA)
+        assert mock_ibsocket.send_message.call_count == 2
         assert len(tracker._quotes) == 0
         assert len(tracker._requests) == 0
 
     @pytest.mark.asyncio
     async def test_unsubscribe_keeps_quote_with_multiple_subscribers(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Unsubscribe should not cancel if other subscribers exist."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         async def on_update(data: QuoteData) -> None:
             pass
@@ -591,8 +582,8 @@ class TestQuoteTrackerUnsubscribe:
         ):
             tracker.unsubscribe(sub_key1)
 
-        # Quote should still exist
-        cancel_hook.assert_not_called()
+        # Quote should still exist (only subscribe call, no cancel)
+        mock_ibsocket.send_message.assert_called_once()
         assert len(tracker._quotes) == 1
 
 
@@ -601,12 +592,10 @@ class TestQuoteTrackerUpdate:
 
     @pytest.mark.asyncio
     async def test_update_dispatches_to_tracked_quote(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Update should dispatch to TrackedQuote."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         # Create quote
         quote = TrackedQuote(sample_cached_contract, req_id=1)
@@ -619,11 +608,9 @@ class TestQuoteTrackerUpdate:
         assert quote.bid == 150.0
         assert quote.ask == 150.5
 
-    def test_update_ignores_unknown_req_id(self) -> None:
+    def test_update_ignores_unknown_req_id(self, mock_ibsocket: MagicMock) -> None:
         """Update should silently ignore unknown req_id."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         # Send update for non-existent quote
         tracker.update(999, {"bid": 150.0})
@@ -635,12 +622,10 @@ class TestQuoteTrackerRaiseError:
     """Test raise_error method (called from reader thread)."""
 
     def test_raise_error_returns_true_when_quote_exists(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """raise_error should return True if req_id found."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         # Create quote
         quote = TrackedQuote(sample_cached_contract, req_id=1)
@@ -653,11 +638,11 @@ class TestQuoteTrackerRaiseError:
 
         assert result is True
 
-    def test_raise_error_returns_false_when_quote_not_found(self) -> None:
+    def test_raise_error_returns_false_when_quote_not_found(
+        self, mock_ibsocket: MagicMock
+    ) -> None:
         """raise_error should return False if req_id not found."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         error = ProviderException(
             "tws", "datafeed", "PROVIDER_DATAFEED_ERROR", "Test error"
@@ -671,12 +656,10 @@ class TestQuoteTrackerReset:
     """Test reset method."""
 
     def test_reset_clears_all_quotes(
-        self, sample_cached_contract: CachedContract
+        self, sample_cached_contract: CachedContract, mock_ibsocket: MagicMock
     ) -> None:
         """Reset should clear all quotes and requests."""
-        request_hook = MagicMock(return_value=1)
-        cancel_hook = MagicMock()
-        tracker = QuoteTracker(request_hook, cancel_hook)
+        tracker = QuoteTracker(mock_ibsocket)
 
         # Create quote
         quote = TrackedQuote(sample_cached_contract, req_id=1)

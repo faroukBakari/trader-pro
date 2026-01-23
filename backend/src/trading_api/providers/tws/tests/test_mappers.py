@@ -27,16 +27,18 @@ from trading_api.models.broker import (
 )
 from trading_api.models.exceptions import ProviderException
 from trading_api.models.market import QuoteValues
-from trading_api.providers.tws.order_tracker import OrderFill, TrackedOrder
+from trading_api.providers.tws.order_tracker import (
+    BracketContext,
+    OrderFill,
+    TrackedOrder,
+)
 from trading_api.providers.tws.position_tracker import TrackedPosition
 from trading_api.providers.tws.tws_mappers import (
-    BracketContext,
     brackets_to_tws,
     contract_details_to_symbol_info,
     order_state_to_preview_result,
     parse_tws_bar_date,
     preorder_to_tws,
-    tracked_order_to_placed_order,
     tws_bar_to_domain_bar,
     tws_ticks_to_quote_data,
 )
@@ -880,7 +882,7 @@ class TestBracketsToTws:
 
 
 class TestTrackedOrderToPlacedOrder:
-    """Test tracked_order_to_placed_order mapper."""
+    """Test tracked_order.to_domain mapper."""
 
     def _make_tracked_order(
         self,
@@ -925,7 +927,7 @@ class TestTrackedOrderToPlacedOrder:
         """Test mapping a working market order."""
         tracked = self._make_tracked_order()
 
-        result = tracked_order_to_placed_order(tracked)
+        result = tracked.to_domain()
 
         assert result.id == "1"
         assert result.symbol == "NASDAQ:AAPL"
@@ -958,7 +960,7 @@ class TestTrackedOrderToPlacedOrder:
         )
         tracked.fills = [fill]
 
-        result = tracked_order_to_placed_order(tracked)
+        result = tracked.to_domain()
 
         assert result.type == OrderType.LIMIT
         assert result.status == OrderStatus.FILLED
@@ -970,7 +972,7 @@ class TestTrackedOrderToPlacedOrder:
         """Test mapping a cancelled order."""
         tracked = self._make_tracked_order(status="Cancelled")
 
-        result = tracked_order_to_placed_order(tracked)
+        result = tracked.to_domain()
 
         assert result.status == OrderStatus.CANCELED
 
@@ -984,7 +986,7 @@ class TestTrackedOrderToPlacedOrder:
             stop_type=int(StopType.TRAILING_STOP),
         )
 
-        result = tracked_order_to_placed_order(tracked, bracket_context=bracket_context)
+        result = tracked.to_domain(bracket_context=bracket_context)
 
         assert result.takeProfit == 160.00
         assert result.stopLoss == 145.00
@@ -1001,7 +1003,7 @@ class TestTrackedOrderToPlacedOrder:
             parent_id=100,
         )
 
-        result = tracked_order_to_placed_order(tracked)
+        result = tracked.to_domain()
 
         assert result.id == "101"
         assert result.parentId == "100"

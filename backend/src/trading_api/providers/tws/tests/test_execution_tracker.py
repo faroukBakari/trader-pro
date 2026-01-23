@@ -5,6 +5,7 @@ Tests TrackedExecution dataclass and ExecutionTracker thread-safe operations.
 
 import asyncio
 from decimal import Decimal
+from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 from ibapi.contract import Contract
@@ -17,10 +18,25 @@ from trading_api.providers.tws.execution_tracker import (
     TrackedExecution,
     _parse_tws_execution_time,
 )
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
 
 # =============================================================================
 # Fixtures
 # =============================================================================
+
+
+@pytest.fixture
+def mock_ibsocket() -> MagicMock:
+    """Mock IbSocketWiringInterface for ExecutionTracker tests."""
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    counter = {"value": 1000}
+
+    def get_next_id() -> int:
+        counter["value"] += 1
+        return counter["value"]
+
+    type(mock).next_req_id = PropertyMock(side_effect=get_next_id)
+    return mock
 
 
 @pytest.fixture
@@ -72,9 +88,9 @@ def sample_sell_execution() -> TWSExecution:
 
 
 @pytest.fixture
-def tracker() -> ExecutionTracker:
-    """Create a fresh ExecutionTracker for testing."""
-    return ExecutionTracker()
+def tracker(mock_ibsocket: MagicMock) -> ExecutionTracker:
+    """Create a fresh ExecutionTracker with mocked ibsocket for testing."""
+    return ExecutionTracker(mock_ibsocket)
 
 
 # =============================================================================
@@ -187,6 +203,18 @@ class TestTrackedExecution:
 # =============================================================================
 
 
+class TestExecutionTrackerWiring:
+    """Test ExecutionTracker wiring with IBSocket interface."""
+
+    def test_execution_tracker_wires_during_init(
+        self, mock_ibsocket: MagicMock
+    ) -> None:
+        """ExecutionTracker wires itself during __init__."""
+        tracker = ExecutionTracker(mock_ibsocket)
+        mock_ibsocket.wire_execution_tracker.assert_called_once_with(tracker)
+        assert tracker.ibsocket is mock_ibsocket
+
+
 class TestExecutionTrackerUpsert:
     """Test ExecutionTracker.upsert_execution() method."""
 
@@ -271,21 +299,18 @@ class TestExecutionTrackerSnapshot:
         tracker.mark_snapshot_complete()
         assert tracker._snapshot_complete.is_set()
 
-    def test_ensure_snapshot_requested_calls_callback_once(
-        self, tracker: ExecutionTracker
+    def test_ensure_snapshot_requested_sends_once(
+        self, tracker: ExecutionTracker, mock_ibsocket: MagicMock
     ) -> None:
-        """Verify ensure_snapshot_requested calls callback only once."""
-        call_count = 0
+        """Verify ensure_snapshot_requested sends request only once."""
+        # Should send request on first call
+        tracker.ensure_snapshot_requested()
+        assert mock_ibsocket.send_protobuf.call_count == 1
 
-        def request_cb() -> None:
-            nonlocal call_count
-            call_count += 1
-
-        tracker.ensure_snapshot_requested(request_cb)
-        tracker.ensure_snapshot_requested(request_cb)
-        tracker.ensure_snapshot_requested(request_cb)
-
-        assert call_count == 1
+        # Should NOT send again
+        tracker.ensure_snapshot_requested()
+        tracker.ensure_snapshot_requested()
+        assert mock_ibsocket.send_protobuf.call_count == 1
 
     @pytest.mark.asyncio
     async def test_all_executions_returns_after_snapshot_complete(
@@ -343,7 +368,6 @@ class TestExecutionTrackerStreamHooks:
         self, tracker: ExecutionTracker
     ) -> None:
         """Verify create_stream_hook returns unique keys."""
-        loop = asyncio.new_event_loop()
 
         async def callback(tracked: TrackedExecution) -> None:
             pass
@@ -351,19 +375,16 @@ class TestExecutionTrackerStreamHooks:
         async def on_error(exc: ProviderException) -> None:
             pass
 
-        key1 = tracker.create_stream_hook(loop, callback, on_error)
-        key2 = tracker.create_stream_hook(loop, callback, on_error)
+        key1 = tracker.create_stream_hook(callback, on_error)
+        key2 = tracker.create_stream_hook(callback, on_error)
 
         assert key1 != key2
         assert len(tracker._stream_hooks) == 2
-
-        loop.close()
 
     def test_remove_stream_hook_removes_callback(
         self, tracker: ExecutionTracker
     ) -> None:
         """Verify remove_stream_hook removes the callback."""
-        loop = asyncio.new_event_loop()
 
         async def callback(tracked: TrackedExecution) -> None:
             pass
@@ -371,13 +392,11 @@ class TestExecutionTrackerStreamHooks:
         async def on_error(exc: ProviderException) -> None:
             pass
 
-        key = tracker.create_stream_hook(loop, callback, on_error)
+        key = tracker.create_stream_hook(callback, on_error)
         assert key in tracker._stream_hooks
 
         tracker.remove_stream_hook(key)
         assert key not in tracker._stream_hooks
-
-        loop.close()
 
     def test_remove_stream_hook_ignores_unknown_key(
         self, tracker: ExecutionTracker
@@ -401,15 +420,13 @@ class TestExecutionTrackerReset:
         tracker.upsert_execution(sample_contract, sample_execution)
         tracker.mark_snapshot_complete()
 
-        loop = asyncio.new_event_loop()
-
         async def callback(tracked: TrackedExecution) -> None:
             pass
 
         async def on_error(exc: ProviderException) -> None:
             pass
 
-        tracker.create_stream_hook(loop, callback, on_error)
+        tracker.create_stream_hook(callback, on_error)
 
         # Reset
         tracker.reset()
@@ -420,5 +437,3 @@ class TestExecutionTrackerReset:
         assert not tracker._snapshot_complete.is_set()
         assert len(tracker._snapshot_hooks) == 0
         assert len(tracker._stream_hooks) == 0
-
-        loop.close()

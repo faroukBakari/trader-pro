@@ -4,16 +4,16 @@ This module provides a unified contract cache that can be populated from either
 ContractDescription (partial, from symbol search) or ContractDetails (full).
 """
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from ibapi.contract import Contract, ContractDescription, ContractDetails
 
-from trading_api.models.market.instruments import SearchSymbolResultItem
+from trading_api.models.market.instruments import SearchSymbolResultItem, SymbolInfo
 from trading_api.providers.tws.tws_mappers import (
     clone_contract,
+    contract_details_to_symbol_info,
     normalize_timezone,
     ticker_name,
 )
@@ -36,7 +36,6 @@ SEC_TYPE_MAP: dict[str, str] = {
 }
 
 
-@dataclass
 class CachedContract(ContractDetails):
     """Combined contract description and details for caching.
 
@@ -48,10 +47,12 @@ class CachedContract(ContractDetails):
         has_full_details: True if populated from ContractDetails, False if from ContractDescription
     """
 
-    derivativeSecTypes: list[str] = field(default_factory=list)
-    has_full_details: bool = False
-    _ticker: str = ""
-    overnight_hours: str | None = None
+    def __init__(self) -> None:
+        super().__init__()
+        self.derivativeSecTypes: list[str] = []
+        self.has_full_details: bool = False
+        self._ticker: str = ""
+        self.overnight_hours: str | None = None  # From OVERNIGHT exchange tradingHours
 
     # === Factory Methods ===
 
@@ -220,6 +221,18 @@ class CachedContract(ContractDetails):
             type=type,
         )
 
+    def to_symbol_info(self) -> SymbolInfo:
+        """Map TWS ContractDetails → domain SymbolInfo.
+
+        Args:
+            details: TWS ContractDetails from contractDetails callback
+
+        Returns:
+            Domain SymbolInfo for frontend consumption (TradingView LibrarySymbolInfo)
+        """
+
+        return contract_details_to_symbol_info(self.to_contract_details())
+
     def update_from_details(self, details: ContractDetails) -> None:
         """Update this CachedContract with full details.
 
@@ -249,6 +262,11 @@ class CachedContract(ContractDetails):
                 self._ticker = ticker_name(self.contract)
         finally:
             return self._ticker
+
+    @property
+    def valid_exchanges(self) -> list[str]:
+        """Get list of valid exchanges for this contract."""
+        return self.validExchanges.split(",") if self.validExchanges else []
 
     def matches(self, ticker: str) -> bool:
         """Check if this cached contract matches the given contract.

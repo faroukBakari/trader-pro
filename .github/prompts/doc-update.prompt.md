@@ -7,7 +7,7 @@ description: "Generate a self-sufficient documentation update plan (no edits mad
 
 ## 🎯 Documentation Update Planning
 
-Analyze code changes and generate a **complete, executable plan** for documentation updates. **You will NOT make any edits** - only produce the plan.
+Analyze changes and generate a **complete, executable plan** for documentation updates. **You will NOT make any edits** - only produce the plan.
 
 ### ⚙️ Workflow
 
@@ -19,6 +19,7 @@ Analyze code changes and generate a **complete, executable plan** for documentat
    - Extract key details: function signatures, class names, endpoints, patterns
    - Use `@workspace` for additional context if needed
    - Use git commands to discover/identify update scope and insights on code changes
+   - Finally, identify relevant aspects and changes that need to be documented. Filter out noise.
 
 2. **Map to Documentation Structure**
    - Briefly explore existing documentation for cartography

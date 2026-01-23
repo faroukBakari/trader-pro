@@ -6,6 +6,8 @@ directly. Domain conversion happens at broker_provider level via tws_mappers.
 """
 
 import asyncio
+import logging
+import os
 import re
 import threading
 import time
@@ -17,13 +19,37 @@ from decimal import Decimal
 from itertools import count
 from typing import Any
 
+from ibapi.client_utils import (
+    createCancelOrderRequestProto,
+    createPlaceOrderRequestProto,
+)
+from ibapi.common import PROTOBUF_MSG_ID
+from ibapi.const import UNSET_DECIMAL, UNSET_DOUBLE
 from ibapi.contract import Contract
+from ibapi.message import OUT
 from ibapi.order import Order, OrderComboLeg
+from ibapi.order_cancel import OrderCancel
 from ibapi.order_state import OrderState
 from ibapi.softdollartier import SoftDollarTier
 
-from trading_api.models.broker import OrderStatus, ParentType
+from trading_api.models.broker import (
+    OrderStatus,
+    OrderType,
+    ParentType,
+    PlacedOrder,
+    Side,
+    StopType,
+)
 from trading_api.models.exceptions import ProviderException
+from trading_api.providers.tws.tws_mappers import ticker_name
+from trading_api.providers.tws.wiring_interfaces import (
+    IbSocketWiringInterface,
+    OrderTrackerCBWiringInterface,
+)
+
+logger = logging.getLogger(__name__)
+
+DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
 
 _DIRECT_MAPPED_STATUS: dict[str, int] = {
     "PreSubmitted": 3,  # INACTIVE - simulated order held by IB (stop waiting for trigger)
@@ -42,6 +68,64 @@ _HISTORY_RESOLVED_STATUS: set[str] = {
 }
 
 ORDER_BRACKET_PATTERN = re.compile(r"^brackets_(\d+)$")
+
+# Domain OrderType → TWS orderType string
+ORDER_TYPE_TO_TWS: dict[int, str] = {
+    1: "LMT",  # LIMIT
+    2: "MKT",  # MARKET
+    3: "STP",  # STOP
+    4: "TRAIL",  # TRAIL
+}
+
+# TWS orderType string → Domain OrderType
+TWS_TO_ORDER_TYPE: dict[str, int] = {
+    "LMT": 1,  # LIMIT
+    "MKT": 2,  # MARKET
+    "STP": 3,  # STOP
+    "TRAIL": 4,  # Alias
+}
+
+# Domain Side → TWS action string
+SIDE_TO_TWS_ACTION: dict[int, str] = {
+    1: "BUY",  # Side.BUY
+    -1: "SELL",  # Side.SELL
+}
+
+# TWS action → Domain Side
+TWS_ACTION_TO_SIDE: dict[str, int] = {
+    "BUY": 1,
+    "SELL": -1,
+    "BOT": 1,  # Historical action
+    "SLD": -1,  # Historical action
+}
+
+
+def isUnset(value: Any) -> bool:
+    """Check if a TWS value is considered 'unset' (default/placeholder)."""
+    if value is None:
+        return True
+    if isinstance(value, (int, float)) and value == UNSET_DOUBLE:
+        return True
+    if isinstance(value, Decimal) and value == UNSET_DECIMAL:
+        return True
+    if isinstance(value, str) and value == "":
+        return True
+    return False
+
+
+@dataclass
+class BracketContext:
+    """Context for bracket order information.
+
+    Preserves original PreOrder bracket fields for PlacedOrder reconstruction.
+    TWS doesn't return bracket prices in order callbacks, so we track them here.
+    """
+
+    take_profit: float | None = None
+    stop_loss: float | None = None
+    trailing_stop_pips: float | None = None
+    stop_type: int | None = None
+    child_order_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -200,8 +284,120 @@ class TrackedOrder:
 
         return order_copy
 
+    def to_domain(
+        self,
+        *,
+        contract: Contract | None = None,
+        bracket_context: BracketContext | None = None,
+    ) -> PlacedOrder:
+        """Convert TrackedOrder to domain PlacedOrder.
 
-class OrderTracker:
+        Extracts data directly from raw TWS objects (Contract, Order, OrderState)
+        stored in TrackedOrder without relying on flattened dict fields.
+
+        Args:
+            tracked: TrackedOrder wrapping raw TWS objects
+            bracket_context: Optional bracket info from original PreOrder.
+                TWS doesn't return bracket prices in callbacks, so this
+                preserves the original stopLoss/takeProfit/trailingStopPips.
+
+        Returns:
+            Domain PlacedOrder model
+        """
+
+        contract = contract or self.contract
+        order = self.order
+
+        # Build symbol from contract
+        symbol = ticker_name(contract)
+
+        # Order type
+        order_type_str = order.orderType
+        order_type = OrderType(TWS_TO_ORDER_TYPE.get(order_type_str, 2))
+
+        # Side from action
+        side = Side(TWS_ACTION_TO_SIDE.get(order.action, 1))
+
+        # Quantity
+        qty = float(order.totalQuantity)
+
+        # Status with history-aware resolution
+        status = self.domain_status
+
+        # Prices
+        limit_price: float | None = None
+        stop_price: float | None = None
+        if order.lmtPrice and order.lmtPrice > 0:
+            limit_price = order.lmtPrice
+        if order.auxPrice and order.auxPrice > 0:
+            stop_price = order.auxPrice
+
+        # Filled quantity from order object (mutated by orderStatus callback)
+        filled_qty = (
+            0.0 if isUnset(order.filledQuantity) else float(order.filledQuantity)
+        )
+
+        # Average fill price from fills history (last fill's avgFillPrice)
+        avg_price: float | None = None
+        if self.fills and filled_qty > 0:
+            avg_price = self.fills[-1].avgFillPrice
+
+        # Bracket fields from context (TWS doesn't return these in callbacks)
+        take_profit: float | None = None
+        stop_loss: float | None = None
+        trailing_stop_pips: float | None = None
+        stop_type: StopType | None = None
+
+        if bracket_context:
+            take_profit = bracket_context.take_profit
+            stop_loss = bracket_context.stop_loss
+            trailing_stop_pips = bracket_context.trailing_stop_pips
+            if bracket_context.stop_type is not None:
+                stop_type = StopType(bracket_context.stop_type)
+
+        # Parent order linking (for bracket child orders)
+        # TWS sets order.parentId > 0 for child orders (TP/SL)
+        parent_id: str | None = None
+        parent_type: ParentType | None = None
+        if self.parent_filled:
+            parent_id = symbol
+            parent_type = ParentType.POSITION
+        elif order.parentId and order.parentId > 0:
+            parent_id = str(order.parentId)
+            parent_type = ParentType.ORDER
+        else:
+            # Try to parse parentId from OCA group for position brackets
+            parsed_parent_id, parsed_parent_type = self.brackets_info
+            if parsed_parent_id and parsed_parent_type == ParentType.POSITION:
+                parent_id = parsed_parent_id
+                parent_type = ParentType.POSITION
+
+        return PlacedOrder(
+            id=str(self.orderId),
+            symbol=symbol,
+            type=order_type,
+            side=side,
+            qty=qty if qty > 0 else 1,  # Ensure positive qty
+            status=status,
+            limitPrice=limit_price,
+            stopPrice=stop_price,
+            takeProfit=take_profit,
+            stopLoss=stop_loss,
+            guaranteedStop=None,  # Not supported by TWS
+            trailingStopPips=trailing_stop_pips,
+            stopType=stop_type,
+            filledQty=filled_qty if filled_qty > 0 else None,
+            avgPrice=avg_price,
+            updateTime=None,  # Could add timestamp from last fill
+            parentId=parent_id,
+            parentType=parent_type,
+        )
+
+
+# TODO: finer refactoring and cleanup
+# TODO: group smart/overnight orders
+# TODO: switch orders when switching smart/overnight exchange
+class OrderTracker(OrderTrackerCBWiringInterface):
     """Manages order state for IBSocket. Thread-safe via asyncio dispatch.
 
     Encapsulates all order tracking state that was previously scattered across
@@ -217,10 +413,14 @@ class OrderTracker:
         - Subscription: subscribeOpenOrders() → register_order_hook() → dispatch_update()
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ibsocket: IbSocketWiringInterface) -> None:
+        nxt_valid_order_id = ibsocket.wire_order_tracker(self)
+        self.__order_id_count = (
+            count(nxt_valid_order_id) if nxt_valid_order_id else None
+        )
+        self.ibsocket = ibsocket
         self._snapshot_requested = threading.Event()
         self._snapshot_complete = threading.Event()
-        self._order_id_count: count[int] = count()
         self._orders: dict[int, TrackedOrder] = {}
         self._snapshot_hooks: dict[
             str, tuple[asyncio.AbstractEventLoop, asyncio.Future[list[TrackedOrder]]]
@@ -240,17 +440,25 @@ class OrderTracker:
             dict[str, tuple[asyncio.AbstractEventLoop, asyncio.Future[TrackedOrder]]],
         ] = {}
 
-    # --- Order management (reader thread) ---
+    # --- Order helper methods (internal) ---
 
-    def signed_oca_groups(self) -> set[str]:
-        """Get set of all OCA groups in tracked orders."""
-        return {
-            tracked.order.ocaGroup
-            for tracked in self._orders.values()
-            if tracked.order.ocaGroup and tracked.is_active
-        }
+    @property
+    def next_order_id(self) -> int:
+        assert self.__order_id_count is not None, "Order ID counter not initialized."
+        return next(self.__order_id_count)
 
-    def find_tracked_order(
+    def __assert_order_exists(self, orderId: int) -> TrackedOrder:
+        """Raise if orderId not tracked."""
+        if orderId not in self._orders:
+            raise ProviderException(
+                code="SERVICE_TWS_ORDER_NOT_FOUND",
+                message=f"Order ID {orderId} not found in TWS order tracker.",
+                provider="tws",
+                capability="shared",
+            )
+        return self._orders[orderId]
+
+    def __find_tracked_order(
         self,
         order: Order,
     ) -> TrackedOrder | None:
@@ -297,7 +505,7 @@ class OrderTracker:
         )
         return next(iter(orders), None)
 
-    def find_oca_group(self, oca_group: str) -> str | None:
+    def __find_oca_group(self, oca_group: str) -> str | None:
         """Check if any active order exists in given OCA group."""
         oca_group = next(iter(oca_group.split("@")), oca_group)
 
@@ -315,15 +523,7 @@ class OrderTracker:
             None,
         )
 
-    def ensure_snapshot_requested(self, request_cb: Callable[[], None]) -> None:
-        if not self._snapshot_requested.is_set():
-            request_cb()
-            self._snapshot_requested.set()
-
-    def set_next_order_id(self, orderId: int) -> None:
-        self._order_id_count = count(orderId)
-
-    def notify_hooks(self, orderId: int) -> None:
+    def __notify_hooks(self, orderId: int) -> None:
         """Notify all registered hooks with current orders.
 
         Called from reader thread after reconnect snapshot.
@@ -356,19 +556,140 @@ class OrderTracker:
                     stream_callback(tracked),
                 )
 
-        # parent_tracked = tracked.order.parentId and self._orders.get(
-        #     tracked.order.parentId
-        # )
-        # if parent_tracked:
-        #     for loop, future in self._order_hooks.get(
-        #         tracked.order.parentId, {}
-        #     ).values():
-        #         loop.call_soon_threadsafe(resolve_hook, future, parent_tracked)
-        #     for stream_loop, stream_callback, _ in self._stream_hooks.values():
-        #         stream_loop.call_soon_threadsafe(
-        #             stream_loop.create_task,
-        #             stream_callback(parent_tracked),
-        #         )
+    async def __order_update(
+        self, orderId: int, timeout: float | None = None
+    ) -> TrackedOrder:
+        """Register a future to be resolved on next update for orderId.
+
+        Called from main thread.
+
+        Args:
+            orderId: TWS order ID to wait for
+            timeout: Optional timeout in seconds for the update
+        """
+
+        key = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[TrackedOrder] = loop.create_future()
+
+        self._order_hooks.setdefault(orderId, {})[key] = (loop, future)
+
+        try:
+            return await asyncio.wait_for(future, timeout)
+        finally:
+            self._order_hooks.get(orderId, {}).pop(key, None)
+
+    # --- Reset Helper for testing ---
+    def reset(self) -> None:
+        """Full reset - like fresh creation.
+
+        Clears all orders, snapshot state, and hooks.
+        Called from main thread before new snapshot request.
+        """
+        self._orders.clear()
+        self._snapshot_complete.clear()
+        self._snapshot_requested.clear()
+        self._snapshot_hooks.clear()
+        self._stream_hooks.clear()
+        self._order_hooks.clear()
+        self.__order_id_count = count()
+
+    # --- Order request hooks (main thread) ---
+
+    def __ensure_snapshot_requested(self) -> None:
+        if not self._snapshot_requested.is_set():
+            VERSION = 1
+            self.ibsocket.send_message(OUT.REQ_OPEN_ORDERS, [VERSION])
+            if DEBUG_TWS_REQUEST:
+                logger.info("requested open orders")
+            self._snapshot_requested.set()
+
+    def __placeOrder(self, order_id: int, contract: Contract, order: Order) -> None:
+        # Use protobuf encoding for server version >= 203
+        assert (
+            isinstance(order_id, int) and order_id >= 0
+        ), "order_id must be a non-negative integer."
+        assert (
+            isinstance(contract, Contract) and contract.conId != 0
+        ), "contract must be an instance of Contract with a non-zero conId."
+        proto_msg = createPlaceOrderRequestProto(order_id, contract, order)
+        serialized = proto_msg.SerializeToString()
+        # Protobuf message ID = OUT.PLACE_ORDER + 200
+        proto_msg_id = OUT.PLACE_ORDER + PROTOBUF_MSG_ID
+        self.ibsocket.send_protobuf(proto_msg_id, serialized)
+        if DEBUG_TWS_REQUEST:
+            ticker = ticker_name(contract)
+            logger.info(
+                f"placed order (protobuf): id={order_id}, ticker={ticker}, Exchange={contract.exchange} "
+                f"action={order.action}, type={order.orderType} "
+                f"qty={order.totalQuantity}, type={order.lmtPrice or order.auxPrice} "
+            )
+
+    def __submit_order(
+        self,
+        contract: Contract,
+        order: Order,
+        parent_id: int = 0,
+        transmit: bool = False,
+    ) -> tuple[int, bool]:
+        order_id = order.orderId
+        place_flag = True
+        tracked: TrackedOrder | None = self.__find_tracked_order(
+            order,
+        )
+        if tracked:
+            order_ori = tracked.clone_order()
+            order_id = tracked.orderId
+            # we only modify allowed fields. for more infos
+            # check 02-API-REFERENCE-CONTRACTS-ORDERS.md
+            assert (
+                tracked.contract.conId == contract.conId
+            ), f"Cannot change contract of an existing order {tracked.contract.conId} -> {contract.conId}"
+            assert (
+                not contract.exchange or tracked.contract.exchange == contract.exchange
+            ), f"Cannot change exchange of an existing order {tracked.contract.exchange} -> {contract.exchange}"
+            assert (
+                not parent_id or order_ori.parentId == parent_id
+            ), f"Cannot change parentId of an existing order {order_ori.parentId} -> {parent_id}"
+            place_flag = False
+            if order.lmtPrice != UNSET_DOUBLE and order_ori.lmtPrice != order.lmtPrice:
+                order_ori.lmtPrice = order.lmtPrice
+                place_flag = True
+            if order.auxPrice != UNSET_DOUBLE and order_ori.auxPrice != order.auxPrice:
+                order_ori.auxPrice = order.auxPrice
+                place_flag = True
+            if (
+                order.totalQuantity != UNSET_DECIMAL
+                and order_ori.totalQuantity != order.totalQuantity
+            ):
+                order_ori.totalQuantity = order.totalQuantity
+                place_flag = True
+            order = order_ori
+            order.tif = ""  # do not modify time-in-force for existing orders
+            order.transmit = True  # always transmit existing orders
+        else:
+            order_id = self.next_order_id
+            order.parentId = parent_id
+            order.transmit = transmit
+
+        if place_flag:
+            self.__placeOrder(order_id, contract, order)
+
+        return order_id, place_flag
+
+    def __cancelOrder(self, order_id: int) -> None:
+        orderCancel = OrderCancel()
+        cancelOrderRequestProto = createCancelOrderRequestProto(order_id, orderCancel)
+        serializedString = cancelOrderRequestProto.SerializeToString()
+
+        self.ibsocket.send_protobuf(
+            OUT.CANCEL_ORDER + PROTOBUF_MSG_ID, serializedString
+        )
+
+        if DEBUG_TWS_REQUEST:
+            logger.info(f"cancelled order: id={order_id}")
+
+    # --- Order management (reader thread) ---
 
     def upsert_order(
         self,
@@ -402,7 +723,7 @@ class OrderTracker:
                 orderState=orderState,
             )
 
-        self.notify_hooks(orderId)
+        self.__notify_hooks(orderId)
 
     def update_status(
         self,
@@ -469,7 +790,7 @@ class OrderTracker:
             )
         )
 
-        self.notify_hooks(orderId)
+        self.__notify_hooks(orderId)
 
     def raise_error(self, exception: ProviderException) -> None:
         """Dispatch error to all stream hooks.
@@ -519,23 +840,9 @@ class OrderTracker:
 
             loop.call_soon_threadsafe(resolve_hook, future, list(self._orders.values()))
 
-    # --- Order registrations (main thread) ---
+    # --- Exposed Order methods (main thread) ---
 
-    def reset(self) -> None:
-        """Full reset - like fresh creation.
-
-        Clears all orders, snapshot state, and hooks.
-        Called from main thread before new snapshot request.
-        """
-        self._orders.clear()
-        self._snapshot_complete.clear()
-        self._snapshot_requested.clear()
-        self._snapshot_hooks.clear()
-        self._stream_hooks.clear()
-        self._order_hooks.clear()
-        self._order_id_count = count()
-
-    async def all_orders(self, timeout: float | None = None) -> list[TrackedOrder]:
+    async def reqOpenOrders(self, timeout: float | None = None) -> list[TrackedOrder]:
         """Register a future to be resolved when snapshot completes.
 
         Called from main thread. If snapshot is already complete,
@@ -545,6 +852,8 @@ class OrderTracker:
             loop: Event loop for the future
             future: Future to resolve with order list
         """
+
+        self.__ensure_snapshot_requested()
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future[list[TrackedOrder]] = loop.create_future()
@@ -561,43 +870,167 @@ class OrderTracker:
         finally:
             self._snapshot_hooks.pop(key, None)
 
-    @property
-    def next_order_id(self) -> int:
-        return next(self._order_id_count)
-
-    def ensure_existing_order(self, orderId: int) -> TrackedOrder:
-        """Raise if orderId not tracked."""
-        if orderId not in self._orders:
-            raise ProviderException(
-                code="SERVICE_TWS_ORDER_NOT_FOUND",
-                message=f"Order ID {orderId} not found in TWS order tracker.",
-                provider="tws",
-                capability="shared",
-            )
-        return self._orders[orderId]
-
-    async def order_update(
-        self, orderId: int, timeout: float | None = None
+    async def placeWhatifOrder(
+        self, contract: Contract, order: Order, timeout: float
     ) -> TrackedOrder:
-        """Register a future to be resolved on next update for orderId.
+        """Place an order via TWS.
 
-        Called from main thread.
+        Allocates a unique order ID and submits the order. Order status updates
+        are delivered via openOrder() and orderStatus() callbacks.
 
         Args:
-            orderId: TWS order ID to wait for
-            timeout: Optional timeout in seconds for the update
+            contract: Contract to trade
+            order: Order parameters (type, side, quantity, price, etc.)
+
+        Returns:
+            The allocated order ID
+
+        Note:
+            For server version >= 203, uses protobuf encoding (required by TWS).
+            For older server versions, uses legacy message format.
         """
 
-        key = str(uuid.uuid4())
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[TrackedOrder] = loop.create_future()
+        if order.orderId != -1:
+            logger.warning(
+                "placeWhatifOrder called with pre-set order.orderId; "
+                "this may cause unexpected behavior"
+            )
+            order.orderId = -1
+        if not order.whatIf:
+            logger.warning(
+                "placeWhatifOrder called with order.whatIf=False; "
+                "proceeding to place a regular order"
+            )
+            order.whatIf = True
+        order_id = self.next_order_id
+        self.__placeOrder(order_id, contract, order)
+        return await self.__order_update(order_id, timeout=timeout)
 
-        self._order_hooks.setdefault(orderId, {})[key] = (loop, future)
+    async def placeOcaGroup(
+        self,
+        contract: Contract,
+        order_list: list[Order],
+        oca_group: str,
+        oca_type: int = 1,
+        parent_id: int = 0,
+        timeout: float | None = None,
+    ) -> list[TrackedOrder]:
+        """Place multiple orders linked by OCA (One-Cancels-All) group.
 
-        try:
-            return await asyncio.wait_for(future, timeout)
-        finally:
-            self._order_hooks.get(orderId, {}).pop(key, None)
+        Used for position brackets where no parent order exists.
+        When one order in the group fills, TWS automatically cancels the rest.
+
+        Args:
+            contract: The contract for all orders
+            orders: List of Order objects (e.g., stop loss + take profit)
+            oca_group: Unique OCA group identifier string
+            oca_type: OCA behavior type:
+                1 = Cancel all remaining with block (overfill protection) - RECOMMENDED
+                2 = Proportional reduce with block
+                3 = Proportional reduce no block
+
+        Returns:
+            List of TrackedOrder for each submitted order
+        """
+        if not order_list:
+            return []
+
+        if not oca_group.startswith("brackets_"):
+            raise ValueError("oca_group must start with 'brackets_'")
+
+        # get or create unique OCA group name
+        transmit_all = False
+        signed_oca_group = self.__find_oca_group(oca_group)
+        if signed_oca_group:
+            transmit_all = True
+        else:
+            signed_oca_group = f"{oca_group}@{int(time.time() * 1000)}"
+
+        # Assign OCA attributes to each order
+        for order in order_list:
+            order.ocaGroup = signed_oca_group
+            order.ocaType = oca_type
+
+        submit_results = [
+            self.__submit_order(
+                contract, order, parent_id=parent_id, transmit=transmit_all
+            )
+            for order in order_list[:-1]
+        ]
+        submit_results.append(
+            self.__submit_order(
+                contract, order_list[-1], parent_id=parent_id, transmit=True
+            )
+        )
+
+        tracked_list = await asyncio.gather(
+            *[
+                self.__order_update(oid, timeout=timeout)
+                for oid, placed in submit_results
+                if placed
+            ]
+        ) + [
+            self.__assert_order_exists(oid)
+            for oid, placed in submit_results
+            if not placed
+        ]
+
+        return list(tracked_list)
+
+    async def placeOrderGroup(
+        self,
+        contract: Contract,
+        parent: Order,
+        children: list[Order],
+        timeout: float | None = None,
+    ) -> tuple[TrackedOrder, list[TrackedOrder]]:
+        """Place a parent order with optional child orders (bracket).
+
+        Allocates unique order IDs and submits orders atomically.
+        Parent is submitted first, children use transmit chain pattern.
+
+        Args:
+            contract: Contract to trade
+            parent: Parent order (entry order)
+            children: Child orders (stop loss, take profit, etc.)
+
+        Returns:
+            Tuple of (parent TrackedOrder, list of child TrackedOrders)
+        """
+        parent_id, placed = self.__submit_order(
+            contract, parent, transmit=(not children)
+        )
+
+        children_tracked: list[TrackedOrder] = []
+        if children:
+            children_tracked = await self.placeOcaGroup(
+                contract,
+                children,
+                oca_group=f"brackets_{parent_id}",
+                oca_type=1,
+                parent_id=parent_id,
+            )
+
+        parent_tracked = (
+            (await self.__order_update(parent_id, timeout=timeout))
+            if placed
+            else self.__assert_order_exists(parent_id)
+        )
+
+        return parent_tracked, children_tracked
+
+    async def cancelOrder(self, order_id: int, timeout: float) -> TrackedOrder:
+        """Cancel an order via TWS.
+
+        Args:
+            order_id: Order ID to cancel
+        """
+
+        self.__assert_order_exists(order_id)
+        self.__cancelOrder(order_id)
+        return await self.__order_update(order_id, timeout=timeout)
+
+    # --- Reset and hooks (main thread) ---
 
     def create_stream_hook(
         self,
@@ -614,6 +1047,7 @@ class OrderTracker:
             callback: Called for each order update
             on_error: Optional error callback
         """
+        self.__ensure_snapshot_requested()
         key = str(uuid.uuid4())
         self._stream_hooks[key] = (loop, callback, on_error)
         return key

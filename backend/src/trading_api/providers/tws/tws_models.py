@@ -560,12 +560,14 @@ class TWSErrorNature:
     - A request ID (reqId) for data requests like market data, historical data
     - An order ID (orderId) for order-related operations
     - -1 for system-wide errors (neither request nor order specific)
+    - -1 for position-related errors (global subscription, no reqId)
 
     This classification helps route errors to the appropriate handler.
     """
 
     REQUEST = "req"  # Error ID is a request ID (market data, historical, etc.)
     ORDER = "order"  # Error ID is an order ID
+    POSITION = "position"  # Position-related error (global subscription, no reqId)
     SYSTEM = "system"  # System-wide error (reqId=-1 or connection-level)
 
 
@@ -681,7 +683,6 @@ _FATAL_CODES: frozenset[int] = frozenset(
 _NOT_FOUND_CODES: frozenset[int] = frozenset(
     {
         135,  # Can't find order with ID
-        162,  # HMDS query returned no data (valid empty response)
         300,  # Can't find ticker ID
         366,  # No historical data query found
         365,  # No scanner subscription found
@@ -739,8 +740,7 @@ _ORDER_NATURE_CODES: frozenset[int] = frozenset(
         313,  # Combo leg details invalid
         314,  # Security type BAG requires combo legs
         315,  # Stock combo legs restricted to SMART
-        321,  # Server error validating request (can be order)
-        322,  # Server error processing request (can be order)
+        # 321, 322 moved to _POSITION_NATURE_CODES (server errors during position requests)
         325,  # Discretionary orders not supported
         328,  # Trailing stop attachment error
         329,  # Cannot change to new order type
@@ -780,7 +780,7 @@ _REQUEST_NATURE_CODES: frozenset[int] = frozenset(
         166,  # HMDS expired contract violation
         366,  # No historical data query found
         # Contract/security definition
-        200,  # No security definition found
+        # Note: 200 moved to _POSITION_NATURE_CODES for position-specific handling
         203,  # Security not available for account (can be request context)
         # Market data request errors
         300,  # Can't find ticker ID
@@ -798,6 +798,16 @@ _REQUEST_NATURE_CODES: frozenset[int] = frozenset(
         10167,  # Requested market data requires subscription
         10186,  # Market data not subscribed, delayed not enabled
         10197,  # No market data during competing session
+    }
+)
+
+# Position-related error codes (global subscription, no reqId)
+# These errors occur during position requests (reqPositions has no reqId)
+_POSITION_NATURE_CODES: frozenset[int] = frozenset(
+    {
+        200,  # No security definition found (position contract unknown)
+        321,  # Server error validating request (position request validation)
+        322,  # Server error processing request (position request processing)
     }
 )
 
@@ -845,16 +855,19 @@ _SYSTEM_NATURE_CODES: frozenset[int] = frozenset(
 
 
 def _classify_nature(error_code: int) -> str:
-    """Determine if error ID represents a request ID, order ID, or system error.
+    """Determine if error ID represents a request ID, order ID, position, or system error.
 
     Args:
         error_code: TWS error code
 
     Returns:
-        TWSErrorNature constant (REQUEST, ORDER, or SYSTEM)
+        TWSErrorNature constant (REQUEST, ORDER, POSITION, or SYSTEM)
     """
     if error_code in _ORDER_NATURE_CODES:
         return TWSErrorNature.ORDER
+
+    if error_code in _POSITION_NATURE_CODES:
+        return TWSErrorNature.POSITION
 
     if error_code in _REQUEST_NATURE_CODES:
         return TWSErrorNature.REQUEST
