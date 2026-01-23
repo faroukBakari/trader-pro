@@ -2,10 +2,11 @@
 
 Tests cover:
 - SQLiteContractCache: CRUD operations, WAL mode, thread safety
-- ContractTracker: Lazy loading (memory → SQLite → None), upsert, session management
+- ContractTracker: Lazy loading (memory → SQLite → None), wiring interface, session management
 """
 
 from pathlib import Path
+from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 from ibapi.contract import Contract, ContractDescription, ContractDetails
@@ -14,6 +15,7 @@ from trading_api.providers.tws.contract_tracker import (
     ContractTracker,
     SQLiteContractCache,
 )
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
 
 
 def _make_contract(
@@ -286,25 +288,57 @@ class TestSQLiteContractCacheGetBySymbolPrefix:
 
 
 @pytest.fixture
-def tracker(tmp_path: Path) -> ContractTracker:
-    """Create a ContractTracker with temp database."""
+def mock_ibsocket() -> MagicMock:
+    """Create a mock IbSocketWiringInterface for ContractTracker tests.
+
+    The mock returns incrementing req_ids starting from 1.
+    """
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    req_id_counter = [0]
+
+    def get_next_req_id() -> int:
+        req_id_counter[0] += 1
+        return req_id_counter[0]
+
+    type(mock).next_req_id = PropertyMock(side_effect=get_next_req_id)
+    return mock
+
+
+@pytest.fixture
+def tracker(tmp_path: Path, mock_ibsocket: MagicMock) -> ContractTracker:
+    """Create a ContractTracker with temp database and mock ibsocket."""
     db_path = str(tmp_path / "contracts.db")
-    return ContractTracker(db_path=db_path)
+    return ContractTracker(ibsocket=mock_ibsocket, db_path=db_path)
 
 
-class TestContractTrackerGetBySymbolPrefix:
-    """Test ContractTracker.get_by_symbol_prefix lazy loading."""
+class TestContractTrackerWiring:
+    """Test ContractTracker wiring interface integration."""
 
-    def test_returns_from_memory(self, tracker: ContractTracker) -> None:
-        """Test get_by_symbol_prefix returns from in-memory cache."""
-        tracker.upsert_descriptions(
-            [
-                _make_description(symbol="AAPL", con_id=1),
-                _make_description(symbol="AA", con_id=2),
-            ]
-        )
+    def test_wires_to_ibsocket_on_init(
+        self, tmp_path: Path, mock_ibsocket: MagicMock
+    ) -> None:
+        """ContractTracker calls wire_contract_tracker() during __init__."""
+        db_path = str(tmp_path / "contracts.db")
+        tracker = ContractTracker(ibsocket=mock_ibsocket, db_path=db_path)
 
-        results = tracker.get_by_symbol_prefix("AA")
+        mock_ibsocket.wire_contract_tracker.assert_called_once_with(tracker)
+
+
+class TestContractTrackerLoadCachedDescriptions:
+    """Test ContractTracker._search_cache lazy loading."""
+
+    def test_returns_from_memory_cache(self, tracker: ContractTracker) -> None:
+        """Test _search_cache returns from in-memory _cached_contracts."""
+        from trading_api.providers.tws.cached_contract import CachedContract
+
+        # Directly populate memory cache via _cache_results
+        desc1 = _make_description(symbol="AAPL", con_id=1)
+        desc2 = _make_description(symbol="AA", con_id=2)
+        cached1 = CachedContract.from_contract_description(desc1)
+        cached2 = CachedContract.from_contract_description(desc2)
+        tracker._cache_results([cached1, cached2])
+
+        results = tracker._search_cache("AA")
 
         assert len(results) == 2
         symbols = [r.contract.symbol for r in results]
@@ -312,7 +346,8 @@ class TestContractTrackerGetBySymbolPrefix:
         assert "AA" in symbols
 
     def test_loads_from_sqlite_on_memory_miss(self, tracker: ContractTracker) -> None:
-        """Test get_by_symbol_prefix loads from SQLite when not in memory."""
+        """Test _search_cache loads from SQLite when not in memory."""
+        # Directly populate SQLite (bypass memory cache)
         tracker._sqlite.upsert_many(
             [
                 {
@@ -336,142 +371,174 @@ class TestContractTrackerGetBySymbolPrefix:
             ]
         )
 
-        results = tracker.get_by_symbol_prefix("AA")
+        results = tracker._search_cache("AA")
 
         assert len(results) == 2
-        assert 1 in tracker._descriptions
-        assert 2 in tracker._descriptions
+        # Verify loaded into _cached_contracts (ticker-keyed)
+        assert "NASDAQ:AAPL" in tracker._cached_contracts
+        assert "NYSE:AA" in tracker._cached_contracts
 
     def test_returns_empty_list_when_not_found(self, tracker: ContractTracker) -> None:
-        """Test get_by_symbol_prefix returns empty list when not found."""
-        results = tracker.get_by_symbol_prefix("UNKNOWN")
+        """Test _search_cache returns empty list when not found."""
+        results = tracker._search_cache("UNKNOWN")
         assert results == []
 
 
-class TestContractTrackerUpsertDescriptions:
-    """Test ContractTracker.upsert_descriptions method."""
+class TestContractTrackerCacheResults:
+    """Test ContractTracker._cache_results method."""
 
     def test_persists_to_sqlite_and_memory(self, tracker: ContractTracker) -> None:
-        """Test upsert_descriptions persists to both SQLite and memory."""
+        """Test _cache_results persists to both SQLite and in-memory cache."""
+        from trading_api.providers.tws.cached_contract import CachedContract
+
         desc = _make_description(con_id=265598, symbol="AAPL")
+        cached = CachedContract.from_contract_description(desc)
 
-        result = tracker.upsert_descriptions([desc])
+        tracker._cache_results([cached])
 
-        assert len(result) == 1
-        assert result[0].con_id == 265598
+        # In memory (_cached_contracts is ticker-keyed)
+        assert "NASDAQ:AAPL" in tracker._cached_contracts
 
-        # In memory
-        assert 265598 in tracker._descriptions
-
-        # In SQLite (via fresh lookup)
-        tracker._descriptions.clear()
-        loaded = tracker.get_by_symbol_prefix("AAPL")
+        # In SQLite (via fresh lookup after clearing memory)
+        tracker._cached_contracts.clear()
+        loaded = tracker._search_cache("AAPL")
         assert len(loaded) == 1
 
-    def test_skips_invalid_con_ids(self, tracker: ContractTracker) -> None:
-        """Test upsert_descriptions skips entries with invalid conId."""
-        desc = _make_description(con_id=0)  # Invalid
+    def test_skips_duplicate_tickers(self, tracker: ContractTracker) -> None:
+        """Test _cache_results skips entries already in cache."""
+        from trading_api.providers.tws.cached_contract import CachedContract
 
-        result = tracker.upsert_descriptions([desc])
+        desc = _make_description(con_id=265598, symbol="AAPL")
+        cached = CachedContract.from_contract_description(desc)
 
-        assert len(result) == 0
-        assert 0 not in tracker._descriptions
+        # First call caches
+        tracker._cache_results([cached])
+        assert "NASDAQ:AAPL" in tracker._cached_contracts
 
-    def test_returns_empty_list_for_empty_input(self, tracker: ContractTracker) -> None:
-        """Test upsert_descriptions returns empty list for empty input."""
-        result = tracker.upsert_descriptions([])
-        assert result == []
+        # Second call with same ticker should not overwrite
+        desc2 = _make_description(con_id=265598, symbol="AAPL")
+        cached2 = CachedContract.from_contract_description(desc2)
+        tracker._cache_results([cached2])
+
+        # Still only one entry
+        assert len([k for k in tracker._cached_contracts if "AAPL" in k]) == 1
 
 
-class TestContractTrackerUpsertDetails:
-    """Test ContractTracker.upsert_details method."""
+class TestContractTrackerUpdateDescriptions:
+    """Test ContractTracker.update_descriptions wiring callback."""
 
-    def test_stores_in_memory_only(self, tracker: ContractTracker) -> None:
-        """Test upsert_details stores in memory, NOT SQLite."""
+    def test_filters_invalid_con_ids(
+        self, tracker: ContractTracker, mock_ibsocket: MagicMock
+    ) -> None:
+        """Test update_descriptions skips entries with conId <= 0."""
+        import asyncio
+
+        # Set up a pending future to receive results
+        loop = asyncio.new_event_loop()
+        future: asyncio.Future[list] = loop.create_future()
+        req_id = 1
+
+        with tracker.tracker_lock:
+            tracker._pending_descriptions[req_id] = {"test": (loop, future)}
+
+        # Call update_descriptions with invalid conId
+        invalid_desc = _make_description(con_id=0)
+        valid_desc = _make_description(con_id=265598, symbol="AAPL")
+
+        tracker.update_descriptions(req_id, [invalid_desc, valid_desc])
+
+        # Process pending callbacks
+        loop.run_until_complete(asyncio.sleep(0.01))
+
+        # Future should be set with only valid result
+        assert future.done()
+        result = future.result()
+        assert len(result) == 1
+        assert result[0].contract.conId == 265598
+
+        loop.close()
+
+
+class TestContractTrackerUpdateDetails:
+    """Test ContractTracker.update_details wiring callback."""
+
+    def test_accumulates_details_by_req_id(self, tracker: ContractTracker) -> None:
+        """Test update_details accumulates details in _details dict."""
+        details1 = _make_details(con_id=265598, symbol="AAPL")
+        details2 = _make_details(con_id=272093, symbol="MSFT")
+
+        req_id = 1
+        tracker.update_details(req_id, details1)
+        tracker.update_details(req_id, details2)
+
+        assert req_id in tracker._details
+        assert len(tracker._details[req_id]) == 2
+
+
+class TestContractTrackerFlagDetailsComplete:
+    """Test ContractTracker.flag_details_complete wiring callback."""
+
+    def test_resolves_pending_future(self, tracker: ContractTracker) -> None:
+        """Test flag_details_complete resolves pending futures."""
+        import asyncio
+
+        loop = asyncio.new_event_loop()
+        future: asyncio.Future[list] = loop.create_future()
+        req_id = 1
+
+        # Add pending details hook
+        with tracker.tracker_lock:
+            tracker._pending_details[req_id] = {"test": (loop, future)}
+
+        # Add some details first
         details = _make_details(con_id=265598)
+        tracker.update_details(req_id, details)
 
-        result = tracker.upsert_details(details)
+        # Flag complete
+        tracker.flag_details_complete(req_id)
 
-        assert result.has_full_details is True
-        assert 265598 in tracker._details
+        # Process callbacks
+        loop.run_until_complete(asyncio.sleep(0.01))
 
-        # NOT in SQLite (details never persisted to SQLite)
-        sqlite_result = tracker._sqlite.get_by_symbol_prefix("AAPL")
-        assert sqlite_result == []
+        assert future.done()
+        result = future.result()
+        assert len(result) == 1
+        assert result[0].contract.conId == 265598
 
-    def test_stores_overnight_hours(self, tracker: ContractTracker) -> None:
-        """Test upsert_details stores overnight hours."""
-        details = _make_details(con_id=265598)
-
-        result = tracker.upsert_details(details, overnight_hours="20260114:1600-2000")
-
-        assert result.overnight_hours == "20260114:1600-2000"
-
-
-class TestContractTrackerGetFullDetails:
-    """Test ContractTracker.get_full_details method."""
-
-    def test_returns_details_from_memory(self, tracker: ContractTracker) -> None:
-        """Test get_full_details returns from details cache."""
-        details = _make_details(con_id=265598)
-        tracker.upsert_details(details)
-
-        result = tracker.get_details_from_cache(265598)
-
-        assert result is not None
-        assert result.has_full_details is True
-
-    def test_does_not_return_descriptions(self, tracker: ContractTracker) -> None:
-        """Test get_full_details does not return description-level entries."""
-        desc = _make_description(con_id=265598)
-        tracker.upsert_descriptions([desc])
-
-        result = tracker.get_details_from_cache(265598)
-
-        assert result is None  # Only descriptions in cache
-
-    def test_returns_none_when_not_found(self, tracker: ContractTracker) -> None:
-        """Test get_full_details returns None when not found."""
-        result = tracker.get_details_from_cache(999999)
-        assert result is None
+        loop.close()
 
 
 class TestContractTrackerSessionManagement:
     """Test ContractTracker session management methods."""
 
-    def test_clear_details_cache_clears_details_only(
-        self, tracker: ContractTracker
-    ) -> None:
-        """Test clear_details_cache clears details but not descriptions."""
-        desc = _make_description(con_id=1)
-        details = _make_details(con_id=2)
-        tracker.upsert_descriptions([desc])
-        tracker.upsert_details(details)
-
-        tracker.clear_details_cache()
-
-        assert 1 in tracker._descriptions
-        assert 2 not in tracker._details
-
     def test_reset_clears_all_memory(self, tracker: ContractTracker) -> None:
         """Test reset clears all in-memory caches."""
+        from trading_api.providers.tws.cached_contract import CachedContract
+
         desc = _make_description(con_id=1)
+        cached = CachedContract.from_contract_description(desc)
+        tracker._cache_results([cached])
+
+        # Also add to details
         details = _make_details(con_id=2)
-        tracker.upsert_descriptions([desc])
-        tracker.upsert_details(details)
+        tracker.update_details(req_id=1, details=details)
 
         tracker.reset()
 
-        assert len(tracker._descriptions) == 0
+        assert len(tracker._cached_contracts) == 0
         assert len(tracker._details) == 0
+        assert len(tracker._descriptions) == 0
 
     def test_reset_preserves_sqlite_data(self, tracker: ContractTracker) -> None:
         """Test reset preserves SQLite data."""
+        from trading_api.providers.tws.cached_contract import CachedContract
+
         desc = _make_description(con_id=265598, symbol="AAPL")
-        tracker.upsert_descriptions([desc])
+        cached = CachedContract.from_contract_description(desc)
+        tracker._cache_results([cached])
 
         tracker.reset()
 
         # SQLite data still available via lazy load
-        results = tracker.get_by_symbol_prefix("AAPL")
+        results = tracker._search_cache("AAPL")
         assert len(results) == 1

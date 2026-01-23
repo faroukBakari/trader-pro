@@ -212,6 +212,7 @@ class TrackedQuote:
         "bar_wap",
         "bar_count",
         "snapshot_complete",
+        "__log_timer",
     )
 
     def __init__(
@@ -228,6 +229,7 @@ class TrackedQuote:
         self.cached_contract: CachedContract = contract
         self.req_id: int = req_id
         self.last_update: float = time.time()
+        self.__log_timer: float = time.time()
 
         # Initialize all tick fields to None
         self.bid: float | None = None
@@ -347,7 +349,10 @@ class TrackedQuote:
         this can be extended to check delayed data as fallback.
         """
         if not self.is_live:
-            return False
+            logger.warning(
+                f"TrackedQuote for req_id {self.req_id} is stale - last update "
+                f"{time.time() - self.last_update:.1f}s ago"
+            )
 
         if self.snapshot_complete.is_set():
             return True
@@ -370,6 +375,13 @@ class TrackedQuote:
             updates: Dict of field_name -> value from tick callbacks
         """
         self.last_update = time.time()
+
+        if time.time() - self.__log_timer > 5.0:
+            self.__log_timer = time.time()
+            logger.info(
+                f"TrackedQuote is live for req_id {self.req_id} "
+                f"({self.cached_contract.ticker}): bid={self.bid} ask={self.ask} last={self.last}"
+            )
 
         # Apply updates to attributes
         for field_name, value in updates.items():
@@ -643,28 +655,22 @@ class QuoteTracker(QuoteTrackerCBWiringInterface):
         """Debounce unsubscribe - remove quote if no active subscriptions."""
 
         def debounce_cancel(req_id: int) -> None:
-            with self.tracker_lock:
-                quote = self._quotes.get(req_id)
-                if quote is None:
-                    if DEBUG_TWS_DATAFEED:
-                        logger.info(
-                            f"debounce_cancel: No quote found for req_id {req_id}"
-                        )
-                    return
-                if not self._quote_in_use(req_id):
+            quote = self._quotes.get(req_id)
+            assert quote is not None, "quote should exist for debounce cancel"
+            if not self._quote_in_use(req_id):
+                with self.tracker_lock:
                     self._requests.pop(quote.cached_contract.ticker, None)
                     self._quote_cancel_hook(req_id)
                     self._quotes.pop(req_id, None)
-                elif DEBUG_TWS_DATAFEED:
-                    logger.info(
-                        f"debounce_cancel: Quote for req_id {req_id} still in use {quote.cached_contract.ticker}, "
-                        f"snapshot_hooks={[key[-12:] for key in self._snapshot_hooks.get(req_id, {}).keys()]}, "
-                        f"stream_hooks={[key[-12:] for key in self._stream_hooks.get(req_id, {}).keys()]}"
-                    )
-                if DEBUG_TWS_DATAFEED:
-                    logger.info(f"remaining quotes: {list(self._requests.keys())}")
+            else:
+                logger.info(
+                    f"debounce_cancel: Quote for req_id {req_id} still in use {quote.cached_contract.ticker}, "
+                    f"snapshot_hooks={[key[-12:] for key in self._snapshot_hooks.get(req_id, {}).keys()]}, "
+                    f"stream_hooks={[key[-12:] for key in self._stream_hooks.get(req_id, {}).keys()]}"
+                )
+            logger.info(f"remaining quotes: {list(self._requests.keys())}")
 
-        asyncio.get_running_loop().call_later(1.0, debounce_cancel, req_id)
+        asyncio.get_running_loop().call_later(3.0, debounce_cancel, req_id)
 
     # === Lookup Methods (main thread) ===
 
@@ -802,6 +808,7 @@ class QuoteTracker(QuoteTrackerCBWiringInterface):
         if quote is None:
             logger.warning(f"Received tick update for unknown req_id {req_id}")
             return
+
         quote.update(updates)
 
         with self.tracker_lock:
@@ -810,10 +817,11 @@ class QuoteTracker(QuoteTrackerCBWiringInterface):
 
         # If no longer used, debounce cancel
         if not (quote_snapshot_hooks or quote_stream_hooks):
-            logger.warning(
-                f"update: Unused quote subscription for req_id "
-                f"{req_id} --> {quote.cached_contract.ticker}"
-            )
+            if DEBUG_TWS_DATAFEED:
+                logger.warning(
+                    f"update: Unused quote subscription for req_id "
+                    f"{req_id} --> {quote.cached_contract.ticker}"
+                )
             return
 
         # Resolve snapshot hooks if ready
@@ -841,7 +849,6 @@ class QuoteTracker(QuoteTrackerCBWiringInterface):
         quote = self._quotes.get(req_id)
 
         if quote is None:
-            logger.warning(f"Received error for unknown req_id {req_id}")
             return False
 
         with self.tracker_lock:

@@ -13,7 +13,7 @@ What we DON'T test here (tested elsewhere):
 
 import asyncio
 from decimal import Decimal
-from typing import Any, Awaitable
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
@@ -122,74 +122,28 @@ class TestSymbolSearch:
 
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.contract_tracker.get_by_symbol_prefix.return_value = [cached]
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        # Mock contract_tracker with async get_descriptions
+        mock_tracker = MagicMock()
+        mock_tracker.get_descriptions = AsyncMock(return_value=[cached])
+        client._TWSClient__contract_tracker = mock_tracker  # type: ignore[attr-defined]
 
         result = await client.reqMatchingSymbols("AAPL")
 
         assert len(result) == 1
         assert result[0].contract.symbol == "AAPL"
         assert result[0].contract.conId == 265598
-        # Critical: no API call when cache has data
-        mock_ibsocket.create_snapshot.assert_not_called()
-        mock_ibsocket.reqMatchingSymbols.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_fetches_from_tws_on_cache_miss(self) -> None:
-        """Cache miss triggers TWS API call and populates tracker."""
-        client = TWSClient("127.0.0.1", 7497, 1, timeout=5.0)
-
-        contract = Contract()
-        contract.symbol = "AAPL"
-        contract.exchange = "SMART"
-        contract.secType = "STK"
-        contract.conId = 265598
-        desc = ContractDescription()
-        desc.contract = contract
-        cached = CachedContract.from_contract_description(desc)
-
-        mock_ibsocket = MagicMock()
-        mock_ibsocket.running = True
-        mock_ibsocket.get_cached_data.return_value = None
-
-        # First call: cache miss, second call: after API populates
-        call_count = [0]
-
-        def cache_side_effect(pattern: str) -> list[CachedContract]:
-            call_count[0] += 1
-            return [] if call_count[0] == 1 else [cached]
-
-        mock_ibsocket.contract_tracker.get_by_symbol_prefix.side_effect = (
-            cache_side_effect
-        )
-
-        def create_snapshot_side_effect(
-            business_key: str, *, timeout: float | None = 5
-        ) -> tuple[int | None, Awaitable[Any]]:
-            loop = asyncio.get_running_loop()
-            future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
-
-            async def resolve() -> None:
-                await asyncio.sleep(0.01)
-                future.set_result([{"contractDescriptions": desc}])
-
-            asyncio.create_task(resolve())
-            return (42, asyncio.wait_for(future, timeout))
-
-        mock_ibsocket.create_snapshot = create_snapshot_side_effect
-        mock_ibsocket.reqMatchingSymbols = MagicMock()
-        client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
-
-        result = await client.reqMatchingSymbols("AAPL")
-
-        assert len(result) == 1
-        assert result[0].contract.symbol == "AAPL"
-        # Verify correct reqId passed to TWS
-        mock_ibsocket.reqMatchingSymbols.assert_called_once_with(42, "AAPL")
+        # ContractTracker.get_descriptions called
+        mock_tracker.get_descriptions.assert_called_once_with("AAPL", timeout=5.0)
 
     @pytest.mark.asyncio
     async def test_filters_invalid_contract_ids(self) -> None:
-        """Contracts with conId <= 0 are filtered (TWS junk data)."""
+        """Contracts with conId <= 0 are filtered (TWS junk data).
+
+        Note: Filtering now happens inside ContractTracker.get_descriptions,
+        so this test verifies TWSClient passes through tracker results correctly.
+        """
         client = TWSClient("127.0.0.1", 7497, 1, timeout=5.0)
 
         valid = Contract()
@@ -199,55 +153,20 @@ class TestSymbolSearch:
         valid_desc = ContractDescription()
         valid_desc.contract = valid
 
-        invalid = Contract()
-        invalid.symbol = "JUNK"
-        invalid.exchange = "SMART"
-        invalid.conId = 0  # Invalid
-        invalid_desc = ContractDescription()
-        invalid_desc.contract = invalid
-
         valid_cached = CachedContract.from_contract_description(valid_desc)
 
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.get_cached_data.return_value = None
-
-        call_count = [0]
-
-        def cache_side_effect(pattern: str) -> list[CachedContract]:
-            call_count[0] += 1
-            return [] if call_count[0] == 1 else [valid_cached]
-
-        mock_ibsocket.contract_tracker.get_by_symbol_prefix.side_effect = (
-            cache_side_effect
-        )
-
-        def create_snapshot_side_effect(
-            business_key: str, *, timeout: float | None = 5
-        ) -> tuple[int | None, Awaitable[Any]]:
-            loop = asyncio.get_running_loop()
-            future: asyncio.Future[list[dict[str, Any]]] = loop.create_future()
-
-            async def resolve() -> None:
-                await asyncio.sleep(0.01)
-                # TWS returns both valid and invalid
-                future.set_result(
-                    [
-                        {"contractDescriptions": valid_desc},
-                        {"contractDescriptions": invalid_desc},
-                    ]
-                )
-
-            asyncio.create_task(resolve())
-            return (1, asyncio.wait_for(future, timeout))
-
-        mock_ibsocket.create_snapshot = create_snapshot_side_effect
-        mock_ibsocket.reqMatchingSymbols = MagicMock()
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        # ContractTracker already filters invalid (conId <= 0)
+        mock_tracker = MagicMock()
+        mock_tracker.get_descriptions = AsyncMock(return_value=[valid_cached])
+        client._TWSClient__contract_tracker = mock_tracker  # type: ignore[attr-defined]
 
         result = await client.reqMatchingSymbols("AAPL")
 
-        # Only valid contract returned (conId > 0)
+        # Only valid contract returned (filtering done by tracker)
         assert len(result) == 1
         assert result[0].contract.conId == 265598
 
@@ -274,9 +193,12 @@ class TestContractDetails:
 
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.contract_tracker.get_full_details.return_value = cached
-        mock_ibsocket.contract_tracker._details = {265598: cached}
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        # Mock contract_tracker with async get_details
+        mock_tracker = MagicMock()
+        mock_tracker.get_details = AsyncMock(return_value=cached)
+        client._TWSClient__contract_tracker = mock_tracker  # type: ignore[attr-defined]
 
         query = Contract()
         query.symbol = "AAPL"
@@ -285,9 +207,9 @@ class TestContractDetails:
 
         result = await client.reqContractDetails(query)
 
-        assert len(result) == 1
-        assert result[0].longName == "Apple Inc"
-        mock_ibsocket.create_snapshot.assert_not_called()
+        assert result.has_full_details is True
+        assert result.longName == "Apple Inc"
+        mock_tracker.get_details.assert_called_once()
 
 
 class TestTickerDetails:
@@ -303,7 +225,7 @@ class TestTickerDetails:
         with patch.object(
             client, "reqContractDetails", new_callable=AsyncMock
         ) as mock_req:
-            mock_req.return_value = [mock_cached]
+            mock_req.return_value = mock_cached
 
             await client.reqTickerDetails("NASDAQ:AAPL")
 
@@ -321,7 +243,12 @@ class TestTickerDetails:
         with patch.object(
             client, "reqContractDetails", new_callable=AsyncMock
         ) as mock_req:
-            mock_req.return_value = []
+            mock_req.side_effect = ProviderException(
+                provider="tws",
+                capability="datafeed",
+                message="Contract not found",
+                code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
+            )
 
             with pytest.raises(ProviderException) as exc_info:
                 await client.reqTickerDetails("NASDAQ:INVALID_SYMBOL")
@@ -329,26 +256,22 @@ class TestTickerDetails:
             assert exc_info.value.code == "PROVIDER_DATAFEED_SYMBOL_NOT_FOUND"
 
     @pytest.mark.asyncio
-    async def test_returns_first_match_when_ambiguous(self) -> None:
-        """Multiple matches returns first (deterministic behavior)."""
+    async def test_returns_contract_details(self) -> None:
+        """Successfully returns CachedContract when found."""
         client = TWSClient("127.0.0.1", 7497, 1)
 
-        # Mock CachedContract instances without spec to allow attribute access
-        first = MagicMock()
-        first.contract = Contract()
-        first.contract.conId = 111
-        second = MagicMock()
-        second.contract = Contract()
-        second.contract.conId = 222
+        mock_cached = MagicMock(spec=CachedContract)
+        mock_cached.contract = Contract()
+        mock_cached.contract.conId = 111
 
         with patch.object(
             client, "reqContractDetails", new_callable=AsyncMock
         ) as mock_req:
-            mock_req.return_value = [first, second]
+            mock_req.return_value = mock_cached
 
             result = await client.reqTickerDetails("NASDAQ:AAPL")
 
-            assert result is first
+            assert result is mock_cached
 
 
 # =============================================================================
@@ -1072,20 +995,14 @@ class TestErrorHandling:
 
         mock_ibsocket = MagicMock()
         mock_ibsocket.running = True
-        mock_ibsocket.get_cached_data.return_value = None
-        mock_ibsocket.contract_tracker.get_by_symbol_prefix.return_value = []
-
-        # Create a future that never resolves
-        def create_hanging_snapshot(
-            business_key: str, *, timeout: float | None = 5
-        ) -> tuple[int | None, Awaitable[Any]]:
-            loop = asyncio.get_running_loop()
-            future: asyncio.Future[Any] = loop.create_future()
-            return (1, asyncio.wait_for(future, timeout))
-
-        mock_ibsocket.create_snapshot = create_hanging_snapshot
-        mock_ibsocket.reqMatchingSymbols = MagicMock()
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+
+        # Mock contract_tracker.get_descriptions to raise TimeoutError
+        mock_tracker = MagicMock()
+        mock_tracker.get_descriptions = AsyncMock(
+            side_effect=asyncio.TimeoutError("Timeout waiting for TWS response")
+        )
+        client._TWSClient__contract_tracker = mock_tracker  # type: ignore[attr-defined]
 
         with pytest.raises(asyncio.TimeoutError):
             await client.reqMatchingSymbols("AAPL")

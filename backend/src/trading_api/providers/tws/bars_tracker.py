@@ -145,6 +145,28 @@ def bar_size_str_to_timedelta(bar_size_str: str) -> timedelta:
     return timedelta(**{kwarg: value})
 
 
+# Duration pattern: "<number> <unit>" where unit is S/D/W/M/Y
+_DURATION_PATTERN = re.compile(r"^(\d+)\s+([SDWMY])$", re.IGNORECASE)
+
+_DURATION_UNIT_TO_KWARG = {
+    "S": ("seconds", 1),
+    "D": ("days", 1),
+    "W": ("weeks", 1),
+    "M": ("days", 30),  # Approximate
+    "Y": ("days", 365),  # Approximate
+}
+
+
+def duration_str_to_timedelta(duration_str: str) -> timedelta:
+    match = _DURATION_PATTERN.match(duration_str.strip())
+    if not match:
+        raise ValueError(f"Invalid duration format: '{duration_str}'")
+
+    value, unit = int(match.group(1)), match.group(2).upper()
+    kwarg, multiplier = _DURATION_UNIT_TO_KWARG[unit]
+    return timedelta(**{kwarg: value * multiplier})
+
+
 class SmartTwsBar:
     """In-memory bar representation with timezone-aware datetime.
 
@@ -374,6 +396,7 @@ class BarsRequest:
         # Live subscription tracking
         self.__last_update_time: float | None = None
         self.__last_index: datetime | None = None
+        self.__log_timer: float = time_.time()
 
         # Request state events
         self.__request_complete: threading.Event = threading.Event()
@@ -448,7 +471,14 @@ class BarsRequest:
         Args:
             bar: TWS BarData object
         """
-        self.__last_index = parse_tws_bar_date_as_datetime(bar.date)
+        current_index = parse_tws_bar_date_as_datetime(bar.date)
+        if time_.time() - self.__log_timer > 5.0:
+            self.__log_timer = time_.time()
+            logger.info(
+                f"Bar data is live for req_id {self.req_id} ({self.description}): {bar}"
+            )
+
+        self.__last_index = current_index
 
         if self.__last_index in self.__bars:
             self.__bars[self.__last_index].update_from_bardata(bar)
@@ -724,30 +754,22 @@ class BarsTracker(BarsTrackerCBWiringInterface):
         """Debounce unsubscribe - remove bar request if no active hooks."""
 
         def debounce_cancel(req_id: int) -> None:
-            with self.tracker_lock:
-                bar_request = self._bar_requests.get(req_id)
-                if bar_request is None:
-                    if DEBUG_TWS_DATAFEED:
-                        logger.info(
-                            f"debounce_cancel: No bar_request found for req_id {req_id}"
-                        )
-                    return
-                if not self._bar_req_in_use(req_id):
+            bar_request = self._bar_requests.get(req_id)
+            assert bar_request is not None, "bars should exist during debounce period"
+            if not self._bar_req_in_use(req_id):
+                with self.tracker_lock:
                     self._requests.pop(bar_request.description, None)
                     self._bars_cancel_hook(req_id)
                     self._bar_requests.pop(req_id, None)
-                elif DEBUG_TWS_DATAFEED:
-                    logger.info(
-                        f"debounce_cancel: Bar request {req_id} still in use {bar_request.description}, "
-                        f"snapshot_hooks={[key[-12:] for key in self._snapshot_hooks.get(req_id, {}).keys()]}, "
-                        f"stream_hooks={[key[-12:] for key in self._stream_hooks.get(req_id, {}).keys()]}"
-                    )
-                if DEBUG_TWS_DATAFEED:
-                    logger.info(
-                        f"Remaining bar requests: {list(self._requests.keys())}"
-                    )
+            else:
+                logger.info(
+                    f"debounce_cancel: Bar request {req_id} still in use {bar_request.description}, "
+                    f"snapshot_hooks={[key[-12:] for key in self._snapshot_hooks.get(req_id, {}).keys()]}, "
+                    f"stream_hooks={[key[-12:] for key in self._stream_hooks.get(req_id, {}).keys()]}"
+                )
+            logger.info(f"Remaining bar requests: {list(self._requests.keys())}")
 
-        asyncio.get_running_loop().call_later(1.0, debounce_cancel, req_id)
+        asyncio.get_running_loop().call_later(3.0, debounce_cancel, req_id)
 
     # === Lookup Methods (main thread) ===
 
@@ -815,7 +837,8 @@ class BarsTracker(BarsTrackerCBWiringInterface):
                     f"Unregistered snapshot hook for {bar_request.description} "
                     f"(req_id {bar_request.req_id}) => {key}"
                 )
-            self._debounce_cancel_bar_request(bar_request.req_id)
+            if not end_date_time:  # only cancel live subscriptions
+                self._debounce_cancel_bar_request(bar_request.req_id)
 
     # === Subscription Methods (main thread) ===
 
@@ -849,11 +872,10 @@ class BarsTracker(BarsTrackerCBWiringInterface):
                 bar_request.req_id, {}
             )
             bar_request_stream_hooks[key] = (loop, on_update, on_error)
-            if DEBUG_TWS_DATAFEED:
-                logger.info(
-                    f"Registered stream hook for {bar_request.description} "
-                    f"(req_id {bar_request.req_id}) => {key}"
-                )
+            logger.info(
+                f"Registered stream hook for {bar_request.description} "
+                f"(req_id {bar_request.req_id}) => {key}"
+            )
         sub_key = f"{bar_request.description}#{key}"
         return sub_key
 
@@ -879,11 +901,10 @@ class BarsTracker(BarsTrackerCBWiringInterface):
             if bar_request_stream_hooks is not None:
                 bar_request_stream_hooks.pop(sub_key, None)
 
-        if DEBUG_TWS_DATAFEED:
-            logger.info(
-                f"Unsubscribing from bar_request stream for "
-                f"{description} (req_id {req_id}) => {sub_key}"
-            )
+        logger.info(
+            f"Unsubscribing from bar_request stream for "
+            f"{description} (req_id {req_id}) => {sub_key}"
+        )
 
         self._debounce_cancel_bar_request(req_id)
 
@@ -943,11 +964,37 @@ class BarsTracker(BarsTrackerCBWiringInterface):
         Returns:
             True if error was handled, False if no matching request
         """
+
+        is_bar_data_cancelation = exception.code in (
+            162,
+            "PROVIDER_DATAFEED_162",
+            "PROVIDER_TWS_API_ERROR_162_NON_RECOVERABLE",
+        )
+
         # with self.tracker_lock:  <- disabled for performance
         bar_request = self._bar_requests.get(req_id)
-
         if bar_request is None:
-            return False
+            return is_bar_data_cancelation
+
+        # handle no data available case (code 162)
+        if is_bar_data_cancelation:
+            delta = (
+                duration_str_to_timedelta(bar_request.duration_str)
+                if bar_request.duration_str
+                else timedelta()
+            )
+            end_time = (
+                parse_tws_bar_date_as_datetime(bar_request.end_date_time)
+                if bar_request.end_date_time
+                else datetime.now(tz=ZoneInfo("UTC"))  # "" means "now"
+            )
+            start_time = end_time - delta
+            self.flag_complete(
+                req_id=req_id,
+                start=start_time.strftime("%Y%m%d %H:%M:%S") + " UTC",
+                end=end_time.strftime("%Y%m%d %H:%M:%S") + " UTC",
+            )
+            return True
 
         bar_request.flag_request_failed(exception)
 

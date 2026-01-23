@@ -37,7 +37,6 @@ from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
 from typing import Any
-from unittest import result
 
 from ibapi.client_utils import (
     createCancelOrderRequestProto,
@@ -81,11 +80,7 @@ from trading_api.providers.tws.execution_tracker import (
 from trading_api.providers.tws.order_tracker import OrderTracker, TrackedOrder
 from trading_api.providers.tws.position_tracker import PositionTracker, TrackedPosition
 from trading_api.providers.tws.quote_tracker import QuoteTracker
-from trading_api.providers.tws.tws_mappers import (
-    build_darkpool_contract,
-    parse_ticker,
-    ticker_name,
-)
+from trading_api.providers.tws.tws_mappers import parse_ticker, ticker_name
 from trading_api.providers.tws.tws_models import (
     TICK_TYPE_TO_FIELD,
     StreamData,
@@ -1048,8 +1043,8 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         # Protobuf message ID = OUT.PLACE_ORDER + 200
         proto_msg_id = OUT.PLACE_ORDER + PROTOBUF_MSG_ID
         self.send_protobuf(proto_msg_id, serialized)
-        ticker = ticker_name(contract)
         if DEBUG_TWS_REQUEST:
+            ticker = ticker_name(contract)
             debug_log(
                 f"placed order (protobuf): id={order_id}, ticker={ticker}, Exchange={contract.exchange} "
                 f"action={order.action}, type={order.orderType} "
@@ -1865,6 +1860,9 @@ class TWSClient:
     @property
     def ibsocket(self) -> IBSocket:
         if not (self.__ibsocket and self.__ibsocket.running):
+            logger.warning(
+                f"Creating / Recreating new IBSocket with clientId {self._client_id}..."
+            )
             if self.__ibsocket:
                 self.__ibsocket.disconnect()
             if self.__quote_tracker:
@@ -1910,24 +1908,6 @@ class TWSClient:
 
     # === Contract resolution and caching ===
 
-    def _get_cached_details(
-        self,
-        contract: Contract,
-    ) -> CachedContract | None:
-        """Get cached contracts with full details matching the contract.
-
-        Uses ContractTracker for lazy loading: memory → SQLite → None.
-        Only returns contracts with has_full_details=True.
-
-        Args:
-            contract: Contract to match (by conId or symbol+exchange)
-
-        Returns:
-            CachedContract with full details or None if not found
-        """
-        tracker = self.contract_tracker
-        return tracker.get_details_from_cache(contract)
-
     async def reqMatchingSymbols(
         self, pattern: str, timeout: float | None = None
     ) -> list[CachedContract]:
@@ -1946,127 +1926,37 @@ class TWSClient:
             List of CachedContract matching the pattern
         """
         tracker = self.contract_tracker
-
-        # 1. Check tracker (memory + SQLite lazy load)
-        cached_list = tracker.get_by_symbol_prefix(pattern)
-        if cached_list:
-            if DEBUG_TWS_CACHE:
-                debug_log(
-                    f"reqMatchingSymbols cache hit for conId "
-                    f"{cached_list[0].contract.conId} => ({pattern})"
-                )
-            return cached_list
-
-        # 3. Return from tracker (now populated by callback)
-        return await tracker.request_descriptions(
-            pattern, timeout=timeout or self._timeout
-        )
-
-    async def _reqContractDetails(
-        self, contract: Contract, timeout: float | None = None
-    ) -> list[CachedContract]:
-        """Get full contract details.
-
-        Uses cache-first strategy:
-        - If cached with full details, returns immediately
-        - Otherwise fetches from TWS and updates cache
-
-        Args:
-            contract: The contract to get details for (must have conId)
-            timeout: Optional timeout override
-
-        Returns:
-            List of CachedContract (usually 1, but can be multiple for ambiguous contracts)
-        """
-
-        details_list: list[CachedContract] = (
-            await self.contract_tracker.request_details(
-                contract, timeout=timeout or self._timeout
-            )
-        )
-        return details_list
+        return await tracker.get_descriptions(pattern, timeout=timeout or self._timeout)
 
     async def reqContractDetails(
         self, contract: Contract, timeout: float | None = None
-    ) -> list[CachedContract]:
-        """Get full contract details.
-
-        Uses ContractTracker for caching:
-        1. Check in-memory details cache (full details)
-        2. Fetch descriptions via reqMatchingSymbols (uses SQLite persistence)
-        3. Fetch full details from IB API and cache in tracker
-
-        Args:
-            contract: The contract to get details for (must have conId)
+    ) -> CachedContract:
+        """Get detailed contract information.
+        args:
+            contract: Contract with symbol and exchange (or conId)
             timeout: Optional timeout override
-
         Returns:
-            List of CachedContract with full details
+            CachedContract with full details
+        Raises:
+            ProviderException: If contract not found or request fails
         """
-        tracker = self.contract_tracker
-        ticker_name(contract)
-        cached: CachedContract | None = self._get_cached_details(contract)
-
-        if cached:
-            if DEBUG_TWS_CACHE:
-                debug_log(
-                    f"reqContractDetails cache hit for conId {contract.conId} => "
-                    f"({contract.primaryExchange or contract.exchange}:{contract.symbol})"
-                )
-            return [cached]
-
-        # Get descriptions first (SQLite-backed)
-        cached_list = await self.reqMatchingSymbols(
-            contract.symbol, timeout=timeout or self._timeout
+        return await self.contract_tracker.get_details(
+            contract, timeout=timeout or self._timeout
         )
-
-        async def load_and_cache(con: Contract) -> CachedContract:
-            details = next(iter(await self._reqContractDetails(con, timeout=timeout)))
-            # details.contract = con  # remove this! tests should not rely on it
-            overnight_hours: str | None = None
-            if darkpool_contract := details.build_darkpool_contract():
-                darkpool_details = next(
-                    iter(
-                        await self._reqContractDetails(
-                            darkpool_contract, timeout=timeout
-                        )
-                    )
-                )
-                overnight_hours = darkpool_details.tradingHours
-            # Store full details in tracker (memory-only)
-            return tracker.cache_details(details, overnight_hours=overnight_hours)
-
-        results = await asyncio.gather(
-            *[
-                load_and_cache(con)
-                for con in {
-                    cached.contract.conId: cached.contract for cached in cached_list
-                }.values()
-            ]
-        )
-
-        return results
 
     async def reqTickerDetails(
         self,
         ticker: str,
-        **kwargs: Any,
+        timeout: float | None = None,
     ) -> CachedContract:
-        """Get detailed symbol information.
-
-        [ASYNC-BRIDGE]: Wraps sync TWS callback with async Future.
-        [ACCUMULATION]: TWS may return multiple CachedContract, we use first match.
-        [DOMAIN-ONLY]: Returns domain SymbolInfo (no TWS types).
-
+        """Get detailed contract information by ticker string.
         Args:
-            symbol: Symbol name (e.g., "AAPL")
-            exchange: Optional exchange filter (default: "SMART" for smart routing)
-
+            ticker: Ticker string (e.g., "AAPL", "MSFT", "GOOG")
+            timeout: Optional timeout override
         Returns:
-            Detailed symbol metadata (SymbolInfo)
-
+            CachedContract with full details
         Raises:
-            ProviderException: If symbol not found or request fails
+            ProviderException: If contract not found or request fails
         """
 
         symbol, primaryExchange, sec_type, _ = parse_ticker(ticker)
@@ -2075,18 +1965,7 @@ class TWSClient:
         contract.secType = sec_type
         contract.primaryExchange = primaryExchange
 
-        # Get contract details via TWSClient (returns list)
-        details_list = await self.reqContractDetails(contract, **kwargs)
-
-        if not details_list:
-            raise ProviderException(
-                code="PROVIDER_DATAFEED_SYMBOL_NOT_FOUND",
-                message=f"Symbol not found: {ticker}",
-                provider="tws",
-                capability="datafeed",
-            )
-
-        return next(iter(details_list))
+        return await self.reqContractDetails(contract, timeout=timeout)
 
     # === Historical data snapshot (one-time pattern) ===
 

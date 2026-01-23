@@ -133,6 +133,34 @@ See: `wiring_interfaces.py` for interface definitions, section 2.7 for QuoteTrac
 - **Reference Counting**: Tracker manages subscription refcount - unsubscribe only when last consumer disconnects
 - **Symbol Deduplication**: Multiple topics requesting same symbol share underlying TWS subscription
 
+**Connection Lifecycle Logging:**
+
+IBSocket creation and recreation is logged to track connection state:
+
+```python
+# In TWSClient.__init__ or lazy connection logic
+logger.warning(f"Creating new IBSocket with client_id={client_id}")
+# OR
+logger.warning(f"Recreating IBSocket with client_id={client_id}")
+```
+
+**Warning Level Rationale**: Connection creation is an important lifecycle event that should be visible in production logs without DEBUG level verbosity. Helps diagnose:
+
+- Unexpected reconnections (network issues, TWS restarts)
+- Multiple socket instances (misconfigured client IDs)
+- Connection churn patterns (frequent disconnect/reconnect cycles)
+
+**Lifecycle Events:**
+
+| Event              | Log Level | Message                                     |
+| ------------------ | --------- | ------------------------------------------- |
+| Socket creation    | WARNING   | "Creating new IBSocket with client_id={id}" |
+| Socket recreation  | WARNING   | "Recreating IBSocket with client_id={id}"   |
+| Connection success | INFO      | "Connected to TWS/Gateway at {host}:{port}" |
+| Disconnection      | WARNING   | "Disconnected from TWS (reason: {reason})"  |
+
+**Client ID Context**: Logs include `client_id` to distinguish between datafeed (client_id=1) and broker (client_id=2) connections.
+
 ---
 
 ## 2. Ticker Naming Convention
@@ -279,6 +307,11 @@ class IbSocketWiringInterface(ABC):
     def wire_bars_tracker(self, tracker: "BarsTrackerCBWiringInterface") -> None:
         """Wire BarsTracker for callback routing."""
         pass
+
+    @abstractmethod
+    def wire_contract_tracker(self, tracker: "ContractTrackerCBWiringInterface") -> None:
+        """Wire ContractTracker for callback routing."""
+        pass
 ```
 
 **Implementors:**
@@ -365,6 +398,91 @@ class BarsTrackerCBWiringInterface(ABC):
 
 - `BarsTracker` in `bars_tracker.py`
 
+### ContractTrackerCBWiringInterface
+
+Tracker callback contract for contract data updates:
+
+```python
+class ContractTrackerCBWiringInterface(ABC):
+    """Contract tracker callback contract."""
+
+    @abstractmethod
+    def update_descriptions(
+        self, req_id: int, descriptions: list["ContractDescription"]
+    ) -> None:
+        """Dispatch contract descriptions from symbolSamples callback (thread-safe).
+
+        Called from reader thread (TWS callbacks).
+        """
+        pass
+
+    @abstractmethod
+    def update_details(self, req_id: int, details: "ContractDetails") -> None:
+        """Dispatch contract details from contractDetails callback (thread-safe).
+
+        Called from reader thread (TWS callbacks).
+        """
+        pass
+
+    @abstractmethod
+    def flag_details_complete(self, req_id: int) -> None:
+        """Mark contract details request complete (thread-safe).
+
+        Called from reader thread (contractDetailsEnd callback).
+        """
+        pass
+
+    @abstractmethod
+    def raise_error(self, req_id: int, exception: ProviderException) -> bool:
+        """Dispatch contract request errors to hooks (thread-safe).
+
+        Returns: True if error handlers found, False otherwise
+        """
+        pass
+```
+
+**Implementors:**
+
+- `ContractTracker` in `contract_tracker.py`
+
+**Bidirectional Wiring:**
+
+```python
+# ContractTracker constructor
+def __init__(self, ibsocket: IbSocketWiringInterface, db_path: str | None = None):
+    self.ibsocket = ibsocket
+    self.ibsocket.wire_contract_tracker(self)  # ← Register for callbacks
+    # ...
+
+# IBSocket stores reference
+def wire_contract_tracker(self, tracker: ContractTrackerCBWiringInterface):
+    self._contract_tracker = tracker
+
+# IBSocket callbacks route to tracker
+def symbolSamples(self, reqId: int, descriptions: list[ContractDescription]):
+    if self._contract_tracker:
+        self._contract_tracker.update_descriptions(reqId, descriptions)
+
+def contractDetails(self, reqId: int, details: ContractDetails):
+    if self._contract_tracker:
+        self._contract_tracker.update_details(reqId, details)
+
+def contractDetailsEnd(self, reqId: int):
+    if self._contract_tracker:
+        self._contract_tracker.flag_details_complete(reqId)
+```
+
+**Comparison with Other Trackers:**
+
+| Aspect              | QuoteTracker                     | BarsTracker                         | ContractTracker                                     |
+| ------------------- | -------------------------------- | ----------------------------------- | --------------------------------------------------- |
+| Wiring Method       | `wire_quote_tracker(tracker)`    | `wire_bars_tracker(tracker)`        | `wire_contract_tracker(tracker)`                    |
+| Update Callback     | `update(req_id, updates)`        | `update(req_id, bar_data)`          | `update_descriptions()` / `update_details()`        |
+| Completion Callback | _(none - continuous streaming)_  | `flag_complete(req_id, start, end)` | `flag_details_complete(req_id)`                     |
+| Error Callback      | `raise_error(req_id, exception)` | `raise_error(req_id, exception)`    | `raise_error(req_id, exception)`                    |
+| Request Messages    | `OUT.REQ_MKT_DATA`               | `OUT.REQ_HISTORICAL_DATA`           | `OUT.REQ_MATCHING_SYMBOLS`, `OUT.REQ_CONTRACT_DATA` |
+| Cancel Messages     | `OUT.CANCEL_MKT_DATA`            | `OUT.CANCEL_HISTORICAL_DATA`        | _(none - one-shot requests)_                        |
+
 **Rationale:**
 
 This pattern enables:
@@ -391,45 +509,229 @@ Contract data is cached in a two-tier architecture:
 
 **File:** `contract_tracker.py`
 
-The `ContractTracker` manages contract caching with SQLite persistence following the Tracker pattern:
+The `ContractTracker` manages contract caching with SQLite persistence following the dependency inversion pattern established by QuoteTracker/BarsTracker.
+
+**Constructor:**
 
 ```python
-class ContractTracker:
-    _descriptions: dict[int, CachedContract]  # con_id → CachedContract (memory + SQLite)
-    _details: dict[int, CachedContract]       # con_id → CachedContract (memory only)
-    _sqlite: SQLiteContractCache              # Internal SQLite cache (hidden)
+class ContractTracker(ContractTrackerCBWiringInterface):
+    def __init__(
+        self,
+        ibsocket: IbSocketWiringInterface,
+        db_path: str | None = None
+    ):
+        """Initialize ContractTracker with wired IBSocket.
 
-    # Lookup Methods (main thread)
-    def get_by_con_id(self, con_id: int) -> CachedContract | None
-    def get_by_ticker(self, ticker: str) -> CachedContract | None
-    def get_by_symbol_prefix(self, prefix: str) -> list[CachedContract]
-    def get_full_details(self, con_id: int) -> CachedContract | None  # details only
+        Args:
+            ibsocket: Socket interface for TWS communication
+            db_path: SQLite database path (defaults to .cache/contracts.db)
+        """
+        self.ibsocket = ibsocket
+        self.ibsocket.wire_contract_tracker(self)  # Bidirectional wiring
 
-    # Upsert Methods (reader thread via callbacks)
-    def upsert_descriptions(self, descriptions: list[ContractDescription]) -> list[CachedContract]
-    def upsert_details(self, details: ContractDetails, overnight_hours: str | None) -> CachedContract
-
-    # Session Management
-    def clear_details_cache(self) -> None  # Clear session-dependent details
-    def reset(self) -> None                # Clear all memory caches (SQLite preserved)
+        # Internal state
+        self._cached_contracts: dict[str, CachedContract] = {}  # ticker → contract
+        self._descriptions: dict[int, CachedContract] = {}  # req_id → results
+        self._details: dict[int, list[CachedContract]] = {}  # req_id → results
+        self._sqlite = SQLiteContractCache(db_path or DEFAULT_CACHE_PATH)
 ```
 
-**Lazy Loading Flow:**
+**Method Naming Convention:**
+
+Internal helper methods follow clear naming patterns:
+
+| Method                     | Purpose                                         | Called By            |
+| -------------------------- | ----------------------------------------------- | -------------------- |
+| `_fetch_and_cache()`       | Fetch details from TWS and cache to memory      | `get_details()`      |
+| `_search_cache()`          | Multi-tier cache search with exchange filtering | `get_descriptions()` |
+| `_send_descriptions_req()` | Build and send OUT.REQ_MATCHING_SYMBOLS         | `get_descriptions()` |
+| `_send_details_req()`      | Build and send OUT.REQ_CONTRACT_DATA            | `get_details()`      |
+
+**Rationale**: `_fetch_and_cache()` clarifies "fetch from TWS + cache result" semantics vs. previous `_load_and_cache_details()` which suggested loading from cache. `_search_cache()` emphasizes search/filtering behavior vs. previous `_load_cached_descriptions()` which suggested simple retrieval.
+
+**Public Async API:**
+
+```python
+# High-level async methods for TWSClient
+async def get_descriptions(
+    self, pattern: str, timeout: float = 10.0
+) -> list[CachedContract]:
+    """Search for contracts by symbol pattern with optimized cache lookup.
+
+    Search Strategy:
+    1. Exact match: Check memory cache for exact pattern match (O(1) dict lookup)
+    2. Exchange filtering: If pattern contains ":", split into exchange:symbol and filter by exchange
+    3. Symbol search: Check memory cache for symbol substring matches
+    4. SQLite fallback: Query persistent cache
+    5. TWS API: Request from TWS if not cached
+
+    Lazy loading: memory → SQLite → TWS API
+    Deduplication: Reuses pending requests for same pattern
+
+    Args:
+        pattern: Symbol search pattern. Supports:
+            - Simple symbol: "AAPL", "AA" (matches any ticker containing substring)
+            - Exchange-qualified: "NASDAQ:AAPL", "NYSE:AA" (filters by exchange)
+        timeout: Request timeout in seconds
+
+    Returns:
+        List of matching CachedContracts (sorted by ticker name)
+
+    Examples:
+        # Exact match optimization
+        await get_descriptions("NASDAQ:AAPL")  # O(1) if cached
+
+        # Exchange filtering
+        await get_descriptions("NYSE:AA")  # Returns only NYSE matches
+
+        # Symbol search
+        await get_descriptions("AA")  # Returns all tickers with "AA" substring
+    """
+
+async def get_details(
+    self, contract: Contract, timeout: float = 10.0
+) -> CachedContract:
+    """Get full contract details (singular result).
+
+    Fetches primary exchange + SMART + OVERNIGHT if available.
+    Returns first/best match.
+
+    Args:
+        contract: Contract to look up
+        timeout: Request timeout in seconds
+
+    Returns:
+        Single CachedContract with full details
+    """
+```
+
+**Cache Search Optimization:**
+
+The `_search_cache()` method implements a three-tier search strategy:
+
+```python
+def _search_cache(self, pattern: str) -> list[CachedContract]:
+    """Multi-tier cache search with exchange filtering.
+
+    Tier 1: Exact Match (O(1))
+        - Check self._cached_contracts.get(pattern)
+        - Early return if found (e.g., "NASDAQ:AAPL" exactly cached)
+
+    Tier 2: Exchange Filtering
+        - If pattern contains ":", split into exchange:symbol
+        - Filter cached contracts by exchange field
+        - Search within exchange-filtered subset using symbol substring
+
+    Tier 3: Symbol Search
+        - If no ":", search all cached contracts
+        - Match using `symbol in cached.ticker` substring logic
+
+    Returns:
+        Sorted list of matching CachedContracts
+    """
+```
+
+**Performance Impact:**
+
+- **Before**: All searches iterated entire cache with `startswith(prefix)` matching
+- **After**: Exact matches skip iteration (common case when full ticker provided from UI)
+- **Exchange Filtering**: Reduces search space when exchange specified (e.g., "NYSE:AA" only searches NYSE contracts)
+
+**Search Pattern Examples:**
+
+| Pattern         | Tier   | Behavior                                       |
+| --------------- | ------ | ---------------------------------------------- |
+| `"NASDAQ:AAPL"` | Tier 1 | Exact match → O(1) dict lookup                 |
+| `"NYSE:AA"`     | Tier 2 | Filter by NYSE exchange → substring "AA"       |
+| `"AA"`          | Tier 3 | Search all cached contracts for "AA" substring |
+
+**Rationale**: Most contract resolutions use full ticker names from UI (TradingView symbol selection), making exact match optimization the common path. Exchange filtering enables precise contract disambiguation when multiple exchanges available.
+
+**Internal TWS Protocol Methods:**
+
+```python
+# TWS message construction (called by public API)
+def _send_descriptions_req(self, pattern: str) -> int:
+    """Build and send OUT.REQ_MATCHING_SYMBOLS message.
+
+    Handles deduplication by pattern.
+    Returns: Request ID for tracking
+    """
+
+def _send_details_req(self, contract: Contract) -> int:
+    """Build and send OUT.REQ_CONTRACT_DATA message.
+
+    Handles deduplication by contract identity.
+    Returns: Request ID for tracking
+    """
+```
+
+**IBSocket Callback Routing** (implements `ContractTrackerCBWiringInterface`):
+
+```python
+# Called from IBSocket reader thread
+def update_descriptions(
+    self, req_id: int, descriptions: list[ContractDescription]
+) -> None:
+    """Route symbolSamples callback data.
+
+    Filters invalid contracts (conId <= 0), caches to SQLite + memory,
+    resolves pending Futures.
+    """
+
+def update_details(self, req_id: int, details: ContractDetails) -> None:
+    """Route contractDetails callback data.
+
+    Accumulates details for multi-result queries.
+    No auto-caching - waits for flag_details_complete().
+    """
+
+def flag_details_complete(self, req_id: int) -> None:
+    """Route contractDetailsEnd callback.
+
+    Resolves pending Future with accumulated results.
+    """
+
+def raise_error(self, req_id: int, exception: ProviderException) -> bool:
+    """Route error callback.
+
+    Rejects pending Futures with exception.
+    """
+```
+
+**Architecture Diagram:**
 
 ```
-reqMatchingSymbols("AAPL")
+TWSClient.reqMatchingSymbols(pattern)
         │
-ContractTracker.get_by_symbol_prefix("AAPL")
+tracker.get_descriptions(pattern, timeout)
         │
-        ├─► 1. Check _descriptions (memory)
+        ├─► 1. Check memory cache (dedup by pattern)
         │
-        ├─► 2. Check SQLite (load into memory)
+        ├─► 2. Check SQLite cache
         │
-        └─► 3. Cache miss → API call → symbolSamples() callback
-                                            │
-                                 ContractTracker.upsert_descriptions()
-                                            │
-                                 Persists to SQLite + memory
+        ├─► 3. Create Future for async wait
+        │
+        └─► 4. Send _send_descriptions_req() → OUT.REQ_MATCHING_SYMBOLS
+                                │
+                                ▼
+                    IBSocket.symbolSamples() callback
+                                │
+                    tracker.update_descriptions(req_id, descriptions)
+                                │
+                    ├─► Filter invalid (conId <= 0)
+                    ├─► Cache to SQLite + memory
+                    └─► Resolve Future → return to TWSClient
+```
+
+**Session Management:**
+
+```python
+def reset(self) -> None:
+    """Clear all memory caches (SQLite preserved)."""
+
+def clear_details_cache(self) -> None:
+    """Clear session-dependent details only."""
 ```
 
 **SQLite Schema:**
@@ -504,39 +806,56 @@ class CachedContract(ContractDetails):
 **TWSClient Contract Resolution:**
 
 ```python
-# TWSClient.reqContractDetails() - Multi-exchange resolution flow
-async def reqContractDetails(self, contract: Contract) -> list[CachedContract]:
-    # 1. Check ContractTracker by conId
-    #    → Return immediately if has_full_details=True
+# TWSClient - Simplified delegation pattern
+async def reqMatchingSymbols(
+    self, pattern: str, timeout: float = 10.0
+) -> list[CachedContract]:
+    """Delegate to ContractTracker."""
+    return await self.contract_tracker.get_descriptions(pattern, timeout)
 
-    # 2. Fetch primary details via _reqContractDetails()
+async def reqContractDetails(
+    self, contract: Contract, timeout: float = 10.0
+) -> CachedContract:
+    """Delegate to ContractTracker. Returns single best match.
 
-    # 3. If SMART available in validExchanges:
-    #    → Fetch SMART contract details
+    ContractTracker handles:
+    - Multi-exchange resolution (primary + SMART + OVERNIGHT)
+    - SQLite persistence for descriptions
+    - Memory caching for details
+    - Deduplication
 
-    # 4. If OVERNIGHT available in validExchanges:
-    #    → Fetch OVERNIGHT contract details
-    #    → Extract overnight_hours = darkpool.tradingHours
+    Returns:
+        Single CachedContract (not list) with full details
+    """
+    results = await self.contract_tracker.get_details(contract, timeout)
+    return results[0]  # First/best match
 
-    # 5. Cache all details via ContractTracker.upsert_details()
-
-# TWSClient.reqTickerDetails() - Simplified public API
+# TWSClient.reqTickerDetails() - Convenience wrapper
 async def reqTickerDetails(self, ticker: str, **kwargs) -> CachedContract:
     """Get single CachedContract for ticker (uses parse_ticker internally)."""
     symbol, primaryExchange, sec_type, _ = parse_ticker(ticker)
     # ... builds Contract and delegates to reqContractDetails()
-    return next(iter(details_list))  # Returns first/best match
+    return await self.reqContractDetails(contract, **kwargs)
 ```
 
-**Internal Methods:**
+**Return Type Change:**
 
-- `_reqContractDetails(contract)` - Low-level TWS request (no caching logic)
-- `_get_cached_details(con_id)` - Cache lookup via ContractTracker
+⚠️ **Breaking Change**: `reqContractDetails()` now returns `CachedContract` (singular) instead of `list[CachedContract]`.
 
-**Cache Population:**
+**Rationale:** Callers almost always used `next(iter(results))` pattern. Simplifying to singular return reduces boilerplate. Multi-result access available via `contract_tracker.get_details()` if needed.
 
-- `symbolSamples()` callback: Calls `ContractTracker.upsert_descriptions()` (SQLite + memory)
-- `reqContractDetails()`: Calls `ContractTracker.upsert_details()` (memory only, session-dependent)
+**Removed Internal Methods:**
+
+The following methods were internalized in ContractTracker:
+
+- `_reqContractDetails(contract)` - Now `ContractTracker._send_details_req()`
+- `_get_cached_details(con_id)` - Replaced by `get_details()` async API
+
+**IBSocket Callback Routing:**
+
+- `symbolSamples()` callback → `contract_tracker.update_descriptions()`
+- `contractDetails()` callback → `contract_tracker.update_details()`
+- `contractDetailsEnd()` callback → `contract_tracker.flag_details_complete()`
 
 ---
 
@@ -870,6 +1189,68 @@ class QuoteTracker(QuoteTrackerCBWiringInterface):
     def update(self, tws_key: str, tick_data: dict[str, Any]) -> None:
         """Dispatch tick updates to registered hooks (thread-safe)."""
 ```
+
+**Observability & Timing:**
+
+QuoteTracker includes enhanced logging for production debugging:
+
+**Periodic Logging:**
+
+```python
+class TrackedQuote:
+    __slots__ = [
+        ...,
+        "__log_timer",  # Timer for periodic "TrackedQuote is live" logging
+    ]
+
+    def update(self, tick_data: dict[str, Any]) -> None:
+        """Update quote fields and dispatch to hooks.
+
+        Logs "TrackedQuote is live" message every 5 seconds to verify
+        subscription health in production. Timing tracked via __log_timer.
+        """
+```
+
+**Staleness Detection:**
+
+The `is_ready` property warns when quotes are stale:
+
+```python
+@property
+def is_ready(self) -> bool:
+    """Check if quote has received at least one update.
+
+    Logs warning if last_update timestamp exists but is stale
+    (updated > 30 seconds ago). Warning includes timing information
+    for debugging delayed updates.
+
+    Returns:
+        True if quote has valid data, False if never updated
+    """
+```
+
+**Debounce Cancel Timing:**
+
+```python
+# Stream subscription debounce settings
+DEBOUNCE_CANCEL_DELAY = 3.0  # Wait 3 seconds before canceling TWS subscription
+
+# Rationale: Increased from 1.0s to reduce premature cancellations
+# when frontend temporarily disconnects/reconnects (e.g., tab switches).
+# Prevents unnecessary TWS reqMktData churn.
+```
+
+**Logging Strategy:**
+
+| Event                    | Log Level | Frequency    | Purpose                                 |
+| ------------------------ | --------- | ------------ | --------------------------------------- |
+| Quote is live            | DEBUG     | Every 5s     | Verify subscription health              |
+| Quote staleness          | WARNING   | Per access   | Alert to delayed/missing updates        |
+| Subscription start       | INFO      | Once         | Track subscription lifecycle            |
+| Subscription cancel      | INFO      | Once         | Track cleanup operations                |
+| Unknown req_id (removed) | ~~ERROR~~ | ~~Per tick~~ | ~~Removed - handled at IBSocket level~~ |
+
+**Rationale**: Periodic logging enables passive monitoring in production logs without needing active debugging. Staleness warnings surface quote quality issues. Debounce timing reduces TWS API churn during normal frontend reconnection patterns.
 
 **Interface Implementation:**
 
@@ -2427,6 +2808,29 @@ nature, category, is_recoverable = classify_error(error_code)
 | `WARNING`      | 2xxx range     | ✓           | Non-critical warnings              |
 | `SYSTEM`       | 1xxx range     | ✓           | System state messages              |
 | `ERROR`        | (default)      | ✗           | Unclassified errors                |
+
+**Error Code 162 Reclassification (January 2026):**
+
+Error code 162 ("Historical data request pacing violation") was previously included in an internal `_NOT_FOUND_CODES` set in `tws_models.py`, treating it as informational. This classification has been **removed**.
+
+**Change Summary:**
+
+- **Before**: Error 162 treated as "no data" → returned empty list
+- **After**: Error 162 treated as error → raises `ProviderException` with `PACING` classification
+
+**Rationale**: Error 162 indicates rate limiting by TWS API, not "no data available". Treating it as informational masked underlying pacing issues. Now correctly classified as `PACING` error (recoverable), triggering proper error handling:
+
+- Exception propagates to caller
+- Error callbacks invoked for subscriptions
+- Retry logic can be applied at provider level with backoff
+
+**Impact**: Code previously swallowing error 162 will now receive `ProviderException`. Consumers should implement appropriate retry/backoff logic for rate-limited requests.
+
+**Current Classification**: Error 162 is now handled by `classify_error()` as:
+
+- **Nature**: `REQUEST` (req_id-based error)
+- **Category**: `PACING` (rate limiting)
+- **Recoverable**: `True` (can retry with backoff)
 
 **Non-Recoverable Error Convention:**
 

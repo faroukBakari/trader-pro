@@ -134,7 +134,7 @@ class DatafeedApi(APIRouterInterface):
                 to_time=to_time,
                 count_back=count_back,
             )
-            return GetBarsResponse(bars=bars, no_data=len(bars) == 0)
+            return GetBarsResponse(bars=bars, no_data=False)  # len(bars) == 0
 
         @self.post(
             "/quotes",

@@ -1100,17 +1100,18 @@ class TestDecodeData:
 
 
 class TestIBSocketSymbolSamplesCallback:
-    """Test symbolSamples callback for search_symbols."""
+    """Test symbolSamples callback routing to ContractTracker."""
 
     @pytest.mark.asyncio
-    async def test_symbol_samples_accumulates_descriptions(
+    async def test_symbol_samples_routes_to_contract_tracker(
         self, running_ibsocket: IBSocket
     ) -> None:
-        """Test symbolSamples accumulates ContractDescriptions in stream_data."""
-        business_key = "shared:reqMatchingSymbols:AAPL"
+        """Test symbolSamples routes descriptions to wired ContractTracker."""
+        # Wire a mock ContractTracker
+        mock_tracker = MagicMock()
+        running_ibsocket.wire_contract_tracker(mock_tracker)
 
-        reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
-        assert reqId is not None, "Expected reqId from create_snapshot"
+        reqId = 42
 
         # Create contract descriptions
         contract1 = Contract()
@@ -1119,48 +1120,30 @@ class TestIBSocketSymbolSamplesCallback:
         contract1.exchange = "SMART"
         contract1.primaryExchange = "NASDAQ"
 
-        contract2 = Contract()
-        contract2.symbol = "AAPL"
-        contract2.secType = "OPT"
-        contract2.exchange = "SMART"
-
         desc1 = ContractDescription()
         desc1.contract = contract1
 
-        desc2 = ContractDescription()
-        desc2.contract = contract2
+        running_ibsocket.symbolSamples(reqId, [desc1])
 
-        running_ibsocket.symbolSamples(reqId, [desc1, desc2])
-
-        await asyncio.sleep(0.05)
-
-        result = await awaitable
-        assert len(result) == 2
-        assert result[0]["contractDescriptions"].contract.symbol == "AAPL"
-        assert result[0]["contractDescriptions"].contract.secType == "STK"
-        assert result[1]["contractDescriptions"].contract.secType == "OPT"
+        # Verify ContractTracker.update_descriptions was called
+        mock_tracker.update_descriptions.assert_called_once()
+        call_args = mock_tracker.update_descriptions.call_args
+        assert call_args[0][0] == reqId  # reqId
+        assert len(call_args[0][1]) == 1  # descriptions list
+        assert call_args[0][1][0].contract.symbol == "AAPL"
 
     @pytest.mark.asyncio
-    async def test_symbol_samples_flags_complete(
+    async def test_symbol_samples_noop_without_wired_tracker(
         self, running_ibsocket: IBSocket
     ) -> None:
-        """Test symbolSamples flags snapshot as complete."""
-        business_key = "shared:reqMatchingSymbols:TEST"
-
-        reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
-        assert reqId is not None, "Expected reqId from create_snapshot"
-        tws_key = f"req_{reqId}"
-
+        """Test symbolSamples is no-op when no ContractTracker is wired."""
+        # No tracker wired - callback should not error
         desc = ContractDescription()
         desc.contract = Contract()
         desc.contract.symbol = "TEST"
 
-        running_ibsocket.symbolSamples(reqId, [desc])
-
-        stream = running_ibsocket._stream_data[tws_key]
-        assert stream.snapshot_complete is True
-
-        await awaitable
+        # Should not raise
+        running_ibsocket.symbolSamples(1, [desc])
 
 
 # =============================================================================
@@ -1169,18 +1152,18 @@ class TestIBSocketSymbolSamplesCallback:
 
 
 class TestIBSocketContractDetailsCallback:
-    """Test contractDetails and contractDetailsEnd callbacks."""
+    """Test contractDetails and contractDetailsEnd callbacks routing to ContractTracker."""
 
     @pytest.mark.asyncio
-    async def test_contract_details_accumulates_results(
+    async def test_contract_details_routes_to_contract_tracker(
         self, running_ibsocket: IBSocket
     ) -> None:
-        """Test contractDetails accumulates ContractDetails in stream_data."""
-        business_key = "shared:reqContractDetails:NASDAQ:AAPL"
+        """Test contractDetails routes to wired ContractTracker.update_details."""
+        # Wire a mock ContractTracker
+        mock_tracker = MagicMock()
+        running_ibsocket.wire_contract_tracker(mock_tracker)
 
-        reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
-        assert reqId is not None, "Expected reqId from create_snapshot"
-        tws_key = f"req_{reqId}"
+        reqId = 42
 
         # Create contract details
         contract = Contract()
@@ -1197,69 +1180,42 @@ class TestIBSocketContractDetailsCallback:
 
         running_ibsocket.contractDetails(reqId, details)
 
-        stream = running_ibsocket._stream_data[tws_key]
-        assert len(stream) == 1
-        assert stream[0]["contractDetails"].longName == "Apple Inc"
-
-        # Cleanup
-        running_ibsocket._flag_snapshot_complete(tws_key)
-        await awaitable
+        # Verify ContractTracker.update_details was called
+        mock_tracker.update_details.assert_called_once()
+        call_args = mock_tracker.update_details.call_args
+        assert call_args[0][0] == reqId
+        assert call_args[0][1].longName == "Apple Inc"
 
     @pytest.mark.asyncio
-    async def test_contract_details_end_resolves_snapshot(
+    async def test_contract_details_end_routes_to_contract_tracker(
         self, running_ibsocket: IBSocket
     ) -> None:
-        """Test contractDetailsEnd resolves snapshot with accumulated results."""
-        business_key = "shared:reqContractDetails:NASDAQ:AAPL"
+        """Test contractDetailsEnd routes to wired ContractTracker.flag_details_complete."""
+        # Wire a mock ContractTracker
+        mock_tracker = MagicMock()
+        running_ibsocket.wire_contract_tracker(mock_tracker)
 
-        reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
-        assert reqId is not None, "Expected reqId from create_snapshot"
+        reqId = 42
+        running_ibsocket.contractDetailsEnd(reqId)
 
+        # Verify ContractTracker.flag_details_complete was called
+        mock_tracker.flag_details_complete.assert_called_once_with(reqId)
+
+    @pytest.mark.asyncio
+    async def test_contract_details_noop_without_wired_tracker(
+        self, running_ibsocket: IBSocket
+    ) -> None:
+        """Test contractDetails is no-op when no ContractTracker is wired."""
+        # No tracker wired - callbacks should not error
         contract = Contract()
         contract.symbol = "AAPL"
-        contract.secType = "STK"
 
         details = ContractDetails()
         details.contract = contract
-        details.longName = "Apple Inc"
 
-        running_ibsocket.contractDetails(reqId, details)
-        running_ibsocket.contractDetailsEnd(reqId)
-
-        await asyncio.sleep(0.05)
-
-        result = await awaitable
-        assert len(result) == 1
-        assert result[0]["contractDetails"].longName == "Apple Inc"
-
-    @pytest.mark.asyncio
-    async def test_contract_details_multiple_contracts(
-        self, running_ibsocket: IBSocket
-    ) -> None:
-        """Test contractDetails handles multiple matching contracts."""
-        business_key = "shared:reqContractDetails:CME:ES"
-
-        reqId, awaitable = running_ibsocket.create_snapshot(business_key, timeout=5)
-        assert reqId is not None, "Expected reqId from create_snapshot"
-
-        # Multiple futures contracts (different expirations)
-        for month in ["202312", "202403", "202406"]:
-            contract = Contract()
-            contract.symbol = "ES"
-            contract.secType = "FUT"
-            contract.lastTradeDateOrContractMonth = month
-
-            details = ContractDetails()
-            details.contract = contract
-
-            running_ibsocket.contractDetails(reqId, details)
-
-        running_ibsocket.contractDetailsEnd(reqId)
-
-        await asyncio.sleep(0.05)
-
-        result = await awaitable
-        assert len(result) == 3
+        # Should not raise
+        running_ibsocket.contractDetails(1, details)
+        running_ibsocket.contractDetailsEnd(1)
 
 
 # =============================================================================

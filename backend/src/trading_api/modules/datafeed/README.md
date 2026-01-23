@@ -83,6 +83,41 @@ All endpoints require authentication via JWT in HttpOnly cookie.
 | GET    | `/api/datafeed/v1/bars`             | `getBars`       | Get historical OHLC bars      |
 | POST   | `/api/datafeed/v1/quotes`           | `getQuotes`     | Get real-time quotes snapshot |
 
+### Historical Bars Endpoint
+
+Returns OHLC bars for specified symbol, resolution, and time range.
+
+**Request Parameters:**
+
+- `symbol` (required): Ticker symbol (e.g., "NASDAQ:AAPL")
+- `resolution` (required): Bar size ("1", "5", "15", "60", "D", "W", "M")
+- `from` (required): Start timestamp (Unix seconds)
+- `to` (required): End timestamp (Unix seconds)
+- `countBack` (optional): Max bars to return
+
+**Response**: List of `Bar` objects with OHLC data
+
+**Empty Response Handling:**
+
+The provider logs a warning when no bars are returned:
+
+```python
+bars = await self.datafeed_provider.get_historical_bars(...)
+if not bars:
+    logger.warning(
+        f"No bars returned for {ticker} {duration} ending {end_datetime_str}"
+    )
+```
+
+**Rationale**: Distinguishes between provider errors (exceptions thrown) and legitimate "no data" scenarios (empty list returned). Common causes of empty responses:
+
+- Symbol not available for requested time range
+- Market closed during entire period
+- Insufficient historical data for new listings
+- Invalid resolution for asset type (e.g., "1" minute bars for illiquid symbols)
+
+**Response**: Empty list `[]` is returned to frontend (not an error). TradingView charting library handles empty datasets gracefully.
+
 ### Configuration Endpoint
 
 Returns datafeed capabilities for TradingView charting library integration:
