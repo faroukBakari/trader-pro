@@ -1050,6 +1050,87 @@ assert args[1][1] == "AAPL"  # Pattern parameter
 
 ---
 
+**PositionTracker Testing (Interface-Based Mocking):**
+
+PositionTracker uses the same dependency inversion pattern as QuoteTracker/BarsTracker/ContractTracker with unique characteristics:
+
+**Key Aspects:**
+
+1. **Wiring Verification**: Assert `wire_position_tracker()` called during `__init__`
+2. **Auto-Request Logic**: Verify `ensure_snapshot_requested()` sends `OUT.REQ_POSITIONS`
+3. **Error Nature Classification**: Test error codes 200, 321, 322 route to `TWSErrorNature.POSITION`
+4. **Global Error Dispatch**: Verify `raise_error()` dispatches to all hooks (no req_id parameter)
+
+**Test Fixture Pattern:**
+
+```python
+# test_position_tracker.py
+from unittest.mock import MagicMock, PropertyMock
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IbSocketWiringInterface for PositionTracker tests."""
+    mock = MagicMock(spec=IbSocketWiringInterface)
+    type(mock).next_req_id = PropertyMock(side_effect=range(1000, 10000))
+    return mock
+```
+
+**Wiring Test:**
+
+```python
+def test_position_tracker_wiring(mock_ibsocket):
+    """PositionTracker wires itself during __init__."""
+    from trading_api.providers.tws.position_tracker import PositionTracker
+    tracker = PositionTracker(ibsocket=mock_ibsocket)
+    mock_ibsocket.wire_position_tracker.assert_called_once_with(tracker)
+    assert tracker.ibsocket is mock_ibsocket
+```
+
+**Auto-Request Test:**
+
+```python
+def test_ensure_snapshot_requested(mock_ibsocket):
+    """ensure_snapshot_requested() sends OUT.REQ_POSITIONS on first call."""
+    from ibapi.message import OUT
+    from trading_api.providers.tws.position_tracker import PositionTracker
+    tracker = PositionTracker(ibsocket=mock_ibsocket)
+    tracker.ensure_snapshot_requested()
+    mock_ibsocket.send_message.assert_called_once_with(OUT.REQ_POSITIONS, [1])
+```
+
+**Error Nature Classification Test:**
+
+```python
+def test_position_error_codes_classified():
+    """Codes 200, 321, 322 classified as POSITION nature."""
+    from trading_api.providers.tws.tws_models import TWSErrorNature, classify_error
+    assert classify_error(200, "No security definition") == TWSErrorNature.POSITION
+    assert classify_error(321, "Server error") == TWSErrorNature.POSITION
+    assert classify_error(322, "Client id in use") == TWSErrorNature.POSITION
+```
+
+**Comparison with Other Trackers:**
+
+| Aspect              | QuoteTracker         | BarsTracker         | ContractTracker         | PositionTracker                   |
+| ------------------- | -------------------- | ------------------- | ----------------------- | --------------------------------- |
+| Constructor Wiring  | `wire_quote_tracker` | `wire_bars_tracker` | `wire_contract_tracker` | `wire_position_tracker`           |
+| Request ID Needed   | Yes                  | Yes                 | Yes                     | No (global subscription)          |
+| Error Routing       | By req_id            | By req_id           | By req_id               | By nature (all hooks)             |
+| Auto-Request        | No                   | No                  | No                      | Yes (`ensure_snapshot_requested`) |
+| Completion Signal   | None (streaming)     | `flag_complete`     | `flag_details_complete` | `mark_snapshot_complete`          |
+| Lazy Initialization | No (IBSocket owns)   | No (IBSocket owns)  | No (IBSocket owns)      | Yes (`TWSClient.property`)        |
+
+**Migration Note:** When migrating to PositionTracker pattern:
+
+1. Remove `reqPositions()` explicit call (auto-requested on first callback)
+2. Route errors by nature (no req_id in error callbacks)
+3. Use lazy property pattern (`TWSClient.position_tracker`)
+
+**See:** `providers/tws/tests/test_position_tracker.py` for complete test suite
+
+---
+
 ## 5. Testing Patterns
 
 # Test provider-level integration

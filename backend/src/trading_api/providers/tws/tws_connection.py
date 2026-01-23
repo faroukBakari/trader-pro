@@ -94,6 +94,7 @@ from trading_api.providers.tws.wiring_interfaces import (
     BarsTrackerCBWiringInterface,
     ContractTrackerCBWiringInterface,
     IbSocketWiringInterface,
+    PositionTrackerCBWiringInterface,
     QuoteTrackerCBWiringInterface,
 )
 
@@ -224,6 +225,7 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         self.__quote_tracker: QuoteTrackerCBWiringInterface | None = None
         self.__bars_tracker: BarsTrackerCBWiringInterface | None = None
         self.__contract_tracker: ContractTrackerCBWiringInterface | None = None
+        self.__position_tracker: PositionTrackerCBWiringInterface | None = None
         self._req_id_count: count[int] = count()
         self._socket_lock = threading.Lock()
         self._state = IBSocketState.READY
@@ -235,7 +237,6 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
 
         # Data tracking attributes
         self.order_tracker: OrderTracker = OrderTracker()
-        self.position_tracker: PositionTracker = PositionTracker()
         self.account_tracker: AccountTracker = AccountTracker(
             self.reqAccountSubscriptions, self.cancelAccountSubscriptions
         )
@@ -260,6 +261,11 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         self, tracker_interface: ContractTrackerCBWiringInterface
     ) -> None:
         self.__contract_tracker = tracker_interface
+
+    def wire_position_tracker(
+        self, tracker_interface: PositionTrackerCBWiringInterface
+    ) -> None:
+        self.__position_tracker = tracker_interface
 
     def _dispatchMessage(self, fnName: str, fnParams: dict) -> None:
         if DEBUG_TWS_DISPATCH:
@@ -405,7 +411,6 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             self._ready_event.clear()
             self._req_id_count = count()
             self.order_tracker.reset()
-            self.position_tracker.reset()
             self.execution_tracker.reset()
 
     def _log_handled_error(
@@ -617,15 +622,6 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
 
         if DEBUG_TWS_REQUEST:
             debug_log(f"cancelled order: id={order_id}")
-
-    def reqPositions(self) -> None:
-        def request_cb() -> None:
-            VERSION = 1
-            self.send_message(OUT.REQ_POSITIONS, [VERSION])
-            if DEBUG_TWS_REQUEST:
-                debug_log("requested positions")
-
-        self.position_tracker.ensure_snapshot_requested(request_cb)
 
     def reqExecutions(self) -> None:
         """Request all executions for this client (snapshot).
@@ -1169,12 +1165,13 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             )
 
         # Build position data dict for domain conversion
-        self.position_tracker.upsert_position(
-            account=account,
-            contract=contract,
-            position=position,
-            avgCost=avgCost,
-        )
+        if self.__position_tracker is not None:
+            self.__position_tracker.upsert_position(
+                account=account,
+                contract=contract,
+                position=position,
+                avgCost=avgCost,
+            )
 
     def positionEnd(self) -> None:
         """End signal for positions request.
@@ -1186,7 +1183,8 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
             debug_log(f"{current_fn_name()}")
 
         # Mark snapshot complete and resolve pending futures
-        self.position_tracker.mark_snapshot_complete()
+        if self.__position_tracker is not None:
+            self.__position_tracker.mark_snapshot_complete()
 
     # === execution callbacks ===
 
@@ -1278,14 +1276,6 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         # Classify error by nature, category, and recoverability
         nature, category, recoverable = classify_error(errorCode)
 
-        # Handle system-wide errors (reqId=-1) separately
-        if reqId == NO_VALID_ID:
-            log_fn = logger.info if recoverable else logger.error
-            log_fn(
-                f"TWS system {category} [code={errorCode}, recoverable={recoverable}]: {errorString}"
-            )
-            return
-
         # Build message with optional advanced order info
         message = errorString
         if advancedOrderRejectJson:
@@ -1307,7 +1297,6 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
         # Route based on error nature
         if nature == TWSErrorNature.ORDER:
             # Order-related errors use order_{orderId} key format
-            tws_key = f"order_{reqId}"
             self.order_tracker.raise_error(
                 ProviderException(
                     provider="tws",
@@ -1315,6 +1304,27 @@ class IBSocket(EWrapper, IbSocketWiringInterface):
                     code=f"PROVIDER_TWS_{errorCode}",
                     message=message,
                 )
+            )
+            return
+
+        # Position-related errors (global subscription, no reqId)
+        if nature == TWSErrorNature.POSITION:
+            if self.__position_tracker is not None:
+                self.__position_tracker.raise_error(
+                    ProviderException(
+                        provider="tws",
+                        capability="broker",
+                        code=f"PROVIDER_TWS_{errorCode}",
+                        message=message,
+                    )
+                )
+            return
+
+        # Handle system-wide errors (reqId=-1) separately
+        if reqId == NO_VALID_ID:
+            log_fn = logger.info if recoverable else logger.error
+            log_fn(
+                f"TWS system {category} [code={errorCode}, recoverable={recoverable}]: {errorString}"
             )
             return
 
@@ -1401,6 +1411,7 @@ class TWSClient:
         self.__quote_tracker: QuoteTracker | None = None
         self.__bars_tracker: BarsTracker | None = None
         self.__contract_tracker: ContractTracker | None = None
+        self.__position_tracker: PositionTracker | None = None
 
     @property
     def ibsocket(self) -> IBSocket:
@@ -1419,6 +1430,9 @@ class TWSClient:
             if self.__contract_tracker:
                 self.__contract_tracker.reset()
                 self.__contract_tracker = None
+            if self.__position_tracker:
+                self.__position_tracker.reset()
+                self.__position_tracker = None
             self.__ibsocket = IBSocket()
             self.__ibsocket.connect(
                 host=self._host,
@@ -1450,6 +1464,13 @@ class TWSClient:
         if self.__contract_tracker is None:
             self.__contract_tracker = ContractTracker(self.ibsocket)
         return self.__contract_tracker
+
+    @property
+    def position_tracker(self) -> PositionTracker:
+        """Lazy-initialized PositionTracker for position tracking."""
+        if self.__position_tracker is None:
+            self.__position_tracker = PositionTracker(self.ibsocket)
+        return self.__position_tracker
 
     # === Contract resolution and caching ===
 
@@ -1859,9 +1880,7 @@ class TWSClient:
         Returns:
             List of TrackedPosition objects (one per position)
         """
-        self.ibsocket.reqPositions()
-
-        return await self.ibsocket.position_tracker.all_positions(
+        return await self.position_tracker.all_positions(
             timeout=timeout or self._timeout
         )
 
@@ -1937,17 +1956,10 @@ class TWSClient:
 
         Returns stream_key for later unsubscription.
         """
-        # 1. Register with PositionTracker
-        stream_key = self.ibsocket.position_tracker.create_stream_hook(
-            asyncio.get_event_loop(),
+        return self.position_tracker.create_stream_hook(
             callback,
             on_error,
         )
-
-        # 2. Trigger initial snapshot (existing orders)
-        self.ibsocket.reqPositions()
-
-        return stream_key
 
     def reqAccountStream(
         self,
@@ -1989,8 +2001,8 @@ class TWSClient:
 
     def cancelBrokerStream(self, stream_key: str) -> None:
         """Cancel a real-time broker subscription (orders, positions, or accounts)."""
+        self.position_tracker.remove_stream_hook(stream_key)
         self.ibsocket.order_tracker.remove_stream_hook(stream_key)
-        self.ibsocket.position_tracker.remove_stream_hook(stream_key)
         self.ibsocket.account_tracker.remove_stream_hook(stream_key)
         self.ibsocket.execution_tracker.remove_stream_hook(stream_key)
 

@@ -8,6 +8,8 @@ Domain conversion happens via TrackedPosition.to_domain() method.
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import threading
 import uuid
 from collections.abc import Callable, Coroutine
@@ -16,11 +18,20 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from ibapi.contract import Contract
+from ibapi.message import OUT
 
 from trading_api.models.exceptions import ProviderException
+from trading_api.providers.tws.wiring_interfaces import (
+    IbSocketWiringInterface,
+    PositionTrackerCBWiringInterface,
+)
 
 if TYPE_CHECKING:
     from trading_api.models.broker import Position
+
+logger = logging.getLogger(__name__)
+
+DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
 
 
 @dataclass
@@ -69,7 +80,7 @@ class TrackedPosition:
         )
 
 
-class PositionTracker:
+class PositionTracker(PositionTrackerCBWiringInterface):
     """Manages position state for IBSocket. Thread-safe via asyncio dispatch.
 
     Simpler than OrderTracker:
@@ -87,7 +98,9 @@ class PositionTracker:
         - Subscription: reqPositionsStream() → create_stream_hook() → dispatch_update()
     """
 
-    def __init__(self) -> None:
+    def __init__(self, ibsocket: IbSocketWiringInterface) -> None:
+        ibsocket.wire_position_tracker(self)
+        self.ibsocket = ibsocket
         self._snapshot_requested = threading.Event()
         self._snapshot_complete = threading.Event()
         self._positions: dict[str, TrackedPosition] = {}
@@ -105,11 +118,17 @@ class PositionTracker:
 
     # --- Position management (reader thread) ---
 
-    def ensure_snapshot_requested(self, request_cb: Callable[[], None]) -> None:
-        """Ensure snapshot request is made only once."""
+    def ensure_snapshot_requested(self) -> None:
+        """Send reqPositions() if not already requested.
+
+        Called from reader thread before position callbacks.
+        """
         if not self._snapshot_requested.is_set():
-            request_cb()
+            VERSION = 1
+            self.ibsocket.send_message(OUT.REQ_POSITIONS, [VERSION])
             self._snapshot_requested.set()
+            if DEBUG_TWS_REQUEST:
+                logger.info("requested positions")
 
     def upsert_position(
         self,
@@ -211,6 +230,9 @@ class PositionTracker:
         Returns:
             List of TrackedPosition objects
         """
+
+        self.ensure_snapshot_requested()
+
         loop = asyncio.get_running_loop()
         future: asyncio.Future[list[TrackedPosition]] = loop.create_future()
 
@@ -228,7 +250,6 @@ class PositionTracker:
 
     def create_stream_hook(
         self,
-        loop: asyncio.AbstractEventLoop,
         callback: Callable[[TrackedPosition], Coroutine[Any, Any, None]],
         on_error: Callable[[ProviderException], Coroutine[Any, Any, None]],
     ) -> str:
@@ -244,6 +265,10 @@ class PositionTracker:
         Returns:
             Unique key for unsubscription
         """
+        self.ensure_snapshot_requested()
+
+        loop = asyncio.get_event_loop()
+
         key = str(uuid.uuid4())
         self._stream_hooks[key] = (loop, callback, on_error)
         return key

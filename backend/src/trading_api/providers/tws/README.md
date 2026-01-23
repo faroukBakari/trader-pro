@@ -20,7 +20,7 @@
 | **QuoteTracker**            | `quote_tracker.py`                    | Quote subscription management with interface-based wiring, centralized snapshot/stream hooks, refcount logic                         |
 | **BarsTracker**             | `bars_tracker.py`                     | Bar data management with interface-based wiring, timezone-aware conversion, snapshot/stream patterns                                 |
 | **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch                                                      |
-| **PositionTracker**         | `position_tracker.py`                 | Position state tracking, thread-safe snapshot/stream pattern                                                                         |
+| **PositionTracker**         | `position_tracker.py`                 | Position state tracking with interface-based wiring, lazy initialization, snapshot/stream patterns                                   |
 | **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL                                                            |
 | **ExecutionTracker**        | `execution_tracker.py`                | Execution tracking with commission joining, two-phase dispatch pattern                                                               |
 | **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                                                                        |
@@ -88,6 +88,7 @@ callback(data) ◄────────────────────�
 **Key Patterns:**
 
 - **Lazy Connection**: `TWSClient.ibsocket` connects on first access
+- **Lazy Tracker Initialization**: `TWSClient.position_tracker` property creates tracker on first access
 - **Business Key System**: External API uses business keys (e.g., `datafeed:Quote:SMART:AAPL:...`)
 
 **Dependency Inversion Pattern (January 2026):**
@@ -469,7 +470,93 @@ This pattern enables:
 3. **Reduced Coupling**: Components depend on abstractions, not concrete implementations
 4. **Future Extensibility**: Other trackers (OrderTracker, PositionTracker) can adopt same pattern
 
-**See:** Section 2.7 for QuoteTracker implementation, Section 2.8 for BarsTracker implementation
+### PositionTrackerCBWiringInterface
+
+Tracker callback contract for position updates:
+
+```python
+class PositionTrackerCBWiringInterface(ABC):
+    """Position tracker callback contract."""
+
+    @abstractmethod
+    def upsert_position(
+        self,
+        account: str,
+        contract: Contract,
+        position: Decimal,
+        avgCost: float,
+    ) -> None:
+        """Dispatch position update to registered hooks (thread-safe).
+
+        Called from reader thread (position callback).
+        """
+        pass
+
+    @abstractmethod
+    def mark_snapshot_complete(self) -> None:
+        """Signal position snapshot completion (thread-safe).
+
+        Called from reader thread (positionEnd callback).
+        """
+        pass
+
+    @abstractmethod
+    def raise_error(self, exception: ProviderException) -> None:
+        """Dispatch position request errors to hooks (thread-safe).
+
+        Called from reader thread when position request fails.
+        """
+        pass
+```
+
+**Implementors:**
+
+- `PositionTracker` in `position_tracker.py`
+
+**Bidirectional Wiring:**
+
+```python
+# PositionTracker constructor
+def __init__(self, ibsocket: IbSocketWiringInterface):
+    self.ibsocket = ibsocket
+    self.ibsocket.wire_position_tracker(self)  # ← Register for callbacks
+    # ...
+
+# IBSocket stores reference
+def wire_position_tracker(self, tracker: PositionTrackerCBWiringInterface):
+    self._position_tracker = tracker
+
+# IBSocket callbacks route to tracker
+def position(self, account: str, contract: Contract, position: Decimal, avgCost: float):
+    if self._position_tracker:
+        self._position_tracker.ensure_snapshot_requested()  # Auto-request
+        self._position_tracker.upsert_position(account, contract, position, avgCost)
+
+def positionEnd(self):
+    if self._position_tracker:
+        self._position_tracker.mark_snapshot_complete()
+```
+
+**Comparison with Other Trackers:**
+
+| Aspect              | QuoteTracker                     | BarsTracker                         | ContractTracker                  | PositionTracker                        |
+| ------------------- | -------------------------------- | ----------------------------------- | -------------------------------- | -------------------------------------- |
+| Wiring Method       | `wire_quote_tracker(tracker)`    | `wire_bars_tracker(tracker)`        | `wire_contract_tracker(tracker)` | `wire_position_tracker(tracker)`       |
+| Update Callback     | `update(req_id, updates)`        | `update(req_id, bar_data)`          | `update_descriptions()` / `...`  | `upsert_position(account, ...)`        |
+| Completion Callback | _(none - continuous streaming)_  | `flag_complete(req_id, start, end)` | `flag_details_complete(req_id)`  | `mark_snapshot_complete()`             |
+| Error Callback      | `raise_error(req_id, exception)` | `raise_error(req_id, exception)`    | `raise_error(req_id, exception)` | `raise_error(exception)` (no req_id)   |
+| Request Messages    | `OUT.REQ_MKT_DATA`               | `OUT.REQ_HISTORICAL_DATA`           | `OUT.REQ_MATCHING_SYMBOLS`       | `OUT.REQ_POSITIONS`                    |
+| Cancel Messages     | `OUT.CANCEL_MKT_DATA`            | `OUT.CANCEL_HISTORICAL_DATA`        | _(none - one-shot requests)_     | `OUT.CANCEL_POSITIONS`                 |
+| Error Routing       | By req_id                        | By req_id                           | By req_id                        | By nature (global subscription errors) |
+
+**Unique Aspects of PositionTracker:**
+
+1. **No Request ID**: Position subscription is global (single stream per account), no per-request tracking
+2. **Auto-Request**: `ensure_snapshot_requested()` sends `OUT.REQ_POSITIONS` on first callback
+3. **Error Routing by Nature**: Position errors (codes 200, 321, 322) routed via `TWSErrorNature.POSITION` classification
+4. **Lazy Initialization**: `TWSClient.position_tracker` property creates tracker on first access (not owned by IBSocket)
+
+**See:** Section 2.7 for QuoteTracker implementation, Section 2.8 for BarsTracker implementation, Section 2.9 for PositionTracker implementation
 
 ---
 
@@ -2331,6 +2418,239 @@ PlacedOrder(
 | `_group_orders_by_bracket()`             | Partitions orders into parents, order_children, position_children    |
 | `_build_bracket_context_from_children()` | Extracts stopLoss/takeProfit/trailingStopPips from child order types |
 | `_group_and_map_tws_orders()`            | Orchestrates grouping and mapping with bracket enrichment            |
+
+---
+
+## 2.9 Position Tracking
+
+**Files:** `position_tracker.py`, `wiring_interfaces.py`, `tws_models.py`
+
+PositionTracker manages position state following the interface-based wiring pattern with unique characteristics:
+
+### Architecture
+
+**Simpler than Other Trackers:**
+
+- No request ID tracking (global position subscription per account)
+- No per-position waiting hooks (snapshot/stream only)
+- No fills history (positions are net aggregates)
+- Auto-request pattern: sends `OUT.REQ_POSITIONS` on first callback
+
+**Thread Ownership:**
+
+```
+Main Thread (AsyncIO)                    Daemon Thread
+─────────────────────                    ─────────────
+TWSClient.position_tracker property      IBSocket.position(account, contract, ...)
+        │ (lazy initialization)                  │
+        │                                position_tracker.ensure_snapshot_requested()
+        │                                        │
+        │                                position_tracker.upsert_position(...)
+        │                                        │
+callback(tracked_pos) ◄──────────────── loop.call_soon_threadsafe(...)
+```
+
+**Key Differences from Quote/Bars/ContractTracker:**
+
+1. **Lazy Ownership**: Created by `TWSClient.position_tracker` property, not owned by IBSocket
+2. **Error Routing by Nature**: Errors routed via `TWSErrorNature.POSITION` (codes 200, 321, 322)
+3. **Auto-Request**: `ensure_snapshot_requested()` sends request on first callback (no explicit caller)
+4. **No Request ID**: Global subscription, errors dispatched to all hooks
+
+### Wiring Pattern
+
+**Constructor:**
+
+```python
+class PositionTracker(PositionTrackerCBWiringInterface):
+    def __init__(self, ibsocket: IbSocketWiringInterface) -> None:
+        ibsocket.wire_position_tracker(self)  # Bidirectional wiring
+        self.ibsocket = ibsocket
+        self._snapshot_requested = threading.Event()
+        self._snapshot_complete = threading.Event()
+        self._positions: dict[str, TrackedPosition] = {}  # position_key → TrackedPosition
+        self._snapshot_hooks: dict[str, tuple[loop, future]] = {}
+        self._stream_hooks: dict[str, tuple[loop, callback, error_callback]] = {}
+```
+
+**Callback Methods (thread-safe, called from reader thread):**
+
+```python
+def ensure_snapshot_requested(self) -> None:
+    """Send reqPositions() if not already requested."""
+    if not self._snapshot_requested.is_set():
+        VERSION = 1
+        self.ibsocket.send_message(OUT.REQ_POSITIONS, [VERSION])
+        self._snapshot_requested.set()
+
+def upsert_position(
+    self, account: str, contract: Contract, position: Decimal, avgCost: float
+) -> None:
+    """Create or replace TrackedPosition from position callback."""
+    tracked = TrackedPosition(account, contract, position, avgCost)
+    self._positions[tracked.position_key] = tracked
+    # Dispatch to stream hooks via call_soon_threadsafe(...)
+
+def mark_snapshot_complete(self) -> None:
+    """Signal snapshot completion, resolve pending futures."""
+    self._snapshot_complete.set()
+    # Resolve snapshot hooks with all_positions()
+
+def raise_error(self, exception: ProviderException) -> None:
+    """Dispatch error to all hooks (no req_id)."""
+    # Reject snapshot futures, dispatch to stream error callbacks
+```
+
+**IBSocket Callback Routing:**
+
+```python
+class IBSocket:
+    def wire_position_tracker(self, tracker: PositionTrackerCBWiringInterface):
+        self._position_tracker = tracker
+
+    def position(
+        self, account: str, contract: Contract, position: Decimal, avgCost: float
+    ):
+        if self._position_tracker:
+            self._position_tracker.ensure_snapshot_requested()  # Auto-request
+            self._position_tracker.upsert_position(account, contract, position, avgCost)
+
+    def positionEnd(self):
+        if self._position_tracker:
+            self._position_tracker.mark_snapshot_complete()
+
+    def error(self, reqId: int, errorCode: int, errorString: str, advancedOrderRejectJson: str):
+        # ... (other error routing)
+        nature = classify_error(errorCode, errorString)
+        if nature == TWSErrorNature.POSITION:
+            if self._position_tracker:
+                exception = ProviderException(
+                    error_code=f"TWS_{errorCode}",
+                    message=errorString,
+                    category="tws_error"
+                )
+                self._position_tracker.raise_error(exception)
+```
+
+### Error Classification
+
+**File:** `tws_models.py`
+
+Position-specific errors routed via nature classification:
+
+```python
+_POSITION_NATURE_CODES: frozenset[int] = frozenset(
+    [
+        200,  # No security definition found
+        321,  # Server error when validating request
+        322,  # Unable to connect as client id is already in use
+    ]
+)
+
+class TWSErrorNature(str, Enum):
+    POSITION = "position"  # Global position subscription errors
+    # ... (other natures)
+
+def classify_error(error_code: int, error_string: str) -> TWSErrorNature:
+    if error_code in _POSITION_NATURE_CODES:
+        return TWSErrorNature.POSITION
+    # ... (other classifications)
+```
+
+**Rationale:** Position subscription is global (no reqId), errors must be dispatched to all hooks.
+
+### TWSClient Integration (Lazy Property)
+
+**File:** `tws_connection.py`
+
+```python
+class TWSClient:
+    def __init__(self, ...):
+        self._ibsocket: IBSocket | None = None
+        self._position_tracker: PositionTracker | None = None
+
+    @property
+    def position_tracker(self) -> PositionTracker:
+        """Lazy-initialized position tracker.
+
+        Creates tracker on first access and wires with IBSocket.
+        """
+        if self._position_tracker is None:
+            self._position_tracker = PositionTracker(ibsocket=self.ibsocket)
+        return self._position_tracker
+```
+
+**Usage in TWSBrokerProvider:**
+
+```python
+class TWSBrokerProvider:
+    async def get_positions(self) -> list[Position]:
+        tracked = await self._tws_client.position_tracker.all_positions()
+        return [t.to_domain() for t in tracked]
+
+    async def subscribe_positions(
+        self, callback: Callable[[Position], Coroutine[Any, Any, None]]
+    ) -> str:
+        return await self._tws_client.position_tracker.create_stream_hook(
+            callback=lambda t: callback(t.to_domain())
+        )
+```
+
+### Testing Patterns
+
+**Mock Interface Approach:**
+
+```python
+import pytest
+from unittest.mock import Mock, PropertyMock
+from trading_api.providers.tws.position_tracker import PositionTracker
+from trading_api.providers.tws.wiring_interfaces import IbSocketWiringInterface
+
+@pytest.fixture
+def mock_ibsocket():
+    """Mock IbSocketWiringInterface for PositionTracker tests."""
+    mock = Mock(spec=IbSocketWiringInterface)
+    type(mock).next_req_id = PropertyMock(side_effect=range(1000, 10000))
+    return mock
+
+def test_position_tracker_wiring(mock_ibsocket):
+    """PositionTracker wires itself during __init__."""
+    tracker = PositionTracker(ibsocket=mock_ibsocket)
+    mock_ibsocket.wire_position_tracker.assert_called_once_with(tracker)
+    assert tracker.ibsocket is mock_ibsocket
+
+def test_ensure_snapshot_requested(mock_ibsocket):
+    """ensure_snapshot_requested() sends OUT.REQ_POSITIONS."""
+    from ibapi.message import OUT
+    tracker = PositionTracker(ibsocket=mock_ibsocket)
+    tracker.ensure_snapshot_requested()
+    mock_ibsocket.send_message.assert_called_once()
+    call_args = mock_ibsocket.send_message.call_args
+    assert call_args[0][0] == OUT.REQ_POSITIONS  # msgId
+    assert call_args[0][1] == [1]  # VERSION = 1
+```
+
+**Error Routing Test:**
+
+```python
+def test_error_routing_by_nature(mock_ibsocket):
+    """Position errors routed via nature classification (no req_id)."""
+    from trading_api.providers.tws.tws_models import TWSErrorNature, classify_error
+    from trading_api.models.exceptions import ProviderException
+
+    # Verify error code 200 classified as POSITION nature
+    assert classify_error(200, "No security definition") == TWSErrorNature.POSITION
+
+    # Mock error dispatch
+    tracker = PositionTracker(ibsocket=mock_ibsocket)
+    exception = ProviderException(
+        error_code="TWS_200", message="No security definition", category="tws_error"
+    )
+    tracker.raise_error(exception)
+    # Verify error dispatched to hooks (no req_id parameter)
+```
+
+**See:** `providers/tws/tests/test_position_tracker.py` for complete test suite
 
 ---
 
