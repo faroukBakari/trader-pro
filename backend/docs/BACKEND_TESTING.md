@@ -610,13 +610,16 @@ result = await tws_client.reqHistoricalData(contract, "1 min", ...)
 mock_bars_tracker.request.assert_called_once_with(contract, "1 min", ...)
 ```
 
-**❌ OLD Pattern (deprecated):**
+**❌ OLD Pattern (removed Jan 2026):**
 
 ```python
-# Don't mock _stream_data or create_snapshot
-mock_ibsocket.create_snapshot.return_value = [  # ❌ Obsolete API
-    {"time": datetime(...), "open": 150.0, ...}  # ❌ Dict mocks
-]
+# Don't mock removed IBSocket methods
+mock_ibsocket.create_snapshot.return_value = ...  # ❌ Method removed Jan 2026
+mock_ibsocket.create_stream.return_value = ...    # ❌ Method removed Jan 2026
+
+# ✅ DO mock tracker methods instead
+mock_quote_tracker.request.return_value = Quote(...)
+mock_bars_tracker.request.return_value = [Bar(...)]
 ```
 
 **Key Changes:**
@@ -624,7 +627,12 @@ mock_ibsocket.create_snapshot.return_value = [  # ❌ Obsolete API
 1. **Domain Models**: Use `Bar` Pydantic models, not dicts
 2. **Int Timestamps**: `time=1702641000000` (milliseconds), not `datetime` objects
 3. **Int Volume**: `volume=1000000` (int), not `float` or `Decimal`
-4. **Tracker Mocking**: Mock `bars_tracker.request()` (AsyncMock), not `ibsocket.create_snapshot()`
+4. **Tracker Mocking**: Mock tracker public APIs, not removed IBSocket methods:
+   - QuoteTracker: Mock `quote_tracker.request()` / `subscribe()` / `unsubscribe()`
+   - BarsTracker: Mock `bars_tracker.request()` / `subscribe()` / `unsubscribe()`
+   - ContractTracker: Mock `contract_tracker.get_descriptions()` / `get_details()`
+   - OrderTracker: Mock `order_tracker.add_order()` / `find_tracked_order()` / `find_oca_group()`
+   - **Never mock**: `ibsocket.create_snapshot()`, `ibsocket.create_stream()`, `ibsocket.remove_stream()` (removed Jan 2026)
 5. **Callback Routing Tests**: Verify `bars_cb(reqId, bar)` calls, not `_stream_data` accumulation
 6. **No Async in IBSocket Tests**: Callback verification is synchronous (no `async def`, no `await`)
 
@@ -671,7 +679,6 @@ async def test_get_historical_bars_returns_bars(mock_client):
 - [ ] Use `volume: int`, not `float` or `Decimal`
 - [ ] Mock tracker methods (`bars_tracker.request()`), not IBSocket internals
 - [ ] Import `AsyncMock` from `unittest.mock` for async method mocking
-- [ ] Remove `_stream_data` / `create_snapshot` references
 - [ ] Verify callback routing (`bars_cb`, `bars_complete_cb`), not accumulation
 
 **ExecutionTracker Testing (Two-Phase Dispatch):**
@@ -705,7 +712,7 @@ async def test_execution_tracker_two_phase_dispatch():
         dispatches.append(tracked)
 
     loop = asyncio.get_running_loop()
-    tracker.create_stream_hook(loop, on_execution, lambda e: None)
+    subscription_id = tracker.subscribe(callback=on_execution, on_error=lambda e: None)
 
     # Phase 1: execDetails (commission=None)
     tracker.upsert_execution(contract, execution)
@@ -1081,7 +1088,7 @@ callback_mock = AsyncMock()
 - **Domain Conversion**: Use `TrackedExecution.to_domain()` → `Execution` Pydantic model
 - **Time Parsing**: TWS format "YYYYMMDD HH:MM:SS" → int milliseconds UTC
 - **Snapshot Pattern**: Mock `execution_tracker.all_executions()` with list of `TrackedExecution`
-- **Stream Hooks**: Verify `create_stream_hook()` registration and dispatch
+- **Stream Hooks**: Verify `subscribe()` registration and callback dispatch
 
 ---
 
@@ -2210,10 +2217,10 @@ Similar to QuoteTracker/BarsTracker. Constructor calls `mock_ibsocket.wire_contr
 
 **Architectural Change**: `reqBarDataStream()` now delegates through `BarsTracker` for centralized registration.
 
-**OLD Pattern (Before):**
+**OLD Pattern (Pre-Jan 2026 - Method Removed):**
 
 ```python
-# ❌ OLD: Mock ibsocket.create_stream (bypassed BarsTracker)
+# ❌ OLD: Mock ibsocket.create_stream (method removed Jan 2026)
 @patch.object(IBSocket, "create_stream")
 async def test_reqBarDataStream_old(mock_create_stream):
     mock_create_stream.return_value = (42, lambda: None)  # (req_id, cancel_fn)
@@ -2243,9 +2250,9 @@ async def test_reqBarDataStream_new(mock_subscribe):
 
 **Why the Change:**
 
-- **Before**: `reqBarDataStream()` called `ibsocket.create_stream()` directly → bypassed BarsTracker registration → "unknown req_id" warnings
-- **After**: `reqBarDataStream()` calls `bars_tracker.subscribe()` → centralized registration → no warnings
-- **Test Impact**: Mock the new delegation point (`bars_tracker.subscribe`) instead of the old one (`ibsocket.create_stream`)
+- **Before (Pre-Jan 2026)**: `reqBarDataStream()` called `ibsocket.create_stream()` → bypassed BarsTracker
+- **After (Jan 2026)**: IBSocket no longer has `create_stream()` / `remove_stream()` methods - Tracker pattern handles all streaming
+- **Test Impact**: Mock `bars_tracker.subscribe()` public API, or use `wire_bars_tracker()` fixture pattern for callback verification
 
 **Callback Signature Change:**
 
@@ -2255,6 +2262,7 @@ async def test_reqBarDataStream_new(mock_subscribe):
 **Migration Checklist:**
 
 1. ✅ Replace `@patch.object(IBSocket, "create_stream")` with `@patch.object(BarsTracker, "subscribe")`
+   ⚠️ **Note**: `create_stream()`, `remove_stream()`, `create_snapshot()` removed from IBSocket (Jan 2026 cleanup)
 2. ✅ Update mock return value from `(req_id, cancel_fn)` to `None`
 3. ✅ Update callback assertions to expect `Bar` domain model signature
 4. ✅ Add mocks for `quote_tracker` and `ibsocket` if testing cancellation (prevents hanging)
