@@ -8,24 +8,24 @@
 
 ## Quick Reference
 
-| Layer                       | File                                  | Responsibility                                                                                                                       |
-| --------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion                                                                                           |
-| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management                                                                                     |
-| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket                                                                                     |
-| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                                                                        |
-| **Wiring Interfaces**       | `wiring_interfaces.py`                | Abstract interfaces for component composition (IbSocketWiringInterface, QuoteTrackerCBWiringInterface, BarsTrackerCBWiringInterface) |
-| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                                                                        |
-| **ContractTracker**         | `contract_tracker.py`                 | Contract persistence with SQLite + lazy loading                                                                                      |
-| **QuoteTracker**            | `quote_tracker.py`                    | Quote subscription management with interface-based wiring, centralized snapshot/stream hooks, refcount logic                         |
-| **BarsTracker**             | `bars_tracker.py`                     | Bar data management with interface-based wiring, timezone-aware conversion, snapshot/stream patterns                                 |
-| **OrderTracker**            | `order_tracker.py`                    | Order state tracking, status mapping, OCA reconciliation, parent-child dispatch                                                      |
-| **PositionTracker**         | `position_tracker.py`                 | Position state tracking with interface-based wiring, lazy initialization, snapshot/stream patterns                                   |
-| **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL                                                            |
-| **ExecutionTracker**        | `execution_tracker.py`                | Execution tracking with commission joining, two-phase dispatch pattern                                                               |
-| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                                                                        |
-| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                                                                                    |
-| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                                                                                  |
+| Layer                       | File                                  | Responsibility                                                                                                                                                                          |
+| --------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **3 - TWSDatafeedProvider** | `datafeed_provider.py`                | DatafeedCapability impl, domain conversion                                                                                                                                              |
+| **3 - TWSBrokerProvider**   | `broker_provider.py`                  | BrokerCapability impl, order/position management                                                                                                                                        |
+| **2 - TWSClient**           | `tws_connection.py`                   | AsyncIO facade, stream management, owns IBSocket                                                                                                                                        |
+| **1 - IBSocket**            | `tws_connection.py`                   | Raw TCP, daemon thread, business key registry                                                                                                                                           |
+| **Wiring Interfaces**       | `wiring_interfaces.py`                | Abstract interfaces for component composition (IbSocketWiringInterface, QuoteTrackerCBWiringInterface, BarsTrackerCBWiringInterface)                                                    |
+| **CachedContract**          | `cached_contract.py`                  | Contract caching (description → full details)                                                                                                                                           |
+| **ContractTracker**         | `contract_tracker.py`                 | Contract persistence with SQLite + lazy loading                                                                                                                                         |
+| **QuoteTracker**            | `quote_tracker.py`                    | Quote subscription management with interface-based wiring, centralized snapshot/stream hooks, refcount logic                                                                            |
+| **BarsTracker**             | `bars_tracker.py`                     | Bar data management with interface-based wiring, timezone-aware conversion, snapshot/stream patterns                                                                                    |
+| **OrderTracker**            | `order_tracker.py`                    | Order state tracking with interface-based wiring, TWS protocol internalization (placeOrder/cancelOrder), status mapping, OCA reconciliation, parent-child dispatch, lazy initialization |
+| **PositionTracker**         | `position_tracker.py`                 | Position state tracking with interface-based wiring, lazy initialization, snapshot/stream patterns                                                                                      |
+| **AccountTracker**          | `account_tracker.py`                  | Account metrics tracking (equity, balance, P&L), reqAccountSummary/reqPnL                                                                                                               |
+| **ExecutionTracker**        | `execution_tracker.py`                | Execution tracking with interface-based wiring, commission joining, two-phase dispatch pattern, lazy initialization                                                                     |
+| **Mappers**                 | `tws_mappers.py`                      | TWS ↔ domain model conversion, ticker parsing                                                                                                                                           |
+| **Models**                  | `tws_models.py`                       | `StreamData`, `AssetConfig`, error classification                                                                                                                                       |
+| **Config**                  | `models/providers/tws/tws_configs.py` | `TWS_*` env vars, Pydantic settings                                                                                                                                                     |
 
 **Tests:** `providers/tws/tests/test_{client,ibsocket,mappers,models,datafeed_provider,broker_provider,cached_contract,contract_tracker,quote_tracker,config}.py`
 
@@ -556,7 +556,262 @@ def positionEnd(self):
 3. **Error Routing by Nature**: Position errors (codes 200, 321, 322) routed via `TWSErrorNature.POSITION` classification
 4. **Lazy Initialization**: `TWSClient.position_tracker` property creates tracker on first access (not owned by IBSocket)
 
-**See:** Section 2.7 for QuoteTracker implementation, Section 2.8 for BarsTracker implementation, Section 2.9 for PositionTracker implementation
+**See:** Section 2.7 for QuoteTracker implementation, Section 2.8 for BarsTracker implementation, Section 2.9 for PositionTracker implementation, Section 2.10 for ExecutionTracker implementation
+
+### ExecutionTrackerCBWiringInterface
+
+Tracker callback contract for execution updates with commission joining:
+
+```python
+class ExecutionTrackerCBWiringInterface(ABC):
+    """Execution tracker callback contract with two-phase dispatch."""
+
+    @abstractmethod
+    def upsert_execution(
+        self,
+        req_id: int,
+        contract: Contract,
+        execution: Execution,
+    ) -> None:
+        """Dispatch execution update to registered hooks (thread-safe).
+
+        Called from reader thread (execDetails callback).
+        First phase of two-phase dispatch - execution data without commission.
+        """
+        pass
+
+    @abstractmethod
+    def update_commission(
+        self,
+        exec_id: str,
+        commission_report: CommissionAndFeesReport,
+    ) -> None:
+        """Update existing execution with commission data (thread-safe).
+
+        Called from reader thread (commissionAndFeesReport callback).
+        Second phase of two-phase dispatch - joins commission with execution.
+        """
+        pass
+
+    @abstractmethod
+    def mark_snapshot_complete(self, req_id: int) -> None:
+        """Signal execution snapshot completion (thread-safe).
+
+        Called from reader thread (execDetailsEnd callback).
+        """
+        pass
+
+    @abstractmethod
+    def raise_error(self, req_id: int, exception: ProviderException) -> None:
+        """Dispatch execution request errors to hooks (thread-safe).
+
+        Called from reader thread when execution request fails.
+        """
+        pass
+```
+
+**Implementors:**
+
+- `ExecutionTracker` in `execution_tracker.py`
+
+**Bidirectional Wiring:**
+
+```python
+# ExecutionTracker constructor
+def __init__(self, ibsocket: IbSocketWiringInterface):
+    self.ibsocket = ibsocket
+    self.ibsocket.wire_execution_tracker(self)  # ← Register for callbacks
+    # ...
+
+# IBSocket stores reference
+def wire_execution_tracker(self, tracker: ExecutionTrackerCBWiringInterface):
+    self.__execution_tracker = tracker
+
+# IBSocket callbacks route to tracker
+def execDetails(self, reqId: int, contract: Contract, execution: Execution):
+    if self.__execution_tracker:
+        self.__execution_tracker.upsert_execution(reqId, contract, execution)
+
+def commissionAndFeesReport(self, commissionReport: CommissionAndFeesReport):
+    if self.__execution_tracker:
+        self.__execution_tracker.update_commission(
+            commissionReport.execId, commissionReport
+        )
+
+def execDetailsEnd(self, reqId: int):
+    if self.__execution_tracker:
+        self.__execution_tracker.mark_snapshot_complete(reqId)
+```
+
+**Comparison - PositionTracker vs ExecutionTracker:**
+
+| Aspect              | PositionTracker                       | ExecutionTracker                           |
+| ------------------- | ------------------------------------- | ------------------------------------------ |
+| Wiring Method       | `wire_position_tracker(tracker)`      | `wire_execution_tracker(tracker)`          |
+| Update Callback     | `upsert_position(account, ...)`       | `upsert_execution(req_id, contract, exec)` |
+| Join Callback       | _(none)_                              | `update_commission(exec_id, report)`       |
+| Completion Callback | `mark_snapshot_complete()`            | `mark_snapshot_complete(req_id)`           |
+| Error Callback      | `raise_error(exception)` (no req_id)  | `raise_error(req_id, exception)`           |
+| Request Messages    | `OUT.REQ_POSITIONS`                   | `OUT.REQ_EXECUTIONS + PROTOBUF_MSG_ID`     |
+| Cancel Messages     | `OUT.CANCEL_POSITIONS`                | _(none - snapshot only)_                   |
+| Dispatch Pattern    | Single-phase                          | Two-phase (exec → commission join)         |
+| Lazy Initialization | `TWSClient.position_tracker` property | `TWSClient.execution_tracker` property     |
+
+**Unique Aspects of ExecutionTracker:**
+
+1. **Two-Phase Dispatch**: Executions arrive via `execDetails`, commissions via `commissionAndFeesReport` with join by `exec_id`
+2. **Protobuf Request**: Uses `send_protobuf()` for `OUT.REQ_EXECUTIONS` (vs `send_message()` for positions)
+3. **Request ID Tracking**: Execution requests use req_id for completion/error correlation
+4. **Commission Joining**: `update_commission()` enriches existing `TrackedExecution` and re-dispatches to hooks
+
+### OrderTrackerCBWiringInterface
+
+Tracker callback contract for order updates:
+
+```python
+class OrderTrackerCBWiringInterface(ABC):
+    """Order tracker callback contract."""
+
+    @abstractmethod
+    def upsert_order(
+        self,
+        orderId: int,
+        contract: Contract,
+        order: Order,
+        orderState: OrderState,
+    ) -> None:
+        """Create or replace TrackedOrder from openOrder callback (thread-safe).
+
+        Called from reader thread (TWS callbacks).
+        """
+        pass
+
+    @abstractmethod
+    def update_status(
+        self,
+        orderId: int,
+        status: str,
+        filled: Decimal,
+        remaining: Decimal,
+        avgFillPrice: float,
+        permId: int,
+        parentId: int,
+        lastFillPrice: float,
+        clientId: int,
+        whyHeld: str,
+        mktCapPrice: float,
+    ) -> None:
+        """Update TrackedOrder from orderStatus callback (thread-safe).
+
+        Called from reader thread (TWS callbacks).
+        Mutates stored Order and OrderState objects directly.
+        """
+        pass
+
+    @abstractmethod
+    def mark_snapshot_complete(self) -> None:
+        """Signal order snapshot completion (thread-safe).
+
+        Called from reader thread (openOrderEnd callback).
+        """
+        pass
+
+    @abstractmethod
+    def raise_error(self, exception: ProviderException) -> None:
+        """Dispatch order request errors to hooks (thread-safe).
+
+        Called from reader thread when order request fails.
+        No req_id - errors dispatched to all hooks (global subscription).
+        """
+        pass
+```
+
+**Implementors:**
+
+- `OrderTracker` in `order_tracker.py`
+
+**Bidirectional Wiring:**
+
+```python
+# OrderTracker constructor
+def __init__(self, ibsocket: IbSocketWiringInterface):
+    self.ibsocket = ibsocket
+    self.next_order_id: int = self.ibsocket.wire_order_tracker(self)  # ← Returns next_order_id!
+    # ...
+
+# IBSocket stores reference and returns next_order_id
+def wire_order_tracker(self, tracker: OrderTrackerCBWiringInterface) -> int | None:
+    self.__order_tracker = tracker
+    return self.__next_order_id  # Unique: returns order ID for initialization
+
+# IBSocket callbacks route to tracker
+def openOrder(
+    self, orderId: int, contract: Contract, order: Order, orderState: OrderState
+):
+    if self.__order_tracker:
+        self.__order_tracker.upsert_order(orderId, contract, order, orderState)
+
+def orderStatus(
+    self,
+    orderId: int,
+    status: str,
+    filled: Decimal,
+    remaining: Decimal,
+    avgFillPrice: float,
+    permId: int,
+    parentId: int,
+    lastFillPrice: float,
+    clientId: int,
+    whyHeld: str,
+    mktCapPrice: float,
+):
+    if self.__order_tracker:
+        self.__order_tracker.update_status(
+            orderId, status, filled, remaining, avgFillPrice, permId,
+            parentId, lastFillPrice, clientId, whyHeld, mktCapPrice
+        )
+
+def openOrderEnd(self):
+    if self.__order_tracker:
+        self.__order_tracker.mark_snapshot_complete()
+
+def error(self, reqId: int, errorCode: int, errorString: str, advancedOrderRejectJson: str):
+    # ... (other error routing)
+    nature = classify_error(errorCode, errorString)
+    if nature == TWSErrorNature.ORDER:
+        if self.__order_tracker:
+            exception = ProviderException(
+                error_code=f"TWS_{errorCode}",
+                message=errorString,
+                category="tws_error"
+            )
+            self.__order_tracker.raise_error(exception)
+```
+
+**Comparison - OrderTracker vs ExecutionTracker vs PositionTracker:**
+
+| Aspect              | OrderTracker                           | ExecutionTracker                           | PositionTracker                       |
+| ------------------- | -------------------------------------- | ------------------------------------------ | ------------------------------------- |
+| Wiring Method       | `wire_order_tracker(tracker)`          | `wire_execution_tracker(tracker)`          | `wire_position_tracker(tracker)`      |
+| **Wiring Returns**  | **next_order_id (int \| None)**        | _(void)_                                   | _(void)_                              |
+| Update Callback     | `upsert_order(orderId, contract, ...)` | `upsert_execution(req_id, contract, exec)` | `upsert_position(account, ...)`       |
+| Join Callback       | _(none)_                               | `update_commission(exec_id, report)`       | _(none)_                              |
+| Status Callback     | `update_status(orderId, status, ...)`  | _(none)_                                   | _(none)_                              |
+| Completion Callback | `mark_snapshot_complete()`             | `mark_snapshot_complete(req_id)`           | `mark_snapshot_complete()`            |
+| Error Callback      | `raise_error(exception)` (no req_id)   | `raise_error(req_id, exception)`           | `raise_error(exception)` (no req_id)  |
+| Request Messages    | `OUT.REQ_OPEN_ORDERS`                  | `OUT.REQ_EXECUTIONS + PROTOBUF_MSG_ID`     | `OUT.REQ_POSITIONS`                   |
+| Place Messages      | `OUT.PLACE_ORDER + PROTOBUF_MSG_ID`    | _(none)_                                   | _(none)_                              |
+| Cancel Messages     | `OUT.CANCEL_ORDER + PROTOBUF_MSG_ID`   | _(none - snapshot only)_                   | `OUT.CANCEL_POSITIONS`                |
+| Dispatch Pattern    | Single-phase                           | Two-phase (exec → commission join)         | Single-phase                          |
+| Lazy Initialization | `TWSClient.order_tracker` property     | `TWSClient.execution_tracker` property     | `TWSClient.position_tracker` property |
+
+**Unique Aspects of OrderTracker:**
+
+1. **next_order_id Return**: `wire_order_tracker()` returns `int | None` for order ID initialization (unique among all trackers)
+2. **TWS Protocol Internalization**: OrderTracker sends `OUT.PLACE_ORDER` and `OUT.CANCEL_ORDER` via `send_protobuf()`
+3. **Status Updates**: Separate `update_status()` callback mutates existing TrackedOrder (vs ExecutionTracker's commission join)
+4. **No Request ID**: Order subscription is global, errors dispatched to all hooks (like PositionTracker)
+5. **Internal Submission Logic**: Private `__submit_order()` handles reconciliation, no-op detection, immutable field guards
 
 ---
 
@@ -1680,14 +1935,37 @@ else:
 
 ---
 
-## 2.10 ExecutionTracker: Commission Joining Pattern
+## 2.10 ExecutionTracker: Interface-Based Wiring
 
-**Purpose:** Track trade executions with commission enrichment via two-phase dispatch.
+**Purpose:** Track trade executions with commission enrichment via two-phase dispatch, using the dependency inversion pattern.
 
 **Key Classes:**
 
 - `TrackedExecution` - Dataclass wrapping Contract, Execution, and optional commission
-- `ExecutionTracker` - Manages execution state with snapshot/stream hooks
+- `ExecutionTracker` - Manages execution state with snapshot/stream hooks, implements `ExecutionTrackerCBWiringInterface`
+
+**Architecture:**
+
+```
+┌─────────────────────┐              ┌─────────────────────────────────────┐
+│     TWSClient       │─────────────▶│       ExecutionTracker              │
+│  (owns via lazy     │   property   │ (implements ExecutionTrackerCB      │
+│   __execution_      │              │  WiringInterface)                   │
+│   tracker field)    │              └───────────────┬─────────────────────┘
+└─────────────────────┘                              │
+                                         constructor │ calls wire_execution_tracker(self)
+                                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              IBSocket                                       │
+│  wire_execution_tracker(tracker) ─► stores __execution_tracker reference    │
+│                                                                             │
+│  Callbacks route to tracker:                                                │
+│    execDetails()         ─► __execution_tracker.upsert_execution()          │
+│    commissionAndFeesReport() ─► __execution_tracker.update_commission()     │
+│    execDetailsEnd()      ─► __execution_tracker.mark_snapshot_complete()    │
+│    error() [EXEC nature] ─► __execution_tracker.raise_error()               │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 **Commission Joining Workflow:**
 
@@ -1722,9 +2000,45 @@ else:
 
 **Thread Safety:**
 
-- **Reader Thread:** `upsert_execution()`, `update_commission()`, `mark_snapshot_complete()`
-- **Main Thread:** `all_executions()`, `create_stream_hook()`, `reset()`
-- **No Locks Needed:** Reader thread writes, main thread reads via asyncio dispatch
+- **Reader Thread:** `upsert_execution()`, `update_commission()`, `mark_snapshot_complete()` - called via IBSocket callbacks
+- **Main Thread:** `all_executions()`, `create_stream_hook()`, `reset()` - called via TWSClient
+- **No Locks Needed:** Reader thread writes to dict, main thread reads via asyncio dispatch
+
+**Constructor & Wiring:**
+
+```python
+class ExecutionTracker(ExecutionTrackerCBWiringInterface):
+    def __init__(self, ibsocket: IbSocketWiringInterface):
+        self.ibsocket = ibsocket
+        self.ibsocket.wire_execution_tracker(self)  # Register for callbacks
+        self._executions: dict[str, TrackedExecution] = {}
+        self._snapshot_hooks: dict[int, asyncio.Future[list[TrackedExecution]]] = {}
+        self._stream_hooks: dict[str, tuple[asyncio.AbstractEventLoop, ...]] = {}
+        self._snapshot_requested = False
+        self._snapshot_req_id: int | None = None
+
+    def ensure_snapshot_requested(self) -> None:
+        """Send REQ_EXECUTIONS if not already requested (auto-request pattern)."""
+        if not self._snapshot_requested:
+            self._snapshot_requested = True
+            self._snapshot_req_id = self.ibsocket.next_req_id
+            self.ibsocket.send_protobuf(OUT.REQ_EXECUTIONS + PROTOBUF_MSG_ID, ...)
+```
+
+**Lazy Initialization (TWSClient):**
+
+```python
+class TWSClient:
+    def __init__(self, ...):
+        self.__execution_tracker: ExecutionTracker | None = None
+
+    @property
+    def execution_tracker(self) -> ExecutionTracker:
+        """Lazy-initialized ExecutionTracker for execution tracking."""
+        if self.__execution_tracker is None:
+            self.__execution_tracker = ExecutionTracker(self.ibsocket)
+        return self.__execution_tracker
+```
 
 **Execution Model Update:**
 
@@ -1800,14 +2114,10 @@ class ExecutionTracker:
 class TWSBrokerProvider:
     async def get_executions(self, symbol: str | None = None) -> list[DomainExecution]:
         """Get executions with optional symbol filter."""
-        # Trigger snapshot if needed
-        self._tws_client.socket.execution_tracker.ensure_snapshot_requested(
-            lambda: self._tws_client.socket.reqExecutions(ExecutionFilter())
-        )
-        # Wait for snapshot completion
-        tracked = await self._tws_client.socket.execution_tracker.all_executions(
-            filter_symbol=f"EXCHANGE:{symbol}" if symbol else ""
-        )
+        # Uses TWSClient.execution_tracker (lazy init, auto-request)
+        tracked = await self._tws_client.reqExecutions()
+        if symbol:
+            tracked = [t for t in tracked if t.symbol == f"EXCHANGE:{symbol}"]
         return [t.to_domain() for t in tracked]
 
     async def get_all_executions(self) -> list[DomainExecution]:
@@ -1816,8 +2126,6 @@ class TWSBrokerProvider:
 
     async def subscribe_executions(self, callback, on_error, symbol: str | None = None) -> str:
         """Subscribe to execution stream (with commission enrichment)."""
-        loop = asyncio.get_running_loop()
-
         async def on_execution_update(tracked: TrackedExecution) -> None:
             # Filter by symbol if specified
             if symbol and tracked.symbol != f"EXCHANGE:{symbol}":
@@ -1825,15 +2133,8 @@ class TWSBrokerProvider:
             # Convert to domain and dispatch
             await callback(tracked.to_domain())
 
-        # Register stream hook (receives both initial and commission-enriched executions)
-        hook_key = self._tws_client.socket.execution_tracker.create_stream_hook(
-            loop, on_execution_update, on_error
-        )
-        # Trigger snapshot to populate existing executions
-        self._tws_client.socket.execution_tracker.ensure_snapshot_requested(
-            lambda: self._tws_client.socket.reqExecutions(ExecutionFilter())
-        )
-        return hook_key
+        # Uses TWSClient.reqExecutionsStream (lazy init, auto-request via tracker)
+        return self._tws_client.reqExecutionsStream(on_execution_update, on_error)
 ```
 
 **Testing Patterns:**
@@ -1873,6 +2174,360 @@ class TestBrokerProvider:
 - Re-dispatch uses same hook keys (subscribers receive both notifications)
 - Snapshot includes all executions up to `execDetailsEnd` callback
 - Symbol filtering happens at provider layer (not tracker)
+
+---
+
+## 2.11 OrderTracker
+
+**[DEPENDENCY INVERSION - January 24, 2026]**: Interface-based wiring enables testable order state tracking without tight coupling to IBSocket.
+
+**File:** `order_tracker.py`
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                             OrderTracker                            │
+│                                                                     │
+│  Implements OrderTrackerCBWiringInterface for TWS callbacks:       │
+│  - upsert_order(orderId, contract, order, orderState)              │
+│  - update_status(orderId, status, filled, remaining, ...)          │
+│  - mark_snapshot_complete()                                         │
+│  - raise_error(exception)                                           │
+│                                                                     │
+│  Uses IbSocketWiringInterface for TWS protocol:                    │
+│  - wire_order_tracker(self) → returns next_order_id                │
+│  - send_protobuf(OUT.PLACE_ORDER + PROTOBUF_MSG_ID, order_proto)   │
+│  - send_protobuf(OUT.CANCEL_ORDER + PROTOBUF_MSG_ID, order_id)     │
+│  - send_message(OUT.REQ_OPEN_ORDERS)                               │
+│                                                                     │
+│  Internal Logic:                                                    │
+│  - __submit_order(): Reconciliation, no-op detection, guards       │
+│  - TrackedOrder: Bidirectional parent/child refs, BracketContext   │
+│  - __placeOrder(): TWS protocol internalization                    │
+│  - __cancelOrder(): TWS protocol internalization                   │
+│  - __ensure_snapshot_requested(): Auto-request on first hook       │
+└─────────────────────────────────────────────────────────────────────┘
+              ▲                                   │
+              │ implements                        │ uses
+              │ OrderTrackerCBWiringInterface     │ IbSocketWiringInterface
+              │                                   ▼
+┌─────────────┴──────────────────────────────────────────────────────┐
+│                             IBSocket                               │
+│                                                                    │
+│  - Stores __order_tracker: OrderTrackerCBWiringInterface           │
+│  - wire_order_tracker(tracker) → returns next_order_id             │
+│  - openOrder() → __order_tracker.upsert_order()                    │
+│  - orderStatus() → __order_tracker.update_status()                 │
+│  - openOrderEnd() → __order_tracker.mark_snapshot_complete()       │
+│  - error() → __order_tracker.raise_error() (if ORDER error)        │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### Wiring Interfaces (Dependency Inversion)
+
+OrderTracker implements `OrderTrackerCBWiringInterface` (callback contract) and uses `IbSocketWiringInterface` (protocol contract):
+
+```python
+# Constructor: Bidirectional wiring
+def __init__(self, ibsocket: IbSocketWiringInterface):
+    """Initialize OrderTracker with ibsocket wiring (dependency injection).
+
+    Args:
+        ibsocket: Wiring interface for TWS protocol operations and callbacks.
+    """
+    self.ibsocket = ibsocket
+    # Unique: wire_order_tracker() returns next_order_id for initialization
+    self.next_order_id: int = self.ibsocket.wire_order_tracker(self)
+    # ... (other initialization)
+
+# Callback Implementation (OrderTrackerCBWiringInterface)
+def upsert_order(
+    self, orderId: int, contract: Contract, order: Order, orderState: OrderState
+) -> None:
+    """Create or replace TrackedOrder from openOrder callback (thread-safe).
+
+    Called from IBSocket.openOrder() in reader thread.
+    """
+    # ... (update __orders dict, dispatch to hooks)
+
+def update_status(
+    self, orderId: int, status: str, filled: Decimal, remaining: Decimal, ...
+) -> None:
+    """Update TrackedOrder from orderStatus callback (thread-safe).
+
+    Mutates stored Order and OrderState objects directly.
+    """
+    # ... (update Order/OrderState, dispatch to hooks)
+
+def mark_snapshot_complete(self) -> None:
+    """Signal order snapshot completion (thread-safe)."""
+    # ... (dispatch snapshot_complete to hooks)
+
+def raise_error(self, exception: ProviderException) -> None:
+    """Dispatch order request errors to hooks (thread-safe)."""
+    # ... (dispatch error to hooks, no req_id correlation)
+```
+
+### TWS Protocol Internalization
+
+OrderTracker sends TWS protocol messages directly (no callback injection):
+
+```python
+def __placeOrder(
+    self,
+    orderId: int,
+    contract: Contract,
+    order: Order,
+    tracked: TrackedOrder,
+) -> None:
+    """Send PLACE_ORDER protobuf message to TWS (internal)."""
+    ORDER_PROTO = protobuf.OrderProto()
+    ORDER_PROTO.orderId = orderId
+    ORDER_PROTO.contract.CopyFrom(protobuf.ContractProto(...))
+    ORDER_PROTO.order.CopyFrom(protobuf.OrderProto(...))
+
+    # PLACE_ORDER message (TWS API v10.25+)
+    self.ibsocket.send_protobuf(
+        OUT.PLACE_ORDER + PROTOBUF_MSG_ID,
+        ORDER_PROTO.SerializeToString(),
+    )
+
+def __cancelOrder(self, orderId: int) -> None:
+    """Send CANCEL_ORDER protobuf message to TWS (internal)."""
+    CANCEL_PROTO = protobuf.CancelOrderProto()
+    CANCEL_PROTO.orderId = orderId
+    CANCEL_PROTO.manualCancelOrderTime = ""  # Empty = immediate
+
+    # CANCEL_ORDER message (TWS API v10.25+)
+    self.ibsocket.send_protobuf(
+        OUT.CANCEL_ORDER + PROTOBUF_MSG_ID,
+        CANCEL_PROTO.SerializeToString(),
+    )
+
+def __ensure_snapshot_requested(self) -> None:
+    """Send REQ_OPEN_ORDERS if not already requested (auto-request pattern)."""
+    if not self._snapshot_requested:
+        self._snapshot_requested = True
+        self.ibsocket.send_message(OUT.REQ_OPEN_ORDERS)
+```
+
+**Rationale:** By internalizing TWS protocol operations, OrderTracker decouples from IBSocket callback injection (no `place_order_fn` / `cancel_order_fn` parameters). Interface-based wiring provides compile-time safety without tight coupling.
+
+### Lazy Initialization (TWSClient)
+
+OrderTracker is created on-demand when first accessed:
+
+```python
+class TWSClient:
+    def __init__(self, ...):
+        self.__order_tracker: OrderTracker | None = None
+
+    @property
+    def order_tracker(self) -> OrderTracker:
+        """Lazy-initialized OrderTracker for order state tracking."""
+        if self.__order_tracker is None:
+            self.__order_tracker = OrderTracker(self.ibsocket)
+        return self.__order_tracker
+```
+
+**Rationale:** OrderTracker subscribes to global order callbacks (`openOrder`, `orderStatus`) via wiring. Lazy initialization avoids activating order tracking for clients that don't need it (e.g., datafeed-only clients).
+
+### Order Submission Logic (\_\_submit_order)
+
+Private method handles order placement with reconciliation, no-op detection, and immutable field guards:
+
+```python
+def __submit_order(
+    self,
+    preorder: PreOrder,
+    existing_tracked: TrackedOrder | None,
+) -> PlacedOrder:
+    """Submit order with reconciliation, no-op detection, and guards (private).
+
+    Args:
+        preorder: Frontend order request (domain model).
+        existing_tracked: Existing TrackedOrder for modifications, or None for new orders.
+
+    Returns:
+        PlacedOrder (domain model) converted from TrackedOrder.
+
+    Raises:
+        ProviderException: If immutable field changed (qty/price for OCA parent).
+    """
+    # 1. Build TWS Contract and Order from PreOrder
+    contract, order = prebuild_tws_order(preorder)
+
+    # 2. Reconciliation: Use existing order_id for modifications
+    if existing_tracked:
+        order_id = existing_tracked.orderId
+        # Guard: Check immutable fields (qty/price for OCA parent)
+        if existing_tracked.in_oca_group and not existing_tracked.is_oca_child:
+            if order.totalQuantity != existing_tracked.order.totalQuantity:
+                raise ProviderException("Cannot modify qty of OCA parent")
+            if order.lmtPrice != existing_tracked.order.lmtPrice:
+                raise ProviderException("Cannot modify price of OCA parent")
+    else:
+        order_id = self.next_order_id
+        self.next_order_id += 1
+
+    # 3. No-op detection: Skip placeOrder if identical (same contract + order + state)
+    if existing_tracked and existing_tracked.matches(contract, order):
+        return existing_tracked.to_domain()  # Return existing PlacedOrder
+
+    # 4. Create TrackedOrder (stores contract/order/state)
+    tracked = TrackedOrder(order_id, contract, order, orderState=OrderState())
+
+    # 5. Send PLACE_ORDER protobuf to TWS
+    self.__placeOrder(order_id, contract, order, tracked)
+
+    # 6. Store in __orders dict and dispatch to hooks
+    self.__orders[order_id] = tracked
+    self._dispatch_snapshot(tracked)
+
+    # 7. Convert to domain model
+    return tracked.to_domain()
+```
+
+**Key Features:**
+
+- **Reconciliation**: Existing order modifications reuse `order_id` (vs new orders increment `next_order_id`)
+- **No-Op Detection**: Identical modifications skip `placeOrder` (avoids redundant TWS messages)
+- **Immutable Field Guards**: OCA parent orders cannot change `totalQuantity` or `lmtPrice` (TWS constraint)
+- **Private Method**: Not part of public API — TWSBrokerProvider calls `place_order()` wrapper
+
+### Domain Conversion (TrackedOrder.to_domain)
+
+Converts TWS `TrackedOrder` to domain `PlacedOrder` with BracketContext preservation:
+
+```python
+class TrackedOrder:
+    def to_domain(self) -> PlacedOrder:
+        """Convert to domain PlacedOrder model."""
+        # BracketContext: Preserved from original PreOrder (for UI display)
+        bracket_context = self.bracket_context.to_dict() if self.bracket_context else None
+
+        return PlacedOrder(
+            id=str(self.orderId),
+            symbol=self.symbol,
+            status=self.status,
+            side=_map_side(self.order.action),
+            type=_map_order_type(self.order),
+            qty=self.order.totalQuantity,
+            filledQty=self.filledQty,
+            remainingQty=self.remainingQty,
+            limitPrice=self.order.lmtPrice,
+            avgPrice=self.avgFillPrice,
+            time=self.time,
+            account=self.account,
+            exchange=self.contract.exchange,
+            permId=self.permId,
+            parentId=self.parentId,
+            clientId=self.clientId,
+            # BracketContext: Nullable dict with stopLoss/takeProfit IDs
+            bracket_context=bracket_context,
+        )
+
+@dataclass
+class BracketContext:
+    """Parent-child order references for bracket orders (UI metadata).
+
+    Moved from tws_mappers.py to order_tracker.py (domain ownership).
+    """
+    parent_id: int | None = None
+    stop_loss_id: int | None = None
+    take_profit_id: int | None = None
+
+    def to_dict(self) -> dict[str, int]:
+        """Convert to dict for domain model (filters None values)."""
+        return {
+            k: v for k, v in asdict(self).items() if v is not None
+        }
+```
+
+**Rationale:**
+
+- `BracketContext` moved from `tws_mappers.py` to `order_tracker.py` (domain ownership — bracket logic is order tracking concern, not mapping concern)
+- `to_domain()` converts TWS types to domain types (e.g., `Order.action` → `OrderSide`)
+- `bracket_context` field preserves parent/child relationships for UI display (TradingView Account Manager)
+
+### Thread Safety
+
+All public methods and callbacks are thread-safe:
+
+```python
+# RLock for re-entrant safety (callbacks may trigger other callbacks)
+self._lock = threading.RLock()
+
+def upsert_order(self, ...) -> None:
+    with self._lock:
+        # ... (update __orders dict)
+
+def update_status(self, ...) -> None:
+    with self._lock:
+        # ... (mutate Order/OrderState)
+
+def mark_snapshot_complete(self) -> None:
+    with self._lock:
+        # ... (dispatch snapshot_complete)
+
+def place_order(self, preorder: PreOrder) -> PlacedOrder:
+    with self._lock:
+        return self.__submit_order(preorder, existing_tracked=None)
+```
+
+**Rationale:** TWS callbacks fire from reader thread, but `place_order()` called from request thread. RLock prevents race conditions during concurrent access.
+
+### API Summary
+
+**Public Methods (TWSClient/TWSBrokerProvider):**
+
+```python
+def place_order(self, preorder: PreOrder) -> PlacedOrder:
+    """Place new order or modify existing order (thread-safe)."""
+    # ... (calls __submit_order with reconciliation)
+
+def cancel_order(self, order_id: str) -> None:
+    """Cancel order by ID (thread-safe)."""
+    # ... (calls __cancelOrder)
+
+def subscribe_orders(
+    self,
+    on_order: OrderCallback,
+    on_error: ErrorCallback,
+    on_snapshot_complete: SnapshotCompleteCallback | None = None,
+) -> None:
+    """Subscribe to order updates (thread-safe).
+
+    Hooks receive all orders (global subscription, no req_id).
+    Auto-requests snapshot on first hook (lazy pattern).
+    """
+    # ... (register hooks, call __ensure_snapshot_requested)
+
+def unsubscribe_orders(self, on_order: OrderCallback) -> None:
+    """Unsubscribe from order updates (thread-safe)."""
+    # ... (remove hooks)
+```
+
+**Internal Methods (Private):**
+
+```python
+def __submit_order(self, preorder: PreOrder, existing_tracked: TrackedOrder | None) -> PlacedOrder:
+    """Submit order with reconciliation, no-op detection, and guards."""
+
+def __placeOrder(self, orderId: int, contract: Contract, order: Order, tracked: TrackedOrder) -> None:
+    """Send PLACE_ORDER protobuf to TWS."""
+
+def __cancelOrder(self, orderId: int) -> None:
+    """Send CANCEL_ORDER protobuf to TWS."""
+
+def __ensure_snapshot_requested(self) -> None:
+    """Send REQ_OPEN_ORDERS if not already requested."""
+```
+
+**Reference:**
+
+- **Tests**: `providers/tws/tests/test_order_tracker.py` (unit tests), `test_ibsocket.py` (callback routing), `test_client.py` (delegation)
+- **Interfaces**: `wiring_interfaces.py` (`OrderTrackerCBWiringInterface`, `IbSocketWiringInterface`)
+- **Usage**: Used by `TWSClient.order_tracker` property and `TWSBrokerProvider.place_order()`, `cancel_order()`, `subscribe_orders()`
 
 ---
 
@@ -2826,7 +3481,7 @@ def _flag_snapshot_complete(self, tws_key: str) -> None:
 
 ## 9. Implementation Patterns
 
-**Note:** This section documents legacy patterns from pre-January 2026 architecture. Current implementation uses Tracker pattern with wiring interfaces (see sections 2.3-2.10).
+**Note:** This section documents legacy patterns from pre-January 2026 architecture. Current implementation uses Tracker pattern with wiring interfaces (see sections 2.3-2.11).
 
 ### Current Architecture (January 2026+)
 
@@ -2835,7 +3490,7 @@ All data requests now use dedicated Tracker components:
 - **ContractTracker**: Symbol search and contract details (see section 2.5)
 - **QuoteTracker**: Quote snapshots and streaming (see section 2.7)
 - **BarsTracker**: Historical and real-time bars (see section 2.8)
-- **OrderTracker**: Order management (see section 2.9)
+- **OrderTracker**: Order state tracking with interface-based wiring, TWS protocol internalization (placeOrder/cancelOrder), reconciliation, no-op detection, immutable field guards, lazy initialization (see section 2.11)
 - **PositionTracker**: Position tracking (see section 2.9)
 - **AccountTracker**: Account data (see section 2.10)
 - **ExecutionTracker**: Trade executions (see section 2.10)

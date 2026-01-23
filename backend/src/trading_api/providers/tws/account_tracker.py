@@ -122,8 +122,6 @@ class TrackedAccount:
     account_ready: bool = True  # False during TWS server reset
     last_update_time: str | None = None  # Timestamp from updateAccountTime
 
-    # In tws_mappers.py (add after tracked_order_to_placed_order)
-
     @property
     def currency_sign(self) -> str | None:
         """Get currency sign based on currency code."""

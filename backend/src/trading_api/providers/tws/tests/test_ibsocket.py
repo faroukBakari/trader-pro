@@ -220,13 +220,13 @@ class TestIBSocketManagedAccounts:
         running_ibsocket.managedAccounts("U123,U456,U789")
 
     def test_next_valid_id_sets_ready_event(self, running_ibsocket: IBSocket) -> None:
-        """Test nextValidId sets the ready event and initializes order_tracker."""
+        """Test nextValidId sets the ready event and stores order ID."""
         assert not running_ibsocket._ready_event.is_set()
 
         running_ibsocket.nextValidId(100)
 
-        # Order ID tracking is now in order_tracker
-        assert running_ibsocket.order_tracker.next_order_id == 100
+        # Order ID is stored internally for later wiring to OrderTracker
+        assert running_ibsocket._IBSocket__next_order_id == 100  # type: ignore[attr-defined]
         assert running_ibsocket._ready_event.is_set()
 
 
