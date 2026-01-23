@@ -60,11 +60,11 @@ DatafeedService / BrokerService (provider-agnostic)
 TWSDatafeedProvider / TWSBrokerProvider (Layer 3) ─── implements Capability
         │ domain ↔ TWS conversion, business key generation
         ▼
-TWSClient (Layer 2) ─── owns IBSocket, async facade, contract caching
-        │ create_snapshot() / create_stream() API, CachedContract cache
+TWSClient (Layer 2) ─── owns IBSocket, async facade, Tracker orchestration
+        │ CachedContract cache, coordinates tracker components
         ▼
-IBSocket (Layer 1) ─── daemon thread _reader_task(), business key registry
-        │ StreamData accumulation, snapshot/stream hooks, TWS key mapping
+IBSocket (Layer 1) ─── daemon thread _reader_task(), wiring interface implementation
+        │ callback routing to wired trackers
         ▼
 TWS/IB Gateway (localhost:7497)
 ```
@@ -78,24 +78,17 @@ TWSDatafeedProvider.subscribe_market_data()      IBSocket._reader_task()
         │                                        │
 TWSClient.reqMktDataStream()             Decoder.interpret()
         │                                        │
-ibsocket.create_stream(business_key)     tickPrice(reqId, price)
+quote_tracker.subscribe(ticker, callback)        tickPrice(reqId, price)
+        │ (wire_quote_tracker binds)            │
+        │                                quote_tracker.update(tws_key, tick_data)
         │                                        │
-        │                                _update_stream_data(tws_key, {"bid": price})
-        │                                        │
-callback(data) ◄──────────────────────── _notify_stream(tws_key, stream)
-                                                 │
-                    loop.call_soon_threadsafe(callback, stream[-1], updated_fields)
+callback(data) ◄──────────────────────── loop.call_soon_threadsafe(...)
 ```
 
 **Key Patterns:**
 
 - **Lazy Connection**: `TWSClient.ibsocket` connects on first access
 - **Business Key System**: External API uses business keys (e.g., `datafeed:Quote:SMART:AAPL:...`)
-- **TWS Key Mapping**: `_business_to_tws_key[business_key] → tws_key` (e.g., `req_123`)
-- **StreamData Accumulation**: `_stream_data[tws_key]` holds `StreamData` dataclass (list of dicts + metadata)
-- **Snapshot Hooks**: `_snapshot_hooks[tws_key]` holds list of (loop, Future) for one-shot requests
-- **Stream Hooks**: `_stream_hooks[tws_key]` holds list of (loop, callback, on_error) for continuous updates
-- **Deduplication**: `create_snapshot()`/`create_stream()` return `None` reqId if reusing existing request
 
 **Dependency Inversion Pattern (January 2026):**
 
@@ -249,22 +242,6 @@ infer_sec_type("CME", "ES1!")         # → "CONTFUT" (continuous future)
 | `datafeed:reqHistoricalData:SMART:1 D:20251231:NASDAQ:AAPL@5 mins` | Historical bars request                |
 | `broker:orders`                                                    | Order subscription (future)            |
 | `broker:account:DEMO-ACCOUNT`                                      | Account equity/balance stream (future) |
-
-**Internal Mapping:**
-
-```python
-# IBSocket internal mapping
-_business_to_tws_key: dict[str, str] = {
-    "datafeed:Quote:SMART:NASDAQ:AAPL": "req_42",
-    "broker:orders": "order_subscription",
-}
-```
-
-**Benefits:**
-
-- Callers don't need to track reqIds
-- Deduplication: Same business key reuses existing request
-- Cleanup: `remove_stream(business_key)` handles all internal state
 
 ---
 
@@ -1297,7 +1274,7 @@ class TWSClient:
 
 - **Centralized Hooks**: Unlike other trackers, hooks are stored centrally in `_snapshot_hooks` and `_stream_hooks`, not per-`TrackedQuote`
 - **Reference Counting**: Each subscription increments a refcount; `unsubscribe()` decrements and only cancels TWS subscription when count reaches zero
-- **Symbol Deduplication**: Multiple topics requesting the same symbol share the underlying TWS subscription via `create_stream()`
+- **Symbol Deduplication**: Multiple topics requesting the same symbol share the underlying TWS subscription
 
 **Threading Model:**
 
@@ -1494,8 +1471,7 @@ IBSocket.historicalData() callback
 - **BarsRequest**: Lifecycle tracking for single historical data request
   - `upsert()`: Accumulates bars by timestamp (replaces duplicates)
   - `flag_request_complete()`: Resolves snapshot Future with sorted bars
-- **Callback Routing**: `IBSocket.historicalData()` → `self.__bars_tracker.update(reqId, bar)`
-  - Not routed through `_stream_data` accumulation (unlike older patterns)
+- **Callback Routing**: `IBSocket.historicalData()` → `self.__bars_tracker.update(reqId, bar)` via wiring interface
 
 **Threading Model:**
 
@@ -2460,27 +2436,9 @@ class StreamData(list[dict[str, Any]]):
     updated_fields: list[str] = field(default_factory=list)  # Changed fields for selective notification
     last_updated: int = 0                # Unix timestamp (ms) of last update
     last_dispatched: int = 0             # Unix timestamp (ms) of last callback dispatch
-
-# IBSocket internal state
-_stream_data: dict[str, StreamData] = {}           # tws_key → StreamData
-_business_to_tws_key: dict[str, str] = {}          # business_key → tws_key (e.g., "req_123")
-_snapshot_hooks: dict[str, list[tuple[loop, Future]]] = {}  # tws_key → pending futures
-_stream_hooks: dict[str, list[tuple[loop, callback, on_error]]] = {}  # tws_key → stream callbacks
 ```
 
-**StreamData inherits from `list[dict[str, Any]]`** - each dict is one data item (tick, bar, etc.):
-
-```python
-# Example: Quote stream data
-stream[-1] = {
-    "business_key": "datafeed:Quote:SMART:NASDAQ:AAPL",
-    "bid": 150.25,
-    "ask": 150.30,
-    "last": 150.27,
-    "market_data_type": 1,
-    "min_tick": 0.01,
-}
-```
+**Note:** StreamData is used by individual Tracker components (QuoteTracker, BarsTracker) for internal accumulation. IBSocket no longer maintains centralized `_stream_data` or `_business_to_tws_key` dictionaries - each Tracker manages its own internal state.
 
 **Field Mapping:** `TICK_TYPE_TO_FIELD` in `tws_models.py` maps TWS tick types to slot fields:
 
@@ -2548,63 +2506,24 @@ def _flag_snapshot_complete(self, tws_key: str) -> None:
 
 ## 9. Implementation Patterns
 
-### One-Shot Request (Snapshot Pattern)
+**Note:** This section documents legacy patterns from pre-January 2026 architecture. Current implementation uses Tracker pattern with wiring interfaces (see sections 2.3-2.10).
 
-Used by: `search_symbols()`, `get_historical_bars()`, `get_quotes_snapshot()`
+### Current Architecture (January 2026+)
 
-```python
-# TWSClient
-async def reqMatchingSymbols(self, pattern: str, timeout: float | None = None) -> list[ContractDescription]:
-    business_key = f"shared:reqMatchingSymbols:{pattern}"
+All data requests now use dedicated Tracker components:
 
-    # Check cache first
-    data = self.ibsocket.get_cached_data(business_key)
-    if data is not None:
-        return [item["contractDescriptions"] for item in data]
+- **ContractTracker**: Symbol search and contract details (see section 2.5)
+- **QuoteTracker**: Quote snapshots and streaming (see section 2.7)
+- **BarsTracker**: Historical and real-time bars (see section 2.8)
+- **OrderTracker**: Order management (see section 2.9)
+- **PositionTracker**: Position tracking (see section 2.9)
+- **AccountTracker**: Account data (see section 2.10)
+- **ExecutionTracker**: Trade executions (see section 2.10)
 
-    # Create snapshot request
-    reqId, coroutine = self.ibsocket.create_snapshot(
-        business_key,
-        timeout=timeout or self._timeout,
-    )
+See specific tracker sections for current implementation patterns.
 
-    # Only send request if new (reqId is None if reusing existing)
-    if reqId is not None:
-        self.ibsocket.reqMatchingSymbols(reqId, pattern)
+---
 
-    data = await coroutine
-    return [item["contractDescriptions"] for item in data]
-
-# IBSocket callback (daemon thread)
-def symbolSamples(self, reqId: int, contractDescriptions: list[ContractDescription]) -> None:
-    tws_key = f"req_{reqId}"
-    self._extend_stream_data(
-        tws_key, [{"contractDescriptions": cd} for cd in contractDescriptions]
-    )
-    self._flag_snapshot_complete(tws_key)  # Resolves pending futures
-```
-
-### Generic Snapshot Executor
-
-TWSClient provides `_exec_snapshot()` to reduce boilerplate in snapshot methods:
-
-```python
-# TWSClient._exec_snapshot() - Generic cache-check → request → await pattern
-async def _exec_snapshot(
-    self,
-    business_key: str,
-    request_fn: Callable[[int], None],  # Called with reqId to issue TWS request
-    transform_fn: Callable[[list[dict[str, Any]]], T],  # Transforms raw data to return type
-    timeout: float | None = None,
-) -> T:
-    # 1. Check cache first
-    cached = self.ibsocket.get_cached_data(business_key)
-    if cached is not None:
-        return transform_fn(cached)
-
-    # 2. Create snapshot request
-    reqId, coroutine = self.ibsocket.create_snapshot(
-        business_key, timeout=timeout or self._timeout
     )
 
     # 3. Issue request if new (reqId is None if reusing existing)
@@ -2613,7 +2532,8 @@ async def _exec_snapshot(
 
     # 4. Await and transform result
     return transform_fn(await coroutine)
-```
+
+````
 
 **Example Usage (reqQuoteSnapshot):**
 
@@ -2630,7 +2550,7 @@ async def reqQuoteSnapshot(self, contract: Contract) -> dict[str, Any]:
         lambda rid: self.ibsocket.reqQuote(rid, contract),
         transform,
     )
-```
+````
 
 ### Streaming Subscription (Stream Pattern)
 
@@ -2837,7 +2757,7 @@ Error code 162 ("Historical data request pacing violation") was previously inclu
 Error details ending with `_NON_RECOVERABLE` trigger cleanup of associated data structures:
 
 ```python
-# In _handle_request_error():
+# In _log_handled_error():
 detail = f"{category}_{code}" if recoverable else f"{category}_{code}_NON_RECOVERABLE"
 # Example: "VALIDATION_200_NON_RECOVERABLE"
 ```
@@ -2869,7 +2789,7 @@ classify_error(code)  →  (nature, category, is_recoverable)
         │           │
         │           └─► Look up order by order_id, invoke error callback
         │
-        └─► nature == REQUEST/SYSTEM → _handle_request_error(...)
+        └─► nature == REQUEST/SYSTEM → _log_handled_error(...)
                 │
                 ├─► Look up business_key from tws_key
                 │   capability = business_key.split(":")[0]  # "datafeed", "broker", "shared"
@@ -2883,16 +2803,16 @@ classify_error(code)  →  (nature, category, is_recoverable)
 
 ### Centralized Error Routing
 
-`_handle_request_error()` routes errors based on business key and request state:
+`_log_handled_error()` routes errors based on business key and request state:
+
+### Error Routing Pattern
+
+Errors are routed through tracker-specific error handlers:
 
 ```python
-def _handle_request_error(self, category, detail, tws_key, message, timestamp=None):
-    # Look up business_key and extract capability
-    business_key = next(
-        (bk for bk, tk in self._business_to_tws_key.items() if tk == tws_key),
-        "NOT_FOUND"
-    )
-    capability = business_key.split(":", 1)[0] or "shared"
+def _log_handled_error(self, category, detail, tws_key, message, timestamp=None):
+    # Extract capability from error context
+    capability = "shared"  # Default for orphan errors
 
     error = ProviderException(
         code=f"PROVIDER_TWS_{category}_{detail.upper()}",
@@ -2902,20 +2822,13 @@ def _handle_request_error(self, category, detail, tws_key, message, timestamp=No
         timestamp=timestamp,
     )
 
-    # 1. Snapshot hooks → reject futures + schedule cleanup
-    # 2. Stream hooks → invoke on_error callbacks
-    # 3. Non-recoverable (_NON_RECOVERABLE suffix) → call remove_stream()
-    # 4. Neither → log as orphan error
+    # 1. Try routing to QuoteTracker via wired interface
+    # 2. Try routing to BarsTracker via wired interface
+    # 3. Try routing to OrderTracker
+    # 4. Fallback: log as orphan error
 ```
 
-**Thread-Safe Cleanup:** Non-recoverable errors trigger cleanup via `loop.call_soon_threadsafe()`:
-
-```python
-# Daemon thread schedules cleanup in event loop
-for stream_loop, _, on_error in stream_hooks:
-    stream_loop.call_soon_threadsafe(self.remove_stream, business_key)
-    break  # Only need to remove once
-```
+**Thread-Safe Cleanup:** Trackers handle cleanup via their `raise_error()` methods which schedule cleanup in the event loop.
 
 ### Common TWS Error Codes
 

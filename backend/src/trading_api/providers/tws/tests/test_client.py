@@ -834,7 +834,7 @@ class TestDataStreams:
         )
 
     def test_cancel_data_subscription_unsubscribes_all(self) -> None:
-        """cancelDataSubscription cleans up both trackers and ibsocket."""
+        """cancelDataSubscription cleans up both trackers."""
         client = TWSClient("127.0.0.1", 7497, 1)
 
         mock_ibsocket = MagicMock()
@@ -850,7 +850,6 @@ class TestDataStreams:
 
         mock_quote_tracker.unsubscribe.assert_called_once_with("stream_key")
         mock_bars_tracker.unsubscribe.assert_called_once_with("stream_key")
-        mock_ibsocket.remove_stream.assert_called_once_with("stream_key")
 
 
 class TestBrokerStreams:
