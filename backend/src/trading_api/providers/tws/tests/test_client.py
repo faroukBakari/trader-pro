@@ -890,8 +890,9 @@ class TestBrokerStreams:
         mock_position_tracker.create_stream_hook = MagicMock(
             return_value="positions_key"
         )
-        mock_ibsocket.position_tracker = mock_position_tracker
+        # position_tracker is now on TWSClient, not IBSocket
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+        client._TWSClient__position_tracker = mock_position_tracker  # type: ignore[attr-defined]
 
         async def callback(pos: Any) -> None:
             pass
@@ -903,7 +904,6 @@ class TestBrokerStreams:
 
         assert key == "positions_key"
         mock_position_tracker.create_stream_hook.assert_called_once()
-        mock_ibsocket.reqPositions.assert_called_once()
 
     def test_account_stream_registers_and_triggers_snapshot(self) -> None:
         """reqAccountStream sets up callback and requests initial data."""
@@ -966,10 +966,11 @@ class TestBrokerStreams:
         mock_execution_tracker = MagicMock()
 
         mock_ibsocket.order_tracker = mock_order_tracker
-        mock_ibsocket.position_tracker = mock_position_tracker
         mock_ibsocket.account_tracker = mock_account_tracker
         mock_ibsocket.execution_tracker = mock_execution_tracker
         client._TWSClient__ibsocket = mock_ibsocket  # type: ignore[attr-defined]
+        # position_tracker is now on TWSClient, not IBSocket
+        client._TWSClient__position_tracker = mock_position_tracker  # type: ignore[attr-defined]
 
         client.cancelBrokerStream("broker_key")
 
