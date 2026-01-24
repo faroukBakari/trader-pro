@@ -1,14 +1,18 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: November 30, 2025  
-**Version**: 5.3.0
+**Last Updated**: January 24, 2026  
+**Version**: 6.0.0
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Quick Start for Module Development](#quick-start-for-module-development)
 - [Core Design Principles](#core-design-principles)
+  - [Module Independence (Microservice Philosophy)](#module-independence-microservice-philosophy)
+  - [Statelessness and Horizontal Scaling](#statelessness-and-horizontal-scaling)
+  - [Data Ownership and Isolation](#data-ownership-and-isolation)
+  - [Inter-Module Communication Rules](#inter-module-communication-rules)
 - [Architecture Components](#architecture-components)
 - [Module System](#module-system)
 - [Application Factory](#application-factory)
@@ -17,6 +21,7 @@
 - [Code Generation](#code-generation)
 - [Deployment Modes](#deployment-modes)
 - [Testing Strategy](#testing-strategy)
+- [Module Independence Guide](#module-independence-guide)
 
 ---
 
@@ -127,6 +132,336 @@ See sections below for complete implementation patterns and advanced features.
 ---
 
 ## Core Design Principles
+
+> **🔴 CRITICAL**: These principles are **non-negotiable architectural rules**. Violating them will cause scaling failures, data corruption, and maintenance nightmares. Read [MODULE-INDEPENDENCE-GUIDE.md](./MODULE-INDEPENDENCE-GUIDE.md) for detailed examples and anti-patterns.
+
+### Module Independence (Microservice Philosophy)
+
+**Core Rule**: Each module functions as a **distinct, independent microservice** capable of running in isolation within its own container.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    MODULE INDEPENDENCE ARCHITECTURE                      │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ┌──────────────┐      ┌──────────────┐      ┌──────────────┐         │
+│   │   BROKER     │      │  DATAFEED    │      │    AUTH      │         │
+│   │   MODULE     │      │   MODULE     │      │   MODULE     │         │
+│   │              │      │              │      │              │         │
+│   │ ┌──────────┐ │      │ ┌──────────┐ │      │ ┌──────────┐ │         │
+│   │ │ Service  │ │      │ │ Service  │ │      │ │ Service  │ │         │
+│   │ │ API      │ │      │ │ API      │ │      │ │ API      │ │         │
+│   │ │ WS       │ │      │ │ WS       │ │      │ │ Repository│ │         │
+│   │ │ Repository│ │      │ │ Repository│ │      │ └──────────┘ │         │
+│   │ └──────────┘ │      │ └──────────┘ │      │              │         │
+│   │              │      │              │      │              │         │
+│   │   [DB/Cache] │      │   [DB/Cache] │      │   [DB/Cache] │         │
+│   └──────────────┘      └──────────────┘      └──────────────┘         │
+│          │                     │                     │                  │
+│          ▼                     ▼                     ▼                  │
+│   ┌──────────────┐      ┌──────────────┐      ┌──────────────┐         │
+│   │  Container A │      │  Container B │      │  Container C │         │
+│   │  (Port 8001) │      │  (Port 8002) │      │  (Port 8003) │         │
+│   └──────────────┘      └──────────────┘      └──────────────┘         │
+│                                                                          │
+│   ❌ PROHIBITED: Direct cross-module calls, shared repositories         │
+│   ✅ ALLOWED: Independent deployment, horizontal scaling per module     │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Requirements**:
+
+| Requirement               | Description                                                                     | Rationale                                  |
+| ------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------ |
+| **Self-Contained**        | Each module owns its complete stack (API, Service, Repository, DB/Cache)        | Enables independent deployment and scaling |
+| **Container-Ready**       | Every module can run alone in a container with no dependencies on other modules | Supports K8s/Docker orchestration          |
+| **No Shared State**       | Modules never share in-memory state or singleton instances                      | Prevents scaling issues                    |
+| **Independent Lifecycle** | Module crashes, restarts, and deployments don't affect other modules            | Fault isolation                            |
+
+**Production Deployment Pattern**:
+
+```bash
+# Each module = one container
+docker run -p 8001:8000 trading-api --module broker
+docker run -p 8002:8000 trading-api --module datafeed
+docker run -p 8003:8000 trading-api --module auth
+
+# Or via Kubernetes
+kubectl scale deployment broker --replicas=5
+kubectl scale deployment datafeed --replicas=3
+```
+
+### Statelessness and Horizontal Scaling
+
+**Core Rule**: Modules must remain **stateless** to support horizontal scaling. Use the Repository pattern for persistent business data.
+
+**What "Stateless" Means**:
+
+```python
+# ❌ ANTI-PATTERN: Stateful module (breaks horizontal scaling)
+class BrokerService:
+    def __init__(self):
+        self._orders = {}  # In-memory state - LOST on restart!
+        self._positions = []  # In-memory state - NOT shared across instances!
+
+    def place_order(self, order):
+        self._orders[order.id] = order  # Instance-local state!
+
+# ✅ CORRECT: Stateless module with Repository pattern
+class BrokerService(ServiceInterface):
+    def __init__(self, module_dir: Path, *, providers: list | None = None):
+        super().__init__(module_dir, providers=providers)
+        self._order_repository = OrderRepository()  # External persistence
+
+    async def place_order(self, order: PreOrder) -> PlacedOrder:
+        placed = await self._order_repository.create(order)  # Persisted externally
+        return placed
+```
+
+**Horizontal Scaling Diagram**:
+
+```
+                    Load Balancer (nginx)
+                           │
+       ┌───────────────────┼───────────────────┐
+       │                   │                   │
+       ▼                   ▼                   ▼
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ Broker      │     │ Broker      │     │ Broker      │
+│ Instance 1  │     │ Instance 2  │     │ Instance 3  │
+│ (stateless) │     │ (stateless) │     │ (stateless) │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │
+       └───────────────────┼───────────────────┘
+                           │
+                           ▼
+              ┌────────────────────────┐
+              │   Shared Repository    │
+              │   (Redis/PostgreSQL)   │
+              │   Module-Owned Data    │
+              └────────────────────────┘
+```
+
+**Statelessness Rules**:
+
+| ✅ Allowed                 | ❌ Prohibited                       |
+| -------------------------- | ----------------------------------- |
+| Request-scoped variables   | Global/class-level mutable state    |
+| Injected Repository access | In-memory caches with business data |
+| Provider capabilities      | Singleton state across requests     |
+| Configuration (read-only)  | Session storage in instance memory  |
+
+### Data Ownership and Isolation
+
+**Core Rule**: Repositories are **strictly owned** by their specific modules. Cross-module database access is **prohibited**.
+
+**Ownership Model**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      DATA OWNERSHIP BOUNDARIES                           │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   BROKER MODULE                    DATAFEED MODULE                       │
+│   ┌─────────────────────┐          ┌─────────────────────┐              │
+│   │ BrokerService       │          │ DatafeedService     │              │
+│   │   │                 │          │   │                 │              │
+│   │   ▼                 │          │   ▼                 │              │
+│   │ OrderRepository ────┼── ❌ ────┼── BarRepository     │              │
+│   │ PositionRepository  │  NEVER   │ QuoteRepository     │              │
+│   │ ExecutionRepository │  CROSS   │ SymbolRepository    │              │
+│   └─────────┬───────────┘          └─────────┬───────────┘              │
+│             │                                 │                          │
+│             ▼                                 ▼                          │
+│   ┌─────────────────────┐          ┌─────────────────────┐              │
+│   │ broker_db           │          │ datafeed_db         │              │
+│   │ (orders, positions) │          │ (bars, quotes)      │              │
+│   └─────────────────────┘          └─────────────────────┘              │
+│                                                                          │
+│   ✅ Broker instances share broker_db (horizontal scaling)              │
+│   ❌ Datafeed module NEVER accesses broker_db directly                  │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Data Ownership Rules**:
+
+| Rule                    | Description                                                       | Consequence of Violation                |
+| ----------------------- | ----------------------------------------------------------------- | --------------------------------------- |
+| **Repository Scope**    | Repositories owned by specific modules, NEVER shared cross-module | Data corruption, business rule bypass   |
+| **Scaling Context**     | Repositories shared only across instances of SAME module          | Maintains data consistency              |
+| **Access Control**      | Data read/updated exclusively by owning module                    | Prevents unauthorized modifications     |
+| **No Direct DB Access** | Foreign modules cannot query another module's database            | Avoids coupling and schema dependencies |
+
+**Correct Pattern for Cross-Module Data Needs**:
+
+```python
+# ❌ WRONG: Datafeed service directly accessing broker data
+class DatafeedService:
+    def get_quote_with_position(self, symbol: str):
+        quote = self._quote_repo.get(symbol)
+        position = self._broker_position_repo.get(symbol)  # VIOLATION!
+        return {**quote, "position": position}
+
+# ✅ CORRECT: UI/Orchestrator aggregates data from multiple modules
+# Frontend or API Gateway handles aggregation:
+async def get_trading_view(symbol: str):
+    quote = await datafeed_client.get_quote(symbol)      # Datafeed module
+    position = await broker_client.get_position(symbol)  # Broker module
+    return TradingView(quote=quote, position=position)   # Aggregated response
+```
+
+### Inter-Module Communication Rules
+
+**Core Rule**: Modules must be **autonomous**. While API/WS communication is technically possible, it's **strongly discouraged** to prevent tight coupling.
+
+**The "Spaghetti Effect" Prevention**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              INTER-MODULE COMMUNICATION: ANTI-PATTERN                    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ❌ SPAGHETTI ARCHITECTURE (AVOID)                                     │
+│                                                                          │
+│        ┌────────┐     direct call     ┌──────────┐                      │
+│        │ Broker │ ──────────────────► │ Datafeed │                      │
+│        └────┬───┘                     └────┬─────┘                      │
+│             │                              │                             │
+│             │    direct call               │ direct call                 │
+│             └──────────────┐   ┌──────────┘                             │
+│                            ▼   ▼                                         │
+│                        ┌────────┐                                        │
+│                        │  Auth  │                                        │
+│                        └────────┘                                        │
+│                                                                          │
+│   Problems: Circular dependencies, deployment coupling, cascading        │
+│   failures, testing complexity, version conflicts                        │
+│                                                                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│   ✅ ORCHESTRATED ARCHITECTURE (CORRECT)                                │
+│                                                                          │
+│                    ┌──────────────────┐                                  │
+│                    │   UI / Gateway   │                                  │
+│                    │   (Orchestrator) │                                  │
+│                    └────────┬─────────┘                                  │
+│                             │                                            │
+│            ┌────────────────┼────────────────┐                          │
+│            │                │                │                          │
+│            ▼                ▼                ▼                          │
+│      ┌──────────┐    ┌──────────┐    ┌──────────┐                      │
+│      │  Broker  │    │ Datafeed │    │   Auth   │                      │
+│      │ (autonomous)  │ (autonomous)  │ (autonomous)                     │
+│      └──────────┘    └──────────┘    └──────────┘                      │
+│                                                                          │
+│   Benefits: Independent deployment, no circular deps, easy testing,     │
+│   clear failure boundaries, version independence                        │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Autonomous Route Design**:
+
+```python
+# ❌ ANTI-PATTERN: Route depends on another module's API
+class BrokerApi(APIRouterInterface):
+    @self.post("/orders")
+    async def place_order(self, order: PreOrder):
+        # Calling datafeed module from broker module - COUPLING!
+        quote = await self._datafeed_client.get_quote(order.symbol)
+        return await self._service.place_order(order, quote)
+
+# ✅ CORRECT: Self-sufficient request with all required data
+class BrokerApi(APIRouterInterface):
+    @self.post("/orders")
+    async def place_order(self, order: PreOrderWithQuote):
+        # All required data provided in request - AUTONOMOUS!
+        return await self._service.place_order(order)
+
+# The UI/Orchestrator constructs the self-sufficient request:
+# 1. Fetch quote from datafeed module
+# 2. Fetch order from broker module
+# 3. Combine into PreOrderWithQuote
+# 4. Send to broker module
+```
+
+**Data Aggregation Strategy**:
+
+When a module needs data from another module, the **Orchestrator (UI/Gateway)** is responsible:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    DATA AGGREGATION FLOW                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  1. UI needs to place order with current market price                   │
+│                                                                          │
+│     ┌────────────┐                                                       │
+│     │     UI     │                                                       │
+│     │ (Orchestrator)                                                     │
+│     └─────┬──────┘                                                       │
+│           │                                                              │
+│  2. Fetch │ required data from each owning module                       │
+│           │                                                              │
+│     ┌─────┴──────────────────────────────────┐                          │
+│     │                                        │                          │
+│     ▼                                        ▼                          │
+│  ┌──────────┐                          ┌──────────┐                     │
+│  │ Datafeed │ GET /quote/AAPL          │  Broker  │ GET /account        │
+│  │  Module  │ ─────────────────►       │  Module  │ ─────────────►      │
+│  └──────────┘                          └──────────┘                     │
+│     │ { price: 150.00 }                    │ { buyingPower: 10000 }     │
+│     │                                      │                            │
+│     └───────────────┬──────────────────────┘                            │
+│                     │                                                    │
+│  3. Construct       ▼  self-sufficient request                          │
+│              ┌─────────────────────┐                                     │
+│              │ PreOrderWithContext │                                     │
+│              │ {                   │                                     │
+│              │   symbol: "AAPL",   │                                     │
+│              │   qty: 10,          │                                     │
+│              │   currentPrice: 150,│  ◄── From Datafeed                 │
+│              │   buyingPower: 10000│  ◄── From Broker                   │
+│              │ }                   │                                     │
+│              └──────────┬──────────┘                                     │
+│                         │                                                │
+│  4. Send to            ▼  target module                                 │
+│              ┌──────────────────┐                                        │
+│              │  Broker Module   │                                        │
+│              │  POST /orders    │                                        │
+│              │  (autonomous -   │                                        │
+│              │   all data in    │                                        │
+│              │   request)       │                                        │
+│              └──────────────────┘                                        │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Decision Tree: When is Inter-Module Communication Acceptable?**
+
+```
+Need data from another module?
+          │
+          ├─► Can the UI/Gateway aggregate it?
+          │         │
+          │         ├─► YES → UI aggregates, sends self-sufficient request ✅
+          │         │
+          │         └─► NO (background job, no UI)
+          │                   │
+          │                   ├─► Is it event-driven? → Use message queue ✅
+          │                   │
+          │                   └─► Must be synchronous? → Document exception,
+          │                                              use versioned API client,
+          │                                              add circuit breaker ⚠️
+          │
+          └─► Can I duplicate the data? (denormalization)
+                    │
+                    └─► If data is stable → Consider caching locally ✅
+```
+
+---
 
 ### 1. Abstract Base Class Contracts
 
@@ -1966,7 +2301,6 @@ nginx Gateway (port 8000)
 **WebSocket Routing Strategies**:
 
 1. **Path-Based** (default): `ws://host/api/v1/broker/ws`
-
    - Nginx routes based on URL path prefix
    - Matches frontend URL structure
    - Simpler configuration
@@ -1999,6 +2333,97 @@ See [BACKEND_MANAGER_GUIDE.md](BACKEND_MANAGER_GUIDE.md) for complete deployment
 - Nginx routing strategies
 - Production deployment patterns
 - Troubleshooting guide
+
+### 5. Module Independence in Production
+
+**Container-Based Deployment** is the recommended production pattern, enforcing module independence at the infrastructure level:
+
+```yaml
+# docker-compose.yml - Production Pattern
+version: "3.8"
+services:
+  broker:
+    image: trading-api:latest
+    environment:
+      - ENABLED_MODULES=broker
+      - DATABASE_URL=postgresql://broker_db/broker
+    ports:
+      - "8001:8000"
+    deploy:
+      replicas: 3 # Horizontal scaling
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  datafeed:
+    image: trading-api:latest
+    environment:
+      - ENABLED_MODULES=datafeed
+      - DATABASE_URL=postgresql://datafeed_db/datafeed
+    ports:
+      - "8002:8000"
+    deploy:
+      replicas: 5 # Scale independently
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+
+  auth:
+    image: trading-api:latest
+    environment:
+      - ENABLED_MODULES=auth
+      - DATABASE_URL=postgresql://auth_db/auth
+    ports:
+      - "8003:8000"
+```
+
+**Kubernetes Deployment Pattern**:
+
+```yaml
+# k8s/broker-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broker-module
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: broker
+  template:
+    spec:
+      containers:
+        - name: broker
+          image: trading-api:latest
+          env:
+            - name: ENABLED_MODULES
+              value: "broker"
+          resources:
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+---
+# Separate database per module
+apiVersion: v1
+kind: Secret
+metadata:
+  name: broker-db-secret
+data:
+  DATABASE_URL: <base64-encoded-broker-db-url>
+```
+
+**Production Benefits of Module Independence**:
+
+| Benefit                    | Description                                              |
+| -------------------------- | -------------------------------------------------------- |
+| **Fault Isolation**        | Broker crash doesn't affect datafeed or auth             |
+| **Independent Scaling**    | Scale datafeed to 10 replicas while broker stays at 3    |
+| **Resource Optimization**  | Allocate more CPU/memory to compute-heavy modules        |
+| **Rolling Updates**        | Deploy broker v2 while datafeed stays on v1              |
+| **Security Isolation**     | Each module has its own secrets and database credentials |
+| **Monitoring Granularity** | Per-module metrics, alerts, and dashboards               |
 
 ---
 
@@ -2125,11 +2550,13 @@ class MymoduleApi(APIRouterInterface):
 
 ## Related Documentation
 
-- **[ARCHITECTURE.md](../../ARCHITECTURE.md)** - Overall system architecture
+- **[MODULE-INDEPENDENCE-GUIDE.md](./MODULE-INDEPENDENCE-GUIDE.md)** - Detailed modularity rules and anti-patterns
+- **[ARCHITECTURE.md](../../docs/ARCHITECTURE.md)** - Overall system architecture
 - **[backend/README.md](../README.md)** - Backend setup and reference
 - **[MODULAR_VERSIONNING.md](./MODULAR_VERSIONNING.md)** - API versioning strategy
 - **[BACKEND_WEBSOCKETS.md](./BACKEND_WEBSOCKETS.md)** - WebSocket implementation guide
 - **[SPECS_AND_CLIENT_GEN.md](./SPECS_AND_CLIENT_GEN.md)** - Spec and client generation
+- **[BACKEND_MANAGER_GUIDE.md](./BACKEND_MANAGER_GUIDE.md)** - Multi-process deployment
 - **[docs/DOCUMENTATION-GUIDE.md](../../docs/DOCUMENTATION-GUIDE.md)** - Documentation index
 
 ---
@@ -2138,13 +2565,23 @@ class MymoduleApi(APIRouterInterface):
 
 The modular backend architecture provides:
 
+**Core Independence Principles** (Non-Negotiable):
+
+- **Module as Microservice** - Each module is an independent, container-ready unit
+- **Stateless Design** - No in-memory business state; use Repository pattern
+- **Data Ownership** - Repositories strictly owned by their module; no cross-module DB access
+- **Autonomous Routes** - Routes must be self-sufficient; no inter-module API calls
+- **Orchestration Pattern** - UI/Gateway aggregates data; modules receive complete requests
+
+**Technical Implementation**:
+
 - **ABC-Based Design** - All modules extend `Module` abstract base class
 - **Self-Contained Apps** - Each module owns complete FastAPI app per version
 - **Auto-Discovery** - Modules registered automatically via convention
 - **Lazy Loading** - Resources initialized only when needed
 - **Independent Testing** - Test modules in complete isolation
 - **Selective Deployment** - Run only needed modules
-- **Horizontal Scaling** - Multi-process deployment with nginx
+- **Horizontal Scaling** - Multi-process/container deployment with nginx
 - **Automatic Specs** - OpenAPI/AsyncAPI per module + merged
 - **Type Safety** - ABC enforcement at instantiation time
 
@@ -2158,4 +2595,4 @@ The modular backend architecture provides:
 - **Auto Health/Version**: All modules get health/version endpoints via `APIRouterInterface` inheritance
 - **Enforcement**: Module loading validates base class inheritance at import time
 
-Modules are **independently deployable versioned applications** that compose into a cohesive system.
+> **🔴 Remember**: Modules are **independently deployable versioned applications**. Any design that creates coupling between modules violates the core architecture and must be refactored. See [MODULE-INDEPENDENCE-GUIDE.md](./MODULE-INDEPENDENCE-GUIDE.md) for detailed rules.
