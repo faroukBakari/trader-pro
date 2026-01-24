@@ -246,6 +246,76 @@ class AuthService(ServiceInterface):
 
 See [backend/docs/PROVIDER-SYSTEM.md](../backend/docs/PROVIDER-SYSTEM.md) for complete developer guide.
 
+### 9. Module Independence (Microservice Philosophy)
+
+Backend modules follow **microservice principles** within a modular monorepo, enabling independent deployment while maintaining development simplicity:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         MODULAR MONOREPO STRUCTURE                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│   Each Module = Potential Independent Microservice                          │
+│                                                                             │
+│   ┌─────────────┐    ┌─────────────┐    ┌─────────────┐                    │
+│   │   broker    │    │  datafeed   │    │    auth     │                    │
+│   │  (Module)   │    │  (Module)   │    │  (Module)   │                    │
+│   ├─────────────┤    ├─────────────┤    ├─────────────┤                    │
+│   │ Own Data    │    │ Own Data    │    │ Own Data    │                    │
+│   │ Own API     │    │ Own API     │    │ Own API     │                    │
+│   │ Own State   │    │ Own State   │    │ Own State   │                    │
+│   │ Own Tests   │    │ Own Tests   │    │ Own Tests   │                    │
+│   └─────────────┘    └─────────────┘    └─────────────┘                    │
+│         │                  │                  │                             │
+│         └──────────────────┴──────────────────┘                             │
+│                            │                                                │
+│                    ProviderRegistry                                         │
+│              (Capability-based injection)                                   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Five Core Rules:**
+
+| Rule                    | Principle                                | Rationale                                  |
+| ----------------------- | ---------------------------------------- | ------------------------------------------ |
+| **1. Modular Monorepo** | Each module = potential microservice     | Easy extraction for independent deployment |
+| **2. Statelessness**    | No shared mutable state between requests | Enables horizontal scaling                 |
+| **3. Data Ownership**   | Each module owns its data domain         | No cross-module database access            |
+| **4. Communication**    | Module → Provider callbacks only         | No direct inter-module imports             |
+| **5. Aggregation**      | Frontend aggregates, backend isolates    | UI orchestrates, modules stay focused      |
+
+**Key Enforcement Patterns:**
+
+- **Repository Pattern**: Each module has own data access layer (`Repository[T]`)
+- **Provider Callbacks**: Shared concerns via capability injection, not imports
+- **Stateless Services**: No instance variables storing request-scoped data
+- **Test Isolation**: Module tests create isolated app with only that module
+
+**Anti-Patterns to Avoid:**
+
+```python
+# ❌ NEVER: Cross-module imports
+from trading_api.modules.auth.service import AuthService
+
+# ✅ CORRECT: Provider capability injection
+class BrokerService(ServiceInterface):
+    @classmethod
+    def capabilities(cls) -> list[CapabilitySpec]:
+        return [CapabilitySpec(name="auth")]
+
+    def verify_user(self, token: str):
+        return self._get_capability_provider("auth").verify_token(token)
+```
+
+**Benefits:**
+
+- ✅ Independent module deployment (multi-process mode)
+- ✅ Horizontal scaling per module
+- ✅ Clear ownership boundaries
+- ✅ Easier testing and maintenance
+- ✅ Migration path to microservices
+
+See [backend/docs/MODULE-INDEPENDENCE-GUIDE.md](../backend/docs/MODULE-INDEPENDENCE-GUIDE.md) for detailed developer guide.
+
 ---
 
 ## Technology Stack
@@ -835,7 +905,6 @@ make backend-dev-multi
 **WebSocket Routing Strategies**:
 
 1. **Path-Based** (default): `ws://host/api/v1/broker/ws`
-
    - Nginx routes based on URL path prefix
    - Matches frontend URL structure
    - Simpler configuration
@@ -908,20 +977,17 @@ models/
 #### Design Principles
 
 1. **Business Concept Grouping**
-
    - Each file represents a **single business concept** (orders, positions, bars, etc.)
    - All model variations for that concept live in the same file
    - Both REST and WebSocket models coexist in topic files
 
 2. **Model Type Coexistence**
-
    - REST request/response models: `PreOrder`, `PlacedOrder`
    - WebSocket subscription models: `OrderSubscriptionRequest`
    - WebSocket update models: Use the same response models as REST
    - All related to the same business concept stay together
 
 3. **No Technical Segregation**
-
    - ❌ **AVOID**: Separating by API type (`rest_models/`, `ws_models/`)
    - ❌ **AVOID**: Separating by operation type (`requests/`, `responses/`)
    - ✅ **PREFER**: One topic file contains all model types for that domain
@@ -1443,19 +1509,16 @@ Execution Simulator → _simulate_execution()
 **Current Data Flow**:
 
 1. **create_topic()** called by WsRouter when first subscriber arrives
-
    - Registers `topic_update` callback in `_update_callbacks[topic_type]`
    - Starts execution simulator if not already running (first subscription)
    - Service ready to broadcast updates for this topic
 
 2. **Execution Simulator Loop** (background task)
-
    - Picks random WORKING orders at 1-2 second intervals
    - Calls `_simulate_execution(order_id)` → triggers cascade
    - Execution cascade invokes callbacks directly (no queues)
 
 3. **Callback Broadcasting** (immediate, deterministic order)
-
    - Execution created → `callback["executions"](execution)`
    - Order updated → `callback["orders"](order)`
    - Equity updated → `callback["equity"](equity)`
@@ -2889,7 +2952,6 @@ server: {
 **Environment Variables**:
 
 - **`VITE_API_URL`**: Backend URL for proxy target (default: `http://localhost:8000`)
-
   - **MUST** have `VITE_` prefix to be accessible in browser code
   - Used by Vite proxy configuration at build time
   - Example: `VITE_API_URL=http://localhost:8000`

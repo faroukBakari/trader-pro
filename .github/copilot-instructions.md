@@ -27,6 +27,12 @@ Backend (FastAPI + FastWS)     →     Specs (auto-generated)     →     Fronte
 - **Provider System**: External integrations via `providers/` with capability-based injection
 - **Mapper Isolation**: Frontend services use ONLY frontend types; mappers handle conversions
 
+**Modular Monorepo Principles** (each module = potential microservice):
+- **Stateless**: No shared mutable state between requests
+- **Data Ownership**: Each module owns its data domain (no cross-module DB access)
+- **Communication**: Use provider callbacks, never direct inter-module imports
+- **Frontend Aggregation**: UI orchestrates data from multiple modules; backend modules stay isolated
+
 ---
 
 ## 3. Critical Commands (NEVER use npm/poetry directly)
@@ -61,6 +67,12 @@ make -C backend backend-stop          # Stop all processes
 - **TypeScript**: `any` is **FORBIDDEN**. Use `unknown` + type guards.
 - **Python**: Full type hints required. No `Any`, no `# type: ignore` unless unavoidable.
 - **Packages**: Verify `py.typed` markers (Python) or native TS support before adding.
+
+### Module Independence (Microservice Boundaries)
+- **No cross-module imports**: Modules NEVER import from each other directly
+- **Provider callbacks only**: Use `CapabilitySpec` and `_get_capability_provider()` for shared concerns
+- **Own data layer**: Each module has its own `Repository[T]` - no cross-module database access
+- **Stateless services**: No instance variables storing request-scoped data
 
 ### Generated Code
 - **NEVER edit** files in `*_generated/` directories
