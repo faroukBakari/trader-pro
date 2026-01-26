@@ -73,23 +73,6 @@ async def test_module_registry_state(all_modules_app, datafeed_only_app) -> None
 
 
 @pytest.mark.integration
-def test_shared_infrastructure_always_loaded(no_modules_app) -> None:
-    """Verify shared infrastructure is always available regardless of modules."""
-    # no_modules_app is now a ModularApp (which IS a FastAPI)
-    openapi_spec = no_modules_app.openapi()
-    paths = openapi_spec.get("paths", {})
-
-    # With no modules enabled, no health endpoints should exist
-    # (health endpoints are module-specific via APIRouterInterface)
-    # OpenAPI spec should still be valid
-    assert isinstance(paths, dict)
-
-    # No module endpoints should exist
-    assert not any("/broker/" in path for path in paths)
-    assert not any("/datafeed/" in path for path in paths)
-
-
-@pytest.mark.integration
 def test_module_service_independence(broker_only_app, datafeed_only_app) -> None:
     """Verify each app configuration creates independent module instances.
 

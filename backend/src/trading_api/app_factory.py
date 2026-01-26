@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
+from trading_api.datastores import InMemoryDatastore
 from trading_api.models.common import CapabilitySpec
 from trading_api.shared import Module, ModuleApp, ModuleRegistry, settings
 from trading_api.shared.exception_handlers import register_exception_handlers
@@ -319,8 +320,8 @@ class AppFactory:
 
     async def create_app(
         self,
-        enabled_module_names: list[str] | None = None,
-        enabled_provider_names: list[str] | None = None,
+        enabled_module_names: list[str] = [],
+        enabled_provider_names: list[str] = [],
     ) -> ModularApp:
         """Create a ModularApp with specified enabled modules and providers.
 
@@ -349,9 +350,14 @@ class AppFactory:
             required_capabilities
         )
 
-        # Phase 4: Instantiate modules with providers
+        # Phase 4: Create shared datastore for all modules
+        datastore = InMemoryDatastore()
+
+        # Phase 5: Instantiate modules with providers and datastore
         enabled_modules = self.module_registry.get_modules(
-            module_names=enabled_module_names, providers=required_providers
+            module_names=enabled_module_names,
+            providers=required_providers,
+            datastores=[datastore],
         )
 
         # Use shared API prefix constant

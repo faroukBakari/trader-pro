@@ -233,7 +233,7 @@ class BrokerCapability(ABC):
     async def subscribe_orders(
         self,
         callback: Callable[[PlacedOrder], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        on_error: Callable[[TradingApiException], Awaitable[None]],
     ) -> str:
         """Subscribe to order updates.
 
@@ -256,7 +256,7 @@ class BrokerCapability(ABC):
     async def subscribe_positions(
         self,
         callback: Callable[[Position], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        on_error: Callable[[TradingApiException], Awaitable[None]],
     ) -> str:
         """Subscribe to position updates.
 
@@ -280,7 +280,7 @@ class BrokerCapability(ABC):
         self,
         symbol: str,
         callback: Callable[[Execution], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        on_error: Callable[[TradingApiException], Awaitable[None]],
     ) -> str:
         """Subscribe to execution updates for a symbol.
 
@@ -303,7 +303,7 @@ class BrokerCapability(ABC):
     async def subscribe_equity(
         self,
         callback: Callable[[EquityData], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        on_error: Callable[[TradingApiException], Awaitable[None]],
     ) -> str:
         """Subscribe to equity/balance updates.
 

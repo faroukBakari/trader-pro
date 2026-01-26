@@ -58,7 +58,9 @@ class MockBrokerProvider(Provider, BrokerCapability):
     def capabilities(cls) -> list[CapabilitySpec]:
         return [CapabilitySpec(name="broker")]
 
-    async def place_order(self, order: PreOrder) -> PlaceOrderResult:
+    async def place_order(
+        self, order: PreOrder, confirm_id: str | None = None
+    ) -> PlaceOrderResult:
         order_id = f"ORDER-{self._order_counter}"
         self._order_counter += 1
         return PlaceOrderResult(orderId=order_id)
@@ -120,14 +122,14 @@ class MockBrokerProvider(Provider, BrokerCapability):
     async def subscribe_orders(
         self,
         callback: Callable[[PlacedOrder], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        on_error: Callable[[TradingApiException], Awaitable[None]],
     ) -> str:
         return "sub_orders"
 
     async def subscribe_positions(
         self,
         callback: Callable[[Position], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        on_error: Callable[[TradingApiException], Awaitable[None]],
     ) -> str:
         return "sub_positions"
 
@@ -135,14 +137,14 @@ class MockBrokerProvider(Provider, BrokerCapability):
         self,
         symbol: str,
         callback: Callable[[Execution], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        on_error: Callable[[TradingApiException], Awaitable[None]],
     ) -> str:
         return "sub_executions"
 
     async def subscribe_equity(
         self,
         callback: Callable[[EquityData], Awaitable[None]],
-        on_error: Callable[[TradingApiException], Awaitable[None]] | None = None,
+        on_error: Callable[[TradingApiException], Awaitable[None]],
     ) -> str:
         return "sub_equity"
 
@@ -155,13 +157,13 @@ class MockBrokerProvider(Provider, BrokerCapability):
 
 
 def create_test_app(
-    enabled_modules: list[str] | None = None,
+    enabled_modules: list[str] = [],
 ) -> ModularApp:
     """Create a test application with specified modules.
 
     Args:
         enabled_modules: List of module names to enable (e.g., ["broker", "datafeed"])
-                        If None, all modules are enabled.
+                        If empty list, all modules are enabled.
 
     Returns:
         ModularApp: Modular application (extends FastAPI)

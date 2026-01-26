@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from trading_api.datastores import InMemoryDatastore
 from trading_api.models.market import Bar, Resolution, SearchSymbolResultItem
 from trading_api.modules.datafeed.service import DatafeedService
 
@@ -24,7 +25,10 @@ def mock_provider() -> MockDatafeedProvider:
 def service(mock_provider: MockDatafeedProvider) -> DatafeedService:
     """Create DatafeedService with mock provider."""
     module_dir = Path(__file__).parent.parent
-    return DatafeedService(module_dir, providers=[mock_provider])
+    datastore = InMemoryDatastore()
+    return DatafeedService(
+        module_dir, providers=[mock_provider], datastores=[datastore]
+    )
 
 
 @pytest.mark.asyncio

@@ -25,6 +25,7 @@ from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ServiceException, TradingApiException
 from trading_api.models.market import Resolution
 from trading_api.models.market.quotes import QuoteValues
+from trading_api.modules.datafeed.repository import BarRepository
 from trading_api.shared.ws.ws_router import (
     ProviderUpdateCallback,
     TopicErrorCallback,
@@ -92,20 +93,24 @@ class DatafeedService(WsRouteService):
     def __init__(
         self,
         module_dir: Path,
-        *,  # Force keyword-only arguments
-        providers: list | None = None,
+        *args: Any,
+        **kwargs: Any,
     ):
         """Initialize the datafeed service
 
         Args:
             module_dir: Path to the module directory
             providers: Provider instances for capabilities (unused, for interface compatibility)
+            datastores: Datastore instances for capabilities (unused, for interface compatibility)
         """
-        super().__init__(module_dir, providers=providers)
+        super().__init__(module_dir, *args, **kwargs)
         self.configuration = DatafeedConfiguration()
         # Track provider subscription IDs for each topic (for cleanup)
         self._topic_to_subs: dict[str, list[str]] = {}
         self._last_bars: dict[str, Bar] = {}
+        # Bar repository for persistent storage (wiring for future use)
+        # Use injected datastore for shared lock
+        self._bar_repository = BarRepository(self.datastore)
 
     def get_configuration(self) -> DatafeedConfiguration:
         """Get datafeed configuration.

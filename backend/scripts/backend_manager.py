@@ -313,18 +313,10 @@ class ServerManager:
             # Exclude generated files and management scripts to prevent reload loops
             cmd.extend(
                 [
+                    "--reload-dir",
+                    "src/",
                     "--reload-exclude",
-                    "*/openapi.json",
-                    "--reload-exclude",
-                    "*/asyncapi.json",
-                    "--reload-exclude",
-                    "*/clients/*",
-                    "--reload-exclude",
-                    "*/.local/*",
-                    "--reload-exclude",
-                    "*/.pids/*",
-                    "--reload-exclude",
-                    "*/scripts/*",
+                    "**/*__generated/*",
                     "--reload-exclude",
                     "*/__pycache__/*",
                     "--reload-exclude",

@@ -539,7 +539,7 @@ type-check:
 	poetry run flake8 src/ tests/
 	poetry run mypy src/ --exclude='.*_generated'
 	@echo "Running pyright type checking..."
-	poetry run pyright src/
+	poetry run pyright src/ tests/
 
 format:
 	@echo "Formatting backend code..."
@@ -551,7 +551,7 @@ format:
 	@echo "✅ Backend formatting complete"
 
 # Development server
-dev:
+dev: db-up
 	@echo "Starting backend development server with debugpy on http://localhost:$(BACKEND_PORT)"
 	@echo "🔍 Checking if backend port is available..."
 	@if lsof -Pi :$(BACKEND_PORT) -sTCP:LISTEN -t >/dev/null 2>&1; then \
@@ -568,10 +568,8 @@ dev:
 	@echo "Debug server listening on port 4444 (attach debugger to localhost:4444)"
 	poetry run python -m debugpy --listen 0.0.0.0:4444 -m uvicorn "trading_api.main:$(BACKEND_APP_NAME)" \
 		--reload \
+		--reload-dir src/ \
 		--reload-exclude '**/*__generated/*' \
-		--reload-exclude '**/.local/*' \
-		--reload-exclude '**/.pids/*' \
-		--reload-exclude '**/scripts/*' \
 		--reload-exclude '**/__pycache__/*' \
 		--reload-exclude '**/*.pyc' \
 		--host 0.0.0.0 \
@@ -841,9 +839,9 @@ install-tws-api: ## Install TWS API with protobuf regeneration and validation
 
 show-cache: ## Show contract cache statistics and latest records
 	@echo "🔍 Inspecting contract cache..."
-	@if [ ! -f ".cache/contracts.db" ]; then \
+	@if [ ! -f ".local/DB/sqlite/contracts.db" ]; then \
 		echo ""; \
-		echo "❌ Cache database not found at .cache/contracts.db"; \
+		echo "❌ Cache database not found at .local/DB/sqlite/contracts.db"; \
 		echo ""; \
 		echo "💡 The cache is created after first use:"; \
 		echo "   1. Start the backend: make dev"; \
@@ -864,6 +862,43 @@ show-cache-symbol: ## Show contracts matching symbol (usage: make show-cache-sym
 		exit 1; \
 	fi
 	@poetry run python scripts/inspect_contract_cache.py --symbol $(symbol)
+
+# Database Management (PostgreSQL via Docker)
+.PHONY: db-up db-down db-status db-logs db-psql
+
+# Datastore configuration (can override via environment)
+DATASTORE_POSTGRES_PORT ?= 5433
+DATASTORE_POSTGRES_DB ?= trader_bars
+
+db-up: ## Start PostgreSQL database (docker-compose)
+	@echo "🐘 Starting PostgreSQL database..."
+	@DATASTORE_POSTGRES_PORT=$(DATASTORE_POSTGRES_PORT) DATASTORE_POSTGRES_DB=$(DATASTORE_POSTGRES_DB) \
+		docker-compose -f docker-compose.dev.yml up -d
+	@echo "Waiting for PostgreSQL to be ready..."
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if docker-compose -f docker-compose.dev.yml exec -T postgres pg_isready -U trader -d $(DATASTORE_POSTGRES_DB) >/dev/null 2>&1; then \
+			echo "✅ PostgreSQL is ready!"; \
+			break; \
+		fi; \
+		echo "  Waiting... ($$i/10)"; \
+		sleep 2; \
+	done
+	@echo ""
+	@echo "Connection string: postgresql://trader:trader_dev@localhost:$(DATASTORE_POSTGRES_PORT)/$(DATASTORE_POSTGRES_DB)"
+
+db-down: ## Stop PostgreSQL database
+	@echo "🛑 Stopping PostgreSQL database..."
+	@docker-compose -f docker-compose.dev.yml down
+	@echo "✅ PostgreSQL stopped"
+
+db-status: ## Show PostgreSQL container status
+	@docker-compose -f docker-compose.dev.yml ps
+
+db-logs: ## Tail PostgreSQL logs
+	@docker-compose -f docker-compose.dev.yml logs -f postgres
+
+db-psql: ## Connect to PostgreSQL via psql
+	@docker-compose -f docker-compose.dev.yml exec postgres psql -U trader -d $(DATASTORE_POSTGRES_DB)
 
 # echo ""
 	@echo "========================================"

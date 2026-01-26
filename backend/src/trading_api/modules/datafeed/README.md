@@ -1,7 +1,7 @@
 # Datafeed Module
 
 **Status**: ✅ Production Ready  
-**Last Updated**: January 16, 2026  
+**Last Updated**: January 26, 2026  
 **Related Files**: `backend/src/trading_api/modules/datafeed/`
 
 ---
@@ -54,6 +54,35 @@ class DatafeedService(WsRouteService):
 **[DECISION]**: DatafeedService is a thin BFF layer - all business logic lives in the `DatafeedCapability` provider (e.g., `TWSDatafeedProvider`).
 
 **[PATTERN]**: Simple Topic Controller - Service subscribes to the provider once per symbol per topic. Symbol mutualization (deduplication) is handled at the provider/tracker level (`QuoteTracker` manages subscription reference counting internally).
+
+**Datastore Access**: Service inherits `datastore` property from `ServiceInterface`. Used to initialize `BarRepository(self.datastore)` for bar storage with per-table RWLock concurrency.
+
+### Repository Layer
+
+The module includes a `BarRepository` for OHLC bar storage:
+
+```python
+class BarRepository:
+    def __init__(self, datastore: DatastoreInterface) -> None:
+        self._bars: dict[str, dict[str, dict[int, Bar]]] = {}
+        self._lock = datastore.table("bars").lock  # Per-table RWLock
+
+    async def store_bars(self, symbol: str, resolution: Resolution, bars: list[Bar]) -> int:
+        async with self._lock.write():  # Exclusive write access
+            # Store bars with deduplication by timestamp
+            ...
+
+    async def get_bars(self, symbol: str, resolution: Resolution, from_time: int, to_time: int) -> list[Bar]:
+        async with self._lock.read():  # Concurrent read access
+            # Retrieve bars in ascending time order
+            ...
+```
+
+**Key Points:**
+
+- Uses nested dict structure: `{symbol: {resolution: {time_ms: Bar}}}`
+- RWLock allows concurrent readers with exclusive writers
+- Bars deduplicated by timestamp (upsert semantics)
 
 ### Provider Delegation
 
@@ -433,4 +462,4 @@ This module powers the TradingView charting library datafeed:
 
 ---
 
-**Last Updated**: January 7, 2026
+**Last Updated**: January 26, 2026

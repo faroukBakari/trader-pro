@@ -29,6 +29,7 @@ from pathlib import Path
 
 import pytest
 
+from trading_api.datastores import InMemoryDatastore
 from trading_api.models.broker import OrderType, PreOrder, Side
 from trading_api.models.providers.fake_broker_configs import FakeBrokerProviderConfig
 from trading_api.modules.broker.service import BrokerService
@@ -57,8 +58,11 @@ def broker_service() -> BrokerService:
         execution_delay_max=0.02,
     )
     provider = FakeBrokerProvider(config=config)
+    datastore = InMemoryDatastore()
 
-    service = BrokerService(module_dir=module_dir, providers=[provider])
+    service = BrokerService(
+        module_dir=module_dir, providers=[provider], datastores=[datastore]
+    )
     return service
 
 
@@ -106,6 +110,7 @@ async def place_and_execute(
     # Execute immediately via provider
     provider = service.broker_provider
     assert isinstance(provider, FakeBrokerProvider)
+    assert result.orderId is not None, "orderId is required for execution"
     await provider._simulate_execution(result.orderId)
 
 
@@ -130,6 +135,12 @@ def assert_accounting(
     provider = service.broker_provider
     assert isinstance(provider, FakeBrokerProvider)
     accounting = provider._equity
+
+    # Assert required fields are present for type narrowing
+    assert accounting.balance is not None, "accounting.balance is None"
+    assert accounting.equity is not None, "accounting.equity is None"
+    assert accounting.unrealizedPL is not None, "accounting.unrealizedPL is None"
+    assert accounting.realizedPL is not None, "accounting.realizedPL is None"
 
     assert (
         abs(accounting.balance - balance) < tolerance
@@ -507,7 +518,7 @@ async def test_case_8_round_trip_with_commission(broker_service: BrokerService) 
     # Apply commission manually for first order
     provider = broker_service.broker_provider
     assert isinstance(provider, FakeBrokerProvider)
-    provider._equity.balance -= 5.0
+    provider._balance -= 5.0
 
     # Execution 1: Buy 100 @ 500.00
     await place_and_execute(broker_service, "AAPL", Side.BUY, 100, 500.0)
@@ -515,7 +526,7 @@ async def test_case_8_round_trip_with_commission(broker_service: BrokerService) 
     assert_accounting(broker_service, 49995.0, 49995.0, 0.0, 0.0)
 
     # Apply commission for second order
-    provider._equity.balance -= 5.0
+    provider._balance -= 5.0
 
     # Execution 2: Sell 100 @ 510.00
     await place_and_execute(broker_service, "AAPL", Side.SELL, 100, 510.0)

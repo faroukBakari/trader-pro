@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: trader-postgres
+    environment:
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: trader_dev
+      POSTGRES_DB: ${DATASTORE_POSTGRES_DB:-trader_bars}
+    ports:
+      - "${DATASTORE_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trader -d ${DATASTORE_POSTGRES_DB:-trader_bars}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:

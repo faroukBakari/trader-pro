@@ -980,7 +980,7 @@ class ContractTracker(ContractTrackerCBWiringInterface):
 
         Args:
             ibsocket: Socket interface for TWS communication
-            db_path: SQLite database path (defaults to .cache/contracts.db)
+            db_path: SQLite database path (defaults to .local/DB/sqlite/contracts.db)
         """
         self.ibsocket = ibsocket
         self.ibsocket.wire_contract_tracker(self)  # Bidirectional wiring
@@ -1215,7 +1215,7 @@ CREATE INDEX idx_symbol_prefix ON contract_descriptions(symbol COLLATE NOCASE);
 **Configuration:**
 
 ```bash
-# Environment variable (defaults to .cache/contracts.db)
+# Environment variable (defaults to .local/DB/sqlite/contracts.db)
 export TWS_CONTRACT_CACHE_PATH=/path/to/contracts.db
 ```
 

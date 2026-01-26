@@ -21,12 +21,8 @@ try:
 except ImportError:
     HAS_RICH = False
 
-DEFAULT_CACHE_PATH = ".cache/contracts.db"
-
-
-def get_cache_path() -> str:
-    """Get cache path from env or default."""
-    return os.environ.get("TWS_CONTRACT_CACHE_PATH", DEFAULT_CACHE_PATH)
+# Import from authoritative source
+from trading_api.providers.tws.contract_tracker import get_cache_path
 
 
 def get_connection(db_path: str) -> sqlite3.Connection:
