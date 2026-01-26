@@ -1497,11 +1497,6 @@ def broker_only_app() -> ModularApp:
 def datafeed_only_app() -> ModularApp:
     """Application with only datafeed module."""
     return create_test_app(enabled_modules=["datafeed"])
-
-@pytest.fixture(scope="session")
-def no_modules_app() -> ModularApp:
-    """Application with no modules."""
-    return create_test_app(enabled_modules=[])
 ````
 
 **Function-scoped (new instance per test):**
@@ -3239,29 +3234,7 @@ def test_subscribe_to_quotes(client: TestClient) -> None:
         assert "symbol" in quote["payload"]
 ```
 
-### Example 3: Integration Test for Module Isolation
-
-```python
-# backend/tests/integration/test_module_isolation.py
-import pytest
-from httpx import AsyncClient
-from trading_api.app_factory import ModularApp
-
-@pytest.mark.asyncio
-async def test_no_modules_app(no_modules_app: ModularApp):
-    """Test that app with no modules has no module endpoints."""
-    async with AsyncClient(app=no_modules_app, base_url="http://test") as client:
-        # Module endpoints should NOT be available
-        broker = await client.get("/api/v1/broker/accounts")
-        assert broker.status_code == 404
-
-        datafeed = await client.get("/api/v1/datafeed/symbols")
-        assert datafeed.status_code == 404
-
-        # Only ModularApp base endpoints available (if any)
-```
-
-### Example 4: Backend Manager Integration Test
+### Example 3: Backend Manager Integration Test
 
 ```python
 # backend/tests/integration/test_backend_manager_integration.py
@@ -3281,7 +3254,7 @@ async def test_08a_custom_module_routes(
         assert response.status_code == 200
 ```
 
-### Example 5: Isolated Integration Test
+### Example 4: Isolated Integration Test
 
 ```python
 # backend/tests/integration/test_custom_config.py
@@ -3543,9 +3516,10 @@ pytest -m "not slow"      # Skip slow tests
 - `apps` - Full application with all modules
 - `broker_only_app` - Broker module only
 - `datafeed_only_app` - Datafeed module only
-- `no_modules_app` - No modules
 - `session_backend_manager` - Multi-process backend for integration tests
 - `session_test_config` - Test configuration
+
+> **Note**: All fixtures require `InMemoryDatastore` injection. The `no_modules_app` fixture was removed.
 
 **Function-scoped (per test):**
 

@@ -269,15 +269,10 @@ CORS_ORIGINS = ["http://localhost:5173"]
 
 ### Repository Layer
 
-**Interfaces:**
+- `UserRepository(datastore)`: Thread-safe dict with secondary indexes, uses `datastore.table("users").lock` for RWLock concurrency
+- `RefreshTokenRepository(datastore)`: Thread-safe storage with fingerprint validation, uses `datastore.table("tokens").lock`
 
-- `UserRepositoryInterface`: User CRUD operations
-- `RefreshTokenRepositoryInterface`: Token storage with device fingerprinting
-
-**Implementations (MVP):**
-
-- `InMemoryUserRepository`: Thread-safe dict with secondary indexes
-- `InMemoryRefreshTokenRepository`: Thread-safe storage with fingerprint validation
+**Datastore Injection**: Both repositories receive `DatastoreInterface` from `AuthService` via the `ServiceInterface` base class. This enables per-table `RWLock` for concurrent read access with exclusive write access.
 
 ### Service Layer
 

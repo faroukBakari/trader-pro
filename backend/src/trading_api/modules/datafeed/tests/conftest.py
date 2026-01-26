@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from trading_api.app_factory import AppFactory, ModularApp
 from trading_api.capabilities.datafeed import DatafeedCapability
+from trading_api.datastores import InMemoryDatastore
 from trading_api.models.common import CapabilitySpec, ProviderConfig
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import (
@@ -357,9 +358,11 @@ def apps(mock_datafeed_provider: MockDatafeedProvider) -> ModularApp:
     factory.module_registry.auto_discover()
 
     # Get only datafeed module with mock provider injected
+    datastore = InMemoryDatastore()
     enabled_modules = factory.module_registry.get_modules(
         module_names=["datafeed"],  # Only datafeed module
         providers=[mock_datafeed_provider],  # Inject mock provider
+        datastores=[datastore],
     )
 
     # Create ModularApp without lifespan (simpler for tests)

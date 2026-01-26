@@ -104,16 +104,17 @@ class BrokerService(WsRouteService):
     def __init__(
         self,
         module_dir: Path,
-        *,  # Force keyword-only arguments
-        providers: list | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """Initialize broker service.
 
         Args:
             module_dir: Path to the module directory
             providers: Provider instances for capabilities
+            **kwargs: Additional arguments (includes datastore from ServiceInterface)
         """
-        super().__init__(module_dir, providers=providers)
+        super().__init__(module_dir, *args, **kwargs)
 
         # Track provider subscription IDs for each topic (for cleanup)
         self._topic_to_subscription_id: dict[str, str] = {}

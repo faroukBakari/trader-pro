@@ -1,8 +1,8 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: January 24, 2026  
-**Version**: 6.0.0
+**Last Updated**: January 26, 2026  
+**Version**: 6.1.0
 
 ## Table of Contents
 
@@ -88,12 +88,21 @@ class MyModuleModule(Module):
 
 ```python
 # modules/my_module/service.py
-from trading_api.shared import ServiceInterface
+from pathlib import Path
+from trading_api.shared import ServiceInterface, DatastoreInterface
+from trading_api.shared.provider_interface import Provider
 
 class MyModuleService(ServiceInterface):
-    def __init__(self, module_dir: Path):
-        super().__init__(module_dir)
-        # Your service logic here
+    def __init__(
+        self,
+        module_dir: Path,
+        *,
+        providers: list[Provider] = [],
+        datastores: list[DatastoreInterface] = [],
+    ):
+        super().__init__(module_dir, providers=providers, datastores=datastores)
+        # Access datastore via self.datastore property for repository initialization
+        # self._repository = MyRepository(self.datastore)
 ```
 
 **4. Implement the API Router** (extends `APIRouterInterface`):
@@ -943,7 +952,13 @@ Modules are **lazy-loaded** only when needed:
 registry.register(BrokerModule, "broker")
 
 # Instance created on first access
-module = registry.get_module("broker")  # Creates BrokerModule() here
+from trading_api.datastores import InMemoryDatastore
+datastore = InMemoryDatastore()
+modules = registry.get_modules(
+    module_names=["broker"],  # Empty list [] = all modules
+    providers=[...],
+    datastores=[datastore],
+)  # Creates BrokerModule() with injected datastore
 ```
 
 Benefits:

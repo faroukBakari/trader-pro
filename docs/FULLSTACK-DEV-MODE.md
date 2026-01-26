@@ -158,11 +158,13 @@ make -C frontend clean-generated
 make -C backend dev
   ↓
 poetry run python -m debugpy --listen 0.0.0.0:4444 \
-  -m uvicorn "trading_api.main:app" \
-  --reload \
-  --reload-exclude '**/.local/*' \
-  --reload-exclude '**/scripts/*' \
-  --host 0.0.0.0 \
+    -m uvicorn "trading_api.main:app" \
+    --reload \
+    --reload-dir 'src/' \
+    --reload-exclude '**/*__generated/*' \
+    --reload-exclude '**/__pycache__/*' \
+    --reload-exclude '**/*.pyc' \
+    --host 0.0.0.0 \
   --port 8000
 ```
 

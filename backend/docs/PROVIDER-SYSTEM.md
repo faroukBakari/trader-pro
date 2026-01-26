@@ -694,7 +694,8 @@ async def test_provider_integration():
     app = await factory.create_app(enabled_module_names=["auth"])
 
     # Verify provider was injected
-    auth_module = factory.module_registry.get_module("auth")
+    auth_modules = factory.module_registry.get_modules(module_names=["auth"])
+    auth_module = auth_modules[0]
     assert len(auth_module.service._providers) > 0
 ```
 

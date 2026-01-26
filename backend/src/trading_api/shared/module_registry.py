@@ -6,7 +6,10 @@ Provides registration, discovery, and filtering of pluggable modules.
 import importlib
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Dict
+
+from trading_api.shared import DatastoreInterface
+from trading_api.shared.provider_interface import Provider
 
 from .module_interface import Module
 
@@ -96,7 +99,8 @@ class ModuleRegistry:
         self,
         module_name: str,
         version: str | None = None,
-        providers: list[Any] | None = None,
+        providers: list[Provider] = [],
+        datastores: list[DatastoreInterface] = [],
     ) -> Module:
         """Get or create module instance (lazy loading).
 
@@ -104,6 +108,7 @@ class ModuleRegistry:
             module_name: Name of module to instantiate
             version: Specific version to load (e.g., "v1"), or None for all versions
             providers: Provider instances to inject
+            datastores: Optional shared datastores for service repository injection
 
         Returns:
             Module: Module instance
@@ -116,7 +121,9 @@ class ModuleRegistry:
             # Pass as single-item list or None
             versions = [version] if version else None
             # Instantiate with keyword arguments
-            instance = module_class(versions=versions, providers=providers)
+            instance = module_class(
+                versions=versions, providers=providers, datastores=datastores
+            )
             self._instances[cache_key] = instance
             logger.debug(f"Lazy-loaded module instance: {cache_key}")
         return self._instances[cache_key]
@@ -124,25 +131,27 @@ class ModuleRegistry:
     def get_modules(
         self,
         *,  # Force keyword-only
-        module_names: list[str] | None = None,
-        providers: list[Any] | None = None,
+        module_names: list[str] = [],
+        providers: list[Provider] = [],
+        datastores: list[DatastoreInterface] = [],
     ) -> list[Module]:
         """Get modules filtered by enabled list with providers injected.
 
         Args:
             module_names: Module specs (e.g., ["broker:v1", "datafeed:v2"])
-                         or None for all modules
+                         or empty list for all modules
             providers: Provider instances to inject into modules
+            datastores: Optional shared datastores for service repository injection
 
         Returns:
             List of module instances
 
         [KEYWORD-ONLY]: Prevents positional argument errors.
         """
-        if module_names is None:
+        if not module_names:
             # Return all modules with all versions
             return [
-                self._get_instance(name, providers=providers)
+                self._get_instance(name, providers=providers, datastores=datastores)
                 for name in self._module_classes.keys()
             ]
         else:
@@ -153,25 +162,13 @@ class ModuleRegistry:
                 if module_name in self._module_classes:
                     modules.append(
                         self._get_instance(
-                            module_name, version=version, providers=providers
+                            module_name,
+                            version=version,
+                            providers=providers,
+                            datastores=datastores,
                         )
                     )
             return modules
-
-    def get_module(self, name: str) -> Module | None:
-        """Get a specific module by name.
-
-        Lazy-loads the module instance if it exists.
-
-        Args:
-            name: Module name to retrieve
-
-        Returns:
-            Module | None: Module instance if found, None otherwise
-        """
-        if name in self._module_classes:
-            return self._get_instance(name)
-        return None
 
     def clear(self) -> None:
         """Clear all registered modules and instances.

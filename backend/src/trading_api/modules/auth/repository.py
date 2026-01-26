@@ -1,53 +1,29 @@
-import asyncio
-from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional
 
 from trading_api.models.auth import DeviceInfo, User, UserCreate
+from trading_api.shared import DatastoreInterface, RWLock
 
 
-class UserRepositoryInterface(ABC):
-    """Abstract interface for user repository operations"""
-
-    @abstractmethod
-    async def get_by_id(self, user_id: str) -> Optional[User]:
-        """Retrieve user by ID"""
-
-    @abstractmethod
-    async def get_by_email(self, email: str) -> Optional[User]:
-        """Retrieve user by email address"""
-
-    @abstractmethod
-    async def get_by_google_id(self, google_id: str) -> Optional[User]:
-        """Retrieve user by Google ID"""
-
-    @abstractmethod
-    async def create(self, user_data: UserCreate) -> User:
-        """Create a new user"""
-
-    @abstractmethod
-    async def update_last_login(self, user_id: str) -> None:
-        """Update user's last login timestamp"""
-
-
-class InMemoryUserRepository(UserRepositoryInterface):
+class UserRepository:
     """In-memory implementation of user repository for MVP"""
 
-    def __init__(self) -> None:
+    def __init__(self, datastore: DatastoreInterface) -> None:
         self._users: dict[str, User] = {}
         self._email_to_id: dict[str, str] = {}
         self._google_id_to_id: dict[str, str] = {}
         self._counter = 0
-        self._lock = asyncio.Lock()
+        # Use per-table RWLock from datastore if provided
+        self._lock = datastore.table("users").lock
 
     async def get_by_id(self, user_id: str) -> Optional[User]:
         """Retrieve user by ID"""
-        async with self._lock:
+        async with self._lock.read():
             return self._users.get(user_id)
 
     async def get_by_email(self, email: str) -> Optional[User]:
         """Retrieve user by email address"""
-        async with self._lock:
+        async with self._lock.read():
             user_id = self._email_to_id.get(email)
             if user_id is None:
                 return None
@@ -55,7 +31,7 @@ class InMemoryUserRepository(UserRepositoryInterface):
 
     async def get_by_google_id(self, google_id: str) -> Optional[User]:
         """Retrieve user by Google ID"""
-        async with self._lock:
+        async with self._lock.read():
             user_id = self._google_id_to_id.get(google_id)
             if user_id is None:
                 return None
@@ -63,7 +39,7 @@ class InMemoryUserRepository(UserRepositoryInterface):
 
     async def create(self, user_data: UserCreate) -> User:
         """Create a new user"""
-        async with self._lock:
+        async with self._lock.write():
             self._counter += 1
             user_id = f"USER-{self._counter}"
             now = datetime.now()
@@ -87,52 +63,21 @@ class InMemoryUserRepository(UserRepositoryInterface):
 
     async def update_last_login(self, user_id: str) -> None:
         """Update user's last login timestamp"""
-        async with self._lock:
+        async with self._lock.write():
             user = self._users.get(user_id)
             if user is not None:
                 updated_user = user.model_copy(update={"last_login": datetime.now()})
                 self._users[user_id] = updated_user
 
 
-class RefreshTokenRepositoryInterface(ABC):
-    """Abstract interface for refresh token repository operations"""
-
-    @abstractmethod
-    async def store_token(
-        self,
-        token_id: str,
-        user_id: str,
-        token_hash: str,
-        device_info: DeviceInfo,
-        created_at: datetime,
-    ) -> None:
-        """Store a refresh token with device information"""
-
-    @abstractmethod
-    async def get_token(
-        self, token_hash: str, fingerprint: str
-    ) -> Optional[dict[str, str]]:
-        """
-        Retrieve token data by hash and validate device fingerprint.
-        Returns dict with token_id, user_id if valid, None otherwise.
-        """
-
-    @abstractmethod
-    async def revoke_token(self, token_hash: str) -> None:
-        """Revoke a specific refresh token"""
-
-    @abstractmethod
-    async def revoke_all_user_tokens(self, user_id: str) -> None:
-        """Revoke all refresh tokens for a user"""
-
-
-class InMemoryRefreshTokenRepository(RefreshTokenRepositoryInterface):
+class RefreshTokenRepository:
     """In-memory implementation of refresh token repository for MVP"""
 
-    def __init__(self) -> None:
+    def __init__(self, datastore: DatastoreInterface | None = None) -> None:
         self._tokens: dict[str, dict[str, str]] = {}
         self._user_to_tokens: dict[str, list[str]] = {}
-        self._lock = asyncio.Lock()
+        # Use per-table RWLock from datastore if provided
+        self._lock = datastore.table("tokens").lock if datastore else RWLock()
 
     async def store_token(
         self,
@@ -143,7 +88,7 @@ class InMemoryRefreshTokenRepository(RefreshTokenRepositoryInterface):
         created_at: datetime,
     ) -> None:
         """Store a refresh token with device information"""
-        async with self._lock:
+        async with self._lock.write():
             self._tokens[token_hash] = {
                 "token_id": token_id,
                 "user_id": user_id,
@@ -164,7 +109,7 @@ class InMemoryRefreshTokenRepository(RefreshTokenRepositoryInterface):
         Retrieve token data by hash and validate device fingerprint.
         Returns dict with token_id, user_id if valid, None otherwise.
         """
-        async with self._lock:
+        async with self._lock.read():
             token_data = self._tokens.get(token_hash)
             if token_data is None:
                 return None
@@ -179,7 +124,7 @@ class InMemoryRefreshTokenRepository(RefreshTokenRepositoryInterface):
 
     async def revoke_token(self, token_hash: str) -> None:
         """Revoke a specific refresh token"""
-        async with self._lock:
+        async with self._lock.write():
             token_data = self._tokens.get(token_hash)
             if token_data is not None:
                 user_id = token_data["user_id"]
@@ -194,7 +139,7 @@ class InMemoryRefreshTokenRepository(RefreshTokenRepositoryInterface):
 
     async def revoke_all_user_tokens(self, user_id: str) -> None:
         """Revoke all refresh tokens for a user"""
-        async with self._lock:
+        async with self._lock.write():
             token_hashes = self._user_to_tokens.get(user_id, [])
             for token_hash in token_hashes:
                 if token_hash in self._tokens:

@@ -292,16 +292,7 @@ async def all_modules_app() -> ModularApp:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return await factory.create_app(enabled_module_names=None)
-
-
-@pytest.fixture(scope="session")
-async def no_modules_app() -> ModularApp:
-    """Session-scoped app with no modules (shared infrastructure only)."""
-    from trading_api.app_factory import AppFactory
-
-    factory = AppFactory()
-    return await factory.create_app(enabled_module_names=[])
+    return await factory.create_app()
 
 
 # ============================================================================
@@ -361,6 +352,7 @@ async def apps() -> ModularApp:
     external dependencies in integration tests.
     """
     from trading_api.app_factory import AppFactory
+    from trading_api.datastores import InMemoryDatastore
 
     factory = AppFactory()
 
@@ -382,9 +374,12 @@ async def apps() -> ModularApp:
         required_capabilities
     )
 
-    # Instantiate modules with mock providers
+    # Create shared datastore for auth module
+    datastore = InMemoryDatastore()
+
+    # Instantiate modules with mock providers and datastore
     enabled_modules = factory.module_registry.get_modules(
-        module_names=None, providers=required_providers
+        providers=required_providers, datastores=[datastore]
     )
 
     # Create base URL

@@ -17,7 +17,7 @@ JWT-based authentication module with Google OAuth integration, cookie-based sess
 ```
 modules/auth/
 ├── api/v1.py          # REST endpoints (/login, /me, /introspect, etc.)
-├── repository.py      # UserRepository, RefreshTokenRepository (in-memory)
+├── repository.py      # UserRepository, RefreshTokenRepository
 ├── service.py         # AuthService (JWT generation, Google OAuth)
 ├── tests/             # Module tests (see Test Coverage below)
 └── README.md          # This file
@@ -35,12 +35,14 @@ modules/auth/
 
 ### Key Components
 
-| Component                         | Purpose                                                   |
-| --------------------------------- | --------------------------------------------------------- |
-| `AuthService`                     | Business logic, JWT generation, Google OAuth verification |
-| `UserRepositoryInterface`         | User CRUD (in-memory MVP)                                 |
-| `RefreshTokenRepositoryInterface` | Token storage with device fingerprinting                  |
-| Shared middleware                 | `get_current_user()`, `get_current_user_ws()`             |
+| Component                | Purpose                                                   |
+| ------------------------ | --------------------------------------------------------- |
+| `AuthService`            | Business logic, JWT generation, Google OAuth verification |
+| `UserRepository`         | User CRUD with RWLock concurrency                         |
+| `RefreshTokenRepository` | Token storage with device fingerprinting and RWLock       |
+| Shared middleware        | `get_current_user()`, `get_current_user_ws()`             |
+
+**Datastore Injection**: Both repositories receive `DatastoreInterface` from `AuthService` and use per-table `RWLock` for concurrent read access with exclusive write access (`datastore.table("users").lock`, `datastore.table("tokens").lock`).
 
 ---
 
@@ -68,32 +70,6 @@ def capabilities(cls) -> list[CapabilitySpec]:
 - **Refresh Token**: 64-byte opaque token, SHA256 hashed, 7-day expiry
 
 **[DECISION]**: SHA256 used instead of bcrypt to avoid 72-byte input limit issues.
-
----
-
-## Repository Interfaces
-
-### UserRepositoryInterface
-
-```python
-get_by_id(user_id: str) -> User | None
-get_by_email(email: str) -> User | None
-get_by_google_id(google_id: str) -> User | None
-create(user_data: CreateUserData) -> User
-update_last_login(user_id: str) -> None
-```
-
-### RefreshTokenRepositoryInterface
-
-```python
-store_token(token_data: RefreshTokenData) -> None
-get_token(token_hash: str, fingerprint: str) -> RefreshTokenData | None
-revoke_token(token_hash: str) -> None
-revoke_all_user_tokens(user_id: str) -> None
-```
-
-**MVP Implementation**: In-memory thread-safe storage.  
-**Production**: PostgreSQL for users, Redis for refresh tokens.
 
 ---
 

@@ -61,7 +61,7 @@ class ProviderRegistry:
             folder_name = provider_path.name
 
             # Filter by enabled_names if provided
-            if enabled_names is not None and folder_name not in enabled_names:
+            if enabled_names and folder_name not in enabled_names:
                 logger.debug(f"Skipping provider '{folder_name}' (not in enabled list)")
                 continue
 

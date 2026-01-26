@@ -6,6 +6,7 @@ from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import CommonException
 from trading_api.models.health import HealthResponse
 from trading_api.models.versioning import APIMetadata, VersionInfo
+from trading_api.shared import DatastoreInterface
 from trading_api.shared.provider_interface import Provider
 
 
@@ -14,19 +15,27 @@ class ServiceInterface(ABC):
         self,
         module_dir: Path,
         *,  # Force keyword-only
-        providers: list["Provider"] | None = None,
+        providers: list[Provider] = [],
+        datastores: list[DatastoreInterface] = [],
     ) -> None:
         """Initialize service.
 
         Args:
             module_dir: Module directory path
             providers: Provider instances for required capabilities
+            datastores: Optional shared datastores for repository injection
 
         Raises:
             CommonException: If required capability not satisfied
         """
+
+        assert (
+            datastores
+        ), "At least one datastore must be provided to the service layer."
+
         super().__init__()
         self.module_dir = module_dir
+        self.datastores = datastores
 
         # Build capability map and fail-fast validate
         self._capability_map = self._resolve_capabilities(providers or [])
@@ -167,6 +176,15 @@ class ServiceInterface(ABC):
             APIMetadata: The API metadata
         """
         return self._api_metadata
+
+    @property
+    def datastore(self) -> DatastoreInterface:
+        """Get the primary datastore for this service.
+
+        Returns:
+            DatastoreInterface: The primary datastore
+        """
+        return next(iter(self.datastores))
 
     def get_health(self, current_version: str) -> HealthResponse:
         """Get the current health status of the API.

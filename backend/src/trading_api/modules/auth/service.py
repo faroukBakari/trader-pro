@@ -18,12 +18,7 @@ from trading_api.models.auth import (
 )
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ServiceException
-from trading_api.modules.auth.repository import (
-    InMemoryRefreshTokenRepository,
-    InMemoryUserRepository,
-    RefreshTokenRepositoryInterface,
-    UserRepositoryInterface,
-)
+from trading_api.modules.auth.repository import RefreshTokenRepository, UserRepository
 from trading_api.shared import settings
 from trading_api.shared.service_interface import ServiceInterface
 
@@ -75,10 +70,8 @@ class AuthService(AuthServiceInterface, ServiceInterface):
 
     def __init__(self, module_dir: Path, **kwargs: Any) -> None:
         super().__init__(module_dir, **kwargs)
-        self.user_repository: UserRepositoryInterface = InMemoryUserRepository()
-        self.token_repository: RefreshTokenRepositoryInterface = (
-            InMemoryRefreshTokenRepository()
-        )
+        self.user_repository = UserRepository(self.datastore)
+        self.token_repository = RefreshTokenRepository(self.datastore)
         self._oauth: OAuth | None = None
 
     @property

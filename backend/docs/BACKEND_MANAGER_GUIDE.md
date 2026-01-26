@@ -310,14 +310,9 @@ The backend uses **uvicorn's built-in reload** with automatic spec/client genera
 
 ```bash
 # These files do NOT trigger reload:
---reload-exclude "*/openapi.json"
---reload-exclude "*/asyncapi.json"
---reload-exclude "*/clients/*"
---reload-exclude "*/scripts/*"
---reload-exclude "*/.local/*"
---reload-exclude "*/.pids/*"
---reload-exclude "*/__pycache__/*"
---reload-exclude "*.pyc"
+--reload-exclude '**/*__generated/*'
+--reload-exclude '**/__pycache__/*'
+--reload-exclude '**/*.pyc'
 ```
 
 **Manual Client Generation**:

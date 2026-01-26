@@ -30,6 +30,7 @@ BOUNDARY_RULES = {
         "allowed_patterns": [
             "trading_api.models.*",
             "trading_api.shared.*",
+            "trading_api.datastores.*",
             "trading_api.providers.*",  # Providers can import other providers
             "trading_api.capabilities.*",  # Providers implement capabilities
         ],
@@ -40,6 +41,7 @@ BOUNDARY_RULES = {
         "allowed_patterns": [
             "trading_api.models.*",
             "trading_api.shared.*",
+            "trading_api.datastores.*",
             "trading_api.providers.*",  # Tests can import concrete providers for DI
             "trading_api.capabilities.*",
             "trading_api.app_factory",
@@ -51,12 +53,12 @@ BOUNDARY_RULES = {
         "allowed_patterns": [
             "trading_api.models.*",
             "trading_api.shared.*",
-            "trading_api.providers.base",  # Provider ABC for type hints
+            "trading_api.datastores.*",
             "trading_api.app_factory",
         ],
         "forbidden_patterns": [
             "trading_api.modules.*",
-            "trading_api.providers.google",  # Block concrete providers
+            "trading_api.providers.*",  # Block concrete providers (ABC is in shared)
             "trading_api.capabilities.*",  # Block capability interfaces
         ],
         "exception_patterns": [
@@ -69,13 +71,13 @@ BOUNDARY_RULES = {
         "allowed_patterns": [
             "trading_api.models.*",
             "trading_api.shared.*",
-            "trading_api.providers.base",  # Provider ABC for types
+            "trading_api.datastores.*",
             "trading_api.capabilities.*",  # Capability interfaces
             "trading_api.app_factory",
         ],
         "forbidden_patterns": [
             "trading_api.modules.*",  # Block ALL cross-module imports
-            "trading_api.providers.google",  # Block concrete providers
+            "trading_api.providers.*",  # Block concrete providers (ABC is in shared)
         ],
         "description": "Modules can import models, shared, provider"
         "interfaces, but not other modules or concrete providers",
@@ -84,6 +86,7 @@ BOUNDARY_RULES = {
         "allowed_patterns": [
             "trading_api.models.*",
             "trading_api.shared.*",
+            "trading_api.datastores.*",
             "trading_api.providers.*",  # Tests can import concrete providers for DI
             "trading_api.capabilities.*",  # Capability interfaces
             "trading_api.app_factory",
