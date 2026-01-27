@@ -38,23 +38,22 @@ class BarRepository:
         if not bars:
             return 0
 
-        async with self._lock.write():
-            # Initialize nested dicts if needed
-            if symbol not in self._bars:
-                self._bars[symbol] = {}
-            if resolution.value not in self._bars[symbol]:
-                self._bars[symbol][resolution.value] = {}
+        # Initialize nested dicts if needed
+        if symbol not in self._bars:
+            self._bars[symbol] = {}
+        if resolution.value not in self._bars[symbol]:
+            self._bars[symbol][resolution.value] = {}
 
-            symbol_resolution_bars = self._bars[symbol][resolution.value]
-            stored_count = 0
+        symbol_resolution_bars = self._bars[symbol][resolution.value]
+        stored_count = 0
 
-            for bar in bars:
-                # Count as stored only if it's a new timestamp
-                if bar.time not in symbol_resolution_bars:
-                    stored_count += 1
-                symbol_resolution_bars[bar.time] = bar
+        for bar in bars:
+            # Count as stored only if it's a new timestamp
+            if bar.time not in symbol_resolution_bars:
+                stored_count += 1
+            symbol_resolution_bars[bar.time] = bar
 
-            return stored_count
+        return stored_count
 
     async def get_bars(
         self,
@@ -64,24 +63,23 @@ class BarRepository:
         to_time: int,
     ) -> list[Bar]:
         """Retrieve bars within time range, sorted by time ascending."""
-        async with self._lock.read():
-            symbol_bars = self._bars.get(symbol)
-            if symbol_bars is None:
-                return []
+        symbol_bars = self._bars.get(symbol)
+        if symbol_bars is None:
+            return []
 
-            resolution_bars = symbol_bars.get(resolution.value)
-            if resolution_bars is None:
-                return []
+        resolution_bars = symbol_bars.get(resolution.value)
+        if resolution_bars is None:
+            return []
 
-            # Filter bars within time range
-            filtered_bars = [
-                bar
-                for time_ms, bar in resolution_bars.items()
-                if from_time <= time_ms <= to_time
-            ]
+        # Filter bars within time range
+        filtered_bars = [
+            bar
+            for time_ms, bar in resolution_bars.items()
+            if from_time <= time_ms <= to_time
+        ]
 
-            # Sort by time ascending
-            return sorted(filtered_bars, key=lambda b: b.time)
+        # Sort by time ascending
+        return sorted(filtered_bars, key=lambda b: b.time)
 
 
 __all__ = [

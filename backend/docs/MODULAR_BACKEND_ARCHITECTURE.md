@@ -1,8 +1,8 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: January 26, 2026  
-**Version**: 6.1.0
+**Last Updated**: January 27, 2026  
+**Version**: 6.2.0
 
 ## Table of Contents
 
@@ -1008,38 +1008,40 @@ The modular architecture integrates a **pluggable provider/capability system** f
 **Provider-Enabled Architecture:**
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      AppFactory                              │
-│  ┌────────────────────┐         ┌────────────────────┐     │
-│  │  ModuleRegistry    │         │ ProviderRegistry   │     │
-│  │  - auto_discover() │         │ - auto_discover()  │     │
-│  │  - get_modules()   │         │ - get_providers()  │     │
-│  └────────────────────┘         └────────────────────┘     │
-│           │                               │                 │
-│           │  1. Resolve capabilities      │                 │
-│           │  from service classes         │                 │
-│           │                               │                 │
-│           │  2. Request providers ────────┤                 │
-│           │                               │                 │
-│           │  3. Instantiate modules ◄─────┤                 │
-│           │     with providers            │                 │
-└───────────┼───────────────────────────────┼─────────────────┘
-            │                               │
-            ▼                               ▼
-    ┌──────────────┐              ┌─────────────────┐
-    │    Module    │              │    Provider     │
-    │  __init__(   │              │  - capabilities │
-    │   providers) │              │  - verify_token │
-    └──────┬───────┘              └─────────────────┘
-           │                               ▲
-           │  4. Inject providers          │
-           ▼                               │
-    ┌──────────────┐                      │
-    │   Service    │                      │
-    │  __init__(   │──────────────────────┘
-    │   providers) │   5. Cache capability map
-    │              │      (fail-fast validation)
-    └──────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              AppFactory                                  │
+│  ┌────────────────────┐ ┌────────────────────┐ ┌────────────────────┐  │
+│  │  ModuleRegistry    │ │ ProviderRegistry   │ │ InMemoryDatastore  │  │
+│  │  - auto_discover() │ │ - auto_discover()  │ │ - table(name)      │  │
+│  │  - get_modules()   │ │ - get_providers()  │ │ - async CRUD       │  │
+│  └────────────────────┘ └────────────────────┘ └────────────────────┘  │
+│           │                     │                       │               │
+│           │  1. Resolve capabilities from service classes               │
+│           │                     │                       │               │
+│           │  2. Request providers ─────┤                │               │
+│           │                            │                │               │
+│           │  3. Instantiate modules ◄──┴────────────────┘               │
+│           │     with providers AND datastores                           │
+└───────────┼─────────────────────────────────────────────────────────────┘
+            │
+            ▼
+    ┌──────────────────┐
+    │      Module      │
+    │  __init__(       │
+    │   providers,     │
+    │   datastores)    │
+    └──────┬───────────┘
+           │
+           │  4. Inject dependencies
+           ▼
+    ┌──────────────────┐
+    │     Service      │
+    │  __init__(       │
+    │   providers,     │
+    │   datastores)    │
+    │                  │
+    │  self.datastore  │ ◄── Property for repository init
+    └──────────────────┘
 ```
 
 **Two-Phase Loading Process:**
