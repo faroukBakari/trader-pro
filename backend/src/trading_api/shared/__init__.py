@@ -3,6 +3,7 @@
 from .client_factory import InterModuleClients
 from .config import Settings, settings
 from .datastore_interface import DatastoreInterface, RWLock, TableInterface
+from .datastore_registry import DatastoreRegistry
 from .module_interface import Module, ModuleApp
 from .module_registry import ModuleRegistry
 from .provider_interface import Provider
@@ -15,6 +16,7 @@ __all__ = [
     "ModuleRegistry",
     "Provider",
     "ProviderRegistry",
+    "DatastoreRegistry",
     "FastWSAdapter",
     "settings",
     "Settings",

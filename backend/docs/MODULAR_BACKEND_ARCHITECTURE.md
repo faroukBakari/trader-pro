@@ -103,6 +103,7 @@ class MyModuleService(ServiceInterface):
         super().__init__(module_dir, providers=providers, datastores=datastores)
         # Access datastore via self.datastore property for repository initialization
         # self._repository = MyRepository(self.datastore)
+        # See datastores/README.md for TableInterface[T] type-safe patterns
 ```
 
 **4. Implement the API Router** (extends `APIRouterInterface`):

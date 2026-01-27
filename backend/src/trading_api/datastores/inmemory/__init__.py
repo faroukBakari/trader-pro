@@ -14,6 +14,8 @@ from pydantic import BaseModel
 from trading_api.shared import DatastoreInterface, TableInterface
 from trading_api.shared.datastore_interface import RWLock
 
+__all__ = ["InMemoryDatastore", "InMemoryTable"]
+
 
 class InMemoryTable(TableInterface):
     """In-memory table implementation with async CRUD and internal RWLock.

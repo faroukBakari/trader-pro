@@ -5,7 +5,8 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from trading_api.datastores.inmemory_datastore import InMemoryDatastore, InMemoryTable
+from trading_api.datastores.inmemory import InMemoryDatastore, InMemoryTable
+from trading_api.shared import DatastoreInterface, TableInterface
 
 
 class SampleModel(BaseModel):
@@ -17,13 +18,13 @@ class SampleModel(BaseModel):
 
 
 @pytest.fixture
-def table() -> InMemoryTable:
+def table() -> TableInterface[SampleModel]:
     """Create fresh table for each test."""
     return InMemoryTable(timeout=1.0)
 
 
 @pytest.fixture
-def datastore() -> InMemoryDatastore:
+def datastore() -> DatastoreInterface:
     """Create fresh datastore for each test."""
     return InMemoryDatastore(timeout=1.0)
 
@@ -34,7 +35,7 @@ def datastore() -> InMemoryDatastore:
 
 
 @pytest.mark.asyncio
-async def test_set_and_get(table: InMemoryTable) -> None:
+async def test_set_and_get(table: TableInterface[SampleModel]) -> None:
     """Basic store and retrieve."""
     model = SampleModel(id="1", name="test")
     await table.set("1", model)
@@ -46,14 +47,14 @@ async def test_set_and_get(table: InMemoryTable) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_nonexistent_returns_none(table: InMemoryTable) -> None:
+async def test_get_nonexistent_returns_none(table: TableInterface[SampleModel]) -> None:
     """Get non-existent key returns None."""
     result = await table.get("nonexistent")
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_delete_existing_returns_true(table: InMemoryTable) -> None:
+async def test_delete_existing_returns_true(table: TableInterface[SampleModel]) -> None:
     """Delete existing key returns True."""
     await table.set("1", SampleModel(id="1", name="test"))
 
@@ -63,14 +64,16 @@ async def test_delete_existing_returns_true(table: InMemoryTable) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_nonexistent_returns_false(table: InMemoryTable) -> None:
+async def test_delete_nonexistent_returns_false(
+    table: TableInterface[SampleModel],
+) -> None:
     """Delete non-existent key returns False."""
     deleted = await table.delete("nonexistent")
     assert deleted is False
 
 
 @pytest.mark.asyncio
-async def test_exists_returns_expected(table: InMemoryTable) -> None:
+async def test_exists_returns_expected(table: TableInterface[SampleModel]) -> None:
     """Exists returns correct boolean."""
     assert await table.exists("1") is False
 
@@ -79,7 +82,7 @@ async def test_exists_returns_expected(table: InMemoryTable) -> None:
 
 
 @pytest.mark.asyncio
-async def test_keys_and_values(table: InMemoryTable) -> None:
+async def test_keys_and_values(table: TableInterface[SampleModel]) -> None:
     """Keys and values return all entries."""
     await table.set("a", SampleModel(id="a", name="alpha"))
     await table.set("b", SampleModel(id="b", name="beta"))
@@ -89,12 +92,12 @@ async def test_keys_and_values(table: InMemoryTable) -> None:
 
     values = await table.values()
     assert len(values) == 2
-    names = {v.name for v in values}  # type: ignore[union-attr]
+    names = {v.name for v in values}
     assert names == {"alpha", "beta"}
 
 
 @pytest.mark.asyncio
-async def test_clear_removes_all(table: InMemoryTable) -> None:
+async def test_clear_removes_all(table: TableInterface[SampleModel]) -> None:
     """Clear removes all entries."""
     await table.set("a", SampleModel(id="a", name="alpha"))
     await table.set("b", SampleModel(id="b", name="beta"))
@@ -106,7 +109,7 @@ async def test_clear_removes_all(table: InMemoryTable) -> None:
 
 
 @pytest.mark.asyncio
-async def test_count_returns_entry_count(table: InMemoryTable) -> None:
+async def test_count_returns_entry_count(table: TableInterface[SampleModel]) -> None:
     """Count returns correct number of entries."""
     assert await table.count() == 0
 
@@ -118,7 +121,7 @@ async def test_count_returns_entry_count(table: InMemoryTable) -> None:
 
 
 @pytest.mark.asyncio
-async def test_iterate_yields_all_pairs(table: InMemoryTable) -> None:
+async def test_iterate_yields_all_pairs(table: TableInterface[SampleModel]) -> None:
     """Iterate yields all key-value pairs."""
     await table.set("a", SampleModel(id="a", name="alpha"))
     await table.set("b", SampleModel(id="b", name="beta"))
@@ -136,7 +139,9 @@ async def test_iterate_yields_all_pairs(table: InMemoryTable) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_index_enables_secondary_lookup(table: InMemoryTable) -> None:
+async def test_create_index_enables_secondary_lookup(
+    table: TableInterface[SampleModel],
+) -> None:
     """Index allows lookup by field value."""
     await table.set("1", SampleModel(id="1", name="test", category="A"))
     await table.create_index("category")
@@ -144,11 +149,13 @@ async def test_create_index_enables_secondary_lookup(table: InMemoryTable) -> No
     # Lookup by indexed field
     result = await table.get("A", index="category")
     assert result is not None
-    assert result.id == "1"  # type: ignore[union-attr]
+    assert result.id == "1"
 
 
 @pytest.mark.asyncio
-async def test_get_by_index_returns_correct_record(table: InMemoryTable) -> None:
+async def test_get_by_index_returns_correct_record(
+    table: TableInterface[SampleModel],
+) -> None:
     """Get by index returns the correct record."""
     await table.set("1", SampleModel(id="1", name="first", category="X"))
     await table.set("2", SampleModel(id="2", name="second", category="Y"))
@@ -156,11 +163,13 @@ async def test_get_by_index_returns_correct_record(table: InMemoryTable) -> None
 
     result = await table.get("Y", index="category")
     assert result is not None
-    assert result.name == "second"  # type: ignore[union-attr]
+    assert result.name == "second"
 
 
 @pytest.mark.asyncio
-async def test_delete_by_index_removes_record(table: InMemoryTable) -> None:
+async def test_delete_by_index_removes_record(
+    table: TableInterface[SampleModel],
+) -> None:
     """Delete by index removes the correct record."""
     await table.set("1", SampleModel(id="1", name="test", category="Z"))
     await table.create_index("category")
@@ -171,7 +180,9 @@ async def test_delete_by_index_removes_record(table: InMemoryTable) -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_with_index_updates_on_overwrite(table: InMemoryTable) -> None:
+async def test_set_with_index_updates_on_overwrite(
+    table: TableInterface[SampleModel],
+) -> None:
     """Set auto-updates index when overwriting with different field value."""
     await table.create_index("category")
     await table.set("1", SampleModel(id="1", name="old", category="A"))
@@ -184,11 +195,13 @@ async def test_set_with_index_updates_on_overwrite(table: InMemoryTable) -> None
     # New index should find it
     result = await table.get("B", index="category")
     assert result is not None
-    assert result.name == "new"  # type: ignore[union-attr]
+    assert result.name == "new"
 
 
 @pytest.mark.asyncio
-async def test_keys_with_index_returns_indexed_values(table: InMemoryTable) -> None:
+async def test_keys_with_index_returns_indexed_values(
+    table: TableInterface[SampleModel],
+) -> None:
     """Keys with index returns indexed field values."""
     await table.create_index("category")
     await table.set("1", SampleModel(id="1", name="a", category="X"))
@@ -204,18 +217,22 @@ async def test_keys_with_index_returns_indexed_values(table: InMemoryTable) -> N
 
 
 @pytest.mark.asyncio
-async def test_create_unique_index_enables_lookup(table: InMemoryTable) -> None:
+async def test_create_unique_index_enables_lookup(
+    table: TableInterface[SampleModel],
+) -> None:
     """Unique index allows lookup by field value."""
     await table.set("1", SampleModel(id="1", name="alice", category="A"))
     await table.create_unique_index("name")
 
     result = await table.get("alice", index="name")
     assert result is not None
-    assert result.id == "1"  # type: ignore[union-attr]
+    assert result.id == "1"
 
 
 @pytest.mark.asyncio
-async def test_unique_index_rejects_duplicate_on_insert(table: InMemoryTable) -> None:
+async def test_unique_index_rejects_duplicate_on_insert(
+    table: TableInterface[SampleModel],
+) -> None:
     """Unique index rejects insert with duplicate field value."""
     await table.create_unique_index("name")
     await table.set("1", SampleModel(id="1", name="alice", category="A"))
@@ -229,7 +246,9 @@ async def test_unique_index_rejects_duplicate_on_insert(table: InMemoryTable) ->
 
 
 @pytest.mark.asyncio
-async def test_unique_index_allows_update_same_key(table: InMemoryTable) -> None:
+async def test_unique_index_allows_update_same_key(
+    table: TableInterface[SampleModel],
+) -> None:
     """Unique index allows updating same record with same unique value."""
     await table.create_unique_index("name")
     await table.set("1", SampleModel(id="1", name="alice", category="A"))
@@ -239,11 +258,13 @@ async def test_unique_index_allows_update_same_key(table: InMemoryTable) -> None
 
     result = await table.get("1")
     assert result is not None
-    assert result.category == "B"  # type: ignore[union-attr]
+    assert result.category == "B"
 
 
 @pytest.mark.asyncio
-async def test_unique_index_cleanup_on_delete(table: InMemoryTable) -> None:
+async def test_unique_index_cleanup_on_delete(
+    table: TableInterface[SampleModel],
+) -> None:
     """Unique index entry is removed when record is deleted."""
     await table.create_unique_index("name")
     await table.set("1", SampleModel(id="1", name="alice", category="A"))
@@ -257,7 +278,7 @@ async def test_unique_index_cleanup_on_delete(table: InMemoryTable) -> None:
 
 @pytest.mark.asyncio
 async def test_create_unique_index_fails_if_duplicates_exist(
-    table: InMemoryTable,
+    table: TableInterface[SampleModel],
 ) -> None:
     """Creating unique index fails if data already has duplicate values."""
     await table.set("1", SampleModel(id="1", name="alice", category="A"))
@@ -273,7 +294,7 @@ async def test_create_unique_index_fails_if_duplicates_exist(
 
 
 @pytest.mark.asyncio
-async def test_concurrent_reads_allowed(table: InMemoryTable) -> None:
+async def test_concurrent_reads_allowed(table: TableInterface[SampleModel]) -> None:
     """Multiple concurrent reads should not block each other."""
     await table.set("k", SampleModel(id="k", name="value"))
 
@@ -283,11 +304,11 @@ async def test_concurrent_reads_allowed(table: InMemoryTable) -> None:
 
     # Launch 10 concurrent reads - should complete quickly
     results = await asyncio.gather(*[reader() for _ in range(10)])
-    assert all(r is not None and r.name == "value" for r in results)  # type: ignore[union-attr]
+    assert all(r is not None and r.name == "value" for r in results)
 
 
 @pytest.mark.asyncio
-async def test_concurrent_writes_serialized(table: InMemoryTable) -> None:
+async def test_concurrent_writes_serialized(table: TableInterface[SampleModel]) -> None:
     """Concurrent writes should be serialized without corruption."""
     counter = {"value": 0}
 
@@ -309,7 +330,7 @@ async def test_concurrent_writes_serialized(table: InMemoryTable) -> None:
 
 
 @pytest.mark.asyncio
-async def test_model_copy_isolation(table: InMemoryTable) -> None:
+async def test_model_copy_isolation(table: TableInterface[SampleModel]) -> None:
     """Returned models are copies, not references to internal storage."""
     original = SampleModel(id="1", name="original")
     await table.set("1", original)
