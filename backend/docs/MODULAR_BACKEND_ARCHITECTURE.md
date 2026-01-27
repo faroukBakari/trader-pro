@@ -97,8 +97,8 @@ class MyModuleService(ServiceInterface):
         self,
         module_dir: Path,
         *,
-        providers: list[Provider] = [],
-        datastores: list[DatastoreInterface] = [],
+        providers: list[Provider] | None = None,
+        datastores: list[DatastoreInterface] | None = None,
     ):
         super().__init__(module_dir, providers=providers, datastores=datastores)
         # Access datastore via self.datastore property for repository initialization
@@ -1035,15 +1035,34 @@ The modular architecture integrates a **pluggable provider/capability system** f
            │
            │  4. Inject dependencies
            ▼
-    ┌──────────────────┐
-    │     Service      │
-    │  __init__(       │
-    │   providers,     │
-    │   datastores)    │
-    │                  │
-    │  self.datastore  │ ◄── Property for repository init
-    └──────────────────┘
+    ┌──────────────────────────┐
+    │         Service          │
+    │  __init__(               │
+    │   providers,             │
+    │   datastores)            │
+    │                          │
+    │  self.datastore          │ ◄── Property for repository init
+    │  self.persistent_datastore│ ◄── First datastore with has_persistence=True
+    └──────────────────────────┘
 ```
+
+**Datastore Feature Detection:**
+
+Services can access persistent storage via `persistent_datastore` property:
+
+```python
+class MyService(ServiceInterface):
+    async def backup_critical_data(self) -> None:
+        store = self.persistent_datastore
+        if store is None:
+            logger.warning("No persistent datastore - data won't survive restart")
+            return
+        # Use store for critical operations that need persistence
+        table = store.table("backups")
+        await table.set("latest", backup_data)
+```
+
+The property returns the first datastore where `has_persistence=True`, or `None` if no persistent datastore is configured.
 
 **Two-Phase Loading Process:**
 
@@ -1173,25 +1192,43 @@ backend/src/trading_api/
 
 ### Module Lifecycle
 
+The module lifecycle is split between `ModularApp.__init__()` (discovery) and `build_modules()` (instantiation):
+
 ```
-1. Discovery              → registry.auto_discover(modules_dir)
-2. Registration           → registry.register(ModuleClass, "module_name")
-3. Capability Resolution  → factory._resolve_capabilities(enabled_modules)  # Static analysis
-4. Provider Discovery     → provider_registry.auto_discover()
-5. Provider Instantiation → provider_registry.get_providers(capabilities)  # Lazy-loading with lifecycle hooks
-6. Module Loading         → registry.get_modules(module_names, providers)  # Filtering + lazy instantiation with providers
-7. Service Validation     → service._resolve_capabilities()  # Fail-fast validation in each service
-8. App Wrapping           → ModuleApp(module)  # Creates FastAPI apps per version
-9. Mounting               → main_app.mount(f"/api/{version}/{module.name}", api_app)
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    MODULARAPP LIFECYCLE                                  │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                          │
+│  ModularApp.__init__()                    [SYNCHRONOUS - Discovery]     │
+│  ├─ 1. Create instance-level registries                                 │
+│  ├─ 2. module_registry.auto_discover()    ← Class registration          │
+│  ├─ 3. provider_registry.auto_discover()  ← Provider class registration │
+│  └─ 4. datastore_registry.auto_discover() ← Datastore class registration│
+│                                                                          │
+│  lifespan() / build_modules()             [ASYNC - Instantiation]       │
+│  ├─ 5. datastore_registry.get_datastores() ← Create datastore instances │
+│  ├─ 6. provider_registry.get_providers()   ← Create provider instances  │
+│  ├─ 7. module_registry.get_modules()       ← Create module instances    │
+│  ├─ 8. service._resolve_capabilities()     ← Fail-fast validation       │
+│  ├─ 9. ModuleApp(module) wrapping          ← Create FastAPI sub-apps    │
+│  ├─ 10. Mount module routes                ← Attach to main app         │
+│  └─ 11. Start modules                      ← Begin operation            │
+│                                                                          │
+│  shutdown()                               [SYNCHRONOUS - Cleanup]       │
+│  ├─ 12. module.shutdown()                 ← Stop module operations      │
+│  └─ 13. provider.shutdown()               ← Release provider resources  │
+│                                                                          │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Key Points:**
 
-- **Two-Phase Loading**: Classes discovered before instances created (prevents circular dependencies)
+- **Two-Phase Initialization**: Constructor discovers classes, `build_modules()` creates instances
+- **Instance-Level Registries**: Each ModularApp has fresh registries (enables test isolation)
 - **Fail-Fast Validation**: Services validate capabilities at initialization, not request time
-- **Lazy Provider Loading**: Providers instantiated only when first needed, with thread-safe locking
+- **Explicit Lifecycle Control**: Tests can call `build_modules()` directly or skip it entirely
 
-**Reference**: See `backend/src/trading_api/app_factory.py` lines 139-191 for complete implementation.
+**Reference**: See `backend/src/trading_api/app_factory.py` for complete implementation.
 
 ### Module Implementation Example
 
@@ -1303,41 +1340,97 @@ Routes marked "(auto)" are automatically provided by `APIRouterInterface` inheri
 
 ### ModularApp Class
 
-The `ModularApp` class extends FastAPI with module management:
+The `ModularApp` class is a **self-configuring FastAPI application** that owns its registries and handles the full initialization lifecycle:
 
 ```python
 class ModularApp(FastAPI):
-    """FastAPI with integrated module and WebSocket tracking."""
+    """Self-configuring modular FastAPI application.
 
-    def __init__(self, modules: list[Module], base_url: str, **kwargs):
+    Combines application runtime and factory responsibilities.
+    Uses async build_modules() method for initialization after construction.
+    Instance-level registries enable test isolation.
+    """
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        enabled_modules: list[str] | None = None,
+        enabled_providers: list[str] | None = None,
+        enabled_datastores: list[str] | None = None,
+        **kwargs: Any,
+    ):
+        super().__init__(**kwargs)
+        enabled_modules = enabled_modules or []
+        enabled_providers = enabled_providers or []
+        enabled_datastores = enabled_datastores or []
+
         self.base_url = base_url
-        self._modules_apps = [ModuleApp(module) for module in modules]
+        self._modules: list[Module] = []
+        self._modules_apps: list[ModuleApp] = []
 
-        super().__init__(
-            openapi_url=f"{base_url}/openapi.json",
-            docs_url=f"{base_url}/docs",
-            openapi_tags=[...],
-            **kwargs
+        # Instance-level registries (enables test isolation)
+        self.module_registry = ModuleRegistry(trading_app_dir / "modules")
+        self.provider_registry = ProviderRegistry(trading_app_dir / "providers")
+        self.datastore_registry = DatastoreRegistry(trading_app_dir / "datastores")
+
+        # Phase 1: Auto-discover modules, providers, and datastores
+        self.module_registry.auto_discover(enabled_modules=enabled_modules)
+        self.provider_registry.auto_discover(enabled_names=enabled_providers)
+        self.datastore_registry.auto_discover(enabled_names=enabled_datastores)
+
+    async def build_modules(self) -> None:
+        """Initialize runtime assets and mount module routes.
+
+        Called automatically by lifespan() or manually in tests.
+        """
+        # Phase 2: Get datastore instances
+        datastores = await self.datastore_registry.get_datastores()
+
+        # Phase 3: Get provider instances for required capabilities
+        self.__providers = await self.provider_registry.get_providers(
+            self.module_registry.required_capabilities()
         )
 
-        for module_app in self._modules_apps:
+        # Phase 4: Instantiate modules with providers and datastores
+        self._modules = self.module_registry.get_modules(
+            providers=self.__providers,
+            datastores=datastores,
+        )
+
+        # Build module apps and mount routes
+        self._modules_apps = [ModuleApp(module) for module in self._modules]
+        for module_app in self.modules_apps:
             for api_app in module_app.api_versions:
                 mount_path = f"{self.base_url}/{api_app.version}/{module_app.module.name}"
                 self.mount(mount_path, api_app)
 
+        # Start modules
+        for module_app in self.modules_apps:
+            module_app.start()
+
+    def code_gen(self, clean_first: bool = False, output_dir: Path | None = None) -> None:
+        """Generate OpenAPI and AsyncAPI specs and clients for all modules."""
+
+    def validate_model(self) -> None:
+        """Validate that all routes have response_model defined."""
+
     def openapi(self) -> dict[str, Any]:
         """Generate merged OpenAPI schema from all modules."""
-        # Merges paths, components from all mounted module apps
 
     def asyncapi(self) -> dict[str, Any]:
         """Generate merged AsyncAPI schema from all modules."""
-        # Merges channels, components from all module WebSocket apps
 
-    @property
-    def modules_apps(self) -> list[ModuleApp]:
-        """Get all module app wrappers."""
-        return self._modules_apps
+    def shutdown(self) -> None:
+        """Shutdown modules and providers."""
 ```
+
+**Key Design Changes (v6.3.0)**:
+
+- **Self-Configuring**: `ModularApp` owns registries instead of `AppFactory`
+- **Two-Phase Init**: Constructor does discovery, `build_modules()` does instantiation
+- **Instance-Level Registries**: Each `ModularApp` instance has fresh registries for test isolation
+- **Explicit Lifecycle**: `lifespan()` function coordinates startup/shutdown
 
 ### ModuleApp Wrapper
 
@@ -1382,30 +1475,55 @@ class ModuleApp:
 
 ### Factory Pattern
 
+The `AppFactory` is now a thin wrapper that configures and returns a `ModularApp`:
+
 ```python
 class AppFactory:
-    """Factory for creating ModularApp applications."""
+    """Factory for creating ModularApp instances with dynamic module loading."""
 
-    def create_app(
+    async def create_app(
         self,
-        enabled_module_names: list[str] | None = None
+        enabled_module_names: list[str] | None = None,
+        enabled_provider_names: list[str] | None = None,
+        enabled_datastore_names: list[str] | None = None,
     ) -> ModularApp:
-        """Create app with selective module loading."""
-        self.registry.clear()
-        self.registry.auto_discover(self.modules_dir)
-
-        # Get modules to enable (None = all modules, list = specific modules)
-        enabled_modules = self.registry.get_modules(enabled_module_names)
-
+        """Create and configure the ModularApp instance."""
         app = ModularApp(
-            modules=enabled_modules,
-            base_url="/api",
+            base_url=settings.API_PREFIX,
+            enabled_modules=enabled_module_names,
+            enabled_providers=enabled_provider_names,
+            enabled_datastores=enabled_datastore_names,
+            lifespan=lifespan,  # Handles build_modules() automatically
+            openapi_url=f"{settings.API_PREFIX}/openapi.json",
+            docs_url=f"{settings.API_PREFIX}/docs",
             title="Trading API",
             version="1.0.0",
         )
 
+        # Add exception handlers and CORS middleware
+        register_exception_handlers(app)
+        app.add_middleware(CORSMiddleware, ...)
+
         return app
+
+
+@asynccontextmanager
+async def lifespan(app: ModularApp) -> AsyncGenerator[None, None]:
+    """Handle application startup and shutdown events."""
+    await app.build_modules()  # Phase 2-4: Instantiate everything
+    app.validate_model()       # Verify response models
+    app.code_gen()             # Generate specs and clients
+
+    yield
+
+    app.shutdown()             # Cleanup modules and providers
 ```
+
+**Responsibility Split**:
+
+- **AppFactory**: Configuration, middleware, exception handlers
+- **ModularApp**: Registry ownership, discovery, instantiation lifecycle
+- **lifespan()**: Orchestrates startup/shutdown sequence
 
 ### Exception Handler Registration
 
@@ -1589,28 +1707,35 @@ class MyProvider(Provider, AuthCapability):
 
 ### Integration Points
 
-#### AppFactory.\_resolve_capabilities() - Static Analysis
+#### ModuleRegistry.required_capabilities() - Static Analysis
 
 ```python
-def _resolve_capabilities(self, module_names: list[str] | None) -> list[CapabilitySpec]:
-    """Resolve required capabilities from module service classes.
+def required_capabilities(self) -> list[CapabilitySpec]:
+    """Get the set of all required capabilities across registered modules.
 
     [STATIC ANALYSIS]: No instances created, uses classmethods.
     """
     capabilities: set[CapabilitySpec] = set()
 
-    for module_name in module_names:
-        # Get service class (not instance)
+    for module_name in self._module_classes.keys():
+        # Get module class (not instance)
+        module_class = self._module_classes.get(module_name)
+        if module_class is None:
+            continue
+
+        # Get service class (static, no instantiation)
         service_class = module_class._service_class()
 
         # Get capabilities (classmethod, no instance)
         if hasattr(service_class, 'capabilities'):
-            capabilities.update(service_class.capabilities())
+            service_caps = service_class.capabilities()
+            if service_caps is not None:
+                capabilities.update(service_caps)
 
     return list(capabilities)
 ```
 
-**File**: `backend/src/trading_api/app_factory.py` lines 139-172
+**File**: `backend/src/trading_api/shared/module_registry.py` lines 160-196
 
 #### ServiceInterface Methods
 
@@ -2449,20 +2574,79 @@ data:
 
 ### Module Isolation
 
-Each module has independent test fixtures:
+Tests have two patterns for creating `ModularApp` instances:
+
+**Pattern 1: Production-like with lifespan** (integration tests)
 
 ```python
 @pytest.fixture
-def broker_app():
-    """Broker module app only."""
+async def broker_only_app() -> ModularApp:
+    """Create app with lifespan-managed initialization."""
     factory = AppFactory()
-    return factory.create_app(enabled_module_names=["broker"])
-
-@pytest.fixture
-def broker_client(broker_app):
-    """Test client for broker module."""
-    return TestClient(broker_app)
+    app = await factory.create_app(enabled_module_names=["broker"])
+    await app.build_modules()  # Explicitly call for test control
+    return app
 ```
+
+**Pattern 2: Direct registry control** (unit tests, full isolation)
+
+```python
+@pytest.fixture
+def broker_app() -> ModularApp:
+    """Create app with direct registry control for test isolation."""
+    # Create registries directly (bypasses AppFactory)
+    modules_dir = Path(__file__).parents[2]
+    providers_dir = Path(__file__).parents[3] / "providers"
+    datastores_dir = Path(__file__).parents[3] / "datastores"
+
+    module_registry = ModuleRegistry(modules_dir)
+    provider_registry = ProviderRegistry(providers_dir)
+    datastore_registry = DatastoreRegistry(datastores_dir)
+
+    # Discover specific modules/providers
+    module_registry.auto_discover(enabled_modules=["broker"])
+    provider_registry.auto_discover(enabled_names=["fakebroker"])
+    datastore_registry.auto_discover(enabled_names=["inmemory"])
+
+    # Create instances synchronously for test control
+    loop = asyncio.get_event_loop()
+    datastores = loop.run_until_complete(datastore_registry.get_datastores())
+    providers = loop.run_until_complete(
+        provider_registry.get_providers(module_registry.required_capabilities())
+    )
+    enabled_modules = module_registry.get_modules(
+        providers=providers, datastores=datastores
+    )
+
+    # Create ModularApp without lifespan
+    app = ModularApp(
+        base_url=settings.API_PREFIX,
+        enabled_modules=["broker"],
+        enabled_providers=["fakebroker"],
+        title="Trading API (Test)",
+        version="1.0.0",
+    )
+
+    # Manually set runtime state (normally done in build_modules)
+    app._modules = enabled_modules
+    app._modules_apps = [ModuleApp(module) for module in enabled_modules]
+
+    # Mount and start modules
+    for module_app in app._modules_apps:
+        for api_app in module_app.api_versions:
+            mount_path = f"{app.base_url}/{api_app.version}/{module_app.module.name}"
+            app.mount(mount_path, api_app)
+        module_app.start()
+
+    return app
+```
+
+**When to use each pattern**:
+
+| Pattern                 | Use When                                     | Benefits                               |
+| ----------------------- | -------------------------------------------- | -------------------------------------- |
+| Production-like         | Integration tests, full stack testing        | Tests real initialization flow         |
+| Direct registry control | Unit tests, isolation needed, mock providers | Full control, no lifespan side effects |
 
 ### Test Categories
 

@@ -13,16 +13,12 @@ class BarRepository:
     """In-memory implementation of bar repository.
 
     Uses nested dict structure: {symbol: {resolution: {time_ms: Bar}}}
-    Thread-safe via RWLock for concurrent access.
     """
 
     def __init__(self, datastore: DatastoreInterface) -> None:
-        pass
-
         # Structure: {symbol: {resolution_value: {time_ms: Bar}}}
         self._bars: dict[str, dict[str, dict[int, Bar]]] = {}
-        # Use per-table RWLock from datastore if provided
-        self._lock = datastore.table("bars").lock
+        self.__datastore = datastore
 
     async def store_bars(
         self,

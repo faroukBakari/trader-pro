@@ -68,6 +68,7 @@ async def test_module_registry_state(all_modules_app, datafeed_only_app) -> None
     # Verify module discovery by creating an app which triggers discovery
     factory = AppFactory()
     test_app = await factory.create_app()  # This triggers auto-discovery
+    await test_app.build_modules()  # Initialize runtime state
     # Get enabled modules from the created app
     assert len(test_app.modules_apps) >= 2  # Should have broker + datafeed at minimum
 

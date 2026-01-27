@@ -7,13 +7,20 @@ Provides direct access to BrokerService and BrokerProvider for tests that need
 to manipulate broker state directly (e.g., reset, execute_all_working_orders).
 """
 
-import asyncio
+from pathlib import Path
 
 import pytest
 
-from trading_api.app_factory import AppFactory, ModularApp
+from trading_api.app_factory import ModularApp
 from trading_api.capabilities.broker import BrokerCapability
 from trading_api.modules.broker.service import BrokerService
+from trading_api.shared import (
+    DatastoreRegistry,
+    ModuleApp,
+    ModuleRegistry,
+    ProviderRegistry,
+    settings,
+)
 
 
 @pytest.fixture(scope="module")
@@ -23,13 +30,62 @@ def apps() -> ModularApp:
     Uses FakeBrokerProvider instead of TWS to avoid external dependencies
     and ensure tests work with simple symbol formats (e.g., "AAPL").
     """
-    factory = AppFactory()
-    return asyncio.get_event_loop().run_until_complete(
-        factory.create_app(
-            enabled_module_names=["broker", "auth"],
-            enabled_provider_names=["fakebroker", "google"],
-        )
+    # Create registries directly for test isolation
+    modules_dir = Path(__file__).parents[2]
+    providers_dir = Path(__file__).parents[3] / "providers"
+    datastores_dir = Path(__file__).parents[3] / "datastores"
+
+    module_registry = ModuleRegistry(modules_dir)
+    provider_registry = ProviderRegistry(providers_dir)
+    datastore_registry = DatastoreRegistry(datastores_dir)
+
+    # Auto-discover broker and auth modules with fakebroker and google providers
+    module_registry.auto_discover(enabled_modules=["broker", "auth"])
+    provider_registry.auto_discover(enabled_names=["fakebroker", "google"])
+    datastore_registry.auto_discover(enabled_names=["inmemory"])
+
+    # Create datastore
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    datastores = loop.run_until_complete(datastore_registry.get_datastores())
+
+    # Get providers
+    required_capabilities = module_registry.required_capabilities()
+    providers = loop.run_until_complete(
+        provider_registry.get_providers(required_capabilities)
     )
+
+    # Get modules with providers and datastores
+    enabled_modules = module_registry.get_modules(
+        providers=providers,
+        datastores=datastores,
+    )
+
+    # Create ModularApp without lifespan (simpler for tests)
+    app = ModularApp(
+        base_url=settings.API_PREFIX,
+        enabled_modules=["broker", "auth"],
+        enabled_providers=["fakebroker", "google"],
+        enabled_datastores=["inmemory"],
+        title="Trading API (Test)",
+        version="1.0.0",
+    )
+
+    # Manually set runtime state (normally done in build_modules)
+    app._modules = enabled_modules
+    app._modules_apps = [ModuleApp(module) for module in enabled_modules]
+
+    # Mount module routes (normally done in _start)
+    for module_app in app._modules_apps:
+        for api_app in module_app.api_versions:
+            mount_path = f"{app.base_url}/{api_app.version}/{module_app.module.name}"
+            app.mount(mount_path, api_app)
+
+        # Start module
+        module_app.start()
+
+    return app
 
 
 @pytest.fixture(scope="module")

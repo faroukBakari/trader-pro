@@ -1,9 +1,36 @@
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional, TypeVar
+
+from pydantic import BaseModel
 
 from trading_api.models.auth import DeviceInfo, RefreshTokenData, User, UserCreate
 from trading_api.shared import DatastoreInterface, TableInterface
+
+T = TypeVar("T", bound=BaseModel)
+
+
+def _to_model(result: Any, model_class: type[T]) -> T | None:
+    """Convert table result to Pydantic model.
+
+    Handles both:
+    - InMemoryDatastore: returns BaseModel directly
+    - PostgresDatastore: returns dict (needs model_validate)
+
+    Args:
+        result: Value from table.get() - either BaseModel or dict
+        model_class: Pydantic model class to convert to
+
+    Returns:
+        Model instance or None if result is None
+    """
+    if result is None:
+        return None
+    if isinstance(result, model_class):
+        return result
+    if isinstance(result, dict):
+        return model_class.model_validate(result)
+    return None
 
 
 class UserRepository:
@@ -24,17 +51,17 @@ class UserRepository:
     async def get_by_id(self, user_id: str) -> Optional[User]:
         """Retrieve user by ID"""
         result = await self._table.get(user_id)
-        return result if isinstance(result, User) else None
+        return _to_model(result, User)
 
     async def get_by_email(self, email: str) -> Optional[User]:
         """Retrieve user by email address"""
         result = await self._table.get(email, index="email")
-        return result if isinstance(result, User) else None
+        return _to_model(result, User)
 
     async def get_by_google_id(self, google_id: str) -> Optional[User]:
         """Retrieve user by Google ID"""
         result = await self._table.get(google_id, index="google_id")
-        return result if isinstance(result, User) else None
+        return _to_model(result, User)
 
     async def create(self, user_data: UserCreate) -> User:
         """Create a new user.
@@ -110,15 +137,16 @@ class RefreshTokenRepository:
         Returns dict with token_id, user_id if valid, None otherwise.
         """
         result = await self._table.get(token_hash)
-        if result is None or not isinstance(result, RefreshTokenData):
+        token_data = _to_model(result, RefreshTokenData)
+        if token_data is None:
             return None
 
-        if result.fingerprint != fingerprint:
+        if token_data.fingerprint != fingerprint:
             return None
 
         return {
-            "token_id": result.token_id,
-            "user_id": result.user_id,
+            "token_id": token_data.token_id,
+            "user_id": token_data.user_id,
         }
 
     async def revoke_token(self, token_hash: str) -> None:
@@ -127,7 +155,8 @@ class RefreshTokenRepository:
 
     async def revoke_all_user_tokens(self, user_id: str) -> None:
         """Revoke all refresh tokens for a user"""
-        tokens = await self._table.get_all(user_id, index="user_id")
-        for token in tokens:
-            if isinstance(token, RefreshTokenData):
+        results = await self._table.get_all(user_id, index="user_id")
+        for result in results:
+            token = _to_model(result, RefreshTokenData)
+            if token is not None:
                 await self._table.delete(token.token_hash)

@@ -212,7 +212,7 @@ providers = await registry.get_providers([CapabilitySpec(name="auth")])
    ↓
 3. ProviderRegistry.auto_discover() - finds all providers
    ↓
-4. AppFactory._resolve_capabilities() - determines what's needed
+4. ModuleRegistry.required_capabilities() - determines what's needed
    ↓
 5. ProviderRegistry.get_providers() - lazy-loads matching providers
    ↓
@@ -1311,9 +1311,6 @@ class ProviderRegistry:
         required_capabilities: list[CapabilitySpec]
     ) -> list[Provider]:
         """Get provider instances for capabilities."""
-
-    async def get_provider(self, name: str) -> Provider:
-        """Get specific provider by name."""
 
     def list_providers(self) -> list[str]:
 ```

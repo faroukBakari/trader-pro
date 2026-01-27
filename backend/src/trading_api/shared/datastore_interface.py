@@ -7,10 +7,8 @@ Provides minimal abstraction for data persistence that enables:
 - Multi-table transactions with rollback support
 """
 
-import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel
@@ -18,84 +16,13 @@ from pydantic import BaseModel
 T = TypeVar("T", bound=BaseModel)
 
 
-class RWLock:
-    """Async read-write lock allowing concurrent reads with exclusive writes.
-
-    Multiple readers can hold the lock simultaneously, but writers get
-    exclusive access. Writers are prioritized to prevent starvation.
-    """
-
-    def __init__(self) -> None:
-        self._read_count = 0
-        self._write_locked = False
-        self._write_waiting = 0
-        self._condition = asyncio.Condition()
-
-    @asynccontextmanager
-    async def read(self, timeout: float | None = None) -> AsyncIterator[None]:
-        """Acquire read lock (shared access).
-
-        Args:
-            timeout: Max seconds to wait for lock (None = no timeout)
-
-        Raises:
-            asyncio.TimeoutError: If timeout exceeded
-        """
-        async with asyncio.timeout(timeout):
-            async with self._condition:
-                # Wait while write is held or writers are waiting (writer priority)
-                while self._write_locked or self._write_waiting > 0:
-                    await self._condition.wait()
-                self._read_count += 1
-        try:
-            yield
-        finally:
-            async with self._condition:
-                self._read_count -= 1
-                if self._read_count == 0:
-                    self._condition.notify_all()
-
-    @asynccontextmanager
-    async def write(self, timeout: float | None = None) -> AsyncIterator[None]:
-        """Acquire write lock (exclusive access).
-
-        Args:
-            timeout: Max seconds to wait for lock (None = no timeout)
-
-        Raises:
-            asyncio.TimeoutError: If timeout exceeded
-        """
-        async with asyncio.timeout(timeout):
-            async with self._condition:
-                self._write_waiting += 1
-                try:
-                    # Wait until no readers and no other writer
-                    while self._read_count > 0 or self._write_locked:
-                        await self._condition.wait()
-                    self._write_locked = True
-                finally:
-                    self._write_waiting -= 1
-        try:
-            yield
-        finally:
-            async with self._condition:
-                self._write_locked = False
-                self._condition.notify_all()
-
-
 class TableInterface(ABC, Generic[T]):
     """Abstract interface for a datastore table with CRUD operations.
 
     Provides:
-    - Per-table read-write lock for concurrent access
     - Type-safe CRUD operations with Pydantic models
     - Snapshot capability for transaction rollback
     """
-
-    @property
-    @abstractmethod
-    def lock(self) -> RWLock:
-        """Per-table read-write lock."""
 
     @abstractmethod
     async def get(self, key: str, index: str | None = None) -> T | None:
@@ -226,6 +153,42 @@ class DatastoreInterface(ABC):
     - PostgresDatastore: asyncpg pool-based (Wave 2+)
     """
 
+    @property
+    @abstractmethod
+    def has_persistence(self) -> bool:
+        """Whether this datastore persists data across restarts.
+
+        Returns:
+            True if data survives process restarts (e.g., PostgreSQL).
+            False for ephemeral storage (e.g., InMemory).
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def has_transactions(self) -> bool:
+        """Whether this datastore supports ACID transactions.
+
+        Returns:
+            True if datastore provides transactional guarantees.
+            False for simple key-value storage without transactions.
+        """
+        ...
+
+    @classmethod
+    @abstractmethod
+    async def create(cls) -> "DatastoreInterface":
+        """Async factory for datastore creation.
+
+        Default implementation wraps sync instantiation. Override in subclasses
+        that require actual async initialization (e.g., PostgresDatastore for
+        asyncpg pool creation).
+
+        Returns:
+            DatastoreInterface instance
+        """
+        ...
+
     @classmethod
     def datastore_name(cls) -> str:
         """Canonical name for registry lookup.
@@ -238,9 +201,7 @@ class DatastoreInterface(ABC):
         """
         # Default: strip "Datastore" suffix and lowercase
         # InMemoryDatastore → "inmemory"
-        name = cls.__name__
-        if name.endswith("Datastore"):
-            name = name[:-9]  # Remove "Datastore" suffix
+        name = cls.__name__.removesuffix("Datastore")
         return name.lower()
 
     @abstractmethod

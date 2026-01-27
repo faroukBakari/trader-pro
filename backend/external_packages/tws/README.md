@@ -158,14 +158,12 @@ protoc --proto_path=./proto --python_out=./pythonclient/ibapi/protobuf proto/*.p
 Before using the API, configure TWS:
 
 1. **Enable API**:
-
    - Go to `File` → `Global Configuration` → `API` → `Settings`
    - Check "Enable ActiveX and Socket Clients"
    - Uncheck "Read-Only API"
    - Note the "Socket Port" (default: 7496 for TWS Live, 7497 for Paper)
 
 2. **Allow Connections**:
-
    - For localhost: Keep "Allow connections from localhost only" checked
    - For remote: Add your IP to "Trusted IPs"
 
@@ -184,7 +182,7 @@ from ibapi.contract import Contract
 import threading
 import time
 
-class TradingApp(EWrapper, EClient):
+class ModularApp(EWrapper, EClient):
     def __init__(self):
         EClient.__init__(self, self)
 
@@ -201,7 +199,7 @@ def run_loop():
     app.run()
 
 # Initialize and connect
-app = TradingApp()
+app = ModularApp()
 app.connect("127.0.0.1", 7496, clientId=0)
 
 # Start message processing loop in separate thread

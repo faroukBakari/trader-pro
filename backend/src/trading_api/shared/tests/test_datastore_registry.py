@@ -23,40 +23,29 @@ class TestDatastoreRegistry:
 
         assert "inmemory" in registry.list_datastores()
 
-    def test_get_datastores_returns_instances(
+    @pytest.mark.asyncio
+    async def test_get_datastores_returns_instances(
         self, registry: DatastoreRegistry
     ) -> None:
         """get_datastores() returns DatastoreInterface instances."""
         registry.auto_discover()
 
-        datastores = registry.get_datastores()
+        datastores = await registry.get_datastores()
 
         assert len(datastores) >= 1
         assert all(isinstance(ds, DatastoreInterface) for ds in datastores)
 
-    def test_get_datastores_by_name(self, registry: DatastoreRegistry) -> None:
-        """get_datastores(names=[...]) filters by name."""
-        registry.auto_discover()
+    @pytest.mark.asyncio
+    async def test_get_datastores_filters_by_auto_discover(
+        self, registry: DatastoreRegistry
+    ) -> None:
+        """get_datastores() returns only what was enabled in auto_discover."""
+        registry.auto_discover(enabled_names=["inmemory"])
 
-        datastores = registry.get_datastores(names=["inmemory"])
+        datastores = await registry.get_datastores()
 
         assert len(datastores) == 1
         assert datastores[0].__class__.__name__ == "InMemoryDatastore"
-
-    def test_get_datastore_single(self, registry: DatastoreRegistry) -> None:
-        """get_datastore() returns single instance by name."""
-        registry.auto_discover()
-
-        datastore = registry.get_datastore("inmemory")
-
-        assert datastore.__class__.__name__ == "InMemoryDatastore"
-
-    def test_get_datastore_not_found_raises(self, registry: DatastoreRegistry) -> None:
-        """get_datastore() raises ValueError for unknown name."""
-        registry.auto_discover()
-
-        with pytest.raises(ValueError, match="not registered"):
-            registry.get_datastore("postgres")
 
     def test_clear_resets_registry(self, registry: DatastoreRegistry) -> None:
         """clear() removes all registered datastores and instances."""
@@ -80,23 +69,16 @@ class TestDatastoreRegistry:
 
         assert "inmemory" in registry.list_datastores()
 
-    def test_lazy_loading_creates_single_instance(
+    @pytest.mark.asyncio
+    async def test_lazy_loading_creates_single_instance(
         self, registry: DatastoreRegistry
     ) -> None:
-        """Multiple get_datastore() calls return same instance."""
-        registry.auto_discover()
+        """Multiple get_datastores() calls return same instance."""
+        registry.auto_discover(enabled_names=["inmemory"])
 
-        ds1 = registry.get_datastore("inmemory")
-        ds2 = registry.get_datastore("inmemory")
+        # First call creates instance
+        datastores1 = await registry.get_datastores()
+        # Second call returns cached instance
+        datastores2 = await registry.get_datastores()
 
-        assert ds1 is ds2
-
-    def test_register_duplicate_raises(self, registry: DatastoreRegistry) -> None:
-        """register() raises ValueError for duplicate name."""
-        registry.auto_discover()
-
-        with pytest.raises(ValueError, match="already registered"):
-            # Try to register inmemory again
-            from trading_api.datastores import InMemoryDatastore
-
-            registry.register(InMemoryDatastore, "inmemory")
+        assert datastores1[0] is datastores2[0]

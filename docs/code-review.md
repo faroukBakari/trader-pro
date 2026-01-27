@@ -65,8 +65,8 @@ backend/src/trading_api/
 
 ```python
 # All orders are stored globally - no user_id filtering
-self._orders: Dict[str, PlacedOrder] = {}
-self._positions: Dict[str, Position] = {}
+self._orders: dict[str, PlacedOrder] = {}
+self._positions: dict[str, Position] = {}
 ```
 
 While API endpoints require authentication via middleware, they don't pass `user_id` to the service for filtering.

@@ -1,16 +1,17 @@
 # Datastores
 
 **Status**: ✅ Production Ready  
-**Last Updated**: January 27, 2026
+**Last Updated**: January 2026
 
 ## Overview
 
 The datastore layer provides a minimal abstraction for data persistence that enables:
 
 - Testability via dependency injection
-- Future PostgreSQL migration (Wave 2+)
+- PostgreSQL support via `PostgresDatastore` (Wave 2A)
 - Per-table read-write locks for concurrent access
 - Auto-discovery via `DatastoreRegistry`
+- Feature detection via `has_persistence` and `has_transactions` properties
 
 ## Directory Structure
 
@@ -18,9 +19,44 @@ The datastore layer provides a minimal abstraction for data persistence that ena
 datastores/
 ├── __init__.py           # Re-exports for backward compatibility
 ├── README.md             # This file
-└── inmemory/             # InMemoryDatastore implementation
-    ├── __init__.py       # Exports InMemoryDatastore, InMemoryTable
-    └── tests/
+├── inmemory/             # InMemoryDatastore implementation
+│   ├── __init__.py       # Exports InMemoryDatastore, InMemoryTable
+│   └── tests/
+└── postgres/             # PostgresDatastore implementation
+    ├── __init__.py       # Exports PostgresDatastore, PostgresTable
+    └── datastore.py      # Implementation with asyncpg + JSONB
+```
+
+## Feature Detection
+
+Datastores expose properties to detect capabilities:
+
+```python
+datastore = registry.get_datastores(names=["postgres"])[0]
+
+# Check if data survives restarts
+if datastore.has_persistence:
+    logger.info("Using persistent datastore")
+
+# Check if ACID transactions are supported
+if datastore.has_transactions:
+    logger.info("Transactions available")
+```
+
+| Property           | InMemory | Postgres |
+| ------------------ | -------- | -------- |
+| `has_persistence`  | `False`  | `True`   |
+| `has_transactions` | `False`  | `True`   |
+
+Services can access persistent storage via `persistent_datastore` property:
+
+```python
+class MyService(ServiceInterface):
+    async def backup_critical_data(self) -> None:
+        store = self.persistent_datastore
+        if store is None:
+            raise RuntimeError("No persistent datastore available")
+        # Use store for critical operations
 ```
 
 ## DatastoreRegistry
@@ -178,6 +214,103 @@ class UserRepository:
 - **Read operations**: Concurrent access allowed (multiple readers)
 - **Write operations**: Exclusive access (single writer, no readers)
 - **Writer priority**: Writers are prioritized to prevent starvation
+
+---
+
+## PostgresDatastore
+
+PostgreSQL datastore using **asyncpg + JSONB** storage pattern. Provides real persistence with ACID transactions.
+
+### Key Design Decisions
+
+- **JSONB Storage**: Schema-flexible storage - each table stores `key TEXT` + `value JSONB`
+- **Async Factory Pattern**: Pool creation is async, use `PostgresDatastore.create()` factory
+- **No-Op RWLock**: PostgreSQL MVCC provides transaction isolation, app-level locks are redundant
+- **Dict Return Type**: `get()` returns dict (not BaseModel) - caller uses `model_validate()` for conversion
+
+### Usage
+
+```python
+from trading_api.datastores.postgres import PostgresDatastore
+
+# Create with async factory (required for asyncpg pool)
+datastore = await PostgresDatastore.create()
+
+# Or with custom DSN
+datastore = await PostgresDatastore.create(
+    dsn="postgresql://user:pass@localhost:5432/db",
+    min_size=2,
+    max_size=10,
+)
+
+# Get table with indexes
+users = datastore.table(
+    "users",
+    unique_indexes=["email", "google_id"],
+    indexes=["role"],
+)
+
+# Store Pydantic model
+await users.set("user123", user_model)
+
+# Retrieve as dict, convert to model
+data = await users.get("user123")
+if data:
+    user = User.model_validate(data)
+```
+
+### Environment Configuration
+
+Set PostgreSQL connection via environment variables:
+
+```bash
+# Option 1: Full DSN
+export DATASTORE_POSTGRES_DSN=postgresql://user:pass@localhost:5432/dbname
+
+# Option 2: Individual variables
+export DATASTORE_POSTGRES_USER=postgres
+export DATASTORE_POSTGRES_PASSWORD=secret
+export DATASTORE_POSTGRES_HOST=localhost
+export DATASTORE_POSTGRES_PORT=5432
+export DATASTORE_POSTGRES_DB=traderpro
+```
+
+### Registry Integration
+
+The registry handles async initialization automatically:
+
+```python
+registry = DatastoreRegistry()
+registry.auto_discover()  # Detects postgres/ requires async init
+
+# Use async getter for datastores requiring async init
+datastores = await registry.get_datastores_async(names=["postgres"])
+```
+
+### JSONB Table Schema
+
+Each PostgresTable creates this schema on first access:
+
+```sql
+CREATE TABLE IF NOT EXISTS {table_name} (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+Indexes are created via JSONB field extraction:
+
+```sql
+-- Secondary index (1:N)
+CREATE INDEX idx_{table}_{field} ON {table} ((value->>'{field}'));
+
+-- Unique index (1:1)
+CREATE UNIQUE INDEX uidx_{table}_{field} ON {table} ((value->>'{field}'));
+```
+
+---
 
 ## Testing
 

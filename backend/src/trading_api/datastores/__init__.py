@@ -9,13 +9,19 @@ Directory structure follows registry pattern:
   ├── inmemory/             # InMemoryDatastore implementation
   │   ├── __init__.py
   │   └── tests/
+  ├── postgres/             # PostgresDatastore implementation (Wave 2A)
+  │   ├── __init__.py
+  │   └── tests/
   └── README.md
 """
 
 from .inmemory import InMemoryDatastore, InMemoryTable
+from .postgres import PostgresDatastore, PostgresTable
 
 __all__ = [
     # Implementations
     "InMemoryDatastore",
     "InMemoryTable",
+    "PostgresDatastore",
+    "PostgresTable",
 ]

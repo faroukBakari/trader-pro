@@ -265,8 +265,8 @@ class Module(ABC):
         self,
         *,  # Force keyword-only arguments
         versions: list[str] | None = None,
-        providers: list[Provider] = [],
-        datastores: list[DatastoreInterface] = [],
+        providers: list[Provider] | None = None,
+        datastores: list[DatastoreInterface] | None = None,
     ) -> None:
         """Initialize module.
 
@@ -277,6 +277,9 @@ class Module(ABC):
 
         [BACKWARD-COMPATIBLE]: Keyword-only ensures existing code works.
         """
+        providers = providers or []
+        datastores = datastores or []
+
         # Auto-discover available versions if not specified
         if versions is None:
             versions = self._discover_versions()

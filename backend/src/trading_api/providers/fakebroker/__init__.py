@@ -45,7 +45,7 @@ from trading_api.shared import Provider
 logger = logging.getLogger(__name__)
 
 
-class FakebrokerProvider(Provider, BrokerCapability):
+class FakeBrokerProvider(Provider, BrokerCapability):
     """Mock broker provider - simulates order execution and account management.
 
     [IN-MEMORY]: All state stored in dictionaries (orders, positions, executions).
@@ -1031,7 +1031,4 @@ class FakebrokerProvider(Provider, BrokerCapability):
             self._execution_simulator_task = None
 
 
-# Alias for backward compatibility
-FakeBrokerProvider = FakebrokerProvider
-
-__all__ = ["FakeBrokerProvider", "FakebrokerProvider"]
+__all__ = ["FakeBrokerProvider"]

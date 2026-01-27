@@ -186,20 +186,6 @@ class ProviderRegistry:
 
         return self._instances[name]
 
-    async def get_provider(self, name: str) -> Provider:
-        """Get specific provider by name.
-
-        Args:
-            name: Provider name
-
-        Returns:
-            Provider instance
-
-        Raises:
-            CommonException: If provider not found
-        """
-        return await self._get_instance(name)
-
     def list_providers(self) -> list[str]:
         """List all registered provider names."""
         return list(self._provider_classes.keys())

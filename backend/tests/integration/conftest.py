@@ -274,7 +274,9 @@ async def datafeed_only_app() -> ModularApp:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return await factory.create_app(enabled_module_names=["datafeed"])
+    app = await factory.create_app(enabled_module_names=["datafeed"])
+    await app.build_modules()
+    return app
 
 
 @pytest.fixture(scope="session")
@@ -283,7 +285,9 @@ async def broker_only_app() -> ModularApp:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return await factory.create_app(enabled_module_names=["broker"])
+    app = await factory.create_app(enabled_module_names=["broker"])
+    await app.build_modules()
+    return app
 
 
 @pytest.fixture(scope="session")
@@ -292,7 +296,9 @@ async def all_modules_app() -> ModularApp:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    return await factory.create_app()
+    app = await factory.create_app()
+    await app.build_modules()
+    return app
 
 
 # ============================================================================
@@ -351,48 +357,62 @@ async def apps() -> ModularApp:
     Uses MockDatafeedProvider instead of real TWS provider to avoid
     external dependencies in integration tests.
     """
-    from trading_api.app_factory import AppFactory
+    from pathlib import Path
+
+    from trading_api.app_factory import ModularApp
     from trading_api.datastores import InMemoryDatastore
+    from trading_api.shared import ModuleApp, ModuleRegistry, ProviderRegistry, settings
 
-    factory = AppFactory()
+    modules_dir = Path(__file__).parents[2] / "src" / "trading_api" / "modules"
+    providers_dir = Path(__file__).parents[2] / "src" / "trading_api" / "providers"
 
-    # Clear and re-discover modules only (not providers)
-    factory.module_registry.clear()
-    factory.module_registry.auto_discover()
+    # Create registries
+    module_registry = ModuleRegistry(modules_dir)
+    provider_registry = ProviderRegistry(providers_dir)
+
+    # Auto-discover modules
+    module_registry.auto_discover()
 
     # Register mock providers instead of auto-discovering real providers
-    factory.provider_registry.clear()
-    factory.provider_registry.register(MockDatafeedProvider, "mock_datafeed")
-    factory.provider_registry.register(MockAuthProvider, "mock_auth")
-    factory.provider_registry.register(FakeBrokerProvider, "fake_broker")
+    provider_registry.register(MockDatafeedProvider, "mock_datafeed")
+    provider_registry.register(MockAuthProvider, "mock_auth")
+    provider_registry.register(FakeBrokerProvider, "fake_broker")
 
     # Resolve required capabilities
-    required_capabilities = factory._resolve_capabilities(None)
+    required_capabilities = module_registry.required_capabilities()
 
     # Get provider instances (will use our mock)
-    required_providers = await factory.provider_registry.get_providers(
-        required_capabilities
-    )
+    required_providers = await provider_registry.get_providers(required_capabilities)
 
     # Create shared datastore for auth module
     datastore = InMemoryDatastore()
 
     # Instantiate modules with mock providers and datastore
-    enabled_modules = factory.module_registry.get_modules(
+    enabled_modules = module_registry.get_modules(
         providers=required_providers, datastores=[datastore]
     )
 
-    # Create base URL
-    base_url = "/api"
-
     # Create ModularApp without lifespan (tests handle their own lifecycle)
     modular_app = ModularApp(
-        modules=enabled_modules,
-        base_url=base_url,
+        base_url=settings.API_PREFIX,
         title="Trading API (Test)",
-        description="Test instance with mock providers",
         version="1.0.0",
     )
+
+    # Manually set runtime state
+    modular_app._modules = enabled_modules
+    modular_app._modules_apps = [ModuleApp(module) for module in enabled_modules]
+
+    # Mount module routes
+    for module_app in modular_app._modules_apps:
+        for api_app in module_app.api_versions:
+            mount_path = (
+                f"{modular_app.base_url}/{api_app.version}/{module_app.module.name}"
+            )
+            modular_app.mount(mount_path, api_app)
+
+        # Start module
+        module_app.start()
 
     # Add CORS middleware (same as production)
     from fastapi.middleware.cors import CORSMiddleware
