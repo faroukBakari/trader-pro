@@ -72,7 +72,19 @@ Run it: `make test-module-broker`
 ```python
 # backend/tests/integration/test_my_integration.py
 import pytest
-from trading_api.app_factory import ModularApp
+from httpx import AsyncClient
+from trading_api.app_factory import AppFactory, ModularApp
+
+@pytest.fixture
+async def broker_only_app() -> ModularApp:
+    """Create app with broker module for integration tests.
+
+    Note: Calls build_modules() for production-like initialization.
+    """
+    factory = AppFactory()
+    app = await factory.create_app(enabled_module_names=["broker"])
+    await app.build_modules()  # Required: initializes modules
+    return app
 
 @pytest.mark.asyncio
 async def test_my_workflow(broker_only_app: ModularApp):
@@ -83,6 +95,110 @@ async def test_my_workflow(broker_only_app: ModularApp):
 ```
 
 Run it: `make test-integration`
+
+### Test Fixture Patterns for ModularApp
+
+The refactored `ModularApp` supports two initialization patterns for different test needs:
+
+**Pattern 1: Production-like (with build_modules)**
+
+Use for integration tests that need the full initialization flow:
+
+```python
+@pytest.fixture
+async def full_app() -> ModularApp:
+    factory = AppFactory()
+    app = await factory.create_app(enabled_module_names=["broker", "datafeed"])
+    await app.build_modules()  # Runs full lifecycle: datastores → providers → modules
+    return app
+```
+
+**Pattern 2: Direct registry control (unit tests)**
+
+Use for isolated unit tests or when you need mock providers:
+
+```python
+@pytest.fixture
+def isolated_broker_app() -> ModularApp:
+    """Create app with direct registry control for test isolation."""
+    from pathlib import Path
+    from trading_api.shared import ModuleRegistry, ProviderRegistry, DatastoreRegistry, ModuleApp, settings
+    import asyncio
+
+    # Create registries pointing to test directories
+    modules_dir = Path(__file__).parents[2] / "src" / "trading_api" / "modules"
+    providers_dir = Path(__file__).parents[2] / "src" / "trading_api" / "providers"
+    datastores_dir = Path(__file__).parents[2] / "src" / "trading_api" / "datastores"
+
+    module_registry = ModuleRegistry(modules_dir)
+    provider_registry = ProviderRegistry(providers_dir)
+    datastore_registry = DatastoreRegistry(datastores_dir)
+
+    # Auto-discover with specific filtering
+    module_registry.auto_discover(enabled_modules=["broker"])
+    provider_registry.auto_discover(enabled_names=["fakebroker"])  # Use fake provider
+    datastore_registry.auto_discover(enabled_names=["inmemory"])
+
+    # Create instances synchronously
+    loop = asyncio.get_event_loop()
+    datastores = loop.run_until_complete(datastore_registry.get_datastores())
+    providers = loop.run_until_complete(
+        provider_registry.get_providers(module_registry.required_capabilities())
+    )
+    enabled_modules = module_registry.get_modules(providers=providers, datastores=datastores)
+
+    # Create app without lifespan (no automatic build_modules)
+    app = ModularApp(
+        base_url=settings.API_PREFIX,
+        enabled_modules=["broker"],
+        enabled_providers=["fakebroker"],
+        title="Trading API (Test)",
+        version="1.0.0",
+    )
+
+    # Manually set runtime state
+    app._modules = enabled_modules
+    app._modules_apps = [ModuleApp(module) for module in enabled_modules]
+
+    # Mount and start
+    for module_app in app._modules_apps:
+        for api_app in module_app.api_versions:
+            app.mount(f"{app.base_url}/{api_app.version}/{module_app.module.name}", api_app)
+        module_app.start()
+
+    return app
+```
+
+**Pattern 3: Mock provider injection**
+
+Use when you need to inject mock providers for controlled testing:
+
+```python
+@pytest.fixture
+async def app_with_mocks() -> ModularApp:
+    """Create app with mock providers."""
+    from trading_api.shared import ModuleRegistry, ProviderRegistry
+    from tests.mocks import MockDatafeedProvider, MockAuthProvider
+
+    module_registry = ModuleRegistry(modules_dir)
+    provider_registry = ProviderRegistry(providers_dir)
+
+    module_registry.auto_discover()
+
+    # Register mocks instead of auto-discovering real providers
+    provider_registry.register(MockDatafeedProvider, "mock_datafeed")
+    provider_registry.register(MockAuthProvider, "mock_auth")
+
+    # Continue with standard instantiation...
+```
+
+**Decision Guide:**
+
+| Test Type                 | Pattern   | build_modules() | Lifespan    |
+| ------------------------- | --------- | --------------- | ----------- |
+| Integration tests         | Pattern 1 | Yes             | Via fixture |
+| Unit tests (isolated)     | Pattern 2 | No (manual)     | None        |
+| Tests with mock providers | Pattern 3 | Yes             | Via fixture |
 
 ---
 
@@ -435,9 +551,15 @@ Integration tests verify multi-process communication, nginx routing, and cross-m
 # Location: tests/integration/test_module_isolation.py
 # Tests that modules can run independently
 
+# Note: broker_only_app fixture must call build_modules() before use
 @pytest.mark.asyncio
 async def test_broker_isolation(broker_only_app: ModularApp):
-    """Test broker-only app has no datafeed endpoints."""
+    """Test broker-only app has no datafeed endpoints.
+
+    The broker_only_app fixture handles initialization via:
+    - await factory.create_app(enabled_module_names=["broker"])
+    - await app.build_modules()
+    """
     async with AsyncClient(app=broker_only_app, base_url="http://test") as client:
         # Broker available
         response = await client.get("/api/v1/broker/accounts")

@@ -13,7 +13,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from trading_api.capabilities.broker import BrokerCapability
 from trading_api.models.broker import (
@@ -243,7 +243,7 @@ class BrokerService(WsRouteService):
         position_id: str,
         brackets: Brackets,
         user_id: str,
-        custom_fields: Optional[Dict[str, Any]] = None,
+        custom_fields: Optional[dict[str, Any]] = None,
     ) -> None:
         """Update position brackets.
 

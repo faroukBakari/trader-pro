@@ -6,8 +6,8 @@ Provides registration, discovery, and filtering of pluggable modules.
 import importlib
 import logging
 from pathlib import Path
-from typing import Dict
 
+from trading_api.models.common import CapabilitySpec
 from trading_api.shared import DatastoreInterface
 from trading_api.shared.provider_interface import Provider
 
@@ -29,8 +29,8 @@ class ModuleRegistry:
 
     def __init__(self, modules_dir: Path) -> None:
         """Initialize an empty module registry."""
-        self._module_classes: Dict[str, type[Module]] = {}
-        self._instances: Dict[str, Module] = {}
+        self._module_classes: dict[str, type[Module]] = {}
+        self._instances: dict[str, Module] = {}
         self._modules_dir = modules_dir
 
     def register(self, module_class: type[Module], module_name: str) -> None:
@@ -49,24 +49,37 @@ class ModuleRegistry:
         self._module_classes[module_name] = module_class
         logger.info(f"Registered module class: {module_name}")
 
-    def auto_discover(self) -> None:
+    def auto_discover(self, enabled_modules: list[str] | None = None) -> None:
         """Auto-discover and register modules from directory.
 
         Convention: modules/<module_name>/__init__.py exports <ModuleName>Module.
         Example: modules/broker/__init__.py exports BrokerModule
 
         Args:
-            modules_dir: Path to modules directory to scan
+            enabled_modules: List of enabled module specifications (None = all)
 
         Raises:
             ValueError: If module naming validation fails
         """
+        enabled_modules = enabled_modules or []
+        enabled_module_names = {
+            name
+            for name, _ in [
+                self._parse_module_spec(module_spec) for module_spec in enabled_modules
+            ]
+        }
         discovered_modules = {}
 
         # Step 1: Discover all modules
         for module_path in self._modules_dir.iterdir():
             # Skip non-directories and private/internal modules
             if not module_path.is_dir() or module_path.name.startswith("_"):
+                continue
+
+            if enabled_module_names and module_path.name not in enabled_module_names:
+                logger.debug(
+                    f"Skipping module '{module_path.name}' (not in enabled list)"
+                )
                 continue
 
             module_name = module_path.name
@@ -99,8 +112,8 @@ class ModuleRegistry:
         self,
         module_name: str,
         version: str | None = None,
-        providers: list[Provider] = [],
-        datastores: list[DatastoreInterface] = [],
+        providers: list[Provider] | None = None,
+        datastores: list[DatastoreInterface] | None = None,
     ) -> Module:
         """Get or create module instance (lazy loading).
 
@@ -113,6 +126,9 @@ class ModuleRegistry:
         Returns:
             Module: Module instance
         """
+        providers = providers or []
+        datastores = datastores or []
+
         # Cache key includes version for proper isolation
         cache_key = f"{module_name}:{version}" if version else module_name
 
@@ -131,15 +147,12 @@ class ModuleRegistry:
     def get_modules(
         self,
         *,  # Force keyword-only
-        module_names: list[str] = [],
-        providers: list[Provider] = [],
-        datastores: list[DatastoreInterface] = [],
+        providers: list[Provider] | None = None,
+        datastores: list[DatastoreInterface] | None = None,
     ) -> list[Module]:
         """Get modules filtered by enabled list with providers injected.
 
         Args:
-            module_names: Module specs (e.g., ["broker:v1", "datafeed:v2"])
-                         or empty list for all modules
             providers: Provider instances to inject into modules
             datastores: Optional shared datastores for service repository injection
 
@@ -148,27 +161,45 @@ class ModuleRegistry:
 
         [KEYWORD-ONLY]: Prevents positional argument errors.
         """
-        if not module_names:
-            # Return all modules with all versions
-            return [
-                self._get_instance(name, providers=providers, datastores=datastores)
-                for name in self._module_classes.keys()
-            ]
-        else:
-            # Return only specified modules
-            modules = []
-            for module_spec in module_names:
-                module_name, version = self._parse_module_spec(module_spec)
-                if module_name in self._module_classes:
-                    modules.append(
-                        self._get_instance(
-                            module_name,
-                            version=version,
-                            providers=providers,
-                            datastores=datastores,
-                        )
-                    )
-            return modules
+        providers = providers or []
+        datastores = datastores or []
+
+        return [
+            self._get_instance(name, providers=providers, datastores=datastores)
+            for name in self._module_classes.keys()
+        ]
+
+    def required_capabilities(self) -> list[CapabilitySpec]:
+        """Get the set of all required capabilities across registered modules.
+
+        Returns:
+            List of unique capability names required by all modules.
+        """
+        capabilities: set[CapabilitySpec] = set()
+
+        # Get module specs to enable
+        module_specs = list(self._module_classes.keys())
+
+        for spec in module_specs:
+            # Parse "broker:v1" → "broker"
+            module_name = spec.split(":")[0] if ":" in spec else spec
+
+            # Get module class (not instance)
+            module_class = self._module_classes.get(module_name)
+            if module_class is None:
+                continue
+
+            # Get service class (static, no instantiation)
+            service_class = module_class._service_class()
+
+            # Get capabilities (classmethod, no instance)
+            # NOTE: Services may not have capabilities() yet (Phase 4)
+            if hasattr(service_class, "capabilities"):
+                service_caps = service_class.capabilities()
+                if service_caps is not None:
+                    capabilities.update(service_caps)
+
+        return list(capabilities)
 
     def clear(self) -> None:
         """Clear all registered modules and instances.

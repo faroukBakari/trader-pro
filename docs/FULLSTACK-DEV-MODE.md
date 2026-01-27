@@ -81,7 +81,7 @@ Backend Python File Change
    ↓
 3. FastAPI lifespan event triggers
    ↓
-4. app.gen_module_specs_and_clients() executes
+4. app.code_gen() executes
    ↓
 5. Backend regenerates per-module specs:
    - backend/src/trading_api/modules/*/specs_generated/*_v{N}_openapi.json

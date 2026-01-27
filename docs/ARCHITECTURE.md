@@ -192,7 +192,7 @@ Application Startup
     ↓
 ModuleRegistry.auto_discover() + ProviderRegistry.auto_discover()
     ↓
-AppFactory._resolve_capabilities() (static analysis)
+ModuleRegistry.required_capabilities() (static analysis)
     ↓
 ProviderRegistry.get_providers(required_capabilities)
     ↓
@@ -399,7 +399,7 @@ AsyncAPI Spec → Custom Type Extractor → TypeScript Interfaces
 **Process**:
 
 ```
-Module.gen_module_specs_and_clients()
+Module.code_gen()
     ├─→ Generate module OpenAPI spec
     │   └─→ modules/{module_name}/specs_generated/openapi.json
     ├─→ Generate module AsyncAPI spec (if WebSocket routes exist)
@@ -1195,7 +1195,7 @@ Application Startup (AppFactory.create_app)
     ↓
 2. ProviderRegistry.auto_discover() - Find all providers
     ↓
-3. AppFactory._resolve_capabilities() - Static analysis of service requirements
+3. ModuleRegistry.required_capabilities() - Static analysis of service requirements
     ↓
 4. ProviderRegistry.get_providers() - Lazy-load matching providers
     ↓

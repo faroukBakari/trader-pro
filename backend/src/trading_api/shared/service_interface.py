@@ -15,8 +15,8 @@ class ServiceInterface(ABC):
         self,
         module_dir: Path,
         *,  # Force keyword-only
-        providers: list[Provider] = [],
-        datastores: list[DatastoreInterface] = [],
+        providers: list[Provider] | None = None,
+        datastores: list[DatastoreInterface] | None = None,
     ) -> None:
         """Initialize service.
 
@@ -28,6 +28,8 @@ class ServiceInterface(ABC):
         Raises:
             CommonException: If required capability not satisfied
         """
+        providers = providers or []
+        datastores = datastores or []
 
         assert (
             datastores
@@ -185,6 +187,21 @@ class ServiceInterface(ABC):
             DatastoreInterface: The primary datastore
         """
         return next(iter(self.datastores))
+
+    @property
+    def persistent_datastore(self) -> DatastoreInterface | None:
+        """Get the first datastore with persistence capability.
+
+        Useful for distinguishing between cache (InMemory) and storage (Postgres)
+        when multiple datastores are configured.
+
+        Returns:
+            DatastoreInterface with has_persistence=True, or None if not found
+        """
+        return next(
+            (ds for ds in self.datastores if ds.has_persistence),
+            None,
+        )
 
     def get_health(self, current_version: str) -> HealthResponse:
         """Get the current health status of the API.

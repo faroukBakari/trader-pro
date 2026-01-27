@@ -2,7 +2,7 @@
 
 from .client_factory import InterModuleClients
 from .config import Settings, settings
-from .datastore_interface import DatastoreInterface, RWLock, TableInterface
+from .datastore_interface import DatastoreInterface, TableInterface
 from .datastore_registry import DatastoreRegistry
 from .module_interface import Module, ModuleApp
 from .module_registry import ModuleRegistry
@@ -23,5 +23,4 @@ __all__ = [
     "InterModuleClients",
     "DatastoreInterface",
     "TableInterface",
-    "RWLock",
 ]

@@ -157,13 +157,13 @@ class MockBrokerProvider(Provider, BrokerCapability):
 
 
 def create_test_app(
-    enabled_modules: list[str] = [],
+    enabled_modules: list[str] | None = None,
 ) -> ModularApp:
     """Create a test application with specified modules.
 
     Args:
         enabled_modules: List of module names to enable (e.g., ["broker", "datafeed"])
-                        If empty list, all modules are enabled.
+                        If None, all modules are enabled.
 
     Returns:
         ModularApp: Modular application (extends FastAPI)
