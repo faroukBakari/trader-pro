@@ -13,9 +13,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 
-from trading_api.datastores import InMemoryDatastore
 from trading_api.models.common import CapabilitySpec
 from trading_api.shared import Module, ModuleApp, ModuleRegistry, settings
+from trading_api.shared.datastore_registry import DatastoreRegistry
 from trading_api.shared.exception_handlers import register_exception_handlers
 from trading_api.shared.provider_registry import ProviderRegistry
 
@@ -263,6 +263,7 @@ class AppFactory:
         self,
         modules_dir: Path | None = None,
         providers_dir: Path | None = None,
+        datastores_dir: Path | None = None,
     ):
         """Initialize factory with fresh registries.
 
@@ -271,12 +272,17 @@ class AppFactory:
                         Defaults to trading_api/modules/
             providers_dir: Path to providers directory.
                           Defaults to trading_api/providers/
+            datastores_dir: Path to datastores directory.
+                           Defaults to trading_api/datastores/
         """
         self.module_registry = ModuleRegistry(
             modules_dir or Path(__file__).parent / "modules"
         )
         self.provider_registry = ProviderRegistry(
             providers_dir or Path(__file__).parent / "providers"
+        )
+        self.datastore_registry = DatastoreRegistry(
+            datastores_dir or Path(__file__).parent / "datastores"
         )
 
     def _resolve_capabilities(
@@ -322,13 +328,16 @@ class AppFactory:
         self,
         enabled_module_names: list[str] = [],
         enabled_provider_names: list[str] = [],
+        enabled_datastore_names: list[str] = [],
     ) -> ModularApp:
         """Create a ModularApp with specified enabled modules and providers.
 
         Args:
-            enabled_module_names: Module names to enable (None = all)
-            enabled_provider_names: Provider folder names to enable (None = all)
+            enabled_module_names: Module names to enable (empty = all)
+            enabled_provider_names: Provider folder names to enable (empty = all)
                                    e.g., ["tws"], ["fakebroker"], ["tws", "google"]
+            enabled_datastore_names: Datastore folder names to enable (empty = all)
+                                    e.g., ["inmemory"], ["postgres"]
 
         [TWO-PHASE LOADING]: Discover classes, analyze, then instantiate.
         """
@@ -337,6 +346,7 @@ class AppFactory:
         # [PRODUCTION]: create_app() typically called once during app startup
         self.module_registry.clear()
         self.provider_registry.clear()
+        self.datastore_registry.clear()
 
         # Phase 1: Auto-discover module and provider classes
         self.module_registry.auto_discover()
@@ -350,14 +360,19 @@ class AppFactory:
             required_capabilities
         )
 
-        # Phase 4: Create shared datastore for all modules
-        datastore = InMemoryDatastore()
+        # Phase 4: Get datastore instances via registry
+        self.datastore_registry.auto_discover(
+            enabled_names=enabled_datastore_names or None
+        )
+        datastores = self.datastore_registry.get_datastores(
+            names=enabled_datastore_names or None
+        )
 
-        # Phase 5: Instantiate modules with providers and datastore
+        # Phase 5: Instantiate modules with providers and datastores
         enabled_modules = self.module_registry.get_modules(
             module_names=enabled_module_names,
             providers=required_providers,
-            datastores=[datastore],
+            datastores=datastores,
         )
 
         # Use shared API prefix constant

@@ -11,7 +11,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TypeVar
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel
 
@@ -83,7 +83,7 @@ class RWLock:
                 self._condition.notify_all()
 
 
-class TableInterface(ABC):
+class TableInterface(ABC, Generic[T]):
     """Abstract interface for a datastore table with CRUD operations.
 
     Provides:
@@ -98,7 +98,7 @@ class TableInterface(ABC):
         """Per-table read-write lock."""
 
     @abstractmethod
-    async def get(self, key: str, index: str | None = None) -> BaseModel | None:
+    async def get(self, key: str, index: str | None = None) -> T | None:
         """Get a value by key or indexed field.
 
         Args:
@@ -110,7 +110,7 @@ class TableInterface(ABC):
         """
 
     @abstractmethod
-    async def get_all(self, key: str, index: str | None = None) -> list[BaseModel]:
+    async def get_all(self, key: str, index: str | None = None) -> list[T]:
         """Get all values by key or indexed field.
 
         Args:
@@ -168,7 +168,7 @@ class TableInterface(ABC):
         """
 
     @abstractmethod
-    async def values(self) -> list[BaseModel]:
+    async def values(self) -> list[T]:
         """Get all values in the table.
 
         Returns:
@@ -188,7 +188,7 @@ class TableInterface(ABC):
         """
 
     @abstractmethod
-    def iterate(self) -> AsyncIterator[tuple[str, BaseModel]]:
+    def iterate(self) -> AsyncIterator[tuple[str, T]]:
         """Asynchronously iterate over key-value pairs.
 
         Yields:
@@ -225,6 +225,23 @@ class DatastoreInterface(ABC):
     - InMemoryDatastore: Dict-based storage for MVP/testing
     - PostgresDatastore: asyncpg pool-based (Wave 2+)
     """
+
+    @classmethod
+    def datastore_name(cls) -> str:
+        """Canonical name for registry lookup.
+
+        Override in subclasses if the default (lowercase class prefix) is not desired.
+        E.g., InMemoryDatastore → "inmemory", PostgresDatastore → "postgres"
+
+        Returns:
+            str: Datastore name used by DatastoreRegistry
+        """
+        # Default: strip "Datastore" suffix and lowercase
+        # InMemoryDatastore → "inmemory"
+        name = cls.__name__
+        if name.endswith("Datastore"):
+            name = name[:-9]  # Remove "Datastore" suffix
+        return name.lower()
 
     @abstractmethod
     def table(

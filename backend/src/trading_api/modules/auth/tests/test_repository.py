@@ -2,7 +2,7 @@ from datetime import datetime
 
 import pytest
 
-from trading_api.datastores.inmemory_datastore import InMemoryDatastore
+from trading_api.datastores import InMemoryDatastore
 from trading_api.modules.auth.repository import RefreshTokenRepository, UserRepository
 from trading_api.modules.auth.tests.conftest import DeviceInfoFactory, UserCreateFactory
 
