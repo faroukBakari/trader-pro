@@ -23,7 +23,12 @@ class InMemoryTable(TableInterface):
     All CRUD operations are async and handle locking internally.
     """
 
-    def __init__(self, timeout: float = 1.0) -> None:
+    def __init__(
+        self,
+        timeout: float = 1.0,
+        indexes: list[str] | None = None,
+        unique_indexes: list[str] | None = None,
+    ) -> None:
         self.__data: dict[str, BaseModel] = {}
         self.__indexes: dict[str, dict[str, set[str]]] = {}
         self.__unique_indexes: dict[str, dict[str, str]] = {}
@@ -31,6 +36,12 @@ class InMemoryTable(TableInterface):
         # Threading lock for cross-thread sync with TWS connection callbacks
         self.__threading_lock = threading.Lock()
         self.__timeout = timeout
+
+        # Register indexes at construction time (sync, no lock needed)
+        for field_name in indexes or []:
+            self.__indexes[field_name] = {}
+        for field_name in unique_indexes or []:
+            self.__unique_indexes[field_name] = {}
 
     @property
     def timeout(self) -> float:
@@ -183,6 +194,7 @@ class InMemoryTable(TableInterface):
 
     async def create_index(self, field_name: str) -> None:
         """Create an index on a specified field (write-locked)."""
+        # TODO: fix behavior when existing unique / non-unique index
         async with self.__lock.write(self.timeout):
             with self.__threading_lock:
                 index: dict[str, set[str]] = {}
@@ -197,6 +209,7 @@ class InMemoryTable(TableInterface):
 
         Raises ValueError if duplicate field values exist in current data.
         """
+        # TODO: fix behavior when existing unique / non-unique index
         async with self.__lock.write(self.timeout):
             with self.__threading_lock:
                 unique_index: dict[str, str] = {}
@@ -229,9 +242,28 @@ class InMemoryDatastore(DatastoreInterface):
         """Get the default timeout for lock acquisition."""
         return self.__timeout
 
-    def table(self, name: str) -> TableInterface:
-        """Get or create a named table."""
+    def table(
+        self,
+        name: str,
+        *,
+        indexes: list[str] | None = None,
+        unique_indexes: list[str] | None = None,
+    ) -> TableInterface:
+        """Get or create a named table with optional index configuration.
+
+        Args:
+            name: Logical table name
+            indexes: Field names for secondary indexes (1:N mapping)
+            unique_indexes: Field names for unique indexes (1:1 mapping)
+
+        Returns:
+            TableInterface for the named table
+        """
         with self.__threading_lock:
             if name not in self._tables:
-                self._tables[name] = InMemoryTable(timeout=self.__timeout)
+                self._tables[name] = InMemoryTable(
+                    timeout=self.__timeout,
+                    indexes=indexes,
+                    unique_indexes=unique_indexes,
+                )
         return self._tables[name]

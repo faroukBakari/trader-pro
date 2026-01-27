@@ -110,6 +110,18 @@ class TableInterface(ABC):
         """
 
     @abstractmethod
+    async def get_all(self, key: str, index: str | None = None) -> list[BaseModel]:
+        """Get all values by key or indexed field.
+
+        Args:
+            key: Unique identifier or indexed field value
+            index: Optional index field name to search by
+
+        Returns:
+            List of BaseModel instances
+        """
+
+    @abstractmethod
     async def set(self, key: str, value: BaseModel) -> None:
         """Set a value by key.
 
@@ -215,12 +227,24 @@ class DatastoreInterface(ABC):
     """
 
     @abstractmethod
-    def table(self, name: str) -> TableInterface:
-        """Get or create a named storage table.
+    def table(
+        self,
+        name: str,
+        *,
+        indexes: list[str] | None = None,
+        unique_indexes: list[str] | None = None,
+    ) -> TableInterface:
+        """Get or create a named storage table with optional index configuration.
 
         Args:
             name: Logical table name (e.g., "users", "tokens", "bars")
+            indexes: Field names for secondary indexes (1:N mapping)
+            unique_indexes: Field names for unique indexes (1:1 mapping)
 
         Returns:
             TableInterface for the named table
+
+        Note:
+            Index configuration is only applied when creating a new table.
+            Subsequent calls with different index config are ignored.
         """

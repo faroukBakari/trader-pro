@@ -12,7 +12,7 @@ class TestUserRepository:
 
     @pytest.fixture
     def repository(self) -> UserRepository:
-        """Fixture providing repository instance"""
+        """Fixture providing repository instance with indexes configured at construction."""
         from trading_api.modules.auth.repository import UserRepository
 
         return UserRepository(datastore=InMemoryDatastore())
@@ -110,10 +110,8 @@ class TestUserRepository:
         assert updated_user.last_login > original_last_login
 
     @pytest.mark.asyncio
-    async def test_user_id_generation_sequential(
-        self, repository: UserRepository
-    ) -> None:
-        """Test that user IDs are generated sequentially"""
+    async def test_user_id_generation_unique(self, repository: UserRepository) -> None:
+        """Test that user IDs are unique (UUID-based)"""
         user1_data = UserCreateFactory.build()
         user2_data = UserCreateFactory.build()
 
@@ -123,23 +121,40 @@ class TestUserRepository:
         assert user1.id.startswith("USER-")
         assert user2.id.startswith("USER-")
         assert user1.id != user2.id
+        # UUID-based IDs are 12 hex chars after "USER-"
+        assert len(user1.id) == 17  # "USER-" + 12 chars
 
     @pytest.mark.asyncio
-    async def test_create_user_with_duplicate_email(
+    async def test_create_user_with_duplicate_email_raises(
         self, repository: UserRepository
     ) -> None:
-        """Test creating users with duplicate email (should be allowed - no unique constraint in MVP)"""
+        """Test creating users with duplicate email raises ValueError (unique constraint)"""
         email = "duplicate@example.com"
         user1_data = UserCreateFactory.build(email=email)
         user2_data = UserCreateFactory.build(
             email=email, google_id="different-google-id"
         )
 
-        user1 = await repository.create(user1_data)
-        user2 = await repository.create(user2_data)
+        await repository.create(user1_data)
 
-        assert user1.email == user2.email
-        assert user1.id != user2.id
+        with pytest.raises(ValueError, match="Duplicate value.*email"):
+            await repository.create(user2_data)
+
+    @pytest.mark.asyncio
+    async def test_create_user_with_duplicate_google_id_raises(
+        self, repository: UserRepository
+    ) -> None:
+        """Test creating users with duplicate google_id raises ValueError (unique constraint)"""
+        google_id = "same-google-id"
+        user1_data = UserCreateFactory.build(google_id=google_id)
+        user2_data = UserCreateFactory.build(
+            email="different@example.com", google_id=google_id
+        )
+
+        await repository.create(user1_data)
+
+        with pytest.raises(ValueError, match="Duplicate value.*google_id"):
+            await repository.create(user2_data)
 
     @pytest.mark.asyncio
     async def test_secondary_indexes_consistency(
@@ -164,10 +179,10 @@ class TestRefreshTokenRepository:
 
     @pytest.fixture
     def repository(self) -> RefreshTokenRepository:
-        """Fixture providing repository instance"""
+        """Fixture providing repository instance with indexes configured at construction."""
         from trading_api.modules.auth.repository import RefreshTokenRepository
 
-        return RefreshTokenRepository()
+        return RefreshTokenRepository(datastore=InMemoryDatastore())
 
     @pytest.mark.asyncio
     async def test_store_token(self, repository: RefreshTokenRepository) -> None:

@@ -1,8 +1,8 @@
 # Auth Module
 
-**Version:** 1.1.0  
+**Version:** 1.2.0  
 **Status:** ✅ Production Ready (MVP with In-Memory Storage)  
-**Last Updated:** November 30, 2025
+**Last Updated:** January 27, 2026
 
 JWT-based authentication module with Google OAuth integration, cookie-based session management, and device fingerprinting.
 
@@ -35,14 +35,14 @@ modules/auth/
 
 ### Key Components
 
-| Component                | Purpose                                                   |
-| ------------------------ | --------------------------------------------------------- |
-| `AuthService`            | Business logic, JWT generation, Google OAuth verification |
-| `UserRepository`         | User CRUD with RWLock concurrency                         |
-| `RefreshTokenRepository` | Token storage with device fingerprinting and RWLock       |
-| Shared middleware        | `get_current_user()`, `get_current_user_ws()`             |
+| Component                | Purpose                                                             |
+| ------------------------ | ------------------------------------------------------------------- |
+| `AuthService`            | Business logic, JWT generation, Google OAuth verification           |
+| `UserRepository`         | User CRUD via TableInterface with unique indexes (email, google_id) |
+| `RefreshTokenRepository` | Token storage via TableInterface with secondary index (user_id)     |
+| Shared middleware        | `get_current_user()`, `get_current_user_ws()`                       |
 
-**Datastore Injection**: Both repositories receive `DatastoreInterface` from `AuthService` and use per-table `RWLock` for concurrent read access with exclusive write access (`datastore.table("users").lock`, `datastore.table("tokens").lock`).
+**Datastore Injection**: Both repositories receive `DatastoreInterface` from `AuthService`. Index configuration is done at construction time via `datastore.table(name, unique_indexes=[...], indexes=[...])`. User IDs are UUID-based (`USER-{uuid12}`).
 
 ---
 

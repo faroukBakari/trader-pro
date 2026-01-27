@@ -1,41 +1,48 @@
+import uuid
 from datetime import datetime
 from typing import Optional
 
-from trading_api.models.auth import DeviceInfo, User, UserCreate
-from trading_api.shared import DatastoreInterface
+from trading_api.models.auth import DeviceInfo, RefreshTokenData, User, UserCreate
+from trading_api.shared import DatastoreInterface, TableInterface
 
 
 class UserRepository:
-    """In-memory implementation of user repository for MVP"""
+    """User repository using DatastoreInterface abstraction.
+
+    Storage is agnostic to underlying implementation - uses only
+    TableInterface contract with unique indexes for email/google_id lookups.
+    """
+
+    TABLE_NAME = "users"
 
     def __init__(self, datastore: DatastoreInterface) -> None:
-        self._users: dict[str, User] = {}
-        self._email_to_id: dict[str, str] = {}
-        self._google_id_to_id: dict[str, str] = {}
-        self._counter = 0
+        self._table: TableInterface = datastore.table(
+            self.TABLE_NAME,
+            unique_indexes=["email", "google_id"],
+        )
 
     async def get_by_id(self, user_id: str) -> Optional[User]:
         """Retrieve user by ID"""
-        return self._users.get(user_id)
+        result = await self._table.get(user_id)
+        return result if isinstance(result, User) else None
 
     async def get_by_email(self, email: str) -> Optional[User]:
         """Retrieve user by email address"""
-        user_id = self._email_to_id.get(email)
-        if user_id is None:
-            return None
-        return self._users.get(user_id)
+        result = await self._table.get(email, index="email")
+        return result if isinstance(result, User) else None
 
     async def get_by_google_id(self, google_id: str) -> Optional[User]:
         """Retrieve user by Google ID"""
-        user_id = self._google_id_to_id.get(google_id)
-        if user_id is None:
-            return None
-        return self._users.get(user_id)
+        result = await self._table.get(google_id, index="google_id")
+        return result if isinstance(result, User) else None
 
     async def create(self, user_data: UserCreate) -> User:
-        """Create a new user"""
-        self._counter += 1
-        user_id = f"USER-{self._counter}"
+        """Create a new user.
+
+        Raises:
+            ValueError: If email or google_id already exists (unique constraint)
+        """
+        user_id = f"USER-{uuid.uuid4().hex[:12]}"
         now = datetime.now()
 
         user = User(
@@ -49,27 +56,31 @@ class UserRepository:
             is_active=True,
         )
 
-        self._users[user_id] = user
-        self._email_to_id[user_data.email] = user_id
-        self._google_id_to_id[user_data.google_id] = user_id
-
+        await self._table.set(user_id, user)
         return user
 
     async def update_last_login(self, user_id: str) -> None:
         """Update user's last login timestamp"""
-        user = self._users.get(user_id)
+        user = await self.get_by_id(user_id)
         if user is not None:
             updated_user = user.model_copy(update={"last_login": datetime.now()})
-            self._users[user_id] = updated_user
+            await self._table.set(user_id, updated_user)
 
 
 class RefreshTokenRepository:
-    """In-memory implementation of refresh token repository for MVP"""
+    """Refresh token repository using DatastoreInterface abstraction.
 
-    def __init__(self, datastore: DatastoreInterface | None = None) -> None:
-        self._tokens: dict[str, dict[str, str]] = {}
-        self._user_to_tokens: dict[str, list[str]] = {}
-        # Use per-table RWLock from datastore if provided
+    Storage is agnostic to underlying implementation - uses only
+    TableInterface contract with secondary index for user_id lookups.
+    """
+
+    TABLE_NAME = "refresh_tokens"
+
+    def __init__(self, datastore: DatastoreInterface) -> None:
+        self._table: TableInterface = datastore.table(
+            self.TABLE_NAME,
+            indexes=["user_id"],  # 1:N - user can have multiple tokens
+        )
 
     async def store_token(
         self,
@@ -80,18 +91,16 @@ class RefreshTokenRepository:
         created_at: datetime,
     ) -> None:
         """Store a refresh token with device information"""
-        self._tokens[token_hash] = {
-            "token_id": token_id,
-            "user_id": user_id,
-            "fingerprint": device_info.fingerprint,
-            "ip_address": device_info.ip_address,
-            "user_agent": device_info.user_agent,
-            "created_at": created_at.isoformat(),
-        }
-
-        if user_id not in self._user_to_tokens:
-            self._user_to_tokens[user_id] = []
-        self._user_to_tokens[user_id].append(token_hash)
+        token_data = RefreshTokenData(
+            token_id=token_id,
+            user_id=user_id,
+            token_hash=token_hash,
+            fingerprint=device_info.fingerprint,
+            ip_address=device_info.ip_address,
+            user_agent=device_info.user_agent,
+            created_at=created_at,
+        )
+        await self._table.set(token_hash, token_data)
 
     async def get_token(
         self, token_hash: str, fingerprint: str
@@ -100,38 +109,25 @@ class RefreshTokenRepository:
         Retrieve token data by hash and validate device fingerprint.
         Returns dict with token_id, user_id if valid, None otherwise.
         """
-        token_data = self._tokens.get(token_hash)
-        if token_data is None:
+        result = await self._table.get(token_hash)
+        if result is None or not isinstance(result, RefreshTokenData):
             return None
 
-        if token_data["fingerprint"] != fingerprint:
+        if result.fingerprint != fingerprint:
             return None
 
         return {
-            "token_id": token_data["token_id"],
-            "user_id": token_data["user_id"],
+            "token_id": result.token_id,
+            "user_id": result.user_id,
         }
 
     async def revoke_token(self, token_hash: str) -> None:
         """Revoke a specific refresh token"""
-        token_data = self._tokens.get(token_hash)
-        if token_data is not None:
-            user_id = token_data["user_id"]
-            del self._tokens[token_hash]
-
-            if user_id in self._user_to_tokens:
-                self._user_to_tokens[user_id] = [
-                    h for h in self._user_to_tokens[user_id] if h != token_hash
-                ]
-                if not self._user_to_tokens[user_id]:
-                    del self._user_to_tokens[user_id]
+        await self._table.delete(token_hash)
 
     async def revoke_all_user_tokens(self, user_id: str) -> None:
         """Revoke all refresh tokens for a user"""
-        token_hashes = self._user_to_tokens.get(user_id, [])
-        for token_hash in token_hashes:
-            if token_hash in self._tokens:
-                del self._tokens[token_hash]
-
-        if user_id in self._user_to_tokens:
-            del self._user_to_tokens[user_id]
+        tokens = await self._table.get_all(user_id, index="user_id")
+        for token in tokens:
+            if isinstance(token, RefreshTokenData):
+                await self._table.delete(token.token_hash)
