@@ -98,19 +98,22 @@ class TableInterface(ABC):
         """Per-table read-write lock."""
 
     @abstractmethod
-    def get(self, key: str) -> BaseModel | None:
-        """Get a value by key.
+    async def get(self, key: str, index: str | None = None) -> BaseModel | None:
+        """Get a value by key or indexed field.
 
         Args:
-            key: Unique identifier
+            key: Unique identifier or indexed field value
+            index: Optional index field name to search by
 
         Returns:
             BaseModel instance or None if not found
         """
 
     @abstractmethod
-    def set(self, key: str, value: BaseModel) -> None:
+    async def set(self, key: str, value: BaseModel) -> None:
         """Set a value by key.
+
+        Automatically updates all registered indexes (via create_index).
 
         Args:
             key: Unique identifier
@@ -118,37 +121,42 @@ class TableInterface(ABC):
         """
 
     @abstractmethod
-    def delete(self, key: str) -> bool:
-        """Delete a value by key.
+    async def delete(self, key: str, index: str | None = None) -> bool:
+        """Delete a value by key or indexed field.
 
         Args:
-            key: Unique identifier
+            key: Unique identifier or indexed field value
+            index: Optional index field name to search by
 
         Returns:
             True if deleted, False if key didn't exist
         """
 
     @abstractmethod
-    def exists(self, key: str) -> bool:
-        """Check if a key exists.
+    async def exists(self, key: str, index: str | None = None) -> bool:
+        """Check if a key or indexed value exists.
 
         Args:
-            key: Unique identifier
+            key: Unique identifier or indexed field value
+            index: Optional index field name to search by
 
         Returns:
             True if key exists
         """
 
     @abstractmethod
-    def keys(self) -> list[str]:
-        """Get all keys in the table.
+    async def keys(self, index: str | None = None) -> list[str]:
+        """Get all keys, optionally filtered by index.
+
+        Args:
+            index: Optional index field name to get indexed values
 
         Returns:
-            List of all keys
+            List of keys or indexed values
         """
 
     @abstractmethod
-    def values(self) -> list[BaseModel]:
+    async def values(self) -> list[BaseModel]:
         """Get all values in the table.
 
         Returns:
@@ -156,87 +164,46 @@ class TableInterface(ABC):
         """
 
     @abstractmethod
-    def clear(self) -> None:
+    async def clear(self) -> None:
         """Remove all entries from the table."""
 
     @abstractmethod
-    def snapshot(self) -> dict[str, BaseModel]:
-        """Create a shallow copy of the table data for rollback.
+    async def count(self) -> int:
+        """Get the count of entries in the table.
 
         Returns:
-            Copy of current table state
+            Number of entries
         """
 
     @abstractmethod
-    def restore(self, snapshot: dict[str, BaseModel]) -> None:
-        """Restore table data from a snapshot.
+    def iterate(self) -> AsyncIterator[tuple[str, BaseModel]]:
+        """Asynchronously iterate over key-value pairs.
 
-        Args:
-            snapshot: Previous table state to restore
+        Yields:
+            Tuples of (key, value) for each entry
         """
 
-
-class TransactionContext:
-    """Context manager for multi-table transactions with rollback.
-
-    Acquires write locks on all specified tables in sorted order
-    (to prevent deadlocks) and provides automatic rollback on exception.
-    """
-
-    def __init__(
-        self,
-        tables: dict[str, TableInterface],
-        timeout: float = 5.0,
-    ) -> None:
-        """Initialize transaction context.
+    @abstractmethod
+    async def create_index(self, field_name: str) -> None:
+        """Create an index on a specified field.
 
         Args:
-            tables: Dict mapping table names to TableInterface instances
-            timeout: Max seconds to wait for all locks
+            field_name: Name of the model field to index
         """
-        self.tables = tables
-        self.timeout = timeout
-        self._snapshots: dict[str, dict[str, BaseModel]] = {}
-        self._acquired_locks: list[str] = []
 
-    async def __aenter__(self) -> dict[str, TableInterface]:
-        """Acquire locks and create snapshots for rollback."""
-        # Sort table names to prevent deadlock
-        sorted_names = sorted(self.tables.keys())
+    @abstractmethod
+    async def create_unique_index(self, field_name: str) -> None:
+        """Create a unique index on a specified field.
 
-        # Calculate per-lock timeout
-        per_lock_timeout = self.timeout / len(sorted_names) if sorted_names else 0
+        Enforces uniqueness constraint: each field value maps to exactly one key.
+        Raises ValueError if existing data contains duplicate field values.
 
-        for name in sorted_names:
-            table = self.tables[name]
-            # Acquire write lock with timeout
-            await table.lock.write(timeout=per_lock_timeout).__aenter__()
-            self._acquired_locks.append(name)
-            # Snapshot for rollback
-            self._snapshots[name] = table.snapshot()
+        Args:
+            field_name: Name of the model field to index uniquely
 
-        return self.tables
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object,
-    ) -> bool:
-        """Release locks and rollback on exception."""
-        # Rollback on exception
-        if exc_type is not None:
-            for name in self._acquired_locks:
-                self.tables[name].restore(self._snapshots[name])
-
-        # Release locks in reverse order
-        for name in reversed(self._acquired_locks):
-            await self.tables[name].lock.write().__aexit__(None, None, None)
-
-        self._acquired_locks.clear()
-        self._snapshots.clear()
-
-        return False  # Don't suppress exceptions
+        Raises:
+            ValueError: If duplicate field values exist in current data
+        """
 
 
 class DatastoreInterface(ABC):
@@ -257,51 +224,3 @@ class DatastoreInterface(ABC):
         Returns:
             TableInterface for the named table
         """
-
-    @property
-    def lock(self) -> asyncio.Lock:
-        """DEPRECATED: Global lock for backward compatibility.
-
-        Use table(name).lock for per-table locking instead.
-        This returns a new lock each call - not shared!
-        """
-        import warnings
-
-        warnings.warn(
-            "DatastoreInterface.lock is deprecated. Use table(name).lock instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return asyncio.Lock()
-
-    @asynccontextmanager
-    async def transaction(
-        self,
-        table_names: list[str],
-        timeout: float = 5.0,
-    ) -> AsyncIterator[dict[str, TableInterface]]:
-        """Begin a transaction on multiple tables with rollback support.
-
-        Acquires write locks on all tables in sorted order (deadlock prevention)
-        and automatically rolls back on exception.
-
-        Args:
-            table_names: List of table names to include in transaction
-            timeout: Max seconds to wait for all locks
-
-        Yields:
-            Dict mapping table names to TableInterface instances
-
-        Raises:
-            asyncio.TimeoutError: If lock acquisition exceeds timeout
-
-        Example:
-            async with datastore.transaction(["users", "tokens"]) as txn:
-                user = txn["users"].get(user_id)
-                txn["tokens"].set(token_id, token)
-                # Rolls back both tables if exception raised
-        """
-        tables = {name: self.table(name) for name in table_names}
-        ctx = TransactionContext(tables, timeout)
-        async with ctx as txn:
-            yield txn
