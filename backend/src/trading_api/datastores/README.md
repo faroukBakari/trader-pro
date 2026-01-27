@@ -47,15 +47,32 @@ InMemoryDatastore
 
 ### DatastoreInterface Methods
 
-| Method        | Description                               |
-| ------------- | ----------------------------------------- |
-| `table(name)` | Get or create a named table (thread-safe) |
+| Method                                              | Description                                                   |
+| --------------------------------------------------- | ------------------------------------------------------------- |
+| `table(name, *, indexes=None, unique_indexes=None)` | Get or create a named table with optional index configuration |
 
 ## Indexing
 
-### Secondary Index (1:N)
+### Construction-Time Index Configuration (Preferred)
 
-Multiple records can share the same field value:
+Configure indexes when obtaining the table - sync registration, no async calls needed:
+
+```python
+# Unique indexes (1:1) and secondary indexes (1:N) at construction
+users = datastore.table(
+    "users",
+    unique_indexes=["email", "google_id"],  # Raises ValueError on duplicate
+    indexes=["role"],                         # Multiple records can share value
+)
+
+# Indexes only registered if table is newly created
+# Subsequent table() calls return existing table (indexes ignored)
+users_again = datastore.table("users", unique_indexes=["foo"])  # "foo" NOT added
+```
+
+### Runtime Index Creation (Legacy)
+
+Create indexes after table creation using async methods:
 
 ```python
 table = datastore.table("users")
@@ -124,11 +141,13 @@ class User(BaseModel):
 
 # Create datastore with 1-second lock timeout
 datastore = InMemoryDatastore(timeout=1.0)
-users = datastore.table("users")
 
-# Create indexes before inserting data
-await users.create_unique_index("email")
-await users.create_index("role")
+# Configure indexes at construction (preferred)
+users = datastore.table(
+    "users",
+    unique_indexes=["email"],
+    indexes=["role"],
+)
 
 # CRUD operations
 await users.set("user-1", User(id="user-1", name="Alice", email="alice@example.com", role="admin"))
