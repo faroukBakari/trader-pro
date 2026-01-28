@@ -900,6 +900,47 @@ db-logs: ## Tail PostgreSQL logs
 db-psql: ## Connect to PostgreSQL via psql
 	@docker-compose -f docker-compose.dev.yml exec postgres psql -U trader -d $(DATASTORE_POSTGRES_DB)
 
+# Alembic Migrations (SQLModel Wave 2B)
+.PHONY: alembic-upgrade alembic-downgrade alembic-revision alembic-current alembic-history db-migrate db-reset
+
+alembic-upgrade: ## Run Alembic upgrade to head
+	@echo "🔄 Running Alembic migrations..."
+	poetry run alembic upgrade head
+	@echo "✅ Migrations complete"
+
+alembic-downgrade: ## Roll back one Alembic migration
+	@echo "⏪ Rolling back one migration..."
+	poetry run alembic downgrade -1
+	@echo "✅ Rollback complete"
+
+alembic-revision: ## Create new Alembic migration (usage: make alembic-revision msg="description")
+	@if [ -z "$(msg)" ]; then \
+		echo "❌ Error: Please provide a message"; \
+		echo "Usage: make alembic-revision msg=\"your migration description\""; \
+		exit 1; \
+	fi
+	poetry run alembic revision --autogenerate -m "$(msg)"
+
+alembic-current: ## Show current Alembic revision
+	poetry run alembic current
+
+alembic-history: ## Show Alembic migration history
+	poetry run alembic history
+
+db-migrate: alembic-upgrade ## Alias for alembic-upgrade
+
+db-reset: ## Reset database (destroy and recreate with migrations)
+	@echo "⚠️  This will destroy all data in the database!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	@echo "🗑️  Destroying database..."
+	docker-compose -f docker-compose.dev.yml down -v
+	@echo "🐘 Recreating database..."
+	docker-compose -f docker-compose.dev.yml up -d postgres
+	@echo "Waiting for PostgreSQL to be ready..."
+	@sleep 3
+	$(MAKE) alembic-upgrade
+	@echo "✅ Database reset complete"
+
 # echo ""
 	@echo "========================================"
 	@echo "✅ TWS API installation complete!"

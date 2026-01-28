@@ -1,13 +1,13 @@
-"""PostgreSQL datastore implementation with asyncpg + JSONB storage.
+"""PostgreSQL datastore implementation.
+
+[ARCHITECTURE] Wave 2A + 2B: Dual-mode datastore
+- PostgresTable: JSONB storage for legacy/flexible schemas (Wave 2A)
+- SQLModelTable: Typed column storage for SQLModel entities (Wave 2B)
 
 This module provides:
 - PostgresDatastore: Connection pool management with async factory
 - PostgresTable: TableInterface implementation using JSONB storage
-
-Design decisions:
-- Async factory pattern required (asyncpg pool creation is async)
-- JSONB storage enables schema flexibility for Wave 2A
-- Caller handles Pydantic model conversion (returns dict from get())
+- sqlmodel_table(): SQLModel-based table with typed columns
 """
 
 from __future__ import annotations
@@ -18,13 +18,18 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
+from sqlmodel import SQLModel
 
 from trading_api.shared import DatastoreInterface, TableInterface
 
+from .engine import AsyncEngineFactory
+from .sqlmodel_table import SQLModelTable
+
 if TYPE_CHECKING:
     import asyncpg
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-__all__ = ["PostgresDatastore", "PostgresTable"]
+__all__ = ["PostgresDatastore", "PostgresTable", "SQLModelTable"]
 
 
 class PostgresTable(TableInterface[Any]):
@@ -332,19 +337,30 @@ def _build_dsn() -> str:
 class PostgresDatastore(DatastoreInterface):
     """PostgreSQL datastore using asyncpg connection pool.
 
+    [ARCHITECTURE] Wave 2B: Dual-mode storage
+    - table(): JSONB storage for flexible schemas
+    - sqlmodel_table(): Typed columns for SQLModel entities
+
     Uses async factory pattern since pool creation is async:
         ds = await PostgresDatastore.create()
 
     Features:
-    - JSONB storage for schema flexibility
+    - JSONB storage for schema flexibility (Wave 2A)
+    - SQLModel typed columns for performance (Wave 2B)
     - Connection pool with min/max size
     - Graceful shutdown via close()
     """
 
-    def __init__(self, pool: asyncpg.Pool[asyncpg.Record]) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool[asyncpg.Record],
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
+    ) -> None:
         """Initialize with existing pool (use create() factory instead)."""
         self._pool = pool
+        self._session_factory = session_factory
         self._tables: dict[str, PostgresTable] = {}
+        self._sqlmodel_tables: dict[str, SQLModelTable[Any]] = {}
 
     @classmethod
     async def create(
@@ -388,7 +404,10 @@ class PostgresDatastore(DatastoreInterface):
         if pool is None:
             raise RuntimeError("Failed to create asyncpg connection pool")
 
-        return cls(pool)
+        # Also create session factory for SQLModel tables (Wave 2B)
+        session_factory = await AsyncEngineFactory.get_session_factory(dsn)
+
+        return cls(pool, session_factory)
 
     @property
     def has_persistence(self) -> bool:
@@ -400,6 +419,11 @@ class PostgresDatastore(DatastoreInterface):
         """PostgreSQL supports ACID transactions."""
         return True
 
+    @property
+    def is_relational(self) -> bool:
+        """PostgreSQL is a SQL-based relational database."""
+        return True
+
     def table(
         self,
         name: str,
@@ -407,7 +431,10 @@ class PostgresDatastore(DatastoreInterface):
         indexes: list[str] | None = None,
         unique_indexes: list[str] | None = None,
     ) -> TableInterface[Any]:
-        """Get or create a named table with optional index configuration.
+        """Get or create a named JSONB table with optional index configuration.
+
+        [ARCHITECTURE] Wave 2A: JSONB storage for flexible schemas.
+        Use sqlmodel_table() for typed column storage (Wave 2B).
 
         Note: Table/index DDL is executed lazily on first operation.
         Returns TableInterface[Any] since JSONB returns dict, not BaseModel.
@@ -421,6 +448,44 @@ class PostgresDatastore(DatastoreInterface):
             )
         return self._tables[name]
 
+    def sqlmodel_table(
+        self,
+        model_class: type[SQLModel],
+        primary_key: str = "id",
+    ) -> TableInterface[Any]:
+        """Get SQLModel-based table (typed columns).
+
+        [ARCHITECTURE] Wave 2B: Typed column storage.
+        Use this for models with table=True that have proper column definitions.
+        Schema managed via Alembic migrations.
+
+        Args:
+            model_class: SQLModel class with table=True
+            primary_key: Primary key field name
+
+        Returns:
+            SQLModelTable instance
+
+        Raises:
+            RuntimeError: If session factory not initialized (missing create() call)
+        """
+        if self._session_factory is None:
+            raise RuntimeError(
+                "Session factory not initialized. "
+                "Use PostgresDatastore.create() factory method."
+            )
+
+        # Get table name from SQLModel class
+        table_name: str = str(model_class.__tablename__)
+        if table_name not in self._sqlmodel_tables:
+            self._sqlmodel_tables[table_name] = SQLModelTable(
+                model_class=model_class,
+                session_factory=self._session_factory,
+                primary_key=primary_key,
+            )
+        return self._sqlmodel_tables[table_name]
+
     async def close(self) -> None:
-        """Graceful shutdown - close connection pool."""
+        """Graceful shutdown - close connection pool and dispose engine."""
         await self._pool.close()
+        await AsyncEngineFactory.dispose()

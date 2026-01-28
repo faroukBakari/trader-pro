@@ -35,6 +35,10 @@ cudf-cu12 = "^25.10.0"
 asyncpg = "^0.30.0"
 pyarrow = "^18.0.0"
 duckdb = "^1.1.0"
+# SQLModel + Alembic (Wave 2B)
+sqlmodel = "^0.0.22"
+alembic = "^1.14.0"
+greenlet = "^3.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"

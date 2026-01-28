@@ -1,6 +1,13 @@
+"""Auth module repositories using DatastoreInterface abstraction.
+
+[ARCHITECTURE] Wave 2B: SQLModel integration
+- PostgresDatastore: Uses sqlmodel_table() for typed column storage
+- InMemoryDatastore: Falls back to table() with JSONB-like dict storage
+"""
+
 import uuid
-from datetime import datetime
-from typing import Any, Optional, TypeVar
+from datetime import datetime, timezone
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -36,29 +43,38 @@ def _to_model(result: Any, model_class: type[T]) -> T | None:
 class UserRepository:
     """User repository using DatastoreInterface abstraction.
 
-    Storage is agnostic to underlying implementation - uses only
-    TableInterface contract with unique indexes for email/google_id lookups.
+    [ARCHITECTURE] Wave 2B: Uses SQLModelTable when available
+    - PostgresDatastore: sqlmodel_table() with typed columns
+    - InMemoryDatastore: table() fallback with dict storage
     """
 
     TABLE_NAME = "users"
 
     def __init__(self, datastore: DatastoreInterface) -> None:
-        self._table: TableInterface = datastore.table(
-            self.TABLE_NAME,
-            unique_indexes=["email", "google_id"],
-        )
+        # Use SQLModel table for typed storage (Wave 2B)
+        if datastore.is_relational:
+            # PostgresDatastore has sqlmodel_table() for typed columns
+            self._table: TableInterface[Any] = datastore.sqlmodel_table(
+                User, primary_key="id"
+            )
+        else:
+            # Fallback for InMemory/other datastores
+            self._table = datastore.table(
+                self.TABLE_NAME,
+                unique_indexes=["email", "google_id"],
+            )
 
-    async def get_by_id(self, user_id: str) -> Optional[User]:
+    async def get_by_id(self, user_id: str) -> User | None:
         """Retrieve user by ID"""
         result = await self._table.get(user_id)
         return _to_model(result, User)
 
-    async def get_by_email(self, email: str) -> Optional[User]:
+    async def get_by_email(self, email: str) -> User | None:
         """Retrieve user by email address"""
         result = await self._table.get(email, index="email")
         return _to_model(result, User)
 
-    async def get_by_google_id(self, google_id: str) -> Optional[User]:
+    async def get_by_google_id(self, google_id: str) -> User | None:
         """Retrieve user by Google ID"""
         result = await self._table.get(google_id, index="google_id")
         return _to_model(result, User)
@@ -70,7 +86,7 @@ class UserRepository:
             ValueError: If email or google_id already exists (unique constraint)
         """
         user_id = f"USER-{uuid.uuid4().hex[:12]}"
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         user = User(
             id=user_id,
@@ -90,24 +106,35 @@ class UserRepository:
         """Update user's last login timestamp"""
         user = await self.get_by_id(user_id)
         if user is not None:
-            updated_user = user.model_copy(update={"last_login": datetime.now()})
+            updated_user = user.model_copy(
+                update={"last_login": datetime.now(timezone.utc)}
+            )
             await self._table.set(user_id, updated_user)
 
 
 class RefreshTokenRepository:
     """Refresh token repository using DatastoreInterface abstraction.
 
-    Storage is agnostic to underlying implementation - uses only
-    TableInterface contract with secondary index for user_id lookups.
+    [ARCHITECTURE] Wave 2B: Uses SQLModelTable when available
+    - PostgresDatastore: sqlmodel_table() with typed columns
+    - InMemoryDatastore: table() fallback with dict storage
     """
 
     TABLE_NAME = "refresh_tokens"
 
     def __init__(self, datastore: DatastoreInterface) -> None:
-        self._table: TableInterface = datastore.table(
-            self.TABLE_NAME,
-            indexes=["user_id"],  # 1:N - user can have multiple tokens
-        )
+        # Use SQLModel table for typed storage (Wave 2B)
+        if datastore.is_relational:
+            # PostgresDatastore has sqlmodel_table() for typed columns
+            self._table: TableInterface[Any] = datastore.sqlmodel_table(
+                RefreshTokenData, primary_key="token_hash"
+            )
+        else:
+            # Fallback for InMemory/other datastores
+            self._table = datastore.table(
+                self.TABLE_NAME,
+                indexes=["user_id"],  # 1:N - user can have multiple tokens
+            )
 
     async def store_token(
         self,
@@ -131,7 +158,7 @@ class RefreshTokenRepository:
 
     async def get_token(
         self, token_hash: str, fingerprint: str
-    ) -> Optional[dict[str, str]]:
+    ) -> dict[str, str] | None:
         """
         Retrieve token data by hash and validate device fingerprint.
         Returns dict with token_id, user_id if valid, None otherwise.

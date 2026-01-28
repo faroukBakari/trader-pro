@@ -23,7 +23,6 @@ from .auth import (
     User,
     UserCreate,
     UserData,
-    UserInDB,
 )
 
 # Import from broker domain
@@ -127,7 +126,6 @@ __all__ = [
     "User",
     "UserCreate",
     "UserData",
-    "UserInDB",
     # Market data models
     "Bar",
     "DatafeedConfiguration",

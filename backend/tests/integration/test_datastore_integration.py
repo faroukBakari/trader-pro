@@ -12,7 +12,7 @@ Or: pytest tests/integration/test_datastore_integration.py -v
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncIterator
 
 import pytest
@@ -89,17 +89,13 @@ async def datastore(
     else:
         if not _POSTGRES_AVAILABLE:
             pytest.skip("PostgreSQL not available")
-        from trading_api.datastores import PostgresDatastore, PostgresTable
+        from trading_api.datastores import PostgresDatastore
+        from trading_api.models.auth import RefreshTokenData, User
 
         ds = await PostgresDatastore.create(dsn=TEST_DSN)
-        # Clear test tables before use
-        users_table = ds.table("users", unique_indexes=["email", "google_id"])
-        tokens_table = ds.table("refresh_tokens", indexes=["user_id"])
-        # Cast to PostgresTable for _ensure_table access (internal method)
-        assert isinstance(users_table, PostgresTable)
-        assert isinstance(tokens_table, PostgresTable)
-        await users_table._ensure_table()
-        await tokens_table._ensure_table()
+        # Clear test tables before use (Wave 2B: use SQLModel tables)
+        users_table = ds.sqlmodel_table(User, primary_key="id")
+        tokens_table = ds.sqlmodel_table(RefreshTokenData, primary_key="token_hash")
         await users_table.clear()
         await tokens_table.clear()
         yield ds
@@ -209,7 +205,7 @@ class TestRefreshTokenRepositoryDatastoreCompatibility:
             user_id=user_id,
             token_hash=token_hash,
             device_info=device_info,
-            created_at=datetime.now(),
+            created_at=datetime.now(timezone.utc),
         )
 
         result = await token_repository.get_token(token_hash, device_info.fingerprint)
@@ -229,7 +225,7 @@ class TestRefreshTokenRepositoryDatastoreCompatibility:
             user_id="USER-R1",
             token_hash=token_hash,
             device_info=device_info,
-            created_at=datetime.now(),
+            created_at=datetime.now(timezone.utc),
         )
 
         await token_repository.revoke_token(token_hash)
@@ -251,14 +247,14 @@ class TestRefreshTokenRepositoryDatastoreCompatibility:
             user_id=user_id,
             token_hash="multi_hash_1",
             device_info=device1,
-            created_at=datetime.now(),
+            created_at=datetime.now(timezone.utc),
         )
         await token_repository.store_token(
             token_id="TOKEN-M2",
             user_id=user_id,
             token_hash="multi_hash_2",
             device_info=device2,
-            created_at=datetime.now(),
+            created_at=datetime.now(timezone.utc),
         )
 
         await token_repository.revoke_all_user_tokens(user_id)

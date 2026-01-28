@@ -328,6 +328,11 @@ class InMemoryDatastore(DatastoreInterface):
         return False
 
     @property
+    def is_relational(self) -> bool:
+        """InMemory datastore is not a relational database."""
+        return False
+
+    @property
     def timeout(self) -> float:
         """Get the default timeout for lock acquisition."""
         return self.__timeout
