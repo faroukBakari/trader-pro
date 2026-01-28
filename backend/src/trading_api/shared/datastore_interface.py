@@ -166,6 +166,17 @@ class DatastoreInterface(ABC):
 
     @property
     @abstractmethod
+    def is_relational(self) -> bool:
+        """Whether this datastore supports ACID transactions.
+
+        Returns:
+            True if datastore provides transactional guarantees.
+            False for simple key-value storage without transactions.
+        """
+        ...
+
+    @property
+    @abstractmethod
     def has_transactions(self) -> bool:
         """Whether this datastore supports ACID transactions.
 
@@ -226,3 +237,11 @@ class DatastoreInterface(ABC):
             Index configuration is only applied when creating a new table.
             Subsequent calls with different index config are ignored.
         """
+
+    def sqlmodel_table(
+        self, model_class: type, primary_key: str = "id"
+    ) -> TableInterface:
+        """Optional: Override in implementations that support SQLModel."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} doesn't support sqlmodel_table()"
+        )

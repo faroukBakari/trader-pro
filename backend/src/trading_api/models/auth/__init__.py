@@ -11,12 +11,11 @@ from .token import (
     TokenStatus,
     UserData,
 )
-from .user import User, UserCreate, UserInDB
+from .user import User, UserCreate
 
 __all__ = [
     "User",
     "UserCreate",
-    "UserInDB",
     "TokenResponse",
     "TokenIntrospectResponse",
     "TokenStatus",

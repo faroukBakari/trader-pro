@@ -1,8 +1,15 @@
+"""Token models for authentication module.
+
+[ARCHITECTURE] Wave 2B: SQLModel migration
+- RefreshTokenData has table=True for database persistence
+- Other token DTOs are pure SQLModel (Pydantic-like) without table=True
+"""
+
 from datetime import datetime
 from enum import Enum
-from typing import Optional
 
-from pydantic import BaseModel, Field
+from sqlalchemy import Column, DateTime
+from sqlmodel import Field, SQLModel
 
 
 class TokenStatus(str, Enum):
@@ -14,7 +21,7 @@ class TokenStatus(str, Enum):
     ERROR = "error"
 
 
-class DeviceInfo(BaseModel):
+class DeviceInfo(SQLModel):
     """Device information for fingerprinting"""
 
     ip_address: str
@@ -22,7 +29,7 @@ class DeviceInfo(BaseModel):
     fingerprint: str = Field(..., description="Hash of IP + User-Agent")
 
 
-class TokenResponse(BaseModel):
+class TokenResponse(SQLModel):
     """Response containing both access and refresh tokens"""
 
     access_token: str = Field(..., description="RS256 JWT access token (5-min expiry)")
@@ -31,45 +38,54 @@ class TokenResponse(BaseModel):
     expires_in: int = Field(..., description="Access token expiry in seconds")
 
 
-class RefreshRequest(BaseModel):
+class RefreshRequest(SQLModel):
     """Request to refresh access token"""
 
     refresh_token: str = Field(..., description="Opaque refresh token")
 
 
-class LogoutRequest(BaseModel):
+class LogoutRequest(SQLModel):
     """Request to logout and revoke refresh token"""
 
     refresh_token: str = Field(..., description="Refresh token to revoke")
 
 
-class GoogleLoginRequest(BaseModel):
+class GoogleLoginRequest(SQLModel):
     """Request containing Google OAuth token"""
 
     google_token: str = Field(..., description="Google OAuth ID token")
 
 
-class TokenData(BaseModel):
+class TokenData(SQLModel):
     """Data extracted from JWT token"""
 
     user_id: str
-    email: Optional[str] = None
-    exp: Optional[int] = None
+    email: str | None = None
+    exp: int | None = None
 
 
-class RefreshTokenData(BaseModel):
-    """Refresh token data stored in Redis"""
+class RefreshTokenData(SQLModel, table=True):
+    """Refresh token stored in database.
 
-    token_id: str = Field(..., description="Unique token identifier")
-    user_id: str = Field(..., description="User ID this token belongs to")
-    token_hash: str = Field(..., description="Bcrypt hash of the token")
-    created_at: datetime = Field(..., description="Token creation timestamp")
-    ip_address: str = Field(..., description="IP address where token was issued")
-    user_agent: str = Field(..., description="User agent string")
-    fingerprint: str = Field(..., description="Device fingerprint hash")
+    [ARCHITECTURE]: Primary key is token_hash (bcrypt hash).
+    user_id indexed for efficient token lookups by user.
+    """
+
+    __tablename__ = "refresh_tokens"  # pyright: ignore[reportAssignmentType]
+
+    token_hash: str = Field(primary_key=True, description="Bcrypt hash of the token")
+    token_id: str = Field(description="Unique token identifier")
+    user_id: str = Field(index=True, description="User ID this token belongs to")
+    created_at: datetime = Field(
+        description="Token creation timestamp",
+        sa_column=Column(DateTime(timezone=True)),
+    )
+    ip_address: str = Field(description="IP address where token was issued")
+    user_agent: str = Field(description="User agent string")
+    fingerprint: str = Field(description="Device fingerprint hash")
 
 
-class JWTPayload(BaseModel):
+class JWTPayload(SQLModel):
     """JWT access token payload structure"""
 
     user_id: str
@@ -79,10 +95,10 @@ class JWTPayload(BaseModel):
     exp: int
     iat: int
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True}  # pyright: ignore[reportAssignmentType]
 
 
-class UserData(BaseModel):
+class UserData(SQLModel):
     """Authenticated user data available in endpoints"""
 
     user_id: str
@@ -91,14 +107,12 @@ class UserData(BaseModel):
     picture: str | None
     device_fingerprint: str
 
-    model_config = {"frozen": True}
+    model_config = {"frozen": True}  # pyright: ignore[reportAssignmentType]
 
 
-class TokenIntrospectResponse(BaseModel):
+class TokenIntrospectResponse(SQLModel):
     """Response from token introspection endpoint"""
 
     status: TokenStatus = Field(..., description="Token validation status")
-    exp: Optional[int] = Field(
-        None, description="Token expiration time (Unix timestamp)"
-    )
-    error: Optional[str] = Field(None, description="Error message if status is ERROR")
+    exp: int | None = Field(None, description="Token expiration time (Unix timestamp)")
+    error: str | None = Field(None, description="Error message if status is ERROR")

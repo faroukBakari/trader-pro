@@ -8,10 +8,11 @@
 The datastore layer provides a minimal abstraction for data persistence that enables:
 
 - Testability via dependency injection
-- PostgreSQL support via `PostgresDatastore` (Wave 2A)
+- PostgreSQL support via `PostgresDatastore` (Wave 2A + 2B)
 - Per-table read-write locks for concurrent access
 - Auto-discovery via `DatastoreRegistry`
 - Feature detection via `has_persistence` and `has_transactions` properties
+- **SQLModel + Alembic migrations** for typed column storage (Wave 2B)
 
 ## Directory Structure
 
@@ -23,8 +24,10 @@ datastores/
 │   ├── __init__.py       # Exports InMemoryDatastore, InMemoryTable
 │   └── tests/
 └── postgres/             # PostgresDatastore implementation
-    ├── __init__.py       # Exports PostgresDatastore, PostgresTable
-    └── datastore.py      # Implementation with asyncpg + JSONB
+    ├── __init__.py       # Exports PostgresDatastore, PostgresTable, SQLModelTable
+    ├── datastore.py      # Dual-mode: JSONB tables + SQLModel tables
+    ├── engine.py         # AsyncEngineFactory singleton (SQLAlchemy)
+    └── sqlmodel_table.py # SQLModelTable implementation
 ```
 
 ## Feature Detection
@@ -309,6 +312,127 @@ CREATE INDEX idx_{table}_{field} ON {table} ((value->>'{field}'));
 -- Unique index (1:1)
 CREATE UNIQUE INDEX uidx_{table}_{field} ON {table} ((value->>'{field}'));
 ```
+
+---
+
+## SQLModelTable (Wave 2B)
+
+**Typed column storage** using SQLModel ORM for entities requiring schema enforcement and SQL queries.
+
+### Overview
+
+`SQLModelTable[T]` provides an alternative to JSONB storage for entities that benefit from:
+
+- **Typed columns**: Direct PostgreSQL column types (TEXT, TIMESTAMPTZ, BOOLEAN)
+- **Native SQL indexes**: Standard B-tree indexes on columns
+- **Schema validation**: Database-level NOT NULL constraints
+- **Query flexibility**: Full SQL capabilities via SQLAlchemy
+
+### Usage
+
+```python
+from trading_api.models.auth import User
+from trading_api.datastores.postgres import PostgresDatastore
+
+# Create datastore (initializes both asyncpg pool and SQLAlchemy engine)
+datastore = await PostgresDatastore.create()
+
+# Get SQLModel table (caller specifies model and primary key)
+users = datastore.sqlmodel_table(User, primary_key="id")
+
+# Store SQLModel instance directly
+await users.set("user123", user)
+
+# Retrieve as typed model
+user = await users.get("user123")  # Returns User | None
+```
+
+### Architecture
+
+```
+PostgresDatastore
+├── _pool (asyncpg)                 # JSONB tables via PostgresTable
+├── _session_factory (SQLAlchemy)   # SQLModel tables via AsyncSessionFactory
+└── _sqlmodel_tables: dict[str, SQLModelTable[T]]
+        │
+        └── SQLModelTable[T]
+            ├── _model_class: type[SQLModel]  # User, RefreshTokenData, etc.
+            ├── _pk_field: str                # Primary key column name
+            └── Uses INSERT...ON CONFLICT for upserts
+```
+
+### SQLModel Entity Definition
+
+Entities must inherit from `SQLModel` with `table=True`:
+
+```python
+from sqlmodel import Field, SQLModel
+from datetime import datetime
+
+class User(SQLModel, table=True):
+    """User model - unified API and database representation."""
+    __tablename__ = "users"
+
+    id: str = Field(primary_key=True)
+    email: str = Field(index=True)
+    google_id: str = Field(index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    is_active: bool = Field(default=True)
+```
+
+### Table Schema
+
+SQLModel creates typed columns automatically:
+
+```sql
+CREATE TABLE users (
+    id TEXT PRIMARY KEY,
+    email TEXT NOT NULL,
+    google_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE INDEX ix_users_email ON users (email);
+CREATE INDEX ix_users_google_id ON users (google_id);
+```
+
+### Alembic Migrations
+
+Schema changes are managed via Alembic migrations in `backend/alembic/`:
+
+```bash
+# Check current migration state
+make alembic-current
+
+# Apply pending migrations
+make alembic-upgrade
+
+# Roll back one migration
+make alembic-downgrade
+
+# Create new migration (autogenerate from model changes)
+make alembic-revision msg="add user preferences"
+
+# Reset database (destroys data!)
+make db-reset
+```
+
+Migration files are in `backend/alembic/versions/`. See `001_migrate_jsonb_to_typed.py` for the initial JSONB → typed column migration example.
+
+### Dual-Mode Datastore
+
+`PostgresDatastore` supports both storage modes simultaneously:
+
+```python
+# JSONB storage (schema-flexible)
+orders = datastore.table("orders", indexes=["user_id"])
+
+# SQLModel storage (typed columns)
+users = datastore.sqlmodel_table(User, primary_key="id")
+```
+
+This enables gradual migration from JSONB to typed columns per entity.
 
 ---
 
