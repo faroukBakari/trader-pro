@@ -13,13 +13,14 @@ import sqlite3
 from pathlib import Path
 
 # Rich table formatting (optional - graceful fallback to plain text)
+HAS_RICH = False
 try:
     from rich.console import Console
     from rich.table import Table
 
     HAS_RICH = True
 except ImportError:
-    HAS_RICH = False
+    pass
 
 # Import from authoritative source
 from trading_api.providers.tws.contract_tracker import get_cache_path
@@ -101,7 +102,7 @@ def search_by_symbol(conn: sqlite3.Connection, symbol: str):
 def print_stats_table(stats: dict, db_path: str):
     """Print statistics in table format."""
     if HAS_RICH:
-        console = Console()
+        console = Console()  # type: ignore[possibly-unbound]
 
         # Header
         console.print("\n[bold cyan]📊 Contract Cache Statistics[/bold cyan]")
@@ -111,7 +112,7 @@ def print_stats_table(stats: dict, db_path: str):
         console.print(f"[bold]Total Contracts:[/bold] {stats['total']:,}")
 
         # Exchanges table
-        table = Table(
+        table = Table(  # type: ignore[possibly-unbound]
             title="Top Exchanges", show_header=True, header_style="bold magenta"
         )
         table.add_column("Exchange", style="cyan")
@@ -121,7 +122,7 @@ def print_stats_table(stats: dict, db_path: str):
         console.print(table)
 
         # Security types table
-        table = Table(
+        table = Table(  # type: ignore[possibly-unbound]
             title="Security Types", show_header=True, header_style="bold magenta"
         )
         table.add_column("Type", style="cyan")
@@ -154,8 +155,8 @@ def print_records_table(records, title: str):
         return
 
     if HAS_RICH:
-        console = Console()
-        table = Table(title=title, show_header=True, header_style="bold magenta")
+        console = Console()  # type: ignore[possibly-unbound]
+        table = Table(title=title, show_header=True, header_style="bold magenta")  # type: ignore[possibly-unbound]
         table.add_column("ConID", style="dim")
         table.add_column("Symbol", style="cyan")
         table.add_column("Type", style="yellow")

@@ -263,15 +263,13 @@ See [postgres/README.md](postgres/README.md) for detailed error messages and rem
 ```python
 from trading_api.datastores.postgres import PostgresDatastore
 
-# Create with async factory (required for psycopg3 pool)
+# Create with async factory (reads config from settings - 12-Factor compliant)
 datastore = await PostgresDatastore.create()
 
-# Or with custom DSN
-datastore = await PostgresDatastore.create(
-    dsn="postgresql://user:pass@localhost:5432/db",
-    min_size=2,
-    max_size=10,
-)
+# For tests: inject custom config
+from trading_api.shared.config import Settings
+test_settings = Settings(DATASTORE_POSTGRES_DSN="postgresql://test:test@localhost:5432/test_db")
+datastore = await PostgresDatastore.create(config=test_settings)
 
 # Get table - indexes auto-extracted from Field() metadata
 users = datastore.table(User)
@@ -466,14 +464,71 @@ This enables gradual migration from JSONB to typed columns per entity.
 
 ## Testing
 
-Run tests:
+### Test Architecture
+
+The datastore tests follow a three-tier structure:
+
+1. **Contract Tests** (`tests/integration/test_datastore_contract.py`):
+   - Parametrized tests that run against ALL datastore implementations
+   - Validates `TableInterface` and `DatastoreInterface` contracts
+   - Uses `reset()` for full test isolation (data + indexes)
+   - Source of truth for expected behavior
+
+2. **Implementation-Specific Tests** (`datastores/{impl}/tests/test_{impl}_specific.py`):
+   - Tests unique features of each implementation
+   - InMemory: RWLock behavior, BaseModel return type, deep copy
+   - Postgres: psycopg exceptions, connection pool, dict return type
+
+3. **Integration Tests** (`tests/integration/test_datastore_integration.py`):
+   - End-to-end tests with repositories and services
+
+### Test Settings
+
+Tests use a session-scoped `test_settings` fixture that:
+
+- Enables `DATASTORE_ALLOW_RESET=True` for test isolation
+- Configures minimal pool sizes for efficiency
+- Ensures CI pipelines are config-agnostic
+
+```python
+@pytest.fixture(scope="session")
+def test_settings() -> Settings:
+    return Settings(
+        DATASTORE_ALLOW_RESET=True,  # Enable reset() for tests
+        DATASTORE_POSTGRES_POOL_MAX_SIZE=2,
+        # ... other test-specific config
+    )
+```
+
+### The `reset()` Method
+
+`reset()` clears data AND removes custom indexes (unlike `clear()` which only removes data).
+It's protected by `DATASTORE_ALLOW_RESET` to prevent accidental use in production:
+
+```python
+# Test fixture pattern
+@pytest.fixture
+async def table(any_datastore: DatastoreInterface) -> AsyncIterator[TableInterface]:
+    tbl = any_datastore.table(MyModel)
+    await tbl.reset()  # Clean state: no data, no indexes
+    yield tbl
+    await tbl.reset()  # Cleanup after test
+```
+
+### Running Tests
 
 ```bash
-# InMemory datastore tests
+# All contract tests (InMemory + Postgres)
+cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v
+
+# InMemory-specific tests
 cd backend && poetry run pytest src/trading_api/datastores/inmemory/tests/ -v
 
-# PostgreSQL datastore tests (requires running database: make db-up)
+# PostgreSQL-specific tests (uses testcontainers)
 cd backend && poetry run pytest src/trading_api/datastores/postgres/tests/ -v
+
+# Full datastore test suite
+cd backend && poetry run pytest src/trading_api/datastores/ tests/integration/test_datastore*.py -v
 ```
 
 ## Related Documentation

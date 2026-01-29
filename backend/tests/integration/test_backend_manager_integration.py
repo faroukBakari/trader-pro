@@ -94,7 +94,7 @@ async def ensure_started(manager: ServerManager) -> None:
             return  # All good, backend is ready
 
     # Need to restart - clean up first
-    await manager.stop_all(timeout=2.0)
+    await manager.stop_all(timeout=0.5)
     await asyncio.sleep(0.5)  # Wait for ports to be released
 
     # Clear state and restart
@@ -118,7 +118,7 @@ async def _ensure_all_processes_killed(manager: ServerManager) -> None:
     """
     # Step 1: Try normal stop
     try:
-        await manager.stop_all(timeout=3.0)
+        await manager.stop_all(timeout=0.5)
     except Exception as e:
         print(f"Warning during stop_all: {e}")
 
@@ -281,7 +281,7 @@ class TestBackendManagerIntegration:
         nginx_port = session_backend_manager.config.nginx.port
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/broker/health", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/health", timeout=1.0
             )
             assert response.status_code == 200
 
@@ -290,14 +290,14 @@ class TestBackendManagerIntegration:
             # Broker server
             broker_port = session_backend_manager.config.servers["broker"].port
             response = await client.get(
-                f"http://127.0.0.1:{broker_port}/api/v1/broker/health", timeout=5.0
+                f"http://127.0.0.1:{broker_port}/api/v1/broker/health", timeout=1.0
             )
             assert response.status_code == 200
 
             # Datafeed server
             datafeed_port = session_backend_manager.config.servers["datafeed"].port
             response = await client.get(
-                f"http://127.0.0.1:{datafeed_port}/api/v1/datafeed/health", timeout=5.0
+                f"http://127.0.0.1:{datafeed_port}/api/v1/datafeed/health", timeout=1.0
             )
             assert response.status_code == 200
 
@@ -311,7 +311,7 @@ class TestBackendManagerIntegration:
         nginx_port = session_backend_manager.config.nginx.port
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/broker/health", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/health", timeout=1.0
             )
             assert response.status_code == 200
 
@@ -344,7 +344,7 @@ class TestBackendManagerIntegration:
         }
 
         # Stop
-        await session_backend_manager.stop_all(timeout=2.0)
+        await session_backend_manager.stop_all(timeout=1.0)
         await asyncio.sleep(0.5)
 
         # Restart
@@ -374,21 +374,21 @@ class TestBackendManagerIntegration:
         nginx_port = session_backend_manager.config.nginx.port
 
         async with httpx.AsyncClient() as client:
-            # Broker endpoint
-            response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/broker/orders",
-                cookies=auth_cookies,
-                timeout=5.0,
+            responses: list[httpx.Response] = await asyncio.gather(
+                *[
+                    client.get(
+                        f"http://127.0.0.1:{nginx_port}/api/v1/broker/orders",
+                        cookies=auth_cookies,
+                        timeout=1.0,
+                    ),
+                    client.get(
+                        f"http://127.0.0.1:{nginx_port}/api/v1/broker/positions",
+                        cookies=auth_cookies,
+                        timeout=1.0,
+                    ),
+                ]
             )
-            assert response.status_code in [200, 404]
-
-            # Positions endpoint
-            response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/broker/positions",
-                cookies=auth_cookies,
-                timeout=5.0,
-            )
-            assert response.status_code in [200, 404]
+            assert all([response.status_code in [200, 404] for response in responses])
 
     async def test_07_datafeed_routes_through_nginx(
         self, session_backend_manager: ServerManager, auth_cookies: dict[str, str]
@@ -403,7 +403,7 @@ class TestBackendManagerIntegration:
             response = await client.get(
                 f"http://127.0.0.1:{nginx_port}/api/v1/datafeed/config",
                 cookies=auth_cookies,
-                timeout=5.0,
+                timeout=1.0,
             )
             assert response.status_code == 200
 
@@ -418,7 +418,7 @@ class TestBackendManagerIntegration:
         async with httpx.AsyncClient() as client:
             # Health endpoint through nginx (public endpoint, no auth required)
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/broker/health", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/health", timeout=1.0
             )
             assert response.status_code == 200
             data = response.json()
@@ -427,7 +427,7 @@ class TestBackendManagerIntegration:
 
             # Versions endpoint (public endpoint, no auth required)
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/broker/versions", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/versions", timeout=1.0
             )
             assert response.status_code == 200
 
@@ -442,7 +442,7 @@ class TestBackendManagerIntegration:
         async with httpx.AsyncClient() as client:
             # Direct broker health check (public endpoint, no auth required)
             response = await client.get(
-                f"http://127.0.0.1:{broker_port}/api/v1/broker/health", timeout=5.0
+                f"http://127.0.0.1:{broker_port}/api/v1/broker/health", timeout=1.0
             )
             assert response.status_code == 200
 
@@ -450,7 +450,7 @@ class TestBackendManagerIntegration:
             response = await client.get(
                 f"http://127.0.0.1:{broker_port}/api/v1/broker/orders",
                 cookies=auth_cookies,
-                timeout=5.0,
+                timeout=1.0,
             )
             assert response.status_code in [200, 404]
 
@@ -465,7 +465,7 @@ class TestBackendManagerIntegration:
         async with httpx.AsyncClient() as client:
             # Direct datafeed health check (public endpoint, no auth required)
             response = await client.get(
-                f"http://127.0.0.1:{datafeed_port}/api/v1/datafeed/health", timeout=5.0
+                f"http://127.0.0.1:{datafeed_port}/api/v1/datafeed/health", timeout=1.0
             )
             assert response.status_code == 200
 
@@ -473,7 +473,7 @@ class TestBackendManagerIntegration:
             response = await client.get(
                 f"http://127.0.0.1:{datafeed_port}/api/v1/datafeed/config",
                 cookies=auth_cookies,
-                timeout=5.0,
+                timeout=1.0,
             )
             assert response.status_code == 200
 
@@ -491,7 +491,7 @@ class TestBackendManagerIntegration:
             response = await client.get(
                 f"http://127.0.0.1:{broker_port}/api/v1/datafeed/config",
                 cookies=auth_cookies,
-                timeout=5.0,
+                timeout=1.0,
             )
             assert response.status_code == 404
 
@@ -509,7 +509,7 @@ class TestBackendManagerIntegration:
             response = await client.get(
                 f"http://127.0.0.1:{datafeed_port}/api/v1/broker/orders",
                 cookies=auth_cookies,
-                timeout=5.0,
+                timeout=1.0,
             )
             assert response.status_code == 404
 
@@ -523,7 +523,7 @@ class TestBackendManagerIntegration:
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/broker/ws", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/broker/ws", timeout=1.0
             )
             # WebSocket endpoints return various codes for regular HTTP
             assert response.status_code in [426, 400, 404, 101]
@@ -538,7 +538,7 @@ class TestBackendManagerIntegration:
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"http://127.0.0.1:{nginx_port}/api/v1/datafeed/ws", timeout=5.0
+                f"http://127.0.0.1:{nginx_port}/api/v1/datafeed/ws", timeout=1.0
             )
             assert response.status_code in [426, 400, 404, 101]
 
@@ -552,7 +552,7 @@ class TestBackendManagerIntegration:
         ports = [port for _, port in session_backend_manager.config.get_all_ports()]
 
         # Stop all
-        await session_backend_manager.stop_all(timeout=3.0)
+        await session_backend_manager.stop_all(timeout=1.0)
 
         # Verify nginx stopped (PID file should be removed)
         assert not session_backend_manager.nginx_pid_file.exists() or (
@@ -632,7 +632,7 @@ class TestBackendManagerIntegration:
         new_manager.nginx_pid_file = session_backend_manager.nginx_pid_file
 
         # Stop using PID files
-        await new_manager.stop_all(timeout=3.0)
+        await new_manager.stop_all(timeout=1.0)
 
         # Verify processes stopped
         await asyncio.sleep(0.3)
@@ -644,7 +644,7 @@ class TestBackendManagerIntegration:
     ) -> None:
         """Test get_status when backend is stopped."""
         # Ensure stopped (test_18 or test_15 should have stopped it)
-        await session_backend_manager.stop_all(timeout=2.0)
+        await session_backend_manager.stop_all(timeout=1.0)
         await asyncio.sleep(0.3)
 
         status = await session_backend_manager.get_status()

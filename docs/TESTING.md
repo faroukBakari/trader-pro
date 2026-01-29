@@ -37,7 +37,7 @@ make test-integration # Integration tests only
 ```
 backend/
 ├── tests/
-│   ├── conftest.py                    # Global fixtures
+│   ├── conftest.py                    # Global fixtures (test_settings)
 │   ├── unit/                          # Unit tests
 │   │   ├── test_auth_middleware.py
 │   │   ├── test_error_models.py
@@ -45,13 +45,20 @@ backend/
 │   └── integration/                   # Integration tests
 │       ├── conftest.py
 │       ├── test_auth_integration.py
-│       ├── test_broker_equity_computation.py
+│       ├── test_datastore_contract.py     # Contract tests for ALL datastores
+│       ├── test_datastore_integration.py  # Repository integration tests
 │       └── test_provider_integration.py
 │
 ├── src/trading_api/modules/
 │   ├── broker/tests/                  # Module-specific tests
 │   ├── datafeed/tests/
 │   └── auth/tests/
+│
+├── src/trading_api/datastores/
+│   ├── inmemory/tests/
+│   │   └── test_inmemory_specific.py  # InMemory-specific tests
+│   └── postgres/tests/
+│       └── test_postgres_specific.py  # Postgres-specific tests
 │
 └── src/trading_api/providers/
     ├── fakebroker/tests/              # Provider-specific tests
@@ -610,14 +617,19 @@ jobs:
 
 PostgreSQL integration tests use different database sources depending on environment:
 
-| Environment | PostgreSQL Source                 | Setup                      |
-| ----------- | --------------------------------- | -------------------------- |
-| **Local**   | testcontainers (auto-provisioned) | None required              |
-| **CI**      | GitHub Actions service container  | Pre-configured in workflow |
+| Environment | PostgreSQL Source                 | Configuration Source             |
+| ----------- | --------------------------------- | -------------------------------- |
+| **Local**   | testcontainers (auto-provisioned) | `test_settings` fixture          |
+| **CI**      | GitHub Actions service container  | `DATASTORE_POSTGRES_DSN` env var |
 
-**Local development**: Tests automatically provision a PostgreSQL container via testcontainers-python. No manual Docker setup needed.
+**Configuration**: All test settings flow through a session-scoped `test_settings` fixture in `backend/conftest.py`. This fixture:
 
-**CI environment**: The workflow provides a PostgreSQL service container. Tests detect CI via `CI=true` or `GITHUB_ACTIONS=true` environment variables.
+- Detects CI mode by checking if `DATASTORE_POSTGRES_DSN` is set
+- Spins up testcontainers locally when DSN is not set
+- Enables `DATASTORE_ALLOW_RESET=True` for test isolation
+- Configures minimal pool sizes for efficiency
+
+**Datastore Contract Tests**: Tests in `test_datastore_contract.py` validate that all datastore implementations conform to `TableInterface` and `DatastoreInterface` contracts using parametrized fixtures.
 
 See [backend/docs/BACKEND_TESTING.md](../backend/docs/BACKEND_TESTING.md#5-postgresql-integration-testing) for fixture patterns and implementation details.
 

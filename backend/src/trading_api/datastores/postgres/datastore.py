@@ -32,7 +32,7 @@ from sqlalchemy.orm import Mapper
 from sqlmodel import SQLModel
 
 from trading_api.shared import DatastoreInterface, TableInterface
-from trading_api.shared.config import settings
+from trading_api.shared.config import Settings
 
 from .engine import (
     AsyncEngineFactory,
@@ -126,6 +126,7 @@ class PostgresTable(TableInterface[Any]):
         table_name: str,
         indexes: list[str] | None = None,
         unique_indexes: list[str] | None = None,
+        allow_reset: bool = False,
     ) -> None:
         # Validate table name at construction time
         validate_identifier(table_name, "table name")
@@ -139,6 +140,7 @@ class PostgresTable(TableInterface[Any]):
         self._indexes = indexes or []
         self._unique_indexes = unique_indexes or []
         self._initialized = False
+        self._allow_reset = allow_reset
 
     async def _ensure_table(self) -> None:
         """Create table and indexes if not exists (idempotent)."""
@@ -362,6 +364,47 @@ class PostgresTable(TableInterface[Any]):
             )
             await conn.execute(query)
 
+    async def reset(self) -> None:
+        """Reset table to initial state: clear data AND remove all custom indexes.
+
+        Drops all indexes created via create_index() and create_unique_index(),
+        then truncates the table. This ensures full test isolation.
+
+        Raises:
+            RuntimeError: If DATASTORE_ALLOW_RESET is not enabled in settings.
+        """
+        if not self._allow_reset:
+            raise RuntimeError(
+                "reset() is disabled. Set DATASTORE_ALLOW_RESET=True in settings "
+                "(test mode only)."
+            )
+
+        await self._ensure_table()
+
+        async with self._pool.connection() as conn:
+            # Drop all custom indexes (idx_ and uidx_ prefixed)
+            for field_name in self._indexes:
+                drop_query = sql.SQL("DROP INDEX IF EXISTS {}").format(
+                    sql.Identifier(f"idx_{self._table_name}_{field_name}")
+                )
+                await conn.execute(drop_query)
+
+            for field_name in self._unique_indexes:
+                drop_query = sql.SQL("DROP INDEX IF EXISTS {}").format(
+                    sql.Identifier(f"uidx_{self._table_name}_{field_name}")
+                )
+                await conn.execute(drop_query)
+
+            # Clear all data
+            truncate_query = sql.SQL("TRUNCATE TABLE {}").format(
+                sql.Identifier(self._table_name)
+            )
+            await conn.execute(truncate_query)
+
+        # Reset internal tracking
+        self._indexes.clear()
+        self._unique_indexes.clear()
+
     async def count(self) -> int:
         """Get the count of entries in the table."""
         await self._ensure_table()
@@ -484,56 +527,62 @@ class PostgresDatastore(DatastoreInterface):
         self,
         pool: AsyncConnectionPool[Any],
         session_factory: async_sessionmaker[AsyncSession],
+        allow_reset: bool = False,
     ) -> None:
         """Initialize with existing pool (use create() factory instead)."""
         self._pool = pool
         self._session_factory = session_factory
         self._tables: dict[str, PostgresTable] = {}
         self._typed_tables: dict[str, SQLModelTable[Any]] = {}
+        self._allow_reset = allow_reset
 
     @classmethod
     async def create(
         cls,
-        dsn: str | None = None,
-        *,
-        warm_bg_workers: bool | None = None,
-        max_size: int | None = None,
-        reconnect_timeout: float | None = None,
+        config: Settings | None = None,
     ) -> PostgresDatastore:
         """Async factory - required because pool creation is async.
 
         Args:
-            dsn: PostgreSQL connection string (or use settings.postgres_dsn)
-            warm_bg_workers: Whether to keep background workers warm in the pool.
-                            Defaults to False when running in pytest (auto-detected),
-                            True otherwise. NullConnectionPool has no background workers.
-            max_size: Maximum pool connections (default from settings)
-            reconnect_timeout: Max seconds to retry connecting (default from settings)
+            config: Optional Settings instance for dependency injection (tests).
+                   Defaults to global settings singleton.
+
+        All configuration is read from settings (12-Factor compliant):
+        - DSN: settings.postgres_dsn (from DATASTORE_POSTGRES_DSN or components)
+        - Pool size: settings.DATASTORE_POSTGRES_POOL_MAX_SIZE
+        - Timeouts: settings.DATASTORE_POSTGRES_POOL_*
+
+        Auto-detects test mode via PYTEST_CURRENT_TEST env var to use
+        NullConnectionPool (no background workers) preventing teardown hangs.
 
         Returns:
             PostgresDatastore instance with active connection pool
-        """
 
-        dsn = dsn or settings.postgres_dsn
-        max_size = (
-            max_size
-            if max_size is not None
-            else settings.DATASTORE_POSTGRES_POOL_MAX_SIZE
-        )
-        reconnect_timeout = (
-            reconnect_timeout
-            if reconnect_timeout is not None
-            else settings.DATASTORE_POSTGRES_POOL_RECONNECT_TIMEOUT
-        )
-        open_timeout = settings.DATASTORE_POSTGRES_POOL_OPEN_TIMEOUT
+        Raises:
+            ValueError: If PostgreSQL DSN is not configured
+        """
+        # [12-FACTOR] Config from injected settings or global singleton
+        # Deferred import for SSOT - allows tests to inject config without module-level coupling
+        from trading_api.shared.config import settings as default_settings
+
+        cfg = config or default_settings
+        dsn = cfg.postgres_dsn
+        if not dsn:
+            raise ValueError(
+                "PostgreSQL DSN not configured. "
+                "Set DATASTORE_POSTGRES_DSN or individual DATASTORE_POSTGRES_* vars in .env"
+            )
+
+        max_size = cfg.DATASTORE_POSTGRES_POOL_MAX_SIZE
+        reconnect_timeout = cfg.DATASTORE_POSTGRES_POOL_RECONNECT_TIMEOUT
+        open_timeout = cfg.DATASTORE_POSTGRES_POOL_OPEN_TIMEOUT
+
+        # Auto-detect pytest: use NullConnectionPool (no background workers)
+        warm_bg_workers = not _is_testing()
 
         # [FAIL-FAST] Pre-flight check: verify database exists before attempting pool connection
         # This catches "database does not exist" errors immediately with clear remediation steps
         check_database_exists(dsn)
-
-        # Auto-detect pytest: use NullConnectionPool (no background workers) to prevent teardown hangs
-        if warm_bg_workers is None:
-            warm_bg_workers = not _is_testing()
 
         # Create async connection pool with psycopg3
         # Note: psycopg3 handles JSONB encoding/decoding natively
@@ -560,7 +609,7 @@ class PostgresDatastore(DatastoreInterface):
         # Also create session factory for SQLModel tables (Wave 2B)
         session_factory = await AsyncEngineFactory.get_session_factory(dsn)
 
-        return cls(pool, session_factory)
+        return cls(pool, session_factory, allow_reset=cfg.DATASTORE_ALLOW_RESET)
 
     @property
     def has_persistence(self) -> bool:
@@ -620,6 +669,7 @@ class PostgresDatastore(DatastoreInterface):
                     model_class=model_class,
                     session_factory=self._session_factory,
                     primary_key=pk,
+                    allow_reset=self._allow_reset,
                 )
             return self._typed_tables[table_name]
         else:
@@ -641,6 +691,7 @@ class PostgresDatastore(DatastoreInterface):
                     table_name=name,
                     indexes=indexes,
                     unique_indexes=unique_indexes,
+                    allow_reset=self._allow_reset,
                 )
             return self._tables[name]
 
