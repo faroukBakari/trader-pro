@@ -65,6 +65,7 @@ types-protobuf = "^6.32.1.20251105"
 mypy-protobuf = "^3.7.0"
 grpcio-tools = ">=1.60,<1.70"
 pytest-timeout = "^2.3.1"
+testcontainers = {version = "^4.14", extras = ["postgres"]}
 
 [build-system]
 requires = ["poetry-core"]
@@ -120,6 +121,9 @@ markers = [
 # Temporary: passlib 1.7.4 uses deprecated 'crypt' module (removed in Python 3.13)
 # Remove this filter after upgrading to Python 3.13 + passlib 1.8.0+
 # TODO: docs/tmp/python-3.13-upgrade-evaluation.md
+# Temporary: testcontainers 4.14 uses deprecated @wait_container_is_ready internally
+# Remove this filter after testcontainers fixes upstream (tracked in their codebase)
 filterwarnings = [
     "ignore:'crypt' is deprecated:DeprecationWarning",
+    "ignore:The @wait_container_is_ready decorator is deprecated:DeprecationWarning:testcontainers",
 ]

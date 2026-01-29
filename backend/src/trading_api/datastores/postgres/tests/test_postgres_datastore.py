@@ -1,15 +1,13 @@
 """PostgreSQL Datastore integration tests.
 
 These tests validate PostgresDatastore against a real PostgreSQL database.
-They are marked with @pytest.mark.integration and require:
-- PostgreSQL running (docker-compose.dev.yml or CI service)
-- DATASTORE_POSTGRES_* environment variables configured
+They are marked with @pytest.mark.integration and require the test_database
+fixture which creates an ephemeral test database.
 
 Run with: pytest -m integration
 Skip with: pytest -m "not integration"
 """
 
-import os
 from collections.abc import AsyncIterator
 
 import pytest
@@ -20,12 +18,6 @@ from trading_api.shared.datastore_interface import TableInterface
 
 # Skip all tests if PostgreSQL not available
 pytestmark = pytest.mark.integration
-
-# Test DSN from environment or default to docker-compose.dev.yml settings
-TEST_DSN = os.environ.get(
-    "DATASTORE_POSTGRES_DSN",
-    "postgresql://trader:trader_dev@localhost:5433/trader_bars",
-)
 
 
 # Test models as SQLModel classes (table=False for JSONB storage)
@@ -50,9 +42,13 @@ IndexedTableFixture = tuple[PostgresTable, type[IndexedTestModel]]
 
 
 @pytest.fixture
-async def postgres_datastore() -> AsyncIterator[PostgresDatastore]:
-    """Create PostgresDatastore for testing with cleanup."""
-    ds = await PostgresDatastore.create(dsn=TEST_DSN)
+async def postgres_datastore(test_database: str) -> AsyncIterator[PostgresDatastore]:
+    """Create PostgresDatastore for testing with cleanup.
+
+    Args:
+        test_database: DSN from the session-scoped test_database fixture
+    """
+    ds = await PostgresDatastore.create(dsn=test_database)
     yield ds
     # Cleanup: close connection pool
     await ds.close()

@@ -4,6 +4,9 @@
 Provides singleton pattern for engine/session factory to avoid
 multiple connection pools in the same process.
 
+Configuration is centralized in Settings (config.py), which loads from .env.
+This module delegates to settings.postgres_dsn for connection URL.
+
 Usage:
     session_factory = await AsyncEngineFactory.get_session_factory(url)
     async with session_factory() as session:
@@ -12,9 +15,10 @@ Usage:
 
 from __future__ import annotations
 
-import os
-from typing import TYPE_CHECKING
+import re
+from urllib.parse import urlparse
 
+import psycopg
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -22,8 +26,92 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-if TYPE_CHECKING:
-    pass
+from trading_api.models.exceptions import CommonException
+from trading_api.shared.config import settings
+
+
+class DatabaseNotFoundError(CommonException):
+    """Raised when the configured database does not exist.
+
+    Provides actionable remediation steps for the developer.
+    """
+
+    def __init__(self, db_name: str, host: str, port: int) -> None:
+        message = (
+            f"Database '{db_name}' does not exist on {host}:{port}.\n\n"
+            f"To fix this, either:\n"
+            f"  1. Recreate the Docker volume (loses data):\n"
+            f"     make db-down && docker volume rm backend_postgres_data && make db-up\n\n"
+            f"  2. Create the database manually (preserves existing data):\n"
+            f"     docker-compose -f docker-compose.dev.yml exec postgres \\\n"
+            f"       psql -U trader -d postgres -c 'CREATE DATABASE {db_name};'"
+        )
+        super().__init__(code="DATASTORE_DATABASE_NOT_FOUND", message=message)
+        self.db_name = db_name
+        self.host = host
+        self.port = port
+
+
+class ConnectionTimeoutError(CommonException):
+    """Raised when database connection times out during startup.
+
+    Indicates the database server may be down or unreachable.
+    """
+
+    def __init__(self, host: str, port: int, timeout: float) -> None:
+        message = (
+            f"Could not connect to PostgreSQL at {host}:{port} within {timeout}s.\n\n"
+            f"Possible causes:\n"
+            f"  1. Database server is not running:\n"
+            f"     make db-up\n\n"
+            f"  2. Wrong host/port configuration:\n"
+            f"     Check DATASTORE_POSTGRES_HOST and DATASTORE_POSTGRES_PORT in .env"
+        )
+        super().__init__(code="DATASTORE_CONNECTION_TIMEOUT", message=message)
+        self.host = host
+        self.port = port
+        self.timeout = timeout
+
+
+def parse_dsn(dsn: str) -> tuple[str, str, str, int, str]:
+    """Parse DSN into components: (user, password, host, port, dbname)."""
+    # Strip driver suffix for parsing (e.g., postgresql+psycopg:// -> postgresql://)
+    clean_dsn = re.sub(r"postgresql\+\w+://", "postgresql://", dsn)
+    parsed = urlparse(clean_dsn)
+    return (
+        parsed.username or "trader",
+        parsed.password or "",
+        parsed.hostname or "localhost",
+        parsed.port or 5432,
+        parsed.path.lstrip("/") or "postgres",
+    )
+
+
+def check_database_exists(dsn: str) -> None:
+    """Check if the target database exists, raise DatabaseNotFoundError if not.
+
+    Connects to 'postgres' maintenance database to query pg_database.
+    Uses synchronous psycopg for simplicity (one-time startup check).
+    """
+
+    user, password, host, port, db_name = parse_dsn(dsn)
+
+    # Connect to maintenance database to check if target exists
+    maintenance_dsn = f"postgresql://{user}:{password}@{host}:{port}/postgres"
+
+    try:
+        with psycopg.connect(maintenance_dsn, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s",
+                    (db_name,),
+                )
+                if cur.fetchone() is None:
+                    raise DatabaseNotFoundError(db_name, host, port)
+    except psycopg.OperationalError:
+        # Can't connect to maintenance DB - let the original connection attempt
+        # fail with its own error (server down, auth failed, etc.)
+        pass
 
 
 class AsyncEngineFactory:
@@ -39,21 +127,9 @@ class AsyncEngineFactory:
 
     @classmethod
     def _build_url(cls) -> str:
-        """Build async database URL from environment."""
-        dsn = os.environ.get("DATASTORE_POSTGRES_DSN")
-        if dsn:
-            # Convert postgresql:// to postgresql+psycopg://
-            if dsn.startswith("postgresql://"):
-                return dsn.replace("postgresql://", "postgresql+psycopg://", 1)
-            return dsn
-
-        user = os.environ.get("DATASTORE_POSTGRES_USER", "trader")
-        password = os.environ.get("DATASTORE_POSTGRES_PASSWORD", "trader_dev")
-        host = os.environ.get("DATASTORE_POSTGRES_HOST", "localhost")
-        port = os.environ.get("DATASTORE_POSTGRES_PORT", "5433")
-        db = os.environ.get("DATASTORE_POSTGRES_DB", "trader_bars")
-
-        return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db}"
+        """Build async database URL from settings (which loads from .env)."""
+        dsn = settings.postgres_dsn
+        return cls._normalize_url(dsn)
 
     @classmethod
     def _normalize_url(cls, url: str) -> str:
@@ -74,12 +150,18 @@ class AsyncEngineFactory:
 
         Returns:
             AsyncEngine instance (singleton per URL).
+
+        Raises:
+            DatabaseNotFoundError: If the target database doesn't exist.
         """
         url = cls._normalize_url(url) if url else cls._build_url()
 
         if cls._engine is None or cls._url != url:
             if cls._engine is not None:
                 await cls._engine.dispose()
+
+            # Validate database exists before attempting connection
+            check_database_exists(url)
 
             cls._engine = create_async_engine(
                 url,

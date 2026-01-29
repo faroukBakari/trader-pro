@@ -33,11 +33,14 @@ class Settings(BaseSettings):
     DATASTORE_POSTGRES_PASSWORD: str = "trader_dev"
     DATASTORE_POSTGRES_HOST: str = "localhost"
     DATASTORE_POSTGRES_PORT: int = 5433
-    DATASTORE_POSTGRES_DB: str = "trader_bars"
+    DATASTORE_POSTGRES_DB: str = "trader_pro"
     DATASTORE_POSTGRES_POOL_MAX_SIZE: int = 10
     DATASTORE_POSTGRES_POOL_RECONNECT_TIMEOUT: float = 5.0
+    DATASTORE_POSTGRES_POOL_OPEN_TIMEOUT: float = (
+        30.0  # Total timeout for initial connection
+    )
 
-    model_config = SettingsConfigDict(env_file=".env.local", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @model_validator(mode="after")
     def resolve_paths(self) -> "Settings":
