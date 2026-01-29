@@ -91,7 +91,7 @@ factory = AppFactory()
 app = await factory.create_app(
     enabled_module_names=["broker", "auth"],
     enabled_provider_names=["fakebroker", "google"],
-    enabled_datastore_names=["inmemory"],  # NEW: filter datastores
+    enabled_datastores=["inmemory"],  # NEW: filter datastores
 )
 ```
 
@@ -159,35 +159,36 @@ InMemoryDatastore
 
 #### DatastoreInterface Methods
 
-| Method                                              | Description                                                   |
-| --------------------------------------------------- | ------------------------------------------------------------- |
-| `table(name, *, indexes=None, unique_indexes=None)` | Get or create a named table with optional index configuration |
-| `datastore_name()` (classmethod)                    | Canonical name for registry lookup (e.g., "inmemory")         |
+| Method                            | Description                                                            |
+| --------------------------------- | ---------------------------------------------------------------------- |
+| `table(model_class, primary_key)` | Get or create table for model class (auto-extracts indexes from Field) |
+| `datastore_name()` (classmethod)  | Canonical name for registry lookup (e.g., "inmemory")                  |
 
-### Indexing
+### Indexing via Field() Metadata
 
-#### Construction-Time Index Configuration (Preferred)
-
-Configure indexes when obtaining the table - sync registration, no async calls needed:
+Indexes are declared in the model class using SQLModel's `Field()` metadata:
 
 ```python
-# Unique indexes (1:1) and secondary indexes (1:N) at construction
-users = datastore.table(
-    "users",
-    unique_indexes=["email", "google_id"],  # Raises ValueError on duplicate
-    indexes=["role"],                         # Multiple records can share value
-)
+from sqlmodel import Field, SQLModel
+
+class User(SQLModel):
+    id: str = Field(primary_key=True)
+    email: str = Field(unique=True)      # Unique index (1:1)
+    google_id: str = Field(unique=True)  # Unique index (1:1)
+    role: str = Field(index=True)        # Secondary index (1:N)
+
+# table() auto-extracts index configuration from Field() metadata
+users = datastore.table(User)
 ```
 
 #### Unique Index (1:1)
 
 Enforces uniqueness constraint - raises `ValueError` on duplicate:
 
-```python
-await table.create_unique_index("email")
+````python
+# Declared via Field(unique=True) in model
 await table.set("1", User(id="1", email="alice@example.com"))
 await table.set("2", User(id="2", email="alice@example.com"))  # Raises ValueError!
-```
 
 ### Type-Safe Tables
 
@@ -195,22 +196,20 @@ Use `TableInterface[T]` for compile-time type checking:
 
 ```python
 from trading_api.shared import DatastoreInterface, TableInterface
-from trading_api.models.auth import UserData
+from trading_api.models.auth import User
 
 class UserRepository:
     def __init__(self, datastore: DatastoreInterface) -> None:
-        # Type-safe: users table returns UserData
-        self._users: TableInterface[UserData] = datastore.table(
-            "users",
-            unique_indexes=["email", "google_id"],
-        )
+        # Type-safe: users table returns User
+        # Indexes auto-extracted from Field(index=True, unique=True)
+        self._users: TableInterface[User] = datastore.table(User)
 
-    async def get_user(self, user_id: str) -> UserData | None:
-        return await self._users.get(user_id)  # Returns UserData | None
+    async def get_user(self, user_id: str) -> User | None:
+        return await self._users.get(user_id)  # Returns User | None
 
-    async def list_users(self) -> list[UserData]:
-        return await self._users.values()  # Returns list[UserData]
-```
+    async def list_users(self) -> list[User]:
+        return await self._users.values()  # Returns list[User]
+````
 
 ### Concurrency Model
 
@@ -222,7 +221,7 @@ class UserRepository:
 
 ## PostgresDatastore
 
-PostgreSQL datastore using **asyncpg + JSONB** storage pattern. Provides real persistence with ACID transactions.
+PostgreSQL datastore using **psycopg3 + JSONB** storage pattern. Provides real persistence with ACID transactions.
 
 ### Key Design Decisions
 
@@ -230,13 +229,14 @@ PostgreSQL datastore using **asyncpg + JSONB** storage pattern. Provides real pe
 - **Async Factory Pattern**: Pool creation is async, use `PostgresDatastore.create()` factory
 - **No-Op RWLock**: PostgreSQL MVCC provides transaction isolation, app-level locks are redundant
 - **Dict Return Type**: `get()` returns dict (not BaseModel) - caller uses `model_validate()` for conversion
+- **SQL Injection Safety**: All queries use `psycopg.sql.SQL/Identifier/Literal` for safe dynamic SQL composition
 
 ### Usage
 
 ```python
 from trading_api.datastores.postgres import PostgresDatastore
 
-# Create with async factory (required for asyncpg pool)
+# Create with async factory (required for psycopg3 pool)
 datastore = await PostgresDatastore.create()
 
 # Or with custom DSN
@@ -246,14 +246,10 @@ datastore = await PostgresDatastore.create(
     max_size=10,
 )
 
-# Get table with indexes
-users = datastore.table(
-    "users",
-    unique_indexes=["email", "google_id"],
-    indexes=["role"],
-)
+# Get table - indexes auto-extracted from Field() metadata
+users = datastore.table(User)
 
-# Store Pydantic model
+# Store SQLModel instance
 await users.set("user123", user_model)
 
 # Retrieve as dict, convert to model
@@ -334,11 +330,12 @@ CREATE UNIQUE INDEX uidx_{table}_{field} ON {table} ((value->>'{field}'));
 from trading_api.models.auth import User
 from trading_api.datastores.postgres import PostgresDatastore
 
-# Create datastore (initializes both asyncpg pool and SQLAlchemy engine)
+# Create datastore (initializes both psycopg3 pool and SQLAlchemy engine)
 datastore = await PostgresDatastore.create()
 
-# Get SQLModel table (caller specifies model and primary key)
-users = datastore.sqlmodel_table(User, primary_key="id")
+# Get table - auto-detects storage mode from model class
+# table=True models use typed columns, table=False uses JSONB
+users = datastore.table(User)
 
 # Store SQLModel instance directly
 await users.set("user123", user)
@@ -351,9 +348,9 @@ user = await users.get("user123")  # Returns User | None
 
 ```
 PostgresDatastore
-├── _pool (asyncpg)                 # JSONB tables via PostgresTable
+├── _pool (psycopg3)                # JSONB tables via PostgresTable
 ├── _session_factory (SQLAlchemy)   # SQLModel tables via AsyncSessionFactory
-└── _sqlmodel_tables: dict[str, SQLModelTable[T]]
+└── _typed_tables: dict[str, SQLModelTable[T]]
         │
         └── SQLModelTable[T]
             ├── _model_class: type[SQLModel]  # User, RefreshTokenData, etc.
@@ -422,14 +419,18 @@ Migration files are in `backend/alembic/versions/`. See `001_migrate_jsonb_to_ty
 
 ### Dual-Mode Datastore
 
-`PostgresDatastore` supports both storage modes simultaneously:
+`PostgresDatastore.table()` auto-detects storage mode based on the model class:
 
 ```python
-# JSONB storage (schema-flexible)
-orders = datastore.table("orders", indexes=["user_id"])
+from trading_api.models.auth import User  # has table=True
+from trading_api.models.orders import Order  # has table=False
 
-# SQLModel storage (typed columns)
-users = datastore.sqlmodel_table(User, primary_key="id")
+# SQLModel table=True → typed column storage (SQLModelTable)
+users = datastore.table(User)
+
+# SQLModel table=False or Pydantic → JSONB storage (PostgresTable)
+# Indexes extracted from Field(index=True, unique=True)
+orders = datastore.table(Order)
 ```
 
 This enables gradual migration from JSONB to typed columns per entity.
@@ -441,7 +442,11 @@ This enables gradual migration from JSONB to typed columns per entity.
 Run tests:
 
 ```bash
+# InMemory datastore tests
 cd backend && poetry run pytest src/trading_api/datastores/inmemory/tests/ -v
+
+# PostgreSQL datastore tests (requires running database: make db-up)
+cd backend && poetry run pytest src/trading_api/datastores/postgres/tests/ -v
 ```
 
 ## Related Documentation

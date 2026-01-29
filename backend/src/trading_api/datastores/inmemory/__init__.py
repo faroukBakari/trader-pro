@@ -12,8 +12,46 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from pydantic import BaseModel
+from sqlmodel import SQLModel
 
 from trading_api.shared import DatastoreInterface, TableInterface
+
+
+def extract_indexes(
+    model_class: type[BaseModel],
+) -> tuple[list[str], list[str], str | None]:
+    """Extract index metadata from SQLModel/Pydantic Field() declarations.
+
+    Reads index=True, unique=True, and primary_key=True from FieldInfo.
+    Works for both SQLModel and Pydantic BaseModel classes.
+
+    Returns:
+        (indexes, unique_indexes, primary_key) tuple where:
+        - indexes: Fields with index=True (non-unique secondary indexes)
+        - unique_indexes: Fields with unique=True
+        - primary_key: Field with primary_key=True (or None)
+    """
+    indexes: list[str] = []
+    unique_indexes: list[str] = []
+    primary_key: str | None = None
+
+    for field_name, field_info in model_class.model_fields.items():
+        # Check for primary_key (only in SQLModel FieldInfo)
+        if getattr(field_info, "primary_key", None) is True:
+            primary_key = field_name
+
+        # Check for unique constraint
+        if getattr(field_info, "unique", None) is True:
+            unique_indexes.append(field_name)
+
+        # Check for index (non-unique) - only add if not already unique
+        if (
+            getattr(field_info, "index", None) is True
+            and field_name not in unique_indexes
+        ):
+            indexes.append(field_name)
+
+    return indexes, unique_indexes, primary_key
 
 
 class RWLock:
@@ -339,23 +377,26 @@ class InMemoryDatastore(DatastoreInterface):
 
     def table(
         self,
-        name: str,
-        *,
-        indexes: list[str] | None = None,
-        unique_indexes: list[str] | None = None,
+        model_class: type[BaseModel],
+        primary_key: str = "id",
     ) -> TableInterface:
-        """Get or create a named table with optional index configuration.
+        """Get or create a table for the given model class.
+
+        Index configuration is extracted from Field() metadata:
+        - index=True → secondary index
+        - unique=True → unique index
 
         Args:
-            name: Logical table name
-            indexes: Field names for secondary indexes (1:N mapping)
-            unique_indexes: Field names for unique indexes (1:1 mapping)
+            model_class: Model class (SQLModel or Pydantic BaseModel)
+            primary_key: Primary key field name (unused in InMemory but kept for API parity)
 
         Returns:
-            TableInterface for the named table
+            TableInterface for the model
         """
+        name = model_class.__name__.lower()
         with self.__threading_lock:
             if name not in self._tables:
+                indexes, unique_indexes, _ = extract_indexes(model_class)
                 self._tables[name] = InMemoryTable(
                     timeout=self.__timeout,
                     indexes=indexes,

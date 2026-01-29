@@ -42,9 +42,9 @@ class AsyncEngineFactory:
         """Build async database URL from environment."""
         dsn = os.environ.get("DATASTORE_POSTGRES_DSN")
         if dsn:
-            # Convert postgresql:// to postgresql+asyncpg://
+            # Convert postgresql:// to postgresql+psycopg://
             if dsn.startswith("postgresql://"):
-                return dsn.replace("postgresql://", "postgresql+asyncpg://", 1)
+                return dsn.replace("postgresql://", "postgresql+psycopg://", 1)
             return dsn
 
         user = os.environ.get("DATASTORE_POSTGRES_USER", "trader")
@@ -53,13 +53,16 @@ class AsyncEngineFactory:
         port = os.environ.get("DATASTORE_POSTGRES_PORT", "5433")
         db = os.environ.get("DATASTORE_POSTGRES_DB", "trader_bars")
 
-        return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db}"
+        return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db}"
 
     @classmethod
     def _normalize_url(cls, url: str) -> str:
-        """Ensure URL uses asyncpg driver."""
+        """Ensure URL uses psycopg async driver."""
         if url.startswith("postgresql://"):
-            return url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            return url.replace("postgresql://", "postgresql+psycopg://", 1)
+        # Also handle legacy asyncpg URLs
+        if "+asyncpg" in url:
+            return url.replace("+asyncpg", "+psycopg")
         return url
 
     @classmethod

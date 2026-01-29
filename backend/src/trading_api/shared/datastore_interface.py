@@ -218,30 +218,23 @@ class DatastoreInterface(ABC):
     @abstractmethod
     def table(
         self,
-        name: str,
-        *,
-        indexes: list[str] | None = None,
-        unique_indexes: list[str] | None = None,
+        model_class: type,
+        primary_key: str = "id",
     ) -> TableInterface:
-        """Get or create a named storage table with optional index configuration.
+        """Get or create a table for the given model class.
+
+        Index configuration is extracted from Field() metadata:
+        - index=True → secondary index
+        - unique=True → unique index
+        - primary_key=True → primary key field
+
+        For SQLModel table=True classes, uses typed column storage.
+        For table=False or Pydantic models, uses JSONB storage.
 
         Args:
-            name: Logical table name (e.g., "users", "tokens", "bars")
-            indexes: Field names for secondary indexes (1:N mapping)
-            unique_indexes: Field names for unique indexes (1:1 mapping)
+            model_class: Model class (SQLModel or Pydantic BaseModel)
+            primary_key: Primary key field name (default "id", extracted from Field if declared)
 
         Returns:
-            TableInterface for the named table
-
-        Note:
-            Index configuration is only applied when creating a new table.
-            Subsequent calls with different index config are ignored.
+            TableInterface for the model
         """
-
-    def sqlmodel_table(
-        self, model_class: type, primary_key: str = "id"
-    ) -> TableInterface:
-        """Optional: Override in implementations that support SQLModel."""
-        raise NotImplementedError(
-            f"{self.__class__.__name__} doesn't support sqlmodel_table()"
-        )

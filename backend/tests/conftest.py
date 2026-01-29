@@ -158,12 +158,14 @@ class MockBrokerProvider(Provider, BrokerCapability):
 
 def create_test_app(
     enabled_modules: list[str] | None = None,
+    enabled_datastores: list[str] | None = None,
 ) -> ModularApp:
     """Create a test application with specified modules.
 
     Args:
         enabled_modules: List of module names to enable (e.g., ["broker", "datafeed"])
                         If None, all modules are enabled.
+        enabled_datastores: List of datastore names (defaults to ["inmemory"] for tests)
 
     Returns:
         ModularApp: Modular application (extends FastAPI)
@@ -178,9 +180,14 @@ def create_test_app(
         # Test with only shared infrastructure (no modules)
         app = create_test_app(enabled_modules=[])
     """
+    if enabled_datastores is None:
+        enabled_datastores = ["inmemory"]  # Default to inmemory for tests
     factory = AppFactory()
     return asyncio.get_event_loop().run_until_complete(
-        factory.create_app(enabled_module_names=enabled_modules)
+        factory.create_app(
+            enabled_module_names=enabled_modules,
+            enabled_datastores=enabled_datastores,
+        )
     )
 
 

@@ -64,25 +64,23 @@ The module includes a `BarRepository` for OHLC bar storage:
 ```python
 class BarRepository:
     def __init__(self, datastore: DatastoreInterface) -> None:
+        # Structure: {symbol: {resolution_value: {time_ms: Bar}}}
         self._bars: dict[str, dict[str, dict[int, Bar]]] = {}
-        self._lock = datastore.table("bars").lock  # Per-table RWLock
 
     async def store_bars(self, symbol: str, resolution: Resolution, bars: list[Bar]) -> int:
-        async with self._lock.write():  # Exclusive write access
-            # Store bars with deduplication by timestamp
-            ...
+        # Store bars with deduplication by timestamp
+        ...
 
     async def get_bars(self, symbol: str, resolution: Resolution, from_time: int, to_time: int) -> list[Bar]:
-        async with self._lock.read():  # Concurrent read access
-            # Retrieve bars in ascending time order
-            ...
+        # Retrieve bars in ascending time order
+        ...
 ```
 
 **Key Points:**
 
 - Uses nested dict structure: `{symbol: {resolution: {time_ms: Bar}}}`
-- RWLock allows concurrent readers with exclusive writers
 - Bars deduplicated by timestamp (upsert semantics)
+- In-memory storage (future: migrate to TableInterface for persistence)
 
 ### Provider Delegation
 

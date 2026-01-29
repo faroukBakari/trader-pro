@@ -1,8 +1,8 @@
 """Auth module repositories using DatastoreInterface abstraction.
 
-[ARCHITECTURE] Wave 2B: SQLModel integration
-- PostgresDatastore: Uses sqlmodel_table() for typed column storage
-- InMemoryDatastore: Falls back to table() with JSONB-like dict storage
+[ARCHITECTURE] Wave 2B: Unified table() API
+- PostgresDatastore: Auto-detects table=True → SQLModelTable with typed columns
+- InMemoryDatastore: Uses extracted Field() metadata for indexes
 """
 
 import uuid
@@ -43,26 +43,13 @@ def _to_model(result: Any, model_class: type[T]) -> T | None:
 class UserRepository:
     """User repository using DatastoreInterface abstraction.
 
-    [ARCHITECTURE] Wave 2B: Uses SQLModelTable when available
-    - PostgresDatastore: sqlmodel_table() with typed columns
-    - InMemoryDatastore: table() fallback with dict storage
+    [ARCHITECTURE] Wave 2B: Unified table() API
+    - PostgresDatastore: Auto-routes to SQLModelTable (User has table=True)
+    - InMemoryDatastore: Extracts indexes from Field(index=True, unique=True)
     """
 
-    TABLE_NAME = "users"
-
     def __init__(self, datastore: DatastoreInterface) -> None:
-        # Use SQLModel table for typed storage (Wave 2B)
-        if datastore.is_relational:
-            # PostgresDatastore has sqlmodel_table() for typed columns
-            self._table: TableInterface[Any] = datastore.sqlmodel_table(
-                User, primary_key="id"
-            )
-        else:
-            # Fallback for InMemory/other datastores
-            self._table = datastore.table(
-                self.TABLE_NAME,
-                unique_indexes=["email", "google_id"],
-            )
+        self._table: TableInterface[Any] = datastore.table(User)
 
     async def get_by_id(self, user_id: str) -> User | None:
         """Retrieve user by ID"""
@@ -115,26 +102,13 @@ class UserRepository:
 class RefreshTokenRepository:
     """Refresh token repository using DatastoreInterface abstraction.
 
-    [ARCHITECTURE] Wave 2B: Uses SQLModelTable when available
-    - PostgresDatastore: sqlmodel_table() with typed columns
-    - InMemoryDatastore: table() fallback with dict storage
+    [ARCHITECTURE] Wave 2B: Unified table() API
+    - PostgresDatastore: Auto-routes to SQLModelTable (RefreshTokenData has table=True)
+    - InMemoryDatastore: Extracts indexes from Field(index=True)
     """
 
-    TABLE_NAME = "refresh_tokens"
-
     def __init__(self, datastore: DatastoreInterface) -> None:
-        # Use SQLModel table for typed storage (Wave 2B)
-        if datastore.is_relational:
-            # PostgresDatastore has sqlmodel_table() for typed columns
-            self._table: TableInterface[Any] = datastore.sqlmodel_table(
-                RefreshTokenData, primary_key="token_hash"
-            )
-        else:
-            # Fallback for InMemory/other datastores
-            self._table = datastore.table(
-                self.TABLE_NAME,
-                indexes=["user_id"],  # 1:N - user can have multiple tokens
-            )
+        self._table: TableInterface[Any] = datastore.table(RefreshTokenData)
 
     async def store_token(
         self,

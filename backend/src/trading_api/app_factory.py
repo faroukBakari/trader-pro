@@ -306,7 +306,7 @@ class AppFactory:
         self,
         enabled_module_names: list[str] | None = None,
         enabled_provider_names: list[str] | None = None,
-        enabled_datastore_names: list[str] | None = None,
+        enabled_datastores: list[str] | None = None,
     ) -> ModularApp:
         """Create and configure the ModularApp instance."""
         base_url = settings.API_PREFIX
@@ -314,7 +314,7 @@ class AppFactory:
             base_url=base_url,
             enabled_modules=enabled_module_names,
             enabled_providers=enabled_provider_names,
-            enabled_datastores=enabled_datastore_names,
+            enabled_datastores=enabled_datastores,
             lifespan=lifespan,
             openapi_url=f"{base_url}/openapi.json",
             docs_url=f"{base_url}/docs",

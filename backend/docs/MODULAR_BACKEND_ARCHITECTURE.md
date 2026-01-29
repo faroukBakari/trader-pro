@@ -1058,7 +1058,7 @@ class MyService(ServiceInterface):
             logger.warning("No persistent datastore - data won't survive restart")
             return
         # Use store for critical operations that need persistence
-        table = store.table("backups")
+        table = store.table(BackupData)  # Auto-extracts indexes from Field()
         await table.set("latest", backup_data)
 ```
 
@@ -1485,14 +1485,14 @@ class AppFactory:
         self,
         enabled_module_names: list[str] | None = None,
         enabled_provider_names: list[str] | None = None,
-        enabled_datastore_names: list[str] | None = None,
+        enabled_datastores: list[str] | None = None,
     ) -> ModularApp:
         """Create and configure the ModularApp instance."""
         app = ModularApp(
             base_url=settings.API_PREFIX,
             enabled_modules=enabled_module_names,
             enabled_providers=enabled_provider_names,
-            enabled_datastores=enabled_datastore_names,
+            enabled_datastores=enabled_datastores,
             lifespan=lifespan,  # Handles build_modules() automatically
             openapi_url=f"{settings.API_PREFIX}/openapi.json",
             docs_url=f"{settings.API_PREFIX}/docs",

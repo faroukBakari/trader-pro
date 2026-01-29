@@ -32,7 +32,7 @@ libcudf-cu12 = "^25.10.0"
 pylibcudf-cu12 = "^25.10.0"
 cudf-cu12 = "^25.10.0"
 # Datastore infrastructure
-asyncpg = "^0.30.0"
+psycopg = {extras = ["binary", "pool"], version = "^3.2"}
 pyarrow = "^18.0.0"
 duckdb = "^1.1.0"
 # SQLModel + Alembic (Wave 2B)
@@ -41,8 +41,8 @@ alembic = "^1.14.0"
 greenlet = "^3.1.0"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^7.4.3"
-pytest-asyncio = "^0.21.1"
+pytest = "^8.2"
+pytest-asyncio = "^1.1.0"
 pytest-cov = "^4.1.0"
 httpx = "^0.25.2"
 requests = "^2.31.0"
@@ -64,8 +64,7 @@ types-authlib = "^1.6.6.20251220"
 types-protobuf = "^6.32.1.20251105"
 mypy-protobuf = "^3.7.0"
 grpcio-tools = ">=1.60,<1.70"
-# Datastore type stubs
-asyncpg-stubs = "^0.30.0"
+pytest-timeout = "^2.3.1"
 
 [build-system]
 requires = ["poetry-core"]
@@ -106,6 +105,8 @@ warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+timeout = 10
 testpaths = [
     "tests",
     "tests/integration",
