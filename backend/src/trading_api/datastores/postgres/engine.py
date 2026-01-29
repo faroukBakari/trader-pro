@@ -136,9 +136,6 @@ class AsyncEngineFactory:
         """Ensure URL uses psycopg async driver."""
         if url.startswith("postgresql://"):
             return url.replace("postgresql://", "postgresql+psycopg://", 1)
-        # Also handle legacy asyncpg URLs
-        if "+asyncpg" in url:
-            return url.replace("+asyncpg", "+psycopg")
         return url
 
     @classmethod

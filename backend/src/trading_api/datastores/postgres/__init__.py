@@ -6,7 +6,7 @@
 - AsyncEngineFactory: SQLAlchemy async engine singleton
 
 Provides persistent storage with:
-- Async connection pool via asyncpg (JSONB tables)
+- Async connection pool via psycopg (JSONB tables)
 - SQLAlchemy AsyncSession via SQLModel (typed tables)
 - PostgreSQL MVCC for concurrent access
 - Alembic migrations for schema evolution

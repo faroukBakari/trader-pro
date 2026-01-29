@@ -175,12 +175,15 @@ git push --no-verify
 
 ### Backend Environment
 
-The backend uses `.env` as the **Single Source of Truth (SSOT)** for configuration:
+The backend uses `.env` as the **Single Source of Truth (SSOT)** for configuration.
+
+> **📖 Complete Guide**: See [backend/docs/BACKEND_CONFIG.md](../backend/docs/BACKEND_CONFIG.md) for the full configuration management philosophy, mandatory patterns, and anti-patterns.
+
+**Quick Reference:**
 
 ```bash
 # backend/.env (copy from .env.example)
 BACKEND_PORT=8000
-BACKEND_APP_NAME=app
 
 # Database configuration
 DATASTORE_POSTGRES_USER=trader
@@ -190,7 +193,13 @@ DATASTORE_POSTGRES_PORT=5433
 DATASTORE_POSTGRES_DB=trader_pro
 ```
 
-See `backend/.env.example` for all available options.
+**Critical Rules:**
+
+- ✅ Always access config via `from trading_api.shared.config import settings`
+- ❌ Never use `os.environ.get()` directly in application code
+- ❌ Never hardcode values that vary between environments
+
+See `.env.example` for all available options.
 
 ### Frontend Environment
 

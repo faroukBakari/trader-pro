@@ -97,7 +97,7 @@ async def client(auth_app: ModularApp) -> AsyncGenerator[AsyncClient, None]:
     are handled by FastAPI's exception handlers and return proper HTTP responses
     instead of bubbling up to the test.
 
-    CRITICAL: Uses async client to avoid event loop mismatch with asyncpg pool.
+    CRITICAL: Uses async client to avoid event loop mismatch with async pool.
     """
     transport = ASGITransport(
         app=auth_app,  # type: ignore[arg-type]

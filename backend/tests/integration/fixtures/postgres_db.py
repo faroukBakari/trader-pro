@@ -27,6 +27,7 @@ from testcontainers.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config
+from trading_api.datastores.postgres.engine import AsyncEngineFactory
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +57,12 @@ def _get_alembic_config(dsn: str) -> Config:
     """Create Alembic config pointing to the test database.
 
     Args:
-        dsn: Database connection string (will be converted to asyncpg driver)
+        dsn: Database connection string (normalized via AsyncEngineFactory)
 
     Returns:
         Configured Alembic Config object
     """
-    # Alembic expects asyncpg driver for async migrations
-    async_dsn = dsn.replace("postgresql://", "postgresql+asyncpg://")
+    async_dsn = AsyncEngineFactory._normalize_url(dsn)
 
     backend_dir = Path(__file__).parents[3]  # backend/
     alembic_ini = backend_dir / "alembic.ini"
@@ -129,10 +129,8 @@ def _run_migrations(dsn: str) -> None:
         dsn: Database connection string
     """
     config = _get_alembic_config(dsn)
-    # Set the DSN in environment for alembic/env.py
-    os.environ["DATASTORE_POSTGRES_DSN"] = dsn.replace(
-        "postgresql://", "postgresql+asyncpg://"
-    )
+    # Set the DSN in environment for alembic/env.py (normalization handled by engine.py)
+    os.environ["DATASTORE_POSTGRES_DSN"] = dsn
     command.upgrade(config, "head")
 
 
@@ -148,7 +146,6 @@ def _build_dsn(base_url: str, db_name: str) -> str:
     """
     # Strip SQLAlchemy driver suffix (e.g., postgresql+psycopg:// -> postgresql://)
     clean_url = base_url.replace("postgresql+psycopg://", "postgresql://")
-    clean_url = clean_url.replace("postgresql+asyncpg://", "postgresql://")
 
     parsed = urlparse(clean_url)
     # Replace the path (database name) with our test database
@@ -182,14 +179,12 @@ def test_database() -> Iterator[str]:
                 "CI environment detected but DATASTORE_POSTGRES_DSN not set. "
                 "Ensure PostgreSQL service container is configured in CI workflow."
             )
-        # Convert asyncpg URL to psycopg format for consistency
-        dsn = env_dsn.replace("postgresql+asyncpg://", "postgresql://")
+        # Normalize URL to base format (engine.py handles driver)
+        dsn = env_dsn.replace("postgresql+psycopg://", "postgresql://")
         logger.info("CI mode: using pre-configured DSN")
         # Run migrations on CI database
         _run_migrations(dsn)
-        os.environ["DATASTORE_POSTGRES_DSN"] = dsn.replace(
-            "postgresql://", "postgresql+asyncpg://"
-        )
+        os.environ["DATASTORE_POSTGRES_DSN"] = dsn
         yield dsn
         return
 
@@ -214,10 +209,8 @@ def test_database() -> Iterator[str]:
             # Run Alembic migrations to create schema
             _run_migrations(test_dsn)
 
-            # Export for any code that reads from environment
-            os.environ["DATASTORE_POSTGRES_DSN"] = test_dsn.replace(
-                "postgresql://", "postgresql+asyncpg://"
-            )
+            # Export for any code that reads from environment (normalization handled by engine.py)
+            os.environ["DATASTORE_POSTGRES_DSN"] = test_dsn
 
             yield test_dsn
 
