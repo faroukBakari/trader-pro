@@ -13,7 +13,7 @@ import os
 from collections.abc import AsyncIterator
 
 import pytest
-from pydantic import BaseModel
+from sqlmodel import Field, SQLModel
 
 from trading_api.datastores import PostgresDatastore, PostgresTable
 from trading_api.shared.datastore_interface import TableInterface
@@ -28,25 +28,25 @@ TEST_DSN = os.environ.get(
 )
 
 
-# Test models defined at module level for type annotations
-class TestModel(BaseModel):
+# Test models as SQLModel classes (table=False for JSONB storage)
+class CrudTestModel(SQLModel):
     """Test model for CRUD operations."""
 
     name: str
     value: int
 
 
-class IndexedModel(BaseModel):
+class IndexedTestModel(SQLModel):
     """Test model with indexed fields."""
 
-    email: str
-    group: str
+    email: str = Field(unique=True)  # Unique index (1:1)
+    group: str = Field(index=True)  # Secondary index (1:N)
     value: int
 
 
 # Type alias for fixture return types
-TableFixture = tuple[PostgresTable, type[TestModel]]
-IndexedTableFixture = tuple[PostgresTable, type[IndexedModel]]
+TableFixture = tuple[PostgresTable, type[CrudTestModel]]
+IndexedTableFixture = tuple[PostgresTable, type[IndexedTestModel]]
 
 
 @pytest.fixture
@@ -85,7 +85,7 @@ class TestPostgresDatastoreInterface:
         self, postgres_datastore: PostgresDatastore
     ) -> None:
         """table() returns a TableInterface implementation."""
-        table = postgres_datastore.table("test_table")
+        table = postgres_datastore.table(CrudTestModel)
         assert isinstance(table, TableInterface)
         assert isinstance(table, PostgresTable)
 
@@ -99,12 +99,12 @@ class TestPostgresTableCRUD:
     ) -> AsyncIterator[TableFixture]:
         """Create a test table with cleanup."""
         # Get table as PostgresTable (not TableInterface) for _ensure_table access
-        pg_table = postgres_datastore.table("test_crud_table")
+        pg_table = postgres_datastore.table(CrudTestModel)
         assert isinstance(pg_table, PostgresTable)
         # Ensure table exists and is empty
         await pg_table._ensure_table()
         await pg_table.clear()
-        yield pg_table, TestModel
+        yield pg_table, CrudTestModel
         # Cleanup
         await pg_table.clear()
 
@@ -204,17 +204,13 @@ class TestPostgresTableIndexes:
     async def indexed_table(
         self, postgres_datastore: PostgresDatastore
     ) -> AsyncIterator[IndexedTableFixture]:
-        """Create a table with indexes."""
-        # Get table as PostgresTable for _ensure_table access
-        pg_table = postgres_datastore.table(
-            "test_indexed_table",
-            indexes=["group"],  # Secondary index (1:N)
-            unique_indexes=["email"],  # Unique index (1:1)
-        )
+        """Create a table with indexes (extracted from Field metadata)."""
+        # Get table - indexes are extracted from Field(index=True, unique=True)
+        pg_table = postgres_datastore.table(IndexedTestModel)
         assert isinstance(pg_table, PostgresTable)
         await pg_table._ensure_table()
         await pg_table.clear()
-        yield pg_table, IndexedModel
+        yield pg_table, IndexedTestModel
         await pg_table.clear()
 
     @pytest.mark.asyncio
@@ -267,8 +263,8 @@ class TestPostgresTableIndexes:
 
         await tbl.set("k1", Model(email="dup@test.com", group="admin", value=1))
 
-        # asyncpg raises UniqueViolationError which becomes asyncpg.exceptions.*
-        import asyncpg
+        # psycopg3 raises UniqueViolation for constraint violations
+        from psycopg.errors import UniqueViolation
 
-        with pytest.raises(asyncpg.UniqueViolationError):
+        with pytest.raises(UniqueViolation):
             await tbl.set("k2", Model(email="dup@test.com", group="user", value=2))

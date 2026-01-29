@@ -43,8 +43,8 @@ class User(UserBase, table=True):
     __tablename__ = "users"  # pyright: ignore[reportAssignmentType]
 
     id: str = Field(primary_key=True, description="Unique user identifier")
-    google_id: str = Field(index=True)
-    email: EmailStr = Field(index=True)  # Override base to add index
+    google_id: str = Field(index=True, unique=True)
+    email: EmailStr = Field(index=True, unique=True)  # Override base to add index
     created_at: datetime = Field(
         default_factory=_utc_now, sa_column=Column(DateTime(timezone=True))
     )

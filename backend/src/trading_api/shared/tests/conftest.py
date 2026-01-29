@@ -14,12 +14,14 @@ from trading_api.app_factory import AppFactory, ModularApp
 
 async def create_test_app(
     enabled_modules: list[str] | None = None,
+    enabled_datastores: list[str] | None = None,
 ) -> ModularApp:
     """Create a test application with specified modules.
 
     Args:
         enabled_modules: List of module names to enable (e.g., ["broker", "datafeed"])
                         If None, all modules are enabled.
+        enabled_datastores: List of datastore names (defaults to ["inmemory"] for tests)
 
     Returns:
         ModularApp: Modular application (extends FastAPI)
@@ -34,8 +36,13 @@ async def create_test_app(
         # Test with only shared infrastructure (no modules)
         app = await create_test_app(enabled_modules=[])
     """
+    if enabled_datastores is None:
+        enabled_datastores = ["inmemory"]  # Default to inmemory for tests
     factory = AppFactory()
-    return await factory.create_app(enabled_module_names=enabled_modules)
+    return await factory.create_app(
+        enabled_module_names=enabled_modules,
+        enabled_datastores=enabled_datastores,
+    )
 
 
 @pytest.fixture(scope="session")

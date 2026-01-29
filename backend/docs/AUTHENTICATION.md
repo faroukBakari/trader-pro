@@ -272,7 +272,7 @@ CORS_ORIGINS = ["http://localhost:5173"]
 - `UserRepository(datastore)`: Uses `TableInterface` with unique indexes on `email` and `google_id` for O(1) lookups
 - `RefreshTokenRepository(datastore)`: Uses `TableInterface` with secondary index on `user_id` for 1:N token lookups
 
-**Datastore Injection**: Both repositories receive `DatastoreInterface` from `AuthService` via the `ServiceInterface` base class. Index configuration is done at construction time: `datastore.table(name, unique_indexes=[...], indexes=[...])`. Concurrency is handled internally by `TableInterface` (RWLock pattern).
+**Datastore Injection**: Both repositories receive `DatastoreInterface` from `AuthService` via the `ServiceInterface` base class. Index configuration is extracted from `Field(index=True, unique=True)` metadata via `datastore.table(ModelClass)`. Concurrency is handled internally by `TableInterface` (RWLock pattern).
 
 ### Service Layer
 

@@ -42,7 +42,7 @@ modules/auth/
 | `RefreshTokenRepository` | Token storage via TableInterface with secondary index (user_id)     |
 | Shared middleware        | `get_current_user()`, `get_current_user_ws()`                       |
 
-**Datastore Injection**: Both repositories receive `DatastoreInterface` from `AuthService`. Index configuration is done at construction time via `datastore.table(name, unique_indexes=[...], indexes=[...])`. User IDs are UUID-based (`USER-{uuid12}`).
+**Datastore Injection**: Both repositories receive `DatastoreInterface` from `AuthService`. Index configuration is extracted from `Field(index=True, unique=True)` metadata via `datastore.table(ModelClass)`. User IDs are UUID-based (`USER-{uuid12}`).
 
 ---
 

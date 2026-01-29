@@ -274,7 +274,9 @@ async def datafeed_only_app() -> ModularApp:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    app = await factory.create_app(enabled_module_names=["datafeed"])
+    app = await factory.create_app(
+        enabled_module_names=["datafeed"], enabled_datastores=["inmemory"]
+    )
     await app.build_modules()
     return app
 
@@ -285,7 +287,9 @@ async def broker_only_app() -> ModularApp:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    app = await factory.create_app(enabled_module_names=["broker"])
+    app = await factory.create_app(
+        enabled_module_names=["broker"], enabled_datastores=["inmemory"]
+    )
     await app.build_modules()
     return app
 
@@ -296,7 +300,7 @@ async def all_modules_app() -> ModularApp:
     from trading_api.app_factory import AppFactory
 
     factory = AppFactory()
-    app = await factory.create_app()
+    app = await factory.create_app(enabled_datastores=["inmemory"])
     await app.build_modules()
     return app
 

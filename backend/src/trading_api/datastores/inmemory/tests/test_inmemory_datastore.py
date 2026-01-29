@@ -3,18 +3,25 @@
 import asyncio
 
 import pytest
-from pydantic import BaseModel
+from sqlmodel import SQLModel
 
 from trading_api.datastores.inmemory import InMemoryDatastore, InMemoryTable
 from trading_api.shared import DatastoreInterface, TableInterface
 
 
-class SampleModel(BaseModel):
+class SampleModel(SQLModel):
     """Test model for datastore operations."""
 
     id: str
     name: str
     category: str = "default"
+
+
+class AnotherModel(SQLModel):
+    """Another test model for table isolation tests."""
+
+    key: str
+    data: str
 
 
 @pytest.fixture
@@ -342,12 +349,12 @@ async def test_model_copy_isolation(table: TableInterface[SampleModel]) -> None:
 
 @pytest.mark.asyncio
 async def test_datastore_table_retrieval(datastore: InMemoryDatastore) -> None:
-    """Datastore returns same table instance for same name."""
-    table1 = datastore.table("users")
-    table2 = datastore.table("users")
+    """Datastore returns same table instance for same model class."""
+    table1 = datastore.table(SampleModel)
+    table2 = datastore.table(SampleModel)
 
     assert table1 is table2
 
-    # Different names get different tables
-    table3 = datastore.table("orders")
+    # Different model classes get different tables
+    table3 = datastore.table(AnotherModel)
     assert table3 is not table1

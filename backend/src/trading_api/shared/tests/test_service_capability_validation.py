@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from trading_api.datastores.inmemory import InMemoryDatastore
 from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import CommonException
 from trading_api.shared.service_interface import ServiceInterface
@@ -28,7 +29,9 @@ def test_service_fails_without_required_capability() -> None:
         match="requires capability 'auth' but no provider found",
     ):
         MockServiceRequiringAuth(
-            module_dir=Path("/tmp"), providers=[]  # No providers → should fail
+            module_dir=Path("/tmp"),
+            providers=[],  # No providers → should fail
+            datastores=[InMemoryDatastore()],
         )
 
 
@@ -43,6 +46,10 @@ async def test_service_succeeds_with_required_capability() -> None:
     provider = GoogleProvider(config=config)
 
     # Should succeed
-    service = MockServiceRequiringAuth(module_dir=Path("/tmp"), providers=[provider])
+    service = MockServiceRequiringAuth(
+        module_dir=Path("/tmp"),
+        providers=[provider],
+        datastores=[InMemoryDatastore()],
+    )
 
     assert service.get_capability_provider("auth") == provider

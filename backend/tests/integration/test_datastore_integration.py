@@ -68,10 +68,14 @@ async def inmemory_datastore() -> AsyncIterator[DatastoreInterface]:
 
 @pytest.fixture
 async def postgres_datastore() -> AsyncIterator[DatastoreInterface]:
-    """PostgresDatastore fixture with cleanup."""
+    """PostgresDatastore fixture with cleanup.
+
+    Uses NullConnectionPool (via warm_bg_workers=False) which has no background
+    workers, preventing 'Task was destroyed' errors during test teardown.
+    """
     from trading_api.datastores import PostgresDatastore
 
-    ds = await PostgresDatastore.create(dsn=TEST_DSN)
+    ds = await PostgresDatastore.create(dsn=TEST_DSN, warm_bg_workers=False)
     yield ds
     await ds.close()
 
@@ -83,6 +87,8 @@ async def datastore(
     """Parametrized fixture providing both datastore implementations.
 
     This allows running the same tests against both InMemory and Postgres.
+    Uses NullConnectionPool (via warm_bg_workers=False) for Postgres to prevent
+    'Task was destroyed' errors - NullConnectionPool has no background workers.
     """
     if request.param == "inmemory":
         yield InMemoryDatastore()
@@ -92,10 +98,10 @@ async def datastore(
         from trading_api.datastores import PostgresDatastore
         from trading_api.models.auth import RefreshTokenData, User
 
-        ds = await PostgresDatastore.create(dsn=TEST_DSN)
-        # Clear test tables before use (Wave 2B: use SQLModel tables)
-        users_table = ds.sqlmodel_table(User, primary_key="id")
-        tokens_table = ds.sqlmodel_table(RefreshTokenData, primary_key="token_hash")
+        ds = await PostgresDatastore.create(dsn=TEST_DSN, warm_bg_workers=False)
+        # Clear test tables before use (Wave 2B: unified table() API)
+        users_table = ds.table(User)
+        tokens_table = ds.table(RefreshTokenData)
         await users_table.clear()
         await tokens_table.clear()
         yield ds
