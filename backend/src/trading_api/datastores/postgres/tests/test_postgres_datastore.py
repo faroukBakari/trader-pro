@@ -14,10 +14,11 @@ import pytest
 from sqlmodel import Field, SQLModel
 
 from trading_api.datastores import PostgresDatastore, PostgresTable
+from trading_api.shared.config import Settings
 from trading_api.shared.datastore_interface import TableInterface
 
 # Skip all tests if PostgreSQL not available
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 
 # Test models as SQLModel classes (table=False for JSONB storage)
@@ -42,13 +43,15 @@ IndexedTableFixture = tuple[PostgresTable, type[IndexedTestModel]]
 
 
 @pytest.fixture
-async def postgres_datastore(test_database: str) -> AsyncIterator[PostgresDatastore]:
+async def postgres_datastore(
+    test_settings: Settings,
+) -> AsyncIterator[PostgresDatastore]:
     """Create PostgresDatastore for testing with cleanup.
 
-    Args:
-        test_database: DSN from the session-scoped test_database fixture
+    Uses test_settings which has DATASTORE_POSTGRES_DSN configured.
+    PostgresDatastore.create() reads config and auto-detects test mode.
     """
-    ds = await PostgresDatastore.create(dsn=test_database)
+    ds = await PostgresDatastore.create(config=test_settings)
     yield ds
     # Cleanup: close connection pool
     await ds.close()

@@ -1,6 +1,7 @@
 """Conftest for PostgreSQL datastore tests.
 
-Imports the test_database fixture for integration tests.
+The test_settings fixture from root conftest.py is the Single Source of Truth (SSOT)
+for all test configuration, including PostgreSQL DSN setup via testcontainers or CI env.
 """
 
-from tests.integration.fixtures import test_database  # noqa: F401
+# No imports needed - test_settings is available from root conftest.py

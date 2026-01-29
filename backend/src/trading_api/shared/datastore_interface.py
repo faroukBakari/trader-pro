@@ -13,6 +13,8 @@ from typing import Generic, TypeVar
 
 from pydantic import BaseModel
 
+from trading_api.shared.config import Settings
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -144,6 +146,15 @@ class TableInterface(ABC, Generic[T]):
             ValueError: If duplicate field values exist in current data
         """
 
+    @abstractmethod
+    async def reset(self) -> None:
+        """Reset table to initial state: clear data AND remove all indexes.
+
+        Unlike clear() which only removes data, reset() also removes any
+        custom indexes created via create_index() or create_unique_index().
+        This ensures full test isolation between tests that manipulate indexes.
+        """
+
 
 class DatastoreInterface(ABC):
     """Abstract interface for datastore with transaction support.
@@ -188,8 +199,12 @@ class DatastoreInterface(ABC):
 
     @classmethod
     @abstractmethod
-    async def create(cls) -> "DatastoreInterface":
-        """Async factory for datastore creation.
+    async def create(cls, config: Settings | None = None) -> "DatastoreInterface":
+        """Async factory for datastore creation with optional config injection.
+
+        Args:
+            config: Optional Settings instance for dependency injection (tests).
+                   Defaults to global settings singleton for production (SSOT).
 
         Default implementation wraps sync instantiation. Override in subclasses
         that require actual async initialization (e.g., PostgresDatastore for

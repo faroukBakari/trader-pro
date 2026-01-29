@@ -10,6 +10,7 @@ import logging
 import threading
 from pathlib import Path
 
+from trading_api.shared.config import Settings
 from trading_api.shared.datastore_interface import DatastoreInterface
 
 logger = logging.getLogger(__name__)
@@ -101,11 +102,14 @@ class DatastoreRegistry:
                     f"Auto-discovered datastore: {folder_name} ({obj.__name__})"
                 )
 
-    async def get_datastores(self) -> list[DatastoreInterface]:
+    async def get_datastores(
+        self, config: Settings | None = None
+    ) -> list[DatastoreInterface]:
         """Get datastore instances by name.
 
         Args:
-            names: Datastore names to get
+            config: Optional Settings for dependency injection (tests).
+                   Defaults to global settings singleton.
 
         Returns:
             List of datastore instances
@@ -117,14 +121,21 @@ class DatastoreRegistry:
         """
 
         return await asyncio.gather(
-            *[self._get_instance(name) for name in self._datastore_classes.keys()]
+            *[
+                self._get_instance(name, config=config)
+                for name in self._datastore_classes.keys()
+            ]
         )
 
-    async def _get_instance(self, name: str) -> DatastoreInterface:
+    async def _get_instance(
+        self, name: str, config: Settings | None = None
+    ) -> DatastoreInterface:
         """Get or create datastore instance via async factory.
 
         Args:
             name: Datastore name
+            config: Optional Settings for dependency injection (tests).
+                   Defaults to global settings singleton.
 
         Returns:
             DatastoreInterface instance
@@ -148,7 +159,7 @@ class DatastoreRegistry:
                 )
 
             datastore_class = self._datastore_classes[name]
-            instance = await datastore_class.create()
+            instance = await datastore_class.create(config=config)
 
             self._instances[name] = instance
             logger.debug(f"Loaded datastore instance: {name}")

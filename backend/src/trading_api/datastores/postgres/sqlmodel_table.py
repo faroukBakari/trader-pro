@@ -50,6 +50,7 @@ class SQLModelTable(TableInterface[T]):
         model_class: type[T],
         session_factory: async_sessionmaker[AsyncSession],
         primary_key: str = "id",
+        allow_reset: bool = False,
     ) -> None:
         """Initialize SQLModelTable.
 
@@ -57,12 +58,14 @@ class SQLModelTable(TableInterface[T]):
             model_class: SQLModel class with table=True
             session_factory: Async session factory for database operations
             primary_key: Name of the primary key field
+            allow_reset: Whether reset() is allowed (test mode only)
         """
         self._model = model_class
         self._session_factory = session_factory
         self._pk = primary_key
         self._pk_col = getattr(model_class, primary_key)
         self._initialized = False
+        self._allow_reset = allow_reset
 
         # Extract SQLAlchemy Table for targeted create_all
         try:
@@ -192,6 +195,23 @@ class SQLModelTable(TableInterface[T]):
         async with self._session_factory() as session:
             await session.execute(delete(self._model))
             await session.commit()
+
+    async def reset(self) -> None:
+        """Reset table to initial state.
+
+        For SQLModelTable, indexes are schema-defined (via Field metadata),
+        not dynamically created. Reset is equivalent to clear() since indexes
+        cannot be removed without dropping the entire table.
+
+        Raises:
+            RuntimeError: If DATASTORE_ALLOW_RESET is not enabled in settings.
+        """
+        if not self._allow_reset:
+            raise RuntimeError(
+                "reset() is disabled. Set DATASTORE_ALLOW_RESET=True in settings "
+                "(test mode only)."
+            )
+        await self.clear()
 
     async def count(self) -> int:
         """Count records."""

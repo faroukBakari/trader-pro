@@ -412,14 +412,38 @@ make test-integration
 
 ### 5. PostgreSQL Integration Testing
 
-Tests requiring a real PostgreSQL database use a **dual-path architecture**:
+Tests requiring a real PostgreSQL database use a **dual-path architecture** with `test_settings` as the single source of truth:
 
-| Environment | Detection                          | PostgreSQL Source                  |
-| ----------- | ---------------------------------- | ---------------------------------- |
-| **Local**   | `CI` env var not set               | testcontainers (auto-provisioned)  |
-| **CI**      | `CI=true` or `GITHUB_ACTIONS=true` | Service container (pre-configured) |
+| Environment | Detection                        | PostgreSQL Source                  |
+| ----------- | -------------------------------- | ---------------------------------- |
+| **Local**   | `DATASTORE_POSTGRES_DSN` not set | testcontainers (auto-provisioned)  |
+| **CI**      | `DATASTORE_POSTGRES_DSN` set     | Service container (pre-configured) |
 
-**Location:** `backend/tests/integration/fixtures/postgres_db.py`
+**Location:** `backend/conftest.py` (session-scoped `test_settings` fixture)
+
+#### The `test_settings` Fixture (Single Source of Truth)
+
+All test configuration flows through a session-scoped `test_settings` fixture in `backend/conftest.py`:
+
+```python
+@pytest.fixture(scope="session")
+def test_settings() -> Iterator[Settings]:
+    """Session-scoped test settings - SINGLE SOURCE OF TRUTH for all config.
+
+    Handles PostgreSQL setup automatically:
+    - CI mode: Uses DATASTORE_POSTGRES_DSN from environment
+    - Local mode: Spins up postgres:16 via testcontainers, creates test database
+
+    DSN presence in environment IS the CI indicator - no separate detection needed.
+    """
+    # ... see backend/conftest.py for full implementation
+```
+
+The fixture returns a fully-configured `Settings` instance with:
+
+- `DATASTORE_ALLOW_RESET=True` - Enables `reset()` for test isolation
+- `DATASTORE_POSTGRES_POOL_MAX_SIZE=2` - Minimal pool for test efficiency
+- `DATASTORE_POSTGRES_DSN` - Set from environment (CI) or testcontainers (local)
 
 #### Local Development (testcontainers)
 
@@ -427,17 +451,22 @@ Tests automatically provision a PostgreSQL container via [testcontainers-python]
 
 ```python
 import pytest
-from tests.integration.fixtures.postgres_db import postgres_container
+from trading_api.shared.config import Settings
 
-@pytest.fixture(scope="session")
-def db_dsn(postgres_container):
-    """Get DSN from auto-provisioned container."""
-    return postgres_container.get_connection_url()
+@pytest.fixture
+async def postgres_datastore(test_settings: Settings):
+    """Create PostgresDatastore using test_settings fixture."""
+    from trading_api.datastores import PostgresDatastore
+    # test_settings has DATASTORE_POSTGRES_DSN configured
+    # create() uses config, auto-detects pytest for NullConnectionPool
+    ds = await PostgresDatastore.create(config=test_settings)
+    yield ds
+    await ds.close()
 
 @pytest.mark.asyncio
-async def test_database_operation(db_dsn):
-    datastore = await PostgresDatastore.create(dsn=db_dsn)
-    # Test with real PostgreSQL
+async def test_database_operation(postgres_datastore):
+    users_table = postgres_datastore.table(User)
+    # ...
 ```
 
 **Benefits:**
@@ -446,6 +475,7 @@ async def test_database_operation(db_dsn):
 - ✅ Isolated container per test session
 - ✅ Automatic cleanup on test completion
 - ✅ Uses PostgreSQL 16 (matches production)
+- ✅ 12-Factor compliant (config via Settings injection)
 
 #### CI Environment (Service Containers)
 
@@ -460,28 +490,119 @@ services:
       POSTGRES_USER: trader
       POSTGRES_PASSWORD: trader_dev
       POSTGRES_DB: trader_test
+env:
+  DATASTORE_POSTGRES_DSN: postgresql://trader:trader_dev@localhost:5432/trader_test
 ```
 
-The fixture detects CI via environment variables and uses `POSTGRES_DSN`:
-
-```python
-def _is_ci_environment() -> bool:
-    return os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
-```
+The `test_settings` fixture detects CI mode by checking if `DATASTORE_POSTGRES_DSN` is set in the environment - no separate `_is_ci_environment()` function needed.
 
 #### Fixture Usage Pattern
 
 ```python
 # tests/integration/conftest.py
-from tests.integration.fixtures.postgres_db import postgres_container
+from trading_api.shared.config import Settings
 
-@pytest.fixture(scope="session")
-def postgres_dsn(postgres_container) -> str:
-    """PostgreSQL DSN - works in both local and CI environments."""
-    return postgres_container.get_connection_url()
+@pytest.fixture
+async def postgres_datastore(
+    test_settings: Settings,
+) -> AsyncIterator[DatastoreInterface]:
+    """PostgresDatastore fixture with cleanup.
+
+    Uses test_settings which has DATASTORE_POSTGRES_DSN configured.
+    PostgresDatastore.create() auto-detects test mode and uses NullConnectionPool.
+    """
+    from trading_api.datastores import PostgresDatastore
+    ds = await PostgresDatastore.create(config=test_settings)
+    yield ds
+    await ds.close()
 ```
 
-**Note:** The `postgres_container` fixture handles both paths transparently - local tests get a real testcontainer, CI tests get the service container URL.
+**Note:** The `test_settings` fixture handles both paths transparently - local tests get testcontainers, CI tests use the pre-configured DSN from environment.
+
+### 6. Datastore Contract Testing
+
+Datastore tests follow a **three-tier architecture** for comprehensive coverage:
+
+```
+backend/
+├── tests/integration/
+│   ├── test_datastore_contract.py      # Contract tests (ALL implementations)
+│   └── test_datastore_integration.py   # Repository integration tests
+└── src/trading_api/datastores/
+    ├── inmemory/tests/
+    │   └── test_inmemory_specific.py   # InMemory-specific tests
+    └── postgres/tests/
+        └── test_postgres_specific.py   # Postgres-specific tests
+```
+
+| Test Tier                   | Location                                          | Purpose                                       |
+| --------------------------- | ------------------------------------------------- | --------------------------------------------- |
+| **Contract Tests**          | `tests/integration/test_datastore_contract.py`    | Validates interface compliance (parametrized) |
+| **Implementation-Specific** | `datastores/{impl}/tests/`                        | Tests unique features per implementation      |
+| **Integration Tests**       | `tests/integration/test_datastore_integration.py` | End-to-end with repositories                  |
+
+#### Parametrized Contract Tests
+
+Contract tests use a parametrized `any_datastore` fixture to run against all implementations:
+
+```python
+@pytest.fixture(
+    params=[
+        pytest.param("inmemory", id="inmemory"),
+        pytest.param(
+            "postgres",
+            id="postgres",
+            marks=[pytest.mark.integration, pytest.mark.postgres],
+        ),
+    ]
+)
+async def any_datastore(
+    request: pytest.FixtureRequest,
+    inmemory_datastore: DatastoreInterface,
+    postgres_datastore: DatastoreInterface | None,
+) -> AsyncIterator[DatastoreInterface]:
+    """Parametrized fixture providing each datastore implementation."""
+    if request.param == "inmemory":
+        yield inmemory_datastore
+    elif request.param == "postgres":
+        if postgres_datastore is None:
+            pytest.skip("PostgreSQL not available")
+        yield postgres_datastore
+```
+
+#### Test Isolation with `reset()`
+
+The `reset()` method clears data AND removes custom indexes (unlike `clear()` which only removes data):
+
+```python
+@pytest.fixture
+async def table(any_datastore: DatastoreInterface) -> AsyncIterator[TableInterface]:
+    tbl = any_datastore.table(ContractTestModel)
+    await tbl.reset()  # Clean state: no data, no indexes
+    yield tbl
+    await tbl.reset()  # Cleanup after test
+```
+
+**Important:** `reset()` is protected by `DATASTORE_ALLOW_RESET` setting to prevent accidental use in production.
+
+#### Running Datastore Tests
+
+```bash
+# All contract tests (InMemory + Postgres)
+cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v
+
+# InMemory only (fast)
+cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v -k inmemory
+
+# Postgres only (requires testcontainers)
+cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v -k postgres -m integration
+
+# Implementation-specific tests
+cd backend && poetry run pytest src/trading_api/datastores/inmemory/tests/ -v
+cd backend && poetry run pytest src/trading_api/datastores/postgres/tests/ -v -m integration
+```
+
+See [datastores/README.md](../src/trading_api/datastores/README.md) for the complete test architecture documentation.
 
 ---
 

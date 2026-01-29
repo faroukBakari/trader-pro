@@ -115,6 +115,7 @@ testpaths = [
 ]
 markers = [
     "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    "postgres: marks tests requiring PostgreSQL (deselect with '-m \"not postgres\"')",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: marks tests as fast unit tests with mocks",
 ]
