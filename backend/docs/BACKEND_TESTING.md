@@ -410,6 +410,79 @@ backend/tests/integration/
 make test-integration
 ```
 
+### 5. PostgreSQL Integration Testing
+
+Tests requiring a real PostgreSQL database use a **dual-path architecture**:
+
+| Environment | Detection                          | PostgreSQL Source                  |
+| ----------- | ---------------------------------- | ---------------------------------- |
+| **Local**   | `CI` env var not set               | testcontainers (auto-provisioned)  |
+| **CI**      | `CI=true` or `GITHUB_ACTIONS=true` | Service container (pre-configured) |
+
+**Location:** `backend/tests/integration/fixtures/postgres_db.py`
+
+#### Local Development (testcontainers)
+
+Tests automatically provision a PostgreSQL container via [testcontainers-python](https://testcontainers-python.readthedocs.io/):
+
+```python
+import pytest
+from tests.integration.fixtures.postgres_db import postgres_container
+
+@pytest.fixture(scope="session")
+def db_dsn(postgres_container):
+    """Get DSN from auto-provisioned container."""
+    return postgres_container.get_connection_url()
+
+@pytest.mark.asyncio
+async def test_database_operation(db_dsn):
+    datastore = await PostgresDatastore.create(dsn=db_dsn)
+    # Test with real PostgreSQL
+```
+
+**Benefits:**
+
+- ✅ No manual Docker setup required
+- ✅ Isolated container per test session
+- ✅ Automatic cleanup on test completion
+- ✅ Uses PostgreSQL 16 (matches production)
+
+#### CI Environment (Service Containers)
+
+In GitHub Actions, the workflow provides a PostgreSQL service container:
+
+```yaml
+# .github/workflows/ci.yml
+services:
+  postgres:
+    image: postgres:16
+    env:
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: trader_dev
+      POSTGRES_DB: trader_test
+```
+
+The fixture detects CI via environment variables and uses `POSTGRES_DSN`:
+
+```python
+def _is_ci_environment() -> bool:
+    return os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
+```
+
+#### Fixture Usage Pattern
+
+```python
+# tests/integration/conftest.py
+from tests.integration.fixtures.postgres_db import postgres_container
+
+@pytest.fixture(scope="session")
+def postgres_dsn(postgres_container) -> str:
+    """PostgreSQL DSN - works in both local and CI environments."""
+    return postgres_container.get_connection_url()
+```
+
+**Note:** The `postgres_container` fixture handles both paths transparently - local tests get a real testcontainer, CI tests get the service container URL.
+
 ---
 
 ## Adding New Tests

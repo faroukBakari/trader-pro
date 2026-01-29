@@ -26,7 +26,7 @@ config = context.config
 # Set sqlalchemy.url from environment
 database_url = os.environ.get(
     "DATASTORE_POSTGRES_DSN",
-    "postgresql+asyncpg://trader:trader_dev@localhost:5433/trader_bars",
+    "postgresql+asyncpg://trader:trader_dev@localhost:5433/trader_pro",
 )
 config.set_main_option("sqlalchemy.url", database_url)
 

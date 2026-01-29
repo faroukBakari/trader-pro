@@ -13,11 +13,19 @@ Provides persistent storage with:
 """
 
 from .datastore import PostgresDatastore, PostgresTable, SQLModelTable
-from .engine import AsyncEngineFactory
+from .engine import (
+    AsyncEngineFactory,
+    ConnectionTimeoutError,
+    DatabaseNotFoundError,
+    check_database_exists,
+)
 
 __all__ = [
     "AsyncEngineFactory",
+    "ConnectionTimeoutError",
+    "DatabaseNotFoundError",
     "PostgresDatastore",
     "PostgresTable",
     "SQLModelTable",
+    "check_database_exists",
 ]

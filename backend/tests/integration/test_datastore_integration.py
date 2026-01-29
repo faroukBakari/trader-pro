@@ -3,15 +3,15 @@
 These tests run the same test cases against multiple datastore implementations
 to ensure interface conformance and behavioral consistency.
 
-PostgreSQL tests require:
-- PostgreSQL running (docker-compose.dev.yml or CI service)
-- DATASTORE_POSTGRES_DSN or DATASTORE_POSTGRES_* env vars
+PostgreSQL tests require the test_database fixture which:
+- Creates an ephemeral trader_bars_test database
+- Runs migrations automatically
+- Cleans up after the test session
 
 Run with: make -C backend test-integration
 Or: pytest tests/integration/test_datastore_integration.py -v
 """
 
-import os
 from datetime import datetime, timezone
 from typing import AsyncIterator
 
@@ -22,43 +22,6 @@ from trading_api.modules.auth.repository import RefreshTokenRepository, UserRepo
 from trading_api.modules.auth.tests.conftest import DeviceInfoFactory, UserCreateFactory
 from trading_api.shared.datastore_interface import DatastoreInterface
 
-# Test DSN for PostgreSQL
-TEST_DSN = os.environ.get(
-    "DATASTORE_POSTGRES_DSN",
-    "postgresql://trader:trader_dev@localhost:5433/trader_bars",
-)
-
-
-def postgres_available() -> bool:
-    """Check if PostgreSQL is available for testing."""
-    try:
-        import socket
-
-        # Parse DSN to get host and port
-        # Format: postgresql://user:pass@host:port/db
-        parts = TEST_DSN.split("@")[1].split("/")[0]
-        host, port = parts.split(":")
-
-        # Simple socket check for connectivity
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex((host, int(port)))
-        sock.close()
-        return result == 0
-    except Exception:
-        return False
-
-
-# Cache the result to avoid repeated checks
-_POSTGRES_AVAILABLE = postgres_available()
-
-
-# Mark to skip postgres tests if not available
-skip_postgres = pytest.mark.skipif(
-    not _POSTGRES_AVAILABLE,
-    reason="PostgreSQL not available (start with: docker compose -f backend/docker-compose.dev.yml up -d)",
-)
-
 
 @pytest.fixture
 async def inmemory_datastore() -> AsyncIterator[DatastoreInterface]:
@@ -67,15 +30,18 @@ async def inmemory_datastore() -> AsyncIterator[DatastoreInterface]:
 
 
 @pytest.fixture
-async def postgres_datastore() -> AsyncIterator[DatastoreInterface]:
+async def postgres_datastore(
+    test_database: str,
+) -> AsyncIterator[DatastoreInterface]:
     """PostgresDatastore fixture with cleanup.
 
-    Uses NullConnectionPool (via warm_bg_workers=False) which has no background
-    workers, preventing 'Task was destroyed' errors during test teardown.
+    Uses the test_database fixture to get a DSN pointing to the ephemeral
+    test database. Uses NullConnectionPool (via warm_bg_workers=False) which
+    has no background workers, preventing 'Task was destroyed' errors.
     """
     from trading_api.datastores import PostgresDatastore
 
-    ds = await PostgresDatastore.create(dsn=TEST_DSN, warm_bg_workers=False)
+    ds = await PostgresDatastore.create(dsn=test_database, warm_bg_workers=False)
     yield ds
     await ds.close()
 
@@ -83,6 +49,7 @@ async def postgres_datastore() -> AsyncIterator[DatastoreInterface]:
 @pytest.fixture(params=["inmemory", "postgres"])
 async def datastore(
     request: pytest.FixtureRequest,
+    test_database: str,
 ) -> AsyncIterator[DatastoreInterface]:
     """Parametrized fixture providing both datastore implementations.
 
@@ -93,12 +60,10 @@ async def datastore(
     if request.param == "inmemory":
         yield InMemoryDatastore()
     else:
-        if not _POSTGRES_AVAILABLE:
-            pytest.skip("PostgreSQL not available")
         from trading_api.datastores import PostgresDatastore
         from trading_api.models.auth import RefreshTokenData, User
 
-        ds = await PostgresDatastore.create(dsn=TEST_DSN, warm_bg_workers=False)
+        ds = await PostgresDatastore.create(dsn=test_database, warm_bg_workers=False)
         # Clear test tables before use (Wave 2B: unified table() API)
         users_table = ds.table(User)
         tokens_table = ds.table(RefreshTokenData)
@@ -293,7 +258,6 @@ class TestDatastoreFeatureFlags:
         """InMemoryDatastore.has_transactions is False."""
         assert inmemory_datastore.has_transactions is False
 
-    @skip_postgres
     @pytest.mark.asyncio
     async def test_postgres_has_persistence_true(
         self, postgres_datastore: DatastoreInterface
@@ -301,7 +265,6 @@ class TestDatastoreFeatureFlags:
         """PostgresDatastore.has_persistence is True."""
         assert postgres_datastore.has_persistence is True
 
-    @skip_postgres
     @pytest.mark.asyncio
     async def test_postgres_has_transactions_true(
         self, postgres_datastore: DatastoreInterface

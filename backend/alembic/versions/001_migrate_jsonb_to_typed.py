@@ -1,15 +1,18 @@
 """Migrate JSONB storage to typed columns.
 
 Revision ID: 001_migrate_jsonb_to_typed
-Revises:
+Revises: 000_initial_schema
 Create Date: 2026-01-28
 
-[ARCHITECTURE] Wave 2B: SQLModel migration
-This migration transforms the JSONB-based schema (Wave 2A) to typed columns:
-- Users: key/value/created_at/updated_at → id/email/google_id/full_name/picture/created_at/last_login/is_active
-- RefreshTokens: key/value/created_at/updated_at → token_hash/token_id/user_id/created_at/ip_address/user_agent/fingerprint
+[ARCHITECTURE] Wave 2B: JSONB → Typed column migration
+This migration transforms the JSONB-based schema (Wave 2A) to typed columns.
 
-Steps:
+CONDITIONAL EXECUTION:
+- Only runs if tables have JSONB "value" column (Wave 2A schema)
+- Safely skips if tables already have typed schema (from 000_initial_schema)
+- Safely skips if tables don't exist
+
+Migration steps (when applicable):
 1. Add typed columns (nullable initially)
 2. Copy data from JSONB to typed columns
 3. Set NOT NULL constraints
@@ -21,19 +24,63 @@ Reversible: downgrade recreates JSONB schema and copies data back.
 """
 
 import sqlalchemy as sa
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "001_migrate_jsonb_to_typed"
-down_revision = None
+down_revision = "000_initial_schema"
 branch_labels = None
 depends_on = None
 
 
+def _table_exists(table_name: str) -> bool:
+    """Check if a table exists in the database."""
+    conn = op.get_bind()
+    inspector = sa_inspect(conn)
+    return table_name in inspector.get_table_names()
+
+
+def _column_exists(table_name: str, column_name: str) -> bool:
+    """Check if a column exists in a table."""
+    conn = op.get_bind()
+    inspector = sa_inspect(conn)
+    if table_name not in inspector.get_table_names():
+        return False
+    columns = [col["name"] for col in inspector.get_columns(table_name)]
+    return column_name in columns
+
+
+def _has_jsonb_schema(table_name: str) -> bool:
+    """Check if table has JSONB schema (Wave 2A pattern).
+
+    Wave 2A tables have: key, value (JSONB), created_at, updated_at
+    Wave 2B tables have: typed columns matching SQLModel
+    """
+    return _column_exists(table_name, "value") and _column_exists(table_name, "key")
+
+
 def upgrade() -> None:
+    """Migrate JSONB tables to typed columns.
+
+    CONDITIONAL: Only runs if JSONB schema detected.
+    Safely no-ops for:
+    - Fresh databases (typed tables from 000_initial_schema)
+    - Already migrated databases
+    """
     # === USERS TABLE ===
+    if _table_exists("users") and _has_jsonb_schema("users"):
+        _migrate_users_table()
+
+    # === REFRESH_TOKENS TABLE ===
+    if _table_exists("refresh_tokens") and _has_jsonb_schema("refresh_tokens"):
+        _migrate_refresh_tokens_table()
+
+
+def _migrate_users_table() -> None:
+    """Migrate users table from JSONB to typed columns."""
 
     # Step 1: Add typed columns (nullable initially)
     op.add_column("users", sa.Column("email", sa.String(), nullable=True))
@@ -129,8 +176,9 @@ def upgrade() -> None:
     op.alter_column("users", "key", new_column_name="id")
     op.alter_column("users", "typed_created_at", new_column_name="created_at")
 
-    # === REFRESH_TOKENS TABLE ===
 
+def _migrate_refresh_tokens_table() -> None:
+    """Migrate refresh_tokens table from JSONB to typed columns."""
     # Step 1: Add typed columns
     op.add_column("refresh_tokens", sa.Column("token_id", sa.String(), nullable=True))
     op.add_column("refresh_tokens", sa.Column("user_id", sa.String(), nullable=True))
@@ -223,7 +271,24 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    """Revert typed columns back to JSONB schema.
+
+    CONDITIONAL: Only runs if typed schema exists (id column for users).
+    This handles the case where upgrade was a no-op.
+    """
     # === REFRESH_TOKENS TABLE (reverse) ===
+    if _table_exists("refresh_tokens") and _column_exists(
+        "refresh_tokens", "token_hash"
+    ):
+        _downgrade_refresh_tokens_table()
+
+    # === USERS TABLE (reverse) ===
+    if _table_exists("users") and _column_exists("users", "id"):
+        _downgrade_users_table()
+
+
+def _downgrade_refresh_tokens_table() -> None:
+    """Revert refresh_tokens table to JSONB schema."""
 
     # Rename columns back
     op.alter_column("refresh_tokens", "token_hash", new_column_name="key")
@@ -286,8 +351,9 @@ def downgrade() -> None:
     op.drop_column("refresh_tokens", "user_agent")
     op.drop_column("refresh_tokens", "fingerprint")
 
-    # === USERS TABLE (reverse) ===
 
+def _downgrade_users_table() -> None:
+    """Revert users table to JSONB schema."""
     # Rename columns back
     op.alter_column("users", "id", new_column_name="key")
     op.alter_column("users", "created_at", new_column_name="typed_created_at")

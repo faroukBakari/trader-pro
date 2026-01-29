@@ -453,7 +453,7 @@ describe("authService", () => {
     const authService = useAuthService();
 
     vi.spyOn(authService.apiAdapter, "loginWithGoogleToken").mockRejectedValue(
-      new Error("Invalid token")
+      new Error("Invalid token"),
     );
 
     await authService.loginWithGoogleToken("invalid_token");
@@ -606,6 +606,21 @@ jobs:
 - Fast feedback (2-3 minutes total)
 - Clear failure isolation
 
+### Database Testing (Dual-Path Architecture)
+
+PostgreSQL integration tests use different database sources depending on environment:
+
+| Environment | PostgreSQL Source                 | Setup                      |
+| ----------- | --------------------------------- | -------------------------- |
+| **Local**   | testcontainers (auto-provisioned) | None required              |
+| **CI**      | GitHub Actions service container  | Pre-configured in workflow |
+
+**Local development**: Tests automatically provision a PostgreSQL container via testcontainers-python. No manual Docker setup needed.
+
+**CI environment**: The workflow provides a PostgreSQL service container. Tests detect CI via `CI=true` or `GITHUB_ACTIONS=true` environment variables.
+
+See [backend/docs/BACKEND_TESTING.md](../backend/docs/BACKEND_TESTING.md#5-postgresql-integration-testing) for fixture patterns and implementation details.
+
 ## Test Coverage
 
 ### Backend Coverage
@@ -737,7 +752,7 @@ describe("WebSocket Client", () => {
     await adapter.bars.subscribe(
       "test-listener",
       { symbol: "AAPL", resolution: "1" },
-      callback
+      callback,
     );
 
     expect(callback).toHaveBeenCalled();

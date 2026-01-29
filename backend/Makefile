@@ -866,9 +866,9 @@ show-cache-symbol: ## Show contracts matching symbol (usage: make show-cache-sym
 # Database Management (PostgreSQL via Docker)
 .PHONY: db-up db-down db-status db-logs db-psql
 
-# Datastore configuration (can override via environment)
+# Datastore configuration - loaded from .env, fallbacks for safety
 DATASTORE_POSTGRES_PORT ?= 5433
-DATASTORE_POSTGRES_DB ?= trader_bars
+DATASTORE_POSTGRES_DB ?= trader_pro
 
 db-up: ## Start PostgreSQL database (docker-compose)
 	@echo "🐘 Starting PostgreSQL database..."
@@ -936,14 +936,18 @@ db-reset: ## Reset database (destroy and recreate with migrations)
 	docker-compose -f docker-compose.dev.yml down -v
 	@echo "🐘 Recreating database..."
 	docker-compose -f docker-compose.dev.yml up -d postgres
-	@echo "Waiting for PostgreSQL to be ready..."
-	@sleep 3
+	@echo "⏳ Waiting for PostgreSQL to be ready..."
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if docker-compose -f docker-compose.dev.yml exec -T postgres pg_isready -U trader > /dev/null 2>&1; then \
+			echo "✓ PostgreSQL is ready"; \
+			break; \
+		fi; \
+		echo "  Attempt $$i/10 - waiting..."; \
+		sleep 2; \
+	done
 	$(MAKE) alembic-upgrade
-	@echo "✅ Database reset complete"
-
-# echo ""
 	@echo "========================================"
-	@echo "✅ TWS API installation complete!"
+	@echo "✅ Database reset complete"
 	@echo "========================================"
 
 # JWT Key Pair Management

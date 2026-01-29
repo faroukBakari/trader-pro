@@ -21,6 +21,8 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient
 from jose import jwt
 
+# Import test database fixture for pytest auto-discovery
+from tests.integration.fixtures import test_database  # noqa: F401
 from trading_api.app_factory import ModularApp
 from trading_api.capabilities.auth import AuthCapability
 

@@ -6,6 +6,7 @@
 ## Overview
 
 PostgreSQL datastore implementation using **psycopg3** with dual-mode storage:
+
 - **PostgresTable**: JSONB storage for flexible schemas (Wave 2A)
 - **SQLModelTable**: Typed column storage for SQLModel entities (Wave 2B)
 
@@ -60,12 +61,12 @@ query = sql.SQL("SELECT value FROM {} WHERE value->>{} = %s").format(
 
 ### Composition Patterns
 
-| Component | Purpose | Example |
-|-----------|---------|---------|
-| `sql.SQL()` | Static SQL template | `sql.SQL("SELECT * FROM {}")` |
+| Component          | Purpose                     | Example                               |
+| ------------------ | --------------------------- | ------------------------------------- |
+| `sql.SQL()`        | Static SQL template         | `sql.SQL("SELECT * FROM {}")`         |
 | `sql.Identifier()` | Table/column names (quoted) | `sql.Identifier("users")` → `"users"` |
-| `sql.Literal()` | Literal values in SQL | `sql.Literal("email")` → `'email'` |
-| `%s` placeholder | Query parameters (values) | `cursor.execute(query, (value,))` |
+| `sql.Literal()`    | Literal values in SQL       | `sql.Literal("email")` → `'email'`    |
+| `%s` placeholder   | Query parameters (values)   | `cursor.execute(query, (value,))`     |
 
 ### When to Use Each
 
@@ -75,7 +76,7 @@ query = sql.SQL("SELECT value FROM {} WHERE value->>{} = %s").format(
 
 ## Configuration
 
-Environment variables for PostgreSQL connection:
+Environment variables for PostgreSQL connection (`.env` is the SSOT):
 
 ```bash
 # Option 1: Full DSN (takes precedence)
@@ -86,11 +87,12 @@ DATASTORE_POSTGRES_USER=trader
 DATASTORE_POSTGRES_PASSWORD=trader_dev
 DATASTORE_POSTGRES_HOST=localhost
 DATASTORE_POSTGRES_PORT=5433
-DATASTORE_POSTGRES_DB=trader_bars
+DATASTORE_POSTGRES_DB=trader_pro
 
 # Pool configuration
 DATASTORE_POSTGRES_POOL_MAX_SIZE=10
-DATASTORE_POSTGRES_POOL_RECONNECT_TIMEOUT=5.0
+DATASTORE_POSTGRES_POOL_RECONNECT_TIMEOUT=5.0  # Per-attempt timeout (seconds)
+DATASTORE_POSTGRES_POOL_OPEN_TIMEOUT=30.0      # Total startup timeout (seconds)
 ```
 
 Access via settings:
@@ -100,6 +102,68 @@ from trading_api.shared.config import settings
 
 dsn = settings.postgres_dsn  # Built from components or DATASTORE_POSTGRES_DSN
 ```
+
+## Startup Behavior (Fail-Fast)
+
+The datastore implements **fail-fast startup** following 12-Factor App principles:
+
+1. **Pre-flight database check**: Before opening the connection pool, `check_database_exists()` verifies the target database exists
+2. **Bounded timeout**: Pool opening is wrapped with `asyncio.wait_for()` using `POOL_OPEN_TIMEOUT` (default: 30s)
+3. **Clear error messages**: Custom exceptions provide actionable remediation steps
+
+```python
+from trading_api.datastores.postgres import (
+    check_database_exists,
+    DatabaseNotFoundError,
+    ConnectionTimeoutError,
+)
+
+# Manual pre-flight check (optional - datastore does this automatically)
+check_database_exists(dsn)  # Raises DatabaseNotFoundError if DB missing
+```
+
+### Why Fail-Fast?
+
+- **Prevents infinite hangs**: psycopg3's pool retries indefinitely without a total timeout cap
+- **Clear diagnostics**: Developers see actionable error messages instead of mysterious hangs
+- **Signal responsive**: Bounded timeout allows Ctrl+C to work during startup
+
+## Error Handling
+
+### DatabaseNotFoundError
+
+Raised when the configured database doesn't exist on the PostgreSQL server:
+
+```
+DATASTORE_DATABASE_NOT_FOUND: Database 'trader_pro' does not exist on localhost:5433.
+
+To fix this, either:
+  1. Recreate the Docker volume (loses data):
+     make db-down && docker volume rm backend_postgres_data && make db-up
+
+  2. Create the database manually (preserves existing data):
+     docker-compose -f docker-compose.dev.yml exec postgres \
+       psql -U trader -d postgres -c 'CREATE DATABASE trader_pro;'
+```
+
+**Common cause**: Database was renamed in config but the Docker volume still has the old database.
+
+### ConnectionTimeoutError
+
+Raised when the database server is unreachable within the timeout period:
+
+```
+DATASTORE_CONNECTION_TIMEOUT: Could not connect to PostgreSQL at localhost:5433 within 30.0s.
+
+Possible causes:
+  1. Database server is not running:
+     make db-up
+
+  2. Wrong host/port configuration:
+     Check DATASTORE_POSTGRES_HOST and DATASTORE_POSTGRES_PORT in .env
+```
+
+**Common cause**: Docker container not running (`make db-up` to start).
 
 ## Testing
 

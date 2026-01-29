@@ -15,6 +15,7 @@ eliminating SQL injection vulnerabilities from dynamic table/field names.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -33,7 +34,12 @@ from sqlmodel import SQLModel
 from trading_api.shared import DatastoreInterface, TableInterface
 from trading_api.shared.config import settings
 
-from .engine import AsyncEngineFactory
+from .engine import (
+    AsyncEngineFactory,
+    ConnectionTimeoutError,
+    check_database_exists,
+    parse_dsn,
+)
 from .sql_safe import validate_identifier
 from .sqlmodel_table import SQLModelTable
 
@@ -519,6 +525,11 @@ class PostgresDatastore(DatastoreInterface):
             if reconnect_timeout is not None
             else settings.DATASTORE_POSTGRES_POOL_RECONNECT_TIMEOUT
         )
+        open_timeout = settings.DATASTORE_POSTGRES_POOL_OPEN_TIMEOUT
+
+        # [FAIL-FAST] Pre-flight check: verify database exists before attempting pool connection
+        # This catches "database does not exist" errors immediately with clear remediation steps
+        check_database_exists(dsn)
 
         # Auto-detect pytest: use NullConnectionPool (no background workers) to prevent teardown hangs
         if warm_bg_workers is None:
@@ -537,7 +548,14 @@ class PostgresDatastore(DatastoreInterface):
             open=False,  # Manual open for async context
             reconnect_timeout=reconnect_timeout,
         )
-        await pool.open()
+
+        # [BOUNDED-TIMEOUT] Wrap pool.open() to prevent infinite retry hangs
+        # This ensures Ctrl+C responsiveness and fail-fast on server down
+        _, _, host, port, _ = parse_dsn(dsn)
+        try:
+            await asyncio.wait_for(pool.open(), timeout=open_timeout)
+        except asyncio.TimeoutError:
+            raise ConnectionTimeoutError(host, port, open_timeout) from None
 
         # Also create session factory for SQLModel tables (Wave 2B)
         session_factory = await AsyncEngineFactory.get_session_factory(dsn)

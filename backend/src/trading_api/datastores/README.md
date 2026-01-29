@@ -223,6 +223,33 @@ class UserRepository:
 
 PostgreSQL datastore using **psycopg3 + JSONB** storage pattern. Provides real persistence with ACID transactions.
 
+### Startup Errors
+
+The datastore implements **fail-fast startup** with clear error messages:
+
+| Exception                | Code                           | Cause                             | Fix                                   |
+| ------------------------ | ------------------------------ | --------------------------------- | ------------------------------------- |
+| `DatabaseNotFoundError`  | `DATASTORE_DATABASE_NOT_FOUND` | Target database doesn't exist     | Create DB or reset Docker volume      |
+| `ConnectionTimeoutError` | `DATASTORE_CONNECTION_TIMEOUT` | Server unreachable within timeout | Start Docker container (`make db-up`) |
+
+```python
+from trading_api.datastores.postgres import (
+    PostgresDatastore,
+    DatabaseNotFoundError,
+    ConnectionTimeoutError,
+    check_database_exists,  # Pre-flight check utility
+)
+
+try:
+    datastore = await PostgresDatastore.create()
+except DatabaseNotFoundError as e:
+    print(f"Database missing: {e.db_name}")
+except ConnectionTimeoutError as e:
+    print(f"Connection timeout after {e.timeout}s")
+```
+
+See [postgres/README.md](postgres/README.md) for detailed error messages and remediation steps.
+
 ### Key Design Decisions
 
 - **JSONB Storage**: Schema-flexible storage - each table stores `key TEXT` + `value JSONB`
