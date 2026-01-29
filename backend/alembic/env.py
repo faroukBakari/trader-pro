@@ -2,7 +2,7 @@
 """Alembic migration environment for async SQLModel.
 
 [ARCHITECTURE] Wave 2B: SQLModel + Alembic integration
-- Uses asyncpg driver for PostgreSQL
+- Uses psycopg async driver for PostgreSQL
 - Target metadata from SQLModel.metadata
 - Environment-driven database URL
 """
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlmodel import SQLModel
 
 from alembic import context
+from trading_api.datastores.postgres.engine import AsyncEngineFactory
 from trading_api.models.auth.token import RefreshTokenData  # table=True
 
 # Import ALL table models to register metadata
@@ -23,12 +24,14 @@ from trading_api.models.auth.user import User  # table=True
 
 config = context.config
 
-# Set sqlalchemy.url from environment
+# Set sqlalchemy.url from environment, normalized to use psycopg driver
 database_url = os.environ.get(
     "DATASTORE_POSTGRES_DSN",
-    "postgresql+asyncpg://trader:trader_dev@localhost:5433/trader_pro",
+    "postgresql://trader:trader_dev@localhost:5433/trader_pro",
 )
-config.set_main_option("sqlalchemy.url", database_url)
+config.set_main_option(
+    "sqlalchemy.url", AsyncEngineFactory._normalize_url(database_url)
+)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

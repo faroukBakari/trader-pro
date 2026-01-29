@@ -150,7 +150,7 @@ class DatastoreInterface(ABC):
 
     Implementations:
     - InMemoryDatastore: Dict-based storage for MVP/testing
-    - PostgresDatastore: asyncpg pool-based (Wave 2+)
+    - PostgresDatastore: psycopg pool-based (Wave 2+)
     """
 
     @property
@@ -193,7 +193,7 @@ class DatastoreInterface(ABC):
 
         Default implementation wraps sync instantiation. Override in subclasses
         that require actual async initialization (e.g., PostgresDatastore for
-        asyncpg pool creation).
+        psycopg pool creation).
 
         Returns:
             DatastoreInterface instance

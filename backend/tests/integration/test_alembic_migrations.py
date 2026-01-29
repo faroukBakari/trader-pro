@@ -22,6 +22,7 @@ from psycopg import sql
 
 from alembic import command
 from alembic.config import Config
+from trading_api.datastores.postgres.engine import AsyncEngineFactory
 
 # Import testcontainers setup (includes RYUK_DISABLED)
 
@@ -119,7 +120,7 @@ FAKE_TOKENS = [
 
 def _get_alembic_config(dsn: str) -> Config:
     """Create Alembic config pointing to the test database."""
-    async_dsn = dsn.replace("postgresql://", "postgresql+asyncpg://")
+    async_dsn = AsyncEngineFactory._normalize_url(dsn)
     backend_dir = Path(__file__).parents[2]  # backend/
     alembic_ini = backend_dir / "alembic.ini"
 
@@ -131,7 +132,6 @@ def _get_alembic_config(dsn: str) -> Config:
 def _build_dsn(base_url: str, db_name: str) -> str:
     """Build a DSN for a specific database from a base URL."""
     clean_url = base_url.replace("postgresql+psycopg://", "postgresql://")
-    clean_url = clean_url.replace("postgresql+asyncpg://", "postgresql://")
     parsed = urlparse(clean_url)
     return f"{parsed.scheme}://{parsed.netloc}/{db_name}"
 
@@ -333,10 +333,8 @@ def migration_database() -> Iterator[str]:
                     "INSERT INTO alembic_version (version_num) VALUES ('000_initial_schema')"
                 )
 
-        # Export DSN for alembic env.py
-        os.environ["DATASTORE_POSTGRES_DSN"] = test_dsn.replace(
-            "postgresql://", "postgresql+asyncpg://"
-        )
+        # Export DSN for alembic env.py (normalization handled by engine.py)
+        os.environ["DATASTORE_POSTGRES_DSN"] = test_dsn
 
         yield test_dsn
 
@@ -496,9 +494,7 @@ class TestAlembicMigrationEdgeCases:
                         "INSERT INTO alembic_version (version_num) VALUES ('000_initial_schema')"
                     )
 
-            os.environ["DATASTORE_POSTGRES_DSN"] = test_dsn.replace(
-                "postgresql://", "postgresql+asyncpg://"
-            )
+            os.environ["DATASTORE_POSTGRES_DSN"] = test_dsn
 
             try:
                 config = _get_alembic_config(test_dsn)
@@ -533,9 +529,7 @@ class TestAlembicMigrationEdgeCases:
                         )
                     )
 
-            os.environ["DATASTORE_POSTGRES_DSN"] = test_dsn.replace(
-                "postgresql://", "postgresql+asyncpg://"
-            )
+            os.environ["DATASTORE_POSTGRES_DSN"] = test_dsn
 
             try:
                 config = _get_alembic_config(test_dsn)

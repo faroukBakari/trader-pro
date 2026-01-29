@@ -76,13 +76,17 @@ query = sql.SQL("SELECT value FROM {} WHERE value->>{} = %s").format(
 
 ## Configuration
 
-Environment variables for PostgreSQL connection (`.env` is the SSOT):
+PostgreSQL configuration follows the **SSOT (Single Source of Truth)** pattern—all variables are defined in `.env` and consumed by both Python (`pydantic-settings`) and Docker Compose.
+
+> **📖 Full Guide**: See [BACKEND_CONFIG.md](../../../docs/BACKEND_CONFIG.md) for complete configuration management philosophy, patterns, and guidelines.
+
+### Environment Variables
 
 ```bash
 # Option 1: Full DSN (takes precedence)
 DATASTORE_POSTGRES_DSN=postgresql://user:pass@localhost:5433/dbname
 
-# Option 2: Individual components
+# Option 2: Individual components (recommended for docker-compose compatibility)
 DATASTORE_POSTGRES_USER=trader
 DATASTORE_POSTGRES_PASSWORD=trader_dev
 DATASTORE_POSTGRES_HOST=localhost
@@ -95,12 +99,17 @@ DATASTORE_POSTGRES_POOL_RECONNECT_TIMEOUT=5.0  # Per-attempt timeout (seconds)
 DATASTORE_POSTGRES_POOL_OPEN_TIMEOUT=30.0      # Total startup timeout (seconds)
 ```
 
-Access via settings:
+### Access via Settings
 
 ```python
+# ✅ CORRECT: Always use settings singleton
 from trading_api.shared.config import settings
 
 dsn = settings.postgres_dsn  # Built from components or DATASTORE_POSTGRES_DSN
+timeout = settings.DATASTORE_POSTGRES_POOL_OPEN_TIMEOUT
+
+# ❌ PROHIBITED: Never use os.environ directly
+# host = os.environ.get("DATASTORE_POSTGRES_HOST")  # Don't do this!
 ```
 
 ## Startup Behavior (Fail-Fast)

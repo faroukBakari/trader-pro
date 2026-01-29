@@ -473,6 +473,30 @@ Need data from another module?
 
 ---
 
+#### Configuration Management
+
+All modules access configuration through the centralized Settings class:
+
+```python
+from trading_api.shared.config import settings
+
+# ✅ Correct - typed, validated, documented
+dsn = settings.postgres_dsn
+
+# ❌ PROHIBITED - breaks SSOT, no validation
+dsn = os.environ.get("DATABASE_URL")
+```
+
+**Key Rules**:
+
+- `.env` is the **Single Source of Truth** for all configuration
+- Use `settings.property_name` - never `os.environ.get()`
+- Modules MUST NOT define their own configuration loading logic
+
+📖 **Full details**: [BACKEND_CONFIG.md](BACKEND_CONFIG.md)
+
+---
+
 ### 1. Abstract Base Class Contracts
 
 Every module extends the `Module` abstract base class defined in `shared/module_interface.py`:

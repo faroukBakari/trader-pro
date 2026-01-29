@@ -165,6 +165,7 @@ When updating documentation for large-scale changes, follow this three-phase app
 | **backend/docs/BACKEND_WEBSOCKETS.md**           | FastWS integration and WebSocket-ready modules                                                         |
 | **backend/docs/SPECS_AND_CLIENT_GEN.md**         | OpenAPI/AsyncAPI spec and client generation                                                            |
 | **backend/docs/BACKEND_TESTING.md**              | Backend testing strategy and overhead optimization                                                     |
+| **backend/docs/BACKEND_CONFIG.md**               | ⭐ Configuration management guide - .env SSOT, Settings pattern, dual-consumption model                |
 
 > **Note**: Historical documentation from previous refactors has been cleaned up. All current backend documentation listed above is accurate and actively maintained.
 
@@ -390,9 +391,12 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 | **"Datastore indexing/secondary index"**         | **`datastores/README.md` (Indexing System section) → `datastore_interface.py` (abstract interface) → `inmemory_datastore.py` (implementation)**                                                                                             | **Implementation doc** |
 | **"Unique index/uniqueness constraint"**         | **`datastores/README.md` (Unique Index Constraint section) → `inmemory_datastore.py` (create_unique_index, uniqueness enforcement)**                                                                                                        | **Implementation doc** |
 | **"Datastore async CRUD/get_all/iterate"**       | **`datastores/README.md` (API Reference section) → `datastore_interface.py` (TableInterface methods)**                                                                                                                                      | **Interface doc**      |
-| **"PostgresDatastore/JSONB storage"**            | **`datastores/README.md` (PostgresDatastore section) → `datastores/postgres/datastore.py` (asyncpg + JSONB implementation) → `datastore_interface.py`**                                                                                     | **Implementation doc** |
+| **"PostgresDatastore/JSONB storage"**            | **`datastores/README.md` (PostgresDatastore section) → `datastores/postgres/datastore.py` (psycopg + JSONB implementation) → `datastore_interface.py`**                                                                                     | **Implementation doc** |
 | **"SQLModelTable/SQLModel/Alembic/migrations"**  | **`datastores/README.md` (SQLModelTable section) → `datastores/postgres/sqlmodel_table.py` (typed column storage) → `alembic/` (migration files) → `backend/Makefile` (alembic-\* targets)**                                                | **Implementation doc** |
 | **"Persistent datastore/has_persistence"**       | **`datastores/README.md` (Feature Detection section) → `MODULAR_BACKEND_ARCHITECTURE.md` (persistent_datastore property) → `service_interface.py`**                                                                                         | **Interface doc**      |
+| "How to add configuration/environment variable"  | `BACKEND_CONFIG.md` → `shared/config.py`                                                                                                                                                                                                    | Config doc first       |
+| "Where is config/settings/environment"           | `BACKEND_CONFIG.md` → `DEVELOPMENT.md`                                                                                                                                                                                                      | Config doc first       |
+| "Settings/.env/SSOT pattern"                     | `BACKEND_CONFIG.md` (SSOT Pattern section) → `shared/config.py` (Settings implementation) → `.env.example` (template)                                                                                                                       | Config doc first       |
 
 ---
 
@@ -420,6 +424,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **Account Tracking**: `providers/tws/README.md` (section 2.6 AccountTracker, Wiring Interfaces section 2.3) → `BACKEND_TESTING.md` (AccountTracker Testing subsection) → `wiring_interfaces.py` (AccountTrackerCBWiringInterface) → `account_tracker.py` (implementation with TWS protocol internalization) → `modules/broker/README.md` (REST /accounts endpoint with optional equity fields, equity WebSocket topic)
 - **Provider Observability**: `PROVIDER-SYSTEM.md` (Provider Observability section 7.4) → `providers/tws/README.md` (component-specific logging)
 - **Datastore Implementation**: `MODULAR_BACKEND_ARCHITECTURE.md` (service datastore injection, persistent_datastore property) → `datastores/README.md` (implementation guide, Feature Detection) → `datastore_interface.py` (abstract interface, has_persistence, has_transactions) → `inmemory_datastore.py` (in-memory implementation) → `datastores/postgres/datastore.py` (PostgreSQL + JSONB implementation)
+- **Configuration Management**: `BACKEND_CONFIG.md` (philosophy, SSOT pattern, Settings class) → `shared/config.py` (implementation) → `.env.example` (template)
 - **Client Generation**: `SPECS_AND_CLIENT_GEN.md` → `CLIENT-GENERATION.md`
 
 ### Testing Chains
@@ -439,7 +444,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### Architecture & Design
 
-**Keywords**: system design, component architecture, design patterns, module structure, provider system, broker integration, modular architecture, datastore abstraction, DatastoreInterface, TableInterface, TableInterface[T], Generic[T], type-safe tables, RWLock, InMemoryDatastore, PostgresDatastore, DatastoreRegistry, auto-discovery, per-table locking, datastore injection, construction-time index configuration, indexes kwarg, unique_indexes kwarg, create_index, create_unique_index, auto-indexing, secondary index, unique index, async CRUD, get_all, iterate, values, AsyncIterator, ValueFactory, DataNotFoundError, datastore_name classmethod, has_persistence, has_transactions, persistent_datastore, asyncpg, JSONB, async factory, requires_async_init, register_factory, get_datastores_async
+**Keywords**: system design, component architecture, design patterns, module structure, provider system, broker integration, modular architecture, datastore abstraction, DatastoreInterface, TableInterface, TableInterface[T], Generic[T], type-safe tables, RWLock, InMemoryDatastore, PostgresDatastore, DatastoreRegistry, auto-discovery, per-table locking, datastore injection, construction-time index configuration, indexes kwarg, unique_indexes kwarg, create_index, create_unique_index, auto-indexing, secondary index, unique index, async CRUD, get_all, iterate, values, AsyncIterator, ValueFactory, DataNotFoundError, datastore_name classmethod, has_persistence, has_transactions, persistent_datastore, psycopg, JSONB, async factory, requires_async_init, register_factory, get_datastores_async
 
 **Scope**: System-level design, architectural patterns, module organization  
 **Out of Scope**: Implementation details, code examples
@@ -460,7 +465,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ### Setup & Configuration
 
-**Keywords**: installation, environment setup, workspace configuration, git hooks, development environment
+**Keywords**: installation, environment setup, workspace configuration, git hooks, development environment, configuration, environment variables, .env, Settings, pydantic-settings, SSOT, BaseSettings, config pattern, 12-Factor App, dual-consumption model
 
 **Scope**: Initial project setup, development environment configuration  
 **Out of Scope**: Production deployment, infrastructure provisioning
@@ -468,6 +473,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 - **docs/GETTING-STARTED.md** - Complete setup guide (workspace, hooks, environment)
 - **docs/DEVELOPMENT.md** - Development workflows and tooling
 - **docs/FULLSTACK-DEV-MODE.md** - Full-stack dev mode with auto-regeneration and watch system
+- **backend/docs/BACKEND_CONFIG.md** - ⭐ Configuration management guide - .env SSOT, Settings pattern, anti-patterns
 
 ### API & Client Generation
 
@@ -640,6 +646,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2026-01-29**: Configuration Management Documentation - Created `BACKEND_CONFIG.md` documenting `.env` as SSOT, `pydantic-settings` integration with `Settings` class, dual-consumption model (Python + docker-compose), mandatory checklist for new configuration, anti-patterns section prohibiting off-pattern shortcuts (`os.environ.get()`, hardcoded values, mismatched defaults). Updated postgres/README.md (cross-reference to config guide), DEVELOPMENT.md (enhanced Environment Configuration section with critical rules), DOCUMENTATION-GUIDE.md (backend/docs table, Setup & Configuration keywords, query patterns, Feature Implementation Chains: Configuration Management, timeline).
 - **2026-01-29**: Wave 2B psycopg3 Migration & SQL Safety - Replaced asyncpg with psycopg3 (`psycopg[binary,pool]`), added `sql_safe.py` module with `validate_identifier()` defense-in-depth validation and psycopg3's `sql.SQL/Identifier/Literal` composition for SQL injection prevention. Unified `DatastoreInterface.table(model_class)` API replacing separate `table(name, indexes=[...])` and `sqlmodel_table(model_class)` methods - indexes now auto-extracted from `Field(index=True, unique=True, primary_key=True)` metadata. Added `settings.postgres_dsn` property and `DATASTORE_POSTGRES_*` config vars. Updated pytest to v8.2+ with `asyncio_default_fixture_loop_scope="session"`. Created postgres/README.md (SQL injection safety patterns, psycopg3 composition). Updated datastores/README.md (dual-mode auto-detection via `get_table_name()`, PostgresDatastore psycopg3 patterns), auth repository simplification (`datastore.table(User)` vs conditional `sqlmodel_table()`/`table()` branching), MODULAR_BACKEND_ARCHITECTURE.md (`table(BackupData)` example), DOCUMENTATION-GUIDE.md (keywords: sql_safe, validate_identifier, psycopg3, sql.SQL, sql.Identifier, sql.Literal, SafeSQL, get_table_name, extract_indexes, DATASTORE_POSTGRES_DSN, postgres_dsn, table(model_class), Field(primary_key=True), asyncio_default_fixture_loop_scope; timeline).
 - **2026-01-27**: DatastoreRegistry & Generic TableInterface[T] - Added `DatastoreRegistry` class mirroring `ProviderRegistry` pattern with auto-discovery from `datastores/` subdirectories, lazy-loading, and thread-safe instantiation. Restructured `datastores/inmemory/` as subdirectory for registry discovery. Added `datastore_name()` classmethod to `DatastoreInterface` for registry lookup. Made `TableInterface` generic over `T` (`TableInterface[T]`) with type-safe return types: `get() → T | None`, `get_all() → list[T]`, `values() → list[T]`, `iterate() → AsyncIterator[tuple[str, T]]`. Integrated into `AppFactory.create_app()` with new `enabled_datastores` parameter. Added 10 unit tests for DatastoreRegistry. Updated datastores/README.md (DatastoreRegistry section, TableInterface[T] Methods table with Return Type column, Type-Safe Tables section with repository example), MODULAR_BACKEND_ARCHITECTURE.md (service example cross-reference), DOCUMENTATION-GUIDE.md (keywords: DatastoreRegistry, TableInterface[T], Generic[T], type-safe tables, datastore_name classmethod, auto-discovery, AsyncIterator).
 - **2026-01-27**: Auth Repository DatastoreInterface Migration - Migrated `UserRepository` and `RefreshTokenRepository` from hardcoded dicts to `TableInterface` abstraction, added `Field(index=True, unique=True)` metadata extraction via unified `table(model_class)` API, changed user IDs to UUID-based format (`USER-{uuid12}`), added `RefreshTokenData` Pydantic model for token storage, unique constraint enforcement on email/google_id, added `get_all()` method for 1:N index lookups. Updated datastores/README.md (DatastoreInterface Methods table, Field() metadata indexing section), auth/README.md (version 1.2.0, Key Components table with TableInterface usage), AUTHENTICATION.md (Repository Layer descriptions without .lock references).
@@ -701,5 +708,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: January 26, 2026  
+**Last Updated**: January 29, 2026  
 **Maintained by**: Development Team
