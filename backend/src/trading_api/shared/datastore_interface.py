@@ -116,6 +116,15 @@ class TableInterface(ABC, Generic[T]):
             Number of entries
         """
 
+    @property
+    @abstractmethod
+    async def is_empty(self) -> bool:
+        """Check if table has zero entries.
+
+        Returns:
+            True if table has no entries, False otherwise
+        """
+
     @abstractmethod
     def iterate(self) -> AsyncIterator[tuple[str, T]]:
         """Asynchronously iterate over key-value pairs.
@@ -144,15 +153,6 @@ class TableInterface(ABC, Generic[T]):
 
         Raises:
             ValueError: If duplicate field values exist in current data
-        """
-
-    @abstractmethod
-    async def reset(self) -> None:
-        """Reset table to initial state: clear data AND remove all indexes.
-
-        Unlike clear() which only removes data, reset() also removes any
-        custom indexes created via create_index() or create_unique_index().
-        This ensures full test isolation between tests that manipulate indexes.
         """
 
 
@@ -253,3 +253,35 @@ class DatastoreInterface(ABC):
         Returns:
             TableInterface for the model
         """
+
+    @abstractmethod
+    async def list_tables(self, prefix: str | None = None) -> list[str]:
+        """List all table names in the datastore.
+
+        Queries the datastore for existing tables. For PostgreSQL, this queries
+        information_schema to find dynamically-created tables (e.g., bar tables).
+        For InMemory, this returns keys from the internal tables dict.
+
+        Args:
+            prefix: Optional prefix filter (e.g., "bars_" to list only bar tables)
+
+        Returns:
+            List of table names matching the prefix filter (or all if no prefix)
+        """
+        ...
+
+    @abstractmethod
+    async def drop_table(self, name: str) -> bool:
+        """Drop a table by name.
+
+        Removes the table from the datastore and unregisters it from internal tracking.
+        For PostgreSQL, executes DROP TABLE IF EXISTS.
+        For InMemory, removes from the internal tables dict.
+
+        Args:
+            name: Table name to drop
+
+        Returns:
+            True if table was dropped, False if it didn't exist
+        """
+        ...

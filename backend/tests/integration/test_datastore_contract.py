@@ -76,7 +76,7 @@ async def postgres_datastore(
 
 @pytest.fixture(
     params=[
-        pytest.param("inmemory", id="inmemory"),
+        pytest.param("inmemory", id="inmemory", marks=[pytest.mark.integration]),
         pytest.param(
             "postgres",
             id="postgres",
@@ -91,7 +91,8 @@ async def any_datastore(
 ) -> AsyncIterator[DatastoreInterface]:
     """Parametrized fixture providing each datastore implementation.
 
-    InMemory runs always, Postgres requires integration marker.
+    Both variants require @pytest.mark.integration marker.
+    Postgres additionally has @pytest.mark.postgres for selective runs.
     """
     if request.param == "inmemory":
         yield inmemory_datastore
@@ -105,26 +106,28 @@ async def any_datastore(
 async def table(
     any_datastore: DatastoreInterface,
 ) -> AsyncIterator[TableInterface[Any]]:
-    """Table fixture with full reset for test isolation.
+    """Table fixture with table drop/recreate for test isolation.
 
-    Uses reset() instead of clear() to ensure indexes are also removed,
-    allowing tests to run in parallel without index conflicts.
+    Uses drop_table() before and after test to ensure clean state,
+    including removal of any custom indexes created during the test.
     """
+    table_name = ContractTestModel.__name__.lower()
+    await any_datastore.drop_table(table_name)
     tbl = any_datastore.table(ContractTestModel)
-    await tbl.reset()
     yield tbl
-    await tbl.reset()
+    await any_datastore.drop_table(table_name)
 
 
 @pytest.fixture
 async def indexed_table(
     any_datastore: DatastoreInterface,
 ) -> AsyncIterator[TableInterface[Any]]:
-    """Table with indexes fixture with full reset for test isolation."""
+    """Table with indexes fixture with table drop/recreate for test isolation."""
+    table_name = IndexedContractModel.__name__.lower()
+    await any_datastore.drop_table(table_name)
     tbl = any_datastore.table(IndexedContractModel)
-    await tbl.reset()
     yield tbl
-    await tbl.reset()
+    await any_datastore.drop_table(table_name)
 
 
 # =============================================================================
@@ -198,6 +201,42 @@ class TestDatastoreInterfaceContract:
         tbl1 = any_datastore.table(ContractTestModel)
         tbl2 = any_datastore.table(ContractTestModel)
         assert tbl1 is tbl2
+
+    @pytest.mark.asyncio
+    async def test_drop_table_returns_true_when_exists(
+        self, any_datastore: DatastoreInterface
+    ) -> None:
+        """drop_table() returns True when table exists."""
+        table = any_datastore.table(ContractTestModel)
+        # Actually create table by writing to it (postgres creates lazily)
+        await table.set("test_key", ContractTestModel(id="1", name="test"))
+        table_name = ContractTestModel.__name__.lower()
+
+        dropped = await any_datastore.drop_table(table_name)
+        assert dropped is True
+
+    @pytest.mark.asyncio
+    async def test_drop_table_returns_false_when_not_exists(
+        self, any_datastore: DatastoreInterface
+    ) -> None:
+        """drop_table() returns False when table doesn't exist."""
+        dropped = await any_datastore.drop_table("nonexistent_table_contract_test")
+        assert dropped is False
+
+    @pytest.mark.asyncio
+    async def test_drop_table_allows_recreation(
+        self, any_datastore: DatastoreInterface
+    ) -> None:
+        """After drop_table(), table can be recreated fresh."""
+        table1 = any_datastore.table(ContractTestModel)
+        await table1.set("k", ContractTestModel(id="1", name="old"))
+        table_name = ContractTestModel.__name__.lower()
+
+        await any_datastore.drop_table(table_name)
+
+        # Recreate and verify it's fresh
+        table2 = any_datastore.table(ContractTestModel)
+        assert await table2.count() == 0
 
 
 # =============================================================================
@@ -299,6 +338,21 @@ class TestTableCRUDContract:
 
         await table.set("cnt2", ContractTestModel(id="2", name="two"))
         assert await table.count() == 2
+
+    @pytest.mark.asyncio
+    async def test_is_empty_true_when_no_entries(
+        self, table: TableInterface[Any]
+    ) -> None:
+        """is_empty returns True for empty table."""
+        assert await table.is_empty is True
+
+    @pytest.mark.asyncio
+    async def test_is_empty_false_when_has_entries(
+        self, table: TableInterface[Any]
+    ) -> None:
+        """is_empty returns False when table has entries."""
+        await table.set("k", ContractTestModel(id="1", name="test"))
+        assert await table.is_empty is False
 
     @pytest.mark.asyncio
     async def test_iterate_yields_all_pairs(self, table: TableInterface[Any]) -> None:
@@ -497,6 +551,7 @@ class TestFeatureFlagConsistency:
     """Tests that validate feature flag consistency."""
 
     @pytest.mark.asyncio
+    @pytest.mark.integration
     async def test_inmemory_feature_flags(
         self, inmemory_datastore: DatastoreInterface
     ) -> None:

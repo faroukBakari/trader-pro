@@ -170,8 +170,14 @@ async def _ensure_all_processes_killed(manager: ServerManager) -> None:
 
 
 @pytest.fixture(scope="session")
-def session_test_config() -> DeploymentConfig:
-    """Create test deployment configuration with unique ports (session-scoped)."""
+def session_test_config(test_settings: Settings) -> DeploymentConfig:
+    """Create test deployment configuration with unique ports (session-scoped).
+
+    Depends on test_settings to ensure testcontainers PostgreSQL is running
+    and DATASTORE_POSTGRES_DSN env var is set before spawning backend processes.
+    """
+    _ = test_settings  # Trigger DB setup via conftest.py (env var inheritance)
+
     # Use process-specific port offset to avoid conflicts in parallel tests
     base_port = 19000 + (os.getpid() % 100) * 10
 
