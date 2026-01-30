@@ -24,7 +24,7 @@ from trading_api.shared import (
 
 
 @pytest.fixture(scope="module")
-def apps() -> ModularApp:
+async def apps() -> ModularApp:
     """Broker-specific app with only broker and auth modules.
 
     Uses FakeBrokerProvider instead of TWS to avoid external dependencies
@@ -44,17 +44,12 @@ def apps() -> ModularApp:
     provider_registry.auto_discover(enabled_names=["fakebroker", "google"])
     datastore_registry.auto_discover(enabled_names=["inmemory"])
 
-    # Create datastore
-    import asyncio
-
-    loop = asyncio.get_event_loop()
-    datastores = loop.run_until_complete(datastore_registry.get_datastores())
+    # Create datastore using async/await (avoid asyncio.get_event_loop() for Python 3.10+)
+    datastores = await datastore_registry.get_datastores()
 
     # Get providers
     required_capabilities = module_registry.required_capabilities()
-    providers = loop.run_until_complete(
-        provider_registry.get_providers(required_capabilities)
-    )
+    providers = await provider_registry.get_providers(required_capabilities)
 
     # Get modules with providers and datastores
     enabled_modules = module_registry.get_modules(

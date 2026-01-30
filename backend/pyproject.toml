@@ -66,6 +66,7 @@ mypy-protobuf = "^3.7.0"
 grpcio-tools = ">=1.60,<1.70"
 pytest-timeout = "^2.3.1"
 testcontainers = {version = "^4.14", extras = ["postgres"]}
+pytest-testmon = "^2.1.0"
 
 [build-system]
 requires = ["poetry-core"]
@@ -105,6 +106,8 @@ init_typed = true
 warn_required_dynamic_aliases = true
 
 [tool.pytest.ini_options]
+# Testmon: Use `make test-changed` or `pytest --testmon` explicitly
+# Not added to addopts to keep regular `make test` unaffected
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 timeout = 10

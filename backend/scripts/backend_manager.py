@@ -764,6 +764,16 @@ class ServerManager:
                     logger.info(f"Stopping {instance_name} (PID: {pid})...")
                     self._stop_process(pid, instance_name, timeout)
 
+                # Clean up PID file after stopping (regardless of whether process was running)
+                pid_file = self.pid_dir / f"{instance_name}.pid"
+                if pid_file.exists():
+                    try:
+                        pid_file.unlink()
+                    except OSError as e:
+                        logger.warning(
+                            f"Failed to remove PID file for {instance_name}: {e}"
+                        )
+
         logger.info("All processes stopped")
 
         # Wait for ports to be released

@@ -6,15 +6,20 @@ Provides dict-based storage for MVP and testing with:
 - Transaction support with automatic rollback
 """
 
+from __future__ import annotations
+
 import asyncio
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
 from trading_api.shared import DatastoreInterface, TableInterface
-from trading_api.shared.config import Settings
+
+if TYPE_CHECKING:
+    from trading_api.shared.config import Settings
 
 
 def extract_indexes(

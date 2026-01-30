@@ -4,10 +4,12 @@ Creates FastAPI application with configurable module loading.
 Unified ModularApp class with async factory method pattern.
 """
 
+from __future__ import annotations
+
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,8 +18,10 @@ from fastapi.routing import APIRoute
 from trading_api.shared import Module, ModuleApp, ModuleRegistry, settings
 from trading_api.shared.datastore_registry import DatastoreRegistry
 from trading_api.shared.exception_handlers import register_exception_handlers
-from trading_api.shared.provider_interface import Provider
 from trading_api.shared.provider_registry import ProviderRegistry
+
+if TYPE_CHECKING:
+    from trading_api.shared.provider_interface import Provider
 
 # Configure logging for the application
 logging.basicConfig(

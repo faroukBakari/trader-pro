@@ -13,7 +13,6 @@ Lazy table creation pattern matches PostgresTable behavior:
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import BaseModel
@@ -25,6 +24,8 @@ from sqlmodel import SQLModel
 from trading_api.shared.datastore_interface import TableInterface
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)

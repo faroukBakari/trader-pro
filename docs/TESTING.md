@@ -25,12 +25,15 @@ Trading Pro uses a multi-tier testing approach that enables independent testing 
 
 ```bash
 cd backend
-make test           # Run all tests (boundaries + providers + modules + integration)
+make test           # Run all tests (incremental with testmon)
+make test-full      # Run all tests (complete suite, no testmon)
 make test-cov       # With coverage report
-make test-modules   # Module tests only
-make test-providers # Provider tests only
-make test-integration # Integration tests only
+make test-modules   # Module tests only (incremental)
+make test-providers # Provider tests only (incremental)
+make test-integration # Integration tests only (incremental)
 ```
+
+> **Note:** All test commands use [pytest-testmon](https://testmon.org/) by default for faster feedback. Add `-full` suffix (e.g., `make test-modules-full`) to run the complete suite. See [backend/docs/BACKEND_TESTING.md](../backend/docs/BACKEND_TESTING.md#incremental-testing-with-pytest-testmon) for details.
 
 ### Test Structure
 

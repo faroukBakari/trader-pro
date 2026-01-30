@@ -205,9 +205,23 @@ jobs:
         make check-generate-keypair
         make check-generate-hmac-key
 
-    - name: Run ${{ matrix.provider }} provider tests
+    - name: Restore testmon cache
+      uses: actions/cache@v3
+      with:
+        path: backend/.testmondata
+        key: testmon-provider-${{ matrix.provider }}-${{ hashFiles('backend/src/trading_api/providers/${{ matrix.provider }}/**/*.py') }}
+        restore-keys: |
+          testmon-provider-${{ matrix.provider }}-
+
+    - name: Run ${{ matrix.provider }} provider tests (incremental for PRs)
+      if: github.event_name == 'pull_request'
       working-directory: backend
-      run: make test-provider-${{ matrix.provider }}
+      run: poetry run pytest --testmon src/trading_api/providers/${{ matrix.provider }}/tests/ -v
+
+    - name: Run ${{ matrix.provider }} provider tests (full for pushes)
+      if: github.event_name == 'push'
+      working-directory: backend
+      run: poetry run pytest src/trading_api/providers/${{ matrix.provider }}/tests/ -v
 
   # Backend module tests (runs in parallel per module)
   backend-modules:
@@ -250,9 +264,23 @@ jobs:
         make check-generate-keypair
         make check-generate-hmac-key
 
-    - name: Run ${{ matrix.module }} module tests
+    - name: Restore testmon cache
+      uses: actions/cache@v3
+      with:
+        path: backend/.testmondata
+        key: testmon-module-${{ matrix.module }}-${{ hashFiles('backend/src/trading_api/modules/${{ matrix.module }}/**/*.py') }}
+        restore-keys: |
+          testmon-module-${{ matrix.module }}-
+
+    - name: Run ${{ matrix.module }} module tests (incremental for PRs)
+      if: github.event_name == 'pull_request'
       working-directory: backend
-      run: make test-module-${{ matrix.module }}
+      run: poetry run pytest --testmon src/trading_api/modules/${{ matrix.module }}/tests/ -v
+
+    - name: Run ${{ matrix.module }} module tests (full for pushes)
+      if: github.event_name == 'push'
+      working-directory: backend
+      run: poetry run pytest src/trading_api/modules/${{ matrix.module }}/tests/ -v
 
   # Backend integration tests (runs once, requires all modules)
   backend-integration:

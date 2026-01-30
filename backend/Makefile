@@ -28,7 +28,7 @@ endif
 
 comma := ,
 
-.PHONY: help install install-ci test test-boundaries test-modules test-cov test-integration lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api show-cache show-cache-json show-cache-symbol $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-core list-providers list-providers-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS))
+.PHONY: help install install-ci test test-full test-boundaries test-boundaries-full test-modules test-modules-full test-cov test-integration test-integration-full lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api show-cache show-cache-json show-cache-symbol $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-full test-providers-core test-providers-core-full list-providers list-providers-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)) testmon-forcerun testmon-reset testmon-status
 
 # Default target
 help:
@@ -36,14 +36,19 @@ help:
 	@echo "  install           Install backend dependencies (auto-checks Python/Poetry/nginx)"
 	@echo "  install-ci        Install backend dependencies for CI (non-interactive)"
 	@echo ""
-	@echo "Testing targets:"
-	@echo "  test              Run all tests (boundaries + providers + modules + integration)"
-	@echo "  test-boundaries   Validate import boundaries between modules"
-	@echo "  test-providers    Run all provider tests (core + all discovered providers)"
-	@echo "  test-providers-core  Run provider registry/capability tests only"
-	@echo "  test-modules      Run all module tests (use modules=mod1,mod2 to select specific)"
-	@echo "  test-integration  Run integration tests"
-	@echo "  test-cov          Run all tests with coverage"
+	@echo "Testing (default: incremental with testmon, add -full suffix for complete runs):"
+	@echo "  test              Run all tests (incremental)"
+	@echo "  test-full         Run all tests (complete suite)"
+	@echo "  test-boundaries   Validate import boundaries (incremental)"
+	@echo "  test-providers    Run all provider tests (incremental)"
+	@echo "  test-modules      Run module tests (modules=x,y to select)"
+	@echo "  test-integration  Run integration tests (incremental)"
+	@echo "  test-cov          Run tests with coverage (always full)"
+	@echo ""
+	@echo "Testmon utilities:"
+	@echo "  testmon-forcerun  Force full run + rebuild database"
+	@echo "  testmon-reset     Clear testmon database"
+	@echo "  testmon-status    Show testmon database status"
 	@echo ""
 	@echo "Module-specific test targets (auto-discovered):"
 	@for module in $(DISCOVERED_MODULES); do \
@@ -427,17 +432,47 @@ install-ci:
 	@echo "✅ CI installation complete!"
 
 test-boundaries: check-generate-keypair check-generate-hmac-key
-	@echo "Running root-level tests..."
+	@echo "Running root-level tests (incremental)..."
+	poetry run pytest tests/ -v --testmon --ignore=tests/integration/ $(ARGS)
+
+test-boundaries-full: check-generate-keypair check-generate-hmac-key
+	@echo "Running root-level tests (full)..."
 	poetry run pytest tests/ -v --ignore=tests/integration/ $(ARGS)
 
 # Provider core tests (registry, capability spec)
 test-providers-core: check-generate-keypair check-generate-hmac-key
-	@echo "Running provider core tests..."
+	@echo "Running provider core tests (incremental)..."
+	poetry run pytest src/trading_api/providers/tests/ -v --testmon $(ARGS)
+
+test-providers-core-full: check-generate-keypair check-generate-hmac-key
+	@echo "Running provider core tests (full)..."
 	poetry run pytest src/trading_api/providers/tests/ -v $(ARGS)
 
 # All provider tests (core + all discovered providers)
 test-providers: test-providers-core
-	@echo "Running all provider tests..."
+	@echo "Running all provider tests (incremental)..."
+	@if [ -z "$(SELECTED_PROVIDERS)" ]; then \
+		echo "⚠️  No providers selected or found"; \
+	else \
+		echo "Testing providers: $(SELECTED_PROVIDERS)"; \
+		for provider in $(SELECTED_PROVIDERS); do \
+			if [ -d "$(PROVIDERS_DIR)/$$provider/tests" ]; then \
+				echo "Testing provider: $$provider"; \
+				poetry run pytest --testmon $(PROVIDERS_DIR)/$$provider/tests/ -v -x $(ARGS); \
+				EXIT_CODE=$$?; \
+				if [ $$EXIT_CODE -eq 5 ]; then \
+					echo "⚠️  No tests collected for provider: $$provider (skipping)"; \
+				elif [ $$EXIT_CODE -ne 0 ]; then \
+					exit 1; \
+				fi; \
+			else \
+				echo "⚠️  No tests found for provider: $$provider"; \
+			fi; \
+		done; \
+	fi
+
+test-providers-full: test-providers-core-full
+	@echo "Running all provider tests (full)..."
 	@if [ -z "$(SELECTED_PROVIDERS)" ]; then \
 		echo "⚠️  No providers selected or found"; \
 	else \
@@ -459,7 +494,29 @@ test-providers: test-providers-core
 	fi
 
 test-modules: check-generate-keypair check-generate-hmac-key
-	@echo "Running module tests..."
+	@echo "Running module tests (incremental)..."
+	@if [ -z "$(SELECTED_MODULES)" ]; then \
+		echo "⚠️  No modules selected or found"; \
+	else \
+		echo "Testing modules: $(SELECTED_MODULES)"; \
+		for module in $(SELECTED_MODULES); do \
+			if [ -d "$(MODULES_DIR)/$$module/tests" ]; then \
+				echo "Testing module: $$module"; \
+				poetry run pytest --testmon $(MODULES_DIR)/$$module/tests/ -v -x $(ARGS); \
+				EXIT_CODE=$$?; \
+				if [ $$EXIT_CODE -eq 5 ]; then \
+					echo "⚠️  No tests collected for module: $$module (skipping)"; \
+				elif [ $$EXIT_CODE -ne 0 ]; then \
+					exit 1; \
+				fi; \
+			else \
+				echo "⚠️  No tests found for module: $$module"; \
+			fi; \
+		done; \
+	fi
+
+test-modules-full: check-generate-keypair check-generate-hmac-key
+	@echo "Running module tests (full)..."
 	@if [ -z "$(SELECTED_MODULES)" ]; then \
 		echo "⚠️  No modules selected or found"; \
 	else \
@@ -480,11 +537,11 @@ test-modules: check-generate-keypair check-generate-hmac-key
 		done; \
 	fi
 
-# Individual module tests (auto-generated targets)
+# Individual module tests (auto-generated targets, incremental by default)
 $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
-	@echo "Running tests for module: $*..."
+	@echo "Running tests for module: $* (incremental)..."
 	@if [ -d "$(MODULES_DIR)/$*/tests" ]; then \
-		poetry run pytest $(MODULES_DIR)/$*/tests/ -v -x $(ARGS); \
+		poetry run pytest --testmon $(MODULES_DIR)/$*/tests/ -v -x $(ARGS); \
 		EXIT_CODE=$$?; \
 		if [ $$EXIT_CODE -eq 5 ]; then \
 			echo "⚠️  No tests collected for module: $* (skipping)"; \
@@ -495,11 +552,11 @@ $(addprefix test-module-, $(DISCOVERED_MODULES)): test-module-%:
 		echo "⚠️  No tests found for module: $*"; \
 	fi
 
-# Individual provider tests (auto-generated targets)
+# Individual provider tests (auto-generated targets, incremental by default)
 $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)): test-provider-%:
-	@echo "Running tests for provider: $*..."
+	@echo "Running tests for provider: $* (incremental)..."
 	@if [ -d "$(PROVIDERS_DIR)/$*/tests" ]; then \
-		poetry run pytest $(PROVIDERS_DIR)/$*/tests/ -v -x $(ARGS); \
+		poetry run pytest --testmon $(PROVIDERS_DIR)/$*/tests/ -v -x $(ARGS); \
 		EXIT_CODE=$$?; \
 		if [ $$EXIT_CODE -eq 5 ]; then \
 			echo "⚠️  No tests collected for provider: $* (skipping)"; \
@@ -511,11 +568,20 @@ $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)): test-provider-%:
 	fi
 
 test-integration: check-generate-keypair check-generate-hmac-key
-	@echo "Running integration tests..."
+	@echo "Running integration tests (incremental)..."
+	@# Backend manager tests require ordered execution, run without testmon
+	poetry run pytest tests/integration/ -v -x --testmon -m integration --ignore=tests/integration/test_backend_manager_integration.py $(ARGS)
+	poetry run pytest tests/integration/test_backend_manager_integration.py -v -x -m integration $(ARGS)
+
+test-integration-full: check-generate-keypair check-generate-hmac-key
+	@echo "Running integration tests (full)..."
 	poetry run pytest tests/integration/ -v -x -m integration $(ARGS)
 
 test: test-boundaries test-providers test-modules test-integration
-	@echo "✅ All tests passed (boundaries + providers + modules + integration)"
+	@echo "✅ All tests passed (incremental with testmon)"
+
+test-full: test-boundaries-full test-providers-full test-modules-full test-integration-full
+	@echo "✅ All tests passed (full suite)"
 
 # Coverage targets
 test-cov: check-generate-keypair check-generate-hmac-key test-boundaries
@@ -526,6 +592,30 @@ test-cov: check-generate-keypair check-generate-hmac-key test-boundaries
 	@rm -f .coverage.* 2>/dev/null || true
 	@echo "✓ Removed intermediate .coverage.* files"
 	@echo "✅ Coverage report generated: coverage.xml"
+
+# ============================================
+# TESTMON UTILITIES
+# ============================================
+
+# Force full test run (rebuild testmon database)
+testmon-forcerun: check-generate-keypair check-generate-hmac-key testmon-reset
+	@echo "Running all tests (rebuilding testmon database)..."
+	poetry run pytest --testmon -v $(ARGS)
+
+# Reset testmon database
+testmon-reset:
+	@echo "Resetting testmon database..."
+	rm -f .testmondata
+	@echo "✅ Testmon database cleared"
+
+# Show testmon status
+testmon-status:
+	@if [ -f ".testmondata" ]; then \
+		echo "✅ Testmon database exists"; \
+		ls -lh .testmondata; \
+	else \
+		echo "⚠️  No testmon database found (run tests with --testmon first)"; \
+	fi
 
 # Linting and formatting
 lint:

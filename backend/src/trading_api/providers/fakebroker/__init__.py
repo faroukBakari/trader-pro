@@ -7,13 +7,15 @@ Internal property accessors (_balance, _unrealized_pl_total, _realized_pl)
 provide safe access to nullable EquityData fields with 0.0 fallback.
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import random
 import time
 import uuid
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import TYPE_CHECKING
 
 from trading_api.capabilities.broker import BrokerCapability
 from trading_api.models.broker import (
@@ -41,6 +43,9 @@ from trading_api.models.common import CapabilitySpec
 from trading_api.models.exceptions import ProviderException, TradingApiException
 from trading_api.models.providers.fake_broker_configs import FakeBrokerProviderConfig
 from trading_api.shared import Provider
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 logger = logging.getLogger(__name__)
 

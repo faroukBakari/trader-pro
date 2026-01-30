@@ -12,13 +12,14 @@ Architecture:
 - IBSocket (Layer 1): Raw TCP protocol, message framing
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
-from collections.abc import Coroutine
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 from trading_api.capabilities.datafeed import DatafeedCapability
@@ -36,6 +37,9 @@ from trading_api.shared import Provider
 
 from .tws_connection import TWSClient
 from .tws_mappers import calculate_tws_duration, map_resolution_to_tws_bar_size
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 
