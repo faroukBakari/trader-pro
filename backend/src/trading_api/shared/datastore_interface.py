@@ -7,13 +7,17 @@ Provides minimal abstraction for data persistence that enables:
 - Multi-table transactions with rollback support
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
-from typing import Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar
 
 from pydantic import BaseModel
 
-from trading_api.shared.config import Settings
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from trading_api.shared.config import Settings
 
 T = TypeVar("T", bound=BaseModel)
 

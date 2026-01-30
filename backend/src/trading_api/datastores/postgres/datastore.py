@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, cast
 
 from psycopg import AsyncConnection, sql
@@ -46,6 +45,8 @@ from .sqlmodel_table import SQLModelTable
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 __all__ = ["PostgresDatastore", "PostgresTable", "SQLModelTable"]

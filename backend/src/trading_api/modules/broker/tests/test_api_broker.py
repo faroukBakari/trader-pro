@@ -514,7 +514,7 @@ async def test_edit_position_brackets_endpoint(
 
 @pytest.mark.asyncio
 async def test_leverage_info_endpoint(
-    async_client: AsyncClient, auth_cookies: dict[str, str]
+    async_client: AsyncClient, auth_cookies: dict[str, str], reset_broker: None
 ) -> None:
     """Test getting leverage information for a symbol"""
     response = await async_client.get(

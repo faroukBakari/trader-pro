@@ -7,7 +7,6 @@ Tests the REST API layer of the auth module, including:
 - Get current user info
 """
 
-import asyncio
 import time
 from collections.abc import AsyncGenerator
 from http.cookies import SimpleCookie
@@ -31,7 +30,7 @@ from trading_api.shared import (
 
 
 @pytest.fixture
-def auth_app() -> ModularApp:
+async def auth_app() -> ModularApp:
     """Create app with only auth module enabled (function-scoped for test isolation)"""
     # Create registries directly for test isolation
     modules_dir = Path(__file__).parents[2]
@@ -47,15 +46,12 @@ def auth_app() -> ModularApp:
     provider_registry.auto_discover(enabled_names=["google"])
     datastore_registry.auto_discover(enabled_names=["inmemory"])
 
-    # Create datastore
-    loop = asyncio.get_event_loop()
-    datastores = loop.run_until_complete(datastore_registry.get_datastores())
+    # Create datastore using async/await (avoid asyncio.get_event_loop() for Python 3.10+)
+    datastores = await datastore_registry.get_datastores()
 
     # Get providers
     required_capabilities = module_registry.required_capabilities()
-    providers = loop.run_until_complete(
-        provider_registry.get_providers(required_capabilities)
-    )
+    providers = await provider_registry.get_providers(required_capabilities)
 
     # Get modules with providers and datastores
     enabled_modules = module_registry.get_modules(

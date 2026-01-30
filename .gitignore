@@ -217,3 +217,7 @@ tmp/
 .cursor
 
 *.tar.gz
+
+.testmondata
+.testmondata-shm
+.testmondata-wal

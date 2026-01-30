@@ -1,9 +1,13 @@
 """Provider base classes and interfaces."""
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from trading_api.models.common import CapabilitySpec, ProviderConfig
+if TYPE_CHECKING:
+    from trading_api.models.common import CapabilitySpec, ProviderConfig
 
 
 class Provider(ABC):

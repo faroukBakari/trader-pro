@@ -20,6 +20,8 @@ Architecture:
 - Used via composition by TWSProvider
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -27,14 +29,13 @@ import select
 import struct
 import threading
 import time
-from collections.abc import Callable, Coroutine
 from decimal import Decimal
 from itertools import count
 from socket import MSG_PEEK
 from socket import error as socketError
 from socket import socket
 from socket import timeout as socketTimeout
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ibapi.commission_and_fees_report import CommissionAndFeesReport
 from ibapi.common import PROTOBUF_MSG_ID, BarData, TickAttrib
@@ -44,6 +45,10 @@ from ibapi.decoder import Decoder
 from ibapi.execution import Execution
 from ibapi.message import OUT
 from ibapi.order import Order
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
 from ibapi.order_state import OrderState
 from ibapi.protobuf.ErrorMessage_pb2 import ErrorMessage as ErrorMessageProto
 from ibapi.ticktype import TickTypeEnum

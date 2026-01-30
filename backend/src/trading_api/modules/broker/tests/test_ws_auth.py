@@ -26,10 +26,8 @@ from trading_api.shared.config import Settings
 
 
 @pytest.fixture
-def broker_app() -> ModularApp:
+async def broker_app() -> ModularApp:
     """Create app with broker module enabled"""
-    import asyncio
-
     # Create registries directly for test isolation
     modules_dir = Path(__file__).parents[2]
     providers_dir = Path(__file__).parents[3] / "providers"
@@ -44,15 +42,12 @@ def broker_app() -> ModularApp:
     provider_registry.auto_discover(enabled_names=["fakebroker"])
     datastore_registry.auto_discover(enabled_names=["inmemory"])
 
-    # Create datastore
-    loop = asyncio.get_event_loop()
-    datastores = loop.run_until_complete(datastore_registry.get_datastores())
+    # Create datastore using async/await (avoid asyncio.get_event_loop() for Python 3.10+)
+    datastores = await datastore_registry.get_datastores()
 
     # Get providers
     required_capabilities = module_registry.required_capabilities()
-    providers = loop.run_until_complete(
-        provider_registry.get_providers(required_capabilities)
-    )
+    providers = await provider_registry.get_providers(required_capabilities)
 
     # Get modules with providers and datastores
     enabled_modules = module_registry.get_modules(

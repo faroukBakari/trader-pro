@@ -1,25 +1,30 @@
 """Broker capability interface."""
 
-from abc import ABC, abstractmethod
-from typing import Awaitable, Callable
+from __future__ import annotations
 
-from trading_api.models.broker import (
-    AccountMetainfo,
-    Brackets,
-    EquityData,
-    Execution,
-    LeverageInfo,
-    LeverageInfoParams,
-    LeveragePreviewResult,
-    LeverageSetParams,
-    LeverageSetResult,
-    OrderPreviewResult,
-    PlacedOrder,
-    PlaceOrderResult,
-    Position,
-    PreOrder,
-)
-from trading_api.models.exceptions import TradingApiException
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from trading_api.models.broker import (
+        AccountMetainfo,
+        Brackets,
+        EquityData,
+        Execution,
+        LeverageInfo,
+        LeverageInfoParams,
+        LeveragePreviewResult,
+        LeverageSetParams,
+        LeverageSetResult,
+        OrderPreviewResult,
+        PlacedOrder,
+        PlaceOrderResult,
+        Position,
+        PreOrder,
+    )
+    from trading_api.models.exceptions import TradingApiException
 
 
 class BrokerCapability(ABC):

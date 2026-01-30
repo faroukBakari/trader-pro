@@ -41,6 +41,7 @@ This guide helps you extend and maintain the backend testing suite. The backend 
 | Task                    | Command                                   | Section                                               |
 | ----------------------- | ----------------------------------------- | ----------------------------------------------------- |
 | Run all tests           | `make test`                               | [Running Tests](#running-tests)                       |
+| Run all tests (full)    | `make test-full`                          | [Running Tests](#running-tests)                       |
 | Run unit tests only     | `make test-modules`                       | [Running Tests](#running-tests)                       |
 | Run integration tests   | `make test-integration`                   | [Running Tests](#running-tests)                       |
 | Add a module unit test  | See template below                        | [Adding Unit Tests](#adding-unit-tests)               |
@@ -273,6 +274,46 @@ Pytest automatically discovers tests in:
 - **Module test suite**: < 5 seconds
 - **Integration tests**: < 1 minute total
 - **Full test suite**: < 2 minutes
+
+### Incremental Testing with pytest-testmon
+
+pytest-testmon tracks which tests are affected by code changes and only runs those tests. **All `make test*` commands use testmon by default for faster development cycles.**
+
+#### Quick Start
+
+| Command                     | Description                                  |
+| --------------------------- | -------------------------------------------- |
+| `make test`                 | Run all tests (incremental, testmon)         |
+| `make test-full`            | Run all tests (complete suite)               |
+| `make test-modules`         | Run module tests (incremental)               |
+| `make test-modules-full`    | Run module tests (complete suite)            |
+| `make test-boundaries`      | Run boundary tests (incremental)             |
+| `make test-boundaries-full` | Run boundary tests (complete suite)          |
+| `make testmon-forcerun`     | Force full run + rebuild dependency database |
+| `make testmon-reset`        | Clear testmon database                       |
+| `make testmon-status`       | Show testmon database status                 |
+
+**Tip:** Add `-full` suffix to any test target for a complete (non-incremental) run.
+
+#### How It Works
+
+1. **First run**: All tests execute, testmon builds dependency map
+2. **Subsequent runs**: Only tests depending on changed files run
+3. **Database location**: `.testmondata` (git-ignored, machine-specific)
+
+#### When to Force Full Runs
+
+- After rebasing/merging main
+- After major refactoring
+- When test behavior seems inconsistent
+- In CI (main branch builds)
+
+#### Limitations
+
+- Single-process only (no pytest-xdist parallel execution)
+- Database is machine-specific (not shared across devs)
+- External service changes (PostgreSQL schema) not detected
+- **Backend manager tests excluded**: `test_backend_manager_integration.py` uses session-scoped fixtures that require ordered execution - always run without testmon reordering
 
 ---
 

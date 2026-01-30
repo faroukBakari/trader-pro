@@ -619,10 +619,14 @@ class TestBackendManagerIntegration:
             manager.pid_dir.mkdir(parents=True, exist_ok=True)
             manager.log_dir.mkdir(parents=True, exist_ok=True)
 
-            success = await manager.start_all()
+            try:
+                success = await manager.start_all()
 
-            # Should fail due to blocked port
-            assert not success
+                # Should fail due to blocked port
+                assert not success
+            finally:
+                # Clean up any partially started processes
+                await manager.stop_all(timeout=1.0)
 
     async def test_17_stop_by_pid_files(
         self, session_backend_manager: ServerManager
@@ -649,9 +653,12 @@ class TestBackendManagerIntegration:
         self, session_backend_manager: ServerManager
     ) -> None:
         """Test get_status when backend is stopped."""
-        # Ensure stopped (test_18 or test_15 should have stopped it)
-        await session_backend_manager.stop_all(timeout=1.0)
-        await asyncio.sleep(0.3)
+        # Make test autonomous - ensure known state first
+        await ensure_started(session_backend_manager)
+
+        # Stop all processes with generous timeout
+        await session_backend_manager.stop_all(timeout=2.0)
+        await asyncio.sleep(1.0)  # Wait for processes to fully terminate
 
         status = await session_backend_manager.get_status()
 

@@ -353,6 +353,11 @@ class TestAlembicMigrationDataIntegrity:
 
     def test_pre_migration_jsonb_schema_exists(self, migration_database: str) -> None:
         """Verify JSONB schema is set up correctly before migration."""
+        config = _get_alembic_config(migration_database)
+
+        # Ensure we're in pre-migration state (JSONB schema)
+        command.downgrade(config, "000_initial_schema")
+
         # Check JSONB columns exist
         assert _table_has_column(migration_database, "users", "key")
         assert _table_has_column(migration_database, "users", "value")
@@ -402,7 +407,10 @@ class TestAlembicMigrationDataIntegrity:
 
     def test_upgrade_preserves_token_data(self, migration_database: str) -> None:
         """Verify token data is correctly migrated to typed columns."""
-        # Migration already ran in previous test (tests run sequentially)
+        config = _get_alembic_config(migration_database)
+        # Ensure migration is applied (idempotent - only runs if needed)
+        command.upgrade(config, "001_migrate_jsonb_to_typed")
+
         tokens = _get_typed_tokens(migration_database)
         assert len(tokens) == 3
 
@@ -416,6 +424,9 @@ class TestAlembicMigrationDataIntegrity:
     def test_downgrade_restores_jsonb_schema(self, migration_database: str) -> None:
         """Verify downgrade correctly restores JSONB schema with data."""
         config = _get_alembic_config(migration_database)
+
+        # Ensure we start from upgraded state
+        command.upgrade(config, "001_migrate_jsonb_to_typed")
 
         # Downgrade
         command.downgrade(config, "000_initial_schema")
@@ -436,6 +447,9 @@ class TestAlembicMigrationDataIntegrity:
     def test_round_trip_preserves_data(self, migration_database: str) -> None:
         """Verify upgrade → downgrade → upgrade preserves all data."""
         config = _get_alembic_config(migration_database)
+
+        # Ensure we start from JSONB state (downgraded)
+        command.downgrade(config, "000_initial_schema")
 
         # Upgrade again
         command.upgrade(config, "001_migrate_jsonb_to_typed")

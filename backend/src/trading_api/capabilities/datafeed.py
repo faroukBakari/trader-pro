@@ -1,18 +1,22 @@
 """Datafeed capability interface."""
 
-from abc import ABC, abstractmethod
-from collections.abc import Coroutine
-from datetime import datetime
-from typing import Any, Callable
+from __future__ import annotations
 
-from trading_api.models.exceptions import TradingApiException
-from trading_api.models.market import (
-    Bar,
-    QuoteData,
-    Resolution,
-    SearchSymbolResultItem,
-    SymbolInfo,
-)
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+    from datetime import datetime
+
+    from trading_api.models.exceptions import TradingApiException
+    from trading_api.models.market import (
+        Bar,
+        QuoteData,
+        Resolution,
+        SearchSymbolResultItem,
+        SymbolInfo,
+    )
 
 
 class DatafeedCapability(ABC):
