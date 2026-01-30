@@ -126,7 +126,6 @@ class PostgresTable(TableInterface[Any]):
         table_name: str,
         indexes: list[str] | None = None,
         unique_indexes: list[str] | None = None,
-        allow_reset: bool = False,
     ) -> None:
         # Validate table name at construction time
         validate_identifier(table_name, "table name")
@@ -140,53 +139,74 @@ class PostgresTable(TableInterface[Any]):
         self._indexes = indexes or []
         self._unique_indexes = unique_indexes or []
         self._initialized = False
-        self._allow_reset = allow_reset
+        self._init_lock = asyncio.Lock()
 
     async def _ensure_table(self) -> None:
-        """Create table and indexes if not exists (idempotent)."""
+        """Create table and indexes if not exists (idempotent).
+
+        Uses asyncio.Lock to serialize concurrent table creation attempts,
+        preventing race conditions in concurrent writes.
+        """
         if self._initialized:
             return
 
-        async with self._pool.connection() as conn:
-            # Create table with JSONB value column
-            await conn.execute(
-                sql.SQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS {} (
-                        key TEXT PRIMARY KEY,
-                        value JSONB NOT NULL,
-                        created_at TIMESTAMPTZ DEFAULT NOW(),
-                        updated_at TIMESTAMPTZ DEFAULT NOW()
-                    )
-                    """
-                ).format(sql.Identifier(self._table_name))
-            )
+        async with self._init_lock:
+            # Double-check after acquiring lock (another coroutine may have initialized)
+            if self._initialized:
+                return  # type: ignore[unreachable]
 
-            # Create secondary indexes (1:N mapping)
-            for field in self._indexes:
-                await conn.execute(
-                    sql.SQL(
-                        "CREATE INDEX IF NOT EXISTS {} ON {} ((value->>{}))"
-                    ).format(
-                        sql.Identifier(f"idx_{self._table_name}_{field}"),
-                        sql.Identifier(self._table_name),
-                        sql.Literal(field),
+            async with self._pool.connection() as conn:
+                try:
+                    # Create table with JSONB value column
+                    await conn.execute(
+                        sql.SQL(
+                            """
+                            CREATE TABLE IF NOT EXISTS {} (
+                                key TEXT PRIMARY KEY,
+                                value JSONB NOT NULL,
+                                created_at TIMESTAMPTZ DEFAULT NOW(),
+                                updated_at TIMESTAMPTZ DEFAULT NOW()
+                            )
+                            """
+                        ).format(sql.Identifier(self._table_name))
                     )
-                )
 
-            # Create unique indexes (1:1 mapping)
-            for field in self._unique_indexes:
-                await conn.execute(
-                    sql.SQL(
-                        "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ((value->>{}))"
-                    ).format(
-                        sql.Identifier(f"uidx_{self._table_name}_{field}"),
-                        sql.Identifier(self._table_name),
-                        sql.Literal(field),
+                    # Create secondary indexes (1:N mapping)
+                    for field in self._indexes:
+                        await conn.execute(
+                            sql.SQL(
+                                "CREATE INDEX IF NOT EXISTS {} ON {} ((value->>{}))"
+                            ).format(
+                                sql.Identifier(f"idx_{self._table_name}_{field}"),
+                                sql.Identifier(self._table_name),
+                                sql.Literal(field),
+                            )
+                        )
+
+                    # Create unique indexes (1:1 mapping)
+                    for field in self._unique_indexes:
+                        await conn.execute(
+                            sql.SQL(
+                                "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ((value->>{}))"
+                            ).format(
+                                sql.Identifier(f"uidx_{self._table_name}_{field}"),
+                                sql.Identifier(self._table_name),
+                                sql.Literal(field),
+                            )
+                        )
+                except Exception:
+                    # Table may already exist from concurrent creation - re-raise if not
+                    # Check if table exists now and skip error if so
+                    result = await conn.execute(
+                        sql.SQL(
+                            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = {})"
+                        ).format(sql.Literal(self._table_name))
                     )
-                )
+                    row = await result.fetchone()
+                    if not row or not row[0]:
+                        raise  # Re-raise if table doesn't exist (real error)
 
-        self._initialized = True
+            self._initialized = True
 
     async def get(self, key: str, index: str | None = None) -> Any:
         """Get a value by key or indexed field.
@@ -364,47 +384,6 @@ class PostgresTable(TableInterface[Any]):
             )
             await conn.execute(query)
 
-    async def reset(self) -> None:
-        """Reset table to initial state: clear data AND remove all custom indexes.
-
-        Drops all indexes created via create_index() and create_unique_index(),
-        then truncates the table. This ensures full test isolation.
-
-        Raises:
-            RuntimeError: If DATASTORE_ALLOW_RESET is not enabled in settings.
-        """
-        if not self._allow_reset:
-            raise RuntimeError(
-                "reset() is disabled. Set DATASTORE_ALLOW_RESET=True in settings "
-                "(test mode only)."
-            )
-
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            # Drop all custom indexes (idx_ and uidx_ prefixed)
-            for field_name in self._indexes:
-                drop_query = sql.SQL("DROP INDEX IF EXISTS {}").format(
-                    sql.Identifier(f"idx_{self._table_name}_{field_name}")
-                )
-                await conn.execute(drop_query)
-
-            for field_name in self._unique_indexes:
-                drop_query = sql.SQL("DROP INDEX IF EXISTS {}").format(
-                    sql.Identifier(f"uidx_{self._table_name}_{field_name}")
-                )
-                await conn.execute(drop_query)
-
-            # Clear all data
-            truncate_query = sql.SQL("TRUNCATE TABLE {}").format(
-                sql.Identifier(self._table_name)
-            )
-            await conn.execute(truncate_query)
-
-        # Reset internal tracking
-        self._indexes.clear()
-        self._unique_indexes.clear()
-
     async def count(self) -> int:
         """Get the count of entries in the table."""
         await self._ensure_table()
@@ -417,6 +396,11 @@ class PostgresTable(TableInterface[Any]):
                 await cur.execute(query)
                 row = await cur.fetchone()
                 return int(row["cnt"]) if row else 0
+
+    @property
+    async def is_empty(self) -> bool:
+        """Check if table has zero entries."""
+        return await self.count() == 0
 
     async def iterate(self) -> AsyncIterator[tuple[str, Any]]:
         """Asynchronously iterate over key-value pairs.
@@ -525,16 +509,14 @@ class PostgresDatastore(DatastoreInterface):
 
     def __init__(
         self,
-        pool: AsyncConnectionPool[Any],
+        pool: AsyncConnectionPool[AsyncConnection[Any]],
         session_factory: async_sessionmaker[AsyncSession],
-        allow_reset: bool = False,
     ) -> None:
         """Initialize with existing pool (use create() factory instead)."""
         self._pool = pool
         self._session_factory = session_factory
         self._tables: dict[str, PostgresTable] = {}
         self._typed_tables: dict[str, SQLModelTable[Any]] = {}
-        self._allow_reset = allow_reset
 
     @classmethod
     async def create(
@@ -609,7 +591,13 @@ class PostgresDatastore(DatastoreInterface):
         # Also create session factory for SQLModel tables (Wave 2B)
         session_factory = await AsyncEngineFactory.get_session_factory(dsn)
 
-        return cls(pool, session_factory, allow_reset=cfg.DATASTORE_ALLOW_RESET)
+        # [EAGER SCHEMA] Create all SQLModel table=True tables at startup
+        # This ensures schema exists before any operations, avoiding lazy init issues
+        engine = await AsyncEngineFactory.get_engine(dsn)
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+
+        return cls(pool, session_factory)
 
     @property
     def has_persistence(self) -> bool:
@@ -669,7 +657,6 @@ class PostgresDatastore(DatastoreInterface):
                     model_class=model_class,
                     session_factory=self._session_factory,
                     primary_key=pk,
-                    allow_reset=self._allow_reset,
                 )
             return self._typed_tables[table_name]
         else:
@@ -691,9 +678,75 @@ class PostgresDatastore(DatastoreInterface):
                     table_name=name,
                     indexes=indexes,
                     unique_indexes=unique_indexes,
-                    allow_reset=self._allow_reset,
                 )
             return self._tables[name]
+
+    async def list_tables(self, prefix: str | None = None) -> list[str]:
+        """List all table names in the datastore.
+
+        Queries information_schema for tables in the public schema.
+        This captures dynamically-created tables (e.g., bar tables) that
+        are not tracked in the internal _tables cache.
+
+        Args:
+            prefix: Optional prefix filter (e.g., "bars_" for bar tables)
+
+        Returns:
+            List of table names matching the prefix filter
+        """
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                if prefix:
+                    await cur.execute(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = 'public' AND table_name LIKE %s",
+                        (f"{prefix}%",),
+                    )
+                else:
+                    await cur.execute(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = 'public'"
+                    )
+                rows = await cur.fetchall()
+                return [row["table_name"] for row in rows]
+
+    async def drop_table(self, name: str) -> bool:
+        """Drop a table by name.
+
+        Executes DROP TABLE IF EXISTS and removes from internal tracking.
+
+        Args:
+            name: Table name to drop
+
+        Returns:
+            True if table was dropped, False if it didn't exist
+        """
+        validate_identifier(name, "table name")
+
+        # Check if table exists first
+        async with self._pool.connection() as conn:
+            async with conn.cursor(row_factory=dict_row) as cur:
+                await cur.execute(
+                    "SELECT EXISTS ("
+                    "SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = 'public' AND table_name = %s"
+                    ")",
+                    (name,),
+                )
+                row = await cur.fetchone()
+                if not row or not row["exists"]:
+                    return False
+
+            # Drop the table
+            await conn.execute(
+                sql.SQL("DROP TABLE IF EXISTS {}").format(sql.Identifier(name))
+            )
+
+        # Remove from internal caches
+        self._tables.pop(name, None)
+        self._typed_tables.pop(name, None)
+
+        return True
 
     async def close(self) -> None:
         """Graceful shutdown - close connection pool and dispose engine."""

@@ -9,12 +9,14 @@ PostgreSQL datastore implementation using **psycopg3** with dual-mode storage:
 
 - **PostgresTable**: JSONB storage for flexible schemas (Wave 2A)
 - **SQLModelTable**: Typed column storage for SQLModel entities (Wave 2B)
+- **PostgresBarRepository**: Time-series bar storage with table-per-combo pattern (Wave 3A)
 
 ## Directory Structure
 
 ```
 postgres/
 ├── __init__.py           # Exports PostgresDatastore, PostgresTable, SQLModelTable
+├── bars.py               # Bar storage with table-per-combo pattern (Wave 3A)
 ├── datastore.py          # Main datastore + JSONB table implementation
 ├── engine.py             # AsyncEngineFactory singleton (SQLAlchemy)
 ├── sql_safe.py           # SQL injection protection utilities
@@ -23,6 +25,29 @@ postgres/
 └── tests/
     └── test_postgres_datastore.py
 ```
+
+## Bar Storage (`bars.py`)
+
+Implements **Wave 3A** time-series bar storage with **table-per-combo pattern** for efficient OHLCV data storage.
+
+### Table Schema
+
+Each symbol/timeframe combination gets its own table:
+
+- **Table naming**: `bars_{symbol}_{timeframe}` (e.g., `bars_aapl_1h`)
+- **Columns**: `time` (PK), `open`, `high`, `low`, `close`, `volume`, `count`
+
+### Key Functions
+
+| Function                              | Purpose                              |
+| ------------------------------------- | ------------------------------------ |
+| `bar_table_name(symbol, timeframe)`   | Generate sanitized table name        |
+| `PostgresBarRepository.upsert_bars()` | Bulk upsert with conflict resolution |
+| `PostgresBarRepository.get_bars()`    | Query bars with optional time range  |
+
+### Design Rationale
+
+Table-per-combo avoids index bloat and enables efficient partition-like queries without PostgreSQL partitioning complexity. Each table is created lazily on first write.
 
 ## SQL Injection Protection
 

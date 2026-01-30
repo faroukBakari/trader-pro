@@ -156,6 +156,7 @@ InMemoryDatastore
 | `iterate()`                       | Read  | `AsyncIterator[tuple[str,T]]` | Async iterate over key-value pairs            |
 | `create_index(field_name)`        | Write | `None`                        | Create secondary index (1:N)                  |
 | `create_unique_index(field_name)` | Write | `None`                        | Create unique index (1:1)                     |
+| `is_empty` (property)             | Read  | `bool`                        | Returns True if table has zero entries        |
 
 #### DatastoreInterface Methods
 
@@ -163,6 +164,8 @@ InMemoryDatastore
 | --------------------------------- | ---------------------------------------------------------------------- |
 | `table(model_class, primary_key)` | Get or create table for model class (auto-extracts indexes from Field) |
 | `datastore_name()` (classmethod)  | Canonical name for registry lookup (e.g., "inmemory")                  |
+| `list_tables(prefix)`             | List all table names, optionally filtered by prefix                    |
+| `drop_table(name)`                | Drop a table by name (returns True if dropped, False if not found)     |
 
 ### Indexing via Field() Metadata
 
@@ -471,7 +474,7 @@ The datastore tests follow a three-tier structure:
 1. **Contract Tests** (`tests/integration/test_datastore_contract.py`):
    - Parametrized tests that run against ALL datastore implementations
    - Validates `TableInterface` and `DatastoreInterface` contracts
-   - Uses `reset()` for full test isolation (data + indexes)
+   - Uses `drop_table()` and `list_tables()` for test isolation
    - Source of truth for expected behavior
 
 2. **Implementation-Specific Tests** (`datastores/{impl}/tests/test_{impl}_specific.py`):
@@ -486,7 +489,6 @@ The datastore tests follow a three-tier structure:
 
 Tests use a session-scoped `test_settings` fixture that:
 
-- Enables `DATASTORE_ALLOW_RESET=True` for test isolation
 - Configures minimal pool sizes for efficiency
 - Ensures CI pipelines are config-agnostic
 
@@ -494,25 +496,23 @@ Tests use a session-scoped `test_settings` fixture that:
 @pytest.fixture(scope="session")
 def test_settings() -> Settings:
     return Settings(
-        DATASTORE_ALLOW_RESET=True,  # Enable reset() for tests
         DATASTORE_POSTGRES_POOL_MAX_SIZE=2,
         # ... other test-specific config
     )
 ```
 
-### The `reset()` Method
+### Test Isolation with `drop_table()`
 
-`reset()` clears data AND removes custom indexes (unlike `clear()` which only removes data).
-It's protected by `DATASTORE_ALLOW_RESET` to prevent accidental use in production:
+Use `list_tables()` and `drop_table()` to clean up dynamically-created tables between tests:
 
 ```python
-# Test fixture pattern
+# Test fixture pattern for bar tables
 @pytest.fixture
-async def table(any_datastore: DatastoreInterface) -> AsyncIterator[TableInterface]:
-    tbl = any_datastore.table(MyModel)
-    await tbl.reset()  # Clean state: no data, no indexes
-    yield tbl
-    await tbl.reset()  # Cleanup after test
+async def clean_bar_tables(datastore: DatastoreInterface) -> AsyncIterator[None]:
+    yield
+    # Cleanup: drop all bar tables created during test
+    for table_name in await datastore.list_tables(prefix="bars_"):
+        await datastore.drop_table(table_name)
 ```
 
 ### Running Tests

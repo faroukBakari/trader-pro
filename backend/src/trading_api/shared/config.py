@@ -27,9 +27,6 @@ class Settings(BaseSettings):
     INTERNAL_HMAC_KEY_PATH: Path = Path(".local/secrets/hmac_internal.key")
     INTERNAL_SIGNATURE_TTL_SECONDS: int = 30  # Replay protection window
 
-    # Datastore Configuration
-    DATASTORE_ALLOW_RESET: bool = False  # DANGEROUS: Only enable in test mode!
-
     # PostgreSQL Datastore Configuration
     DATASTORE_POSTGRES_DSN: str | None = None
     DATASTORE_POSTGRES_USER: str = "trader"

@@ -181,29 +181,110 @@ async def test_create_works_without_config() -> None:
 
 
 # =============================================================================
-# InMemory-Specific: Reset Protection
+# InMemory-Specific: drop_table()
 # =============================================================================
 
 
 @pytest.mark.asyncio
-async def test_reset_raises_when_disabled() -> None:
-    """reset() raises RuntimeError when DATASTORE_ALLOW_RESET is False."""
-    # Create settings with reset disabled (production mode)
-    settings = Settings(DATASTORE_ALLOW_RESET=False)
-    ds = await InMemoryDatastore.create(config=settings)
-    table = ds.table(SampleModel)
+async def test_drop_table_returns_true_when_exists() -> None:
+    """drop_table() returns True when table exists and is dropped."""
+    ds = await InMemoryDatastore.create()
+    ds.table(SampleModel)  # Create the table
 
-    with pytest.raises(RuntimeError, match="reset\\(\\) is disabled"):
-        await table.reset()
+    dropped = await ds.drop_table("samplemodel")
+
+    assert dropped is True
+    assert "samplemodel" not in await ds.list_tables()
 
 
 @pytest.mark.asyncio
-async def test_reset_works_when_enabled() -> None:
-    """reset() works when DATASTORE_ALLOW_RESET is True."""
-    settings = Settings(DATASTORE_ALLOW_RESET=True)
-    ds = await InMemoryDatastore.create(config=settings)
-    table = ds.table(SampleModel)
+async def test_drop_table_returns_false_when_not_exists() -> None:
+    """drop_table() returns False when table doesn't exist."""
+    ds = await InMemoryDatastore.create()
 
+    dropped = await ds.drop_table("nonexistent")
+
+    assert dropped is False
+
+
+@pytest.mark.asyncio
+async def test_drop_table_allows_recreation() -> None:
+    """After drop_table(), table can be recreated fresh."""
+    ds = await InMemoryDatastore.create()
+    table1 = ds.table(SampleModel)
+    await table1.set("k", SampleModel(id="k", name="old"))
+
+    await ds.drop_table("samplemodel")
+
+    # Recreate and verify it's fresh
+    table2 = ds.table(SampleModel)
+    assert await table2.count() == 0
+    assert table1 is not table2  # Different instance
+
+
+# =============================================================================
+# InMemory-Specific: is_empty property
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_is_empty_true_when_no_entries() -> None:
+    """is_empty returns True for empty table."""
+    table: InMemoryTable = InMemoryTable()
+    assert await table.is_empty is True
+
+
+@pytest.mark.asyncio
+async def test_is_empty_false_when_has_entries() -> None:
+    """is_empty returns False when table has entries."""
+    table: InMemoryTable = InMemoryTable()
     await table.set("k", SampleModel(id="k", name="test"))
-    await table.reset()
-    assert await table.count() == 0
+    assert await table.is_empty is False
+
+
+# =============================================================================
+# InMemory-Specific: list_tables()
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_list_tables_returns_all() -> None:
+    """list_tables() returns all table names."""
+    ds = await InMemoryDatastore.create()
+    ds.table(SampleModel)
+    ds.table(AnotherModel)
+
+    tables = await ds.list_tables()
+
+    assert "samplemodel" in tables
+    assert "anothermodel" in tables
+
+
+@pytest.mark.asyncio
+async def test_list_tables_with_prefix() -> None:
+    """list_tables() filters by prefix."""
+    ds = await InMemoryDatastore.create()
+    # Access _tables directly to add a bar-style table name
+    ds._tables["bars_aapl_r1d"] = InMemoryTable()
+    ds._tables["bars_msft_r1d"] = InMemoryTable()
+    ds.table(SampleModel)  # Creates "samplemodel"
+
+    # All tables
+    all_tables = await ds.list_tables()
+    assert len(all_tables) >= 3
+
+    # Only bar tables
+    bar_tables = await ds.list_tables(prefix="bars_")
+    assert len(bar_tables) == 2
+    assert "bars_aapl_r1d" in bar_tables
+    assert "bars_msft_r1d" in bar_tables
+    assert "samplemodel" not in bar_tables
+
+
+@pytest.mark.asyncio
+async def test_list_tables_empty() -> None:
+    """list_tables() returns empty list when no tables exist."""
+    ds = await InMemoryDatastore.create()
+
+    tables = await ds.list_tables()
+    assert tables == []

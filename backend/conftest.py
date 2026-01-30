@@ -43,8 +43,6 @@ def _build_test_settings(project_root: Path, postgres_dsn: str | None) -> Settin
         Configured Settings instance
     """
     return Settings(
-        # Datastore - enable reset() for test isolation
-        DATASTORE_ALLOW_RESET=True,
         # JWT paths - resolve from project root (same as production)
         JWT_PRIVATE_KEY_PATH=project_root / ".local/secrets/jwt_private.pem",
         JWT_PUBLIC_KEY_PATH=project_root / ".local/secrets/jwt_public.pem",

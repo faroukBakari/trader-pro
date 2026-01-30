@@ -132,7 +132,6 @@ class InMemoryTable(TableInterface):
         timeout: float = 1.0,
         indexes: list[str] | None = None,
         unique_indexes: list[str] | None = None,
-        allow_reset: bool = False,
     ) -> None:
         self.__data: dict[str, BaseModel] = {}
         self.__indexes: dict[str, dict[str, set[str]]] = {}
@@ -141,7 +140,6 @@ class InMemoryTable(TableInterface):
         # Threading lock for cross-thread sync with TWS connection callbacks
         self.__threading_lock = threading.Lock()
         self.__timeout = timeout
-        self.__allow_reset = allow_reset
 
         # Register indexes at construction time (sync, no lock needed)
         for field_name in indexes or []:
@@ -287,26 +285,16 @@ class InMemoryTable(TableInterface):
                 self.__indexes.clear()
                 self.__unique_indexes.clear()
 
-    async def reset(self) -> None:
-        """Reset table to initial state: clear data AND remove all indexes.
-
-        For InMemory, this is equivalent to clear() since clear() already
-        removes both data and indexes.
-
-        Raises:
-            RuntimeError: If DATASTORE_ALLOW_RESET is not enabled in settings.
-        """
-        if not self.__allow_reset:
-            raise RuntimeError(
-                "reset() is disabled. Set DATASTORE_ALLOW_RESET=True in settings "
-                "(test mode only)."
-            )
-        await self.clear()
-
     async def count(self) -> int:
         """Get the count of entries in the table (read-locked)."""
         async with self.__lock.read(self.timeout):
             return len(self.__data)
+
+    @property
+    async def is_empty(self) -> bool:
+        """Check if table has zero entries (read-locked)."""
+        async with self.__lock.read(self.timeout):
+            return len(self.__data) == 0
 
     async def iterate(self) -> AsyncIterator[tuple[str, BaseModel]]:
         """Asynchronously iterate over key-value pairs in the table (read-locked)."""
@@ -359,23 +347,16 @@ class InMemoryDatastore(DatastoreInterface):
         """Async factory for InMemoryDatastore.
 
         Args:
-            config: Optional Settings for configuration (e.g., DATASTORE_ALLOW_RESET).
-                   Defaults to global settings singleton.
+            config: Optional Settings for configuration. Defaults to global settings singleton.
 
         Returns:
             InMemoryDatastore instance
         """
-        if config is None:
-            from trading_api.shared.config import settings as default_settings
+        return cls()
 
-            config = default_settings
-
-        return cls(allow_reset=config.DATASTORE_ALLOW_RESET)
-
-    def __init__(self, timeout: float = 1.0, allow_reset: bool = False) -> None:
+    def __init__(self, timeout: float = 1.0) -> None:
         self._tables: dict[str, InMemoryTable] = {}
         self.__timeout = timeout
-        self.__allow_reset = allow_reset
         self.__threading_lock = threading.Lock()
 
     @property
@@ -434,9 +415,40 @@ class InMemoryDatastore(DatastoreInterface):
                     timeout=self.__timeout,
                     indexes=indexes,
                     unique_indexes=unique_indexes,
-                    allow_reset=self.__allow_reset,
                 )
         return self._tables[name]
+
+    async def list_tables(self, prefix: str | None = None) -> list[str]:
+        """List all table names in the datastore.
+
+        Args:
+            prefix: Optional prefix filter (e.g., "bars_" for bar tables)
+
+        Returns:
+            List of table names matching the prefix filter
+        """
+        with self.__threading_lock:
+            names = list(self._tables.keys())
+        if prefix:
+            names = [n for n in names if n.startswith(prefix)]
+        return names
+
+    async def drop_table(self, name: str) -> bool:
+        """Drop a table by name.
+
+        Removes the table from the internal tables dict.
+
+        Args:
+            name: Table name to drop
+
+        Returns:
+            True if table was dropped, False if it didn't exist
+        """
+        with self.__threading_lock:
+            if name in self._tables:
+                del self._tables[name]
+                return True
+            return False
 
 
 __all__ = ["InMemoryDatastore", "InMemoryTable"]
