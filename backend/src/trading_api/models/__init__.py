@@ -80,12 +80,14 @@ from .health import HealthResponse
 from .market import (
     Bar,
     BarsSubscriptionRequest,
+    CoveredRange,
     DatafeedConfiguration,
     DatafeedSymbolType,
     Exchange,
     GetBarsRequest,
     GetBarsResponse,
     GetQuotesRequest,
+    PendingRange,
     QuoteData,
     QuoteDataSubscriptionRequest,
     QuoteValues,
@@ -93,6 +95,7 @@ from .market import (
     SearchSymbolResultItem,
     SearchSymbolsRequest,
     SymbolInfo,
+    TimeRange,
 )
 
 # Import versioning models
@@ -141,6 +144,10 @@ __all__ = [
     "SearchSymbolResultItem",
     "SearchSymbolsRequest",
     "SymbolInfo",
+    # Cache models
+    "TimeRange",
+    "PendingRange",
+    "CoveredRange",
     # Broker models
     "AccountMetainfo",
     "Brackets",
