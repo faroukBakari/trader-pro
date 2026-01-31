@@ -9,13 +9,23 @@ import logging
 import time
 from typing import Optional
 
+from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import CoveredRange, PendingRange, Resolution, TimeRange
+from trading_api.shared.config import Settings
+from trading_api.shared.datastore_interface import DatastoreInterface, TableInterface
 from trading_api.types import StorageType
 
 logger = logging.getLogger(__name__)
 
-# Default pending range expiration: 30 seconds
-DEFAULT_PENDING_TTL_MS = 30_000
+
+def _primary_key(symbol: str, resolution: Resolution, time_range: TimeRange) -> str:
+    """Create unique primary key for a range."""
+    return f"{symbol}_{resolution.value}_{time_range.start}_{time_range.end}"
+
+
+def _lookup_key(symbol: str, resolution: Resolution) -> str:
+    """Create lookup key from symbol and resolution."""
+    return f"{symbol}_{resolution.value}"
 
 
 class BarCacheManager:
@@ -25,30 +35,82 @@ class BarCacheManager:
     - Pending ranges: In-flight provider requests (prevents duplicate fetches)
     - Covered ranges: Successfully cached data (enables gap detection)
 
-    [THREAD-SAFETY]: Not thread-safe. Use with asyncio lock if concurrent access needed.
+    Uses DatastoreInterface for persistence with indexed lookups by symbol+resolution.
+
+    [THREAD-SAFETY]: Datastore provides per-table locking for concurrent access.
     [MEMORY]: Metadata only - actual bar storage is in BarRepository.
     """
 
-    def __init__(self, pending_ttl_ms: int = DEFAULT_PENDING_TTL_MS) -> None:
+    # Convention: Use a class-level variable as a "key"
+    _AUTH_KEY = object()
+
+    def __init__(
+        self,
+        key: object,
+        datastore: DatastoreInterface,
+        pending_ttl_ms: int,
+    ) -> None:
         """Initialize cache manager.
 
         Args:
+            datastore: DatastoreInterface for persistence
             pending_ttl_ms: Time-to-live for pending ranges in milliseconds
         """
-        self._pending_ttl_ms = pending_ttl_ms
-        # Key: (symbol, resolution.value) -> list of ranges
-        self._pending: dict[tuple[str, str], list[PendingRange]] = {}
-        self._covered: dict[tuple[str, str], list[CoveredRange]] = {}
+        # Prevent direct instantiation
+        if key is not self._AUTH_KEY:
+            raise TradingApiException(
+                code="BAR_CACHE_MANAGER_INIT_FORBIDDEN",
+                message="Use BarCacheManager.create() to instantiate",
+            )
 
-    def _key(self, symbol: str, resolution: Resolution) -> tuple[str, str]:
-        """Create lookup key from symbol and resolution."""
-        return (symbol, resolution.value)
+        self._pending_ttl_ms = pending_ttl_ms
+        self._datastore = datastore
+        self._pending_table: TableInterface[PendingRange] | None = None
+        self._covered_table: TableInterface[CoveredRange] | None = None
+        self._indexes_created = False
+
+    @classmethod
+    async def create(
+        cls,
+        datastore: DatastoreInterface,
+        settings: Settings,
+    ) -> "BarCacheManager":
+        """Factory method to create BarCacheManager instance."""
+        instance = cls(
+            key=cls._AUTH_KEY,
+            datastore=datastore,
+            pending_ttl_ms=settings.BAR_CACHE_PENDING_TTL_MS,
+        )
+        await instance.__ensure_indexes()
+        return instance
+
+    @property
+    def pending_table(self) -> TableInterface[PendingRange]:
+        """Get or create the pending ranges table."""
+        if self._pending_table is None:
+            self._pending_table = self._datastore.table(PendingRange)
+        return self._pending_table
+
+    @property
+    def covered_table(self) -> TableInterface[CoveredRange]:
+        """Get or create the covered ranges table."""
+        if self._covered_table is None:
+            self._covered_table = self._datastore.table(CoveredRange)
+        return self._covered_table
+
+    async def __ensure_indexes(self) -> None:
+        """Create indexes on first use (idempotent)."""
+        if self._indexes_created:
+            return
+        await self.pending_table.create_index("lookup_key")
+        await self.covered_table.create_index("lookup_key")
+        self._indexes_created = True
 
     # =========================================================================
     # Pending Range Management
     # =========================================================================
 
-    def add_pending(
+    async def add_pending(
         self,
         symbol: str,
         resolution: Resolution,
@@ -66,6 +128,7 @@ class BarCacheManager:
         Returns:
             Created PendingRange
         """
+
         ttl = ttl_ms if ttl_ms is not None else self._pending_ttl_ms
         expires_at = int(time.time() * 1000) + ttl
 
@@ -76,15 +139,13 @@ class BarCacheManager:
             expires_at=expires_at,
         )
 
-        key = self._key(symbol, resolution)
-        if key not in self._pending:
-            self._pending[key] = []
-        self._pending[key].append(pending)
+        key = _primary_key(symbol, resolution, time_range)
+        await self.pending_table.set(key, pending)
 
         logger.debug(f"Added pending range: {symbol}/{resolution.value} {time_range}")
         return pending
 
-    def remove_pending(
+    async def remove_pending(
         self,
         symbol: str,
         resolution: Resolution,
@@ -100,23 +161,16 @@ class BarCacheManager:
         Returns:
             True if removed, False if not found
         """
-        key = self._key(symbol, resolution)
-        pending_list = self._pending.get(key, [])
+        key = _primary_key(symbol, resolution, time_range)
+        result = await self.pending_table.delete(key)
 
-        for i, pending in enumerate(pending_list):
-            if (
-                pending.time_range.start == time_range.start
-                and pending.time_range.end == time_range.end
-            ):
-                pending_list.pop(i)
-                logger.debug(
-                    f"Removed pending range: {symbol}/{resolution.value} {time_range}"
-                )
-                return True
+        if result:
+            logger.debug(
+                f"Removed pending range: {symbol}/{resolution.value} {time_range}"
+            )
+        return result
 
-        return False
-
-    def get_pending_ranges(
+    async def get_pending_ranges(
         self,
         symbol: str,
         resolution: Resolution,
@@ -125,34 +179,41 @@ class BarCacheManager:
 
         Automatically cleans up expired entries.
         """
-        key = self._key(symbol, resolution)
+
+        lookup_key = _lookup_key(symbol, resolution)
+        pending_list = await self.pending_table.get_all(lookup_key, index="lookup_key")
+
         now_ms = int(time.time() * 1000)
+        valid: list[PendingRange] = []
+        expired_keys: list[str] = []
 
-        # Filter out expired entries
-        pending_list = self._pending.get(key, [])
-        valid = [p for p in pending_list if p.expires_at > now_ms]
+        for p in pending_list:
+            if p.expires_at > now_ms:
+                valid.append(p)
+            else:
+                expired_keys.append(_primary_key(p.symbol, p.resolution, p.time_range))
 
-        # Update list if any expired
-        if len(valid) != len(pending_list):
-            self._pending[key] = valid
+        # Clean up expired entries
+        for key in expired_keys:
+            await self.pending_table.delete(key)
 
         return valid
 
-    def is_pending(
+    async def is_pending(
         self,
         symbol: str,
         resolution: Resolution,
         time_range: TimeRange,
     ) -> bool:
         """Check if a range overlaps with any pending request."""
-        pending_ranges = self.get_pending_ranges(symbol, resolution)
+        pending_ranges = await self.get_pending_ranges(symbol, resolution)
         return any(p.time_range.overlaps(time_range) for p in pending_ranges)
 
     # =========================================================================
     # Covered Range Management
     # =========================================================================
 
-    def mark_covered(
+    async def mark_covered(
         self,
         symbol: str,
         resolution: Resolution,
@@ -175,6 +236,7 @@ class BarCacheManager:
         Returns:
             Created CoveredRange
         """
+
         covered = CoveredRange(
             symbol=symbol,
             resolution=resolution,
@@ -183,10 +245,8 @@ class BarCacheManager:
             bar_count=bar_count,
         )
 
-        key = self._key(symbol, resolution)
-        if key not in self._covered:
-            self._covered[key] = []
-        self._covered[key].append(covered)
+        key = _primary_key(symbol, resolution, time_range)
+        await self.covered_table.set(key, covered)
 
         logger.debug(
             f"Marked covered: {symbol}/{resolution.value} {time_range} "
@@ -194,20 +254,21 @@ class BarCacheManager:
         )
         return covered
 
-    def get_covered_ranges(
+    async def get_covered_ranges(
         self,
         symbol: str,
         resolution: Resolution,
     ) -> list[CoveredRange]:
         """Get all covered ranges for symbol/resolution."""
-        key = self._key(symbol, resolution)
-        return self._covered.get(key, [])
+
+        lookup_key = _lookup_key(symbol, resolution)
+        return await self.covered_table.get_all(lookup_key, index="lookup_key")
 
     # =========================================================================
     # Gap Detection
     # =========================================================================
 
-    def find_missing_ranges(
+    async def find_missing_ranges(
         self,
         symbol: str,
         resolution: Resolution,
@@ -229,7 +290,7 @@ class BarCacheManager:
         Returns:
             List of TimeRange gaps that need to be fetched
         """
-        covered_ranges = self.get_covered_ranges(symbol, resolution)
+        covered_ranges = await self.get_covered_ranges(symbol, resolution)
 
         if not covered_ranges:
             # Full miss - need entire range
@@ -259,7 +320,7 @@ class BarCacheManager:
     # Cleanup
     # =========================================================================
 
-    def cleanup_expired_pending(self) -> int:
+    async def cleanup_expired_pending(self) -> int:
         """Remove all expired pending ranges.
 
         Returns:
@@ -268,41 +329,42 @@ class BarCacheManager:
         now_ms = int(time.time() * 1000)
         removed = 0
 
-        for key in list(self._pending.keys()):
-            original_len = len(self._pending[key])
-            self._pending[key] = [
-                p for p in self._pending[key] if p.expires_at > now_ms
-            ]
-            removed += original_len - len(self._pending[key])
+        all_pending = await self.pending_table.values()
 
-            # Remove empty keys
-            if not self._pending[key]:
-                del self._pending[key]
+        for p in all_pending:
+            if p.expires_at <= now_ms:
+                key = _primary_key(p.symbol, p.resolution, p.time_range)
+                if await self.pending_table.delete(key):
+                    removed += 1
 
         if removed:
             logger.debug(f"Cleaned up {removed} expired pending ranges")
 
         return removed
 
-    def clear(self, symbol: Optional[str] = None) -> None:
+    async def clear(self, symbol: Optional[str] = None) -> None:
         """Clear cache metadata.
 
         Args:
             symbol: If provided, only clear for this symbol. Otherwise clear all.
         """
         if symbol is None:
-            self._pending.clear()
-            self._covered.clear()
+            await self.pending_table.clear()
+            await self.covered_table.clear()
             logger.debug("Cleared all cache metadata")
         else:
-            # Clear all resolutions for this symbol
-            keys_to_remove = [k for k in self._pending if k[0] == symbol]
-            for key in keys_to_remove:
-                del self._pending[key]
+            # Clear all entries for this symbol (all resolutions)
+            all_pending = await self.pending_table.values()
+            for p in all_pending:
+                if p.symbol == symbol:
+                    key = _primary_key(p.symbol, p.resolution, p.time_range)
+                    await self.pending_table.delete(key)
 
-            keys_to_remove = [k for k in self._covered if k[0] == symbol]
-            for key in keys_to_remove:
-                del self._covered[key]
+            all_covered = await self.covered_table.values()
+            for c in all_covered:
+                if c.symbol == symbol:
+                    key = _primary_key(c.symbol, c.resolution, c.time_range)
+                    await self.covered_table.delete(key)
 
             logger.debug(f"Cleared cache metadata for {symbol}")
 

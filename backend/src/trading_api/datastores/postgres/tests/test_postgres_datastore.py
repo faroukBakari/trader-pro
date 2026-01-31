@@ -117,8 +117,8 @@ class TestPostgresTableCRUD:
 
         result = await tbl.get("key1")
         assert result is not None
-        assert result["name"] == "test"
-        assert result["value"] == 42
+        assert result.name == "test"
+        assert result.value == 42
 
     @pytest.mark.asyncio
     async def test_get_nonexistent_returns_none(self, table: TableFixture) -> None:
@@ -224,7 +224,7 @@ class TestPostgresTableIndexes:
 
         result = await tbl.get("a@test.com", index="email")
         assert result is not None
-        assert result["value"] == 1
+        assert result.value == 1
 
     @pytest.mark.asyncio
     async def test_get_all_by_secondary_index(
@@ -239,7 +239,7 @@ class TestPostgresTableIndexes:
 
         results = await tbl.get_all("admin", index="group")
         assert len(results) == 2
-        values = {r["value"] for r in results}
+        values = {r.value for r in results}
         assert values == {1, 2}
 
     @pytest.mark.asyncio

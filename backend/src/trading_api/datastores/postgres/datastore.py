@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from psycopg import AsyncConnection, sql
 from psycopg.rows import dict_row
@@ -43,6 +43,8 @@ from .sql_safe import validate_identifier
 from .sqlmodel_table import SQLModelTable
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T", bound=BaseModel)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -99,11 +101,11 @@ def extract_indexes(
     return indexes, unique_indexes, primary_key
 
 
-class PostgresTable(TableInterface[Any]):
+class PostgresTable(TableInterface[T]):
     """PostgreSQL table implementation using JSONB storage.
 
-    Returns dict values (not BaseModel) - caller handles Pydantic conversion
-    via Model.model_validate(). This matches the Wave 2A JSONB approach.
+    Returns validated Pydantic model instances. JSONB data is automatically
+    converted to the model class via model_validate().
 
     [SECURITY] All SQL uses psycopg3's sql.SQL/sql.Identifier composition
     to prevent SQL injection from dynamic table/field names.
@@ -125,6 +127,7 @@ class PostgresTable(TableInterface[Any]):
         self,
         pool: AsyncConnectionPool[AsyncConnection[Any]],
         table_name: str,
+        model_class: type[T],
         indexes: list[str] | None = None,
         unique_indexes: list[str] | None = None,
     ) -> None:
@@ -137,6 +140,7 @@ class PostgresTable(TableInterface[Any]):
 
         self._pool = pool
         self._table_name = table_name
+        self._model_class = model_class
         self._indexes = indexes or []
         self._unique_indexes = unique_indexes or []
         self._initialized = False
@@ -209,12 +213,10 @@ class PostgresTable(TableInterface[Any]):
 
             self._initialized = True
 
-    async def get(self, key: str, index: str | None = None) -> Any:
+    async def get(self, key: str, index: str | None = None) -> T | None:
         """Get a value by key or indexed field.
 
-        Returns dict (caller handles Pydantic conversion via model_validate).
-        Note: Type is Any since JSONB returns dict, not BaseModel.
-        Repository layer calls Model.model_validate() for conversion.
+        Returns validated Pydantic model instance or None if not found.
         """
         await self._ensure_table()
 
@@ -238,13 +240,12 @@ class PostgresTable(TableInterface[Any]):
                 result = await cur.fetchone()
                 if result is None:
                     return None
-                # Return dict - caller uses Model.model_validate() for conversion
-                return result["value"]
+                return self._model_class.model_validate(result["value"])
 
-    async def get_all(self, key: str, index: str | None = None) -> list[Any]:
+    async def get_all(self, key: str, index: str | None = None) -> list[T]:
         """Get all values by key or indexed field.
 
-        Returns list of dicts - caller handles Pydantic conversion.
+        Returns list of validated Pydantic model instances.
         """
         await self._ensure_table()
 
@@ -266,7 +267,7 @@ class PostgresTable(TableInterface[Any]):
                     await cur.execute(query, (key,))
 
                 rows = await cur.fetchall()
-                return [row["value"] for row in rows]
+                return [self._model_class.model_validate(row["value"]) for row in rows]
 
     async def set(self, key: str, value: BaseModel) -> None:
         """Set a value by key (upsert pattern)."""
@@ -359,10 +360,10 @@ class PostgresTable(TableInterface[Any]):
                     rows = await cur.fetchall()
                     return [row["idx_val"] for row in rows]
 
-    async def values(self) -> list[Any]:
+    async def values(self) -> list[T]:
         """Get all values in the table.
 
-        Returns list of dicts - caller handles Pydantic conversion.
+        Returns list of validated Pydantic model instances.
         """
         await self._ensure_table()
 
@@ -373,7 +374,7 @@ class PostgresTable(TableInterface[Any]):
                 )
                 await cur.execute(query)
                 rows = await cur.fetchall()
-                return [row["value"] for row in rows]
+                return [self._model_class.model_validate(row["value"]) for row in rows]
 
     async def clear(self) -> None:
         """Remove all entries from the table."""
@@ -403,10 +404,10 @@ class PostgresTable(TableInterface[Any]):
         """Check if table has zero entries."""
         return await self.count() == 0
 
-    async def iterate(self) -> AsyncIterator[tuple[str, Any]]:
+    async def iterate(self) -> AsyncIterator[tuple[str, T]]:
         """Asynchronously iterate over key-value pairs.
 
-        Yields (key, dict) tuples - caller handles Pydantic conversion.
+        Yields (key, model) tuples with validated Pydantic instances.
         """
         await self._ensure_table()
 
@@ -417,7 +418,7 @@ class PostgresTable(TableInterface[Any]):
                 )
                 await cur.execute(query)
                 async for row in cur:
-                    yield row["key"], row["value"]
+                    yield row["key"], self._model_class.model_validate(row["value"])
 
     async def create_index(self, field_name: str) -> None:
         """Create an index on a specified field."""
@@ -677,6 +678,7 @@ class PostgresDatastore(DatastoreInterface):
                 self._tables[name] = PostgresTable(
                     pool=self._pool,
                     table_name=name,
+                    model_class=model_class,
                     indexes=indexes,
                     unique_indexes=unique_indexes,
                 )

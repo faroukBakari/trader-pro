@@ -258,7 +258,7 @@ See [postgres/README.md](postgres/README.md) for detailed error messages and rem
 - **JSONB Storage**: Schema-flexible storage - each table stores `key TEXT` + `value JSONB`
 - **Async Factory Pattern**: Pool creation is async, use `PostgresDatastore.create()` factory
 - **No-Op RWLock**: PostgreSQL MVCC provides transaction isolation, app-level locks are redundant
-- **Dict Return Type**: `get()` returns dict (not BaseModel) - caller uses `model_validate()` for conversion
+- **Typed Model Returns**: `get()`, `get_all()`, `values()` return validated Pydantic model instances (same as InMemoryDatastore)
 - **SQL Injection Safety**: All queries use `psycopg.sql.SQL/Identifier/Literal` for safe dynamic SQL composition
 
 ### Usage
@@ -480,7 +480,7 @@ The datastore tests follow a three-tier structure:
 2. **Implementation-Specific Tests** (`datastores/{impl}/tests/test_{impl}_specific.py`):
    - Tests unique features of each implementation
    - InMemory: RWLock behavior, BaseModel return type, deep copy
-   - Postgres: psycopg exceptions, connection pool, dict return type
+   - Postgres: psycopg exceptions, connection pool, model validation
 
 3. **Integration Tests** (`tests/integration/test_datastore_integration.py`):
    - End-to-end tests with repositories and services
