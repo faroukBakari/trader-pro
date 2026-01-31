@@ -131,23 +131,6 @@ async def indexed_table(
 
 
 # =============================================================================
-# Helper Functions
-# =============================================================================
-
-
-def normalize_result(result: Any) -> dict[str, Any]:
-    """Normalize result to dict for comparison.
-
-    InMemory returns BaseModel, Postgres returns dict.
-    """
-    if result is None:
-        return {}
-    if hasattr(result, "model_dump"):
-        return result.model_dump()
-    return dict(result)
-
-
-# =============================================================================
 # DatastoreInterface Contract Tests
 # =============================================================================
 
@@ -255,9 +238,8 @@ class TestTableCRUDContract:
 
         result = await table.get("1")
         assert result is not None
-        data = normalize_result(result)
-        assert data["name"] == "test"
-        assert data["category"] == "A"
+        assert result.name == "test"
+        assert result.category == "A"
 
     @pytest.mark.asyncio
     async def test_get_nonexistent_returns_none(
@@ -314,7 +296,7 @@ class TestTableCRUDContract:
 
         values = await table.values()
         assert len(values) == 2
-        names = {normalize_result(v)["name"] for v in values}
+        names = {v.name for v in values}
         assert names == {"alpha", "beta"}
 
     @pytest.mark.asyncio
@@ -373,8 +355,8 @@ class TestTableCRUDContract:
         await table.set("ow_key", ContractTestModel(id="1", name="new"))
 
         result = await table.get("ow_key")
-        data = normalize_result(result)
-        assert data["name"] == "new"
+        assert result is not None
+        assert result.name == "new"
         assert await table.count() == 1
 
 
@@ -396,8 +378,7 @@ class TestTableIndexContract:
 
         result = await table.get("X", index="category")
         assert result is not None
-        data = normalize_result(result)
-        assert data["id"] == "1"
+        assert result.id == "1"
 
     @pytest.mark.asyncio
     async def test_get_by_index_returns_correct_record(
@@ -409,8 +390,8 @@ class TestTableIndexContract:
         await table.create_index("category")
 
         result = await table.get("B", index="category")
-        data = normalize_result(result)
-        assert data["name"] == "second"
+        assert result is not None
+        assert result.name == "second"
 
     @pytest.mark.asyncio
     async def test_delete_by_index(self, table: TableInterface[Any]) -> None:
@@ -466,8 +447,7 @@ class TestTableUniqueIndexContract:
 
         result = await table.get("alice", index="name")
         assert result is not None
-        data = normalize_result(result)
-        assert data["id"] == "1"
+        assert result.id == "1"
 
     @pytest.mark.asyncio
     async def test_unique_index_allows_update_same_key(
@@ -479,8 +459,8 @@ class TestTableUniqueIndexContract:
         await table.set("us1", ContractTestModel(id="1", name="bob", category="B"))
 
         result = await table.get("us1")
-        data = normalize_result(result)
-        assert data["category"] == "B"
+        assert result is not None
+        assert result.category == "B"
 
     @pytest.mark.asyncio
     async def test_unique_index_cleanup_on_delete(

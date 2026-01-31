@@ -59,67 +59,81 @@ class DatafeedService(WsRouteService):
 
 ### Repository Layer
 
-The module includes a `BarRepository` for OHLC bar storage:
+The module includes a `BarRepository` for OHLC bar storage using `DatastoreInterface`:
 
 ```python
 class BarRepository:
     def __init__(self, datastore: DatastoreInterface) -> None:
-        # Structure: {symbol: {resolution_value: {time_ms: Bar}}}
-        self._bars: dict[str, dict[str, dict[int, Bar]]] = {}
+        self._datastore = datastore
+        self._table_classes: dict[str, type[Bar]] = {}  # Cache dynamic subclasses
+
+    def _get_bar_table(self, symbol: str, resolution: Resolution) -> TableInterface[Bar]:
+        # Creates separate table per symbol/resolution: bars_{symbol}_{resolution}
+        table_name = f"bars_{symbol.lower()}_{resolution.value.lower()}"
+        if table_name not in self._table_classes:
+            self._table_classes[table_name] = type(table_name, (Bar,), {"__tablename__": table_name})
+        return self._datastore.table(self._table_classes[table_name])
 
     async def store_bars(self, symbol: str, resolution: Resolution, bars: list[Bar]) -> int:
-        # Store bars with deduplication by timestamp
-        ...
-
-    async def get_bars(self, symbol: str, resolution: Resolution, from_time: int, to_time: int) -> list[Bar]:
-        # Retrieve bars in ascending time order
+        table = self._get_bar_table(symbol, resolution)
+        # Store bars keyed by timestamp (ms)
         ...
 ```
 
 **Key Points:**
 
-- Uses nested dict structure: `{symbol: {resolution: {time_ms: Bar}}}`
-- Bars deduplicated by timestamp (upsert semantics)
-- In-memory storage (future: migrate to TableInterface for persistence)
+- Creates dynamic `TableInterface` per symbol/resolution combination
+- Table naming convention: `bars_{symbol}_{resolution}` (e.g., `bars_aapl_1d`)
+- Bars keyed by timestamp (upsert semantics via `table.set()`)
+- Supports cleanup via `drop_if_empty()` using `datastore.drop_table()`
 
 ### Cache Management Layer
 
 The `BarCacheManager` provides intelligent cache metadata tracking for historical bars:
 
 ```python
+from trading_api.datastores import InMemoryDatastore
 from trading_api.modules.datafeed.bar_cache_manager import BarCacheManager
-from trading_api.models.market import CoveredRange
+from trading_api.models.market import TimeRange
+from trading_api.shared.config import Settings
 
-# Initialize manager
-manager = BarCacheManager(pending_ttl_seconds=30.0)
+# Initialize via async factory (required pattern)
+datastore = InMemoryDatastore()
+settings = Settings()  # Uses BAR_CACHE_PENDING_TTL_MS config
+manager = await BarCacheManager.create(datastore=datastore, settings=settings)
 
-# Track in-flight request
-manager.add_pending(symbol="AAPL", resolution=resolution, start_ms=start, end_ms=end)
+# Track in-flight request (async)
+await manager.add_pending(symbol="AAPL", resolution=resolution, time_range=TimeRange(start=start, end=end))
 
 # After successful fetch, mark as covered
-manager.mark_covered(symbol="AAPL", resolution=resolution, start_ms=start, end_ms=end)
+await manager.mark_covered(symbol="AAPL", resolution=resolution, time_range=TimeRange(start=start, end=end), storage_type=StorageType.MEMORY, bar_count=100)
 
 # Find gaps for subsequent requests
-missing = manager.find_missing_ranges("AAPL", resolution, query_start, query_end)
+missing = await manager.find_missing_ranges("AAPL", resolution, query_start, query_end)
 # Returns: [TimeRange(start=gap_start, end=gap_end), ...]
 ```
 
+**Instantiation**: Direct `__init__` is forbidden (raises `TradingApiException`). Use `BarCacheManager.create()` factory which handles index creation and settings injection.
+
 **Key Features**:
 
-| Feature              | Description                                                                   |
-| -------------------- | ----------------------------------------------------------------------------- |
-| **Gap Detection**    | Boundary-based algorithm finds uncached time ranges                           |
-| **Pending Tracking** | Prevents duplicate in-flight requests (TTL-based expiration)                  |
-| **Range Merging**    | Adjacent/overlapping covered ranges auto-merge                                |
-| **Storage Tracking** | `CoveredRange.storage_type` indicates cache tier (MEMORY, DATABASE, DATALAKE) |
+| Feature              | Description                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| **Gap Detection**    | Boundary-based algorithm finds uncached time ranges                                  |
+| **Pending Tracking** | Prevents duplicate in-flight requests (TTL via `settings.BAR_CACHE_PENDING_TTL_MS`)  |
+| **Range Merging**    | Adjacent/overlapping covered ranges auto-merge                                       |
+| **Storage Tracking** | `CoveredRange.storage_type` indicates cache tier (MEMORY, DATABASE, DATALAKE)        |
+| **Thread Safety**    | Datastore provides per-table locking for concurrent access (no external lock needed) |
 
 **Models** (from `trading_api.models.market.bar_cache`):
 
-| Model          | Purpose                                        |
-| -------------- | ---------------------------------------------- |
-| `TimeRange`    | Base range with `start`/`end` int milliseconds |
-| `PendingRange` | In-flight request with `expires_at` timestamp  |
-| `CoveredRange` | Cached data with `storage_type` indicator      |
+| Model          | Purpose                                                                   |
+| -------------- | ------------------------------------------------------------------------- |
+| `TimeRange`    | Base range with `start`/`end` int milliseconds                            |
+| `PendingRange` | In-flight request with `expires_at` timestamp, auto-computed `lookup_key` |
+| `CoveredRange` | Cached data with `storage_type` indicator, auto-computed `lookup_key`     |
+
+**Note**: `PendingRange` and `CoveredRange` have a `lookup_key` field (computed via `model_post_init()` as `{symbol}_{resolution}`) enabling indexed datastore lookups.
 
 ### Provider Delegation
 

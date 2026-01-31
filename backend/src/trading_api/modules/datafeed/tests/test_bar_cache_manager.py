@@ -7,12 +7,15 @@ Tests cover:
 - Cleanup operations (expired pending, clear)
 """
 
+import asyncio
 import time
 
 import pytest
 
+from trading_api.datastores import InMemoryDatastore
 from trading_api.models.market import Resolution, TimeRange
 from trading_api.modules.datafeed.bar_cache_manager import BarCacheManager
+from trading_api.shared.config import Settings
 from trading_api.types import StorageType
 
 # ============================================================================
@@ -21,9 +24,11 @@ from trading_api.types import StorageType
 
 
 @pytest.fixture
-def manager() -> BarCacheManager:
+async def manager() -> BarCacheManager:
     """Create a fresh BarCacheManager with short TTL for testing."""
-    return BarCacheManager(pending_ttl_ms=1000)
+    datastore = InMemoryDatastore()
+    settings = Settings(BAR_CACHE_PENDING_TTL_MS=1000)
+    return await BarCacheManager.create(datastore=datastore, settings=settings)
 
 
 @pytest.fixture
@@ -37,11 +42,11 @@ def time_range() -> TimeRange:
 # ============================================================================
 
 
-def test_add_pending_creates_entry(manager: BarCacheManager) -> None:
+async def test_add_pending_creates_entry(manager: BarCacheManager) -> None:
     """Test add_pending creates a PendingRange entry."""
     time_range = TimeRange(start=1000, end=2000)
 
-    pending = manager.add_pending("AAPL", Resolution.DAY_1, time_range)
+    pending = await manager.add_pending("AAPL", Resolution.DAY_1, time_range)
 
     assert pending.symbol == "AAPL"
     assert pending.resolution == Resolution.DAY_1
@@ -50,95 +55,97 @@ def test_add_pending_creates_entry(manager: BarCacheManager) -> None:
     assert pending.expires_at > int(time.time() * 1000)
 
 
-def test_add_pending_custom_ttl(manager: BarCacheManager) -> None:
+async def test_add_pending_custom_ttl(manager: BarCacheManager) -> None:
     """Test add_pending respects custom TTL parameter."""
     time_range = TimeRange(start=1000, end=2000)
     now_ms = int(time.time() * 1000)
 
-    pending = manager.add_pending("AAPL", Resolution.DAY_1, time_range, ttl_ms=5000)
+    pending = await manager.add_pending(
+        "AAPL", Resolution.DAY_1, time_range, ttl_ms=5000
+    )
 
     # Should expire ~5 seconds from now (with some tolerance)
     assert pending.expires_at >= now_ms + 4900
     assert pending.expires_at <= now_ms + 5100
 
 
-def test_remove_pending_returns_true(manager: BarCacheManager) -> None:
+async def test_remove_pending_returns_true(manager: BarCacheManager) -> None:
     """Test remove_pending returns True on successful removal."""
     time_range = TimeRange(start=1000, end=2000)
-    manager.add_pending("AAPL", Resolution.DAY_1, time_range)
+    await manager.add_pending("AAPL", Resolution.DAY_1, time_range)
 
-    result = manager.remove_pending("AAPL", Resolution.DAY_1, time_range)
+    result = await manager.remove_pending("AAPL", Resolution.DAY_1, time_range)
 
     assert result is True
-    assert manager.get_pending_ranges("AAPL", Resolution.DAY_1) == []
+    assert await manager.get_pending_ranges("AAPL", Resolution.DAY_1) == []
 
 
-def test_remove_pending_returns_false_not_found(manager: BarCacheManager) -> None:
+async def test_remove_pending_returns_false_not_found(manager: BarCacheManager) -> None:
     """Test remove_pending returns False when range not found."""
     time_range = TimeRange(start=1000, end=2000)
 
-    result = manager.remove_pending("AAPL", Resolution.DAY_1, time_range)
+    result = await manager.remove_pending("AAPL", Resolution.DAY_1, time_range)
 
     assert result is False
 
 
-def test_get_pending_ranges_filters_expired(manager: BarCacheManager) -> None:
+async def test_get_pending_ranges_filters_expired(manager: BarCacheManager) -> None:
     """Test get_pending_ranges automatically filters out expired entries."""
     time_range = TimeRange(start=1000, end=2000)
 
     # Add with very short TTL
-    manager.add_pending("AAPL", Resolution.DAY_1, time_range, ttl_ms=1)
+    await manager.add_pending("AAPL", Resolution.DAY_1, time_range, ttl_ms=1)
 
     # Wait for expiration
-    time.sleep(0.01)
+    await asyncio.sleep(0.01)
 
     # Should be empty after expiration
-    result = manager.get_pending_ranges("AAPL", Resolution.DAY_1)
+    result = await manager.get_pending_ranges("AAPL", Resolution.DAY_1)
     assert result == []
 
 
-def test_is_pending_detects_overlap(manager: BarCacheManager) -> None:
+async def test_is_pending_detects_overlap(manager: BarCacheManager) -> None:
     """Test is_pending returns True when ranges overlap."""
     # Add pending range 1000-2000
-    manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
+    await manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
 
     # Check overlapping range 1500-2500
-    result = manager.is_pending(
+    result = await manager.is_pending(
         "AAPL", Resolution.DAY_1, TimeRange(start=1500, end=2500)
     )
 
     assert result is True
 
 
-def test_is_pending_no_overlap(manager: BarCacheManager) -> None:
+async def test_is_pending_no_overlap(manager: BarCacheManager) -> None:
     """Test is_pending returns False when ranges don't overlap."""
     # Add pending range 1000-2000
-    manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
+    await manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
 
     # Check disjoint range 3000-4000
-    result = manager.is_pending(
+    result = await manager.is_pending(
         "AAPL", Resolution.DAY_1, TimeRange(start=3000, end=4000)
     )
 
     assert result is False
 
 
-def test_is_pending_different_symbol(manager: BarCacheManager) -> None:
+async def test_is_pending_different_symbol(manager: BarCacheManager) -> None:
     """Test is_pending returns False for different symbol."""
-    manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
+    await manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
 
-    result = manager.is_pending(
+    result = await manager.is_pending(
         "GOOGL", Resolution.DAY_1, TimeRange(start=1000, end=2000)
     )
 
     assert result is False
 
 
-def test_is_pending_different_resolution(manager: BarCacheManager) -> None:
+async def test_is_pending_different_resolution(manager: BarCacheManager) -> None:
     """Test is_pending returns False for different resolution."""
-    manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
+    await manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
 
-    result = manager.is_pending(
+    result = await manager.is_pending(
         "AAPL", Resolution.HOUR_1, TimeRange(start=1000, end=2000)
     )
 
@@ -150,11 +157,11 @@ def test_is_pending_different_resolution(manager: BarCacheManager) -> None:
 # ============================================================================
 
 
-def test_mark_covered_creates_entry(manager: BarCacheManager) -> None:
+async def test_mark_covered_creates_entry(manager: BarCacheManager) -> None:
     """Test mark_covered creates a CoveredRange entry."""
     time_range = TimeRange(start=1000, end=2000)
 
-    covered = manager.mark_covered(
+    covered = await manager.mark_covered(
         "AAPL", Resolution.DAY_1, time_range, StorageType.MEMORY, bar_count=10
     )
 
@@ -166,23 +173,31 @@ def test_mark_covered_creates_entry(manager: BarCacheManager) -> None:
     assert covered.bar_count == 10
 
 
-def test_get_covered_ranges_empty(manager: BarCacheManager) -> None:
+async def test_get_covered_ranges_empty(manager: BarCacheManager) -> None:
     """Test get_covered_ranges returns empty list for unknown symbol."""
-    result = manager.get_covered_ranges("UNKNOWN", Resolution.DAY_1)
+    result = await manager.get_covered_ranges("UNKNOWN", Resolution.DAY_1)
 
     assert result == []
 
 
-def test_get_covered_ranges_returns_all(manager: BarCacheManager) -> None:
+async def test_get_covered_ranges_returns_all(manager: BarCacheManager) -> None:
     """Test get_covered_ranges returns all ranges for symbol/resolution."""
-    manager.mark_covered(
-        "AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000), StorageType.MEMORY, 5
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1000, end=2000),
+        StorageType.MEMORY,
+        5,
     )
-    manager.mark_covered(
-        "AAPL", Resolution.DAY_1, TimeRange(start=3000, end=4000), StorageType.MEMORY, 5
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=3000, end=4000),
+        StorageType.MEMORY,
+        5,
     )
 
-    result = manager.get_covered_ranges("AAPL", Resolution.DAY_1)
+    result = await manager.get_covered_ranges("AAPL", Resolution.DAY_1)
 
     assert len(result) == 2
 
@@ -192,21 +207,21 @@ def test_get_covered_ranges_returns_all(manager: BarCacheManager) -> None:
 # ============================================================================
 
 
-def test_find_missing_full_miss(manager: BarCacheManager) -> None:
+async def test_find_missing_full_miss(manager: BarCacheManager) -> None:
     """Test find_missing_ranges returns full range when no coverage exists.
 
     Request:  |------------|
     Covered:  (none)
     Missing:  |------------|
     """
-    missing = manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
+    missing = await manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
 
     assert len(missing) == 1
     assert missing[0].start == 1000
     assert missing[0].end == 2000
 
 
-def test_find_missing_gap_at_start(manager: BarCacheManager) -> None:
+async def test_find_missing_gap_at_start(manager: BarCacheManager) -> None:
     """Test find_missing_ranges detects gap at start.
 
     Request:  |------------|
@@ -214,18 +229,22 @@ def test_find_missing_gap_at_start(manager: BarCacheManager) -> None:
     Missing:  |----|
     """
     # Coverage from 1500-2000
-    manager.mark_covered(
-        "AAPL", Resolution.DAY_1, TimeRange(start=1500, end=2000), StorageType.MEMORY, 5
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1500, end=2000),
+        StorageType.MEMORY,
+        5,
     )
 
-    missing = manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
+    missing = await manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
 
     assert len(missing) == 1
     assert missing[0].start == 1000
     assert missing[0].end == 1499  # min(2000, 1500-1)
 
 
-def test_find_missing_gap_at_end(manager: BarCacheManager) -> None:
+async def test_find_missing_gap_at_end(manager: BarCacheManager) -> None:
     """Test find_missing_ranges detects gap at end.
 
     Request:  |------------|
@@ -233,18 +252,22 @@ def test_find_missing_gap_at_end(manager: BarCacheManager) -> None:
     Missing:         |----|
     """
     # Coverage from 1000-1500
-    manager.mark_covered(
-        "AAPL", Resolution.DAY_1, TimeRange(start=1000, end=1500), StorageType.MEMORY, 5
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1000, end=1500),
+        StorageType.MEMORY,
+        5,
     )
 
-    missing = manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
+    missing = await manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
 
     assert len(missing) == 1
     assert missing[0].start == 1501  # max(1000, 1500+1)
     assert missing[0].end == 2000
 
 
-def test_find_missing_full_hit(manager: BarCacheManager) -> None:
+async def test_find_missing_full_hit(manager: BarCacheManager) -> None:
     """Test find_missing_ranges returns empty when fully covered.
 
     Request:     |-----|
@@ -252,16 +275,20 @@ def test_find_missing_full_hit(manager: BarCacheManager) -> None:
     Missing:  (none)
     """
     # Coverage from 500-2500 (larger than request)
-    manager.mark_covered(
-        "AAPL", Resolution.DAY_1, TimeRange(start=500, end=2500), StorageType.MEMORY, 20
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=500, end=2500),
+        StorageType.MEMORY,
+        20,
     )
 
-    missing = manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
+    missing = await manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
 
     assert len(missing) == 0
 
 
-def test_find_missing_gaps_both_ends(manager: BarCacheManager) -> None:
+async def test_find_missing_gaps_both_ends(manager: BarCacheManager) -> None:
     """Test find_missing_ranges detects gaps at both ends.
 
     Request:  |--------------|
@@ -269,11 +296,15 @@ def test_find_missing_gaps_both_ends(manager: BarCacheManager) -> None:
     Missing:  |--|     |-----|
     """
     # Coverage from 1200-1800 (middle only)
-    manager.mark_covered(
-        "AAPL", Resolution.DAY_1, TimeRange(start=1200, end=1800), StorageType.MEMORY, 6
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1200, end=1800),
+        StorageType.MEMORY,
+        6,
     )
 
-    missing = manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
+    missing = await manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
 
     assert len(missing) == 2
     # Gap at start
@@ -284,9 +315,9 @@ def test_find_missing_gaps_both_ends(manager: BarCacheManager) -> None:
     assert missing[1].end == 2000
 
 
-def test_find_missing_exact_coverage(manager: BarCacheManager) -> None:
+async def test_find_missing_exact_coverage(manager: BarCacheManager) -> None:
     """Test find_missing_ranges returns empty when coverage exactly matches request."""
-    manager.mark_covered(
+    await manager.mark_covered(
         "AAPL",
         Resolution.DAY_1,
         TimeRange(start=1000, end=2000),
@@ -294,7 +325,7 @@ def test_find_missing_exact_coverage(manager: BarCacheManager) -> None:
         10,
     )
 
-    missing = manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
+    missing = await manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
 
     assert len(missing) == 0
 
@@ -304,65 +335,77 @@ def test_find_missing_exact_coverage(manager: BarCacheManager) -> None:
 # ============================================================================
 
 
-def test_cleanup_expired_pending_removes_old(manager: BarCacheManager) -> None:
+async def test_cleanup_expired_pending_removes_old(manager: BarCacheManager) -> None:
     """Test cleanup_expired_pending removes expired entries."""
     # Add with very short TTL
-    manager.add_pending(
+    await manager.add_pending(
         "AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000), ttl_ms=1
     )
 
     # Wait for expiration
-    time.sleep(0.01)
+    await asyncio.sleep(0.01)
 
-    removed = manager.cleanup_expired_pending()
+    removed = await manager.cleanup_expired_pending()
 
     assert removed == 1
-    assert manager.get_pending_ranges("AAPL", Resolution.DAY_1) == []
+    assert await manager.get_pending_ranges("AAPL", Resolution.DAY_1) == []
 
 
-def test_cleanup_expired_pending_keeps_valid(manager: BarCacheManager) -> None:
+async def test_cleanup_expired_pending_keeps_valid(manager: BarCacheManager) -> None:
     """Test cleanup_expired_pending keeps non-expired entries."""
     # Add with long TTL
-    manager.add_pending(
+    await manager.add_pending(
         "AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000), ttl_ms=60000
     )
 
-    removed = manager.cleanup_expired_pending()
+    removed = await manager.cleanup_expired_pending()
 
     assert removed == 0
-    assert len(manager.get_pending_ranges("AAPL", Resolution.DAY_1)) == 1
+    assert len(await manager.get_pending_ranges("AAPL", Resolution.DAY_1)) == 1
 
 
-def test_clear_all(manager: BarCacheManager) -> None:
+async def test_clear_all(manager: BarCacheManager) -> None:
     """Test clear() removes all pending and covered entries."""
-    manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
-    manager.mark_covered(
-        "AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000), StorageType.MEMORY, 5
+    await manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1000, end=2000),
+        StorageType.MEMORY,
+        5,
     )
-    manager.add_pending("GOOGL", Resolution.HOUR_1, TimeRange(start=3000, end=4000))
+    await manager.add_pending(
+        "GOOGL", Resolution.HOUR_1, TimeRange(start=3000, end=4000)
+    )
 
-    manager.clear()
+    await manager.clear()
 
-    assert manager.get_pending_ranges("AAPL", Resolution.DAY_1) == []
-    assert manager.get_covered_ranges("AAPL", Resolution.DAY_1) == []
-    assert manager.get_pending_ranges("GOOGL", Resolution.HOUR_1) == []
+    assert await manager.get_pending_ranges("AAPL", Resolution.DAY_1) == []
+    assert await manager.get_covered_ranges("AAPL", Resolution.DAY_1) == []
+    assert await manager.get_pending_ranges("GOOGL", Resolution.HOUR_1) == []
 
 
-def test_clear_by_symbol(manager: BarCacheManager) -> None:
+async def test_clear_by_symbol(manager: BarCacheManager) -> None:
     """Test clear(symbol) removes only entries for that symbol."""
-    manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
-    manager.mark_covered(
-        "AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000), StorageType.MEMORY, 5
+    await manager.add_pending("AAPL", Resolution.DAY_1, TimeRange(start=1000, end=2000))
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1000, end=2000),
+        StorageType.MEMORY,
+        5,
     )
-    manager.add_pending("GOOGL", Resolution.DAY_1, TimeRange(start=3000, end=4000))
+    await manager.add_pending(
+        "GOOGL", Resolution.DAY_1, TimeRange(start=3000, end=4000)
+    )
 
-    manager.clear(symbol="AAPL")
+    await manager.clear(symbol="AAPL")
 
     # AAPL should be cleared
-    assert manager.get_pending_ranges("AAPL", Resolution.DAY_1) == []
-    assert manager.get_covered_ranges("AAPL", Resolution.DAY_1) == []
+    assert await manager.get_pending_ranges("AAPL", Resolution.DAY_1) == []
+    assert await manager.get_covered_ranges("AAPL", Resolution.DAY_1) == []
     # GOOGL should remain
-    assert len(manager.get_pending_ranges("GOOGL", Resolution.DAY_1)) == 1
+    assert len(await manager.get_pending_ranges("GOOGL", Resolution.DAY_1)) == 1
 
 
 # ============================================================================

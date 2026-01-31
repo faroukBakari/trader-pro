@@ -5,25 +5,45 @@ This module defines the repository pattern for bar storage,
 enabling pluggable storage backends (in-memory, PostgreSQL, etc.).
 """
 
-from typing import TYPE_CHECKING, Union
-
 from trading_api.models.market import Bar, Resolution
-from trading_api.shared import DatastoreInterface
-
-if TYPE_CHECKING:
-    from trading_api.datastores.postgres.bars import PostgresBarRepository
+from trading_api.shared import DatastoreInterface, TableInterface
 
 
 class BarRepository:
-    """In-memory implementation of bar repository.
+    """Bar repository using DatastoreInterface.
 
-    Uses nested dict structure: {symbol: {resolution: {time_ms: Bar}}}
+    Creates a separate table per symbol/resolution combination.
+    Tables are named: bars_{symbol}_{resolution} (e.g., bars_aapl_1d)
+    Bars are keyed by timestamp (milliseconds).
     """
 
     def __init__(self, datastore: DatastoreInterface) -> None:
-        # Structure: {symbol: {resolution_value: {time_ms: Bar}}}
-        self._bars: dict[str, dict[str, dict[int, Bar]]] = {}
-        self.__datastore = datastore
+        self._datastore = datastore
+        # Cache dynamic Bar subclasses to avoid recreating them
+        self._table_classes: dict[str, type[Bar]] = {}
+
+    def _get_table_name(self, symbol: str, resolution: Resolution) -> str:
+        """Generate table name for symbol/resolution combo."""
+        safe_symbol = symbol.replace("/", "_").replace("-", "_").lower()
+        return f"bars_{safe_symbol}_{resolution.value.lower()}"
+
+    def _get_bar_table(
+        self, symbol: str, resolution: Resolution
+    ) -> TableInterface[Bar]:
+        """Get or create a table for the symbol/resolution combination."""
+        table_name = self._get_table_name(symbol, resolution)
+
+        if table_name not in self._table_classes:
+            # Create dynamic Bar subclass with custom class name
+            # InMemoryDatastore uses class name as table name
+            # PostgresDatastore uses __tablename__ for JSONB storage
+            self._table_classes[table_name] = type(
+                table_name,
+                (Bar,),
+                {"__tablename__": table_name},
+            )
+
+        return self._datastore.table(self._table_classes[table_name])
 
     async def store_bars(
         self,
@@ -39,20 +59,15 @@ class BarRepository:
         if not bars:
             return 0
 
-        # Initialize nested dicts if needed
-        if symbol not in self._bars:
-            self._bars[symbol] = {}
-        if resolution.value not in self._bars[symbol]:
-            self._bars[symbol][resolution.value] = {}
-
-        symbol_resolution_bars = self._bars[symbol][resolution.value]
+        table = self._get_bar_table(symbol, resolution)
         stored_count = 0
 
         for bar in bars:
+            key = str(bar.time)
             # Count as stored only if it's a new timestamp
-            if bar.time not in symbol_resolution_bars:
+            if not await table.exists(key):
                 stored_count += 1
-            symbol_resolution_bars[bar.time] = bar
+            await table.set(key, bar)
 
         return stored_count
 
@@ -64,29 +79,21 @@ class BarRepository:
         to_time: int,
     ) -> list[Bar]:
         """Retrieve bars within time range, sorted by time ascending."""
-        symbol_bars = self._bars.get(symbol)
-        if symbol_bars is None:
-            return []
+        table = self._get_bar_table(symbol, resolution)
 
-        resolution_bars = symbol_bars.get(resolution.value)
-        if resolution_bars is None:
-            return []
+        # Get all bars and filter by time range
+        all_bars = await table.values()
 
         # Filter bars within time range
-        filtered_bars = [
-            bar
-            for time_ms, bar in resolution_bars.items()
-            if from_time <= time_ms <= to_time
-        ]
+        filtered_bars = [bar for bar in all_bars if from_time <= bar.time <= to_time]
 
         # Sort by time ascending
         return sorted(filtered_bars, key=lambda b: b.time)
 
     async def drop_if_empty(self, symbol: str, resolution: Resolution) -> bool:
-        """Drop in-memory table if it has zero bars.
+        """Drop table if it has zero bars.
 
-        Used by cleanup workers to limit memory usage.
-        Removes the resolution dict and optionally the symbol dict if empty.
+        Used by cleanup workers to limit memory/storage usage.
 
         Args:
             symbol: Trading symbol
@@ -95,28 +102,20 @@ class BarRepository:
         Returns:
             True if table was dropped, False if not empty or doesn't exist
         """
-        if symbol not in self._bars:
-            return False
+        table_name = self._get_table_name(symbol, resolution)
+        table = self._get_bar_table(symbol, resolution)
 
-        if resolution.value not in self._bars[symbol]:
-            return False
-
-        if len(self._bars[symbol][resolution.value]) == 0:
-            del self._bars[symbol][resolution.value]
-            # Clean up symbol dict if no more resolutions
-            if not self._bars[symbol]:
-                del self._bars[symbol]
-            return True
+        if await table.is_empty:
+            # Drop the table from datastore
+            dropped = await self._datastore.drop_table(table_name)
+            if dropped:
+                # Clean up cached class
+                self._table_classes.pop(table_name, None)
+            return dropped
 
         return False
 
 
-# Type alias for bar repository implementations
-# Used by DatafeedService for type hints supporting both backends
-BarRepositoryType = Union["BarRepository", "PostgresBarRepository"]
-
-
 __all__ = [
     "BarRepository",
-    "BarRepositoryType",
 ]

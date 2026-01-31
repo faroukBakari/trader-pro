@@ -37,6 +37,17 @@ class PendingRange(BaseModel):
         ...,
         description="Unix timestamp (ms) when this pending entry expires",
     )
+    lookup_key: str = Field(
+        default="",
+        description="Composite key for symbol+resolution lookup (auto-computed)",
+    )
+
+    def model_post_init(self, __context: object) -> None:
+        """Compute lookup_key after initialization."""
+        if not self.lookup_key:
+            object.__setattr__(
+                self, "lookup_key", f"{self.symbol}_{self.resolution.value}"
+            )
 
 
 class CoveredRange(BaseModel):
@@ -54,6 +65,17 @@ class CoveredRange(BaseModel):
     time_range: TimeRange = Field(..., description="Cached time range")
     storage_type: StorageType = Field(..., description="Where bars are stored")
     bar_count: int = Field(..., ge=0, description="Number of bars in this range")
+    lookup_key: str = Field(
+        default="",
+        description="Composite key for symbol+resolution lookup (auto-computed)",
+    )
+
+    def model_post_init(self, __context: object) -> None:
+        """Compute lookup_key after initialization."""
+        if not self.lookup_key:
+            object.__setattr__(
+                self, "lookup_key", f"{self.symbol}_{self.resolution.value}"
+            )
 
 
 __all__ = [
