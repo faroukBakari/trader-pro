@@ -1,7 +1,7 @@
 # Datafeed Module
 
 **Status**: ✅ Production Ready  
-**Last Updated**: January 26, 2026  
+**Last Updated**: January 31, 2026  
 **Related Files**: `backend/src/trading_api/modules/datafeed/`
 
 ---
@@ -81,6 +81,45 @@ class BarRepository:
 - Uses nested dict structure: `{symbol: {resolution: {time_ms: Bar}}}`
 - Bars deduplicated by timestamp (upsert semantics)
 - In-memory storage (future: migrate to TableInterface for persistence)
+
+### Cache Management Layer
+
+The `BarCacheManager` provides intelligent cache metadata tracking for historical bars:
+
+```python
+from trading_api.modules.datafeed.bar_cache_manager import BarCacheManager
+from trading_api.models.market import CoveredRange
+
+# Initialize manager
+manager = BarCacheManager(pending_ttl_seconds=30.0)
+
+# Track in-flight request
+manager.add_pending(symbol="AAPL", resolution=resolution, start_ms=start, end_ms=end)
+
+# After successful fetch, mark as covered
+manager.mark_covered(symbol="AAPL", resolution=resolution, start_ms=start, end_ms=end)
+
+# Find gaps for subsequent requests
+missing = manager.find_missing_ranges("AAPL", resolution, query_start, query_end)
+# Returns: [TimeRange(start=gap_start, end=gap_end), ...]
+```
+
+**Key Features**:
+
+| Feature              | Description                                                                   |
+| -------------------- | ----------------------------------------------------------------------------- |
+| **Gap Detection**    | Boundary-based algorithm finds uncached time ranges                           |
+| **Pending Tracking** | Prevents duplicate in-flight requests (TTL-based expiration)                  |
+| **Range Merging**    | Adjacent/overlapping covered ranges auto-merge                                |
+| **Storage Tracking** | `CoveredRange.storage_type` indicates cache tier (MEMORY, DATABASE, DATALAKE) |
+
+**Models** (from `trading_api.models.market.bar_cache`):
+
+| Model          | Purpose                                        |
+| -------------- | ---------------------------------------------- |
+| `TimeRange`    | Base range with `start`/`end` int milliseconds |
+| `PendingRange` | In-flight request with `expires_at` timestamp  |
+| `CoveredRange` | Cached data with `storage_type` indicator      |
 
 ### Provider Delegation
 
@@ -372,6 +411,11 @@ cd backend && poetry run pytest src/trading_api/modules/datafeed/tests/ -v
 cd backend && poetry run pytest src/trading_api/modules/datafeed/tests/ --cov=src/trading_api/modules/datafeed
 ```
 
+### Test Files
+
+- `test_api.py` - REST API endpoint tests
+- `test_bar_cache_manager.py` - BarCacheManager unit tests (24 tests covering pending/covered ranges, gap detection, cleanup)
+
 ### Mocking the Datafeed Provider
 
 ```python
@@ -404,17 +448,20 @@ async def test_bars_subscription(datafeed_ws_client):
 
 Key Pydantic models used by this module (defined in `trading_api/models/`):
 
-| Model                          | Purpose                                 |
-| ------------------------------ | --------------------------------------- |
-| `Bar`                          | OHLC bar data                           |
-| `BarsSubscriptionRequest`      | Bars subscription parameters            |
-| `QuoteData`                    | Quote with bid/ask/last                 |
-| `QuoteDataSubscriptionRequest` | Quote subscription parameters           |
-| `SymbolInfo`                   | Full symbol information for TradingView |
-| `SearchSymbolResultItem`       | Symbol search result                    |
-| `DatafeedConfiguration`        | Datafeed capabilities/config            |
-| `GetBarsResponse`              | Historical bars response wrapper        |
-| `Resolution`                   | Type-safe TradingView resolution enum   |
+| Model                          | Purpose                                    |
+| ------------------------------ | ------------------------------------------ |
+| `Bar`                          | OHLC bar data                              |
+| `BarsSubscriptionRequest`      | Bars subscription parameters               |
+| `QuoteData`                    | Quote with bid/ask/last                    |
+| `QuoteDataSubscriptionRequest` | Quote subscription parameters              |
+| `SymbolInfo`                   | Full symbol information for TradingView    |
+| `SearchSymbolResultItem`       | Symbol search result                       |
+| `DatafeedConfiguration`        | Datafeed capabilities/config               |
+| `GetBarsResponse`              | Historical bars response wrapper           |
+| `Resolution`                   | Type-safe TradingView resolution enum      |
+| `TimeRange`                    | Base range with start/end int milliseconds |
+| `PendingRange`                 | In-flight request with TTL expiration      |
+| `CoveredRange`                 | Cached range with storage type indicator   |
 
 ### SymbolInfo Fields (TradingView LibrarySymbolInfo)
 
@@ -457,7 +504,3 @@ This module powers the TradingView charting library datafeed:
 - **[Backend WebSockets](../../../../docs/BACKEND_WEBSOCKETS.md)** - WsRouteService pattern
 - **[Error Management](../../../../docs/ERROR-MANAGEMENT.md)** - Exception hierarchy
 - **[Modular Backend Architecture](../../../../docs/MODULAR_BACKEND_ARCHITECTURE.md)** - Module lifecycle
-
----
-
-**Last Updated**: January 26, 2026
