@@ -595,8 +595,26 @@ class PostgresDatastore(DatastoreInterface):
         # [EAGER SCHEMA] Create all SQLModel table=True tables at startup
         # This ensures schema exists before any operations, avoiding lazy init issues
         engine = await AsyncEngineFactory.get_engine(dsn)
+
+        # [WAVE 3B] Enable btree_gist extension for TSTZRANGE EXCLUDE constraints
+        # Required before any range-based exclusion constraints can be created
+        from .range_support import (
+            ensure_btree_gist_extension,
+            ensure_exclusion_constraint,
+        )
+
+        await ensure_btree_gist_extension(engine)
+
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
+
+        # [WAVE 3B] Add EXCLUDE constraint for covered_ranges overlap prevention
+        # This prevents duplicate coverage records for the same symbol/resolution
+        await ensure_exclusion_constraint(
+            engine,
+            table_name="covered_ranges",
+            constraint_name="excl_covered_ranges_overlap",
+        )
 
         return cls(pool, session_factory)
 

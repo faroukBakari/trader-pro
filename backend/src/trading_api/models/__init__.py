@@ -67,6 +67,9 @@ from .common import (
     SubscriptionUpdate,
 )
 
+# Import from coordination layer
+from .coordination import CoveredRange, PendingRange
+
 # Import exception models
 from .exceptions import (
     CommonException,
@@ -113,6 +116,9 @@ __all__ = [
     "CommonException",
     "ServiceException",
     "ProviderException",
+    # Coordination models
+    "CoveredRange",
+    "PendingRange",
     # Auth models
     "DeviceInfo",
     "GoogleLoginRequest",

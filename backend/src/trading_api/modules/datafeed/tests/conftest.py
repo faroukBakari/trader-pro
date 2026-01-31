@@ -26,7 +26,9 @@ from trading_api.models.market import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
+from trading_api.modules.datafeed.coordination_repository import CoordinationRepository
 from trading_api.shared import FastWSAdapter, ModuleRegistry, Provider
+from trading_api.shared.config import Settings
 
 
 class MockDatafeedProvider(Provider, DatafeedCapability):
@@ -416,3 +418,94 @@ def client(app: FastAPI) -> Generator[TestClient, None, None]:
     """Sync test client for WebSocket tests."""
     with TestClient(app) as c:
         yield c
+
+
+# ============================================================================
+# Coordination Repository Fixtures (for gap detection tests)
+# ============================================================================
+
+
+@pytest.fixture
+def coordination_repo(
+    test_settings: Settings,
+) -> Generator[CoordinationRepository, None, None]:
+    """Provide CoordinationRepository with fresh database state.
+
+    Creates tables and exclusion constraint, yields repository,
+    then cleans up all covered_ranges entries.
+    """
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.ext.asyncio import (
+        AsyncSession,
+        async_sessionmaker,
+        create_async_engine,
+    )
+    from sqlmodel import SQLModel
+
+    from trading_api.modules.datafeed.coordination_repository import (
+        CoordinationRepository,
+    )
+
+    dsn = test_settings.DATASTORE_POSTGRES_DSN
+    if dsn is None:
+        pytest.skip("No PostgreSQL DSN configured")
+
+    # Ensure we use psycopg3 async driver
+    if "postgresql+psycopg://" not in dsn:
+        async_dsn = dsn.replace("postgresql://", "postgresql+psycopg://")
+    else:
+        async_dsn = dsn
+
+    # Also need sync engine for table setup
+    sync_dsn = async_dsn
+
+    # Create sync engine for setup/teardown
+    sync_engine = create_engine(sync_dsn, echo=False)
+
+    # Enable btree_gist extension
+    with sync_engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS btree_gist"))
+
+    # Create tables
+    SQLModel.metadata.create_all(sync_engine)
+
+    # Add EXCLUDE constraint
+    with sync_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conname = 'excl_covered_ranges_overlap'
+                ) THEN
+                    ALTER TABLE covered_ranges
+                    ADD CONSTRAINT excl_covered_ranges_overlap
+                    EXCLUDE USING gist (
+                        symbol WITH =,
+                        resolution WITH =,
+                        time_range WITH &&
+                    )
+                    WHERE (time_range IS NOT NULL);
+                END IF;
+            END $$;
+        """
+            )
+        )
+
+    # Create async engine and session factory for repository
+    async_engine = create_async_engine(async_dsn, echo=False)
+    session_factory = async_sessionmaker(async_engine, class_=AsyncSession)
+
+    repo = CoordinationRepository(session_factory)
+
+    yield repo
+
+    # Cleanup: delete all covered_ranges entries
+    with sync_engine.begin() as conn:
+        conn.execute(text("DELETE FROM covered_ranges"))
+
+    # Drop tables and dispose
+    SQLModel.metadata.drop_all(sync_engine)
+    sync_engine.dispose()
