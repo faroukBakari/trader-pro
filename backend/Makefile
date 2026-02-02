@@ -20,6 +20,10 @@ PROVIDERS_DIR = src/trading_api/providers
 DISCOVERED_PROVIDERS = $(shell find $(PROVIDERS_DIR) -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -vE '__pycache__|tests|capabilities' || echo "")
 
 # Provider selection (can be overridden: make test-providers providers=google,tws)
+
+# Dynamic datastore discovery
+DATASTORES_DIR = src/trading_api/datastores
+DISCOVERED_DATASTORES = $(shell find $(DATASTORES_DIR) -mindepth 1 -maxdepth 1 -type d -exec basename {} \; 2>/dev/null | grep -v __pycache__ || echo "")
 ifdef providers
 	SELECTED_PROVIDERS = $(subst $(comma), ,$(providers))
 else
@@ -28,7 +32,7 @@ endif
 
 comma := ,
 
-.PHONY: help install install-ci test test-full test-boundaries test-boundaries-full test-modules test-modules-full test-cov test-integration test-integration-full lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api show-cache show-cache-json show-cache-symbol $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-full test-providers-core test-providers-core-full list-providers list-providers-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)) testmon-forcerun testmon-reset testmon-status
+.PHONY: help install install-ci test test-full test-boundaries test-boundaries-full test-modules test-modules-full test-cov test-integration test-integration-full lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api show-cache show-cache-json show-cache-symbol $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-full test-providers-core test-providers-core-full list-providers list-providers-json list-datastores list-datastores-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)) testmon-forcerun testmon-reset testmon-status
 
 # Default target
 help:
@@ -133,6 +137,17 @@ list-providers:
 # List providers as JSON array (for CI dynamic matrix)
 list-providers-json:
 	@echo '$(DISCOVERED_PROVIDERS)' | tr ' ' '\n' | grep -v '^$$' | jq -R -s -c 'split("\n") | map(select(. != ""))'
+
+# List all discovered datastores
+list-datastores:
+	@echo "📦 Discovered datastores:"
+	@for datastore in $(DISCOVERED_DATASTORES); do \
+		echo "  - $$datastore"; \
+	done
+
+# List datastores as JSON array (for CI dynamic matrix)
+list-datastores-json:
+	@echo '$(DISCOVERED_DATASTORES)' | tr ' ' '\n' | grep -v '^$$' | jq -R -s -c 'split("\n") | map(select(. != ""))'
 
 # Unified generation command
 # Usage: make generate [modules=mod1,mod2] [output_dir=/path/to/output]
