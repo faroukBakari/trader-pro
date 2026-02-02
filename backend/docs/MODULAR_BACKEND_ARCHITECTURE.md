@@ -1037,7 +1037,7 @@ The modular architecture integrates a **pluggable provider/capability system** f
 │                              AppFactory                                  │
 │  ┌────────────────────┐ ┌────────────────────┐ ┌────────────────────┐  │
 │  │  ModuleRegistry    │ │ ProviderRegistry   │ │ InMemoryDatastore  │  │
-│  │  - auto_discover() │ │ - auto_discover()  │ │ - table(name)      │  │
+│  │  - auto_discover() │ │ - auto_discover()  │ │ - table(model)     │  │
 │  │  - get_modules()   │ │ - get_providers()  │ │ - async CRUD       │  │
 │  └────────────────────┘ └────────────────────┘ └────────────────────┘  │
 │           │                     │                       │               │
