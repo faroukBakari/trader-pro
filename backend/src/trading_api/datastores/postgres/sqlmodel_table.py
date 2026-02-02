@@ -291,6 +291,79 @@ class SQLModelTable(TableInterface[T]):
             await s.execute(stmt)
             # Note: commit handled by _session_scope if we own the session
 
+    # ────────────────────────────────────────────────────────────────────────
+    # Timeseries / Bulk Operations
+    # ────────────────────────────────────────────────────────────────────────
+
+    async def get_many(
+        self,
+        from_time: int,
+        to_time: int,
+        session: "AsyncSession | None" = None,
+    ) -> list[T]:
+        """Get values within time range using B-tree index. [TIMESERIES]
+
+        Efficient range query leveraging the primary key index on time column.
+        Returns results ordered by primary key (time) ascending.
+
+        Args:
+            from_time: Range start (inclusive), typically milliseconds timestamp
+            to_time: Range end (inclusive), typically milliseconds timestamp
+            session: Optional external session for transaction batching
+
+        Returns:
+            List of values ordered by time ascending
+        """
+        await self._ensure_table()
+        async with self._session_scope(session) as s:
+            stmt = (
+                select(self._model)
+                .where(self._pk_col >= from_time)
+                .where(self._pk_col <= to_time)
+                .order_by(self._pk_col)
+            )
+            result = await s.execute(stmt)
+            return list(result.scalars().all())
+
+    async def set_many(
+        self,
+        values: list[T],
+        session: "AsyncSession | None" = None,
+    ) -> int:
+        """Bulk upsert values using batch INSERT...ON CONFLICT. [BATCH]
+
+        Efficiently stores multiple values in a single database roundtrip.
+        Uses PostgreSQL's INSERT ... ON CONFLICT DO UPDATE for upsert semantics.
+
+        Args:
+            values: List of model instances to upsert
+            session: Optional external session for transaction batching
+
+        Returns:
+            Number of values processed (note: doesn't distinguish inserts vs updates)
+        """
+        if not values:
+            return 0
+
+        await self._ensure_table()
+
+        async with self._session_scope(session) as s:
+            # Convert models to dicts for batch insert
+            rows = [v.model_dump() for v in values]
+
+            # Get non-PK columns for update set
+            update_cols = [k for k in rows[0].keys() if k != self._pk]
+
+            # PostgreSQL batch upsert
+            stmt = pg_insert(self._model).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[self._pk],
+                set_={col: stmt.excluded[col] for col in update_cols},
+            )
+            await s.execute(stmt)
+
+        return len(values)
+
     async def delete(
         self,
         key: str,

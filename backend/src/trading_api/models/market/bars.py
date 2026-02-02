@@ -3,12 +3,17 @@ Market data bars and historical data models.
 
 This module contains models related to OHLC bars,
 historical data requests, and responses.
+
+[ARCHITECTURE] Wave X: Bar upgraded to SQLModel table=True for PostgreSQL
+typed column storage. Supports dynamic table names via __tablename__ override.
 """
 
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from sqlalchemy import BigInteger, Column, Float, Integer
+from sqlmodel import Field, SQLModel
 
 
 class Resolution(str, Enum):
@@ -38,17 +43,43 @@ class Resolution(str, Enum):
     YEAR_1 = "12M"
 
 
-class Bar(BaseModel):
-    """OHLC bar model matching Bar interface"""
+class Bar(SQLModel, table=True):
+    """OHLC bar model with PostgreSQL typed column storage.
 
-    time: int = Field(..., description="Bar timestamp in milliseconds")
-    open: float = Field(..., description="Open price")
-    high: float = Field(..., description="High price")
-    low: float = Field(..., description="Low price")
-    close: float = Field(..., description="Close price")
-    volume: int = Field(default=0, description="Volume")
+    [ARCHITECTURE] SQLModel table=True enables:
+    - B-tree index on time (primary key) for efficient range queries
+    - Typed columns for open/high/low/close/volume
+    - Batch upsert via INSERT...ON CONFLICT
+
+    __tablename__ is dynamically overridden per symbol/resolution combo
+    by BarRepository._create_bar_model(). Template name prevents conflicts.
+    """
+
+    __tablename__ = cast(Any, "bar_template")  # Overridden dynamically
+
+    time: int = Field(
+        sa_column=Column(BigInteger, primary_key=True),
+        description="Bar timestamp in milliseconds",
+    )
+    # 'open' is a SQL reserved keyword - use sa_column with explicit name
+    open: float = Field(
+        sa_column=Column("open", Float, nullable=False),
+        description="Open price",
+    )
+    high: float = Field(
+        sa_column=Column(Float, nullable=False), description="High price"
+    )
+    low: float = Field(sa_column=Column(Float, nullable=False), description="Low price")
+    close: float = Field(
+        sa_column=Column(Float, nullable=False), description="Close price"
+    )
+    volume: int = Field(
+        default=0, sa_column=Column(Integer, default=0), description="Volume"
+    )
     count: Optional[int] = Field(
-        default=None, description="Trades count (if available)"
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+        description="Trades count (if available)",
     )
 
 

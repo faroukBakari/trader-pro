@@ -162,6 +162,62 @@ class TableInterface(ABC, Generic[T]):
             Number of entries
         """
 
+    # ────────────────────────────────────────────────────────────────────────
+    # Timeseries / Bulk Operations (PostgreSQL-only)
+    # ────────────────────────────────────────────────────────────────────────
+
+    async def get_many(
+        self,
+        from_time: int,
+        to_time: int,
+        session: "AsyncSession | None" = None,
+    ) -> list[T]:
+        """Get values within time range using B-tree index. [TIMESERIES]
+
+        Efficient range query leveraging the primary key index.
+        Only implemented for SQLModelTable with time-indexed primary key.
+
+        Args:
+            from_time: Range start (inclusive), typically milliseconds timestamp
+            to_time: Range end (inclusive), typically milliseconds timestamp
+            session: Optional external session for transaction batching
+
+        Returns:
+            List of values ordered by time ascending
+
+        Raises:
+            NotImplementedError: If datastore doesn't support time-range queries
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support get_many(). "
+            "Use PostgresDatastore for time-range queries."
+        )
+
+    async def set_many(
+        self,
+        values: list[T],
+        session: "AsyncSession | None" = None,
+    ) -> int:
+        """Bulk upsert values using batch INSERT...ON CONFLICT. [BATCH]
+
+        Efficiently stores multiple values in a single database operation.
+        Only implemented for SQLModelTable.
+
+        Args:
+            values: List of model instances to upsert
+            session: Optional external session for transaction batching
+
+        Returns:
+            Number of values processed (note: doesn't distinguish inserts vs updates)
+
+        Raises:
+            NotImplementedError: If datastore doesn't support bulk operations
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support set_many(). "
+            "Use PostgresDatastore for bulk operations."
+        )
+
     @property
     @abstractmethod
     async def is_empty(self) -> bool:
