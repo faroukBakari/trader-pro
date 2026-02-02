@@ -81,15 +81,15 @@ async def postgres_datastore(
 
 
 # =============================================================================
-# Postgres-Specific: Dict Return Type
+# Postgres-Specific: Model Return Type
 # =============================================================================
 
 
 @pytest.mark.asyncio
-async def test_get_returns_dict_not_basemodel(
+async def test_get_returns_validated_model(
     postgres_datastore: "PostgresDatastore",
 ) -> None:
-    """PostgresTable.get() returns dict, not BaseModel instance."""
+    """PostgresTable.get() returns validated Pydantic model instance."""
     from trading_api.datastores import PostgresTable
 
     table = postgres_datastore.table(PgSampleModel)
@@ -101,10 +101,10 @@ async def test_get_returns_dict_not_basemodel(
     await table.set("key1", PgSampleModel(name="test", value=42))
     result = await table.get("key1")
 
-    # Postgres returns dict (caller uses model_validate for conversion)
-    assert isinstance(result, dict)
-    assert result["name"] == "test"
-    assert result["value"] == 42
+    # Postgres returns validated model instance (model_validate called internally)
+    assert isinstance(result, PgSampleModel)
+    assert result.name == "test"
+    assert result.value == 42
 
 
 # =============================================================================

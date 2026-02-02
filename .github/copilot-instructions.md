@@ -89,6 +89,41 @@ import type { PlacedOrder } from '@public/trading_terminal/charting_library'
 import type { PreOrder as PreOrder_Backend } from '...'
 ```
 
+### Pre-Command Reasoning (Required)
+**IMPORTANT: STOP and THINK before executing ANY terminal command.**
+
+Before running a command, explicitly reason through these 3 checks:
+
+| Check | Think Through | If Yes |
+|-------|---------------|--------|
+| **1. Makefile First** | "Is there a `make` target that already does this?" | Use the make target instead |
+| **2. Env-Aware** | "Am I using the project's environment wrappers?" | Must use `make`, `poetry run`, or `nvm use &&` |
+| **3. Timeout Guard** | "If I'm limiting output with `head`/`tail`/`more`, could the source hang?" | Add `timeout N` before the command |
+
+**Reasoning example:**
+```
+I need to run the backend tests...
+→ Check 1: Is there a make target? YES → `make test` exists
+→ Using: `make -C backend test`
+```
+
+```
+I need to see the last 50 lines of a docker build...
+→ Check 1: No specific make target for this inspection
+→ Check 2: docker command is fine (not npm/pip/python)
+→ Check 3: Am I using `tail`? YES. Could `docker build` hang? YES (network, large layers)
+→ Using: `timeout 120 docker build ... 2>&1 | tail -50`
+```
+
+**Why timeout with output limiters?**
+```bash
+# ❌ WRONG: Pipe doesn't kill source — if build hangs, waits forever
+docker build . 2>&1 | tail -50
+
+# ✅ CORRECT: Timeout terminates hung process
+timeout 120 docker build . 2>&1 | tail -50
+```
+
 ---
 
 ## 5. Module Development Patterns

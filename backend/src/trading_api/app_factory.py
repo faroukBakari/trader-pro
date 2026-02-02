@@ -75,9 +75,9 @@ class ModularApp(FastAPI):
             **kwargs: Additional FastAPI configuration
         """
         super().__init__(**kwargs)
-        enabled_modules = enabled_modules or []
-        enabled_providers = enabled_providers or []
-        enabled_datastores = enabled_datastores or []
+        self.enabled_modules = enabled_modules or []
+        self.enabled_providers = enabled_providers or []
+        self.enabled_datastores = enabled_datastores or []
 
         self.base_url = base_url
         self.__providers: list[Provider] = []
@@ -93,13 +93,16 @@ class ModularApp(FastAPI):
         self.datastore_registry = DatastoreRegistry(trading_app_dir / "datastores")
 
         # Phase 1: Auto-discover modules, providers, and datastores
-        self.module_registry.auto_discover(enabled_modules=enabled_modules)
-        self.provider_registry.auto_discover(enabled_names=enabled_providers)
-        self.datastore_registry.auto_discover(enabled_names=enabled_datastores)
+        self.module_registry.auto_discover(enabled_modules=self.enabled_modules)
+        self.provider_registry.auto_discover(enabled_names=self.enabled_providers)
+        self.datastore_registry.auto_discover(enabled_names=self.enabled_datastores)
 
     async def build_modules(self) -> None:
         """Initialize runtime assets and mount module routes."""
-        logger.info("🚀 Starting ModularApp...")
+        logger.info(
+            f"🚀 Starting ModularApp [modules={self.enabled_modules}] "
+            f"[providers={self.enabled_providers}] [datastores={self.enabled_datastores}]..."
+        )
 
         # Phase 2: Get datastore instances
         datastores = await self.datastore_registry.get_datastores()

@@ -32,7 +32,7 @@ endif
 
 comma := ,
 
-.PHONY: help install install-ci test test-full test-boundaries test-boundaries-full test-modules test-modules-full test-cov test-integration test-integration-full lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api show-cache show-cache-json show-cache-symbol $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-full test-providers-core test-providers-core-full list-providers list-providers-json list-datastores list-datastores-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)) testmon-forcerun testmon-reset testmon-status
+.PHONY: help install install-ci test test-full test-boundaries test-boundaries-full test-modules test-modules-full test-datastores test-datastores-full test-cov test-integration test-integration-full lint type-check format build clean clean-cache clean-generated dev dev-ci kill-dev health-ci list-modules list-modules-json generate backend-manager-start backend-manager-stop backend-manager-status backend-manager-restart backend-manager-gen-nginx-conf logs-tail logs-tail-nginx logs-clean install-tws-api show-cache show-cache-json show-cache-symbol $(addprefix test-module-, $(DISCOVERED_MODULES)) test-providers test-providers-full test-providers-core test-providers-core-full list-providers list-providers-json list-datastores list-datastores-json $(addprefix test-provider-, $(DISCOVERED_PROVIDERS)) testmon-forcerun testmon-reset testmon-status
 
 # Default target
 help:
@@ -46,6 +46,7 @@ help:
 	@echo "  test-boundaries   Validate import boundaries (incremental)"
 	@echo "  test-providers    Run all provider tests (incremental)"
 	@echo "  test-modules      Run module tests (modules=x,y to select)"
+	@echo "  test-datastores   Run all datastore tests (incremental)"
 	@echo "  test-integration  Run integration tests (incremental)"
 	@echo "  test-cov          Run tests with coverage (always full)"
 	@echo ""
@@ -589,16 +590,35 @@ test-integration: check-generate-keypair check-generate-hmac-key
 	@echo "Running integration tests (incremental)..."
 	@# Backend manager tests require ordered execution, run without testmon
 	poetry run pytest tests/integration/ -v -x --testmon -m integration --ignore=tests/integration/test_backend_manager_integration.py $(ARGS)
-	poetry run pytest tests/integration/test_backend_manager_integration.py -v -x -m integration $(ARGS)
+	@# Use xdist for parallel execution with loadgroup distribution
+	poetry run pytest tests/integration/test_backend_manager_integration.py -v -x -m integration -n auto --dist=loadgroup $(ARGS)
 
 test-integration-full: check-generate-keypair check-generate-hmac-key
 	@echo "Running integration tests (full)..."
-	poetry run pytest tests/integration/ -v -x -m integration $(ARGS)
+	poetry run pytest tests/integration/ -v -x -m integration --ignore=tests/integration/test_backend_manager_integration.py $(ARGS)
+	@# Use xdist for parallel execution with loadgroup distribution
+	poetry run pytest tests/integration/test_backend_manager_integration.py -v -x -m integration -n auto --dist=loadgroup $(ARGS)
 
-test: test-boundaries test-providers test-modules test-integration
+test-datastores: check-generate-keypair check-generate-hmac-key
+	@echo "Running datastore tests (incremental)..."
+	@for datastore in $(DISCOVERED_DATASTORES); do \
+		echo ""; \
+		echo "Testing datastore: $$datastore"; \
+		poetry run pytest --testmon src/trading_api/datastores/$$datastore/tests/ -v $(ARGS) || exit 1; \
+	done
+
+test-datastores-full: check-generate-keypair check-generate-hmac-key
+	@echo "Running datastore tests (full)..."
+	@for datastore in $(DISCOVERED_DATASTORES); do \
+		echo ""; \
+		echo "Testing datastore: $$datastore"; \
+		poetry run pytest src/trading_api/datastores/$$datastore/tests/ -v $(ARGS) || exit 1; \
+	done
+
+test: test-boundaries test-providers test-modules test-datastores test-integration
 	@echo "✅ All tests passed (incremental with testmon)"
 
-test-full: test-boundaries-full test-providers-full test-modules-full test-integration-full
+test-full: test-boundaries-full test-providers-full test-modules-full test-datastores-full test-integration-full
 	@echo "✅ All tests passed (full suite)"
 
 # Coverage targets
