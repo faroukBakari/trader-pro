@@ -7,14 +7,16 @@ DatastoreInterface behavior. This file tests ONLY InMemory-specific features:
 - Model copy isolation (returns actual BaseModel, not dict)
 - Timeout configuration
 - Table instance caching
+- Exclusion constraint rejection (fail-fast for unsupported models)
 
 Run with: pytest src/trading_api/datastores/inmemory/tests/ -v
 """
 
 import asyncio
+from typing import Any, cast
 
 import pytest
-from sqlmodel import SQLModel
+from sqlmodel import Field, SQLModel
 
 from trading_api.datastores.inmemory import InMemoryDatastore, InMemoryTable
 from trading_api.shared.config import Settings
@@ -32,6 +34,20 @@ class AnotherModel(SQLModel):
 
     key: str
     data: str
+
+
+class ExclusionRequiredModel(SQLModel, table=True):
+    """Model that requires exclusion constraints (should be rejected by InMemory)."""
+
+    __tablename__ = cast(Any, "exclusion_test")
+    __table_args__ = {
+        "info": {"exclusion": {"range_field": "time_range", "group": "lookup_key"}}
+    }
+
+    id: int | None = Field(default=None, primary_key=True)
+    lookup_key: str
+    time_range_start: int
+    time_range_end: int
 
 
 # =============================================================================
@@ -288,3 +304,36 @@ async def test_list_tables_empty() -> None:
 
     tables = await ds.list_tables()
     assert tables == []
+
+
+# =============================================================================
+# InMemory-Specific: Exclusion Constraint Rejection (Fail-Fast)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_table_rejects_models_requiring_exclusion() -> None:
+    """table() raises NotImplementedError for models with exclusion requirements.
+
+    Models that declare __table_args__["info"]["exclusion"] require database-level
+    exclusion constraints (PostgreSQL EXCLUDE USING GIST). InMemory cannot provide
+    this guarantee, so it fails fast rather than silently allowing overlapping ranges.
+    """
+    ds = await InMemoryDatastore.create()
+
+    with pytest.raises(NotImplementedError) as exc_info:
+        ds.table(ExclusionRequiredModel)
+
+    assert "exclusion constraints" in str(exc_info.value)
+    assert "ExclusionRequiredModel" in str(exc_info.value)
+    assert "PostgresDatastore" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_table_allows_models_without_exclusion() -> None:
+    """table() allows normal models without exclusion requirements."""
+    ds = await InMemoryDatastore.create()
+
+    # Should not raise - no exclusion requirement
+    table = ds.table(SampleModel)
+    assert table is not None

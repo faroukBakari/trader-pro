@@ -3,7 +3,7 @@
 import asyncio
 
 import pytest
-from sqlmodel import SQLModel
+from sqlmodel import Field, SQLModel
 
 from trading_api.datastores.inmemory import InMemoryDatastore, InMemoryTable
 from trading_api.shared import DatastoreInterface, TableInterface
@@ -14,6 +14,22 @@ class SampleModel(SQLModel):
 
     id: str
     name: str
+    category: str = "default"
+
+
+class IndexedModel(SQLModel):
+    """Test model with declarative index on category field."""
+
+    id: str
+    name: str
+    category: str = Field(default="default", index=True)
+
+
+class UniqueIndexedModel(SQLModel):
+    """Test model with declarative unique index on name field."""
+
+    id: str
+    name: str = Field(index=True, unique=True)
     category: str = "default"
 
 
@@ -141,32 +157,32 @@ async def test_iterate_yields_all_pairs(table: TableInterface[SampleModel]) -> N
 
 
 # =============================================================================
-# Indexing Tests
+# Declarative Indexing Tests (Field(index=True))
 # =============================================================================
 
 
 @pytest.mark.asyncio
-async def test_create_index_enables_secondary_lookup(
-    table: TableInterface[SampleModel],
+async def test_field_index_enables_secondary_lookup(
+    datastore: InMemoryDatastore,
 ) -> None:
-    """Index allows lookup by field value."""
-    await table.set("1", SampleModel(id="1", name="test", category="A"))
-    await table.create_index("category")
+    """Field(index=True) enables lookup by indexed field value."""
+    table = datastore.table(IndexedModel)
+    await table.set("1", IndexedModel(id="1", name="test", category="A"))
 
-    # Lookup by indexed field
+    # Lookup by indexed field - no create_index() call needed
     result = await table.get("A", index="category")
     assert result is not None
     assert result.id == "1"
 
 
 @pytest.mark.asyncio
-async def test_get_by_index_returns_correct_record(
-    table: TableInterface[SampleModel],
+async def test_field_index_get_returns_correct_record(
+    datastore: InMemoryDatastore,
 ) -> None:
-    """Get by index returns the correct record."""
-    await table.set("1", SampleModel(id="1", name="first", category="X"))
-    await table.set("2", SampleModel(id="2", name="second", category="Y"))
-    await table.create_index("category")
+    """Get by declarative index returns the correct record."""
+    table = datastore.table(IndexedModel)
+    await table.set("1", IndexedModel(id="1", name="first", category="X"))
+    await table.set("2", IndexedModel(id="2", name="second", category="Y"))
 
     result = await table.get("Y", index="category")
     assert result is not None
@@ -174,12 +190,12 @@ async def test_get_by_index_returns_correct_record(
 
 
 @pytest.mark.asyncio
-async def test_delete_by_index_removes_record(
-    table: TableInterface[SampleModel],
+async def test_field_index_delete_by_index_removes_record(
+    datastore: InMemoryDatastore,
 ) -> None:
-    """Delete by index removes the correct record."""
-    await table.set("1", SampleModel(id="1", name="test", category="Z"))
-    await table.create_index("category")
+    """Delete by declarative index removes the correct record."""
+    table = datastore.table(IndexedModel)
+    await table.set("1", IndexedModel(id="1", name="test", category="Z"))
 
     deleted = await table.delete("Z", index="category")
     assert deleted is True
@@ -187,15 +203,15 @@ async def test_delete_by_index_removes_record(
 
 
 @pytest.mark.asyncio
-async def test_set_with_index_updates_on_overwrite(
-    table: TableInterface[SampleModel],
+async def test_field_index_updates_on_overwrite(
+    datastore: InMemoryDatastore,
 ) -> None:
-    """Set auto-updates index when overwriting with different field value."""
-    await table.create_index("category")
-    await table.set("1", SampleModel(id="1", name="old", category="A"))
+    """Set auto-updates declarative index when overwriting with different value."""
+    table = datastore.table(IndexedModel)
+    await table.set("1", IndexedModel(id="1", name="old", category="A"))
 
     # Overwrite with new category
-    await table.set("1", SampleModel(id="1", name="new", category="B"))
+    await table.set("1", IndexedModel(id="1", name="new", category="B"))
 
     # Old index should not find it
     assert await table.get("A", index="category") is None
@@ -206,62 +222,63 @@ async def test_set_with_index_updates_on_overwrite(
 
 
 @pytest.mark.asyncio
-async def test_keys_with_index_returns_indexed_values(
-    table: TableInterface[SampleModel],
+async def test_field_index_keys_returns_indexed_values(
+    datastore: InMemoryDatastore,
 ) -> None:
-    """Keys with index returns indexed field values."""
-    await table.create_index("category")
-    await table.set("1", SampleModel(id="1", name="a", category="X"))
-    await table.set("2", SampleModel(id="2", name="b", category="Y"))
+    """Keys with declarative index returns indexed field values."""
+    table = datastore.table(IndexedModel)
+    await table.set("1", IndexedModel(id="1", name="a", category="X"))
+    await table.set("2", IndexedModel(id="2", name="b", category="Y"))
 
     indexed_keys = await table.keys(index="category")
     assert set(indexed_keys) == {"X", "Y"}
 
 
 # =============================================================================
-# Unique Index Tests
+# Declarative Unique Index Tests (Field(unique=True))
 # =============================================================================
 
 
 @pytest.mark.asyncio
-async def test_create_unique_index_enables_lookup(
-    table: TableInterface[SampleModel],
+async def test_field_unique_enables_lookup(
+    datastore: InMemoryDatastore,
 ) -> None:
-    """Unique index allows lookup by field value."""
-    await table.set("1", SampleModel(id="1", name="alice", category="A"))
-    await table.create_unique_index("name")
+    """Field(unique=True) enables lookup by unique field value."""
+    table = datastore.table(UniqueIndexedModel)
+    await table.set("1", UniqueIndexedModel(id="1", name="alice", category="A"))
 
+    # Lookup by unique field - no create_unique_index() call needed
     result = await table.get("alice", index="name")
     assert result is not None
     assert result.id == "1"
 
 
 @pytest.mark.asyncio
-async def test_unique_index_rejects_duplicate_on_insert(
-    table: TableInterface[SampleModel],
+async def test_field_unique_rejects_duplicate_on_insert(
+    datastore: InMemoryDatastore,
 ) -> None:
-    """Unique index rejects insert with duplicate field value."""
-    await table.create_unique_index("name")
-    await table.set("1", SampleModel(id="1", name="alice", category="A"))
+    """Field(unique=True) rejects insert with duplicate field value."""
+    table = datastore.table(UniqueIndexedModel)
+    await table.set("1", UniqueIndexedModel(id="1", name="alice", category="A"))
 
     # Should raise ValueError for duplicate name
     with pytest.raises(ValueError, match="Duplicate value 'alice'"):
-        await table.set("2", SampleModel(id="2", name="alice", category="B"))
+        await table.set("2", UniqueIndexedModel(id="2", name="alice", category="B"))
 
     # Original should still exist
     assert await table.count() == 1
 
 
 @pytest.mark.asyncio
-async def test_unique_index_allows_update_same_key(
-    table: TableInterface[SampleModel],
+async def test_field_unique_allows_update_same_key(
+    datastore: InMemoryDatastore,
 ) -> None:
-    """Unique index allows updating same record with same unique value."""
-    await table.create_unique_index("name")
-    await table.set("1", SampleModel(id="1", name="alice", category="A"))
+    """Field(unique=True) allows updating same record with same unique value."""
+    table = datastore.table(UniqueIndexedModel)
+    await table.set("1", UniqueIndexedModel(id="1", name="alice", category="A"))
 
     # Update same key with same name should work
-    await table.set("1", SampleModel(id="1", name="alice", category="B"))
+    await table.set("1", UniqueIndexedModel(id="1", name="alice", category="B"))
 
     result = await table.get("1")
     assert result is not None
@@ -269,30 +286,18 @@ async def test_unique_index_allows_update_same_key(
 
 
 @pytest.mark.asyncio
-async def test_unique_index_cleanup_on_delete(
-    table: TableInterface[SampleModel],
+async def test_field_unique_cleanup_on_delete(
+    datastore: InMemoryDatastore,
 ) -> None:
     """Unique index entry is removed when record is deleted."""
-    await table.create_unique_index("name")
-    await table.set("1", SampleModel(id="1", name="alice", category="A"))
+    table = datastore.table(UniqueIndexedModel)
+    await table.set("1", UniqueIndexedModel(id="1", name="alice", category="A"))
 
     await table.delete("1")
 
     # Now should be able to insert same unique value with different key
-    await table.set("2", SampleModel(id="2", name="alice", category="B"))
+    await table.set("2", UniqueIndexedModel(id="2", name="alice", category="B"))
     assert await table.count() == 1
-
-
-@pytest.mark.asyncio
-async def test_create_unique_index_fails_if_duplicates_exist(
-    table: TableInterface[SampleModel],
-) -> None:
-    """Creating unique index fails if data already has duplicate values."""
-    await table.set("1", SampleModel(id="1", name="alice", category="A"))
-    await table.set("2", SampleModel(id="2", name="alice", category="B"))
-
-    with pytest.raises(ValueError, match="Duplicate value 'alice'"):
-        await table.create_unique_index("name")
 
 
 # =============================================================================

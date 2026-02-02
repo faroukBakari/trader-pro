@@ -19,6 +19,7 @@ from .engine import (
     DatabaseNotFoundError,
     check_database_exists,
 )
+from .exclusion_listener import register_exclusion_listener
 
 __all__ = [
     "AsyncEngineFactory",
@@ -28,4 +29,5 @@ __all__ = [
     "PostgresTable",
     "SQLModelTable",
     "check_database_exists",
+    "register_exclusion_listener",
 ]

@@ -8,20 +8,23 @@ DatastoreInterface behavior. This file tests ONLY Postgres-specific features:
 - Connection pool behavior
 - Settings injection via create()
 - Table type detection (JSONB vs SQLModel)
+- Exclusion constraints via __table_args__ metadata + exclusion_listener
 
 Run with: pytest src/trading_api/datastores/postgres/tests/test_postgres_specific.py -v -m integration
 """
 
 from collections.abc import AsyncIterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import pytest
 from sqlmodel import Field, SQLModel
 
 from trading_api.shared.config import Settings
+from trading_api.types import Int8RangeType, IntRange
 
 if TYPE_CHECKING:
     from trading_api.datastores import PostgresDatastore
+    from trading_api.datastores.postgres import SQLModelTable
 
 # Skip all tests if PostgreSQL not available
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
@@ -39,6 +42,25 @@ class PgIndexedModel(SQLModel):
 
     email: str = Field(unique=True)
     value: int
+
+
+class PgRangeModel(SQLModel, table=True):
+    """SQLModel with native int8range column for exclusion constraint tests.
+
+    Uses native PostgreSQL int8range type via Int8RangeType TypeDecorator.
+    This is the production pattern used by PendingRange/CoveredRange models.
+    Exclusion constraint is created automatically by exclusion_listener.
+    """
+
+    __tablename__ = cast(Any, "pg_range_test")
+    __table_args__ = {
+        "info": {"exclusion": {"range_field": "time_range", "group": "lookup_key"}}
+    }
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    lookup_key: str = Field(index=True)
+    time_range: IntRange = Field(..., sa_type=Int8RangeType)
+    description: str = ""
 
 
 # =============================================================================
@@ -400,3 +422,286 @@ async def test_is_empty_false_when_has_entries(
 
     await table.set("k", PgSampleModel(name="test", value=42))
     assert await table.is_empty is False
+
+
+# =============================================================================
+# SQLModelTable: Declarative Exclusion Constraints via __table_args__
+# =============================================================================
+
+
+@pytest.fixture
+async def range_table(
+    postgres_datastore: "PostgresDatastore",
+) -> AsyncIterator["SQLModelTable[PgRangeModel]"]:
+    """Fixture providing a clean PgRangeModel table with exclusion constraint.
+
+    Constraint is created automatically by exclusion_listener from __table_args__.
+    """
+    from trading_api.datastores.postgres import SQLModelTable
+
+    table = postgres_datastore.table(PgRangeModel)
+    assert isinstance(table, SQLModelTable)
+
+    # Clear table - exclusion constraint created automatically on first access
+    await table.clear()
+
+    yield table
+
+    # Cleanup: drop table
+    try:
+        await postgres_datastore.drop_table("pg_range_test")
+    except Exception:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_exclusion_rejects_overlapping_ranges_same_group(
+    range_table: "SQLModelTable",
+) -> None:
+    """Overlapping ranges within same lookup_key are rejected.
+
+    This is the core business case: prevent duplicate pending/covered ranges
+    for the same symbol+resolution combination.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    # Insert first range: [100, 200] for group "AAPL_1D"
+    await range_table.set(
+        "1",
+        PgRangeModel(
+            lookup_key="AAPL_1D",
+            time_range=IntRange(start=100, end=200),
+            description="first range",
+        ),
+    )
+
+    # Try to insert overlapping range: [150, 250] for same group
+    with pytest.raises(IntegrityError) as exc_info:
+        await range_table.set(
+            "2",
+            PgRangeModel(
+                lookup_key="AAPL_1D",
+                time_range=IntRange(start=150, end=250),
+                description="overlapping range",
+            ),
+        )
+
+    # Should be exclusion violation
+    assert (
+        "exclusion" in str(exc_info.value).lower()
+        or "conflicting" in str(exc_info.value).lower()
+    )
+
+
+@pytest.mark.asyncio
+async def test_exclusion_allows_non_overlapping_ranges_same_group(
+    range_table: "SQLModelTable",
+) -> None:
+    """Non-overlapping ranges within same group are allowed."""
+    # Insert first range: [100, 200]
+    await range_table.set(
+        "1",
+        PgRangeModel(
+            lookup_key="AAPL_1D",
+            time_range=IntRange(start=100, end=200),
+            description="first range",
+        ),
+    )
+
+    # Insert non-overlapping range: [300, 400] - should succeed
+    await range_table.set(
+        "2",
+        PgRangeModel(
+            lookup_key="AAPL_1D",
+            time_range=IntRange(start=300, end=400),
+            description="non-overlapping range",
+        ),
+    )
+
+    assert await range_table.count() == 2
+
+
+@pytest.mark.asyncio
+async def test_exclusion_allows_overlapping_ranges_different_groups(
+    range_table: "SQLModelTable",
+) -> None:
+    """Overlapping ranges in different groups are allowed.
+
+    Different symbol+resolution combinations can have overlapping time ranges.
+    """
+    # Insert range for AAPL_1D: [100, 200]
+    await range_table.set(
+        "1",
+        PgRangeModel(
+            lookup_key="AAPL_1D",
+            time_range=IntRange(start=100, end=200),
+            description="AAPL daily",
+        ),
+    )
+
+    # Insert overlapping range for MSFT_1D: [150, 250] - different group, should succeed
+    await range_table.set(
+        "2",
+        PgRangeModel(
+            lookup_key="MSFT_1D",
+            time_range=IntRange(start=150, end=250),
+            description="MSFT daily",
+        ),
+    )
+
+    # Insert overlapping range for AAPL_1H: [150, 250] - different resolution, should succeed
+    await range_table.set(
+        "3",
+        PgRangeModel(
+            lookup_key="AAPL_1H",
+            time_range=IntRange(start=150, end=250),
+            description="AAPL hourly",
+        ),
+    )
+
+    assert await range_table.count() == 3
+
+
+@pytest.mark.asyncio
+async def test_exclusion_allows_adjacent_ranges(
+    range_table: "SQLModelTable",
+) -> None:
+    """Adjacent ranges (touching at boundary) are allowed with [] bounds.
+
+    With inclusive bounds [], ranges [100,200] and [201,300] don't overlap.
+    """
+    await range_table.set(
+        "1",
+        PgRangeModel(
+            lookup_key="AAPL_1D",
+            time_range=IntRange(start=100, end=200),
+        ),
+    )
+
+    # Adjacent range starting right after - should succeed
+    await range_table.set(
+        "2",
+        PgRangeModel(
+            lookup_key="AAPL_1D",
+            time_range=IntRange(start=201, end=300),
+        ),
+    )
+
+    assert await range_table.count() == 2
+
+
+# =============================================================================
+# Exclusion Listener: Automatic Constraint Creation from Model Metadata
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_exclusion_listener_creates_constraint_from_table_args(
+    postgres_datastore: "PostgresDatastore",
+) -> None:
+    """Exclusion listener creates constraint from __table_args__[info][exclusion].
+
+    This tests the declarative pattern where models declare exclusion intent
+    via __table_args__ and the listener creates the constraint automatically.
+    """
+    from psycopg.rows import dict_row
+
+    # Import real production models that use __table_args__ exclusion
+    from trading_api.models.market import PendingRange
+
+    # Access table to trigger schema creation
+    table = postgres_datastore.table(PendingRange)
+    await table.clear()  # Ensures table exists
+
+    # Verify constraint exists in pg_constraint
+    async with postgres_datastore._pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT conname, contype FROM pg_constraint
+                WHERE conname = 'pending_ranges_no_overlap'
+                AND conrelid = 'pending_ranges'::regclass
+                """
+            )
+            row = await cur.fetchone()
+
+    assert row is not None, "Exclusion constraint pending_ranges_no_overlap not found"
+    assert row["conname"] == "pending_ranges_no_overlap"
+    assert row["contype"] == "x"  # 'x' = exclusion constraint
+
+
+@pytest.mark.asyncio
+async def test_exclusion_listener_creates_covered_ranges_constraint(
+    postgres_datastore: "PostgresDatastore",
+) -> None:
+    """Verify CoveredRange model also gets exclusion constraint from listener."""
+    from psycopg.rows import dict_row
+
+    from trading_api.models.market import CoveredRange
+
+    # Access table to trigger schema creation
+    table = postgres_datastore.table(CoveredRange)
+    await table.clear()
+
+    # Verify constraint exists
+    async with postgres_datastore._pool.connection() as conn:
+        async with conn.cursor(row_factory=dict_row) as cur:
+            await cur.execute(
+                """
+                SELECT conname, contype FROM pg_constraint
+                WHERE conname = 'covered_ranges_no_overlap'
+                AND conrelid = 'covered_ranges'::regclass
+                """
+            )
+            row = await cur.fetchone()
+
+    assert row is not None, "Exclusion constraint covered_ranges_no_overlap not found"
+    assert row["contype"] == "x"
+
+
+@pytest.mark.asyncio
+async def test_exclusion_listener_enforces_non_overlapping_pending_ranges(
+    postgres_datastore: "PostgresDatastore",
+) -> None:
+    """Integration test: overlapping PendingRange inserts are rejected.
+
+    This tests the full flow:
+    1. Model declares exclusion via __table_args__
+    2. Listener creates constraint during schema creation
+    3. Overlapping inserts raise IntegrityError
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from trading_api.models.market import PendingRange, Resolution, TimeRange
+
+    table = postgres_datastore.table(PendingRange)
+    await table.clear()
+
+    # Use reasonable expires_at that fits in 32-bit integer
+    expires_at = 2000000000  # Fits in 32-bit signed int (max ~2.1B)
+
+    # Insert first range
+    pending1 = PendingRange(
+        symbol="AAPL",
+        resolution=Resolution.DAY_1,
+        time_range=TimeRange(start=1000, end=2000),
+        expires_at=expires_at,
+    )
+    await table.set(pending1.id, pending1)
+
+    # Try to insert overlapping range (same lookup_key, overlapping time_range)
+    pending2 = PendingRange(
+        symbol="AAPL",
+        resolution=Resolution.DAY_1,
+        time_range=TimeRange(start=1500, end=2500),  # Overlaps with [1000, 2000]
+        expires_at=expires_at,
+    )
+
+    with pytest.raises(IntegrityError) as exc_info:
+        await table.set(pending2.id, pending2)
+
+    # Verify it's an exclusion violation
+    assert (
+        "exclusion" in str(exc_info.value).lower()
+        or "conflicting" in str(exc_info.value).lower()
+    )

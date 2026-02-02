@@ -137,28 +137,6 @@ class TableInterface(ABC, Generic[T]):
             Tuples of (key, value) for each entry
         """
 
-    @abstractmethod
-    async def create_index(self, field_name: str) -> None:
-        """Create an index on a specified field.
-
-        Args:
-            field_name: Name of the model field to index
-        """
-
-    @abstractmethod
-    async def create_unique_index(self, field_name: str) -> None:
-        """Create a unique index on a specified field.
-
-        Enforces uniqueness constraint: each field value maps to exactly one key.
-        Raises ValueError if existing data contains duplicate field values.
-
-        Args:
-            field_name: Name of the model field to index uniquely
-
-        Raises:
-            ValueError: If duplicate field values exist in current data
-        """
-
 
 class DatastoreInterface(ABC):
     """Abstract interface for datastore with transaction support.
@@ -198,6 +176,25 @@ class DatastoreInterface(ABC):
         Returns:
             True if datastore provides transactional guarantees.
             False for simple key-value storage without transactions.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def has_exclusion(self) -> bool:
+        """Whether this datastore supports range exclusion constraints.
+
+        When True, exclusion constraints are automatically created from
+        model __table_args__ metadata by the exclusion_listener. This creates
+        database-level constraints (e.g., PostgreSQL EXCLUDE USING GIST)
+        that atomically prevent overlapping ranges across concurrent writes.
+
+        When False, exclusion constraints are not supported and overlap
+        prevention must be handled via application-level checks.
+
+        Returns:
+            True if datastore supports atomic exclusion constraints.
+            False for datastores without native range constraint support.
         """
         ...
 

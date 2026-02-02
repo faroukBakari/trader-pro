@@ -10,6 +10,8 @@ PostgreSQL datastore implementation using **psycopg3** with dual-mode storage:
 - **PostgresTable**: JSONB storage for flexible schemas (Wave 2A)
 - **SQLModelTable**: Typed column storage for SQLModel entities (Wave 2B)
 - **PostgresBarRepository**: Time-series bar storage with table-per-combo pattern (Wave 3A)
+- **Native Range Types**: `int8range`, `tstzrange`, `daterange` via TypeDecorators (Wave 2C)
+- **Exclusion Constraints**: Declarative non-overlapping range constraints via `exclusion_listener.py` (Wave 2C)
 
 ## Directory Structure
 
@@ -19,11 +21,15 @@ postgres/
 ├── bars.py               # Bar storage with table-per-combo pattern (Wave 3A)
 ├── datastore.py          # Main datastore + JSONB table implementation
 ├── engine.py             # AsyncEngineFactory singleton (SQLAlchemy)
+├── exclusion_listener.py # SQLAlchemy event listener for EXCLUDE USING GIST
 ├── sql_safe.py           # SQL injection protection utilities
 ├── sqlmodel_table.py     # SQLModelTable implementation
 ├── README.md             # This file
+├── adapters/             # psycopg3 type adapters
+│   ├── __init__.py       # Exports register_range_adapters()
+│   └── range_adapter.py  # Range[T] ↔ PostgreSQL range type conversion
 └── tests/
-    └── test_postgres_datastore.py
+    └── test_postgres_specific.py
 ```
 
 ## Bar Storage (`bars.py`)
@@ -98,6 +104,135 @@ query = sql.SQL("SELECT value FROM {} WHERE value->>{} = %s").format(
 - **`sql.Identifier`**: Table names, column names, index names
 - **`sql.Literal`**: JSONB field paths (`value->>'field'`), enum values in SQL
 - **`%s` parameters**: User-provided values, search terms, IDs
+
+## Range Types
+
+Native PostgreSQL range type support via psycopg3 adapters and SQLAlchemy TypeDecorators.
+
+### Supported Mappings
+
+| Application Type  | PostgreSQL Type | TypeDecorator    | Adapter Class         |
+| ----------------- | --------------- | ---------------- | --------------------- |
+| `IntRange`        | `int8range`     | `Int8RangeType`  | `Int8RangeDumper`     |
+| `TimeRange`       | `int8range`     | `Int8RangeType`  | `Int8RangeDumper`     |
+| `DateTimeRange`   | `tstzrange`     | `TstzRangeType`  | `TstzRangeDumper`     |
+| `DateOnlyRange`   | `daterange`     | `DateRangeType`  | `DateRangeDumper`     |
+
+### How It Works
+
+**1. TypeDecorator (SQLAlchemy DDL + Query Compilation)**
+
+TypeDecorators in `types/range.py` handle:
+- DDL generation: `CREATE TABLE ... (column int8range)`
+- Query compilation: Type coercion in WHERE clauses
+- Value conversion via `process_bind_param()` / `process_result_value()`
+
+```python
+from trading_api.types import Int8RangeType, TimeRange
+from sqlmodel import Field, SQLModel
+
+class PendingRange(SQLModel, table=True):
+    time_range: TimeRange = Field(sa_type=Int8RangeType)
+```
+
+**2. psycopg3 Adapter (Connection-Level Conversion)**
+
+Adapters in `adapters/range_adapter.py` register with psycopg3 connections:
+
+```python
+from trading_api.datastores.postgres.adapters import register_range_adapters
+
+async with await psycopg.AsyncConnection.connect(dsn) as conn:
+    register_range_adapters(conn)  # Now Range subclasses auto-convert
+```
+
+**3. Canonical Form Handling**
+
+PostgreSQL canonicalizes discrete ranges (int, date) to `[)` bounds:
+- `[1, 10]` → `[1, 11)` (stored internally)
+- Adapters handle this: `Range(start=1, end=10)` round-trips correctly
+
+### GiST Index Markers
+
+TypeDecorators with `requires_gist_index = True` attribute trigger automatic GiST index creation:
+
+```python
+class Int8RangeType(TypeDecorator[Range[int]]):
+    impl = INT8RANGE
+    cache_ok = True
+    requires_gist_index: ClassVar[bool] = True  # ← Marker
+```
+
+`SQLModelTable._detect_range_columns()` scans for this marker and `_create_gist_index()` creates indexes during table initialization.
+
+## Exclusion Constraints
+
+PostgreSQL exclusion constraints (`EXCLUDE USING GIST`) prevent overlapping ranges at the database level.
+
+### Declarative Pattern
+
+Models declare exclusion requirements via `__table_args__["info"]["exclusion"]`:
+
+```python
+from typing import Any, cast
+from sqlmodel import Field, SQLModel
+from trading_api.types import Int8RangeType, TimeRange
+
+class PendingRange(SQLModel, table=True):
+    __tablename__ = cast(Any, "pending_ranges")
+    __table_args__ = {
+        "info": {"exclusion": {"range_field": "time_range", "group": "lookup_key"}}
+    }
+
+    id: str = Field(primary_key=True)
+    lookup_key: str = Field(index=True)  # Grouping column
+    time_range: TimeRange = Field(sa_type=Int8RangeType)  # Range column
+```
+
+### exclusion_listener.py
+
+The listener is registered before `SQLModel.metadata.create_all()` in `PostgresDatastore.create()`:
+
+1. **Event Registration**: `register_exclusion_listener()` hooks into `after_create` event
+2. **Extension Creation**: Auto-creates `btree_gist` extension (required for text + range GiST index)
+3. **Constraint Creation**: For each table with exclusion metadata:
+   ```sql
+   ALTER TABLE pending_ranges
+   ADD CONSTRAINT pending_ranges_no_overlap
+   EXCLUDE USING GIST (
+       ("lookup_key") WITH =,
+       "time_range" WITH &&
+   )
+   ```
+4. **Idempotent**: Checks `pg_constraint` catalog before creating
+
+### Exclusion Config Keys
+
+| Key           | Required | Default        | Description                           |
+| ------------- | -------- | -------------- | ------------------------------------- |
+| `range_field` | Yes      | —              | Column containing the range type      |
+| `group`       | No       | `"lookup_key"` | Column for grouping (equality check)  |
+
+### Constraint Semantics
+
+- **Within same group**: Ranges cannot overlap (`&&` operator returns true)
+- **Across groups**: No constraint (different `lookup_key` values are independent)
+- **Violation**: PostgreSQL raises `ExclusionViolation` on conflicting INSERT/UPDATE
+
+### Usage in Services
+
+```python
+# Attempting to insert overlapping range raises psycopg3 exception
+from psycopg.errors import ExclusionViolation
+
+try:
+    await pending_table.set("id2", PendingRange(
+        lookup_key="AAPL_1D",
+        time_range=TimeRange(start=100, end=200),  # Overlaps existing!
+    ))
+except ExclusionViolation:
+    logger.warning("Range overlap detected - request already pending")
+```
 
 ## Configuration
 

@@ -3,11 +3,20 @@ Bar cache manager for read-through caching of historical bar data.
 
 Manages pending and covered ranges to support gap detection and
 prevent duplicate provider requests.
+
+Public API (minimal surface):
+- create() - Factory method
+- try_add_pending() - Atomically acquire a pending range (exclusion constraint)
+- mark_covered() - Complete fetch: remove pending, add covered (atomic)
+- find_missing_ranges() - Gap detection for cache-first pattern
+- clear() - Cleanup for testing/reset
 """
 
 import logging
 import time
 from typing import Optional
+
+from sqlalchemy.exc import IntegrityError
 
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import CoveredRange, PendingRange, Resolution, TimeRange
@@ -35,7 +44,12 @@ class BarCacheManager:
     - Pending ranges: In-flight provider requests (prevents duplicate fetches)
     - Covered ranges: Successfully cached data (enables gap detection)
 
-    Uses DatastoreInterface for persistence with indexed lookups by symbol+resolution.
+    Lifecycle:
+    1. try_add_pending() - Acquire lock on range (returns None if overlap)
+    2. Fetch bars from provider
+    3. mark_covered() - Atomically: remove pending + add covered
+
+    Failure recovery: TTL on pending ranges auto-expires stale entries.
 
     [THREAD-SAFETY]: Datastore provides per-table locking for concurrent access.
     [MEMORY]: Metadata only - actual bar storage is in BarRepository.
@@ -63,11 +77,16 @@ class BarCacheManager:
                 message="Use BarCacheManager.create() to instantiate",
             )
 
+        if not datastore.has_exclusion:
+            raise TradingApiException(
+                code="BAR_CACHE_MANAGER_NO_EXCLUSION_SUPPORT",
+                message="Datastore must support exclusion constraints",
+            )
+
         self._pending_ttl_ms = pending_ttl_ms
         self._datastore = datastore
         self._pending_table: TableInterface[PendingRange] | None = None
         self._covered_table: TableInterface[CoveredRange] | None = None
-        self._indexes_created = False
 
     @classmethod
     async def create(
@@ -76,13 +95,11 @@ class BarCacheManager:
         settings: Settings,
     ) -> "BarCacheManager":
         """Factory method to create BarCacheManager instance."""
-        instance = cls(
+        return cls(
             key=cls._AUTH_KEY,
             datastore=datastore,
             pending_ttl_ms=settings.BAR_CACHE_PENDING_TTL_MS,
         )
-        await instance.__ensure_indexes()
-        return instance
 
     @property
     def pending_table(self) -> TableInterface[PendingRange]:
@@ -98,26 +115,26 @@ class BarCacheManager:
             self._covered_table = self._datastore.table(CoveredRange)
         return self._covered_table
 
-    async def __ensure_indexes(self) -> None:
-        """Create indexes on first use (idempotent)."""
-        if self._indexes_created:
-            return
-        await self.pending_table.create_index("lookup_key")
-        await self.covered_table.create_index("lookup_key")
-        self._indexes_created = True
-
     # =========================================================================
     # Pending Range Management
     # =========================================================================
 
-    async def add_pending(
+    async def try_add_pending(
         self,
         symbol: str,
         resolution: Resolution,
         time_range: TimeRange,
         ttl_ms: Optional[int] = None,
-    ) -> PendingRange:
-        """Mark a range as pending (in-flight provider request).
+    ) -> PendingRange | None:
+        """Atomically add pending range if no overlap exists.
+
+        Uses PostgreSQL exclusion constraint for atomic "acquire" semantics.
+        If another request already owns an overlapping range, returns None
+        instead of raising an error.
+
+        This enables concurrent request deduplication:
+        - First request wins (gets PendingRange)
+        - Concurrent requests lose (get None, can wait/retry)
 
         Args:
             symbol: Trading symbol
@@ -126,32 +143,52 @@ class BarCacheManager:
             ttl_ms: Custom TTL (uses default if not specified)
 
         Returns:
-            Created PendingRange
+            PendingRange if acquired successfully
+            None if overlapping pending range exists (exclusion violation)
+
+        Raises:
+            IntegrityError: For non-exclusion database errors
         """
+        try:
+            ttl = ttl_ms if ttl_ms is not None else self._pending_ttl_ms
+            expires_at = int(time.time() * 1000) + ttl
 
-        ttl = ttl_ms if ttl_ms is not None else self._pending_ttl_ms
-        expires_at = int(time.time() * 1000) + ttl
+            pending = PendingRange(
+                symbol=symbol,
+                resolution=resolution,
+                time_range=time_range,
+                expires_at=expires_at,
+            )
 
-        pending = PendingRange(
-            symbol=symbol,
-            resolution=resolution,
-            time_range=time_range,
-            expires_at=expires_at,
-        )
+            key = _primary_key(symbol, resolution, time_range)
+            await self.pending_table.set(key, pending)
 
-        key = _primary_key(symbol, resolution, time_range)
-        await self.pending_table.set(key, pending)
+            logger.debug(
+                f"Added pending range: {symbol}/{resolution.value} {time_range}"
+            )
+            return pending
+        except IntegrityError as e:
+            # PostgreSQL exclusion_violation SQLSTATE
+            # psycopg3 uses 'sqlstate', older psycopg2 uses 'pgcode'
+            sqlstate = getattr(e.orig, "sqlstate", None) or getattr(
+                e.orig, "pgcode", None
+            )
+            if sqlstate == "23P01":  # exclusion_violation
+                logger.debug(
+                    f"Exclusion violation for {symbol}/{resolution.value} {time_range} - "
+                    "overlapping pending range exists"
+                )
+                return None
+            # Re-raise non-exclusion errors
+            raise
 
-        logger.debug(f"Added pending range: {symbol}/{resolution.value} {time_range}")
-        return pending
-
-    async def remove_pending(
+    async def _remove_pending(
         self,
         symbol: str,
         resolution: Resolution,
         time_range: TimeRange,
     ) -> bool:
-        """Remove a pending range (request completed or failed).
+        """Remove a pending range (internal - called by mark_covered).
 
         Args:
             symbol: Trading symbol
@@ -170,12 +207,12 @@ class BarCacheManager:
             )
         return result
 
-    async def get_pending_ranges(
+    async def _get_pending_ranges(
         self,
         symbol: str,
         resolution: Resolution,
     ) -> list[PendingRange]:
-        """Get all non-expired pending ranges for symbol/resolution.
+        """Get all non-expired pending ranges for symbol/resolution (internal).
 
         Automatically cleans up expired entries.
         """
@@ -199,16 +236,6 @@ class BarCacheManager:
 
         return valid
 
-    async def is_pending(
-        self,
-        symbol: str,
-        resolution: Resolution,
-        time_range: TimeRange,
-    ) -> bool:
-        """Check if a range overlaps with any pending request."""
-        pending_ranges = await self.get_pending_ranges(symbol, resolution)
-        return any(p.time_range.overlaps(time_range) for p in pending_ranges)
-
     # =========================================================================
     # Covered Range Management
     # =========================================================================
@@ -223,6 +250,13 @@ class BarCacheManager:
     ) -> CoveredRange:
         """Mark a range as covered (successfully cached).
 
+        Atomically:
+        1. Removes the corresponding pending range (if exists)
+        2. Creates a covered range entry
+
+        This completes the fetch lifecycle: try_add_pending → fetch → mark_covered.
+        Failure cleanup relies on TTL expiration of pending ranges.
+
         For simplicity, this version does not merge adjacent ranges.
         Future enhancement: merge overlapping/adjacent ranges.
 
@@ -236,7 +270,10 @@ class BarCacheManager:
         Returns:
             Created CoveredRange
         """
+        # Step 1: Remove pending entry (completes the lock lifecycle)
+        await self._remove_pending(symbol, resolution, time_range)
 
+        # Step 2: Create covered entry
         covered = CoveredRange(
             symbol=symbol,
             resolution=resolution,
@@ -254,12 +291,12 @@ class BarCacheManager:
         )
         return covered
 
-    async def get_covered_ranges(
+    async def _get_covered_ranges(
         self,
         symbol: str,
         resolution: Resolution,
     ) -> list[CoveredRange]:
-        """Get all covered ranges for symbol/resolution."""
+        """Get all covered ranges for symbol/resolution (internal)."""
 
         lookup_key = _lookup_key(symbol, resolution)
         return await self.covered_table.get_all(lookup_key, index="lookup_key")
@@ -290,7 +327,7 @@ class BarCacheManager:
         Returns:
             List of TimeRange gaps that need to be fetched
         """
-        covered_ranges = await self.get_covered_ranges(symbol, resolution)
+        covered_ranges = await self._get_covered_ranges(symbol, resolution)
 
         if not covered_ranges:
             # Full miss - need entire range
@@ -320,8 +357,8 @@ class BarCacheManager:
     # Cleanup
     # =========================================================================
 
-    async def cleanup_expired_pending(self) -> int:
-        """Remove all expired pending ranges.
+    async def _cleanup_expired_pending(self) -> int:
+        """Remove all expired pending ranges (internal - for background cleanup).
 
         Returns:
             Number of expired entries removed
