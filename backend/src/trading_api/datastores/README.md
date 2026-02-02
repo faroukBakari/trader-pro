@@ -8,11 +8,11 @@
 The datastore layer provides a minimal abstraction for data persistence that enables:
 
 - Testability via dependency injection
-- PostgreSQL support via `PostgresDatastore` (Wave 2A + 2B)
+- PostgreSQL support via `PostgresDatastore` with typed SQLModel columns
 - Per-table read-write locks for concurrent access
 - Auto-discovery via `DatastoreRegistry`
 - Feature detection via `has_persistence` and `has_transactions` properties
-- **SQLModel + Alembic migrations** for typed column storage (Wave 2B)
+- **SQLModel + Alembic migrations** for schema management
 
 ## Directory Structure
 
@@ -24,8 +24,8 @@ datastores/
 │   ├── __init__.py       # Exports InMemoryDatastore, InMemoryTable
 │   └── tests/
 └── postgres/             # PostgresDatastore implementation
-    ├── __init__.py       # Exports PostgresDatastore, PostgresTable, SQLModelTable
-    ├── datastore.py      # Dual-mode: JSONB tables + SQLModel tables
+    ├── __init__.py       # Exports PostgresDatastore, SQLModelTable
+    ├── datastore.py      # SQLModel tables via SQLModelTable
     ├── engine.py         # AsyncEngineFactory singleton (SQLAlchemy)
     └── sqlmodel_table.py # SQLModelTable implementation
 ```
@@ -54,6 +54,8 @@ if datastore.has_transactions:
 
 **`has_exclusion`**: Indicates support for database-level exclusion constraints (e.g., PostgreSQL `EXCLUDE USING GIST`) that atomically prevent overlapping ranges. Used for cache metadata tables like `PendingRange` and `CoveredRange`.
 
+**`has_transactions`**: Indicates support for ACID transactions via session injection pattern. Enables atomic multi-table operations.
+
 Services can access persistent storage via `persistent_datastore` property:
 
 ```python
@@ -63,6 +65,63 @@ class MyService(ServiceInterface):
         if store is None:
             raise RuntimeError("No persistent datastore available")
         # Use store for critical operations
+```
+
+---
+
+## Transaction Support (Session Injection)
+
+Datastores with `has_transactions=True` support atomic multi-operation transactions via **session injection**.
+
+### Session Factory Property
+
+```python
+from trading_api.datastores import PostgresDatastore
+
+datastore = await PostgresDatastore.create()
+
+# Get session factory for transaction support
+if datastore.has_transactions and datastore.session_factory:
+    async with datastore.session_factory() as session:
+        # Multiple operations in one transaction
+        await table1.set("key1", model1, session=session)
+        await table2.delete("key2", session=session)
+        await session.commit()  # Atomic commit
+```
+
+### Session Ownership Semantics
+
+All `TableInterface` CRUD methods accept an optional `session` parameter:
+
+| Caller Provides | Behavior |
+|-----------------|----------|
+| `session=None` (default) | Method creates internal session, auto-commits on success |
+| `session=external_session` | Method uses provided session, **caller owns commit** |
+
+**Pattern**: "Unit of Work propagation" - the outermost caller controls transaction boundaries.
+
+```python
+# Single operation - auto-commits
+await table.set("key", model)  # Committed immediately
+
+# Multi-operation transaction - caller controls commit
+async with datastore.session_factory() as session:
+    await table1.set("a", model_a, session=session)  # Not committed yet
+    await table2.set("b", model_b, session=session)  # Not committed yet
+    # Both visible within this session ("read your writes")
+    result = await table1.get("a", session=session)  # Sees uncommitted data
+    await session.commit()  # Atomic commit of both operations
+```
+
+### Rollback Behavior
+
+If an exception is raised before commit, the transaction rolls back automatically:
+
+```python
+async with datastore.session_factory() as session:
+    await table.set("key", model, session=session)
+    raise ValueError("Oops")  # Session rolls back automatically
+# "key" was never persisted
 ```
 
 ## DatastoreRegistry
@@ -145,28 +204,30 @@ InMemoryDatastore
 
 `TableInterface` is generic over `T` (a Pydantic `BaseModel`), enabling type-safe returns:
 
-| Method                            | Lock  | Return Type                   | Description                                   |
-| --------------------------------- | ----- | ----------------------------- | --------------------------------------------- |
-| `get(key, index=None)`            | Read  | `T \| None`                   | Get value by key or indexed field             |
-| `get_all(key, index=None)`        | Read  | `list[T]`                     | Get all values matching indexed field         |
-| `set(key, value)`                 | Write | `None`                        | Store value, auto-index all registered fields |
-| `delete(key, index=None)`         | Write | `bool`                        | Delete by key or indexed field                |
-| `exists(key, index=None)`         | Read  | `bool`                        | Check if key/indexed value exists             |
-| `keys(index=None)`                | Read  | `list[str]`                   | Get all keys or indexed field values          |
-| `values()`                        | Read  | `list[T]`                     | Get all values (deep copies)                  |
-| `clear()`                         | Write | `None`                        | Remove all entries and indexes                |
-| `count()`                         | Read  | `int`                         | Get entry count                               |
-| `iterate()`                       | Read  | `AsyncIterator[tuple[str,T]]` | Async iterate over key-value pairs            |
-| `is_empty` (property)             | Read  | `bool`                        | Returns True if table has zero entries        |
+| Method                                   | Lock  | Return Type                   | Description                                   |
+| ---------------------------------------- | ----- | ----------------------------- | --------------------------------------------- |
+| `get(key, index=None, session=None)`     | Read  | `T \| None`                   | Get value by key or indexed field             |
+| `get_all(key, index=None, session=None)` | Read  | `list[T]`                     | Get all values matching indexed field         |
+| `set(key, value, session=None)`          | Write | `None`                        | Store value, auto-index all registered fields |
+| `delete(key, index=None, session=None)`  | Write | `bool`                        | Delete by key or indexed field                |
+| `exists(key, index=None, session=None)`  | Read  | `bool`                        | Check if key/indexed value exists             |
+| `keys(index=None)`                       | Read  | `list[str]`                   | Get all keys or indexed field values          |
+| `values()`                               | Read  | `list[T]`                     | Get all values (deep copies)                  |
+| `clear(session=None)`                    | Write | `None`                        | Remove all entries and indexes                |
+| `count()`                                | Read  | `int`                         | Get entry count                               |
+| `iterate()`                              | Read  | `AsyncIterator[tuple[str,T]]` | Async iterate over key-value pairs            |
+| `is_empty` (property)                    | Read  | `bool`                        | Returns True if table has zero entries        |
+
+> **Note**: The `session` parameter enables transaction batching (see [Transaction Support](#transaction-support-session-injection)). When `session=None`, each operation auto-commits. When provided, caller controls commit.
 
 > **Note**: Indexes are declared via `Field(index=True, unique=True)` metadata in model classes. The deprecated `create_index()` and `create_unique_index()` methods have been removed from `TableInterface`.
 
 #### DatastoreInterface Methods
 
-| Method                            | Description                                                            |
-| --------------------------------- | ---------------------------------------------------------------------- |
-| `table(model_class, primary_key)` | Get or create table for model class (auto-extracts indexes from Field) |
-| `datastore_name()` (classmethod)  | Canonical name for registry lookup (e.g., "inmemory")                  |
+| Method                       | Description                                                            |
+| ---------------------------- | ---------------------------------------------------------------------- |
+| `table(model_class)`         | Get or create table for model class (auto-extracts indexes from Field) |
+| `datastore_name()` (classmethod) | Canonical name for registry lookup (e.g., "inmemory")              |
 | `list_tables(prefix)`             | List all table names, optionally filtered by prefix                    |
 | `drop_table(name)`                | Drop a table by name (returns True if dropped, False if not found)     |
 
@@ -245,9 +306,9 @@ postgres_ds.table(PendingRange)  # Works - creates EXCLUDE USING GIST constraint
 
 ## PostgresDatastore
 
-PostgreSQL datastore using **psycopg3 + JSONB** storage pattern. Provides real persistence with ACID transactions.
+PostgreSQL datastore using **psycopg3** with typed column storage via SQLModel. Provides real persistence with ACID transactions.
 
-**Wave 2C Features**:
+**Features**:
 - Native PostgreSQL range type support (`int8range`, `tstzrange`, `daterange`) via TypeDecorators
 - Declarative exclusion constraints via `__table_args__["info"]["exclusion"]` metadata
 - GiST index auto-creation for range columns
@@ -281,7 +342,7 @@ See [postgres/README.md](postgres/README.md) for detailed error messages and rem
 
 ### Key Design Decisions
 
-- **JSONB Storage**: Schema-flexible storage - each table stores `key TEXT` + `value JSONB`
+- **Typed Column Storage**: All models use SQLModel with `table=True` for typed PostgreSQL columns
 - **Async Factory Pattern**: Pool creation is async, use `PostgresDatastore.create()` factory
 - **No-Op RWLock**: PostgreSQL MVCC provides transaction isolation, app-level locks are redundant
 - **Typed Model Returns**: `get()`, `get_all()`, `values()` return validated Pydantic model instances (same as InMemoryDatastore)
@@ -340,38 +401,15 @@ registry.auto_discover()  # Detects postgres/ requires async init
 datastores = await registry.get_datastores_async(names=["postgres"])
 ```
 
-### JSONB Table Schema
-
-Each PostgresTable creates this schema on first access:
-
-```sql
-CREATE TABLE IF NOT EXISTS {table_name} (
-    key TEXT PRIMARY KEY,
-    value JSONB NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-```
-
-Indexes are created via JSONB field extraction:
-
-```sql
--- Secondary index (1:N)
-CREATE INDEX idx_{table}_{field} ON {table} ((value->>'{field}'));
-
--- Unique index (1:1)
-CREATE UNIQUE INDEX uidx_{table}_{field} ON {table} ((value->>'{field}'));
-```
-
 ---
 
-## SQLModelTable (Wave 2B)
+## SQLModelTable
 
 **Typed column storage** using SQLModel ORM for entities requiring schema enforcement and SQL queries.
 
 ### Overview
 
-`SQLModelTable[T]` provides an alternative to JSONB storage for entities that benefit from:
+`SQLModelTable[T]` provides typed column storage for SQLModel entities with:
 
 - **Typed columns**: Direct PostgreSQL column types (TEXT, TIMESTAMPTZ, BOOLEAN)
 - **Native SQL indexes**: Standard B-tree indexes on columns
@@ -384,11 +422,10 @@ CREATE UNIQUE INDEX uidx_{table}_{field} ON {table} ((value->>'{field}'));
 from trading_api.models.auth import User
 from trading_api.datastores.postgres import PostgresDatastore
 
-# Create datastore (initializes both psycopg3 pool and SQLAlchemy engine)
+# Create datastore (initializes psycopg3 pool and SQLAlchemy engine)
 datastore = await PostgresDatastore.create()
 
-# Get table - auto-detects storage mode from model class
-# table=True models use typed columns, table=False uses JSONB
+# Get table - requires SQLModel with table=True
 users = datastore.table(User)
 
 # Store SQLModel instance directly
@@ -402,9 +439,9 @@ user = await users.get("user123")  # Returns User | None
 
 ```
 PostgresDatastore
-├── _pool (psycopg3)                # JSONB tables via PostgresTable
+├── _pool (psycopg3)                # Connection pool for raw SQL operations
 ├── _session_factory (SQLAlchemy)   # SQLModel tables via AsyncSessionFactory
-└── _typed_tables: dict[str, SQLModelTable[T]]
+└── _tables: dict[str, SQLModelTable[Any]]
         │
         └── SQLModelTable[T]
             ├── _model_class: type[SQLModel]  # User, RefreshTokenData, etc.
@@ -470,24 +507,6 @@ make db-reset
 ```
 
 Migration files are in `backend/alembic/versions/`. See `001_migrate_jsonb_to_typed.py` for the initial JSONB → typed column migration example.
-
-### Dual-Mode Datastore
-
-`PostgresDatastore.table()` auto-detects storage mode based on the model class:
-
-```python
-from trading_api.models.auth import User  # has table=True
-from trading_api.models.orders import Order  # has table=False
-
-# SQLModel table=True → typed column storage (SQLModelTable)
-users = datastore.table(User)
-
-# SQLModel table=False or Pydantic → JSONB storage (PostgresTable)
-# Indexes extracted from Field(index=True, unique=True)
-orders = datastore.table(Order)
-```
-
-This enables gradual migration from JSONB to typed columns per entity.
 
 ### Range Types & GiST Indexes
 

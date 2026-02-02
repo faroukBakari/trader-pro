@@ -25,14 +25,14 @@ from trading_api.shared.config import Settings
 class SampleModel(SQLModel):
     """Test model for InMemory-specific tests."""
 
-    id: str
+    id: str = Field(primary_key=True)
     name: str
 
 
 class AnotherModel(SQLModel):
     """Another model for table isolation tests."""
 
-    key: str
+    key: str = Field(primary_key=True)
     data: str
 
 

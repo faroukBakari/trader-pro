@@ -14,7 +14,7 @@ Run with:
 
 import asyncio
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from sqlmodel import Field, SQLModel
@@ -28,26 +28,32 @@ from trading_api.shared.datastore_interface import DatastoreInterface, TableInte
 # =============================================================================
 
 
-class ContractTestModel(SQLModel):
+class ContractTestModel(SQLModel, table=True):
     """Standard test model for CRUD operations."""
 
-    id: str
+    __tablename__ = cast(Any, "contract_test_model")
+
+    id: str = Field(primary_key=True)
     name: str
     category: str = "default"
 
 
-class IndexedContractModel(SQLModel):
+class IndexedContractModel(SQLModel, table=True):
     """Model with declarative index for index contract tests."""
 
-    id: str
+    __tablename__ = cast(Any, "indexed_contract_model")
+
+    id: str = Field(primary_key=True)
     name: str
     category: str = Field(default="default", index=True)
 
 
-class UniqueIndexedContractModel(SQLModel):
+class UniqueIndexedContractModel(SQLModel, table=True):
     """Model with declarative unique index for unique index contract tests."""
 
-    id: str
+    __tablename__ = cast(Any, "unique_indexed_contract_model")
+
+    id: str = Field(primary_key=True)
     name: str = Field(unique=True)
     category: str = "default"
 
@@ -119,7 +125,7 @@ async def table(
     Uses drop_table() before and after test to ensure clean state,
     including removal of any custom indexes created during the test.
     """
-    table_name = ContractTestModel.__name__.lower()
+    table_name = cast(str, ContractTestModel.__tablename__)
     await any_datastore.drop_table(table_name)
     tbl = any_datastore.table(ContractTestModel)
     yield tbl
@@ -131,7 +137,7 @@ async def indexed_table(
     any_datastore: DatastoreInterface,
 ) -> AsyncIterator[TableInterface[Any]]:
     """Table with Field(index=True) on category for index contract tests."""
-    table_name = IndexedContractModel.__name__.lower()
+    table_name = cast(str, IndexedContractModel.__tablename__)
     await any_datastore.drop_table(table_name)
     tbl = any_datastore.table(IndexedContractModel)
     yield tbl
@@ -143,7 +149,7 @@ async def unique_indexed_table(
     any_datastore: DatastoreInterface,
 ) -> AsyncIterator[TableInterface[Any]]:
     """Table with Field(unique=True) on name for unique index contract tests."""
-    table_name = UniqueIndexedContractModel.__name__.lower()
+    table_name = cast(str, UniqueIndexedContractModel.__tablename__)
     await any_datastore.drop_table(table_name)
     tbl = any_datastore.table(UniqueIndexedContractModel)
     yield tbl
@@ -213,7 +219,7 @@ class TestDatastoreInterfaceContract:
         table = any_datastore.table(ContractTestModel)
         # Actually create table by writing to it (postgres creates lazily)
         await table.set("test_key", ContractTestModel(id="1", name="test"))
-        table_name = ContractTestModel.__name__.lower()
+        table_name = cast(str, ContractTestModel.__tablename__)
 
         dropped = await any_datastore.drop_table(table_name)
         assert dropped is True
@@ -233,7 +239,7 @@ class TestDatastoreInterfaceContract:
         """After drop_table(), table can be recreated fresh."""
         table1 = any_datastore.table(ContractTestModel)
         await table1.set("k", ContractTestModel(id="1", name="old"))
-        table_name = ContractTestModel.__name__.lower()
+        table_name = cast(str, ContractTestModel.__tablename__)
 
         await any_datastore.drop_table(table_name)
 
@@ -394,12 +400,12 @@ class TestTableIndexContract:
     ) -> None:
         """Field(index=True) enables lookup by indexed field."""
         await indexed_table.set(
-            "idx1", IndexedContractModel(id="1", name="test", category="X")
+            "idx1", IndexedContractModel(id="idx1", name="test", category="X")
         )
 
         result = await indexed_table.get("X", index="category")
         assert result is not None
-        assert result.id == "1"
+        assert result.id == "idx1"
 
     @pytest.mark.asyncio
     async def test_get_by_index_returns_correct_record(
@@ -476,12 +482,12 @@ class TestTableUniqueIndexContract:
     ) -> None:
         """Field(unique=True) enables lookup by unique field."""
         await unique_indexed_table.set(
-            "ui1", UniqueIndexedContractModel(id="1", name="alice", category="A")
+            "ui1", UniqueIndexedContractModel(id="ui1", name="alice", category="A")
         )
 
         result = await unique_indexed_table.get("alice", index="name")
         assert result is not None
-        assert result.id == "1"
+        assert result.id == "ui1"
 
     @pytest.mark.asyncio
     async def test_unique_index_allows_update_same_key(

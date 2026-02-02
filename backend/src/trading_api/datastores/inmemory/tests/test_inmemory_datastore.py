@@ -12,7 +12,7 @@ from trading_api.shared import DatastoreInterface, TableInterface
 class SampleModel(SQLModel):
     """Test model for datastore operations."""
 
-    id: str
+    id: str = Field(primary_key=True)
     name: str
     category: str = "default"
 
@@ -20,7 +20,7 @@ class SampleModel(SQLModel):
 class IndexedModel(SQLModel):
     """Test model with declarative index on category field."""
 
-    id: str
+    id: str = Field(primary_key=True)
     name: str
     category: str = Field(default="default", index=True)
 
@@ -28,7 +28,7 @@ class IndexedModel(SQLModel):
 class UniqueIndexedModel(SQLModel):
     """Test model with declarative unique index on name field."""
 
-    id: str
+    id: str = Field(primary_key=True)
     name: str = Field(index=True, unique=True)
     category: str = "default"
 
@@ -36,7 +36,7 @@ class UniqueIndexedModel(SQLModel):
 class AnotherModel(SQLModel):
     """Another test model for table isolation tests."""
 
-    key: str
+    key: str = Field(primary_key=True)
     data: str
 
 

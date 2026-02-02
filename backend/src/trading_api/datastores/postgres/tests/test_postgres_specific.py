@@ -3,11 +3,9 @@
 Contract tests (test_datastore_contract.py) cover all shared TableInterface/
 DatastoreInterface behavior. This file tests ONLY Postgres-specific features:
 
-- Dict return type (not BaseModel)
-- psycopg-specific exceptions (UniqueViolation)
+- SQLAlchemy-specific exceptions (IntegrityError)
 - Connection pool behavior
 - Settings injection via create()
-- Table type detection (JSONB vs SQLModel)
 - Exclusion constraints via __table_args__ metadata + exclusion_listener
 
 Run with: pytest src/trading_api/datastores/postgres/tests/test_postgres_specific.py -v -m integration
@@ -30,16 +28,22 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 
-class PgSampleModel(SQLModel):
+class PgSampleModel(SQLModel, table=True):
     """Test model for Postgres-specific tests."""
 
+    __tablename__ = cast(Any, "pg_sample_model")
+
+    id: str = Field(primary_key=True)
     name: str
     value: int
 
 
-class PgIndexedModel(SQLModel):
-    """Model with unique constraint for violation tests (JSONB storage)."""
+class PgIndexedModel(SQLModel, table=True):
+    """Model with unique constraint for violation tests."""
 
+    __tablename__ = cast(Any, "pg_indexed_model")
+
+    id: str = Field(primary_key=True)
     email: str = Field(unique=True)
     value: int
 
@@ -89,49 +93,49 @@ async def postgres_datastore(
 async def test_get_returns_validated_model(
     postgres_datastore: "PostgresDatastore",
 ) -> None:
-    """PostgresTable.get() returns validated Pydantic model instance."""
-    from trading_api.datastores import PostgresTable
+    """SQLModelTable.get() returns validated Pydantic model instance."""
+    from trading_api.datastores.postgres import SQLModelTable
 
     table = postgres_datastore.table(PgSampleModel)
-    assert isinstance(table, PostgresTable)
+    assert isinstance(table, SQLModelTable)
 
     # clear() triggers table creation internally
     await table.clear()
 
-    await table.set("key1", PgSampleModel(name="test", value=42))
+    await table.set("key1", PgSampleModel(id="key1", name="test", value=42))
     result = await table.get("key1")
 
-    # Postgres returns validated model instance (model_validate called internally)
+    # Returns validated model instance
     assert isinstance(result, PgSampleModel)
     assert result.name == "test"
     assert result.value == 42
 
 
 # =============================================================================
-# Postgres-Specific: psycopg Exceptions
+# Postgres-Specific: SQLAlchemy Exceptions
 # =============================================================================
 
 
 @pytest.mark.asyncio
-async def test_unique_constraint_raises_psycopg_exception(
+async def test_unique_constraint_raises_integrity_error(
     postgres_datastore: "PostgresDatastore",
 ) -> None:
-    """Unique constraint violation raises psycopg UniqueViolation."""
-    from psycopg.errors import UniqueViolation
+    """Unique constraint violation raises SQLAlchemy IntegrityError."""
+    from sqlalchemy.exc import IntegrityError
 
-    from trading_api.datastores import PostgresTable
+    from trading_api.datastores.postgres import SQLModelTable
 
     table = postgres_datastore.table(PgIndexedModel)
-    assert isinstance(table, PostgresTable)
+    assert isinstance(table, SQLModelTable)
 
     # clear() triggers table creation internally
     await table.clear()
 
-    await table.set("k1", PgIndexedModel(email="dup@test.com", value=1))
+    await table.set("k1", PgIndexedModel(id="k1", email="dup@test.com", value=1))
 
-    # psycopg3 raises UniqueViolation (not generic ValueError like InMemory)
-    with pytest.raises(UniqueViolation):
-        await table.set("k2", PgIndexedModel(email="dup@test.com", value=2))
+    # SQLAlchemy raises IntegrityError for constraint violations
+    with pytest.raises(IntegrityError):
+        await table.set("k2", PgIndexedModel(id="k2", email="dup@test.com", value=2))
 
 
 # =============================================================================
@@ -145,6 +149,7 @@ async def test_create_uses_injected_settings(
 ) -> None:
     """PostgresDatastore.create() uses injected Settings for DSN."""
     from trading_api.datastores import PostgresDatastore
+    from trading_api.datastores.postgres import SQLModelTable
 
     # test_settings has DSN set by test_database fixture
     ds = await PostgresDatastore.create(config=test_settings)
@@ -153,8 +158,9 @@ async def test_create_uses_injected_settings(
         assert ds.has_persistence is True
         # Verify we can actually use it
         table = ds.table(PgSampleModel)
+        assert isinstance(table, SQLModelTable)
         await table.clear()
-        await table.set("test_key", PgSampleModel(name="test", value=1))
+        await table.set("test_key", PgSampleModel(id="test_key", name="test", value=1))
         assert await table.count() == 1
     finally:
         await ds.close()
@@ -166,6 +172,7 @@ async def test_create_builds_dsn_from_components(
 ) -> None:
     """PostgresDatastore.create() can build DSN from host/port/user/pass/db components."""
     from trading_api.datastores import PostgresDatastore
+    from trading_api.datastores.postgres import SQLModelTable
 
     # If DSN is set, test that it works (already covered elsewhere)
     # This test verifies that a datastore can be created with valid settings
@@ -174,8 +181,9 @@ async def test_create_builds_dsn_from_components(
     try:
         # Verify it works
         table = ds.table(PgSampleModel)
+        assert isinstance(table, SQLModelTable)
         await table.clear()
-        await table.set("test_key", PgSampleModel(name="test", value=1))
+        await table.set("test_key", PgSampleModel(id="test_key", name="test", value=1))
         assert await table.count() == 1
     finally:
         await ds.close()
@@ -213,22 +221,6 @@ async def test_create_ensures_sqlmodel_tables_at_startup(
 
 
 # =============================================================================
-# Postgres-Specific: Table Type Detection
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_table_returns_postgres_table_for_jsonb_model(
-    postgres_datastore: "PostgresDatastore",
-) -> None:
-    """table() returns PostgresTable for models without table=True (JSONB storage)."""
-    from trading_api.datastores import PostgresTable
-
-    table = postgres_datastore.table(PgIndexedModel)
-    assert isinstance(table, PostgresTable)
-
-
-# =============================================================================
 # Postgres-Specific: Connection Pool
 # =============================================================================
 
@@ -261,18 +253,17 @@ async def test_list_tables_returns_public_tables(
     postgres_datastore: "PostgresDatastore",
 ) -> None:
     """list_tables() returns tables from public schema."""
-    from trading_api.datastores import PostgresTable
+    from trading_api.datastores.postgres import SQLModelTable
 
     # Create a table via datastore (clear() triggers creation)
     table = postgres_datastore.table(PgSampleModel)
-    assert isinstance(table, PostgresTable)
+    assert isinstance(table, SQLModelTable)
     await table.clear()
 
     tables = await postgres_datastore.list_tables()
 
-    # Should include our table (table name is derived from model's __tablename__)
-    # PgSampleModel doesn't have __tablename__, so it will use JSONB table name
-    assert len(tables) >= 1  # At least our table should exist
+    # Should include our table
+    assert "pg_sample_model" in tables
 
 
 @pytest.mark.asyncio
@@ -384,16 +375,14 @@ async def test_drop_table_removes_from_internal_cache(
     table = postgres_datastore.table(PgSampleModel)
     await table.clear()
 
-    # Verify it's in the cache (the table name is the __tablename__ attribute)
-    table_name = getattr(PgSampleModel, "__tablename__", None)
-    if table_name:
-        assert table_name in postgres_datastore._tables
+    table_name = "pg_sample_model"
+    assert table_name in postgres_datastore._typed_tables
 
-        # Drop it
-        await postgres_datastore.drop_table(table_name)
+    # Drop it
+    await postgres_datastore.drop_table(table_name)
 
-        # Should be removed from cache
-        assert table_name not in postgres_datastore._tables
+    # Should be removed from cache
+    assert table_name not in postgres_datastore._typed_tables
 
 
 # =============================================================================
@@ -420,7 +409,7 @@ async def test_is_empty_false_when_has_entries(
     table = postgres_datastore.table(PgSampleModel)
     await table.clear()  # triggers table creation
 
-    await table.set("k", PgSampleModel(name="test", value=42))
+    await table.set("k", PgSampleModel(id="k", name="test", value=42))
     assert await table.is_empty is False
 
 

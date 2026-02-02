@@ -12,7 +12,7 @@ import asyncio
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -208,8 +208,19 @@ class InMemoryTable(TableInterface):
             return True
         return False
 
-    async def get(self, key: str, index: str | None = None) -> BaseModel | None:
-        """Get a value by key (read-locked)."""
+    async def get(
+        self,
+        key: str,
+        index: str | None = None,
+        session: Any = None,  # Ignored for InMemory
+    ) -> BaseModel | None:
+        """Get a value by key (read-locked).
+
+        Args:
+            key: Unique identifier or indexed field value
+            index: Optional index field name to search by
+            session: Ignored - InMemory doesn't support sessions
+        """
         async with self.__lock.read(self.timeout):
             record = next(iter(self.__get_by_index(key, index)), None)
             if record is None:
@@ -217,14 +228,35 @@ class InMemoryTable(TableInterface):
             _, value = record
             return value.model_copy(deep=True) if value is not None else None
 
-    async def get_all(self, key: str, index: str | None = None) -> list[BaseModel]:
-        """Get all values by indexed field (read-locked)."""
+    async def get_all(
+        self,
+        key: str,
+        index: str | None = None,
+        session: Any = None,  # Ignored for InMemory
+    ) -> list[BaseModel]:
+        """Get all values by indexed field (read-locked).
+
+        Args:
+            key: Unique identifier or indexed field value
+            index: Optional index field name to search by
+            session: Ignored - InMemory doesn't support sessions
+        """
         async with self.__lock.read(self.timeout):
             records = self.__get_by_index(key, index)
             return [value.model_copy(deep=True) for _, value in records]
 
-    async def set(self, key: str, value: BaseModel) -> None:
+    async def set(
+        self,
+        key: str,
+        value: BaseModel,
+        session: Any = None,  # Ignored for InMemory
+    ) -> None:
         """Set a value by key (write-locked). Auto-indexes all registered fields.
+
+        Args:
+            key: Unique identifier
+            value: Pydantic model to store
+            session: Ignored - InMemory doesn't support sessions
 
         Raises:
             ValueError: If value violates a unique index constraint
@@ -258,14 +290,39 @@ class InMemoryTable(TableInterface):
                     if field_value is not None:
                         unique_index[str(field_value)] = key
 
-    async def delete(self, key: str, index: str | None = None) -> bool:
-        """Delete a value by key (write-locked)."""
+    async def delete(
+        self,
+        key: str,
+        index: str | None = None,
+        session: Any = None,  # Ignored for InMemory
+    ) -> bool:
+        """Delete a value by key (write-locked).
+
+        Args:
+            key: Unique identifier or indexed field value
+            index: Optional index field name to search by
+            session: Ignored - InMemory doesn't support sessions
+
+        Returns:
+            True if deleted, False if key didn't exist
+        """
         async with self.__lock.write(self.timeout):
             with self.__threading_lock:
                 return self.__delete(key, index)
 
-    async def exists(self, key: str, index: str | None = None) -> bool:
-        """Check if a key exists (read-locked)."""
+    async def exists(
+        self,
+        key: str,
+        index: str | None = None,
+        session: Any = None,  # Ignored for InMemory
+    ) -> bool:
+        """Check if a key exists (read-locked).
+
+        Args:
+            key: Unique identifier or indexed field value
+            index: Optional index field name to search by
+            session: Ignored - InMemory doesn't support sessions
+        """
         async with self.__lock.read(self.timeout):
             return self.__get_by_index(key, index) != []
 
@@ -282,8 +339,12 @@ class InMemoryTable(TableInterface):
         async with self.__lock.read(self.timeout):
             return [value.model_copy(deep=True) for value in self.__data.values()]
 
-    async def clear(self) -> None:
-        """Remove all entries from the table (write-locked)."""
+    async def clear(self, session: Any = None) -> None:  # noqa: ARG002
+        """Remove all entries from the table (write-locked).
+
+        Args:
+            session: Ignored - InMemory doesn't support sessions
+        """
         async with self.__lock.write(self.timeout):
             with self.__threading_lock:
                 self.__data.clear()
@@ -363,6 +424,11 @@ class InMemoryDatastore(DatastoreInterface):
         return False
 
     @property
+    def session_factory(self) -> None:
+        """InMemory datastore does not support session-based transactions."""
+        return None
+
+    @property
     def timeout(self) -> float:
         """Get the default timeout for lock acquisition."""
         return self.__timeout
@@ -370,7 +436,6 @@ class InMemoryDatastore(DatastoreInterface):
     def table(
         self,
         model_class: type[BaseModel],
-        primary_key: str = "id",
     ) -> TableInterface:
         """Get or create a table for the given model class.
 
@@ -378,9 +443,12 @@ class InMemoryDatastore(DatastoreInterface):
         - index=True → secondary index
         - unique=True → unique index
 
+        Note: Unlike PostgresDatastore, InMemoryDatastore does NOT require
+        Field(primary_key=True) since data is stored by the external key
+        passed to set(), not by a model field.
+
         Args:
-            model_class: Model class (SQLModel or Pydantic BaseModel)
-            primary_key: Primary key field name (unused in InMemory but kept for API parity)
+            model_class: Model class (BaseModel or SQLModel)
 
         Returns:
             TableInterface for the model
@@ -399,10 +467,15 @@ class InMemoryDatastore(DatastoreInterface):
                     f"Use PostgresDatastore for models with exclusion requirements."
                 )
 
-        name = model_class.__name__.lower()
+        # Use __tablename__ if available (SQLModel table=True), else class name
+        name = (
+            getattr(model_class, "__tablename__", None) or model_class.__name__.lower()
+        )
         with self.__threading_lock:
             if name not in self._tables:
                 indexes, unique_indexes, _ = extract_indexes(model_class)
+                # Note: InMemoryTable stores by external key (first arg to set()),
+                # so extracted_pk is informational only - no validation needed
                 self._tables[name] = InMemoryTable(
                     timeout=self.__timeout,
                     indexes=indexes,

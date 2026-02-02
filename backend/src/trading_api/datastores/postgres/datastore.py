@@ -1,13 +1,15 @@
 """PostgreSQL datastore implementation.
 
-[ARCHITECTURE] Wave 2A + 2B: Dual-mode datastore
-- PostgresTable: JSONB storage for legacy/flexible schemas (Wave 2A)
-- SQLModelTable: Typed column storage for SQLModel entities (Wave 2B)
+[ARCHITECTURE] SQLModel-based typed column storage.
 
 This module provides:
 - PostgresDatastore: Connection pool management with async factory
-- PostgresTable: TableInterface implementation using JSONB storage
-- table(): Unified API that auto-detects storage mode from model class
+- SQLModelTable: TableInterface implementation using typed SQLModel columns
+- table(): API for accessing tables from SQLModel(table=True) classes
+
+All models must:
+- Use SQLModel with table=True
+- Define a primary key via Field(primary_key=True)
 
 [SECURITY] Uses psycopg3's sql.SQL/sql.Identifier for safe SQL composition,
 eliminating SQL injection vulnerabilities from dynamic table/field names.
@@ -22,11 +24,9 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from psycopg import AsyncConnection, sql
 from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool, AsyncNullConnectionPool
 from pydantic import BaseModel
 from sqlalchemy import Table, inspect
-from sqlalchemy.exc import NoInspectionAvailable
 from sqlalchemy.orm import Mapper
 from sqlmodel import SQLModel
 
@@ -48,21 +48,29 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    pass
 
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-__all__ = ["PostgresDatastore", "PostgresTable", "SQLModelTable"]
+__all__ = ["PostgresDatastore", "SQLModelTable"]
 
 
-def get_table_name(model_class: type) -> str | None:
-    """Get table name from SQLModel class if table=True, else None."""
-    try:
-        mapper: Mapper[Any] = inspect(model_class)
-        table: Table = cast(Table, mapper.persist_selectable)
-        return table.name
-    except NoInspectionAvailable:
-        return None
+def get_table_name(model_class: type) -> str:
+    """Get table name from SQLModel class with table=True.
+
+    Args:
+        model_class: SQLModel class with table=True
+
+    Returns:
+        Table name from the model's metadata
+
+    Raises:
+        NoInspectionAvailable: If model does not have table=True
+    """
+    # Let NoInspectionAvailable propagate for non-table models
+    mapper: Mapper[Any] = inspect(model_class)
+    table: Table = cast(Table, mapper.persist_selectable)
+    return table.name
 
 
 def extract_indexes(
@@ -102,439 +110,6 @@ def extract_indexes(
     return indexes, unique_indexes, primary_key
 
 
-class PostgresTable(TableInterface[T]):
-    """PostgreSQL table implementation using JSONB storage.
-
-    Returns validated Pydantic model instances. JSONB data is automatically
-    converted to the model class via model_validate().
-
-    [SECURITY] All SQL uses psycopg3's sql.SQL/sql.Identifier composition
-    to prevent SQL injection from dynamic table/field names.
-
-    Schema per table (created on first access):
-        CREATE TABLE IF NOT EXISTS {table_name} (
-            key TEXT PRIMARY KEY,
-            value JSONB NOT NULL,
-            created_at TIMESTAMPTZ DEFAULT NOW(),
-            updated_at TIMESTAMPTZ DEFAULT NOW()
-        );
-
-    Index patterns:
-        - Secondary index (1:N): CREATE INDEX idx_{table}_{field} ON {table} ((value->>'{field}'))
-        - Unique index (1:1): CREATE UNIQUE INDEX uidx_{table}_{field} ON {table} ((value->>'{field}'))
-    """
-
-    def __init__(
-        self,
-        pool: AsyncConnectionPool[AsyncConnection[Any]],
-        table_name: str,
-        model_class: type[T],
-        indexes: list[str] | None = None,
-        unique_indexes: list[str] | None = None,
-    ) -> None:
-        # Validate table name at construction time
-        validate_identifier(table_name, "table name")
-        for idx in indexes or []:
-            validate_identifier(idx, "index field")
-        for idx in unique_indexes or []:
-            validate_identifier(idx, "unique index field")
-
-        self._pool = pool
-        self._table_name = table_name
-        self._model_class = model_class
-        self._indexes = indexes or []
-        self._unique_indexes = unique_indexes or []
-        self._initialized = False
-        self._init_lock = asyncio.Lock()
-
-    async def _ensure_table(self) -> None:
-        """Create table and indexes if not exists (idempotent).
-
-        Uses asyncio.Lock to serialize concurrent table creation attempts,
-        preventing race conditions in concurrent writes.
-        """
-        if self._initialized:
-            return
-
-        async with self._init_lock:
-            # Double-check after acquiring lock (another coroutine may have initialized)
-            if self._initialized:
-                return  # type: ignore[unreachable]
-
-            async with self._pool.connection() as conn:
-                try:
-                    # Create table with JSONB value column
-                    await conn.execute(
-                        sql.SQL(
-                            """
-                            CREATE TABLE IF NOT EXISTS {} (
-                                key TEXT PRIMARY KEY,
-                                value JSONB NOT NULL,
-                                created_at TIMESTAMPTZ DEFAULT NOW(),
-                                updated_at TIMESTAMPTZ DEFAULT NOW()
-                            )
-                            """
-                        ).format(sql.Identifier(self._table_name))
-                    )
-
-                    # Create secondary indexes (1:N mapping)
-                    for field in self._indexes:
-                        await conn.execute(
-                            sql.SQL(
-                                "CREATE INDEX IF NOT EXISTS {} ON {} ((value->>{}))"
-                            ).format(
-                                sql.Identifier(f"idx_{self._table_name}_{field}"),
-                                sql.Identifier(self._table_name),
-                                sql.Literal(field),
-                            )
-                        )
-
-                    # Create unique indexes (1:1 mapping)
-                    for field in self._unique_indexes:
-                        await conn.execute(
-                            sql.SQL(
-                                "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ((value->>{}))"
-                            ).format(
-                                sql.Identifier(f"uidx_{self._table_name}_{field}"),
-                                sql.Identifier(self._table_name),
-                                sql.Literal(field),
-                            )
-                        )
-                except Exception:
-                    # Table may already exist from concurrent creation - re-raise if not
-                    # Check if table exists now and skip error if so
-                    result = await conn.execute(
-                        sql.SQL(
-                            "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = {})"
-                        ).format(sql.Literal(self._table_name))
-                    )
-                    row = await result.fetchone()
-                    if not row or not row[0]:
-                        raise  # Re-raise if table doesn't exist (real error)
-
-            self._initialized = True
-
-    async def get(self, key: str, index: str | None = None) -> T | None:
-        """Get a value by key or indexed field.
-
-        Returns validated Pydantic model instance or None if not found.
-        """
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                if index is None:
-                    query = sql.SQL("SELECT value FROM {} WHERE key = %s").format(
-                        sql.Identifier(self._table_name)
-                    )
-                    await cur.execute(query, (key,))
-                else:
-                    validate_identifier(index, "index field")
-                    query = sql.SQL(
-                        "SELECT value FROM {} WHERE value->>{} = %s LIMIT 1"
-                    ).format(
-                        sql.Identifier(self._table_name),
-                        sql.Literal(index),
-                    )
-                    await cur.execute(query, (key,))
-
-                result = await cur.fetchone()
-                if result is None:
-                    return None
-                return self._model_class.model_validate(result["value"])
-
-    async def get_all(self, key: str, index: str | None = None) -> list[T]:
-        """Get all values by key or indexed field.
-
-        Returns list of validated Pydantic model instances.
-        """
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                if index is None:
-                    query = sql.SQL("SELECT value FROM {} WHERE key = %s").format(
-                        sql.Identifier(self._table_name)
-                    )
-                    await cur.execute(query, (key,))
-                else:
-                    validate_identifier(index, "index field")
-                    query = sql.SQL(
-                        "SELECT value FROM {} WHERE value->>{} = %s"
-                    ).format(
-                        sql.Identifier(self._table_name),
-                        sql.Literal(index),
-                    )
-                    await cur.execute(query, (key,))
-
-                rows = await cur.fetchall()
-                return [self._model_class.model_validate(row["value"]) for row in rows]
-
-    async def set(self, key: str, value: BaseModel) -> None:
-        """Set a value by key (upsert pattern)."""
-        await self._ensure_table()
-
-        # Convert Pydantic model to dict wrapped in Jsonb for proper encoding
-        value_dict = value.model_dump(mode="json")
-
-        async with self._pool.connection() as conn:
-            query = sql.SQL(
-                """
-                INSERT INTO {} (key, value, created_at, updated_at)
-                VALUES (%s, %s, NOW(), NOW())
-                ON CONFLICT (key) DO UPDATE SET
-                    value = EXCLUDED.value,
-                    updated_at = NOW()
-                """
-            ).format(sql.Identifier(self._table_name))
-            await conn.execute(query, (key, Jsonb(value_dict)))
-
-    async def delete(self, key: str, index: str | None = None) -> bool:
-        """Delete a value by key or indexed field."""
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            if index is None:
-                query = sql.SQL("DELETE FROM {} WHERE key = %s").format(
-                    sql.Identifier(self._table_name)
-                )
-                cursor = await conn.execute(query, (key,))
-            else:
-                validate_identifier(index, "index field")
-                query = sql.SQL("DELETE FROM {} WHERE value->>{} = %s").format(
-                    sql.Identifier(self._table_name),
-                    sql.Literal(index),
-                )
-                cursor = await conn.execute(query, (key,))
-
-            # psycopg3 returns rowcount from cursor
-            return int(cursor.rowcount) > 0
-
-    async def exists(self, key: str, index: str | None = None) -> bool:
-        """Check if a key or indexed value exists."""
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            async with conn.cursor() as cur:
-                if index is None:
-                    query = sql.SQL("SELECT 1 FROM {} WHERE key = %s LIMIT 1").format(
-                        sql.Identifier(self._table_name)
-                    )
-                    await cur.execute(query, (key,))
-                else:
-                    validate_identifier(index, "index field")
-                    query = sql.SQL(
-                        "SELECT 1 FROM {} WHERE value->>{} = %s LIMIT 1"
-                    ).format(
-                        sql.Identifier(self._table_name),
-                        sql.Literal(index),
-                    )
-                    await cur.execute(query, (key,))
-
-                row = await cur.fetchone()
-                return row is not None
-
-    async def keys(self, index: str | None = None) -> list[str]:
-        """Get all keys or indexed values."""
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                if index is None:
-                    query = sql.SQL("SELECT key FROM {}").format(
-                        sql.Identifier(self._table_name)
-                    )
-                    await cur.execute(query)
-                    rows = await cur.fetchall()
-                    return [row["key"] for row in rows]
-                else:
-                    validate_identifier(index, "index field")
-                    query = sql.SQL(
-                        "SELECT DISTINCT value->>{} as idx_val FROM {} "
-                        "WHERE value->>{} IS NOT NULL"
-                    ).format(
-                        sql.Literal(index),
-                        sql.Identifier(self._table_name),
-                        sql.Literal(index),
-                    )
-                    await cur.execute(query)
-                    rows = await cur.fetchall()
-                    return [row["idx_val"] for row in rows]
-
-    async def values(self) -> list[T]:
-        """Get all values in the table.
-
-        Returns list of validated Pydantic model instances.
-        """
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                query = sql.SQL("SELECT value FROM {}").format(
-                    sql.Identifier(self._table_name)
-                )
-                await cur.execute(query)
-                rows = await cur.fetchall()
-                return [self._model_class.model_validate(row["value"]) for row in rows]
-
-    async def clear(self) -> None:
-        """Remove all entries from the table."""
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            query = sql.SQL("TRUNCATE TABLE {}").format(
-                sql.Identifier(self._table_name)
-            )
-            await conn.execute(query)
-
-    async def count(self) -> int:
-        """Get the count of entries in the table."""
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                query = sql.SQL("SELECT COUNT(*) as cnt FROM {}").format(
-                    sql.Identifier(self._table_name)
-                )
-                await cur.execute(query)
-                row = await cur.fetchone()
-                return int(row["cnt"]) if row else 0
-
-    @property
-    async def is_empty(self) -> bool:
-        """Check if table has zero entries."""
-        return await self.count() == 0
-
-    async def iterate(self) -> AsyncIterator[tuple[str, T]]:
-        """Asynchronously iterate over key-value pairs.
-
-        Yields (key, model) tuples with validated Pydantic instances.
-        """
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            async with conn.cursor(row_factory=dict_row) as cur:
-                query = sql.SQL("SELECT key, value FROM {}").format(
-                    sql.Identifier(self._table_name)
-                )
-                await cur.execute(query)
-                async for row in cur:
-                    yield row["key"], self._model_class.model_validate(row["value"])
-
-    async def create_index(self, field_name: str) -> None:
-        """Create an index on a specified field.
-
-        .. deprecated::
-            Use SQLModel Field(index=True) instead. This method will be removed.
-        """
-        # FIXME: Remove this method - use SQLModel Field(index=True) for declarative indexes
-        import warnings
-
-        warnings.warn(
-            "create_index() is deprecated. Use SQLModel Field(index=True) instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        validate_identifier(field_name, "field name")
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            query = sql.SQL(
-                "CREATE INDEX IF NOT EXISTS {} ON {} ((value->>{}))"
-            ).format(
-                sql.Identifier(f"idx_{self._table_name}_{field_name}"),
-                sql.Identifier(self._table_name),
-                sql.Literal(field_name),
-            )
-            await conn.execute(query)
-
-        if field_name not in self._indexes:
-            self._indexes.append(field_name)
-
-    async def create_unique_index(self, field_name: str) -> None:
-        """Create a unique index on a specified field.
-
-        Raises ValueError if duplicate field values exist in current data.
-
-        .. deprecated::
-            Use SQLModel Field(unique=True) instead. This method will be removed.
-        """
-        # FIXME: Remove this method - use SQLModel Field(unique=True) for declarative unique constraints
-        import warnings
-
-        warnings.warn(
-            "create_unique_index() is deprecated. Use SQLModel Field(unique=True) instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        validate_identifier(field_name, "field name")
-        await self._ensure_table()
-
-        async with self._pool.connection() as conn:
-            # Check for duplicates first
-            async with conn.cursor(row_factory=dict_row) as cur:
-                check_query = sql.SQL(
-                    """
-                    SELECT value->>{} as field_val, COUNT(*) as cnt
-                    FROM {}
-                    WHERE value->>{} IS NOT NULL
-                    GROUP BY value->>{}
-                    HAVING COUNT(*) > 1
-                    LIMIT 1
-                    """
-                ).format(
-                    sql.Literal(field_name),
-                    sql.Identifier(self._table_name),
-                    sql.Literal(field_name),
-                    sql.Literal(field_name),
-                )
-                await cur.execute(check_query)
-                row = await cur.fetchone()
-
-                if row:
-                    raise ValueError(
-                        f"Duplicate value '{row['field_val']}' for unique field '{field_name}'"
-                    )
-
-            # Create the index
-            create_query = sql.SQL(
-                "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {} ((value->>{}))"
-            ).format(
-                sql.Identifier(f"uidx_{self._table_name}_{field_name}"),
-                sql.Identifier(self._table_name),
-                sql.Literal(field_name),
-            )
-            await conn.execute(create_query)
-
-        if field_name not in self._unique_indexes:
-            self._unique_indexes.append(field_name)
-
-    async def add_exclusion(
-        self,
-        range_field: str,
-        group: str = "lookup_key",
-        bounds: str = "[]",
-    ) -> None:
-        """JSONB-based PostgresTable does not support range exclusion constraints.
-
-        .. deprecated::
-            Use SQLModel __table_args__ with exclusion metadata instead.
-            See exclusion_listener.py for declarative pattern.
-        """
-        # FIXME: Remove this method - use __table_args__["info"]["exclusion"] for declarative constraints
-        import warnings
-
-        warnings.warn(
-            "add_exclusion() is deprecated. Use SQLModel __table_args__ with "
-            'exclusion metadata: {"info": {"exclusion": {"range_field": ..., "group": ...}}}',
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        raise NotImplementedError(
-            "JSONB-based PostgresTable does not support exclusion constraints."
-        )
-
-
 def _is_testing() -> bool:
     """Detect if running inside pytest via PYTEST_CURRENT_TEST env var."""
     return os.environ.get("PYTEST_CURRENT_TEST") is not None
@@ -543,16 +118,15 @@ def _is_testing() -> bool:
 class PostgresDatastore(DatastoreInterface):
     """PostgreSQL datastore using psycopg3 connection pool.
 
-    [ARCHITECTURE] Wave 2B: Unified table() API with auto-detection
-    - table=True models → SQLModelTable (typed columns via SQLAlchemy)
-    - table=False models → PostgresTable (JSONB storage with extracted indexes)
+    [ARCHITECTURE] SQLModel-based typed column storage
+    - All models must have table=True and a primary key field
+    - table() returns SQLModelTable (typed columns via SQLAlchemy)
 
     Uses async factory pattern since pool creation is async:
         ds = await PostgresDatastore.create()
 
     Features:
-    - JSONB storage for schema flexibility (Wave 2A)
-    - SQLModel typed columns for performance (Wave 2B)
+    - SQLModel typed columns via SQLAlchemy ORM
     - Connection pool with min/max size
     - Graceful shutdown via close()
     - [SECURITY] sql.SQL composition for injection-safe queries
@@ -569,7 +143,6 @@ class PostgresDatastore(DatastoreInterface):
         """Initialize with existing pool (use create() factory instead)."""
         self._pool = pool
         self._session_factory = session_factory
-        self._tables: dict[str, PostgresTable] = {}
         self._typed_tables: dict[str, SQLModelTable[Any]] = {}
 
     @classmethod
@@ -676,73 +249,73 @@ class PostgresDatastore(DatastoreInterface):
         """PostgreSQL is a SQL-based relational database."""
         return True
 
+    @property
+    def session_factory(self) -> "async_sessionmaker[AsyncSession]":
+        """Get session factory for transaction support.
+
+        Required for atomic multi-table operations.
+
+        Returns:
+            Session factory for creating async sessions.
+
+        Raises:
+            RuntimeError: If datastore not initialized via create().
+        """
+        if self._session_factory is None:
+            raise RuntimeError(
+                "Session factory not initialized. "
+                "Use PostgresDatastore.create() factory method."
+            )
+        return self._session_factory
+
     def table(
         self,
         model_class: type[SQLModel],
-        primary_key: str = "id",
     ) -> TableInterface[Any]:
         """Get or create a table for the given SQLModel class.
 
-        [ARCHITECTURE] Unified Wave 2A/2B: Auto-detects storage mode.
-        - table=True models → SQLModelTable (typed columns via SQLAlchemy)
-        - table=False models → PostgresTable (JSONB storage with extracted indexes)
+        All models must use SQLModel with table=True and define a primary key
+        via Field(primary_key=True).
 
         Index configuration is extracted from Field() metadata:
         - index=True → secondary index
         - unique=True → unique index
-        - primary_key=True → primary key field
+        - primary_key=True → primary key field (REQUIRED)
 
         Args:
-            model_class: SQLModel class (table=True or table=False)
-            primary_key: Primary key field name (default "id", extracted from Field if declared)
+            model_class: SQLModel class with table=True and Field(primary_key=True)
 
         Returns:
             TableInterface for the model
+
+        Raises:
+            NoInspectionAvailable: If model does not have table=True
+            ValueError: If model does not define a primary key field
         """
-        # Check if this is a table=True model
+        # get_table_name raises NoInspectionAvailable for non-table models
         table_name = get_table_name(model_class)
 
-        if table_name is not None:
-            # Wave 2B: SQLModel with typed columns
-            if self._session_factory is None:
-                raise RuntimeError(
-                    "Session factory not initialized. "
-                    "Use PostgresDatastore.create() factory method."
-                )
+        if self._session_factory is None:
+            raise RuntimeError(
+                "Session factory not initialized. "
+                "Use PostgresDatastore.create() factory method."
+            )
 
-            if table_name not in self._typed_tables:
-                # Extract primary_key from Field() if available
-                _, _, extracted_pk = extract_indexes(model_class)
-                pk = extracted_pk or primary_key
-
-                self._typed_tables[table_name] = SQLModelTable(
-                    model_class=model_class,
-                    session_factory=self._session_factory,
-                    primary_key=pk,
-                )
-            return self._typed_tables[table_name]
-        else:
-            # Wave 2A: JSONB storage with extracted indexes
-            name = getattr(model_class, "__tablename__", None)
-            if name is None:
+        if table_name not in self._typed_tables:
+            # Extract primary_key from Field(primary_key=True)
+            _, _, extracted_pk = extract_indexes(model_class)
+            if extracted_pk is None:
                 raise ValueError(
-                    "Model class must have __tablename__ attribute for JSONB storage"
+                    f"Model {model_class.__name__} must define a primary key field "
+                    f"via Field(primary_key=True). No primary key found in schema."
                 )
-            if name not in self._tables:
-                indexes, unique_indexes, extracted_pk = extract_indexes(model_class)
-                # Use extracted primary_key if available, otherwise use parameter
-                _ = (
-                    extracted_pk or primary_key
-                )  # Not used for JSONB but could be in future
 
-                self._tables[name] = PostgresTable(
-                    pool=self._pool,
-                    table_name=name,
-                    model_class=model_class,
-                    indexes=indexes,
-                    unique_indexes=unique_indexes,
-                )
-            return self._tables[name]
+            self._typed_tables[table_name] = SQLModelTable(
+                model_class=model_class,
+                session_factory=self._session_factory,
+                primary_key=extracted_pk,
+            )
+        return self._typed_tables[table_name]
 
     async def list_tables(self, prefix: str | None = None) -> list[str]:
         """List all table names in the datastore.
@@ -805,8 +378,7 @@ class PostgresDatastore(DatastoreInterface):
                 sql.SQL("DROP TABLE IF EXISTS {}").format(sql.Identifier(name))
             )
 
-        # Remove from internal caches
-        self._tables.pop(name, None)
+        # Remove from internal cache
         self._typed_tables.pop(name, None)
 
         return True

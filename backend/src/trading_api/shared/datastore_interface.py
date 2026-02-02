@@ -17,6 +17,8 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
     from trading_api.shared.config import Settings
 
 T = TypeVar("T", bound=BaseModel)
@@ -31,59 +33,94 @@ class TableInterface(ABC, Generic[T]):
     """
 
     @abstractmethod
-    async def get(self, key: str, index: str | None = None) -> T | None:
+    async def get(
+        self,
+        key: str,
+        index: str | None = None,
+        session: "AsyncSession | None" = None,
+    ) -> T | None:
         """Get a value by key or indexed field.
 
         Args:
             key: Unique identifier or indexed field value
             index: Optional index field name to search by
+            session: Optional external session for transaction batching.
+                    If provided, reads uncommitted writes from that session.
 
         Returns:
             BaseModel instance or None if not found
         """
 
     @abstractmethod
-    async def get_all(self, key: str, index: str | None = None) -> list[T]:
+    async def get_all(
+        self,
+        key: str,
+        index: str | None = None,
+        session: "AsyncSession | None" = None,
+    ) -> list[T]:
         """Get all values by key or indexed field.
 
         Args:
             key: Unique identifier or indexed field value
             index: Optional index field name to search by
+            session: Optional external session for transaction batching.
+                    If provided, reads uncommitted writes from that session.
 
         Returns:
             List of BaseModel instances
         """
 
     @abstractmethod
-    async def set(self, key: str, value: BaseModel) -> None:
-        """Set a value by key.
+    async def set(
+        self,
+        key: str,
+        value: BaseModel,
+        session: "AsyncSession | None" = None,
+    ) -> None:
+        """Set a value by key (upsert pattern).
 
         Automatically updates all registered indexes (via create_index).
 
         Args:
             key: Unique identifier
             value: Pydantic model to store
+            session: Optional external session for transaction batching.
+                    If provided, caller is responsible for commit.
         """
 
     @abstractmethod
-    async def delete(self, key: str, index: str | None = None) -> bool:
+    async def delete(
+        self,
+        key: str,
+        index: str | None = None,
+        session: "AsyncSession | None" = None,
+    ) -> bool:
         """Delete a value by key or indexed field.
 
         Args:
             key: Unique identifier or indexed field value
             index: Optional index field name to search by
+            session: Optional external session for transaction batching.
+                    If provided, caller is responsible for commit.
 
         Returns:
             True if deleted, False if key didn't exist
         """
 
     @abstractmethod
-    async def exists(self, key: str, index: str | None = None) -> bool:
+    async def exists(
+        self,
+        key: str,
+        index: str | None = None,
+        session: "AsyncSession | None" = None,
+    ) -> bool:
         """Check if a key or indexed value exists.
 
         Args:
             key: Unique identifier or indexed field value
             index: Optional index field name to search by
+            session: Optional external session for transaction batching.
+                    If provided, checks uncommitted writes from that session.
 
         Returns:
             True if key exists
@@ -109,8 +146,13 @@ class TableInterface(ABC, Generic[T]):
         """
 
     @abstractmethod
-    async def clear(self) -> None:
-        """Remove all entries from the table."""
+    async def clear(self, session: "AsyncSession | None" = None) -> None:
+        """Remove all entries from the table.
+
+        Args:
+            session: Optional external session for transaction batching.
+                    If provided, caller is responsible for commit.
+        """
 
     @abstractmethod
     async def count(self) -> int:
@@ -198,6 +240,22 @@ class DatastoreInterface(ABC):
         """
         ...
 
+    @property
+    def session_factory(self) -> "async_sessionmaker[AsyncSession] | None":
+        """Get session factory for transaction support.
+
+        Returns:
+            Session factory if datastore supports transactions, None otherwise.
+            Callers should check has_transactions before using.
+
+        Usage:
+            if datastore.has_transactions and datastore.session_factory:
+                async with datastore.session_factory() as session:
+                    # ... multiple operations in one transaction ...
+                    await session.commit()
+        """
+        return None  # Default for non-transactional datastores
+
     @classmethod
     @abstractmethod
     async def create(cls, config: Settings | None = None) -> "DatastoreInterface":
@@ -235,24 +293,24 @@ class DatastoreInterface(ABC):
     def table(
         self,
         model_class: type,
-        primary_key: str = "id",
     ) -> TableInterface:
         """Get or create a table for the given model class.
 
         Index configuration is extracted from Field() metadata:
         - index=True → secondary index
         - unique=True → unique index
-        - primary_key=True → primary key field
+        - primary_key=True → primary key field (REQUIRED)
 
-        For SQLModel table=True classes, uses typed column storage.
-        For table=False or Pydantic models, uses JSONB storage.
+        All models must define a primary key via Field(primary_key=True).
 
         Args:
-            model_class: Model class (SQLModel or Pydantic BaseModel)
-            primary_key: Primary key field name (default "id", extracted from Field if declared)
+            model_class: Model class with Field(primary_key=True) defined
 
         Returns:
             TableInterface for the model
+
+        Raises:
+            ValueError: If model does not define a primary key field
         """
 
     @abstractmethod
