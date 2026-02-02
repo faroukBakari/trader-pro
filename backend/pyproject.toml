@@ -67,6 +67,8 @@ grpcio-tools = ">=1.60,<1.70"
 pytest-timeout = "^2.3.1"
 testcontainers = {version = "^4.14", extras = ["postgres"]}
 pytest-testmon = "^2.1.0"
+pytest-xdist = "^3.8.0"
+websockets = "^16.0"
 
 [build-system]
 requires = ["poetry-core"]

@@ -1178,6 +1178,15 @@ async def cmd_start(args: argparse.Namespace) -> int:
         logger.exception(f"Failed to load configuration: {e}")
         return 1
 
+    # Force regenerate nginx config if requested (delete existing to trigger regeneration)
+    if args.generate_nginx:
+        nginx_config_path = Path(".local/nginx.conf")
+        if nginx_config_path.exists():
+            nginx_config_path.unlink()
+            logger.info(
+                f"Removed existing nginx config for regeneration: {nginx_config_path}"
+            )
+
     # Create and run server manager (always runs in detached mode)
     # The ServerManager handles nginx config generation internally
     manager = ServerManager(config)

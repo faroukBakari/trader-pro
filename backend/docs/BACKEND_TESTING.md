@@ -440,10 +440,54 @@ backend/tests/integration/
 
 **Key characteristics:**
 
-- Use session-scoped fixtures for efficiency
+- Use module-scoped fixtures for efficiency with xdist compatibility
 - Real uvicorn servers with nginx
 - Test backend manager orchestration
-- Comprehensive cleanup to prevent leaks
+- Comprehensive cleanup with emergency shutdown handlers
+
+#### Two-Class Test Design Pattern (BackendManager)
+
+BackendManager integration tests use a **two-class design** optimized for parallel test execution:
+
+| Class                         | Fixture Scope | Server Lifecycle    | Use Case                                                 |
+| ----------------------------- | ------------- | ------------------- | -------------------------------------------------------- |
+| `TestBackendManagerReadOnly`  | module        | Never stops servers | Health checks, endpoint validation, multi-module testing |
+| `TestBackendManagerLifecycle` | function      | Fresh per test      | Start/stop semantics, error recovery testing             |
+
+**Why two classes?**
+
+- **xdist compatibility**: Module-scoped fixtures prevent parallel worker collisions via `@pytest.mark.xdist_group`
+- **Test isolation**: Lifecycle tests need clean state; read-only tests can share servers
+- **Efficiency**: Read-only tests reuse running servers; lifecycle tests pay startup cost once per test
+
+**Port allocation with `get_unique_port_base()`:**
+
+```python
+def get_unique_port_base(test_name: str, offset: int = 0) -> int:
+    """Generate unique ports based on test name hash.
+
+    Avoids port collisions when tests run in parallel by hashing
+    test_name to a deterministic port range (10000-59999).
+    """
+    hash_val = int(hashlib.sha256(test_name.encode()).hexdigest(), 16)
+    return 10000 + (hash_val % 50000) + offset
+```
+
+**Emergency cleanup pattern:**
+
+```python
+_active_managers: dict[str, BackendManager] = {}
+
+def _emergency_cleanup():
+    """atexit handler - forcefully stop any orphaned managers."""
+    for name, manager in list(_active_managers.items()):
+        try:
+            manager.stop_all()
+        except Exception:
+            pass
+
+atexit.register(_emergency_cleanup)
+```
 
 **Run with:**
 
@@ -1920,30 +1964,43 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 
 ### Session-Based Testing Pattern
 
-Integration tests use session-scoped fixtures to minimize overhead:
+Integration tests use **module-scoped fixtures** for xdist compatibility:
 
 ```python
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="module")
+@pytest.mark.xdist_group(name="backend-manager")
 async def session_backend_manager(...) -> AsyncGenerator[ServerManager, None]:
-    """Start backend once for entire test session."""
+    """Start backend once for test module (xdist-compatible).
+
+    Module scope (not session) ensures xdist workers don't share state.
+    The xdist_group marker keeps these tests on the same worker.
+    """
     manager = ServerManager(...)
 
-    # Start once
+    # Start once per module
     success = await manager.start_all()
     if not success:
         raise RuntimeError("Failed to start backend")
 
-    yield manager  # All tests share this instance
+    yield manager  # Tests in this module share this instance
 
-    # Cleanup once at end
+    # Cleanup at module end
     await _ensure_all_processes_killed(manager)
 ```
 
+**Why module scope instead of session scope?**
+
+- `scope="session"` can cause issues with pytest-xdist parallel workers
+- `scope="module"` provides test isolation per worker process
+- `@pytest.mark.xdist_group` keeps related tests together
+- Still provides efficiency (start once per module, not per test)
+
 **Benefits:**
 
-- ✅ Start backend once (10-15 seconds) instead of per test
-- ✅ Share across multiple tests
-- ✅ Automatic cleanup at session end
+- ✅ Start backend once per module (10-15 seconds saved vs per-test)
+- ✅ xdist-compatible for parallel test execution
+- ✅ Share across tests within same module
+- ✅ Automatic cleanup at module end
 - ✅ 75% faster integration test execution
 
 ### Test Autonomy with `ensure_started()`
@@ -1990,12 +2047,21 @@ async def test_my_feature(self, session_backend_manager: ServerManager):
     # Test logic - backend is guaranteed running
 ```
 
-**When to use:**
+**When to use (Two-Class Design):**
+
+The two-class design (see Section 4) determines when `ensure_started()` is needed:
+
+| Test Class                    | `ensure_started()` | Rationale                                               |
+| ----------------------------- | ------------------ | ------------------------------------------------------- |
+| `TestBackendManagerReadOnly`  | ✅ Always call     | Read-only tests share servers; ensures healthy state    |
+| `TestBackendManagerLifecycle` | ❌ Not needed      | Function-scoped fixtures guarantee fresh state per test |
+
+**General guidance:**
 
 - ✅ After destructive operations (stop/restart tests)
 - ✅ When test order is uncertain
-- ✅ For test isolation and resilience
-- ❌ Not needed for pure read-only operations
+- ✅ For test isolation and resilience in read-only tests
+- ❌ Not needed in lifecycle tests (function-scoped fixtures reset state)
 - ❌ Not needed for non-backend-manager tests
 
 ### Module Isolation Pattern

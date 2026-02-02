@@ -11,12 +11,13 @@ nginx:
 
 # Backend server instances
 servers:
-  # Broker operations server
+  # Broker operations server (includes auth for simplified dev setup)
   broker:
     port: 8001
     instances: 1
     modules:
       - broker
+      - auth
     # providers:  # Optional: limit providers for this server (default: all)
     #   - fakebroker
     reload: true
