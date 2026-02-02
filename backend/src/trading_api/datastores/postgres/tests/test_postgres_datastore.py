@@ -9,11 +9,13 @@ Skip with: pytest -m "not integration"
 """
 
 from collections.abc import AsyncIterator
+from typing import Any, cast
 
 import pytest
 from sqlmodel import Field, SQLModel
 
-from trading_api.datastores import PostgresDatastore, PostgresTable
+from trading_api.datastores import PostgresDatastore
+from trading_api.datastores.postgres import SQLModelTable
 from trading_api.shared.config import Settings
 from trading_api.shared.datastore_interface import TableInterface
 
@@ -21,25 +23,31 @@ from trading_api.shared.datastore_interface import TableInterface
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 
-# Test models as SQLModel classes (table=False for JSONB storage)
-class CrudTestModel(SQLModel):
+# Test models as SQLModel(table=True) classes for SQLModelTable storage
+class CrudTestModel(SQLModel, table=True):
     """Test model for CRUD operations."""
 
+    __tablename__ = cast(Any, "crud_test_model")
+
+    id: str = Field(primary_key=True)
     name: str
     value: int
 
 
-class IndexedTestModel(SQLModel):
+class IndexedTestModel(SQLModel, table=True):
     """Test model with indexed fields."""
 
+    __tablename__ = cast(Any, "indexed_test_model")
+
+    id: str = Field(primary_key=True)
     email: str = Field(unique=True)  # Unique index (1:1)
     group: str = Field(index=True)  # Secondary index (1:N)
     value: int
 
 
 # Type alias for fixture return types
-TableFixture = tuple[PostgresTable, type[CrudTestModel]]
-IndexedTableFixture = tuple[PostgresTable, type[IndexedTestModel]]
+TableFixture = tuple[SQLModelTable[CrudTestModel], type[CrudTestModel]]
+IndexedTableFixture = tuple[SQLModelTable[IndexedTestModel], type[IndexedTestModel]]
 
 
 @pytest.fixture
@@ -86,33 +94,33 @@ class TestPostgresDatastoreInterface:
         """table() returns a TableInterface implementation."""
         table = postgres_datastore.table(CrudTestModel)
         assert isinstance(table, TableInterface)
-        assert isinstance(table, PostgresTable)
+        assert isinstance(table, SQLModelTable)
 
 
-class TestPostgresTableCRUD:
-    """Test PostgresTable CRUD operations."""
+class TestSQLModelTableCRUD:
+    """Test SQLModelTable CRUD operations."""
 
     @pytest.fixture
     async def table(
         self, postgres_datastore: PostgresDatastore
     ) -> AsyncIterator[TableFixture]:
         """Create a test table with cleanup."""
-        # Get table as PostgresTable (not TableInterface) for _ensure_table access
-        pg_table = postgres_datastore.table(CrudTestModel)
-        assert isinstance(pg_table, PostgresTable)
+        # Get table as SQLModelTable
+        tbl = postgres_datastore.table(CrudTestModel)
+        assert isinstance(tbl, SQLModelTable)
         # Ensure table exists and is empty
-        await pg_table._ensure_table()
-        await pg_table.clear()
-        yield pg_table, CrudTestModel
+        await tbl._ensure_table()
+        await tbl.clear()
+        yield tbl, CrudTestModel
         # Cleanup
-        await pg_table.clear()
+        await tbl.clear()
 
     @pytest.mark.asyncio
     async def test_set_and_get(self, table: TableFixture) -> None:
         """Test basic set and get operations."""
         tbl, Model = table
 
-        model = Model(name="test", value=42)
+        model = Model(id="key1", name="test", value=42)
         await tbl.set("key1", model)
 
         result = await tbl.get("key1")
@@ -132,7 +140,7 @@ class TestPostgresTableCRUD:
         """Test delete returns True for existing key."""
         tbl, Model = table
 
-        model = Model(name="to_delete", value=1)
+        model = Model(id="delete_key", name="to_delete", value=1)
         await tbl.set("delete_key", model)
 
         result = await tbl.delete("delete_key")
@@ -153,7 +161,7 @@ class TestPostgresTableCRUD:
         """Test exists returns correct boolean."""
         tbl, Model = table
 
-        model = Model(name="exists_test", value=1)
+        model = Model(id="exists_key", name="exists_test", value=1)
         await tbl.set("exists_key", model)
 
         assert await tbl.exists("exists_key") is True
@@ -164,8 +172,8 @@ class TestPostgresTableCRUD:
         """Test keys() and values() return correct data."""
         tbl, Model = table
 
-        await tbl.set("k1", Model(name="a", value=1))
-        await tbl.set("k2", Model(name="b", value=2))
+        await tbl.set("k1", Model(id="k1", name="a", value=1))
+        await tbl.set("k2", Model(id="k2", name="b", value=2))
 
         keys = await tbl.keys()
         assert set(keys) == {"k1", "k2"}
@@ -178,8 +186,8 @@ class TestPostgresTableCRUD:
         """Test clear removes all entries."""
         tbl, Model = table
 
-        await tbl.set("k1", Model(name="a", value=1))
-        await tbl.set("k2", Model(name="b", value=2))
+        await tbl.set("k1", Model(id="k1", name="a", value=1))
+        await tbl.set("k2", Model(id="k2", name="b", value=2))
         await tbl.clear()
 
         assert await tbl.count() == 0
@@ -190,14 +198,14 @@ class TestPostgresTableCRUD:
         tbl, Model = table
 
         assert await tbl.count() == 0
-        await tbl.set("k1", Model(name="a", value=1))
+        await tbl.set("k1", Model(id="k1", name="a", value=1))
         assert await tbl.count() == 1
-        await tbl.set("k2", Model(name="b", value=2))
+        await tbl.set("k2", Model(id="k2", name="b", value=2))
         assert await tbl.count() == 2
 
 
-class TestPostgresTableIndexes:
-    """Test PostgresTable index functionality."""
+class TestSQLModelTableIndexes:
+    """Test SQLModelTable index functionality."""
 
     @pytest.fixture
     async def indexed_table(
@@ -205,12 +213,12 @@ class TestPostgresTableIndexes:
     ) -> AsyncIterator[IndexedTableFixture]:
         """Create a table with indexes (extracted from Field metadata)."""
         # Get table - indexes are extracted from Field(index=True, unique=True)
-        pg_table = postgres_datastore.table(IndexedTestModel)
-        assert isinstance(pg_table, PostgresTable)
-        await pg_table._ensure_table()
-        await pg_table.clear()
-        yield pg_table, IndexedTestModel
-        await pg_table.clear()
+        tbl = postgres_datastore.table(IndexedTestModel)
+        assert isinstance(tbl, SQLModelTable)
+        await tbl._ensure_table()
+        await tbl.clear()
+        yield tbl, IndexedTestModel
+        await tbl.clear()
 
     @pytest.mark.asyncio
     async def test_get_by_unique_index(
@@ -219,8 +227,8 @@ class TestPostgresTableIndexes:
         """Test get with unique index returns correct record."""
         tbl, Model = indexed_table
 
-        await tbl.set("k1", Model(email="a@test.com", group="admin", value=1))
-        await tbl.set("k2", Model(email="b@test.com", group="user", value=2))
+        await tbl.set("k1", Model(id="k1", email="a@test.com", group="admin", value=1))
+        await tbl.set("k2", Model(id="k2", email="b@test.com", group="user", value=2))
 
         result = await tbl.get("a@test.com", index="email")
         assert result is not None
@@ -233,9 +241,9 @@ class TestPostgresTableIndexes:
         """Test get_all with secondary index returns multiple records."""
         tbl, Model = indexed_table
 
-        await tbl.set("k1", Model(email="a@test.com", group="admin", value=1))
-        await tbl.set("k2", Model(email="b@test.com", group="admin", value=2))
-        await tbl.set("k3", Model(email="c@test.com", group="user", value=3))
+        await tbl.set("k1", Model(id="k1", email="a@test.com", group="admin", value=1))
+        await tbl.set("k2", Model(id="k2", email="b@test.com", group="admin", value=2))
+        await tbl.set("k3", Model(id="k3", email="c@test.com", group="user", value=3))
 
         results = await tbl.get_all("admin", index="group")
         assert len(results) == 2
@@ -247,7 +255,9 @@ class TestPostgresTableIndexes:
         """Test delete with index removes correct record."""
         tbl, Model = indexed_table
 
-        await tbl.set("k1", Model(email="delete@test.com", group="admin", value=1))
+        await tbl.set(
+            "k1", Model(id="k1", email="delete@test.com", group="admin", value=1)
+        )
 
         result = await tbl.delete("delete@test.com", index="email")
         assert result is True
@@ -260,10 +270,14 @@ class TestPostgresTableIndexes:
         """Test unique index raises on duplicate."""
         tbl, Model = indexed_table
 
-        await tbl.set("k1", Model(email="dup@test.com", group="admin", value=1))
+        await tbl.set(
+            "k1", Model(id="k1", email="dup@test.com", group="admin", value=1)
+        )
 
-        # psycopg3 raises UniqueViolation for constraint violations
-        from psycopg.errors import UniqueViolation
+        # SQLAlchemy raises IntegrityError for constraint violations
+        from sqlalchemy.exc import IntegrityError
 
-        with pytest.raises(UniqueViolation):
-            await tbl.set("k2", Model(email="dup@test.com", group="user", value=2))
+        with pytest.raises(IntegrityError):
+            await tbl.set(
+                "k2", Model(id="k2", email="dup@test.com", group="user", value=2)
+            )

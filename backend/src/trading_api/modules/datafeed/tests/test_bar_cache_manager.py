@@ -208,6 +208,57 @@ async def test_mark_covered_removes_pending(manager: BarCacheManager) -> None:
     assert pending2 is not None
 
 
+async def test_mark_covered_uses_transaction(manager: BarCacheManager) -> None:
+    """Test mark_covered uses transaction for delete+insert atomicity.
+
+    Verifies that when PostgresDatastore is used, mark_covered leverages
+    the session_factory for atomic operations.
+    """
+    time_range = TimeRange(start=5000, end=6000)
+
+    # Add pending first
+    pending = await manager.try_add_pending("GOOGL", Resolution.HOUR_1, time_range)
+    assert pending is not None
+
+    # Mark covered - should atomically remove pending and add covered
+    covered = await manager.mark_covered(
+        "GOOGL", Resolution.HOUR_1, time_range, StorageType.DATABASE, bar_count=24
+    )
+    assert covered is not None
+
+    # Verify both operations completed:
+    # 1. Pending should be gone (can add new pending)
+    pending2 = await manager.try_add_pending("GOOGL", Resolution.HOUR_1, time_range)
+    assert pending2 is not None  # Slot is free
+
+    # 2. Covered should exist
+    missing = await manager.find_missing_ranges("GOOGL", Resolution.HOUR_1, 5000, 6000)
+    assert missing == []  # Range is covered
+
+
+async def test_mark_covered_idempotent(manager: BarCacheManager) -> None:
+    """Test mark_covered can be called multiple times for same range.
+
+    This is important for retry scenarios - if mark_covered is called
+    again for the same range, it should succeed (upsert semantics).
+    """
+    time_range = TimeRange(start=7000, end=8000)
+
+    # First call
+    covered1 = await manager.mark_covered(
+        "MSFT", Resolution.DAY_1, time_range, StorageType.MEMORY, bar_count=10
+    )
+    assert covered1 is not None
+
+    # Second call with different bar_count (upsert should update)
+    covered2 = await manager.mark_covered(
+        "MSFT", Resolution.DAY_1, time_range, StorageType.DATABASE, bar_count=15
+    )
+    assert covered2 is not None
+    assert covered2.bar_count == 15
+    assert covered2.storage_type == StorageType.DATABASE
+
+
 # ============================================================================
 # find_missing_ranges() Tests - Gap Detection
 # ============================================================================

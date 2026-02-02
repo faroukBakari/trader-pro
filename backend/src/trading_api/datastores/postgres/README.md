@@ -5,10 +5,9 @@
 
 ## Overview
 
-PostgreSQL datastore implementation using **psycopg3** with dual-mode storage:
+PostgreSQL datastore implementation using **psycopg3** with typed column storage:
 
-- **PostgresTable**: JSONB storage for flexible schemas (Wave 2A)
-- **SQLModelTable**: Typed column storage for SQLModel entities (Wave 2B)
+- **SQLModelTable**: Typed column storage for SQLModel entities
 - **PostgresBarRepository**: Time-series bar storage with table-per-combo pattern (Wave 3A)
 - **Native Range Types**: `int8range`, `tstzrange`, `daterange` via TypeDecorators (Wave 2C)
 - **Exclusion Constraints**: Declarative non-overlapping range constraints via `exclusion_listener.py` (Wave 2C)
@@ -17,9 +16,9 @@ PostgreSQL datastore implementation using **psycopg3** with dual-mode storage:
 
 ```
 postgres/
-├── __init__.py           # Exports PostgresDatastore, PostgresTable, SQLModelTable
+├── __init__.py           # Exports PostgresDatastore, SQLModelTable
 ├── bars.py               # Bar storage with table-per-combo pattern (Wave 3A)
-├── datastore.py          # Main datastore + JSONB table implementation
+├── datastore.py          # Main datastore + table() API
 ├── engine.py             # AsyncEngineFactory singleton (SQLAlchemy)
 ├── exclusion_listener.py # SQLAlchemy event listener for EXCLUDE USING GIST
 ├── sql_safe.py           # SQL injection protection utilities
@@ -30,6 +29,23 @@ postgres/
 │   └── range_adapter.py  # Range[T] ↔ PostgreSQL range type conversion
 └── tests/
     └── test_postgres_specific.py
+```
+
+## Model Requirements
+
+All models must:
+- Use `SQLModel` with `table=True`
+- Define a primary key via `Field(primary_key=True)`
+
+```python
+from sqlmodel import Field, SQLModel
+
+class User(SQLModel, table=True):
+    __tablename__ = "users"
+    
+    id: str = Field(primary_key=True)  # Required!
+    email: str = Field(unique=True)
+    name: str
 ```
 
 ## Bar Storage (`bars.py`)
@@ -232,6 +248,86 @@ try:
     ))
 except ExclusionViolation:
     logger.warning("Range overlap detected - request already pending")
+```
+
+## Session Scope Pattern (SQLModelTable)
+
+`SQLModelTable` implements an internal `_session_scope()` context manager for ownership-based transaction control.
+
+### Ownership Semantics
+
+| Session Provided? | Behavior | Who Commits? |
+|-------------------|----------|--------------|
+| `None` (default)  | Creates internal session | `_session_scope` auto-commits on success |
+| External session  | Uses provided session | Caller must commit |
+
+### Internal Implementation
+
+```python
+@asynccontextmanager
+async def _session_scope(self, session: AsyncSession | None = None):
+    """Context manager with ownership-based commit."""
+    if session is not None:
+        # Caller owns transaction - yield without commit
+        yield session
+    else:
+        # We own transaction - commit on success
+        async with self._session_factory() as owned_session:
+            yield owned_session
+            await owned_session.commit()
+```
+
+### Single Operation (Auto-Commit)
+
+```python
+# Each call creates its own session and commits
+await table.set("key1", model1)  # Committed immediately
+await table.set("key2", model2)  # Committed immediately
+```
+
+### Multi-Operation Transaction
+
+```python
+# Batch operations atomically
+async with datastore.session_factory() as session:
+    await table1.set("key1", model1, session=session)
+    await table2.delete("key2", session=session)
+    await table3.set("key3", model3, session=session)
+    await session.commit()  # All three operations committed atomically
+```
+
+### Read Your Writes
+
+Within the same session, uncommitted writes are visible to subsequent reads:
+
+```python
+async with datastore.session_factory() as session:
+    await table.set("new_key", model, session=session)
+    
+    # Same session can read uncommitted data
+    result = await table.get("new_key", session=session)  # Returns model
+    exists = await table.exists("new_key", session=session)  # True
+    
+    # Different session (or no session) cannot see it yet
+    external_result = await table.get("new_key")  # None (not committed)
+    
+    await session.commit()
+```
+
+### Rollback on Exception
+
+Exceptions trigger automatic rollback:
+
+```python
+try:
+    async with datastore.session_factory() as session:
+        await table.set("will_rollback", model, session=session)
+        raise ValueError("Simulated error")
+except ValueError:
+    pass
+
+# "will_rollback" was never persisted
+result = await table.get("will_rollback")  # None
 ```
 
 ## Configuration

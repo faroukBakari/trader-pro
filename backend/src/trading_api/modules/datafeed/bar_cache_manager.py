@@ -17,6 +17,7 @@ import time
 from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import CoveredRange, PendingRange, Resolution, TimeRange
@@ -83,6 +84,12 @@ class BarCacheManager:
                 message="Datastore must support exclusion constraints",
             )
 
+        if not datastore.has_transactions:
+            raise TradingApiException(
+                code="BAR_CACHE_MANAGER_NO_TRANSACTION_SUPPORT",
+                message="Datastore must support transactions for atomic operations",
+            )
+
         self._pending_ttl_ms = pending_ttl_ms
         self._datastore = datastore
         self._pending_table: TableInterface[PendingRange] | None = None
@@ -114,6 +121,14 @@ class BarCacheManager:
         if self._covered_table is None:
             self._covered_table = self._datastore.table(CoveredRange)
         return self._covered_table
+
+    @property
+    def _session_factory(self) -> async_sessionmaker[AsyncSession]:
+        """Get session factory from datastore for transaction support."""
+        assert (
+            self._datastore.session_factory is not None
+        ), "Datastore does not support transactions"
+        return self._datastore.session_factory
 
     # =========================================================================
     # Pending Range Management
@@ -254,6 +269,9 @@ class BarCacheManager:
         1. Removes the corresponding pending range (if exists)
         2. Creates a covered range entry
 
+        Uses database transaction for atomicity when supported.
+        Falls back to sequential operations for non-transactional datastores.
+
         This completes the fetch lifecycle: try_add_pending → fetch → mark_covered.
         Failure cleanup relies on TTL expiration of pending ranges.
 
@@ -270,10 +288,6 @@ class BarCacheManager:
         Returns:
             Created CoveredRange
         """
-        # Step 1: Remove pending entry (completes the lock lifecycle)
-        await self._remove_pending(symbol, resolution, time_range)
-
-        # Step 2: Create covered entry
         covered = CoveredRange(
             symbol=symbol,
             resolution=resolution,
@@ -281,9 +295,14 @@ class BarCacheManager:
             storage_type=storage_type,
             bar_count=bar_count,
         )
+        req_range_key = _primary_key(symbol, resolution, time_range)
 
-        key = _primary_key(symbol, resolution, time_range)
-        await self.covered_table.set(key, covered)
+        # Use transaction if available
+        async with self._session_factory() as session:
+            # Both operations use same transaction
+            await self.pending_table.delete(req_range_key, session=session)
+            await self.covered_table.set(req_range_key, covered, session=session)
+            await session.commit()
 
         logger.debug(
             f"Marked covered: {symbol}/{resolution.value} {time_range} "

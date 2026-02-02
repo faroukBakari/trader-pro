@@ -15,13 +15,10 @@ Directory structure follows registry pattern:
   └── README.md
 """
 
-from .inmemory import InMemoryDatastore, InMemoryTable
-from .postgres import PostgresDatastore, PostgresTable
+from .inmemory import InMemoryDatastore
+from .postgres import PostgresDatastore
 
 __all__ = [
-    # Implementations
     "InMemoryDatastore",
-    "InMemoryTable",
     "PostgresDatastore",
-    "PostgresTable",
 ]

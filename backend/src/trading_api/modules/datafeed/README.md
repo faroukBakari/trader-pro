@@ -124,6 +124,20 @@ missing = await manager.find_missing_ranges("AAPL", resolution, query_start, que
 | **Range Merging**    | Adjacent/overlapping covered ranges auto-merge                                       |
 | **Storage Tracking** | `CoveredRange.storage_type` indicates cache tier (MEMORY, DATABASE, DATALAKE)        |
 | **Thread Safety**    | Datastore provides per-table locking for concurrent access (no external lock needed) |
+| **Atomic Transitions** | `mark_covered()` uses database transactions to atomically delete pending + insert covered |
+
+**`mark_covered()` Atomicity**: This method atomically removes the pending range and creates the covered range in a single transaction:
+
+```python
+async def mark_covered(self, symbol, resolution, time_range, storage_type, bar_count):
+    # Uses database transaction for atomic delete+insert
+    async with self._session_factory() as session:
+        await self.pending_table.delete(req_range_key, session=session)
+        await self.covered_table.set(req_range_key, covered, session=session)
+        await session.commit()  # Both operations committed atomically
+```
+
+**Requirement**: `BarCacheManager.__init__` validates that the datastore has `has_transactions=True`. This ensures the atomic delete+insert pattern cannot leave partial state (pending deleted but covered not created).
 
 **Models** (from `trading_api.models.market.bar_cache`):
 

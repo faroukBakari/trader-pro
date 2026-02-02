@@ -13,10 +13,11 @@ Lazy table creation pattern matches PostgresTable behavior:
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import BaseModel
-from sqlalchemy import CursorResult, Table, delete, func, inspect, select, text
+from sqlalchemy import CursorResult, Table, delete, func, inspect, literal, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import NoInspectionAvailable
 from sqlalchemy.sql import quoted_name
@@ -99,6 +100,44 @@ class SQLModelTable(TableInterface[T]):
 
         return range_columns
 
+    @asynccontextmanager
+    async def _session_scope(
+        self, session: "AsyncSession | None" = None
+    ) -> "AsyncIterator[AsyncSession]":
+        """Context manager for session with ownership-based commit.
+
+        If session is provided (caller owns it):
+          - Yields the session as-is
+          - Does NOT commit (caller is responsible)
+
+        If session is None (we own it):
+          - Creates new session from factory
+          - Yields the session
+          - Commits on successful exit
+          - Rolls back on exception (automatic via context manager)
+
+        This pattern enables:
+          - Single-operation calls: auto-commit
+          - Multi-operation transactions: caller controls commit
+
+        Industry pattern: "Unit of Work propagation" / "Session injection"
+        Reference: SQLAlchemy docs on session lifecycle management.
+
+        Args:
+            session: Optional externally-managed session
+
+        Yields:
+            AsyncSession for database operations
+        """
+        if session is not None:
+            # Caller owns transaction - yield without commit
+            yield session
+        else:
+            # We own transaction - commit on success
+            async with self._session_factory() as owned_session:
+                yield owned_session
+                await owned_session.commit()
+
     async def _create_gist_index(
         self,
         conn: AsyncConnection,
@@ -174,36 +213,70 @@ class SQLModelTable(TableInterface[T]):
         logger.debug(f"Ensured table exists: {table_name}")
         self._initialized = True
 
-    async def get(self, key: str, index: str | None = None) -> T | None:
-        """Get by primary key or indexed field."""
+    async def get(
+        self,
+        key: str,
+        index: str | None = None,
+        session: "AsyncSession | None" = None,
+    ) -> T | None:
+        """Get by primary key or indexed field.
+
+        Args:
+            key: Primary key or indexed field value
+            index: Optional index field name
+            session: Optional external session for transaction batching
+        """
         await self._ensure_table()
-        async with self._session_factory() as session:
+        async with self._session_scope(session) as s:
             if index is None:
                 stmt = select(self._model).where(self._pk_col == key)
             else:
                 idx_col = getattr(self._model, index)
                 stmt = select(self._model).where(idx_col == key).limit(1)
 
-            result = await session.execute(stmt)
+            result = await s.execute(stmt)
             return result.scalar_one_or_none()
 
-    async def get_all(self, key: str, index: str | None = None) -> list[T]:
-        """Get all matching by primary key or indexed field."""
+    async def get_all(
+        self,
+        key: str,
+        index: str | None = None,
+        session: "AsyncSession | None" = None,
+    ) -> list[T]:
+        """Get all matching by primary key or indexed field.
+
+        Args:
+            key: Primary key or indexed field value
+            index: Optional index field name
+            session: Optional external session for transaction batching
+        """
         await self._ensure_table()
-        async with self._session_factory() as session:
+        async with self._session_scope(session) as s:
             if index is None:
                 stmt = select(self._model).where(self._pk_col == key)
             else:
                 idx_col = getattr(self._model, index)
                 stmt = select(self._model).where(idx_col == key)
 
-            result = await session.execute(stmt)
+            result = await s.execute(stmt)
             return list(result.scalars().all())
 
-    async def set(self, key: str, value: BaseModel) -> None:
-        """Upsert by key using INSERT ... ON CONFLICT."""
+    async def set(
+        self,
+        key: str,
+        value: BaseModel,
+        session: "AsyncSession | None" = None,
+    ) -> None:
+        """Upsert by key using INSERT ... ON CONFLICT.
+
+        Args:
+            key: Primary key value
+            value: Model to upsert
+            session: Optional external session for transaction batching
+        """
         await self._ensure_table()
-        async with self._session_factory() as session:
+
+        async with self._session_scope(session) as s:
             # Ensure key is set on the model
             value_dict = value.model_dump()
             value_dict[self._pk] = key
@@ -215,29 +288,63 @@ class SQLModelTable(TableInterface[T]):
                 set_={k: v for k, v in value_dict.items() if k != self._pk},
             )
 
-            await session.execute(stmt)
-            await session.commit()
+            await s.execute(stmt)
+            # Note: commit handled by _session_scope if we own the session
 
-    async def delete(self, key: str, index: str | None = None) -> bool:
-        """Delete by primary key or indexed field."""
+    async def delete(
+        self,
+        key: str,
+        index: str | None = None,
+        session: "AsyncSession | None" = None,
+    ) -> bool:
+        """Delete by primary key or indexed field.
+
+        Args:
+            key: Key value to match
+            index: Optional index field name
+            session: Optional external session for transaction batching
+
+        Returns:
+            True if rows were deleted
+        """
         await self._ensure_table()
-        async with self._session_factory() as session:
+
+        async with self._session_scope(session) as s:
             if index is None:
                 stmt = delete(self._model).where(self._pk_col == key)
             else:
                 idx_col = getattr(self._model, index)
                 stmt = delete(self._model).where(idx_col == key)
 
-            result = await session.execute(stmt)
-            await session.commit()
+            result = await s.execute(stmt)
             # Cast to CursorResult for DML statements
             cursor = cast(CursorResult[Any], result)
             return bool(cursor.rowcount and cursor.rowcount > 0)
+            # Note: commit handled by _session_scope if we own the session
 
-    async def exists(self, key: str, index: str | None = None) -> bool:
-        """Check existence by primary key or indexed field."""
-        # Note: get() calls _ensure_table() internally
-        return await self.get(key, index) is not None
+    async def exists(
+        self,
+        key: str,
+        index: str | None = None,
+        session: "AsyncSession | None" = None,
+    ) -> bool:
+        """Check existence by primary key or indexed field.
+
+        Args:
+            key: Primary key or indexed field value
+            index: Optional index field name
+            session: Optional external session for transaction batching
+        """
+        await self._ensure_table()
+        async with self._session_scope(session) as s:
+            if index is None:
+                stmt = select(literal(1)).where(self._pk_col == key).limit(1)
+            else:
+                idx_col = getattr(self._model, index)
+                stmt = select(literal(1)).where(idx_col == key).limit(1)
+
+            result = await s.execute(stmt)
+            return result.scalar_one_or_none() is not None
 
     async def keys(self, index: str | None = None) -> list[str]:
         """Get all primary keys or distinct indexed values."""
@@ -259,12 +366,15 @@ class SQLModelTable(TableInterface[T]):
             result = await session.execute(select(self._model))
             return list(result.scalars().all())
 
-    async def clear(self) -> None:
-        """Truncate table."""
+    async def clear(self, session: "AsyncSession | None" = None) -> None:
+        """Delete all rows from table.
+
+        Args:
+            session: Optional external session for transaction batching
+        """
         await self._ensure_table()
-        async with self._session_factory() as session:
-            await session.execute(delete(self._model))
-            await session.commit()
+        async with self._session_scope(session) as s:
+            await s.execute(delete(self._model))
 
     async def count(self) -> int:
         """Count records."""
@@ -278,7 +388,11 @@ class SQLModelTable(TableInterface[T]):
     @property
     async def is_empty(self) -> bool:
         """Check if table has zero entries."""
-        return await self.count() == 0
+        await self._ensure_table()
+        async with self._session_factory() as session:
+            stmt = select(literal(1)).select_from(self._model).limit(1)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none() is None
 
     async def iterate(self) -> AsyncIterator[tuple[str, T]]:
         """Iterate over (key, record) pairs."""

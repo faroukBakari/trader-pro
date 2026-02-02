@@ -1,18 +1,16 @@
 """PostgreSQL datastore implementation.
 
-[ARCHITECTURE] Wave 2A + 2B: Dual-mode datastore
-- PostgresTable: JSONB storage for flexible schemas (Wave 2A)
-- SQLModelTable: Typed column storage for SQLModel entities (Wave 2B)
+[ARCHITECTURE] SQLModel-based typed column storage
+- SQLModelTable: Typed column storage for SQLModel entities
 - AsyncEngineFactory: SQLAlchemy async engine singleton
 
 Provides persistent storage with:
-- Async connection pool via psycopg (JSONB tables)
-- SQLAlchemy AsyncSession via SQLModel (typed tables)
+- SQLAlchemy AsyncSession via SQLModel
 - PostgreSQL MVCC for concurrent access
 - Alembic migrations for schema evolution
 """
 
-from .datastore import PostgresDatastore, PostgresTable, SQLModelTable
+from .datastore import PostgresDatastore, SQLModelTable
 from .engine import (
     AsyncEngineFactory,
     ConnectionTimeoutError,
@@ -26,7 +24,6 @@ __all__ = [
     "ConnectionTimeoutError",
     "DatabaseNotFoundError",
     "PostgresDatastore",
-    "PostgresTable",
     "SQLModelTable",
     "check_database_exists",
     "register_exclusion_listener",
