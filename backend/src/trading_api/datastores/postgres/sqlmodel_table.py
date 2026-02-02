@@ -16,9 +16,10 @@ import logging
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import BaseModel
-from sqlalchemy import CursorResult, Table, delete, func, inspect, select
+from sqlalchemy import CursorResult, Table, delete, func, inspect, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import NoInspectionAvailable
+from sqlalchemy.sql import quoted_name
 from sqlmodel import SQLModel
 
 from trading_api.shared.datastore_interface import TableInterface
@@ -26,7 +27,7 @@ from trading_api.shared.datastore_interface import TableInterface
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +74,74 @@ class SQLModelTable(TableInterface[T]):
         except NoInspectionAvailable:
             self._sa_table = None
 
+        # Detect range columns requiring GiST indexes (no DB access yet)
+        self._gist_index_columns: list[str] = self._detect_range_columns()
+
+    def _detect_range_columns(self) -> list[str]:
+        """Detect columns with range types requiring GiST indexes.
+
+        Scans model columns for TypeDecorators with `requires_gist_index=True`
+        marker attribute. Called at __init__ time (no DB access).
+
+        Returns:
+            List of column names that need GiST indexes.
+        """
+        if self._sa_table is None:
+            return []
+
+        range_columns: list[str] = []
+        for col in self._sa_table.columns:
+            col_type = col.type
+            # Check for marker attribute on TypeDecorator
+            if getattr(col_type, "requires_gist_index", False):
+                if col.name is not None:  # Narrow type for type checker
+                    range_columns.append(col.name)
+
+        return range_columns
+
+    async def _create_gist_index(
+        self,
+        conn: AsyncConnection,
+        table_name: str,
+        col_name: str,
+    ) -> None:
+        """Create GiST index on a range column (idempotent).
+
+        Uses CREATE INDEX IF NOT EXISTS for safe concurrent execution.
+        Only executes on PostgreSQL dialect.
+
+        Args:
+            conn: Database connection
+            table_name: Table name
+            col_name: Column name to index
+        """
+        # Only create GiST on PostgreSQL
+        dialect_name = conn.dialect.name
+        if dialect_name != "postgresql":
+            logger.debug(f"Skipping GiST index on {dialect_name} (not supported)")
+            return
+
+        idx_name = f"idx_{table_name}_{col_name}_gist"
+
+        # Use quoted_name for SQL injection safety
+        safe_table = quoted_name(table_name, quote=True)
+        safe_idx = quoted_name(idx_name, quote=True)
+        safe_col = quoted_name(col_name, quote=True)
+
+        await conn.execute(
+            text(
+                f"CREATE INDEX IF NOT EXISTS {safe_idx} "
+                f"ON {safe_table} USING gist ({safe_col})"
+            )
+        )
+        logger.info(f"Created GiST index {idx_name} on {table_name}.{col_name}")
+
     async def _ensure_table(self) -> None:
-        """Create table if not exists (idempotent, lazy initialization).
+        """Create table and GiST indexes if not exists (idempotent).
 
         Uses SQLModel.metadata.create_all with checkfirst=True to safely
-        create only missing tables. Matches PostgresTable._ensure_table() pattern.
+        create only missing tables. Then creates GiST indexes for any
+        detected range columns. Matches PostgresTable._ensure_table() pattern.
         """
         if self._initialized:
             return
@@ -91,14 +155,22 @@ class SQLModelTable(TableInterface[T]):
             self._initialized = True
             return
 
+        table_name = getattr(sa_table, "name", self._model.__name__)
+
         async with self._session_factory() as session:
             conn = await session.connection()
+
+            # Step 1: Create table
             await conn.run_sync(
                 lambda sync_conn: sa_table.create(sync_conn, checkfirst=True)
             )
+
+            # Step 2: Create GiST indexes for detected range columns
+            for col_name in self._gist_index_columns:
+                await self._create_gist_index(conn, table_name, col_name)
+
             await session.commit()  # DDL needs explicit commit
 
-        table_name = getattr(sa_table, "name", self._model.__name__)
         logger.debug(f"Ensured table exists: {table_name}")
         self._initialized = True
 
@@ -217,9 +289,3 @@ class SQLModelTable(TableInterface[T]):
                 record = row[0]
                 key = str(getattr(record, self._pk))
                 yield key, record
-
-    async def create_index(self, field_name: str) -> None:
-        """No-op: SQLModel defines indexes via Field(index=True)."""
-
-    async def create_unique_index(self, field_name: str) -> None:
-        """No-op: SQLModel defines unique constraints via Field(unique=True)."""

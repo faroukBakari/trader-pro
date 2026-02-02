@@ -433,7 +433,10 @@ install-ci:
 
 test-boundaries: check-generate-keypair check-generate-hmac-key
 	@echo "Running root-level tests (incremental)..."
-	poetry run pytest tests/ -v --testmon --ignore=tests/integration/ $(ARGS)
+	@# test_import_boundaries scans files dynamically - testmon can't track dependencies
+	@# Always run it explicitly, then run remaining tests with testmon
+	poetry run pytest tests/test_import_boundaries.py -v $(ARGS)
+	poetry run pytest tests/ -v --testmon --ignore=tests/integration/ --ignore=tests/test_import_boundaries.py $(ARGS)
 
 test-boundaries-full: check-generate-keypair check-generate-hmac-key
 	@echo "Running root-level tests (full)..."

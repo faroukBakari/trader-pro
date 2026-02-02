@@ -39,6 +39,7 @@ from .engine import (
     check_database_exists,
     parse_dsn,
 )
+from .exclusion_listener import register_exclusion_listener
 from .sql_safe import validate_identifier
 from .sqlmodel_table import SQLModelTable
 
@@ -421,7 +422,19 @@ class PostgresTable(TableInterface[T]):
                     yield row["key"], self._model_class.model_validate(row["value"])
 
     async def create_index(self, field_name: str) -> None:
-        """Create an index on a specified field."""
+        """Create an index on a specified field.
+
+        .. deprecated::
+            Use SQLModel Field(index=True) instead. This method will be removed.
+        """
+        # FIXME: Remove this method - use SQLModel Field(index=True) for declarative indexes
+        import warnings
+
+        warnings.warn(
+            "create_index() is deprecated. Use SQLModel Field(index=True) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         validate_identifier(field_name, "field name")
         await self._ensure_table()
 
@@ -442,7 +455,18 @@ class PostgresTable(TableInterface[T]):
         """Create a unique index on a specified field.
 
         Raises ValueError if duplicate field values exist in current data.
+
+        .. deprecated::
+            Use SQLModel Field(unique=True) instead. This method will be removed.
         """
+        # FIXME: Remove this method - use SQLModel Field(unique=True) for declarative unique constraints
+        import warnings
+
+        warnings.warn(
+            "create_unique_index() is deprecated. Use SQLModel Field(unique=True) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         validate_identifier(field_name, "field name")
         await self._ensure_table()
 
@@ -485,6 +509,31 @@ class PostgresTable(TableInterface[T]):
         if field_name not in self._unique_indexes:
             self._unique_indexes.append(field_name)
 
+    async def add_exclusion(
+        self,
+        range_field: str,
+        group: str = "lookup_key",
+        bounds: str = "[]",
+    ) -> None:
+        """JSONB-based PostgresTable does not support range exclusion constraints.
+
+        .. deprecated::
+            Use SQLModel __table_args__ with exclusion metadata instead.
+            See exclusion_listener.py for declarative pattern.
+        """
+        # FIXME: Remove this method - use __table_args__["info"]["exclusion"] for declarative constraints
+        import warnings
+
+        warnings.warn(
+            "add_exclusion() is deprecated. Use SQLModel __table_args__ with "
+            'exclusion metadata: {"info": {"exclusion": {"range_field": ..., "group": ...}}}',
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        raise NotImplementedError(
+            "JSONB-based PostgresTable does not support exclusion constraints."
+        )
+
 
 def _is_testing() -> bool:
     """Detect if running inside pytest via PYTEST_CURRENT_TEST env var."""
@@ -508,6 +557,9 @@ class PostgresDatastore(DatastoreInterface):
     - Graceful shutdown via close()
     - [SECURITY] sql.SQL composition for injection-safe queries
     """
+
+    # Class-level tracker for exclusion listener registration (improves test isolation)
+    _exclusion_listener_tracker: set[int] = set()
 
     def __init__(
         self,
@@ -595,6 +647,9 @@ class PostgresDatastore(DatastoreInterface):
 
         # [EAGER SCHEMA] Create all SQLModel table=True tables at startup
         # This ensures schema exists before any operations, avoiding lazy init issues
+        # Register exclusion listener before create_all so constraints are created
+        register_exclusion_listener(_registered_tracker=cls._exclusion_listener_tracker)
+
         engine = await AsyncEngineFactory.get_engine(dsn)
         async with engine.begin() as conn:
             await conn.run_sync(SQLModel.metadata.create_all)
@@ -609,6 +664,11 @@ class PostgresDatastore(DatastoreInterface):
     @property
     def has_transactions(self) -> bool:
         """PostgreSQL supports ACID transactions."""
+        return True
+
+    @property
+    def has_exclusion(self) -> bool:
+        """PostgreSQL supports exclusion constraints."""
         return True
 
     @property

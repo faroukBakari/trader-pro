@@ -7,6 +7,7 @@
 
 from datetime import datetime
 from enum import Enum
+from typing import Any, cast
 
 from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
@@ -71,7 +72,7 @@ class RefreshTokenData(SQLModel, table=True):
     user_id indexed for efficient token lookups by user.
     """
 
-    __tablename__ = "refresh_tokens"  # pyright: ignore[reportAssignmentType]
+    __tablename__ = cast(Any, "refresh_tokens")
 
     token_hash: str = Field(primary_key=True, description="Bcrypt hash of the token")
     token_id: str = Field(description="Unique token identifier")

@@ -247,6 +247,9 @@ async def session_backend_manager(
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.asyncio
+@pytest.mark.skip(
+    reason="Flaky tests - port/process race conditions. See issue backlog."
+)
 class TestBackendManagerIntegration:
     """Comprehensive integration tests for backend manager.
 

@@ -7,10 +7,12 @@
 """
 
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from pydantic import EmailStr
 from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
+from sqlmodel._compat import SQLModelConfig
 
 
 def _utc_now() -> datetime:
@@ -40,7 +42,7 @@ class User(UserBase, table=True):
     - SQLAlchemy ORM operations (database persistence)
     """
 
-    __tablename__ = "users"  # pyright: ignore[reportAssignmentType]
+    __tablename__ = cast(Any, "users")
 
     id: str = Field(primary_key=True, description="Unique user identifier")
     google_id: str = Field(index=True, unique=True)
@@ -53,7 +55,4 @@ class User(UserBase, table=True):
     )
     is_active: bool = Field(default=True)
 
-    model_config = {"from_attributes": True}  # pyright: ignore[reportAssignmentType]
-
-
-# [DELETED] UserInDB - redundant: User IS the DB model now
+    model_config = cast(SQLModelConfig, {"from_attributes": True})

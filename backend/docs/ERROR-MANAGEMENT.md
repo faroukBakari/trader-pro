@@ -1,8 +1,8 @@
 # Backend Error Management
 
 **Status**: ✅ Production Ready  
-**Last Updated**: December 19, 2025  
-**Version**: 1.0.0
+**Last Updated**: February 2, 2026  
+**Version**: 1.1.0
 
 ---
 
@@ -90,6 +90,7 @@ All exceptions inherit from `TradingApiException`, which provides serializable e
 ```
 TradingApiException (base)
 ├── CommonException        # Infrastructure/shared/auth middleware errors
+├── DatastoreException     # Datastore layer errors (+datastore, +table)
 ├── ServiceException       # Service layer errors (+module)
 └── ProviderException      # Provider errors (+provider, +capability)
 ```
@@ -107,14 +108,15 @@ TradingApiException (base)
 │  ─────────────────────────────────────────────────────────  │
 │  + to_dict() → dict       # Serialize for JSON response    │
 └─────────────────────────────────────────────────────────────┘
-            ▲                    ▲                    ▲
-            │                    │                    │
-┌───────────┴───────┐ ┌─────────┴─────────┐ ┌───────┴─────────┐
-│  CommonException  │ │ ServiceException  │ │ProviderException│
-│  ───────────────  │ │ ────────────────  │ │ ───────────────  │
-│  (no extra attrs) │ │ + module: str     │ │ + provider: str  │
-│                   │ │                   │ │ + capability: str│
-└───────────────────┘ └───────────────────┘ └──────────────────┘
+            ▲              ▲              ▲              ▲
+            │              │              │              │
+┌───────────┴───────┐ ┌────┴─────────┐ ┌──┴───────────┐ ┌───┴───────────┐
+│  CommonException  │ │ Datastore-  │ │ Service-     │ │Provider-      │
+│  ───────────────  │ │ Exception   │ │ Exception    │ │Exception      │
+│  (no extra attrs) │ │ ─────────── │ │ ──────────── │ │ ───────────── │
+│                   │ │ + datastore │ │ + module     │ │ + provider    │
+│                   │ │ + table     │ │              │ │ + capability  │
+└───────────────────┘ └─────────────┘ └──────────────┘ └───────────────┘
 ```
 
 **Source:** [models/exceptions.py](../src/trading_api/models/exceptions.py)
@@ -166,6 +168,42 @@ raise CommonException(
 - Configuration/startup errors
 - Shared utility failures
 - Capability resolution failures
+
+### DatastoreException
+
+For errors from datastore operations. Includes datastore type and optional table name for context.
+
+```python
+from trading_api.models.exceptions import DatastoreException
+
+# Exclusion constraint configuration error
+raise DatastoreException(
+    code="DATASTORE_EXCLUSION_INVALID_COLUMN",
+    message=f"Column '{col_name}' not found in table '{table_name}'",
+    datastore="postgres",
+    table="pending_ranges",
+)
+
+# Database connection error
+raise DatastoreException(
+    code="DATASTORE_DATABASE_NOT_FOUND",
+    message="Database 'trader_pro' does not exist",
+    datastore="postgres",
+)
+```
+
+**Additional Attributes:**
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `datastore` | `str` | Datastore type (e.g., "postgres", "inmemory") |
+| `table` | `str \| None` | Table name where error occurred (optional) |
+
+**When to use:**
+
+- Schema/constraint creation failures
+- Invalid configuration (missing columns, invalid bounds)
+- Connection or pool errors
+- Extension creation failures (e.g., btree_gist)
 
 ### ServiceException
 
@@ -316,11 +354,12 @@ Error codes follow a hierarchical naming convention that indicates the error's o
 {LAYER}_{DOMAIN}_{ERROR_TYPE}
 ```
 
-| Layer    | Prefix      | Description                  |
-| -------- | ----------- | ---------------------------- |
-| Common   | `COMMON_`   | Infrastructure/shared errors |
-| Service  | `SERVICE_`  | Module service errors        |
-| Provider | `PROVIDER_` | External provider errors     |
+| Layer     | Prefix       | Description                  |
+| --------- | ------------ | ---------------------------- |
+| Common    | `COMMON_`    | Infrastructure/shared errors |
+| Datastore | `DATASTORE_` | Datastore layer errors       |
+| Service   | `SERVICE_`   | Module service errors        |
+| Provider  | `PROVIDER_`  | External provider errors     |
 
 ### Error Code Examples
 
@@ -328,6 +367,10 @@ Error codes follow a hierarchical naming convention that indicates the error's o
 | --------------------------------------- | ----------- | --------------------------------- |
 | `COMMON_CAPABILITY_NOT_FOUND`           | 500         | Required capability not available |
 | `COMMON_CONFIG_MISSING`                 | 500         | Missing configuration             |
+| `DATASTORE_DATABASE_NOT_FOUND`          | 500         | Target database doesn't exist     |
+| `DATASTORE_CONNECTION_TIMEOUT`          | 500         | Server unreachable within timeout |
+| `DATASTORE_EXCLUSION_INVALID_COLUMN`    | 500         | Invalid exclusion constraint config|
+| `DATASTORE_EXTENSION_FAILED`            | 500         | PostgreSQL extension creation failed|
 | `SERVICE_DATAFEED_TOPIC_EXISTS`         | 400         | Topic already subscribed          |
 | `SERVICE_DATAFEED_INVALID_TOPIC_FORMAT` | 400         | Malformed topic string            |
 | `SERVICE_DATAFEED_NO_SYMBOLS`           | 400         | Empty symbols list                |

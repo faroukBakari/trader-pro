@@ -307,38 +307,6 @@ class InMemoryTable(TableInterface):
             for key, value in self.__data.items():
                 yield key, value.model_copy(deep=True)
 
-    async def create_index(self, field_name: str) -> None:
-        """Create an index on a specified field (write-locked)."""
-        # TODO: fix behavior when existing unique / non-unique index
-        async with self.__lock.write(self.timeout):
-            with self.__threading_lock:
-                index: dict[str, set[str]] = {}
-                for key, model in self.__data.items():
-                    field_value = getattr(model, field_name, None)
-                    if field_value is not None:
-                        index.setdefault(field_value, set()).add(key)
-                self.__indexes[field_name] = index
-
-    async def create_unique_index(self, field_name: str) -> None:
-        """Create a unique index on a specified field (write-locked).
-
-        Raises ValueError if duplicate field values exist in current data.
-        """
-        # TODO: fix behavior when existing unique / non-unique index
-        async with self.__lock.write(self.timeout):
-            with self.__threading_lock:
-                unique_index: dict[str, str] = {}
-                for key, model in self.__data.items():
-                    field_value = getattr(model, field_name, None)
-                    if field_value is not None:
-                        str_value = str(field_value)
-                        if str_value in unique_index:
-                            raise ValueError(
-                                f"Duplicate value '{field_value}' for unique field '{field_name}'"
-                            )
-                        unique_index[str_value] = key
-                self.__unique_indexes[field_name] = unique_index
-
 
 class InMemoryDatastore(DatastoreInterface):
     """In-memory datastore implementation for MVP and testing.
@@ -385,6 +353,11 @@ class InMemoryDatastore(DatastoreInterface):
         return False
 
     @property
+    def has_exclusion(self) -> bool:
+        """InMemory datastore does not support range exclusion constraints."""
+        return False
+
+    @property
     def is_relational(self) -> bool:
         """InMemory datastore is not a relational database."""
         return False
@@ -411,7 +384,21 @@ class InMemoryDatastore(DatastoreInterface):
 
         Returns:
             TableInterface for the model
+
+        Raises:
+            NotImplementedError: If model requires exclusion constraints via __table_args__
         """
+        # Fail-fast: reject models that require exclusion constraints
+        table_args = getattr(model_class, "__table_args__", None)
+        if table_args and isinstance(table_args, dict):
+            exclusion_meta = table_args.get("info", {}).get("exclusion")
+            if exclusion_meta:
+                raise NotImplementedError(
+                    f"Model {model_class.__name__} requires exclusion constraints "
+                    f"(via __table_args__), but InMemoryDatastore does not support them. "
+                    f"Use PostgresDatastore for models with exclusion requirements."
+                )
+
         name = model_class.__name__.lower()
         with self.__threading_lock:
             if name not in self._tables:

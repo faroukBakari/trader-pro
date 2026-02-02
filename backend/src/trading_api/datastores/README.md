@@ -50,6 +50,9 @@ if datastore.has_transactions:
 | ------------------ | -------- | -------- |
 | `has_persistence`  | `False`  | `True`   |
 | `has_transactions` | `False`  | `True`   |
+| `has_exclusion`    | `False`  | `True`   |
+
+**`has_exclusion`**: Indicates support for database-level exclusion constraints (e.g., PostgreSQL `EXCLUDE USING GIST`) that atomically prevent overlapping ranges. Used for cache metadata tables like `PendingRange` and `CoveredRange`.
 
 Services can access persistent storage via `persistent_datastore` property:
 
@@ -154,9 +157,9 @@ InMemoryDatastore
 | `clear()`                         | Write | `None`                        | Remove all entries and indexes                |
 | `count()`                         | Read  | `int`                         | Get entry count                               |
 | `iterate()`                       | Read  | `AsyncIterator[tuple[str,T]]` | Async iterate over key-value pairs            |
-| `create_index(field_name)`        | Write | `None`                        | Create secondary index (1:N)                  |
-| `create_unique_index(field_name)` | Write | `None`                        | Create unique index (1:1)                     |
 | `is_empty` (property)             | Read  | `bool`                        | Returns True if table has zero entries        |
+
+> **Note**: Indexes are declared via `Field(index=True, unique=True)` metadata in model classes. The deprecated `create_index()` and `create_unique_index()` methods have been removed from `TableInterface`.
 
 #### DatastoreInterface Methods
 
@@ -220,11 +223,34 @@ class UserRepository:
 - **Write operations**: Exclusive access (single writer, no readers)
 - **Writer priority**: Writers are prioritized to prevent starvation
 
+### Exclusion Constraint Limitations
+
+**InMemoryDatastore does NOT support exclusion constraints.** Models that declare exclusion requirements via `__table_args__["info"]["exclusion"]` will raise `NotImplementedError` when passed to `table()`:
+
+```python
+from trading_api.models.market import PendingRange  # Has exclusion constraint
+
+# InMemoryDatastore rejects models requiring exclusion constraints
+inmemory_ds = InMemoryDatastore()
+inmemory_ds.table(PendingRange)  # Raises NotImplementedError!
+
+# Use PostgresDatastore for such models
+postgres_ds = await PostgresDatastore.create()
+postgres_ds.table(PendingRange)  # Works - creates EXCLUDE USING GIST constraint
+```
+
+**Rationale**: Exclusion constraints require database-level atomic enforcement to prevent overlapping ranges across concurrent writes. InMemoryDatastore cannot provide this guarantee.
+
 ---
 
 ## PostgresDatastore
 
 PostgreSQL datastore using **psycopg3 + JSONB** storage pattern. Provides real persistence with ACID transactions.
+
+**Wave 2C Features**:
+- Native PostgreSQL range type support (`int8range`, `tstzrange`, `daterange`) via TypeDecorators
+- Declarative exclusion constraints via `__table_args__["info"]["exclusion"]` metadata
+- GiST index auto-creation for range columns
 
 ### Startup Errors
 
@@ -462,6 +488,84 @@ orders = datastore.table(Order)
 ```
 
 This enables gradual migration from JSONB to typed columns per entity.
+
+### Range Types & GiST Indexes
+
+SQLModelTable auto-detects range columns and creates GiST indexes for efficient overlap queries:
+
+```python
+from sqlmodel import Field, SQLModel
+from trading_api.types import Int8RangeType, TimeRange
+
+class PendingRange(SQLModel, table=True):
+    __tablename__ = "pending_ranges"
+
+    id: str = Field(primary_key=True)
+    lookup_key: str = Field(index=True)
+    # Range column with TypeDecorator - triggers GiST index creation
+    time_range: TimeRange = Field(sa_type=Int8RangeType)
+```
+
+**Auto-Detection**: TypeDecorators with `requires_gist_index = True` marker are detected in `_detect_range_columns()`. GiST indexes are created during `_ensure_table()`.
+
+**Available Range TypeDecorators** (from `trading_api.types`):
+
+| TypeDecorator    | PostgreSQL Type | Application Type        |
+| ---------------- | --------------- | ----------------------- |
+| `Int8RangeType`  | `int8range`     | `IntRange`, `TimeRange` |
+| `TstzRangeType`  | `tstzrange`     | `DateTimeRange`         |
+| `DateRangeType`  | `daterange`     | `DateOnlyRange`         |
+
+---
+
+## Exclusion Constraints
+
+PostgreSQL exclusion constraints prevent overlapping ranges atomically at the database level. SQLModelTable supports declarative exclusion via model metadata.
+
+### Declarative Pattern
+
+Models declare exclusion requirements via `__table_args__["info"]["exclusion"]`:
+
+```python
+from typing import Any, cast
+from sqlmodel import Field, SQLModel
+from trading_api.types import Int8RangeType, TimeRange
+
+class PendingRange(SQLModel, table=True):
+    __tablename__ = cast(Any, "pending_ranges")
+    __table_args__ = {
+        "info": {"exclusion": {"range_field": "time_range", "group": "lookup_key"}}
+    }
+
+    id: str = Field(primary_key=True)
+    lookup_key: str = Field(index=True)  # Grouping column
+    time_range: TimeRange = Field(sa_type=Int8RangeType)  # Range column
+```
+
+### How It Works
+
+1. **Listener Registration**: `PostgresDatastore.create()` registers `exclusion_listener` before `SQLModel.metadata.create_all()`
+2. **Constraint Creation**: After table creation, listener reads `__table_args__["info"]["exclusion"]` and creates:
+   ```sql
+   ALTER TABLE pending_ranges
+   ADD CONSTRAINT pending_ranges_no_overlap
+   EXCLUDE USING GIST (lookup_key WITH =, time_range WITH &&)
+   ```
+3. **Extension**: `btree_gist` extension is auto-created (required for text column in GiST index)
+4. **Idempotent**: Checks `pg_constraint` before creating to avoid duplicates
+
+### Exclusion Config Keys
+
+| Key           | Required | Description                                          |
+| ------------- | -------- | ---------------------------------------------------- |
+| `range_field` | Yes      | Column name containing the range type                |
+| `group`       | No       | Column for grouping (default: `"lookup_key"`)        |
+
+### Constraint Behavior
+
+- **Within same group**: Ranges cannot overlap (`&&` operator)
+- **Across groups**: No constraint (different `lookup_key` values can have overlapping ranges)
+- **Violation**: PostgreSQL raises exclusion violation error on conflicting INSERT/UPDATE
 
 ---
 

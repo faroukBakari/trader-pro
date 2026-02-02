@@ -132,6 +132,53 @@ class ServiceException(TradingApiException):
         return base
 
 
+class DatastoreException(TradingApiException):
+    """Exception for datastore layer errors.
+
+    Used for errors originating from datastore operations:
+    - Schema/constraint creation failures
+    - Invalid configuration
+    - Connection issues
+
+    Attributes:
+        datastore: Datastore type (e.g., "postgres", "inmemory")
+        table: Table name where error occurred (optional)
+
+    Error code convention: DATASTORE_{OPERATION}_{ERROR_TYPE}
+    Examples:
+    - DATASTORE_EXCLUSION_INVALID_COLUMN
+    - DATASTORE_EXCLUSION_INVALID_BOUNDS
+    - DATASTORE_EXTENSION_FAILED
+    """
+
+    def __init__(
+        self,
+        datastore: str,
+        table: str | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        self.datastore = datastore
+        self.table = table
+        super().__init__(*args, **kwargs)
+
+    def __repr__(self) -> str:
+        timestamp_str = datetime.fromtimestamp(self.timestamp).isoformat()
+        table_part = f", table={self.table!r}" if self.table else ""
+        return (
+            f"{self.__class__.__name__}(code={self.code!r}, message={self.message!r}"
+            + f", datastore={self.datastore!r}{table_part}, timestamp={timestamp_str!r})"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize exception to dictionary for JSON responses."""
+        base = super().to_dict()
+        base["datastore"] = self.datastore
+        if self.table:
+            base["table"] = self.table
+        return base
+
+
 class ProviderException(TradingApiException):
     """Exception for provider layer errors.
 
@@ -177,6 +224,7 @@ class ProviderException(TradingApiException):
 __all__ = [
     "TradingApiException",
     "CommonException",
+    "DatastoreException",
     "ServiceException",
     "ProviderException",
 ]

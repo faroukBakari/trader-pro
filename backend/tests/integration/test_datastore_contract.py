@@ -37,11 +37,19 @@ class ContractTestModel(SQLModel):
 
 
 class IndexedContractModel(SQLModel):
-    """Model with indexes for index contract tests."""
+    """Model with declarative index for index contract tests."""
 
-    email: str = Field(unique=True)
-    group: str = Field(index=True)
-    value: int
+    id: str
+    name: str
+    category: str = Field(default="default", index=True)
+
+
+class UniqueIndexedContractModel(SQLModel):
+    """Model with declarative unique index for unique index contract tests."""
+
+    id: str
+    name: str = Field(unique=True)
+    category: str = "default"
 
 
 # =============================================================================
@@ -122,10 +130,22 @@ async def table(
 async def indexed_table(
     any_datastore: DatastoreInterface,
 ) -> AsyncIterator[TableInterface[Any]]:
-    """Table with indexes fixture with table drop/recreate for test isolation."""
+    """Table with Field(index=True) on category for index contract tests."""
     table_name = IndexedContractModel.__name__.lower()
     await any_datastore.drop_table(table_name)
     tbl = any_datastore.table(IndexedContractModel)
+    yield tbl
+    await any_datastore.drop_table(table_name)
+
+
+@pytest.fixture
+async def unique_indexed_table(
+    any_datastore: DatastoreInterface,
+) -> AsyncIterator[TableInterface[Any]]:
+    """Table with Field(unique=True) on name for unique index contract tests."""
+    table_name = UniqueIndexedContractModel.__name__.lower()
+    await any_datastore.drop_table(table_name)
+    tbl = any_datastore.table(UniqueIndexedContractModel)
     yield tbl
     await any_datastore.drop_table(table_name)
 
@@ -361,131 +381,140 @@ class TestTableCRUDContract:
 
 
 # =============================================================================
-# Index Contract Tests
+# Index Contract Tests (Field(index=True))
 # =============================================================================
 
 
 class TestTableIndexContract:
-    """Tests that validate TableInterface index operations."""
+    """Tests that validate TableInterface declarative index operations."""
 
     @pytest.mark.asyncio
-    async def test_create_index_enables_lookup(
-        self, table: TableInterface[Any]
+    async def test_field_index_enables_lookup(
+        self, indexed_table: TableInterface[Any]
     ) -> None:
-        """create_index enables lookup by indexed field."""
-        await table.set("idx1", ContractTestModel(id="1", name="test", category="X"))
-        await table.create_index("category")
+        """Field(index=True) enables lookup by indexed field."""
+        await indexed_table.set(
+            "idx1", IndexedContractModel(id="1", name="test", category="X")
+        )
 
-        result = await table.get("X", index="category")
+        result = await indexed_table.get("X", index="category")
         assert result is not None
         assert result.id == "1"
 
     @pytest.mark.asyncio
     async def test_get_by_index_returns_correct_record(
-        self, table: TableInterface[Any]
+        self, indexed_table: TableInterface[Any]
     ) -> None:
         """get with index returns correct record among multiple."""
-        await table.set("gi1", ContractTestModel(id="1", name="first", category="A"))
-        await table.set("gi2", ContractTestModel(id="2", name="second", category="B"))
-        await table.create_index("category")
+        await indexed_table.set(
+            "gi1", IndexedContractModel(id="1", name="first", category="A")
+        )
+        await indexed_table.set(
+            "gi2", IndexedContractModel(id="2", name="second", category="B")
+        )
 
-        result = await table.get("B", index="category")
+        result = await indexed_table.get("B", index="category")
         assert result is not None
         assert result.name == "second"
 
     @pytest.mark.asyncio
-    async def test_delete_by_index(self, table: TableInterface[Any]) -> None:
+    async def test_delete_by_index(self, indexed_table: TableInterface[Any]) -> None:
         """delete with index removes correct record."""
-        await table.set("di1", ContractTestModel(id="1", name="target", category="Z"))
-        await table.create_index("category")
+        await indexed_table.set(
+            "di1", IndexedContractModel(id="1", name="target", category="Z")
+        )
 
-        deleted = await table.delete("Z", index="category")
+        deleted = await indexed_table.delete("Z", index="category")
         assert deleted is True
-        assert await table.get("di1") is None
+        assert await indexed_table.get("di1") is None
 
     @pytest.mark.asyncio
-    async def test_index_updated_on_overwrite(self, table: TableInterface[Any]) -> None:
+    async def test_index_updated_on_overwrite(
+        self, indexed_table: TableInterface[Any]
+    ) -> None:
         """Index is updated when record is overwritten with different value."""
-        await table.create_index("category")
-        await table.set("io1", ContractTestModel(id="1", name="old", category="OLD"))
-        await table.set("io1", ContractTestModel(id="1", name="new", category="NEW"))
+        await indexed_table.set(
+            "io1", IndexedContractModel(id="1", name="old", category="OLD")
+        )
+        await indexed_table.set(
+            "io1", IndexedContractModel(id="1", name="new", category="NEW")
+        )
 
         # Old index value should not find it
-        assert await table.get("OLD", index="category") is None
+        assert await indexed_table.get("OLD", index="category") is None
         # New index value should find it
-        result = await table.get("NEW", index="category")
+        result = await indexed_table.get("NEW", index="category")
         assert result is not None
 
     @pytest.mark.asyncio
     async def test_keys_with_index_returns_indexed_values(
-        self, table: TableInterface[Any]
+        self, indexed_table: TableInterface[Any]
     ) -> None:
         """keys(index=...) returns distinct indexed field values."""
-        await table.create_index("category")
-        await table.set("ki1", ContractTestModel(id="1", name="a", category="CAT1"))
-        await table.set("ki2", ContractTestModel(id="2", name="b", category="CAT2"))
+        await indexed_table.set(
+            "ki1", IndexedContractModel(id="1", name="a", category="CAT1")
+        )
+        await indexed_table.set(
+            "ki2", IndexedContractModel(id="2", name="b", category="CAT2")
+        )
 
-        indexed_keys = await table.keys(index="category")
+        indexed_keys = await indexed_table.keys(index="category")
         assert set(indexed_keys) == {"CAT1", "CAT2"}
 
 
 # =============================================================================
-# Unique Index Contract Tests
+# Unique Index Contract Tests (Field(unique=True))
 # =============================================================================
 
 
 class TestTableUniqueIndexContract:
-    """Tests that validate TableInterface unique index operations."""
+    """Tests that validate TableInterface declarative unique index operations."""
 
     @pytest.mark.asyncio
-    async def test_create_unique_index_enables_lookup(
-        self, table: TableInterface[Any]
+    async def test_field_unique_enables_lookup(
+        self, unique_indexed_table: TableInterface[Any]
     ) -> None:
-        """create_unique_index enables lookup by unique field."""
-        await table.set("ui1", ContractTestModel(id="1", name="alice", category="A"))
-        await table.create_unique_index("name")
+        """Field(unique=True) enables lookup by unique field."""
+        await unique_indexed_table.set(
+            "ui1", UniqueIndexedContractModel(id="1", name="alice", category="A")
+        )
 
-        result = await table.get("alice", index="name")
+        result = await unique_indexed_table.get("alice", index="name")
         assert result is not None
         assert result.id == "1"
 
     @pytest.mark.asyncio
     async def test_unique_index_allows_update_same_key(
-        self, table: TableInterface[Any]
+        self, unique_indexed_table: TableInterface[Any]
     ) -> None:
         """Unique index allows updating same key with same unique value."""
-        await table.create_unique_index("name")
-        await table.set("us1", ContractTestModel(id="1", name="bob", category="A"))
-        await table.set("us1", ContractTestModel(id="1", name="bob", category="B"))
+        await unique_indexed_table.set(
+            "us1", UniqueIndexedContractModel(id="1", name="bob", category="A")
+        )
+        await unique_indexed_table.set(
+            "us1", UniqueIndexedContractModel(id="1", name="bob", category="B")
+        )
 
-        result = await table.get("us1")
+        result = await unique_indexed_table.get("us1")
         assert result is not None
         assert result.category == "B"
 
     @pytest.mark.asyncio
     async def test_unique_index_cleanup_on_delete(
-        self, table: TableInterface[Any]
+        self, unique_indexed_table: TableInterface[Any]
     ) -> None:
         """Unique index entry removed when record deleted."""
-        await table.create_unique_index("name")
-        await table.set("ud1", ContractTestModel(id="1", name="charlie", category="A"))
+        await unique_indexed_table.set(
+            "ud1", UniqueIndexedContractModel(id="1", name="charlie", category="A")
+        )
 
-        await table.delete("ud1")
+        await unique_indexed_table.delete("ud1")
 
         # Now should be able to insert same unique value with different key
-        await table.set("ud2", ContractTestModel(id="2", name="charlie", category="B"))
-        assert await table.count() == 1
-
-    @pytest.mark.asyncio
-    async def test_create_unique_index_fails_on_duplicates(
-        self, table: TableInterface[Any]
-    ) -> None:
-        """Creating unique index fails if duplicates already exist."""
-        await table.set("uf1", ContractTestModel(id="1", name="dup", category="A"))
-        await table.set("uf2", ContractTestModel(id="2", name="dup", category="B"))
-
-        with pytest.raises(ValueError, match="[Dd]uplicate"):
-            await table.create_unique_index("name")
+        await unique_indexed_table.set(
+            "ud2", UniqueIndexedContractModel(id="2", name="charlie", category="B")
+        )
+        assert await unique_indexed_table.count() == 1
 
 
 # =============================================================================
