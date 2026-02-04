@@ -25,12 +25,16 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 from psycopg import AsyncConnection, sql
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool, AsyncNullConnectionPool
-from pydantic import BaseModel
 from sqlalchemy import Table, inspect
+from sqlalchemy.exc import NoInspectionAvailable
 from sqlalchemy.orm import Mapper
 from sqlmodel import SQLModel
 
-from trading_api.shared import DatastoreInterface, TableInterface
+from trading_api.shared import (
+    DatastoreInterface,
+    TableInterface,
+    TimeSeriesTableInterface,
+)
 from trading_api.shared.config import Settings
 
 from .engine import (
@@ -41,11 +45,11 @@ from .engine import (
 )
 from .exclusion_listener import register_exclusion_listener
 from .sql_safe import validate_identifier
-from .sqlmodel_table import SQLModelTable
+from .sqlmodel_table import SQLModelTable, TimeSeriesSQLModelTable
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T", bound=BaseModel)
+T = TypeVar("T", bound=SQLModel)
 
 if TYPE_CHECKING:
     pass
@@ -59,18 +63,31 @@ def get_table_name(model_class: type) -> str:
     """Get table name from SQLModel class with table=True.
 
     Args:
-        model_class: SQLModel class with table=True
+        model_class: SQLModel class with table=True or subclass with __tablename__
 
     Returns:
-        Table name from the model's metadata
+        Table name from the model's metadata or __tablename__ attribute
 
     Raises:
-        NoInspectionAvailable: If model does not have table=True
+        ValueError: If model does not have table=True or __tablename__
     """
-    # Let NoInspectionAvailable propagate for non-table models
-    mapper: Mapper[Any] = inspect(model_class)
-    table: Table = cast(Table, mapper.persist_selectable)
-    return table.name
+    # First try SQLAlchemy inspection (works for statically defined table=True models)
+    try:
+        mapper: Mapper[Any] = inspect(model_class)
+        table: Table = cast(Table, mapper.persist_selectable)
+        return table.name
+    except NoInspectionAvailable:
+        pass
+
+    # Fallback for dynamic subclasses: check __tablename__ directly
+    table_name = getattr(model_class, "__tablename__", None)
+    if table_name is not None:
+        return str(table_name)
+
+    raise ValueError(
+        f"Model {model_class.__name__} does not have table=True "
+        f"and no __tablename__ attribute found"
+    )
 
 
 def extract_indexes(
@@ -80,6 +97,11 @@ def extract_indexes(
 
     Reads index=True, unique=True, and primary_key=True from FieldInfo.
     Works for both table=True and table=False models.
+
+    For dynamic subclasses (e.g., BarRepository._create_bar_model), also
+    checks parent class model_fields for inherited field metadata since
+    Pydantic doesn't preserve SQLModel-specific attributes (primary_key, etc.)
+    during subclassing.
 
     Returns:
         (indexes, unique_indexes, primary_key) tuple where:
@@ -91,6 +113,7 @@ def extract_indexes(
     unique_indexes: list[str] = []
     primary_key: str | None = None
 
+    # for field_name, field_info in all_fields.items():
     for field_name, field_info in model_class.model_fields.items():
         # Check for primary_key (only in SQLModel FieldInfo)
         if getattr(field_info, "primary_key", None) is True:
@@ -144,6 +167,7 @@ class PostgresDatastore(DatastoreInterface):
         self._pool = pool
         self._session_factory = session_factory
         self._typed_tables: dict[str, SQLModelTable[Any]] = {}
+        self._timeseries_tables: dict[str, TimeSeriesSQLModelTable[Any]] = {}
 
     @classmethod
     async def create(
@@ -245,8 +269,8 @@ class PostgresDatastore(DatastoreInterface):
         return True
 
     @property
-    def is_relational(self) -> bool:
-        """PostgreSQL is a SQL-based relational database."""
+    def has_timeseries(self) -> bool:
+        """PostgreSQL supports time-series operations via indexed queries."""
         return True
 
     @property
@@ -270,8 +294,8 @@ class PostgresDatastore(DatastoreInterface):
 
     def table(
         self,
-        model_class: type[SQLModel],
-    ) -> TableInterface[Any]:
+        model_class: type[T],
+    ) -> TableInterface[T]:
         """Get or create a table for the given SQLModel class.
 
         All models must use SQLModel with table=True and define a primary key
@@ -310,12 +334,60 @@ class PostgresDatastore(DatastoreInterface):
                     f"via Field(primary_key=True). No primary key found in schema."
                 )
 
-            self._typed_tables[table_name] = SQLModelTable(
+            self._typed_tables[table_name] = SQLModelTable[T](
                 model_class=model_class,
                 session_factory=self._session_factory,
                 primary_key=extracted_pk,
             )
         return self._typed_tables[table_name]
+
+    def timeseries_table(
+        self,
+        model_class: type[T],
+    ) -> TimeSeriesTableInterface[T]:
+        """Get or create a timeseries table for time-indexed models.
+
+        For models with time-based primary keys (e.g., bars), provides
+        efficient time-range queries and batch operations.
+
+        Args:
+            model_class: SQLModel class with time-based Field(primary_key=True)
+
+        Returns:
+            TimeSeriesTableInterface for the model
+
+        Raises:
+            NoInspectionAvailable: If model does not have table=True
+            ValueError: If model does not define a primary key field
+        """
+        table_name = get_table_name(model_class)
+
+        if self._session_factory is None:
+            raise RuntimeError(
+                "Session factory not initialized. "
+                "Use PostgresDatastore.create() factory method."
+            )
+
+        if table_name not in self._timeseries_tables:
+            _, _, extracted_pk = extract_indexes(model_class)
+            if extracted_pk is None:
+                raise ValueError(
+                    f"Model {model_class.__name__} must define a primary key field "
+                    f"via Field(primary_key=True). No primary key found in schema."
+                )
+            pk_field = model_class.model_fields[extracted_pk]
+            if pk_field.annotation not in (int, float):
+                raise TypeError(
+                    f"timeseries_table() requires numeric PK for range queries, "
+                    f"but {model_class.__name__}.{extracted_pk} is {pk_field.annotation}"
+                )
+
+            self._timeseries_tables[table_name] = TimeSeriesSQLModelTable[T](
+                model_class=model_class,
+                session_factory=self._session_factory,
+                primary_key=extracted_pk,
+            )
+        return self._timeseries_tables[table_name]
 
     async def list_tables(self, prefix: str | None = None) -> list[str]:
         """List all table names in the datastore.

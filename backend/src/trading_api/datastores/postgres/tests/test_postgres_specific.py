@@ -22,7 +22,7 @@ from trading_api.types import Int8RangeType, IntRange
 
 if TYPE_CHECKING:
     from trading_api.datastores import PostgresDatastore
-    from trading_api.datastores.postgres import SQLModelTable
+    from trading_api.datastores.postgres.sqlmodel_table import SQLModelTable
 
 # Skip all tests if PostgreSQL not available
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
@@ -94,7 +94,7 @@ async def test_get_returns_validated_model(
     postgres_datastore: "PostgresDatastore",
 ) -> None:
     """SQLModelTable.get() returns validated Pydantic model instance."""
-    from trading_api.datastores.postgres import SQLModelTable
+    from trading_api.datastores.postgres.sqlmodel_table import SQLModelTable
 
     table = postgres_datastore.table(PgSampleModel)
     assert isinstance(table, SQLModelTable)
@@ -123,7 +123,7 @@ async def test_unique_constraint_raises_integrity_error(
     """Unique constraint violation raises SQLAlchemy IntegrityError."""
     from sqlalchemy.exc import IntegrityError
 
-    from trading_api.datastores.postgres import SQLModelTable
+    from trading_api.datastores.postgres.sqlmodel_table import SQLModelTable
 
     table = postgres_datastore.table(PgIndexedModel)
     assert isinstance(table, SQLModelTable)
@@ -149,7 +149,7 @@ async def test_create_uses_injected_settings(
 ) -> None:
     """PostgresDatastore.create() uses injected Settings for DSN."""
     from trading_api.datastores import PostgresDatastore
-    from trading_api.datastores.postgres import SQLModelTable
+    from trading_api.datastores.postgres.sqlmodel_table import SQLModelTable
 
     # test_settings has DSN set by test_database fixture
     ds = await PostgresDatastore.create(config=test_settings)
@@ -172,7 +172,7 @@ async def test_create_builds_dsn_from_components(
 ) -> None:
     """PostgresDatastore.create() can build DSN from host/port/user/pass/db components."""
     from trading_api.datastores import PostgresDatastore
-    from trading_api.datastores.postgres import SQLModelTable
+    from trading_api.datastores.postgres.sqlmodel_table import SQLModelTable
 
     # If DSN is set, test that it works (already covered elsewhere)
     # This test verifies that a datastore can be created with valid settings
@@ -253,7 +253,7 @@ async def test_list_tables_returns_public_tables(
     postgres_datastore: "PostgresDatastore",
 ) -> None:
     """list_tables() returns tables from public schema."""
-    from trading_api.datastores.postgres import SQLModelTable
+    from trading_api.datastores.postgres.sqlmodel_table import SQLModelTable
 
     # Create a table via datastore (clear() triggers creation)
     table = postgres_datastore.table(PgSampleModel)
@@ -426,7 +426,7 @@ async def range_table(
 
     Constraint is created automatically by exclusion_listener from __table_args__.
     """
-    from trading_api.datastores.postgres import SQLModelTable
+    from trading_api.datastores.postgres.sqlmodel_table import SQLModelTable
 
     table = postgres_datastore.table(PgRangeModel)
     assert isinstance(table, SQLModelTable)

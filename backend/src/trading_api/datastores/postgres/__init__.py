@@ -2,6 +2,7 @@
 
 [ARCHITECTURE] SQLModel-based typed column storage
 - SQLModelTable: Typed column storage for SQLModel entities
+- TimeSeriesSQLModelTable: Time-indexed storage with range queries
 - AsyncEngineFactory: SQLAlchemy async engine singleton
 
 Provides persistent storage with:
@@ -10,21 +11,6 @@ Provides persistent storage with:
 - Alembic migrations for schema evolution
 """
 
-from .datastore import PostgresDatastore, SQLModelTable
-from .engine import (
-    AsyncEngineFactory,
-    ConnectionTimeoutError,
-    DatabaseNotFoundError,
-    check_database_exists,
-)
-from .exclusion_listener import register_exclusion_listener
+from .datastore import PostgresDatastore
 
-__all__ = [
-    "AsyncEngineFactory",
-    "ConnectionTimeoutError",
-    "DatabaseNotFoundError",
-    "PostgresDatastore",
-    "SQLModelTable",
-    "check_database_exists",
-    "register_exclusion_listener",
-]
+__all__ = ["PostgresDatastore"]

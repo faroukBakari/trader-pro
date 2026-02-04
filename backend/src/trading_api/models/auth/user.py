@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Any, cast
 
 from pydantic import EmailStr
-from sqlalchemy import Column, DateTime
+from sqlalchemy import DateTime
 from sqlmodel import Field, SQLModel
 from sqlmodel._compat import SQLModelConfig
 
@@ -48,10 +48,10 @@ class User(UserBase, table=True):
     google_id: str = Field(index=True, unique=True)
     email: EmailStr = Field(index=True, unique=True)  # Override base to add index
     created_at: datetime = Field(
-        default_factory=_utc_now, sa_column=Column(DateTime(timezone=True))
+        default_factory=_utc_now, sa_type=cast(type[Any], DateTime(timezone=True))
     )
     last_login: datetime = Field(
-        default_factory=_utc_now, sa_column=Column(DateTime(timezone=True))
+        default_factory=_utc_now, sa_type=cast(type[Any], DateTime(timezone=True))
     )
     is_active: bool = Field(default=True)
 

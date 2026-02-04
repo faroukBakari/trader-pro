@@ -8,11 +8,16 @@ Tests cover:
 4. Resolution enum: values stored correctly
 """
 
+from collections.abc import AsyncIterator
+
 import pytest
+import pytest_asyncio
 
 from trading_api.datastores import InMemoryDatastore
+from trading_api.datastores.postgres import PostgresDatastore
 from trading_api.models.market import Bar, Resolution
 from trading_api.modules.datafeed.repository import BarRepository
+from trading_api.shared.config import Settings
 
 
 def create_test_bars(
@@ -371,12 +376,24 @@ class TestPostgresBarRepository:
 
     These tests require a running PostgreSQL instance.
     Skip with: pytest -m "not integration"
+
+    Tests verify:
+    - TimeSeriesSQLModelTable.get_time_range() works with real PostgreSQL
+    - TimeSeriesSQLModelTable.set_batch() handles bulk inserts correctly
+    - TIMESTAMPTZ round-trip preserves millisecond precision
     """
 
-    @pytest.fixture
-    def repository(self) -> BarRepository:
-        """Fixture for PostgreSQL repository - NOT YET IMPLEMENTED."""
-        pytest.skip("PostgresBarRepository not yet implemented")
+    @pytest_asyncio.fixture
+    async def repository(self, test_settings: Settings) -> AsyncIterator[BarRepository]:
+        """Fixture for PostgreSQL repository using test container."""
+        datastore = await PostgresDatastore.create(config=test_settings)
+        repo = BarRepository(datastore=datastore)
+        yield repo
+        # Cleanup: drop all bar tables created during tests
+        bar_tables = await datastore.list_tables(prefix="bars_")
+        for table_name in bar_tables:
+            await datastore.drop_table(table_name)
+        await datastore.close()
 
     @pytest.mark.asyncio
     async def test_store_1000_bars_postgres(self, repository: BarRepository) -> None:
@@ -431,3 +448,156 @@ class TestPostgresBarRepository:
 
             assert len(result) == 1
             assert result[0].time == ts, f"TIMESTAMPTZ round-trip failed for {ts}"
+
+    @pytest.mark.asyncio
+    async def test_set_batch_upsert_semantics(self, repository: BarRepository) -> None:
+        """Test that set_batch() properly handles INSERT...ON CONFLICT (upsert).
+
+        Verifies TimeSeriesSQLModelTable.set_batch() returns count of NEW rows only.
+        """
+        time_ms = 1704067200000
+
+        bar1 = Bar(
+            time=time_ms, open=100.0, high=101.0, low=99.0, close=100.5, volume=1000
+        )
+
+        # First insert - should count as 1 new row
+        count1 = await repository.store_bars(
+            symbol="UPSERT_TEST", resolution=Resolution.MIN_1, bars=[bar1]
+        )
+        assert count1 == 1
+
+        # Same timestamp with different values - should update, count = 0
+        bar2 = Bar(
+            time=time_ms, open=200.0, high=201.0, low=199.0, close=200.5, volume=2000
+        )
+        count2 = await repository.store_bars(
+            symbol="UPSERT_TEST", resolution=Resolution.MIN_1, bars=[bar2]
+        )
+        assert count2 == 0  # Updated existing, not a new row
+
+        # Verify updated values
+        result = await repository.get_bars(
+            symbol="UPSERT_TEST",
+            resolution=Resolution.MIN_1,
+            from_time=time_ms,
+            to_time=time_ms,
+        )
+        assert len(result) == 1
+        assert result[0].open == 200.0  # Updated value
+        assert result[0].volume == 2000  # Updated value
+
+    @pytest.mark.asyncio
+    async def test_get_time_range_boundary_conditions(
+        self, repository: BarRepository
+    ) -> None:
+        """Test get_time_range() inclusive boundary handling.
+
+        Verifies TimeSeriesSQLModelTable.get_time_range() with exact boundaries.
+        """
+        bars = create_test_bars(count=10, base_time=1704067200000, interval_ms=60000)
+
+        await repository.store_bars(
+            symbol="BOUNDARY_TEST", resolution=Resolution.MIN_1, bars=bars
+        )
+
+        # Exact match on first bar only
+        result = await repository.get_bars(
+            symbol="BOUNDARY_TEST",
+            resolution=Resolution.MIN_1,
+            from_time=bars[0].time,
+            to_time=bars[0].time,
+        )
+        assert len(result) == 1
+        assert result[0].time == bars[0].time
+
+        # Exact match on last bar only
+        result = await repository.get_bars(
+            symbol="BOUNDARY_TEST",
+            resolution=Resolution.MIN_1,
+            from_time=bars[-1].time,
+            to_time=bars[-1].time,
+        )
+        assert len(result) == 1
+        assert result[0].time == bars[-1].time
+
+        # Range outside all bars (before)
+        result = await repository.get_bars(
+            symbol="BOUNDARY_TEST",
+            resolution=Resolution.MIN_1,
+            from_time=0,
+            to_time=bars[0].time - 1,
+        )
+        assert len(result) == 0
+
+        # Range outside all bars (after)
+        result = await repository.get_bars(
+            symbol="BOUNDARY_TEST",
+            resolution=Resolution.MIN_1,
+            from_time=bars[-1].time + 1,
+            to_time=bars[-1].time + 1000000,
+        )
+        assert len(result) == 0
+
+    @pytest.mark.asyncio
+    async def test_batch_insert_multiple_bars(self, repository: BarRepository) -> None:
+        """Test bulk insert of multiple bars in single set_batch() call."""
+        bars = create_test_bars(count=100)
+
+        # Single batch insert
+        stored_count = await repository.store_bars(
+            symbol="BATCH_TEST", resolution=Resolution.MIN_1, bars=bars
+        )
+        assert stored_count == 100
+
+        # Verify all bars retrievable
+        result = await repository.get_bars(
+            symbol="BATCH_TEST",
+            resolution=Resolution.MIN_1,
+            from_time=bars[0].time,
+            to_time=bars[-1].time,
+        )
+        assert len(result) == 100
+
+        # Verify order preserved (ascending by time)
+        for i in range(len(result) - 1):
+            assert result[i].time < result[i + 1].time
+
+    @pytest.mark.asyncio
+    async def test_resolution_isolation_postgres(
+        self, repository: BarRepository
+    ) -> None:
+        """Test that different resolutions create separate PostgreSQL tables."""
+        bar = Bar(
+            time=1704067200000,
+            open=100.0,
+            high=101.0,
+            low=99.0,
+            close=100.5,
+            volume=1000,
+        )
+
+        # Store same bar at different resolutions
+        await repository.store_bars(
+            symbol="RESOLUTION_TEST", resolution=Resolution.MIN_1, bars=[bar]
+        )
+        await repository.store_bars(
+            symbol="RESOLUTION_TEST", resolution=Resolution.HOUR_1, bars=[bar]
+        )
+
+        # Each resolution should be isolated
+        min1_result = await repository.get_bars(
+            symbol="RESOLUTION_TEST",
+            resolution=Resolution.MIN_1,
+            from_time=bar.time,
+            to_time=bar.time,
+        )
+        hour1_result = await repository.get_bars(
+            symbol="RESOLUTION_TEST",
+            resolution=Resolution.HOUR_1,
+            from_time=bar.time,
+            to_time=bar.time,
+        )
+
+        assert len(min1_result) == 1
+        assert len(hour1_result) == 1

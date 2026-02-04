@@ -5,14 +5,18 @@ Provides minimal abstraction for data persistence that enables:
 - Future PostgreSQL migration (Wave 2+)
 - Per-table read-write locks for concurrent access
 - Multi-table transactions with rollback support
+
+Interface Segregation Pattern (ISP):
+- TableInterface: Core CRUD operations (all datastores)
+- TimeSeriesTableInterface: Time-range queries (PostgreSQL timeseries tables)
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
-from pydantic import BaseModel
+from sqlmodel import SQLModel
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -21,7 +25,30 @@ if TYPE_CHECKING:
 
     from trading_api.shared.config import Settings
 
-T = TypeVar("T", bound=BaseModel)
+T = TypeVar("T", bound=SQLModel)
+
+
+def create_dynamic_table_model(
+    base_model: type[T],
+    table_name: str,
+    class_name: str | None = None,
+) -> type[T]:
+    """Create dynamic SQLModel subclass with preserved field metadata."""
+    if class_name is None:
+        class_name = f"{base_model.__name__}_{table_name.replace('-', '_')}"
+
+    # type() invokes SQLModel metaclass properly
+    dynamic_class = type(
+        class_name,
+        (base_model,),
+        {"__tablename__": table_name, "__module__": base_model.__module__},
+    )
+
+    # Preserve SQLModel field metadata (Pydantic strips primary_key, index, etc.)
+    for field_name, parent_field_info in base_model.model_fields.items():
+        dynamic_class.model_fields[field_name] = parent_field_info  # type: ignore
+
+    return cast(type[T], dynamic_class)
 
 
 class TableInterface(ABC, Generic[T]):
@@ -31,6 +58,15 @@ class TableInterface(ABC, Generic[T]):
     - Type-safe CRUD operations with Pydantic models
     - Snapshot capability for transaction rollback
     """
+
+    @property
+    @abstractmethod
+    async def is_empty(self) -> bool:
+        """Check if table has zero entries.
+
+        Returns:
+            True if table has no entries, False otherwise
+        """
 
     @abstractmethod
     async def get(
@@ -48,7 +84,7 @@ class TableInterface(ABC, Generic[T]):
                     If provided, reads uncommitted writes from that session.
 
         Returns:
-            BaseModel instance or None if not found
+            SQLModel instance or None if not found
         """
 
     @abstractmethod
@@ -67,14 +103,14 @@ class TableInterface(ABC, Generic[T]):
                     If provided, reads uncommitted writes from that session.
 
         Returns:
-            List of BaseModel instances
+            List of SQLModel instances
         """
 
     @abstractmethod
     async def set(
         self,
         key: str,
-        value: BaseModel,
+        value: SQLModel,
         session: "AsyncSession | None" = None,
     ) -> None:
         """Set a value by key (upsert pattern).
@@ -83,7 +119,7 @@ class TableInterface(ABC, Generic[T]):
 
         Args:
             key: Unique identifier
-            value: Pydantic model to store
+            value: SQLModel to store
             session: Optional external session for transaction batching.
                     If provided, caller is responsible for commit.
         """
@@ -162,20 +198,36 @@ class TableInterface(ABC, Generic[T]):
             Number of entries
         """
 
-    # ────────────────────────────────────────────────────────────────────────
-    # Timeseries / Bulk Operations (PostgreSQL-only)
-    # ────────────────────────────────────────────────────────────────────────
+    @abstractmethod
+    def iterate(self) -> AsyncIterator[tuple[str, T]]:
+        """Asynchronously iterate over key-value pairs.
 
-    async def get_many(
+        Yields:
+            Tuples of (key, value) for each entry
+        """
+
+
+class TimeSeriesTableInterface(TableInterface[T], ABC):
+    """Extended table interface for time-indexed data (e.g., bars).
+
+    Provides efficient time-range queries and batch operations using
+    PostgreSQL B-tree indexes on time-based primary keys.
+
+    Use datastore.timeseries_table(model_class) to obtain this interface.
+    Check isinstance(table, TimeSeriesTableInterface) before using these methods.
+    """
+
+    @abstractmethod
+    async def get_time_range(
         self,
         from_time: int,
         to_time: int,
         session: "AsyncSession | None" = None,
     ) -> list[T]:
-        """Get values within time range using B-tree index. [TIMESERIES]
+        """Get values within time range using B-tree index.
 
-        Efficient range query leveraging the primary key index.
-        Only implemented for SQLModelTable with time-indexed primary key.
+        Efficient range query leveraging the primary key index on time column.
+        Returns results ordered by primary key (time) ascending.
 
         Args:
             from_time: Range start (inclusive), typically milliseconds timestamp
@@ -184,24 +236,18 @@ class TableInterface(ABC, Generic[T]):
 
         Returns:
             List of values ordered by time ascending
-
-        Raises:
-            NotImplementedError: If datastore doesn't support time-range queries
         """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support get_many(). "
-            "Use PostgresDatastore for time-range queries."
-        )
 
-    async def set_many(
+    @abstractmethod
+    async def set_batch(
         self,
         values: list[T],
         session: "AsyncSession | None" = None,
     ) -> int:
-        """Bulk upsert values using batch INSERT...ON CONFLICT. [BATCH]
+        """Bulk upsert values using batch INSERT...ON CONFLICT.
 
-        Efficiently stores multiple values in a single database operation.
-        Only implemented for SQLModelTable.
+        Efficiently stores multiple values in a single database roundtrip.
+        Uses PostgreSQL's INSERT ... ON CONFLICT DO UPDATE for upsert semantics.
 
         Args:
             values: List of model instances to upsert
@@ -209,30 +255,6 @@ class TableInterface(ABC, Generic[T]):
 
         Returns:
             Number of values processed (note: doesn't distinguish inserts vs updates)
-
-        Raises:
-            NotImplementedError: If datastore doesn't support bulk operations
-        """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support set_many(). "
-            "Use PostgresDatastore for bulk operations."
-        )
-
-    @property
-    @abstractmethod
-    async def is_empty(self) -> bool:
-        """Check if table has zero entries.
-
-        Returns:
-            True if table has no entries, False otherwise
-        """
-
-    @abstractmethod
-    def iterate(self) -> AsyncIterator[tuple[str, T]]:
-        """Asynchronously iterate over key-value pairs.
-
-        Yields:
-            Tuples of (key, value) for each entry
         """
 
 
@@ -252,17 +274,6 @@ class DatastoreInterface(ABC):
         Returns:
             True if data survives process restarts (e.g., PostgreSQL).
             False for ephemeral storage (e.g., InMemory).
-        """
-        ...
-
-    @property
-    @abstractmethod
-    def is_relational(self) -> bool:
-        """Whether this datastore supports ACID transactions.
-
-        Returns:
-            True if datastore provides transactional guarantees.
-            False for simple key-value storage without transactions.
         """
         ...
 
@@ -293,6 +304,24 @@ class DatastoreInterface(ABC):
         Returns:
             True if datastore supports atomic exclusion constraints.
             False for datastores without native range constraint support.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def has_timeseries(self) -> bool:
+        """Whether this datastore supports time series data.
+
+        When True, the datastore provides specialized tables and queries
+        optimized for time-indexed data, such as bars. This includes efficient time-range
+        queries and batch operations.
+
+        When False, time series features are not supported and specialized
+        queries must be implemented at the application level.
+
+        Returns:
+            True if datastore supports time series features.
+            False for datastores without native time series support.
         """
         ...
 
@@ -368,6 +397,30 @@ class DatastoreInterface(ABC):
         Raises:
             ValueError: If model does not define a primary key field
         """
+
+    def timeseries_table(
+        self,
+        model_class: type,
+    ) -> TimeSeriesTableInterface:
+        """Get or create a timeseries table for time-indexed models.
+
+        For models with time-based primary keys (e.g., bars), provides
+        time-range queries and batch operations.
+
+        Args:
+            model_class: Model class with time-based Field(primary_key=True)
+
+        Returns:
+            TimeSeriesTableInterface for the model
+
+        Raises:
+            NotImplementedError: If datastore doesn't support timeseries tables
+            ValueError: If model does not define a primary key field
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support timeseries_table(). "
+            "Use PostgresDatastore for time-range queries and batch operations."
+        )
 
     @abstractmethod
     async def list_tables(self, prefix: str | None = None) -> list[str]:

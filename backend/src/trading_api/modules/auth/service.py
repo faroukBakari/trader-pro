@@ -70,7 +70,7 @@ class AuthService(AuthServiceInterface, ServiceInterface):
 
     def __init__(self, module_dir: Path, **kwargs: Any) -> None:
         super().__init__(module_dir, **kwargs)
-        user_datastore = self.persistent_datastore or self.datastore
+        user_datastore = self.datastore
         self.user_repository = UserRepository(user_datastore)
         self.token_repository = RefreshTokenRepository(user_datastore)
         self._oauth: OAuth | None = None

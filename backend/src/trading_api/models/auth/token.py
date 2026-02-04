@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, cast
 
-from sqlalchemy import Column, DateTime
+from sqlalchemy import DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -79,7 +79,7 @@ class RefreshTokenData(SQLModel, table=True):
     user_id: str = Field(index=True, description="User ID this token belongs to")
     created_at: datetime = Field(
         description="Token creation timestamp",
-        sa_column=Column(DateTime(timezone=True)),
+        sa_type=cast(type[Any], DateTime(timezone=True)),
     )
     ip_address: str = Field(description="IP address where token was issued")
     user_agent: str = Field(description="User agent string")

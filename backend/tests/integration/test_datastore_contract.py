@@ -179,13 +179,6 @@ class TestDatastoreInterfaceContract:
         assert isinstance(any_datastore.has_transactions, bool)
 
     @pytest.mark.asyncio
-    async def test_is_relational_returns_bool(
-        self, any_datastore: DatastoreInterface
-    ) -> None:
-        """is_relational property returns boolean."""
-        assert isinstance(any_datastore.is_relational, bool)
-
-    @pytest.mark.asyncio
     async def test_datastore_name_returns_string(
         self, any_datastore: DatastoreInterface
     ) -> None:
@@ -573,7 +566,6 @@ class TestFeatureFlagConsistency:
         """InMemoryDatastore has expected feature flags."""
         assert inmemory_datastore.has_persistence is False
         assert inmemory_datastore.has_transactions is False
-        assert inmemory_datastore.is_relational is False
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -586,4 +578,3 @@ class TestFeatureFlagConsistency:
             pytest.skip("PostgreSQL not available")
         assert postgres_datastore.has_persistence is True
         assert postgres_datastore.has_transactions is True
-        assert postgres_datastore.is_relational is True
