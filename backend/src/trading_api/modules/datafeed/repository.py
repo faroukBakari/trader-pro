@@ -118,7 +118,7 @@ class BarRepository:
             return 0
 
         # Try timeseries interface first (preferred for PostgreSQL)
-        if self._datastore.has_timeseries:
+        if self._datastore.has_capability("timeseries"):
             ts_table = self._get_timeseries_table(symbol, resolution)
             return await ts_table.set_batch(bars)
 
@@ -147,7 +147,7 @@ class BarRepository:
         Returns bars sorted by time ascending.
         """
         # Try timeseries interface first (preferred for PostgreSQL)
-        if self._datastore.has_timeseries:
+        if self._datastore.has_capability("timeseries"):
             ts_table = self._get_timeseries_table(symbol, resolution)
             return await ts_table.get_time_range(from_time, to_time)
 

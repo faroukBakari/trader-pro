@@ -16,7 +16,7 @@ from trading_api.models.auth import (
     User,
     UserCreate,
 )
-from trading_api.models.common import CapabilitySpec
+from trading_api.models.common import ProviderCapabilitySpec
 from trading_api.models.exceptions import ServiceException
 from trading_api.modules.auth.repository import RefreshTokenRepository, UserRepository
 from trading_api.shared import settings
@@ -60,17 +60,18 @@ class AuthService(AuthServiceInterface, ServiceInterface):
     """Authentication service implementation"""
 
     @classmethod
-    def capabilities(cls) -> list[CapabilitySpec]:
-        """Return required capabilities for this service.
+    def provider_capabilities(cls) -> list[ProviderCapabilitySpec]:
+        """Return required provider capabilities for this service.
 
         Returns:
             List containing auth capability requirement
         """
-        return [CapabilitySpec(name="auth")]
+        return [ProviderCapabilitySpec(name="auth")]
 
     def __init__(self, module_dir: Path, **kwargs: Any) -> None:
         super().__init__(module_dir, **kwargs)
-        user_datastore = self.datastore
+        # Auth doesn't need special datastore capabilities - use first available
+        user_datastore = next(iter(self.datastores))
         self.user_repository = UserRepository(user_datastore)
         self.token_repository = RefreshTokenRepository(user_datastore)
         self._oauth: OAuth | None = None

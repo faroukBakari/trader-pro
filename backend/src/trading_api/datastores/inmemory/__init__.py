@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from trading_api.models.common import DatastoreCapabilitySpec
 from trading_api.shared import DatastoreInterface, TableInterface
 
 if TYPE_CHECKING:
@@ -377,6 +378,15 @@ class InMemoryDatastore(DatastoreInterface):
     """
 
     @classmethod
+    def capabilities(cls) -> list[DatastoreCapabilitySpec]:
+        """InMemory provides no special capabilities.
+
+        Returns:
+            Empty list - no persistence, transactions, timeseries, etc.
+        """
+        return []
+
+    @classmethod
     async def create(cls, config: Settings | None = None) -> "InMemoryDatastore":
         """Async factory for InMemoryDatastore.
 
@@ -392,41 +402,6 @@ class InMemoryDatastore(DatastoreInterface):
         self._tables: dict[str, InMemoryTable] = {}
         self.__timeout = timeout
         self.__threading_lock = threading.Lock()
-
-    @property
-    def has_persistence(self) -> bool:
-        """Whether this datastore persists data across restarts.
-
-        Returns:
-            True if data survives process restarts (e.g., PostgreSQL).
-            False for ephemeral storage (e.g., InMemory).
-        """
-        return False
-
-    @property
-    def has_transactions(self) -> bool:
-        """Whether this datastore supports ACID transactions.
-
-        Returns:
-            True if datastore provides transactional guarantees.
-            False for simple key-value storage without transactions.
-        """
-        return False
-
-    @property
-    def has_exclusion(self) -> bool:
-        """InMemory datastore does not support range exclusion constraints."""
-        return False
-
-    @property
-    def has_timeseries(self) -> bool:
-        """InMemory datastore does not support time-series operations."""
-        return False
-
-    @property
-    def has_rangequery(self) -> bool:
-        """InMemory datastore does not support multirange gap detection."""
-        return False
 
     @property
     def session_factory(self) -> None:

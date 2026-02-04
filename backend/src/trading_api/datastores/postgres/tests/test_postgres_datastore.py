@@ -69,18 +69,18 @@ class TestPostgresDatastoreInterface:
     """Test PostgresDatastore implements DatastoreInterface correctly."""
 
     @pytest.mark.asyncio
-    async def test_has_persistence_true(
+    async def test_has_capability_persistence_true(
         self, postgres_datastore: PostgresDatastore
     ) -> None:
-        """PostgresDatastore.has_persistence returns True."""
-        assert postgres_datastore.has_persistence is True
+        """PostgresDatastore.has_capability('persistence') returns True."""
+        assert postgres_datastore.has_capability("persistence") is True
 
     @pytest.mark.asyncio
-    async def test_has_transactions_true(
+    async def test_has_capability_transactions_true(
         self, postgres_datastore: PostgresDatastore
     ) -> None:
-        """PostgresDatastore.has_transactions returns True."""
-        assert postgres_datastore.has_transactions is True
+        """PostgresDatastore.has_capability('transactions') returns True."""
+        assert postgres_datastore.has_capability("transactions") is True
 
     @pytest.mark.asyncio
     async def test_datastore_name(self) -> None:

@@ -1,8 +1,8 @@
 # Modular Backend Architecture
 
 **Status**: ✅ Production Ready  
-**Last Updated**: January 27, 2026  
-**Version**: 6.2.0
+**Last Updated**: February 4, 2026  
+**Version**: 6.3.0
 
 ## Table of Contents
 
@@ -91,8 +91,22 @@ class MyModuleModule(Module):
 from pathlib import Path
 from trading_api.shared import ServiceInterface, DatastoreInterface
 from trading_api.shared.provider_interface import Provider
+from trading_api.models.common import DatastoreCapabilitySpec, ProviderCapabilitySpec
 
 class MyModuleService(ServiceInterface):
+    @classmethod
+    def provider_capabilities(cls) -> list[ProviderCapabilitySpec]:
+        """Declare required provider capabilities (optional override)."""
+        return []  # No provider capabilities required by default
+
+    @classmethod
+    def datastore_capabilities(cls) -> list[DatastoreCapabilitySpec]:
+        """Declare required datastore capabilities (optional override).
+
+        See datastores/README.md for capability-based selection patterns.
+        """
+        return []  # No datastore capabilities required by default
+
     def __init__(
         self,
         module_dir: Path,

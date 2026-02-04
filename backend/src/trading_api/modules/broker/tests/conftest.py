@@ -48,7 +48,7 @@ async def apps() -> ModularApp:
     datastores = await datastore_registry.get_datastores()
 
     # Get providers
-    required_capabilities = module_registry.required_capabilities()
+    required_capabilities = module_registry.required_provider_capabilities()
     providers = await provider_registry.get_providers(required_capabilities)
 
     # Get modules with providers and datastores

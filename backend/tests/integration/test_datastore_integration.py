@@ -402,34 +402,34 @@ class TestRefreshTokenRepositoryPostgres:
 
 @pytest.mark.integration
 class TestDatastoreFeatureFlags:
-    """Test datastore feature flags (has_persistence, has_transactions)."""
+    """Test datastore capabilities via has_capability() method."""
 
     @pytest.mark.asyncio
     async def test_inmemory_has_persistence_false(
         self, inmemory_datastore: DatastoreInterface
     ) -> None:
-        """InMemoryDatastore.has_persistence is False."""
-        assert inmemory_datastore.has_persistence is False
+        """InMemoryDatastore.has_capability('persistence') is False."""
+        assert inmemory_datastore.has_capability("persistence") is False
 
     @pytest.mark.asyncio
     async def test_inmemory_has_transactions_false(
         self, inmemory_datastore: DatastoreInterface
     ) -> None:
-        """InMemoryDatastore.has_transactions is False."""
-        assert inmemory_datastore.has_transactions is False
+        """InMemoryDatastore.has_capability('transactions') is False."""
+        assert inmemory_datastore.has_capability("transactions") is False
 
     @pytest.mark.asyncio
     @pytest.mark.postgres
     async def test_postgres_has_persistence_true(
         self, postgres_datastore: DatastoreInterface
     ) -> None:
-        """PostgresDatastore.has_persistence is True."""
-        assert postgres_datastore.has_persistence is True
+        """PostgresDatastore.has_capability('persistence') is True."""
+        assert postgres_datastore.has_capability("persistence") is True
 
     @pytest.mark.asyncio
     @pytest.mark.postgres
     async def test_postgres_has_transactions_true(
         self, postgres_datastore: DatastoreInterface
     ) -> None:
-        """PostgresDatastore.has_transactions is True."""
-        assert postgres_datastore.has_transactions is True
+        """PostgresDatastore.has_capability('transactions') is True."""
+        assert postgres_datastore.has_capability("transactions") is True

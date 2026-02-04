@@ -385,7 +385,7 @@ async def apps() -> ModularApp:
     provider_registry.register(FakeBrokerProvider, "fake_broker")
 
     # Resolve required capabilities
-    required_capabilities = module_registry.required_capabilities()
+    required_capabilities = module_registry.required_provider_capabilities()
 
     # Get provider instances (will use our mock)
     required_providers = await provider_registry.get_providers(required_capabilities)

@@ -1248,13 +1248,13 @@ class MyProvider(Provider, MyCapability):
 
 ```python
 @dataclass(frozen=True)
-class CapabilitySpec:
+class ProviderCapabilitySpec:
     """Type-safe capability specification."""
 
-    name: CapabilityName  # "auth", "broker", "datafeed", etc.
+    name: ProviderCapabilityName  # "auth", "broker", "datafeed"
     version: str | None = None
 
-    def matches(self, provider_capability: CapabilitySpec) -> bool:
+    def matches(self, provider_capability: ProviderCapabilitySpec) -> bool:
         """Check if provider satisfies this requirement."""
 ```
 

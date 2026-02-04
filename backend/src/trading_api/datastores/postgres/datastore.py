@@ -30,6 +30,7 @@ from sqlalchemy.exc import NoInspectionAvailable
 from sqlalchemy.orm import Mapper
 from sqlmodel import SQLModel
 
+from trading_api.models.common import DatastoreCapabilitySpec
 from trading_api.shared import (
     DatastoreInterface,
     RangeQueryTableInterface,
@@ -259,30 +260,20 @@ class PostgresDatastore(DatastoreInterface):
 
         return cls(pool, session_factory)
 
-    @property
-    def has_persistence(self) -> bool:
-        """PostgreSQL persists data across restarts."""
-        return True
+    @classmethod
+    def capabilities(cls) -> list[DatastoreCapabilitySpec]:
+        """PostgreSQL provides all datastore capabilities.
 
-    @property
-    def has_transactions(self) -> bool:
-        """PostgreSQL supports ACID transactions."""
-        return True
-
-    @property
-    def has_exclusion(self) -> bool:
-        """PostgreSQL supports exclusion constraints."""
-        return True
-
-    @property
-    def has_timeseries(self) -> bool:
-        """PostgreSQL supports time-series operations via indexed queries."""
-        return True
-
-    @property
-    def has_rangequery(self) -> bool:
-        """PostgreSQL supports range query gap detection via multirange operations."""
-        return True
+        Returns:
+            List with persistence, transactions, timeseries, rangequery, exclusion
+        """
+        return [
+            DatastoreCapabilitySpec(name="persistence"),
+            DatastoreCapabilitySpec(name="transactions"),
+            DatastoreCapabilitySpec(name="timeseries"),
+            DatastoreCapabilitySpec(name="rangequery"),
+            DatastoreCapabilitySpec(name="exclusion"),
+        ]
 
     @property
     def session_factory(self) -> "async_sessionmaker[AsyncSession]":

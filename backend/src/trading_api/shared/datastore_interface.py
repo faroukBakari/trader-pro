@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING, Generic, TypeVar, cast
 
 from sqlmodel import SQLModel
 
+from trading_api.models.common import DatastoreCapabilitySpec
+
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
@@ -267,7 +269,7 @@ class RangeQueryTableInterface(TableInterface[T], ABC):
     multirange operations (range_agg, multirange subtraction).
 
     Use datastore.rangequery_table(model_class) to obtain this interface.
-    Check datastore.has_rangequery before using.
+    Check datastore.has_capability("rangequery") before using.
 
     Requirements:
         - Model must have a Range field (e.g., time_range: Int8RangeType)
@@ -308,81 +310,25 @@ class DatastoreInterface(ABC):
     - PostgresDatastore: psycopg pool-based (Wave 2+)
     """
 
-    @property
-    @abstractmethod
-    def has_persistence(self) -> bool:
-        """Whether this datastore persists data across restarts.
+    def has_capability(self, name: str) -> bool:
+        """Check if datastore has a specific capability.
+
+        Convenience method that checks the capabilities() classmethod.
+        Use this instead of individual has_* properties.
+
+        Args:
+            name: Capability name (e.g., "persistence", "transactions", "timeseries")
 
         Returns:
-            True if data survives process restarts (e.g., PostgreSQL).
-            False for ephemeral storage (e.g., InMemory).
+            True if datastore provides the named capability
+
+        Examples:
+            >>> datastore.has_capability("persistence")
+            True
+            >>> datastore.has_capability("timeseries")
+            False  # for InMemoryDatastore
         """
-        ...
-
-    @property
-    @abstractmethod
-    def has_transactions(self) -> bool:
-        """Whether this datastore supports ACID transactions.
-
-        Returns:
-            True if datastore provides transactional guarantees.
-            False for simple key-value storage without transactions.
-        """
-        ...
-
-    @property
-    @abstractmethod
-    def has_exclusion(self) -> bool:
-        """Whether this datastore supports range exclusion constraints.
-
-        When True, exclusion constraints are automatically created from
-        model __table_args__ metadata by the exclusion_listener. This creates
-        database-level constraints (e.g., PostgreSQL EXCLUDE USING GIST)
-        that atomically prevent overlapping ranges across concurrent writes.
-
-        When False, exclusion constraints are not supported and overlap
-        prevention must be handled via application-level checks.
-
-        Returns:
-            True if datastore supports atomic exclusion constraints.
-            False for datastores without native range constraint support.
-        """
-        ...
-
-    @property
-    @abstractmethod
-    def has_timeseries(self) -> bool:
-        """Whether this datastore supports time series data.
-
-        When True, the datastore provides specialized tables and queries
-        optimized for time-indexed data, such as bars. This includes efficient time-range
-        queries and batch operations.
-
-        When False, time series features are not supported and specialized
-        queries must be implemented at the application level.
-
-        Returns:
-            True if datastore supports time series features.
-            False for datastores without native time series support.
-        """
-        ...
-
-    @property
-    @abstractmethod
-    def has_rangequery(self) -> bool:
-        """Whether this datastore supports range query gap detection.
-
-        When True, the datastore provides RangeQueryTableInterface with efficient
-        gap detection using PostgreSQL multirange operations (range_agg, subtraction).
-
-        When False, gap detection must be implemented at the application level
-        using in-memory algorithms.
-
-        Returns:
-            True if datastore supports multirange gap detection.
-            False for datastores without native multirange support.
-        """
-        ...
+        return any(cap.name == name for cap in self.capabilities())
 
     @property
     def session_factory(self) -> "async_sessionmaker[AsyncSession] | None":
@@ -390,15 +336,32 @@ class DatastoreInterface(ABC):
 
         Returns:
             Session factory if datastore supports transactions, None otherwise.
-            Callers should check has_transactions before using.
+            Callers should check has_capability("transactions") before using.
 
         Usage:
-            if datastore.has_transactions and datastore.session_factory:
+            if datastore.has_capability("transactions") and datastore.session_factory:
                 async with datastore.session_factory() as session:
                     # ... multiple operations in one transaction ...
                     await session.commit()
         """
         return None  # Default for non-transactional datastores
+
+    @classmethod
+    @abstractmethod
+    def capabilities(cls) -> list[DatastoreCapabilitySpec]:
+        """Declare capabilities this datastore provides.
+
+        Used by DatastoreRegistry to filter datastores by required capabilities.
+        Mirrors Provider.capabilities() pattern.
+
+        Returns:
+            List of capabilities this datastore provides
+
+        Examples:
+            >>> PostgresDatastore.capabilities()
+            [DatastoreCapabilitySpec(name="persistence"), ...]
+        """
+        ...
 
     @classmethod
     @abstractmethod

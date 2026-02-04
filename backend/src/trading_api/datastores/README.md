@@ -32,41 +32,114 @@ datastores/
 
 ## Feature Detection
 
-Datastores expose properties to detect capabilities:
+Use `has_capability(name)` to detect datastore capabilities:
 
 ```python
 datastore = registry.get_datastores(names=["postgres"])[0]
 
 # Check if data survives restarts
-if datastore.has_persistence:
+if datastore.has_capability("persistence"):
     logger.info("Using persistent datastore")
 
 # Check if ACID transactions are supported
-if datastore.has_transactions:
+if datastore.has_capability("transactions"):
     logger.info("Transactions available")
 ```
 
-| Property           | InMemory | Postgres |
-| ------------------ | -------- | -------- |
-| `has_persistence`  | `False`  | `True`   |
-| `has_transactions` | `False`  | `True`   |
-| `has_exclusion`    | `False`  | `True`   |
-| `has_timeseries`   | `False`  | `True`   |
-| `has_rangequery`   | `False`  | `True`   |
+| Capability Name   | InMemory | Postgres |
+| ----------------- | -------- | -------- |
+| `"persistence"`   | ❌       | ✅       |
+| `"transactions"` | ❌       | ✅       |
+| `"exclusion"`     | ❌       | ✅       |
+| `"timeseries"`    | ❌       | ✅       |
+| `"rangequery"`    | ❌       | ✅       |
 
-**`has_exclusion`**: Indicates support for database-level exclusion constraints (e.g., PostgreSQL `EXCLUDE USING GIST`) that atomically prevent overlapping ranges. Used for cache metadata tables like `PendingRange` and `CoveredRange`.
+**`"exclusion"`**: Database-level exclusion constraints (e.g., PostgreSQL `EXCLUDE USING GIST`) that atomically prevent overlapping ranges. Used for cache metadata tables like `PendingRange` and `CoveredRange`.
 
-**`has_transactions`**: Indicates support for ACID transactions via session injection pattern. Enables atomic multi-table operations.
+**`"transactions"`**: ACID transactions via session injection pattern. Enables atomic multi-table operations.
 
-**`has_timeseries`**: Indicates support for time-series operations via `TimeSeriesTableInterface`. When `True`, `timeseries_table()` returns a table with `get_time_range()` and `set_batch()` methods for efficient time-indexed queries. When `False`, use standard `TableInterface` with manual filtering.
+**`"timeseries"`**: Time-series operations via `TimeSeriesTableInterface`. When available, `timeseries_table()` returns a table with `get_time_range()` and `set_batch()` methods for efficient time-indexed queries. Otherwise, use standard `TableInterface` with manual filtering.
 
-**`has_rangequery`**: Indicates support for range query operations via `RangeQueryTableInterface`. When `True`, `rangequery_table()` returns a table with `get_missing_ranges()` for accurate gap detection using PostgreSQL multirange subtraction. When `False`, fall back to boundary-based algorithms (which may miss internal gaps).
+**`"rangequery"`**: Range query operations via `RangeQueryTableInterface`. When available, `rangequery_table()` returns a table with `get_missing_ranges()` for accurate gap detection using PostgreSQL multirange subtraction. Otherwise, fall back to boundary-based algorithms (which may miss internal gaps).
+
+---
+
+## Capability-Based Datastore Selection
+
+Services declare their required datastore capabilities via `datastore_capabilities()`, and the system automatically selects a compatible datastore. This mirrors the provider capability pattern.
+
+### Service Declaration
+
+```python
+# modules/datafeed/service.py
+from trading_api.models.common import DatastoreCapabilitySpec
+
+class DatafeedService(ServiceInterface):
+    @classmethod
+    def datastore_capabilities(cls) -> list[DatastoreCapabilitySpec]:
+        """Declare required datastore capabilities.
+
+        Returns:
+            timeseries (optional): Enhanced time-range queries if available
+        """
+        return [DatastoreCapabilitySpec(name="timeseries", optional=True)]
+```
+
+### Capability Matching
+
+The `DatastoreCapabilitySpec` model supports:
+
+| Field      | Type   | Description                                         |
+| ---------- | ------ | --------------------------------------------------- |
+| `name`     | `str`  | Capability name (e.g., "persistence", "timeseries") |
+| `optional` | `bool` | If `True`, capability is preferred but not required |
+
+**Matching behavior**:
+
+- Required capabilities (`optional=False`) must be provided by the datastore
+- Optional capabilities (`optional=True`) are used if available, but fallback is acceptable
+- If no datastore matches required capabilities, service initialization fails
+
+### PostgresDatastore Capabilities
+
+```python
+# PostgresDatastore.capabilities() returns:
+[
+    DatastoreCapabilitySpec(name="persistence"),
+    DatastoreCapabilitySpec(name="transactions"),
+    DatastoreCapabilitySpec(name="timeseries"),
+    DatastoreCapabilitySpec(name="rangequery"),
+    DatastoreCapabilitySpec(name="exclusion"),
+]
+```
+
+### InMemoryDatastore Capabilities
+
+```python
+# InMemoryDatastore.capabilities() returns:
+[]  # No advanced capabilities
+```
+
+### AppFactory Integration
+
+The `AppFactory` aggregates capabilities from all enabled modules and filters datastores accordingly:
+
+```python
+# ModuleRegistry collects required capabilities
+required_caps = module_registry.required_datastore_capabilities()
+
+# DatastoreRegistry filters by capabilities
+datastores = datastore_registry.get_datastores(
+    names=["postgres", "inmemory"],
+    required_capabilities=required_caps,
+)
+```
 
 ---
 
 ## Transaction Support (Session Injection)
 
-Datastores with `has_transactions=True` support atomic multi-operation transactions via **session injection**.
+Datastores with the `"transactions"` capability support atomic multi-operation transactions via **session injection**.
 
 ### Session Factory Property
 
@@ -76,7 +149,7 @@ from trading_api.datastores import PostgresDatastore
 datastore = await PostgresDatastore.create()
 
 # Get session factory for transaction support
-if datastore.has_transactions and datastore.session_factory:
+if datastore.has_capability("transactions") and datastore.session_factory:
     async with datastore.session_factory() as session:
         # Multiple operations in one transaction
         await table1.set("key1", model1, session=session)

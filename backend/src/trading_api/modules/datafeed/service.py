@@ -21,7 +21,7 @@ from trading_api.models import (
     SearchSymbolResultItem,
     SymbolInfo,
 )
-from trading_api.models.common import CapabilitySpec
+from trading_api.models.common import DatastoreCapabilitySpec, ProviderCapabilitySpec
 from trading_api.models.exceptions import ServiceException, TradingApiException
 from trading_api.models.market import Resolution
 from trading_api.models.market.quotes import QuoteValues
@@ -65,15 +65,26 @@ class DatafeedService(WsRouteService):
     """Service for handling datafeed operations"""
 
     @classmethod
-    def capabilities(cls) -> list[CapabilitySpec]:
-        """Return required capabilities for datafeed service.
+    def provider_capabilities(cls) -> list[ProviderCapabilitySpec]:
+        """Return required provider capabilities for datafeed service.
 
         Requires datafeed capability from provider (e.g., TWSDatafeedProvider).
 
         Returns:
             List with datafeed capability requirement
         """
-        return [CapabilitySpec(name="datafeed")]
+        return [ProviderCapabilitySpec(name="datafeed")]
+
+    @classmethod
+    def datastore_capabilities(cls) -> list[DatastoreCapabilitySpec]:
+        """Return required datastore capabilities for datafeed service.
+
+        Requires timeseries capability for efficient bar storage/retrieval.
+
+        Returns:
+            List with timeseries capability requirement (optional for MVP)
+        """
+        return [DatastoreCapabilitySpec(name="timeseries", optional=True)]
 
     @property
     def datafeed_provider(self) -> DatafeedCapability:
@@ -109,8 +120,13 @@ class DatafeedService(WsRouteService):
         self._topic_to_subs: dict[str, list[str]] = {}
         self._last_bars: dict[str, Bar] = {}
         # Bar repository for persistent storage (wiring for future use)
-        # Use injected datastore for shared lock
-        self._bar_repository = BarRepository(self.datastore)
+        # Use capability-based selection: prefer timeseries-capable datastore
+        try:
+            bar_datastore = self.get_featured_datastore("timeseries")
+        except Exception:
+            # Fallback to first available (timeseries is optional for MVP)
+            bar_datastore = next(iter(self.datastores))
+        self._bar_repository = BarRepository(bar_datastore)
 
     def get_configuration(self) -> DatafeedConfiguration:
         """Get datafeed configuration.

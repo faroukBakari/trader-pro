@@ -104,12 +104,14 @@ class ModularApp(FastAPI):
             f"[providers={self.enabled_providers}] [datastores={self.enabled_datastores}]..."
         )
 
-        # Phase 2: Get datastore instances
-        datastores = await self.datastore_registry.get_datastores()
+        # Phase 2: Get datastore instances for required capabilities
+        datastores = await self.datastore_registry.get_datastores(
+            required_capabilities=self.module_registry.required_datastore_capabilities()
+        )
 
         # Phase 3: Get provider instances for required capabilities
         self.__providers = await self.provider_registry.get_providers(
-            self.module_registry.required_capabilities()
+            self.module_registry.required_provider_capabilities()
         )
 
         # Phase 4: Instantiate modules with providers and datastores
