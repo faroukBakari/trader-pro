@@ -26,24 +26,17 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import BaseModel
-from sqlalchemy import (
-    Column,
-    CursorResult,
-    MetaData,
-    Table,
-    delete,
-    func,
-    inspect,
-    literal,
-    select,
-    text,
-)
+from sqlalchemy import Column, CursorResult, MetaData, Table
+from sqlalchemy import cast as sa_cast
+from sqlalchemy import delete, func, inspect, literal, select, text
+from sqlalchemy.dialects.postgresql import INT8MULTIRANGE
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import NoInspectionAvailable
 from sqlalchemy.sql import quoted_name
 from sqlmodel import SQLModel
 
 from trading_api.shared.datastore_interface import (
+    RangeQueryTableInterface,
     TableInterface,
     TimeSeriesTableInterface,
 )
@@ -52,6 +45,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, async_sessionmaker
+
+    from trading_api.types import Range
 
 logger = logging.getLogger(__name__)
 
@@ -596,3 +591,117 @@ class TimeSeriesSQLModelTable(SQLModelTable[T], TimeSeriesTableInterface[T]):
             new_inserts = sum(1 for row in rows_result if row.is_insert)
 
         return new_inserts
+
+
+class RangeQuerySQLModelTable(SQLModelTable[T], RangeQueryTableInterface[T]):
+    """SQLModelTable with range query support via PostgreSQL multirange.
+
+    Provides efficient gap detection using PostgreSQL's range_agg() aggregate
+    and multirange subtraction. Uses SQLAlchemy expression API (not raw SQL)
+    for type safety and statement caching.
+
+    Requirements:
+        - Model must have a Range field (e.g., time_range: Int8RangeType)
+        - Model must have a grouping field (e.g., lookup_key: str)
+        - PostgreSQL 14+ (for range_agg aggregate function)
+
+    Performance:
+        - Statement caching: Query compiled once, cached thereafter
+        - GiST index: Overlap queries use index (O(log n))
+        - Multirange ops: Native PostgreSQL, not Python iteration
+
+    Usage:
+        table = RangeQuerySQLModelTable(CoveredRange, session_factory, "id")
+        gaps = await table.get_missing_ranges("AAPL_1d", IntRange(start=0, end=300))
+    """
+
+    async def get_missing_ranges(
+        self,
+        lookup_key: str,
+        query_range: "Range[int]",
+        range_field: str = "time_range",
+        group_field: str = "lookup_key",
+        session: "AsyncSession | None" = None,
+    ) -> "list[Range[int]]":
+        """Find gaps in coverage using PostgreSQL multirange subtraction.
+
+        Executes the equivalent of:
+            SELECT (int8range(from, to, '[]') - COALESCE(range_agg(time_range), '{}'))::int8multirange
+            FROM table
+            WHERE lookup_key = :key AND time_range && int8range(from, to, '[]')
+
+        Args:
+            lookup_key: Filter value for group_field (e.g., "AAPL_1d")
+            query_range: Requested range to check coverage for
+            range_field: Column name storing Range values (default: "time_range")
+            group_field: Column name for filtering (default: "lookup_key")
+            session: Optional session for transaction batching
+
+        Returns:
+            List of IntRange gaps that are not covered (empty list = full coverage)
+
+        Raises:
+            ValueError: If range_field or group_field don't exist on model
+        """
+        # Import here to avoid circular dependency at module load time
+        from trading_api.types import IntRange
+
+        await self._ensure_table()
+
+        # Validate field names exist
+        if not hasattr(self._model, range_field):
+            raise ValueError(
+                f"Model {self._model.__name__} has no field '{range_field}'"
+            )
+        if not hasattr(self._model, group_field):
+            raise ValueError(
+                f"Model {self._model.__name__} has no field '{group_field}'"
+            )
+
+        range_col = getattr(self._model, range_field)
+        group_col = getattr(self._model, group_field)
+
+        # Build request range using int8range() function (not literal)
+        # to ensure 64-bit integer type matching the column type.
+        # Use "[)" bounds (PostgreSQL canonical form for discrete ranges)
+        request_range = func.int8range(
+            query_range.start, query_range.end + 1, literal("[)")
+        )
+
+        # Wrap in int8multirange for subtraction (range - multirange not supported)
+        request_multirange = func.int8multirange(request_range)
+
+        # Build the gap detection expression:
+        # int8multirange(request_range) - COALESCE(range_agg(covered), '{}')
+        agg = func.range_agg(range_col)
+        empty_multirange = sa_cast(literal("{}"), INT8MULTIRANGE)
+        coalesced = func.coalesce(agg, empty_multirange)
+        subtraction = request_multirange.op("-")(coalesced)
+        result_expr = sa_cast(subtraction, INT8MULTIRANGE).label("gaps")
+
+        # Build SELECT with filters
+        stmt = (
+            select(result_expr)
+            .where(group_col == lookup_key)
+            .where(range_col.op("&&")(request_range))  # Overlap filter for GiST
+        )
+
+        async with self._session_scope(session) as s:
+            result = await s.execute(stmt)
+            row = result.one_or_none()
+
+            # No matching rows = full miss (nothing covered)
+            if row is None or row.gaps is None:
+                return [IntRange(start=query_range.start, end=query_range.end)]
+
+            # Empty multirange = full coverage (no gaps)
+            if not row.gaps:
+                return []
+
+            # Convert SQLAlchemy Range list to IntRange list
+            # Adjust bounds: PostgreSQL returns "[)" canonical form
+            return [
+                IntRange(start=r.lower, end=r.upper - 1)
+                for r in row.gaps
+                if not r.isempty and r.lower is not None and r.upper is not None
+            ]

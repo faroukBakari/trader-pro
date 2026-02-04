@@ -424,6 +424,11 @@ class InMemoryDatastore(DatastoreInterface):
         return False
 
     @property
+    def has_rangequery(self) -> bool:
+        """InMemory datastore does not support multirange gap detection."""
+        return False
+
+    @property
     def session_factory(self) -> None:
         """InMemory datastore does not support session-based transactions."""
         return None

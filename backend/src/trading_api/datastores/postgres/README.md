@@ -22,9 +22,8 @@ postgres/
 ├── sql_safe.py           # SQL injection protection utilities
 ├── sqlmodel_table.py     # SQLModelTable implementation
 ├── README.md             # This file
-├── adapters/             # psycopg3 type adapters
-│   ├── __init__.py       # Exports register_range_adapters()
-│   └── range_adapter.py  # Range[T] ↔ PostgreSQL range type conversion
+├── adapters/             # Reserved for future psycopg3 type adapters
+│   └── __init__.py       # Empty (Range types use SQLAlchemy TypeDecorators)
 └── tests/
     └── test_postgres_specific.py
 ```
@@ -103,12 +102,12 @@ Native PostgreSQL range type support via psycopg3 adapters and SQLAlchemy TypeDe
 
 ### Supported Mappings
 
-| Application Type | PostgreSQL Type | TypeDecorator   | Adapter Class     |
-| ---------------- | --------------- | --------------- | ----------------- |
-| `IntRange`       | `int8range`     | `Int8RangeType` | `Int8RangeDumper` |
-| `TimeRange`      | `int8range`     | `Int8RangeType` | `Int8RangeDumper` |
-| `DateTimeRange`  | `tstzrange`     | `TstzRangeType` | `TstzRangeDumper` |
-| `DateOnlyRange`  | `daterange`     | `DateRangeType` | `DateRangeDumper` |
+| Application Type | PostgreSQL Type | TypeDecorator   |
+| ---------------- | --------------- | --------------- |
+| `IntRange`       | `int8range`     | `Int8RangeType` |
+| `TimeRange`      | `int8range`     | `Int8RangeType` |
+| `DateTimeRange`  | `tstzrange`     | `TstzRangeType` |
+| `DateOnlyRange`  | `daterange`     | `DateRangeType` |
 
 ### How It Works
 
@@ -128,18 +127,7 @@ class PendingRange(SQLModel, table=True):
     time_range: TimeRange = Field(sa_type=Int8RangeType)
 ```
 
-**2. psycopg3 Adapter (Connection-Level Conversion)**
-
-Adapters in `adapters/range_adapter.py` register with psycopg3 connections:
-
-```python
-from trading_api.datastores.postgres.adapters import register_range_adapters
-
-async with await psycopg.AsyncConnection.connect(dsn) as conn:
-    register_range_adapters(conn)  # Now Range subclasses auto-convert
-```
-
-**3. Canonical Form Handling**
+**2. Canonical Form Handling**
 
 PostgreSQL canonicalizes discrete ranges (int, date) to `[)` bounds:
 

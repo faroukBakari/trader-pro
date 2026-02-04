@@ -32,6 +32,7 @@ from sqlmodel import SQLModel
 
 from trading_api.shared import (
     DatastoreInterface,
+    RangeQueryTableInterface,
     TableInterface,
     TimeSeriesTableInterface,
 )
@@ -45,7 +46,11 @@ from .engine import (
 )
 from .exclusion_listener import register_exclusion_listener
 from .sql_safe import validate_identifier
-from .sqlmodel_table import SQLModelTable, TimeSeriesSQLModelTable
+from .sqlmodel_table import (
+    RangeQuerySQLModelTable,
+    SQLModelTable,
+    TimeSeriesSQLModelTable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +173,7 @@ class PostgresDatastore(DatastoreInterface):
         self._session_factory = session_factory
         self._typed_tables: dict[str, SQLModelTable[Any]] = {}
         self._timeseries_tables: dict[str, TimeSeriesSQLModelTable[Any]] = {}
+        self._rangequery_tables: dict[str, RangeQuerySQLModelTable[Any]] = {}
 
     @classmethod
     async def create(
@@ -271,6 +277,11 @@ class PostgresDatastore(DatastoreInterface):
     @property
     def has_timeseries(self) -> bool:
         """PostgreSQL supports time-series operations via indexed queries."""
+        return True
+
+    @property
+    def has_rangequery(self) -> bool:
+        """PostgreSQL supports range query gap detection via multirange operations."""
         return True
 
     @property
@@ -388,6 +399,50 @@ class PostgresDatastore(DatastoreInterface):
                 primary_key=extracted_pk,
             )
         return self._timeseries_tables[table_name]
+
+    def rangequery_table(
+        self,
+        model_class: type[T],
+    ) -> RangeQueryTableInterface[T]:
+        """Get or create a rangequery table for range-indexed models.
+
+        For models with Range fields (e.g., CoveredRange), provides
+        efficient gap detection using PostgreSQL multirange operations.
+
+        Requires PostgreSQL 14+ for range_agg() aggregate function.
+
+        Args:
+            model_class: SQLModel class with Range field (e.g., Int8RangeType)
+
+        Returns:
+            RangeQueryTableInterface for the model
+
+        Raises:
+            NoInspectionAvailable: If model does not have table=True
+            ValueError: If model does not define a primary key field
+        """
+        table_name = get_table_name(model_class)
+
+        if self._session_factory is None:
+            raise RuntimeError(
+                "Session factory not initialized. "
+                "Use PostgresDatastore.create() factory method."
+            )
+
+        if table_name not in self._rangequery_tables:
+            _, _, extracted_pk = extract_indexes(model_class)
+            if extracted_pk is None:
+                raise ValueError(
+                    f"Model {model_class.__name__} must define a primary key field "
+                    f"via Field(primary_key=True). No primary key found in schema."
+                )
+
+            self._rangequery_tables[table_name] = RangeQuerySQLModelTable[T](
+                model_class=model_class,
+                session_factory=self._session_factory,
+                primary_key=extracted_pk,
+            )
+        return self._rangequery_tables[table_name]
 
     async def list_tables(self, prefix: str | None = None) -> list[str]:
         """List all table names in the datastore.

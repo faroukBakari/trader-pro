@@ -9,6 +9,7 @@ Provides minimal abstraction for data persistence that enables:
 Interface Segregation Pattern (ISP):
 - TableInterface: Core CRUD operations (all datastores)
 - TimeSeriesTableInterface: Time-range queries (PostgreSQL timeseries tables)
+- RangeQueryTableInterface: Gap detection via multirange operations (PostgreSQL)
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from trading_api.shared.config import Settings
+    from trading_api.types import Range
 
 T = TypeVar("T", bound=SQLModel)
 
@@ -258,6 +260,46 @@ class TimeSeriesTableInterface(TableInterface[T], ABC):
         """
 
 
+class RangeQueryTableInterface(TableInterface[T], ABC):
+    """Extended table interface for range-indexed data with gap detection.
+
+    Provides efficient gap detection using PostgreSQL GiST indexes and
+    multirange operations (range_agg, multirange subtraction).
+
+    Use datastore.rangequery_table(model_class) to obtain this interface.
+    Check datastore.has_rangequery before using.
+
+    Requirements:
+        - Model must have a Range field (e.g., time_range: Int8RangeType)
+        - Model must have a grouping field (e.g., lookup_key: str)
+        - PostgreSQL 14+ (for range_agg aggregate function)
+    """
+
+    @abstractmethod
+    async def get_missing_ranges(
+        self,
+        lookup_key: str,
+        query_range: "Range[int]",
+        range_field: str = "time_range",
+        group_field: str = "lookup_key",
+        session: "AsyncSession | None" = None,
+    ) -> "list[Range[int]]":
+        """Find gaps in coverage using PostgreSQL multirange subtraction.
+
+        Executes: requested_range - range_agg(covered_ranges)
+
+        Args:
+            lookup_key: Filter value for group_field (e.g., "AAPL_1d")
+            query_range: Requested range to check coverage for
+            range_field: Column name storing Range values (default: "time_range")
+            group_field: Column name for filtering (default: "lookup_key")
+            session: Optional external session for transaction batching
+
+        Returns:
+            List of Range gaps that are not covered (empty = full coverage)
+        """
+
+
 class DatastoreInterface(ABC):
     """Abstract interface for datastore with transaction support.
 
@@ -322,6 +364,23 @@ class DatastoreInterface(ABC):
         Returns:
             True if datastore supports time series features.
             False for datastores without native time series support.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def has_rangequery(self) -> bool:
+        """Whether this datastore supports range query gap detection.
+
+        When True, the datastore provides RangeQueryTableInterface with efficient
+        gap detection using PostgreSQL multirange operations (range_agg, subtraction).
+
+        When False, gap detection must be implemented at the application level
+        using in-memory algorithms.
+
+        Returns:
+            True if datastore supports multirange gap detection.
+            False for datastores without native multirange support.
         """
         ...
 
@@ -420,6 +479,30 @@ class DatastoreInterface(ABC):
         raise NotImplementedError(
             f"{self.__class__.__name__} does not support timeseries_table(). "
             "Use PostgresDatastore for time-range queries and batch operations."
+        )
+
+    def rangequery_table(
+        self,
+        model_class: type,
+    ) -> RangeQueryTableInterface:
+        """Get or create a rangequery table for gap detection.
+
+        For models with Range fields (e.g., CoveredRange), provides efficient
+        gap detection using PostgreSQL multirange operations.
+
+        Args:
+            model_class: Model class with Range field (e.g., time_range: Int8RangeType)
+
+        Returns:
+            RangeQueryTableInterface for the model
+
+        Raises:
+            NotImplementedError: If datastore doesn't support rangequery tables
+            ValueError: If model does not define expected fields
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support rangequery_table(). "
+            "Use PostgresDatastore for multirange gap detection."
         )
 
     @abstractmethod

@@ -58,6 +58,7 @@ BOUNDARY_RULES = {
     "shared/*": {
         "allowed_patterns": [
             "trading_api.models.*",
+            "trading_api.types.*",  # Pure type definitions (Range types, TypeDecorators)
             "trading_api.shared.*",
             "trading_api.datastores.*",
             "trading_api.app_factory",

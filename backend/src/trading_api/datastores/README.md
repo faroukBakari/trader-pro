@@ -52,12 +52,15 @@ if datastore.has_transactions:
 | `has_transactions` | `False`  | `True`   |
 | `has_exclusion`    | `False`  | `True`   |
 | `has_timeseries`   | `False`  | `True`   |
+| `has_rangequery`   | `False`  | `True`   |
 
 **`has_exclusion`**: Indicates support for database-level exclusion constraints (e.g., PostgreSQL `EXCLUDE USING GIST`) that atomically prevent overlapping ranges. Used for cache metadata tables like `PendingRange` and `CoveredRange`.
 
 **`has_transactions`**: Indicates support for ACID transactions via session injection pattern. Enables atomic multi-table operations.
 
 **`has_timeseries`**: Indicates support for time-series operations via `TimeSeriesTableInterface`. When `True`, `timeseries_table()` returns a table with `get_time_range()` and `set_batch()` methods for efficient time-indexed queries. When `False`, use standard `TableInterface` with manual filtering.
+
+**`has_rangequery`**: Indicates support for range query operations via `RangeQueryTableInterface`. When `True`, `rangequery_table()` returns a table with `get_missing_ranges()` for accurate gap detection using PostgreSQL multirange subtraction. When `False`, fall back to boundary-based algorithms (which may miss internal gaps).
 
 ---
 
@@ -641,6 +644,64 @@ class BarRepository:
 ```
 
 **Pattern**: Use `has_timeseries` property for capability detection instead of try/except around `timeseries_table()`. This provides clearer intent and avoids exception overhead.
+
+### RangeQueryTableInterface
+
+For metadata with range columns (cache coverage tracking, etc.), use `RangeQueryTableInterface[T]` which extends `TableInterface[T]`:
+
+| Method                                                 | Description                                              |
+| ------------------------------------------------------ | -------------------------------------------------------- |
+| `get_missing_ranges(lookup_key, query_range, session)` | PostgreSQL multirange subtraction to find uncovered gaps |
+
+### Factory Method
+
+Use `datastore.rangequery_table(model_class)` to get a `RangeQueryTableInterface`:
+
+```python
+from trading_api.shared import RangeQueryTableInterface
+from trading_api.datastores.postgres.types import IntRange
+
+# PostgresDatastore supports range query tables
+rq_table: RangeQueryTableInterface[CoveredRange] = datastore.rangequery_table(CoveredRange)
+
+# Find gaps using PostgreSQL multirange operations
+# Example: existing coverage [100-200], [300-400], query [50-500]
+# Returns: [50-100), [200-300), [400-500)
+gaps = await rq_table.get_missing_ranges(lookup_key="key", query_range=IntRange(50, 500))
+```
+
+### Algorithm
+
+The `get_missing_ranges()` method uses PostgreSQL's native multirange operations:
+
+```sql
+-- Conceptual SQL (actual uses SQLAlchemy expression API)
+SELECT (int8multirange(int8range(50, 500, '[]')) - range_agg(range_col))::int8range[]
+FROM covered_ranges
+WHERE lookup_key = 'key'
+```
+
+This performs:
+
+1. Aggregate all matching ranges into a single multirange via `range_agg()`
+2. Wrap query range in `int8multirange()` for compatible subtraction
+3. Subtract aggregated coverage from query multirange
+4. Cast result to array for row-by-row iteration
+
+### Usage in BarCacheManager
+
+```python
+if self._datastore.has_rangequery:
+    # Delegate to PostgreSQL multirange subtraction
+    rq_table = self._datastore.rangequery_table(CoveredRange)
+    gaps = await rq_table.get_missing_ranges(lookup_key=key, query_range=query_range)
+    return [TimeRange(start=gap.start, end=gap.end) for gap in gaps]
+
+# Fallback for InMemory (no rangequery support)
+return await self.__find_missing_ranges_inmemory(...)
+```
+
+**Pattern**: Use `has_rangequery` property for capability detection. This enables PostgreSQL's efficient set operations while maintaining InMemory fallback compatibility.
 
 ---
 

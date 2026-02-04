@@ -4,6 +4,7 @@ from .client_factory import InterModuleClients
 from .config import Settings, settings
 from .datastore_interface import (
     DatastoreInterface,
+    RangeQueryTableInterface,
     TableInterface,
     TimeSeriesTableInterface,
     create_dynamic_table_model,
@@ -30,4 +31,5 @@ __all__ = [
     "DatastoreInterface",
     "TableInterface",
     "TimeSeriesTableInterface",
+    "RangeQueryTableInterface",
 ]

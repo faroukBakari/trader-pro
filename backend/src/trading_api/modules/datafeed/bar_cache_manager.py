@@ -22,8 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from trading_api.models.exceptions import TradingApiException
 from trading_api.models.market import CoveredRange, PendingRange, Resolution, TimeRange
 from trading_api.shared.config import Settings
-from trading_api.shared.datastore_interface import DatastoreInterface, TableInterface
-from trading_api.types import StorageType
+from trading_api.shared.datastore_interface import (
+    DatastoreInterface,
+    RangeQueryTableInterface,
+    TableInterface,
+)
+from trading_api.types import IntRange, StorageType
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +94,17 @@ class BarCacheManager:
                 message="Datastore must support transactions for atomic operations",
             )
 
+        if not datastore.has_rangequery:
+            raise TradingApiException(
+                code="BAR_CACHE_MANAGER_NO_RANGEQUERY_SUPPORT",
+                message="Datastore must support rangequery for gap detection",
+            )
+
         self._pending_ttl_ms = pending_ttl_ms
         self._datastore = datastore
         self._pending_table: TableInterface[PendingRange] | None = None
         self._covered_table: TableInterface[CoveredRange] | None = None
+        self._rangequery_table: RangeQueryTableInterface[CoveredRange] | None = None
 
     @classmethod
     async def create(
@@ -121,6 +132,13 @@ class BarCacheManager:
         if self._covered_table is None:
             self._covered_table = self._datastore.table(CoveredRange)
         return self._covered_table
+
+    @property
+    def rangequery_table(self) -> RangeQueryTableInterface[CoveredRange]:
+        """Get or create the rangequery table for gap detection."""
+        if self._rangequery_table is None:
+            self._rangequery_table = self._datastore.rangequery_table(CoveredRange)
+        return self._rangequery_table
 
     @property
     def _session_factory(self) -> async_sessionmaker[AsyncSession]:
@@ -197,60 +215,6 @@ class BarCacheManager:
             # Re-raise non-exclusion errors
             raise
 
-    async def _remove_pending(
-        self,
-        symbol: str,
-        resolution: Resolution,
-        time_range: TimeRange,
-    ) -> bool:
-        """Remove a pending range (internal - called by mark_covered).
-
-        Args:
-            symbol: Trading symbol
-            resolution: Bar resolution
-            time_range: Time range to remove
-
-        Returns:
-            True if removed, False if not found
-        """
-        key = _primary_key(symbol, resolution, time_range)
-        result = await self.pending_table.delete(key)
-
-        if result:
-            logger.debug(
-                f"Removed pending range: {symbol}/{resolution.value} {time_range}"
-            )
-        return result
-
-    async def _get_pending_ranges(
-        self,
-        symbol: str,
-        resolution: Resolution,
-    ) -> list[PendingRange]:
-        """Get all non-expired pending ranges for symbol/resolution (internal).
-
-        Automatically cleans up expired entries.
-        """
-
-        lookup_key = _lookup_key(symbol, resolution)
-        pending_list = await self.pending_table.get_all(lookup_key, index="lookup_key")
-
-        now_ms = int(time.time() * 1000)
-        valid: list[PendingRange] = []
-        expired_keys: list[str] = []
-
-        for p in pending_list:
-            if p.expires_at > now_ms:
-                valid.append(p)
-            else:
-                expired_keys.append(_primary_key(p.symbol, p.resolution, p.time_range))
-
-        # Clean up expired entries
-        for key in expired_keys:
-            await self.pending_table.delete(key)
-
-        return valid
-
     # =========================================================================
     # Covered Range Management
     # =========================================================================
@@ -310,16 +274,6 @@ class BarCacheManager:
         )
         return covered
 
-    async def _get_covered_ranges(
-        self,
-        symbol: str,
-        resolution: Resolution,
-    ) -> list[CoveredRange]:
-        """Get all covered ranges for symbol/resolution (internal)."""
-
-        lookup_key = _lookup_key(symbol, resolution)
-        return await self.covered_table.get_all(lookup_key, index="lookup_key")
-
     # =========================================================================
     # Gap Detection
     # =========================================================================
@@ -333,9 +287,8 @@ class BarCacheManager:
     ) -> list[TimeRange]:
         """Find time ranges not covered by cache.
 
-        Simple boundary-based gap detection:
-        - If no coverage: return full requested range
-        - Otherwise: check for gaps at start and end
+        Uses PostgreSQL multirange operations for accurate gap detection,
+        including internal gaps between non-contiguous covered ranges.
 
         Args:
             symbol: Trading symbol
@@ -346,57 +299,20 @@ class BarCacheManager:
         Returns:
             List of TimeRange gaps that need to be fetched
         """
-        covered_ranges = await self._get_covered_ranges(symbol, resolution)
+        lookup_key = _lookup_key(symbol, resolution)
+        query_range = IntRange(start=from_time, end=to_time)
 
-        if not covered_ranges:
-            # Full miss - need entire range
-            return [TimeRange(start=from_time, end=to_time)]
+        gaps = await self.rangequery_table.get_missing_ranges(
+            lookup_key=lookup_key,
+            query_range=query_range,
+        )
 
-        # Find the overall coverage bounds
-        min_covered = min(c.time_range.start for c in covered_ranges)
-        max_covered = max(c.time_range.end for c in covered_ranges)
-
-        missing: list[TimeRange] = []
-
-        # Gap at the beginning?
-        if from_time < min_covered:
-            missing.append(
-                TimeRange(start=from_time, end=min(to_time, min_covered - 1))
-            )
-
-        # Gap at the end?
-        if to_time > max_covered:
-            missing.append(
-                TimeRange(start=max(from_time, max_covered + 1), end=to_time)
-            )
-
-        return missing
+        # Convert IntRange → TimeRange
+        return [TimeRange(start=gap.start, end=gap.end) for gap in gaps]
 
     # =========================================================================
     # Cleanup
     # =========================================================================
-
-    async def _cleanup_expired_pending(self) -> int:
-        """Remove all expired pending ranges (internal - for background cleanup).
-
-        Returns:
-            Number of expired entries removed
-        """
-        now_ms = int(time.time() * 1000)
-        removed = 0
-
-        all_pending = await self.pending_table.values()
-
-        for p in all_pending:
-            if p.expires_at <= now_ms:
-                key = _primary_key(p.symbol, p.resolution, p.time_range)
-                if await self.pending_table.delete(key):
-                    removed += 1
-
-        if removed:
-            logger.debug(f"Cleaned up {removed} expired pending ranges")
-
-        return removed
 
     async def clear(self, symbol: Optional[str] = None) -> None:
         """Clear cache metadata.

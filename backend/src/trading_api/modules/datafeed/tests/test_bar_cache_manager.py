@@ -372,6 +372,92 @@ async def test_find_missing_gaps_both_ends(manager: BarCacheManager) -> None:
     assert missing[1].end == 2000
 
 
+async def test_find_missing_internal_gap_detected(manager: BarCacheManager) -> None:
+    """Test find_missing_ranges detects internal gap — THE BUG WE'RE FIXING.
+
+    Request:  |-------------------|
+    Covered:  |-----|       |-----|
+    Missing:        |-------|  ← internal gap
+
+    This was previously undetected by the boundary-only algorithm.
+    Now uses PostgreSQL multirange subtraction for accurate detection.
+    """
+    # Two separate coverage regions with gap in middle
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1000, end=1200),
+        StorageType.MEMORY,
+        2,
+    )
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1500, end=2000),
+        StorageType.MEMORY,
+        5,
+    )
+
+    missing = await manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
+
+    # Should detect the internal gap
+    assert len(missing) == 1
+    assert missing[0].start == 1201
+    assert missing[0].end == 1499
+
+
+async def test_find_missing_multiple_internal_gaps(manager: BarCacheManager) -> None:
+    """Test find_missing_ranges detects multiple internal gaps.
+
+    Request:  |--------------------------------|
+    Covered:  |---|   |---|   |---|      |-----|
+    Missing:      |---|   |---|   |------|  ← 3 internal gaps
+    """
+    # Four separate coverage regions with gaps
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1000, end=1100),
+        StorageType.MEMORY,
+        1,
+    )
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1200, end=1300),
+        StorageType.MEMORY,
+        1,
+    )
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1400, end=1500),
+        StorageType.MEMORY,
+        1,
+    )
+    await manager.mark_covered(
+        "AAPL",
+        Resolution.DAY_1,
+        TimeRange(start=1800, end=2000),
+        StorageType.MEMORY,
+        2,
+    )
+
+    missing = await manager.find_missing_ranges("AAPL", Resolution.DAY_1, 1000, 2000)
+
+    # Should detect 3 internal gaps
+    assert len(missing) == 3
+    # Gap 1: between [1000-1100] and [1200-1300]
+    assert missing[0].start == 1101
+    assert missing[0].end == 1199
+    # Gap 2: between [1200-1300] and [1400-1500]
+    assert missing[1].start == 1301
+    assert missing[1].end == 1399
+    # Gap 3: between [1400-1500] and [1800-2000]
+    assert missing[2].start == 1501
+    assert missing[2].end == 1799
+
+
 async def test_find_missing_exact_coverage(manager: BarCacheManager) -> None:
     """Test find_missing_ranges returns empty when coverage exactly matches request."""
     await manager.mark_covered(
