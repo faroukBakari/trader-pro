@@ -165,18 +165,14 @@ class TestDatastoreInterfaceContract:
     """Tests that validate DatastoreInterface implementation requirements."""
 
     @pytest.mark.asyncio
-    async def test_has_persistence_returns_bool(
+    async def test_has_capability_returns_bool(
         self, any_datastore: DatastoreInterface
     ) -> None:
-        """has_persistence property returns boolean."""
-        assert isinstance(any_datastore.has_persistence, bool)
-
-    @pytest.mark.asyncio
-    async def test_has_transactions_returns_bool(
-        self, any_datastore: DatastoreInterface
-    ) -> None:
-        """has_transactions property returns boolean."""
-        assert isinstance(any_datastore.has_transactions, bool)
+        """has_capability() returns boolean for any capability name."""
+        assert isinstance(any_datastore.has_capability("persistence"), bool)
+        assert isinstance(any_datastore.has_capability("transactions"), bool)
+        assert isinstance(any_datastore.has_capability("unknown"), bool)
+        assert any_datastore.has_capability("unknown") is False
 
     @pytest.mark.asyncio
     async def test_datastore_name_returns_string(
@@ -556,16 +552,16 @@ class TestTableConcurrencyContract:
 
 
 class TestFeatureFlagConsistency:
-    """Tests that validate feature flag consistency."""
+    """Tests that validate feature flag consistency via capabilities()."""
 
     @pytest.mark.asyncio
     @pytest.mark.integration
     async def test_inmemory_feature_flags(
         self, inmemory_datastore: DatastoreInterface
     ) -> None:
-        """InMemoryDatastore has expected feature flags."""
-        assert inmemory_datastore.has_persistence is False
-        assert inmemory_datastore.has_transactions is False
+        """InMemoryDatastore has expected capabilities (none)."""
+        assert inmemory_datastore.has_capability("persistence") is False
+        assert inmemory_datastore.has_capability("transactions") is False
 
     @pytest.mark.asyncio
     @pytest.mark.integration
@@ -573,8 +569,8 @@ class TestFeatureFlagConsistency:
     async def test_postgres_feature_flags(
         self, postgres_datastore: DatastoreInterface
     ) -> None:
-        """PostgresDatastore has expected feature flags."""
+        """PostgresDatastore has expected capabilities (all)."""
         if postgres_datastore is None:
             pytest.skip("PostgreSQL not available")
-        assert postgres_datastore.has_persistence is True
-        assert postgres_datastore.has_transactions is True
+        assert postgres_datastore.has_capability("persistence") is True
+        assert postgres_datastore.has_capability("transactions") is True

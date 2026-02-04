@@ -10,6 +10,7 @@ import logging
 import threading
 from pathlib import Path
 
+from trading_api.models.common import DatastoreCapabilitySpec
 from trading_api.shared.config import Settings
 from trading_api.shared.datastore_interface import DatastoreInterface
 
@@ -103,28 +104,55 @@ class DatastoreRegistry:
                 )
 
     async def get_datastores(
-        self, config: Settings | None = None
+        self,
+        required_capabilities: list[DatastoreCapabilitySpec] | None = None,
+        config: Settings | None = None,
     ) -> list[DatastoreInterface]:
-        """Get datastore instances by name.
+        """Get datastore instances, optionally filtered by capabilities.
 
         Args:
+            required_capabilities: Optional capability requirements to filter by.
+                                  If None, returns all datastores.
             config: Optional Settings for dependency injection (tests).
                    Defaults to global settings singleton.
 
         Returns:
-            List of datastore instances
+            List of datastore instances matching requirements
 
         Raises:
             ValueError: If requested datastore not found
 
         [LAZY-LOADING]: Datastore instances created on first request via cls.create().
+        [CAPABILITY-FILTERING]: Mirrors ProviderRegistry pattern.
         """
+        if required_capabilities is None:
+            # No filtering - return all datastores
+            return await asyncio.gather(
+                *[
+                    self._get_instance(name, config=config)
+                    for name in self._datastore_classes.keys()
+                ]
+            )
+
+        # Filter datastores by capability requirements
+        # A datastore must satisfy ALL required (non-optional) capabilities
+        matching_names: list[str] = []
+
+        for name, datastore_class in self._datastore_classes.items():
+            provided_caps = datastore_class.capabilities()
+            satisfies_all = True
+
+            for req_cap in required_capabilities:
+                matched = any(req_cap.matches(prov_cap) for prov_cap in provided_caps)
+                if not matched and not req_cap.optional:
+                    satisfies_all = False
+                    break
+
+            if satisfies_all:
+                matching_names.append(name)
 
         return await asyncio.gather(
-            *[
-                self._get_instance(name, config=config)
-                for name in self._datastore_classes.keys()
-            ]
+            *[self._get_instance(name, config=config) for name in matching_names]
         )
 
     async def _get_instance(

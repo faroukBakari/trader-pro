@@ -1129,12 +1129,12 @@ Services declare what they need → ProviderRegistry finds implementations → A
 
 ```python
 @dataclass(frozen=True)
-class CapabilitySpec:
+class ProviderCapabilitySpec:
     """Type-safe capability declaration."""
-    name: CapabilityName  # "auth", "broker", "datafeed"
+    name: ProviderCapabilityName  # "auth", "broker", "datafeed"
     version: str | None = None  # None = any version
 
-    def matches(self, provider_capability: CapabilitySpec) -> bool:
+    def matches(self, provider_capability: ProviderCapabilitySpec) -> bool:
         """Check if provider satisfies requirement."""
 ```
 

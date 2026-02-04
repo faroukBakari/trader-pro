@@ -155,7 +155,7 @@ async def test_create_uses_injected_settings(
     ds = await PostgresDatastore.create(config=test_settings)
 
     try:
-        assert ds.has_persistence is True
+        assert ds.has_capability("persistence") is True
         # Verify we can actually use it
         table = ds.table(PgSampleModel)
         assert isinstance(table, SQLModelTable)

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from trading_api.datastores.inmemory import InMemoryDatastore
-from trading_api.models.common import CapabilitySpec
+from trading_api.models.common import ProviderCapabilitySpec
 from trading_api.models.exceptions import CommonException
 from trading_api.shared.service_interface import ServiceInterface
 
@@ -14,8 +14,8 @@ class MockServiceRequiringAuth(ServiceInterface):
     """Mock service that requires auth capability."""
 
     @classmethod
-    def capabilities(cls) -> list[CapabilitySpec]:
-        return [CapabilitySpec(name="auth")]
+    def provider_capabilities(cls) -> list[ProviderCapabilitySpec]:
+        return [ProviderCapabilitySpec(name="auth")]
 
     @property
     def module_name(self) -> str:

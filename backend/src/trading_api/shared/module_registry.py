@@ -7,7 +7,7 @@ import importlib
 import logging
 from pathlib import Path
 
-from trading_api.models.common import CapabilitySpec
+from trading_api.models.common import CapabilitySpec, DatastoreCapabilitySpec
 from trading_api.shared import DatastoreInterface
 from trading_api.shared.provider_interface import Provider
 
@@ -169,7 +169,7 @@ class ModuleRegistry:
             for name in self._module_classes.keys()
         ]
 
-    def required_capabilities(self) -> list[CapabilitySpec]:
+    def required_provider_capabilities(self) -> list[CapabilitySpec]:
         """Get the set of all required capabilities across registered modules.
 
         Returns:
@@ -196,6 +196,37 @@ class ModuleRegistry:
             # NOTE: Services may not have capabilities() yet (Phase 4)
             if hasattr(service_class, "capabilities"):
                 service_caps = service_class.capabilities()
+                if service_caps is not None:
+                    capabilities.update(service_caps)
+
+        return list(capabilities)
+
+    def required_datastore_capabilities(self) -> list[DatastoreCapabilitySpec]:
+        """Get the set of all required datastore capabilities across registered modules.
+
+        Returns:
+            List of unique datastore capability specs required by all modules.
+        """
+        capabilities: set[DatastoreCapabilitySpec] = set()
+
+        # Get module specs to enable
+        module_specs = list(self._module_classes.keys())
+
+        for spec in module_specs:
+            # Parse "broker:v1" → "broker"
+            module_name = spec.split(":")[0] if ":" in spec else spec
+
+            # Get module class (not instance)
+            module_class = self._module_classes.get(module_name)
+            if module_class is None:
+                continue
+
+            # Get service class (static, no instantiation)
+            service_class = module_class._service_class()
+
+            # Get datastore capabilities (classmethod, no instance)
+            if hasattr(service_class, "datastore_capabilities"):
+                service_caps = service_class.datastore_capabilities()
                 if service_caps is not None:
                     capabilities.update(service_caps)
 

@@ -82,19 +82,19 @@ class BarCacheManager:
                 message="Use BarCacheManager.create() to instantiate",
             )
 
-        if not datastore.has_exclusion:
+        if not datastore.has_capability("exclusion"):
             raise TradingApiException(
                 code="BAR_CACHE_MANAGER_NO_EXCLUSION_SUPPORT",
                 message="Datastore must support exclusion constraints",
             )
 
-        if not datastore.has_transactions:
+        if not datastore.has_capability("transactions"):
             raise TradingApiException(
                 code="BAR_CACHE_MANAGER_NO_TRANSACTION_SUPPORT",
                 message="Datastore must support transactions for atomic operations",
             )
 
-        if not datastore.has_rangequery:
+        if not datastore.has_capability("rangequery"):
             raise TradingApiException(
                 code="BAR_CACHE_MANAGER_NO_RANGEQUERY_SUPPORT",
                 message="Datastore must support rangequery for gap detection",

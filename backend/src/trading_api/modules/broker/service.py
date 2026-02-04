@@ -32,7 +32,7 @@ from trading_api.models.broker import (
     Position,
     PreOrder,
 )
-from trading_api.models.common import CapabilitySpec
+from trading_api.models.common import ProviderCapabilitySpec
 from trading_api.models.exceptions import ServiceException, TradingApiException
 from trading_api.shared.ws.ws_router import (
     ProviderUpdateCallback,
@@ -76,15 +76,15 @@ class BrokerService(WsRouteService):
     """
 
     @classmethod
-    def capabilities(cls) -> list[CapabilitySpec]:
-        """Return required capabilities for broker service.
+    def provider_capabilities(cls) -> list[ProviderCapabilitySpec]:
+        """Return required provider capabilities for broker service.
 
         Requires broker capability from provider (e.g., FakeBrokerProvider).
 
         Returns:
             List with broker capability requirement
         """
-        return [CapabilitySpec(name="broker")]
+        return [ProviderCapabilitySpec(name="broker")]
 
     @property
     def broker_provider(self) -> BrokerCapability:
