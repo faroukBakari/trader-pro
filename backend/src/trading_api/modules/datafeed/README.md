@@ -65,26 +65,37 @@ The module includes a `BarRepository` for OHLC bar storage using `DatastoreInter
 class BarRepository:
     def __init__(self, datastore: DatastoreInterface) -> None:
         self._datastore = datastore
-        self._table_classes: dict[str, type[Bar]] = {}  # Cache dynamic subclasses
+        self._model_cache: dict[str, type[Bar]] = {}  # Dynamic SQLModel subclasses
+        self._table_cache: dict[str, TableInterface[Bar]] = {}  # Fallback tables
+        self._timeseries_cache: dict[str, TimeSeriesTableInterface[Bar]] = {}  # Preferred path
 
-    def _get_bar_table(self, symbol: str, resolution: Resolution) -> TableInterface[Bar]:
-        # Creates separate table per symbol/resolution: bars_{symbol}_{resolution}
-        table_name = f"bars_{symbol.lower()}_{resolution.value.lower()}"
-        if table_name not in self._table_classes:
-            self._table_classes[table_name] = type(table_name, (Bar,), {"__tablename__": table_name})
-        return self._datastore.table(self._table_classes[table_name])
+    def _get_timeseries_table(self, symbol: str, resolution: Resolution) -> TimeSeriesTableInterface[Bar]:
+        """Get timeseries table for efficient time-range queries."""
+        table_name = self._get_table_name(symbol, resolution)
+        if table_name not in self._timeseries_cache:
+            model = self._model_cache.setdefault(table_name, create_dynamic_table_model(Bar, table_name))
+            self._timeseries_cache[table_name] = self._datastore.timeseries_table(model)
+        return self._timeseries_cache[table_name]
 
     async def store_bars(self, symbol: str, resolution: Resolution, bars: list[Bar]) -> int:
+        # Capability-based routing: use has_timeseries for early check
+        if self._datastore.has_timeseries:
+            ts_table = self._get_timeseries_table(symbol, resolution)
+            return await ts_table.set_batch(bars)  # Efficient bulk INSERT
+
+        # Fallback for InMemoryDatastore
         table = self._get_bar_table(symbol, resolution)
-        # Store bars keyed by timestamp (ms)
-        ...
+        for bar in bars:
+            await table.set(str(bar.time), bar)
+        return len(bars)
 ```
 
 **Key Points:**
 
-- Creates dynamic `TableInterface` per symbol/resolution combination
+- Uses `TimeSeriesTableInterface` for PostgreSQL (via `has_timeseries` check)
+- Falls back to `TableInterface` for InMemoryDatastore (no time-series support)
 - Table naming convention: `bars_{symbol}_{resolution}` (e.g., `bars_aapl_1d`)
-- Bars keyed by timestamp (upsert semantics via `table.set()`)
+- `get_time_range()` for efficient B-tree range scans, `set_batch()` for bulk inserts
 - Supports cleanup via `drop_if_empty()` using `datastore.drop_table()`
 
 ### Cache Management Layer
@@ -117,13 +128,13 @@ missing = await manager.find_missing_ranges("AAPL", resolution, query_start, que
 
 **Key Features**:
 
-| Feature              | Description                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------ |
-| **Gap Detection**    | Boundary-based algorithm finds uncached time ranges                                  |
-| **Pending Tracking** | Prevents duplicate in-flight requests (TTL via `settings.BAR_CACHE_PENDING_TTL_MS`)  |
-| **Range Merging**    | Adjacent/overlapping covered ranges auto-merge                                       |
-| **Storage Tracking** | `CoveredRange.storage_type` indicates cache tier (MEMORY, DATABASE, DATALAKE)        |
-| **Thread Safety**    | Datastore provides per-table locking for concurrent access (no external lock needed) |
+| Feature                | Description                                                                               |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| **Gap Detection**      | Boundary-based algorithm finds uncached time ranges                                       |
+| **Pending Tracking**   | Prevents duplicate in-flight requests (TTL via `settings.BAR_CACHE_PENDING_TTL_MS`)       |
+| **Range Merging**      | Adjacent/overlapping covered ranges auto-merge                                            |
+| **Storage Tracking**   | `CoveredRange.storage_type` indicates cache tier (MEMORY, DATABASE, DATALAKE)             |
+| **Thread Safety**      | Datastore provides per-table locking for concurrent access (no external lock needed)      |
 | **Atomic Transitions** | `mark_covered()` uses database transactions to atomically delete pending + insert covered |
 
 **`mark_covered()` Atomicity**: This method atomically removes the pending range and creates the covered range in a single transaction:

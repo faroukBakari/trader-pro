@@ -15,7 +15,7 @@ import pytest
 from sqlmodel import Field, SQLModel
 
 from trading_api.datastores import PostgresDatastore
-from trading_api.datastores.postgres import SQLModelTable
+from trading_api.datastores.postgres.sqlmodel_table import SQLModelTable
 from trading_api.shared.config import Settings
 from trading_api.shared.datastore_interface import TableInterface
 

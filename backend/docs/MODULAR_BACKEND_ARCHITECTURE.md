@@ -1066,27 +1066,8 @@ The modular architecture integrates a **pluggable provider/capability system** f
     │   datastores)            │
     │                          │
     │  self.datastore          │ ◄── Property for repository init
-    │  self.persistent_datastore│ ◄── First datastore with has_persistence=True
     └──────────────────────────┘
 ```
-
-**Datastore Feature Detection:**
-
-Services can access persistent storage via `persistent_datastore` property:
-
-```python
-class MyService(ServiceInterface):
-    async def backup_critical_data(self) -> None:
-        store = self.persistent_datastore
-        if store is None:
-            logger.warning("No persistent datastore - data won't survive restart")
-            return
-        # Use store for critical operations that need persistence
-        table = store.table(BackupData)  # Auto-extracts indexes from Field()
-        await table.set("latest", backup_data)
-```
-
-The property returns the first datastore where `has_persistence=True`, or `None` if no persistent datastore is configured.
 
 **Two-Phase Loading Process:**
 

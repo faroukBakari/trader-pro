@@ -221,3 +221,6 @@ tmp/
 .testmondata
 .testmondata-shm
 .testmondata-wal
+
+
+docs/plans

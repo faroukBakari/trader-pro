@@ -23,5 +23,9 @@
         "${workspaceFolder}/backend/external_packages",
         "${workspaceFolder}/backend/stubs"
     ],
-    "isort.args": ["--profile", "black"],
+    "isort.args": [
+        "--profile",
+        "black"
+    ],
+    "python.defaultInterpreterPath": "/home/farouk/trader-pro/backend/.venv/bin/python",
 }

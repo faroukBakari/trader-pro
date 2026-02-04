@@ -419,8 +419,8 @@ class InMemoryDatastore(DatastoreInterface):
         return False
 
     @property
-    def is_relational(self) -> bool:
-        """InMemory datastore is not a relational database."""
+    def has_timeseries(self) -> bool:
+        """InMemory datastore does not support time-series operations."""
         return False
 
     @property

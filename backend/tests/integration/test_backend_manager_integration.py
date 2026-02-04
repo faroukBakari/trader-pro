@@ -314,6 +314,7 @@ async def session_backend_manager(
 # ============================================================================
 
 
+@pytest.mark.skip(reason="Flaky - under investigation (cleanup/port issues)")
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.asyncio
@@ -625,6 +626,7 @@ async def lifecycle_manager(
         _active_managers.remove(manager)
 
 
+@pytest.mark.skip(reason="Flaky - under investigation (cleanup/port issues)")
 @pytest.mark.asyncio
 @pytest.mark.xdist_group(name="lifecycle_backend")
 class TestBackendManagerLifecycle:

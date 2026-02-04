@@ -51,21 +51,13 @@ if datastore.has_transactions:
 | `has_persistence`  | `False`  | `True`   |
 | `has_transactions` | `False`  | `True`   |
 | `has_exclusion`    | `False`  | `True`   |
+| `has_timeseries`   | `False`  | `True`   |
 
 **`has_exclusion`**: Indicates support for database-level exclusion constraints (e.g., PostgreSQL `EXCLUDE USING GIST`) that atomically prevent overlapping ranges. Used for cache metadata tables like `PendingRange` and `CoveredRange`.
 
 **`has_transactions`**: Indicates support for ACID transactions via session injection pattern. Enables atomic multi-table operations.
 
-Services can access persistent storage via `persistent_datastore` property:
-
-```python
-class MyService(ServiceInterface):
-    async def backup_critical_data(self) -> None:
-        store = self.persistent_datastore
-        if store is None:
-            raise RuntimeError("No persistent datastore available")
-        # Use store for critical operations
-```
+**`has_timeseries`**: Indicates support for time-series operations via `TimeSeriesTableInterface`. When `True`, `timeseries_table()` returns a table with `get_time_range()` and `set_batch()` methods for efficient time-indexed queries. When `False`, use standard `TableInterface` with manual filtering.
 
 ---
 
@@ -93,10 +85,10 @@ if datastore.has_transactions and datastore.session_factory:
 
 All `TableInterface` CRUD methods accept an optional `session` parameter:
 
-| Caller Provides | Behavior |
-|-----------------|----------|
-| `session=None` (default) | Method creates internal session, auto-commits on success |
-| `session=external_session` | Method uses provided session, **caller owns commit** |
+| Caller Provides            | Behavior                                                 |
+| -------------------------- | -------------------------------------------------------- |
+| `session=None` (default)   | Method creates internal session, auto-commits on success |
+| `session=external_session` | Method uses provided session, **caller owns commit**     |
 
 **Pattern**: "Unit of Work propagation" - the outermost caller controls transaction boundaries.
 
@@ -224,12 +216,12 @@ InMemoryDatastore
 
 #### DatastoreInterface Methods
 
-| Method                       | Description                                                            |
-| ---------------------------- | ---------------------------------------------------------------------- |
-| `table(model_class)`         | Get or create table for model class (auto-extracts indexes from Field) |
-| `datastore_name()` (classmethod) | Canonical name for registry lookup (e.g., "inmemory")              |
-| `list_tables(prefix)`             | List all table names, optionally filtered by prefix                    |
-| `drop_table(name)`                | Drop a table by name (returns True if dropped, False if not found)     |
+| Method                           | Description                                                            |
+| -------------------------------- | ---------------------------------------------------------------------- |
+| `table(model_class)`             | Get or create table for model class (auto-extracts indexes from Field) |
+| `datastore_name()` (classmethod) | Canonical name for registry lookup (e.g., "inmemory")                  |
+| `list_tables(prefix)`            | List all table names, optionally filtered by prefix                    |
+| `drop_table(name)`               | Drop a table by name (returns True if dropped, False if not found)     |
 
 ### Indexing via Field() Metadata
 
@@ -309,6 +301,7 @@ postgres_ds.table(PendingRange)  # Works - creates EXCLUDE USING GIST constraint
 PostgreSQL datastore using **psycopg3** with typed column storage via SQLModel. Provides real persistence with ACID transactions.
 
 **Features**:
+
 - Native PostgreSQL range type support (`int8range`, `tstzrange`, `daterange`) via TypeDecorators
 - Declarative exclusion constraints via `__table_args__["info"]["exclusion"]` metadata
 - GiST index auto-creation for range columns
@@ -529,11 +522,11 @@ class PendingRange(SQLModel, table=True):
 
 **Available Range TypeDecorators** (from `trading_api.types`):
 
-| TypeDecorator    | PostgreSQL Type | Application Type        |
-| ---------------- | --------------- | ----------------------- |
-| `Int8RangeType`  | `int8range`     | `IntRange`, `TimeRange` |
-| `TstzRangeType`  | `tstzrange`     | `DateTimeRange`         |
-| `DateRangeType`  | `daterange`     | `DateOnlyRange`         |
+| TypeDecorator   | PostgreSQL Type | Application Type        |
+| --------------- | --------------- | ----------------------- |
+| `Int8RangeType` | `int8range`     | `IntRange`, `TimeRange` |
+| `TstzRangeType` | `tstzrange`     | `DateTimeRange`         |
+| `DateRangeType` | `daterange`     | `DateOnlyRange`         |
 
 ---
 
@@ -575,16 +568,79 @@ class PendingRange(SQLModel, table=True):
 
 ### Exclusion Config Keys
 
-| Key           | Required | Description                                          |
-| ------------- | -------- | ---------------------------------------------------- |
-| `range_field` | Yes      | Column name containing the range type                |
-| `group`       | No       | Column for grouping (default: `"lookup_key"`)        |
+| Key           | Required | Description                                   |
+| ------------- | -------- | --------------------------------------------- |
+| `range_field` | Yes      | Column name containing the range type         |
+| `group`       | No       | Column for grouping (default: `"lookup_key"`) |
 
 ### Constraint Behavior
 
 - **Within same group**: Ranges cannot overlap (`&&` operator)
 - **Across groups**: No constraint (different `lookup_key` values can have overlapping ranges)
 - **Violation**: PostgreSQL raises exclusion violation error on conflicting INSERT/UPDATE
+
+---
+
+## Interface Segregation
+
+The datastore layer uses **Interface Segregation Pattern (ISP)** to decouple specialized operations from the base interface.
+
+### TimeSeriesTableInterface
+
+For time-indexed data (bars, trades, etc.), use `TimeSeriesTableInterface[T]` which extends `TableInterface[T]`:
+
+| Method                                        | Description                                      |
+| --------------------------------------------- | ------------------------------------------------ |
+| `get_time_range(from_time, to_time, session)` | Efficient B-tree range scan on time column       |
+| `set_batch(values, session) -> int`           | Bulk INSERT...ON CONFLICT, returns new row count |
+
+### Factory Method
+
+Use `datastore.timeseries_table(model_class)` to get a `TimeSeriesTableInterface`:
+
+```python
+from trading_api.shared import TimeSeriesTableInterface
+
+# PostgresDatastore supports timeseries tables
+ts_table: TimeSeriesTableInterface[Bar] = datastore.timeseries_table(BarModel)
+
+# Efficient time-range query
+bars = await ts_table.get_time_range(from_time=1704067200000, to_time=1704153600000)
+
+# Bulk insert with conflict handling
+new_count = await ts_table.set_batch(bars)
+```
+
+### Usage in Repository Pattern
+
+```python
+from trading_api.shared import DatastoreInterface, TimeSeriesTableInterface
+
+class BarRepository:
+    def __init__(self, datastore: DatastoreInterface) -> None:
+        self._datastore = datastore
+        self._ts_cache: dict[str, TimeSeriesTableInterface[Bar]] = {}
+
+    def _get_timeseries_table(self, symbol: str) -> TimeSeriesTableInterface[Bar]:
+        """Get timeseries table for efficient time-range queries."""
+        if symbol not in self._ts_cache:
+            self._ts_cache[symbol] = self._datastore.timeseries_table(self._model_cache[symbol])
+        return self._ts_cache[symbol]
+
+    async def store_bars(self, symbol: str, bars: list[Bar]) -> int:
+        # Capability check: use has_timeseries for early routing
+        if self._datastore.has_timeseries:
+            ts_table = self._get_timeseries_table(symbol)
+            return await ts_table.set_batch(bars)
+
+        # Fallback for InMemory (no timeseries support)
+        table = self._datastore.table(self._model_cache[symbol])
+        for bar in bars:
+            await table.set(str(bar.time), bar)
+        return len(bars)
+```
+
+**Pattern**: Use `has_timeseries` property for capability detection instead of try/except around `timeseries_table()`. This provides clearer intent and avoids exception overhead.
 
 ---
 

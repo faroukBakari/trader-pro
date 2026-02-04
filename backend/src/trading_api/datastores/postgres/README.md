@@ -8,7 +8,6 @@
 PostgreSQL datastore implementation using **psycopg3** with typed column storage:
 
 - **SQLModelTable**: Typed column storage for SQLModel entities
-- **PostgresBarRepository**: Time-series bar storage with table-per-combo pattern (Wave 3A)
 - **Native Range Types**: `int8range`, `tstzrange`, `daterange` via TypeDecorators (Wave 2C)
 - **Exclusion Constraints**: Declarative non-overlapping range constraints via `exclusion_listener.py` (Wave 2C)
 
@@ -17,7 +16,6 @@ PostgreSQL datastore implementation using **psycopg3** with typed column storage
 ```
 postgres/
 ├── __init__.py           # Exports PostgresDatastore, SQLModelTable
-├── bars.py               # Bar storage with table-per-combo pattern (Wave 3A)
 ├── datastore.py          # Main datastore + table() API
 ├── engine.py             # AsyncEngineFactory singleton (SQLAlchemy)
 ├── exclusion_listener.py # SQLAlchemy event listener for EXCLUDE USING GIST
@@ -34,6 +32,7 @@ postgres/
 ## Model Requirements
 
 All models must:
+
 - Use `SQLModel` with `table=True`
 - Define a primary key via `Field(primary_key=True)`
 
@@ -42,34 +41,11 @@ from sqlmodel import Field, SQLModel
 
 class User(SQLModel, table=True):
     __tablename__ = "users"
-    
+
     id: str = Field(primary_key=True)  # Required!
     email: str = Field(unique=True)
     name: str
 ```
-
-## Bar Storage (`bars.py`)
-
-Implements **Wave 3A** time-series bar storage with **table-per-combo pattern** for efficient OHLCV data storage.
-
-### Table Schema
-
-Each symbol/timeframe combination gets its own table:
-
-- **Table naming**: `bars_{symbol}_{timeframe}` (e.g., `bars_aapl_1h`)
-- **Columns**: `time` (PK), `open`, `high`, `low`, `close`, `volume`, `count`
-
-### Key Functions
-
-| Function                              | Purpose                              |
-| ------------------------------------- | ------------------------------------ |
-| `bar_table_name(symbol, timeframe)`   | Generate sanitized table name        |
-| `PostgresBarRepository.upsert_bars()` | Bulk upsert with conflict resolution |
-| `PostgresBarRepository.get_bars()`    | Query bars with optional time range  |
-
-### Design Rationale
-
-Table-per-combo avoids index bloat and enables efficient partition-like queries without PostgreSQL partitioning complexity. Each table is created lazily on first write.
 
 ## SQL Injection Protection
 
@@ -127,18 +103,19 @@ Native PostgreSQL range type support via psycopg3 adapters and SQLAlchemy TypeDe
 
 ### Supported Mappings
 
-| Application Type  | PostgreSQL Type | TypeDecorator    | Adapter Class         |
-| ----------------- | --------------- | ---------------- | --------------------- |
-| `IntRange`        | `int8range`     | `Int8RangeType`  | `Int8RangeDumper`     |
-| `TimeRange`       | `int8range`     | `Int8RangeType`  | `Int8RangeDumper`     |
-| `DateTimeRange`   | `tstzrange`     | `TstzRangeType`  | `TstzRangeDumper`     |
-| `DateOnlyRange`   | `daterange`     | `DateRangeType`  | `DateRangeDumper`     |
+| Application Type | PostgreSQL Type | TypeDecorator   | Adapter Class     |
+| ---------------- | --------------- | --------------- | ----------------- |
+| `IntRange`       | `int8range`     | `Int8RangeType` | `Int8RangeDumper` |
+| `TimeRange`      | `int8range`     | `Int8RangeType` | `Int8RangeDumper` |
+| `DateTimeRange`  | `tstzrange`     | `TstzRangeType` | `TstzRangeDumper` |
+| `DateOnlyRange`  | `daterange`     | `DateRangeType` | `DateRangeDumper` |
 
 ### How It Works
 
 **1. TypeDecorator (SQLAlchemy DDL + Query Compilation)**
 
 TypeDecorators in `types/range.py` handle:
+
 - DDL generation: `CREATE TABLE ... (column int8range)`
 - Query compilation: Type coercion in WHERE clauses
 - Value conversion via `process_bind_param()` / `process_result_value()`
@@ -165,6 +142,7 @@ async with await psycopg.AsyncConnection.connect(dsn) as conn:
 **3. Canonical Form Handling**
 
 PostgreSQL canonicalizes discrete ranges (int, date) to `[)` bounds:
+
 - `[1, 10]` → `[1, 11)` (stored internally)
 - Adapters handle this: `Range(start=1, end=10)` round-trips correctly
 
@@ -224,10 +202,10 @@ The listener is registered before `SQLModel.metadata.create_all()` in `PostgresD
 
 ### Exclusion Config Keys
 
-| Key           | Required | Default        | Description                           |
-| ------------- | -------- | -------------- | ------------------------------------- |
-| `range_field` | Yes      | —              | Column containing the range type      |
-| `group`       | No       | `"lookup_key"` | Column for grouping (equality check)  |
+| Key           | Required | Default        | Description                          |
+| ------------- | -------- | -------------- | ------------------------------------ |
+| `range_field` | Yes      | —              | Column containing the range type     |
+| `group`       | No       | `"lookup_key"` | Column for grouping (equality check) |
 
 ### Constraint Semantics
 
@@ -256,10 +234,10 @@ except ExclusionViolation:
 
 ### Ownership Semantics
 
-| Session Provided? | Behavior | Who Commits? |
-|-------------------|----------|--------------|
+| Session Provided? | Behavior                 | Who Commits?                             |
+| ----------------- | ------------------------ | ---------------------------------------- |
 | `None` (default)  | Creates internal session | `_session_scope` auto-commits on success |
-| External session  | Uses provided session | Caller must commit |
+| External session  | Uses provided session    | Caller must commit                       |
 
 ### Internal Implementation
 
@@ -303,14 +281,14 @@ Within the same session, uncommitted writes are visible to subsequent reads:
 ```python
 async with datastore.session_factory() as session:
     await table.set("new_key", model, session=session)
-    
+
     # Same session can read uncommitted data
     result = await table.get("new_key", session=session)  # Returns model
     exists = await table.exists("new_key", session=session)  # True
-    
+
     # Different session (or no session) cannot see it yet
     external_result = await table.get("new_key")  # None (not committed)
-    
+
     await session.commit()
 ```
 

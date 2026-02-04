@@ -4,10 +4,19 @@
 Replaces JSONB storage with typed columns using SQLModel ORM.
 Used for tables with defined SQLModel classes (table=True).
 
+Interface Segregation Pattern:
+- SQLModelTable: Core CRUD operations (TableInterface)
+- TimeSeriesSQLModelTable: Time-range queries + batch ops (TimeSeriesTableInterface)
+
 Lazy table creation pattern matches PostgresTable behavior:
 - Tables are created on first access via _ensure_table()
 - Uses SQLModel.metadata.create_all(checkfirst=True) for idempotent creation
 - No dependency on Alembic for initial schema bootstrap
+
+Dynamic Table Support:
+- Supports dynamic subclasses of table=True models (e.g., bars_{symbol}_{resolution})
+- Creates SQLAlchemy Table objects from parent model's column definitions
+- Tables are created with custom __tablename__ but parent's columns
 """
 
 from __future__ import annotations
@@ -17,13 +26,27 @@ from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from pydantic import BaseModel
-from sqlalchemy import CursorResult, Table, delete, func, inspect, literal, select, text
+from sqlalchemy import (
+    Column,
+    CursorResult,
+    MetaData,
+    Table,
+    delete,
+    func,
+    inspect,
+    literal,
+    select,
+    text,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import NoInspectionAvailable
 from sqlalchemy.sql import quoted_name
 from sqlmodel import SQLModel
 
-from trading_api.shared.datastore_interface import TableInterface
+from trading_api.shared.datastore_interface import (
+    TableInterface,
+    TimeSeriesTableInterface,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -42,6 +65,7 @@ class SQLModelTable(TableInterface[T]):
     - Typed column storage (not JSONB)
     - Uses SQLModel class for schema definition
     - Supports upsert via PostgreSQL INSERT ... ON CONFLICT
+    - Supports dynamic subclasses with custom __tablename__
 
     Usage:
         table = SQLModelTable(User, session_factory, primary_key="id")
@@ -57,7 +81,7 @@ class SQLModelTable(TableInterface[T]):
         """Initialize SQLModelTable.
 
         Args:
-            model_class: SQLModel class with table=True
+            model_class: SQLModel class with table=True or dynamic subclass
             session_factory: Async session factory for database operations
             primary_key: Name of the primary key field
         """
@@ -66,17 +90,83 @@ class SQLModelTable(TableInterface[T]):
         self._pk = primary_key
         self._pk_col = getattr(model_class, primary_key)
         self._initialized = False
+        self._table_name: str | None = None
 
         # Extract SQLAlchemy Table for targeted create_all
         try:
             mapper = inspect(model_class)
             assert mapper is not None
             self._sa_table: Table | None = cast(Table, mapper.persist_selectable)
+            self._table_name = self._sa_table.name
         except NoInspectionAvailable:
-            self._sa_table = None
+            # Dynamic subclass - create table from parent's columns
+            self._sa_table = self._create_dynamic_table(model_class, primary_key)
 
         # Detect range columns requiring GiST indexes (no DB access yet)
         self._gist_index_columns: list[str] = self._detect_range_columns()
+
+    def _create_dynamic_table(
+        self, model_class: type[T], primary_key: str
+    ) -> Table | None:
+        """Create SQLAlchemy Table for dynamic subclasses.
+
+        For models created via BarRepository._create_bar_model(), we need
+        to construct a Table with the custom __tablename__ but using
+        column definitions from the parent model.
+
+        Args:
+            model_class: Dynamic subclass with __tablename__
+            primary_key: Name of the primary key field
+
+        Returns:
+            SQLAlchemy Table or None if parent table not found
+        """
+        # Get table name from model class
+        table_name = getattr(model_class, "__tablename__", None)
+        if table_name is None:
+            logger.warning(
+                f"Cannot create dynamic table for {model_class.__name__}: "
+                "no __tablename__ attribute"
+            )
+            return None
+        self._table_name = str(table_name)
+
+        # Find parent class with table=True to get column definitions
+        from sqlalchemy.orm import Mapper
+
+        parent_table: Table | None = None
+        for parent in model_class.__mro__:
+            if parent is model_class:
+                continue
+            if parent is SQLModel or parent is object:
+                break
+            try:
+                parent_mapper: Mapper[Any] = inspect(parent)
+                parent_table = cast(Table, parent_mapper.persist_selectable)
+                break
+            except NoInspectionAvailable:
+                continue
+
+        if parent_table is None:
+            logger.warning(
+                f"Cannot create dynamic table for {model_class.__name__}: "
+                "no parent with table=True found"
+            )
+            return None
+
+        # Create new table with same columns but different name
+        # Use a local metadata to avoid polluting SQLModel.metadata
+        local_metadata = MetaData()
+        columns = [
+            Column(col.name, col.type, primary_key=col.primary_key)
+            for col in parent_table.columns
+        ]
+        dynamic_table = Table(self._table_name, local_metadata, *columns)
+
+        logger.debug(
+            f"Created dynamic table {self._table_name} from parent {parent_table.name}"
+        )
+        return dynamic_table
 
     def _detect_range_columns(self) -> list[str]:
         """Detect columns with range types requiring GiST indexes.
@@ -291,79 +381,6 @@ class SQLModelTable(TableInterface[T]):
             await s.execute(stmt)
             # Note: commit handled by _session_scope if we own the session
 
-    # ────────────────────────────────────────────────────────────────────────
-    # Timeseries / Bulk Operations
-    # ────────────────────────────────────────────────────────────────────────
-
-    async def get_many(
-        self,
-        from_time: int,
-        to_time: int,
-        session: "AsyncSession | None" = None,
-    ) -> list[T]:
-        """Get values within time range using B-tree index. [TIMESERIES]
-
-        Efficient range query leveraging the primary key index on time column.
-        Returns results ordered by primary key (time) ascending.
-
-        Args:
-            from_time: Range start (inclusive), typically milliseconds timestamp
-            to_time: Range end (inclusive), typically milliseconds timestamp
-            session: Optional external session for transaction batching
-
-        Returns:
-            List of values ordered by time ascending
-        """
-        await self._ensure_table()
-        async with self._session_scope(session) as s:
-            stmt = (
-                select(self._model)
-                .where(self._pk_col >= from_time)
-                .where(self._pk_col <= to_time)
-                .order_by(self._pk_col)
-            )
-            result = await s.execute(stmt)
-            return list(result.scalars().all())
-
-    async def set_many(
-        self,
-        values: list[T],
-        session: "AsyncSession | None" = None,
-    ) -> int:
-        """Bulk upsert values using batch INSERT...ON CONFLICT. [BATCH]
-
-        Efficiently stores multiple values in a single database roundtrip.
-        Uses PostgreSQL's INSERT ... ON CONFLICT DO UPDATE for upsert semantics.
-
-        Args:
-            values: List of model instances to upsert
-            session: Optional external session for transaction batching
-
-        Returns:
-            Number of values processed (note: doesn't distinguish inserts vs updates)
-        """
-        if not values:
-            return 0
-
-        await self._ensure_table()
-
-        async with self._session_scope(session) as s:
-            # Convert models to dicts for batch insert
-            rows = [v.model_dump() for v in values]
-
-            # Get non-PK columns for update set
-            update_cols = [k for k in rows[0].keys() if k != self._pk]
-
-            # PostgreSQL batch upsert
-            stmt = pg_insert(self._model).values(rows)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=[self._pk],
-                set_={col: stmt.excluded[col] for col in update_cols},
-            )
-            await s.execute(stmt)
-
-        return len(values)
-
     async def delete(
         self,
         key: str,
@@ -476,3 +493,106 @@ class SQLModelTable(TableInterface[T]):
                 record = row[0]
                 key = str(getattr(record, self._pk))
                 yield key, record
+
+
+class TimeSeriesSQLModelTable(SQLModelTable[T], TimeSeriesTableInterface[T]):
+    """SQLModelTable with timeseries operations for time-indexed data.
+
+    Extends SQLModelTable with efficient time-range queries and batch operations.
+    Use datastore.timeseries_table(model_class) to obtain this interface.
+
+    Requirements:
+        - Model must have time-based primary key (e.g., timestamp in ms)
+        - Model must use SQLModel with table=True
+
+    Usage:
+        table = TimeSeriesSQLModelTable(Bar, session_factory, primary_key="time")
+        bars = await table.get_time_range(from_time, to_time)
+    """
+
+    async def get_time_range(
+        self,
+        from_time: int,
+        to_time: int,
+        session: "AsyncSession | None" = None,
+    ) -> list[T]:
+        """Get values within time range using B-tree index.
+
+        Efficient range query leveraging the primary key index on time column.
+        Returns results ordered by primary key (time) ascending.
+
+        Args:
+            from_time: Range start (inclusive), typically milliseconds timestamp
+            to_time: Range end (inclusive), typically milliseconds timestamp
+            session: Optional external session for transaction batching
+
+        Returns:
+            List of values ordered by time ascending
+        """
+        await self._ensure_table()
+
+        if self._sa_table is None:
+            raise RuntimeError(f"No table for {self._model.__name__}")
+
+        # Use sa_table for dynamic subclasses that aren't mapper-inspectable
+        pk_col = self._sa_table.c[self._pk]
+
+        async with self._session_scope(session) as s:
+            stmt = (
+                select(self._sa_table)
+                .where(pk_col >= from_time)
+                .where(pk_col <= to_time)
+                .order_by(pk_col)
+            )
+            result = await s.execute(stmt)
+            rows = result.fetchall()
+            # Convert Row objects to model instances
+            return [self._model.model_validate(dict(row._mapping)) for row in rows]
+
+    async def set_batch(
+        self,
+        values: list[T],
+        session: "AsyncSession | None" = None,
+    ) -> int:
+        """Bulk upsert values using batch INSERT...ON CONFLICT.
+
+        Efficiently stores multiple values in a single database roundtrip.
+        Uses PostgreSQL's INSERT ... ON CONFLICT DO UPDATE for upsert semantics.
+
+        Args:
+            values: List of model instances to upsert
+            session: Optional external session for transaction batching
+
+        Returns:
+            Number of NEW rows inserted (not updates to existing rows)
+        """
+        if not values:
+            return 0
+
+        await self._ensure_table()
+
+        if self._sa_table is None:
+            raise RuntimeError(f"No table for {self._model.__name__}")
+
+        async with self._session_scope(session) as s:
+            # Convert models to dicts for batch insert
+            rows = [v.model_dump() for v in values]
+
+            # Get non-PK columns for update set
+            update_cols = [k for k in rows[0].keys() if k != self._pk]
+
+            # Use sa_table for dynamic subclasses
+            insert_stmt = pg_insert(self._sa_table).values(rows)
+            upsert_stmt = insert_stmt.on_conflict_do_update(
+                index_elements=[self._pk],
+                set_={col: insert_stmt.excluded[col] for col in update_cols},
+            )
+
+            # Execute and get xmax to distinguish inserts vs updates
+            # xmax=0 means newly inserted row, xmax>0 means updated existing
+            returning_stmt = upsert_stmt.returning(text("(xmax = 0) AS is_insert"))
+            result = await s.execute(returning_stmt)
+            rows_result = result.fetchall()
+            new_inserts = sum(1 for row in rows_result if row.is_insert)
+
+        return new_inserts
