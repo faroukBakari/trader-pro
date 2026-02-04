@@ -97,7 +97,7 @@ export class WebSocketBase {
       reconnect: true,
       maxReconnectAttempts: 5,
       reconnectDelay: 1000,
-      debug: true,
+      debug: false,
       wsUrl,
     }
     this.logger = this.config.debug
@@ -457,7 +457,7 @@ export class WebSocketClient<TParams extends object, TBackendData extends object
   private debounceMs?: number
   private dataMapper: ((data: TBackendData) => TData)
 
-  private debug: boolean = true
+  private debug: boolean = false
   private logger: Console = this.debug
     ? console
     : ({ log: () => { }, warn: () => { }, error: () => { }, debug: () => { } } as Console)
