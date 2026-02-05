@@ -313,18 +313,10 @@ class ServerManager:
             # Exclude generated files and management scripts to prevent reload loops
             cmd.extend(
                 [
+                    "--reload-dir",
+                    "src/",
                     "--reload-exclude",
-                    "*/openapi.json",
-                    "--reload-exclude",
-                    "*/asyncapi.json",
-                    "--reload-exclude",
-                    "*/clients/*",
-                    "--reload-exclude",
-                    "*/.local/*",
-                    "--reload-exclude",
-                    "*/.pids/*",
-                    "--reload-exclude",
-                    "*/scripts/*",
+                    "**/*__generated/*",
                     "--reload-exclude",
                     "*/__pycache__/*",
                     "--reload-exclude",
@@ -772,6 +764,16 @@ class ServerManager:
                     logger.info(f"Stopping {instance_name} (PID: {pid})...")
                     self._stop_process(pid, instance_name, timeout)
 
+                # Clean up PID file after stopping (regardless of whether process was running)
+                pid_file = self.pid_dir / f"{instance_name}.pid"
+                if pid_file.exists():
+                    try:
+                        pid_file.unlink()
+                    except OSError as e:
+                        logger.warning(
+                            f"Failed to remove PID file for {instance_name}: {e}"
+                        )
+
         logger.info("All processes stopped")
 
         # Wait for ports to be released
@@ -1175,6 +1177,15 @@ async def cmd_start(args: argparse.Namespace) -> int:
     except Exception as e:
         logger.exception(f"Failed to load configuration: {e}")
         return 1
+
+    # Force regenerate nginx config if requested (delete existing to trigger regeneration)
+    if args.generate_nginx:
+        nginx_config_path = Path(".local/nginx.conf")
+        if nginx_config_path.exists():
+            nginx_config_path.unlink()
+            logger.info(
+                f"Removed existing nginx config for regeneration: {nginx_config_path}"
+            )
 
     # Create and run server manager (always runs in detached mode)
     # The ServerManager handles nginx config generation internally

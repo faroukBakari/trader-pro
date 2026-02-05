@@ -1,41 +1,38 @@
+<!-- Version: 2.0 | Last updated: 2026-02-01 -->
 # Documentation Assessment Template
 
-Reference template for `doc-assessment.prompt.md`. The assessment agent reads this at runtime.
+Quick reference for `doc-assessment.prompt.md` output formats. The assessment agent reads this at runtime.
 
 ---
 
-## Section 1: Documentation Refactoring Report (Template)
+## Plan File Template
 
-### Discrepancy Table
+Use this structure for `docs/tmp/documentation-assessment-plan.md`:
 
-| Document          | Verification Source | Status          | Drift Type | Finding                 |
-| ----------------- | ------------------- | --------------- | ---------- | ----------------------- |
-| `path/to/doc.md`  | `src/module/`       | ⚠️ INCONSISTENT | Knowledge  | Doc says X, code uses Y |
-| `path/to/doc2.md` | `src/other/`        | ✅ UP-TO-DATE   | -          | All references verified |
-
-### Structural Proposals
-
-| Action    | Source                  | Target                       | Rationale                 |
-| --------- | ----------------------- | ---------------------------- | ------------------------- |
-| **MERGE** | `doc-a.md` + `doc-b.md` | `combined.md`                | Both describe same module |
-| **SPLIT** | `large-doc.md`          | `api.md` + `architecture.md` | Covers unrelated concerns |
-| **MOVE**  | `docs/impl.md`          | `src/module/README.md`       | Align with code location  |
+```markdown
+# Documentation Assessment Plan
+**Generated**: [DATE]
+**Phase 1 Status**: Approved
 
 ---
 
-## Section 2: Wave Plan Structure
+## Section 1: Approved Refactoring Report
+
+[Copy discrepancy table and structural proposals from Phase 1 output]
+
+---
+
+## Section 2: Wave Plan
 
 ### Wave 1: Module-Level (The Truth)
-
 Update docs inside `src/` folders directly against local code.
 
 - [ ] **[ACTION]**: `path/to/doc.md`
   - **Verification Source**: `src/path/to/code/`
   - **Status**: [UP-TO-DATE | INCONSISTENT | NEEDS-VERIFICATION]
-  - **Findings**: [Summary of issues found]
+  - **Findings**: [Summary of issues]
 
 ### Wave 2: Sub-System (The Bridge)
-
 Update integration docs, API contracts, and cross-module flows.
 
 - [ ] **[ACTION]**: `backend/docs/ARCHITECTURE.md`
@@ -43,125 +40,76 @@ Update integration docs, API contracts, and cross-module flows.
   - **Depends On**: Wave 1 completion
 
 ### Wave 3: Project-Level (The Global)
-
 Update root README and high-level architecture docs.
 
 - [ ] **[ACTION]**: `README.md`
   - **Verification Source**: Entire project structure
-  - **Depends On**: Wave 1 + 2 completion
+  - **Depends On**: Wave 2 completion
 
 ### Wave 4: Guide Regeneration
-
-Regenerate `docs/DOCUMENTATION-GUIDE.md` to reflect new structure.
+- [ ] Regenerate `docs/DOCUMENTATION-GUIDE.md`
 
 ---
 
-## Section 3: Execution Instructions (For Follow-Plan Agent)
-
-You are a technical documentation specialist. Execute this plan step-by-step.
+## Section 3: Execution Instructions
 
 ### Per-Document Workflow
+1. Read verification source (code) first
+2. Compare doc claims against code behavior
+3. Update documentation to match code
+4. Validate all relative links resolve
+5. Mark checkbox complete
 
-1. **Read Code First**: Analyze the "Verification Source" before touching the doc
-2. **Identify Drift**: Compare doc claims against actual code behavior
-3. **Apply Fixes**: Update documentation to match code reality
-4. **Validate Links**: Ensure all relative links resolve correctly
-5. **Update Checkbox**: Mark task complete in this file
-
-### AI-Readable Standards (Apply to Every Doc)
-
-| Technique        | Format                                                          |
-| ---------------- | --------------------------------------------------------------- |
-| Metadata Header  | `<!-- METADATA: scope=..., priority=..., last_verified=... -->` |
-| ADR Callouts     | `**[DECISION]**: [choice] [rationale] [alternatives-rejected]`  |
-| Semantic Markers | `[PERFORMANCE]`, `[PITFALL]`, `[SECURITY]`, `[DEPRECATED]`      |
-| Visuals          | Mermaid diagrams > Tables > Bullet points > Paragraphs          |
-| Code Snippets    | Small illustrative snippets with source file reference          |
+### Doc Standards
+| Technique | Format |
+|-----------|--------|
+| Metadata | `<!-- METADATA: scope=..., last_verified=YYYY-MM-DD -->` |
+| Decisions | `**[DECISION]**: [choice] — [rationale]` |
+| Markers | `[PERFORMANCE]`, `[PITFALL]`, `[SECURITY]`, `[DEPRECATED]` |
 
 ### Post-Wave Checklist
-
 - [ ] All checkboxes in wave marked complete
-- [ ] Section numbering updated
 - [ ] Cross-reference tables updated
-- [ ] All internal links validated (relative paths only)
+- [ ] All internal links validated
 
 ---
 
-## Section 4: Final Report Structure
+## Section 4: Final Report Instructions
 
 After all waves complete, generate `docs/tmp/documentation-assessment-report.md`:
 
-```markdown
-# Documentation Assessment Report
-
-**Generated**: [DATE]
-**Agent**: doc-assessment
-
-## Executive Summary
-
-- Files assessed: X
-- Files updated: Y
-- Merges performed: Z
-- Splits performed: W
-
-## Structural Changes Applied
-
-[Summary from Section 1 proposals]
-
-## Findings by Category
-
-### Ghost Docs (Docs describing deleted code)
-
-- [List]
-
-### Dark Code (Code with no documentation)
-
-- [List]
-
-### Knowledge Drift (Doc ≠ Code)
-
-- [List]
-
-### Broken Links
-
-- [List]
-
-## Recommendations
-
-[Prioritized list of follow-up actions]
+[template provided in main prompt]
 ```
 
 ---
 
-## Assessment Categories Reference
+## Reference Tables
 
 ### Document Status
 
-| Status             | Icon | Meaning                                              |
-| ------------------ | ---- | ---------------------------------------------------- |
-| UP-TO-DATE         | ✅   | All references verified, no issues                   |
-| INCONSISTENT       | ⚠️   | Deprecated refs, terminology conflicts, broken links |
-| NEEDS-VERIFICATION | 🔍   | Missing dates, complex cross-refs needing validation |
-| EXTERNAL           | 📦   | Third-party docs (verify references only)            |
+| Status | Icon | Meaning |
+|--------|------|---------|
+| UP-TO-DATE | - | All references verified |
+| INCONSISTENT | ! | Deprecated refs, terminology conflicts |
+| NEEDS-VERIFICATION | ? | Complex cross-refs needing validation |
+| EXTERNAL | ext | Third-party docs |
 
 ### Structural Actions
 
-| Action | Icon | Meaning                             |
-| ------ | ---- | ----------------------------------- |
-| RETAIN | 🔒   | Document unchanged                  |
-| UPDATE | 📝   | Content updated, location unchanged |
-| MERGE  | 🔄   | Combined into another document      |
-| SPLIT  | ✂️   | Divided into multiple documents     |
-| MOVE   | 📁   | Relocated to different path         |
-| DELETE | 🗑️   | Removed (ghost doc)                 |
+| Action | When to Use |
+|--------|-------------|
+| RETAIN | No changes needed |
+| UPDATE | Content updated, location unchanged |
+| MERGE | Multiple docs describe same code module |
+| SPLIT | Single doc covers unrelated code paths |
+| MOVE | Doc location misaligned with code |
+| DELETE | Ghost doc, no valid verification source |
 
----
+### Gap Categories
 
-## Gap Analysis Categories
-
-| Gap Type            | Definition                                       | Example                                |
-| ------------------- | ------------------------------------------------ | -------------------------------------- |
-| **Ghost Doc**       | Doc describes code/feature that no longer exists | `OAUTH.md` but OAuth removed           |
-| **Dark Code**       | Significant code logic with zero doc footprint   | Complex service with no README         |
-| **Knowledge Drift** | Doc claims contradict actual code                | Doc: "uses REST", Code: uses WebSocket |
-| **Stale Reference** | Links to moved/renamed files                     | Link to `old-path.md` that moved       |
+| Type | Definition |
+|------|------------|
+| Ghost Doc | Doc describes code that no longer exists |
+| Dark Code | Significant code with zero doc coverage |
+| Knowledge Drift | Doc claims contradict code reality |
+| Stale Reference | Links to moved/renamed files |

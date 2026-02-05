@@ -212,7 +212,7 @@ providers = await registry.get_providers([CapabilitySpec(name="auth")])
    ↓
 3. ProviderRegistry.auto_discover() - finds all providers
    ↓
-4. AppFactory._resolve_capabilities() - determines what's needed
+4. ModuleRegistry.required_capabilities() - determines what's needed
    ↓
 5. ProviderRegistry.get_providers() - lazy-loads matching providers
    ↓
@@ -694,7 +694,8 @@ async def test_provider_integration():
     app = await factory.create_app(enabled_module_names=["auth"])
 
     # Verify provider was injected
-    auth_module = factory.module_registry.get_module("auth")
+    auth_modules = factory.module_registry.get_modules(module_names=["auth"])
+    auth_module = auth_modules[0]
     assert len(auth_module.service._providers) > 0
 ```
 
@@ -1247,13 +1248,13 @@ class MyProvider(Provider, MyCapability):
 
 ```python
 @dataclass(frozen=True)
-class CapabilitySpec:
+class ProviderCapabilitySpec:
     """Type-safe capability specification."""
 
-    name: CapabilityName  # "auth", "broker", "datafeed", etc.
+    name: ProviderCapabilityName  # "auth", "broker", "datafeed"
     version: str | None = None
 
-    def matches(self, provider_capability: CapabilitySpec) -> bool:
+    def matches(self, provider_capability: ProviderCapabilitySpec) -> bool:
         """Check if provider satisfies this requirement."""
 ```
 
@@ -1310,9 +1311,6 @@ class ProviderRegistry:
         required_capabilities: list[CapabilitySpec]
     ) -> list[Provider]:
         """Get provider instances for capabilities."""
-
-    async def get_provider(self, name: str) -> Provider:
-        """Get specific provider by name."""
 
     def list_providers(self) -> list[str]:
 ```

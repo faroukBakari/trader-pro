@@ -13,7 +13,7 @@ from fastapi.websockets import WebSocketState
 from pydantic import BaseModel, Field
 
 from trading_api.models import ErrorPayload, SubscriptionError, SubscriptionUpdate
-from trading_api.models.common import CapabilitySpec
+from trading_api.models.common import ProviderCapabilitySpec
 from trading_api.models.exceptions import ProviderException, TradingApiException
 from trading_api.shared.ws.generic_route import WsRouter
 from trading_api.shared.ws.ws_router import (
@@ -52,7 +52,7 @@ class MockWsRouteService(WsRouteService):
         self._topics: dict[str, tuple[ProviderUpdateCallback, TopicErrorCallback]] = {}
 
     @classmethod
-    def capabilities(cls) -> list[CapabilitySpec]:
+    def provider_capabilities(cls) -> list[ProviderCapabilitySpec]:
         """No capabilities required for mock service."""
         return []
 

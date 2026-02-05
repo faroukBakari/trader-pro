@@ -59,14 +59,24 @@ make install           # Install dependencies (checks Python/Poetry, optional ng
 make dev               # Start dev server (checks port)
 make kill-dev          # Kill backend dev server (port 8000)
 
-# Testing
-make test                    # Run all tests (boundaries + modules + integration)
-make test-boundaries         # Root-level tests only (excluding integration)
-make test-providers          # Provider system tests only
-make test-modules            # All module tests (auto-discovers modules)
+# Testing (uses pytest-testmon for incremental runs by default)
+make test                    # Run all tests (incremental with testmon)
+make test-full               # Run all tests (complete suite, no testmon)
+make test-boundaries         # Root-level tests only (incremental)
+make test-boundaries-full    # Root-level tests only (complete)
+make test-providers          # Provider system tests only (incremental)
+make test-providers-full     # Provider system tests only (complete)
+make test-modules            # All module tests (incremental)
+make test-modules-full       # All module tests (complete)
 make test-module-<name>      # Specific module tests (e.g., make test-module-auth)
-make test-integration        # Integration tests only
+make test-integration        # Integration tests only (incremental)
+make test-integration-full   # Integration tests only (complete)
 make test-cov                # Tests with coverage
+
+# Testmon management
+make testmon-forcerun        # Force full run + rebuild dependency database
+make testmon-reset           # Clear testmon database
+make testmon-status          # Show testmon database status
 
 # Testing with ARGS (pytest arguments)
 make test-providers ARGS="-k test_lazy_loading"           # Single test by pattern

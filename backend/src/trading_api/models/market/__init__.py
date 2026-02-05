@@ -5,6 +5,7 @@ This package contains models related to market data, instruments,
 quotes, bars, and datafeed configuration.
 """
 
+from .bar_cache import CoveredRange, PendingRange, TimeRange
 from .bars import (
     Bar,
     BarsSubscriptionRequest,
@@ -50,4 +51,8 @@ __all__: list[str] = [
     # Configuration and health
     "DatafeedConfiguration",
     "QuoteDataSubscriptionRequest",
+    # Cache models
+    "TimeRange",
+    "PendingRange",
+    "CoveredRange",
 ]

@@ -1,7 +1,7 @@
 # Datafeed Module
 
 **Status**: ✅ Production Ready  
-**Last Updated**: January 16, 2026  
+**Last Updated**: February 5, 2026  
 **Related Files**: `backend/src/trading_api/modules/datafeed/`
 
 ---
@@ -54,6 +54,188 @@ class DatafeedService(WsRouteService):
 **[DECISION]**: DatafeedService is a thin BFF layer - all business logic lives in the `DatafeedCapability` provider (e.g., `TWSDatafeedProvider`).
 
 **[PATTERN]**: Simple Topic Controller - Service subscribes to the provider once per symbol per topic. Symbol mutualization (deduplication) is handled at the provider/tracker level (`QuoteTracker` manages subscription reference counting internally).
+
+**Datastore Access**: Service inherits `datastore` property from `ServiceInterface`. Used to initialize `BarRepository(self.datastore)` for bar storage with per-table RWLock concurrency.
+
+### Repository Layer
+
+The module includes a `BarRepository` for OHLC bar storage using `DatastoreInterface`:
+
+```python
+class BarRepository:
+    def __init__(self, datastore: DatastoreInterface) -> None:
+        self._datastore = datastore
+        self._model_cache: dict[str, type[Bar]] = {}  # Dynamic SQLModel subclasses
+        self._table_cache: dict[str, TableInterface[Bar]] = {}  # Fallback tables
+        self._timeseries_cache: dict[str, TimeSeriesTableInterface[Bar]] = {}  # Preferred path
+
+    def _get_timeseries_table(self, symbol: str, resolution: Resolution) -> TimeSeriesTableInterface[Bar]:
+        """Get timeseries table for efficient time-range queries."""
+        table_name = self._get_table_name(symbol, resolution)
+        if table_name not in self._timeseries_cache:
+            model = self._model_cache.setdefault(table_name, create_dynamic_table_model(Bar, table_name))
+            self._timeseries_cache[table_name] = self._datastore.timeseries_table(model)
+        return self._timeseries_cache[table_name]
+
+    async def store_bars(self, symbol: str, resolution: Resolution, bars: list[Bar]) -> int:
+        # Capability-based routing: use has_timeseries for early check
+        if self._datastore.has_timeseries:
+            ts_table = self._get_timeseries_table(symbol, resolution)
+            return await ts_table.set_batch(bars)  # Efficient bulk INSERT
+
+        # Fallback for InMemoryDatastore
+        table = self._get_bar_table(symbol, resolution)
+        for bar in bars:
+            await table.set(str(bar.time), bar)
+        return len(bars)
+```
+
+**Key Points:**
+
+- Uses `TimeSeriesTableInterface` for PostgreSQL (via `has_timeseries` check)
+- Falls back to `TableInterface` for InMemoryDatastore (no time-series support)
+- Table naming convention: `bars_{symbol}_{resolution}` (e.g., `bars_aapl_1d`)
+- `get_time_range()` for efficient B-tree range scans, `set_batch()` for bulk inserts
+- Supports cleanup via `drop_if_empty()` using `datastore.drop_table()`
+
+### Cache Management Layer
+
+The `BarCacheManager` provides intelligent cache metadata tracking for historical bars:
+
+```python
+from trading_api.datastores import InMemoryDatastore
+from trading_api.modules.datafeed.bar_cache_manager import BarCacheManager
+from trading_api.models.market import TimeRange
+from trading_api.shared.config import Settings
+
+# Initialize via async factory (required pattern)
+datastore = InMemoryDatastore()
+settings = Settings()  # Uses BAR_CACHE_PENDING_TTL_MS config
+manager = await BarCacheManager.create(datastore=datastore, settings=settings)
+
+# Track in-flight request (async)
+await manager.add_pending(symbol="AAPL", resolution=resolution, time_range=TimeRange(start=start, end=end))
+
+# After successful fetch, mark as covered
+await manager.mark_covered(symbol="AAPL", resolution=resolution, time_range=TimeRange(start=start, end=end), storage_type=StorageType.MEMORY, bar_count=100)
+
+# Find gaps for subsequent requests
+missing = await manager.find_missing_ranges("AAPL", resolution, query_start, query_end)
+# Returns: [TimeRange(start=gap_start, end=gap_end), ...]
+```
+
+**Instantiation**: Direct `__init__` is forbidden (raises `TradingApiException`). Use `BarCacheManager.create()` factory which handles index creation and settings injection.
+
+**Key Features**:
+
+| Feature                | Description                                                                               |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| **Gap Detection**      | Boundary-based algorithm finds uncached time ranges                                       |
+| **Pending Tracking**   | Prevents duplicate in-flight requests (TTL via `settings.BAR_CACHE_PENDING_TTL_MS`)       |
+| **Range Merging**      | Adjacent/overlapping covered ranges auto-merge                                            |
+| **Storage Tracking**   | `CoveredRange.storage_type` indicates cache tier (MEMORY, DATABASE, DATALAKE)             |
+| **Thread Safety**      | Datastore provides per-table locking for concurrent access (no external lock needed)      |
+| **Atomic Transitions** | `mark_covered()` uses database transactions to atomically delete pending + insert covered |
+
+**`mark_covered()` Atomicity**: This method atomically removes the pending range and creates the covered range in a single transaction:
+
+```python
+async def mark_covered(self, symbol, resolution, time_range, storage_type, bar_count):
+    # Uses database transaction for atomic delete+insert
+    async with self._session_factory() as session:
+        await self.pending_table.delete(req_range_key, session=session)
+        await self.covered_table.set(req_range_key, covered, session=session)
+        await session.commit()  # Both operations committed atomically
+```
+
+**Requirement**: `BarCacheManager.__init__` validates that the datastore has `has_transactions=True`. This ensures the atomic delete+insert pattern cannot leave partial state (pending deleted but covered not created).
+
+**Models** (from `trading_api.models.market.bar_cache`):
+
+| Model          | Purpose                                                                   |
+| -------------- | ------------------------------------------------------------------------- |
+| `TimeRange`    | Base range with `start`/`end` int milliseconds                            |
+| `PendingRange` | In-flight request with `expires_at` timestamp, auto-computed `lookup_key` |
+| `CoveredRange` | Cached data with `storage_type` indicator, auto-computed `lookup_key`     |
+
+**Note**: `PendingRange` and `CoveredRange` have a `lookup_key` field (computed via `model_post_init()` as `{symbol}_{resolution}`) enabling indexed datastore lookups.
+
+### Read-Through Cache Orchestration
+
+The `DatafeedService.get_bars()` method implements read-through cache orchestration:
+
+```
+┌──────────────┐     ┌─────────────────┐     ┌────────────────────┐     ┌─────────────────┐
+│  API Request │────▶│ BarCacheManager │────▶│  DatafeedProvider  │────▶│  BarRepository  │
+│  (get_bars)  │     │ (gap detection) │     │  (fetch gaps only) │     │  (store + read) │
+└──────────────┘     └─────────────────┘     └────────────────────┘     └─────────────────┘
+       │                     │                        │                         │
+       │  find_missing()     │                        │                         │
+       │◀────────────────────│                        │                         │
+       │  gaps: []           │                        │                         │
+       │                     │                        │                         │
+       │  [CACHE HIT]        │                        │                         │
+       │  get_time_range()   │                        │                         │
+       │◀────────────────────┼────────────────────────┼─────────────────────────│
+       │  bars from cache    │                        │                         │
+       │                     │                        │                         │
+       │  [CACHE MISS]       │                        │                         │
+       │  try_add_pending()  │                        │                         │
+       │◀────────────────────│                        │                         │
+       │  acquired=True      │                        │                         │
+       │                     │  get_historical_bars() │                         │
+       │                     │────────────────────────▶│                         │
+       │                     │  bars (for gap)        │                         │
+       │                     │◀────────────────────────│                         │
+       │                     │                        │  store_bars()           │
+       │                     │                        │─────────────────────────▶│
+       │  mark_covered()     │                        │                         │
+       │────────────────────▶│                        │                         │
+       └─────────────────────┴────────────────────────┴─────────────────────────┘
+```
+
+**Flow:**
+
+1. **Gap Detection**: `BarCacheManager.find_missing_ranges()` returns uncached time ranges
+2. **Cache Hit**: If no gaps, read directly from `BarRepository.get_time_range()`
+3. **Cache Miss**: For each gap:
+   - `try_add_pending()` → atomically lock the range (prevents duplicate fetches)
+   - If acquired: fetch from provider → store → `mark_covered()`
+   - If blocked: wait for existing request via `_wait_for_gap_coverage()`
+4. **Combine**: Merge cached + freshly fetched bars, apply `count_back` filter
+
+**Logging (Observability):**
+
+```python
+# In get_bars()
+logger.info(f"[CACHE BYPASS] {symbol}/{resolution} - no cache manager")  # InMemoryDatastore
+logger.info(f"[CACHE HIT] {symbol}/{resolution} - full coverage found")
+logger.info(f"[CACHE MISS] {symbol}/{resolution} - {len(missing_ranges)} gaps found")
+logger.info(f"[PENDING ACQUIRED] {symbol}/{resolution} gap {start}->{end} - fetching...")
+logger.info(f"[PENDING BLOCKED] {symbol}/{resolution} gap {start}->{end} - waiting for existing request")
+```
+
+**Timeout Configuration:**
+
+| Component | Timeout | Purpose                                    |
+| --------- | ------- | ------------------------------------------ |
+| Frontend  | 11s     | Axios request timeout (`apiAdapter.ts`)    |
+| Backend   | 10s     | Provider call timeout (`asyncio.wait_for`) |
+
+**Capability Requirements:**
+
+- Cache orchestration requires `PostgresDatastore` (exclusion constraints for pending ranges)
+- Falls back to direct provider calls with `InMemoryDatastore` (no caching)
+
+**Test Coverage** (`test_api_integration.py::TestGetBarsCaching`):
+
+| Test                                        | Scenario                                        |
+| ------------------------------------------- | ----------------------------------------------- |
+| `test_cache_bypass_with_inmemory_datastore` | InMemoryDatastore → no caching, provider called |
+| `test_cache_miss_fetches_and_stores`        | Cache miss → provider fetch → store             |
+| `test_cache_hit_skips_provider`             | Cache hit → no provider call                    |
+| `test_partial_cache_fills_gaps_only`        | Partial coverage → fetch gaps only              |
+| `test_count_back_applied_after_cache`       | count_back filter applies to cached+fetched     |
 
 ### Provider Delegation
 
@@ -345,6 +527,11 @@ cd backend && poetry run pytest src/trading_api/modules/datafeed/tests/ -v
 cd backend && poetry run pytest src/trading_api/modules/datafeed/tests/ --cov=src/trading_api/modules/datafeed
 ```
 
+### Test Files
+
+- `test_api.py` - REST API endpoint tests
+- `test_bar_cache_manager.py` - BarCacheManager unit tests (24 tests covering pending/covered ranges, gap detection, cleanup)
+
 ### Mocking the Datafeed Provider
 
 ```python
@@ -377,17 +564,20 @@ async def test_bars_subscription(datafeed_ws_client):
 
 Key Pydantic models used by this module (defined in `trading_api/models/`):
 
-| Model                          | Purpose                                 |
-| ------------------------------ | --------------------------------------- |
-| `Bar`                          | OHLC bar data                           |
-| `BarsSubscriptionRequest`      | Bars subscription parameters            |
-| `QuoteData`                    | Quote with bid/ask/last                 |
-| `QuoteDataSubscriptionRequest` | Quote subscription parameters           |
-| `SymbolInfo`                   | Full symbol information for TradingView |
-| `SearchSymbolResultItem`       | Symbol search result                    |
-| `DatafeedConfiguration`        | Datafeed capabilities/config            |
-| `GetBarsResponse`              | Historical bars response wrapper        |
-| `Resolution`                   | Type-safe TradingView resolution enum   |
+| Model                          | Purpose                                    |
+| ------------------------------ | ------------------------------------------ |
+| `Bar`                          | OHLC bar data                              |
+| `BarsSubscriptionRequest`      | Bars subscription parameters               |
+| `QuoteData`                    | Quote with bid/ask/last                    |
+| `QuoteDataSubscriptionRequest` | Quote subscription parameters              |
+| `SymbolInfo`                   | Full symbol information for TradingView    |
+| `SearchSymbolResultItem`       | Symbol search result                       |
+| `DatafeedConfiguration`        | Datafeed capabilities/config               |
+| `GetBarsResponse`              | Historical bars response wrapper           |
+| `Resolution`                   | Type-safe TradingView resolution enum      |
+| `TimeRange`                    | Base range with start/end int milliseconds |
+| `PendingRange`                 | In-flight request with TTL expiration      |
+| `CoveredRange`                 | Cached range with storage type indicator   |
 
 ### SymbolInfo Fields (TradingView LibrarySymbolInfo)
 
@@ -430,7 +620,3 @@ This module powers the TradingView charting library datafeed:
 - **[Backend WebSockets](../../../../docs/BACKEND_WEBSOCKETS.md)** - WsRouteService pattern
 - **[Error Management](../../../../docs/ERROR-MANAGEMENT.md)** - Exception hierarchy
 - **[Modular Backend Architecture](../../../../docs/MODULAR_BACKEND_ARCHITECTURE.md)** - Module lifecycle
-
----
-
-**Last Updated**: January 7, 2026

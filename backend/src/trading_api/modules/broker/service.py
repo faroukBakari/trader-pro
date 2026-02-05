@@ -13,7 +13,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from trading_api.capabilities.broker import BrokerCapability
 from trading_api.models.broker import (
@@ -32,7 +32,7 @@ from trading_api.models.broker import (
     Position,
     PreOrder,
 )
-from trading_api.models.common import CapabilitySpec
+from trading_api.models.common import ProviderCapabilitySpec
 from trading_api.models.exceptions import ServiceException, TradingApiException
 from trading_api.shared.ws.ws_router import (
     ProviderUpdateCallback,
@@ -76,15 +76,15 @@ class BrokerService(WsRouteService):
     """
 
     @classmethod
-    def capabilities(cls) -> list[CapabilitySpec]:
-        """Return required capabilities for broker service.
+    def provider_capabilities(cls) -> list[ProviderCapabilitySpec]:
+        """Return required provider capabilities for broker service.
 
         Requires broker capability from provider (e.g., FakeBrokerProvider).
 
         Returns:
             List with broker capability requirement
         """
-        return [CapabilitySpec(name="broker")]
+        return [ProviderCapabilitySpec(name="broker")]
 
     @property
     def broker_provider(self) -> BrokerCapability:
@@ -104,16 +104,17 @@ class BrokerService(WsRouteService):
     def __init__(
         self,
         module_dir: Path,
-        *,  # Force keyword-only arguments
-        providers: list | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """Initialize broker service.
 
         Args:
             module_dir: Path to the module directory
             providers: Provider instances for capabilities
+            **kwargs: Additional arguments (includes datastore from ServiceInterface)
         """
-        super().__init__(module_dir, providers=providers)
+        super().__init__(module_dir, *args, **kwargs)
 
         # Track provider subscription IDs for each topic (for cleanup)
         self._topic_to_subscription_id: dict[str, str] = {}
@@ -242,7 +243,7 @@ class BrokerService(WsRouteService):
         position_id: str,
         brackets: Brackets,
         user_id: str,
-        custom_fields: Optional[Dict[str, Any]] = None,
+        custom_fields: Optional[dict[str, Any]] = None,
     ) -> None:
         """Update position brackets.
 

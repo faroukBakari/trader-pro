@@ -33,17 +33,21 @@ def mock_tws_connection():
 @pytest.mark.asyncio
 async def test_tws_provider_injection(mock_tws_connection):
     """Test TWSDatafeedProvider is injected into DatafeedService."""
-    factory = AppFactory()
-
     # Create app with datafeed module enabled
-    await factory.create_app(enabled_module_names=["datafeed"])
+    factory = AppFactory()
+    app = await factory.create_app(
+        enabled_module_names=["datafeed"], enabled_datastores=["inmemory"]
+    )
+
+    # Call build_modules() to populate runtime state (normally done in lifespan)
+    await app.build_modules()
 
     # Verify provider was discovered and registered (uses class name)
-    assert "TWSDatafeedProvider" in factory.provider_registry.list_providers()
+    assert "TWSDatafeedProvider" in app.provider_registry.list_providers()
 
     # Find datafeed module
     datafeed_modules = [
-        m for m in factory.module_registry._instances.values() if m.name == "datafeed"
+        m for m in app.module_registry._instances.values() if m.name == "datafeed"
     ]
     assert len(datafeed_modules) > 0
 
@@ -63,11 +67,16 @@ async def test_tws_provider_injection(mock_tws_connection):
 async def test_datafeed_service_has_provider_property(mock_tws_connection):
     """Test DatafeedService has datafeed_provider property."""
     factory = AppFactory()
-    await factory.create_app(enabled_module_names=["datafeed"])
+    app = await factory.create_app(
+        enabled_module_names=["datafeed"], enabled_datastores=["inmemory"]
+    )
+
+    # Call build_modules() to populate runtime state (normally done in lifespan)
+    await app.build_modules()
 
     # Find datafeed module
     datafeed_modules = [
-        m for m in factory.module_registry._instances.values() if m.name == "datafeed"
+        m for m in app.module_registry._instances.values() if m.name == "datafeed"
     ]
     assert len(datafeed_modules) > 0
 
@@ -85,11 +94,23 @@ async def test_datafeed_service_has_provider_property(mock_tws_connection):
 async def test_tws_provider_has_datafeed_capability(mock_tws_connection):
     """Test TWSDatafeedProvider implements DatafeedCapability."""
     factory = AppFactory()
-    await factory.create_app(enabled_module_names=["datafeed"])
+    app = await factory.create_app(
+        enabled_module_names=["datafeed"], enabled_datastores=["inmemory"]
+    )
 
-    # Get TWSDatafeedProvider instance (uses class name as key)
-    tws_provider = factory.provider_registry._instances.get("TWSDatafeedProvider")
-    assert tws_provider is not None
+    # Call build_modules() to populate runtime state (normally done in lifespan)
+    await app.build_modules()
+
+    # Get TWSDatafeedProvider from module service
+    datafeed_modules = [
+        m for m in app.module_registry._instances.values() if m.name == "datafeed"
+    ]
+    assert len(datafeed_modules) > 0
+    datafeed_module = datafeed_modules[0]
+    datafeed_providers = datafeed_module.service._capability_map.get("datafeed", [])
+    tws_providers = [p for p in datafeed_providers if p.name == "tws"]
+    assert len(tws_providers) > 0
+    tws_provider = tws_providers[0]
     assert isinstance(tws_provider, TWSDatafeedProvider)
 
     # Verify it implements DatafeedCapability

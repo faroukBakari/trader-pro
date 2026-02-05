@@ -61,7 +61,7 @@ class ProviderRegistry:
             folder_name = provider_path.name
 
             # Filter by enabled_names if provided
-            if enabled_names is not None and folder_name not in enabled_names:
+            if enabled_names and folder_name not in enabled_names:
                 logger.debug(f"Skipping provider '{folder_name}' (not in enabled list)")
                 continue
 
@@ -185,20 +185,6 @@ class ProviderRegistry:
             logger.debug(f"Lazy-loaded provider instance: {name}")
 
         return self._instances[name]
-
-    async def get_provider(self, name: str) -> Provider:
-        """Get specific provider by name.
-
-        Args:
-            name: Provider name
-
-        Returns:
-            Provider instance
-
-        Raises:
-            CommonException: If provider not found
-        """
-        return await self._get_instance(name)
 
     def list_providers(self) -> list[str]:
         """List all registered provider names."""

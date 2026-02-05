@@ -54,6 +54,8 @@ class BrokerService(WsRouteService):
 
 **[DECISION]**: BrokerService is a thin BFF layer - all business logic lives in the `BrokerCapability` provider (e.g., `FakeBrokerProvider`, `TWSBrokerProvider`).
 
+**Datastore Access**: Service inherits `datastore` property from `ServiceInterface`. Available via `self.datastore` for future repository use (currently unused).
+
 ### Provider Delegation
 
 ```
@@ -254,4 +256,4 @@ Key Pydantic models used by this module (defined in `trading_api/models/broker/`
 
 ---
 
-**Last Updated**: January 1, 2026
+**Last Updated**: January 26, 2026

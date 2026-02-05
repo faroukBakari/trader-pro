@@ -89,6 +89,41 @@ import type { PlacedOrder } from '@public/trading_terminal/charting_library'
 import type { PreOrder as PreOrder_Backend } from '...'
 ```
 
+### Pre-Command Reasoning (Required)
+**IMPORTANT: STOP and THINK before executing ANY terminal command.**
+
+Before running a command, explicitly reason through these 3 checks:
+
+| Check | Think Through | If Yes |
+|-------|---------------|--------|
+| **1. Makefile First** | "Is there a `make` target that already does this?" | Use the make target instead |
+| **2. Env-Aware** | "Am I using the project's environment wrappers?" | Must use `make`, `poetry run`, or `nvm use &&` |
+| **3. Timeout Guard** | "If I'm limiting output with `head`/`tail`/`more`, could the source hang?" | Add `timeout N` before the command |
+
+**Reasoning example:**
+```
+I need to run the backend tests...
+→ Check 1: Is there a make target? YES → `make test` exists
+→ Using: `make -C backend test`
+```
+
+```
+I need to see the last 50 lines of a docker build...
+→ Check 1: No specific make target for this inspection
+→ Check 2: docker command is fine (not npm/pip/python)
+→ Check 3: Am I using `tail`? YES. Could `docker build` hang? YES (network, large layers)
+→ Using: `timeout 120 docker build ... 2>&1 | tail -50`
+```
+
+**Why timeout with output limiters?**
+```bash
+# ❌ WRONG: Pipe doesn't kill source — if build hangs, waits forever
+docker build . 2>&1 | tail -50
+
+# ✅ CORRECT: Timeout terminates hung process
+timeout 120 docker build . 2>&1 | tail -50
+```
+
 ---
 
 ## 5. Module Development Patterns
@@ -180,3 +215,27 @@ Use [docs/DOCUMENTATION-GUIDE.md](../docs/DOCUMENTATION-GUIDE.md) as your map:
 | Provider/capability system | `backend/docs/PROVIDER-SYSTEM.md` |
 | Client generation | `backend/docs/SPECS_AND_CLIENT_GEN.md` + `docs/CLIENT-GENERATION.md` |
 | Testing strategy | `docs/TESTING.md` + `backend/docs/BACKEND_TESTING.md` |
+
+---
+
+## 9. Agent Leverage
+
+Before complex tasks, consider whether a specialist agent could achieve better results. Apply the `agent-routing` skill for systematic delegation decisions.
+
+### Available Agents
+
+| Agent | Use For | Trigger Keywords |
+|-------|---------|------------------|
+| `test` | Test creation, coverage analysis | "test", "coverage", "add tests" |
+| `review` | Code quality, security audit | "review", "check", "audit" |
+| `plan` | Multi-step implementation planning | "plan", "how should we" |
+| `study` | Architecture decisions, design tradeoffs | "evaluate", "compare", "refactor strategy" |
+| `implement` | Code execution with validation | "implement", "build", "fix" |
+
+### Quick Decision Rules
+
+1. **Need context you don't have?** → `research` subagent first
+2. **Multi-file feature?** → `plan` before `implement`
+3. **Writing tests?** → Consider `test` agent
+4. **Large change complete?** → Offer `review` handoff
+5. **Architecture question?** → `study` agent

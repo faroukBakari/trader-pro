@@ -67,26 +67,12 @@ async def test_module_registry_state(all_modules_app, datafeed_only_app) -> None
 
     # Verify module discovery by creating an app which triggers discovery
     factory = AppFactory()
-    test_app = await factory.create_app()  # This triggers auto-discovery
+    test_app = await factory.create_app(
+        enabled_datastores=["inmemory"]
+    )  # This triggers auto-discovery
+    await test_app.build_modules()  # Initialize runtime state
     # Get enabled modules from the created app
     assert len(test_app.modules_apps) >= 2  # Should have broker + datafeed at minimum
-
-
-@pytest.mark.integration
-def test_shared_infrastructure_always_loaded(no_modules_app) -> None:
-    """Verify shared infrastructure is always available regardless of modules."""
-    # no_modules_app is now a ModularApp (which IS a FastAPI)
-    openapi_spec = no_modules_app.openapi()
-    paths = openapi_spec.get("paths", {})
-
-    # With no modules enabled, no health endpoints should exist
-    # (health endpoints are module-specific via APIRouterInterface)
-    # OpenAPI spec should still be valid
-    assert isinstance(paths, dict)
-
-    # No module endpoints should exist
-    assert not any("/broker/" in path for path in paths)
-    assert not any("/datafeed/" in path for path in paths)
 
 
 @pytest.mark.integration

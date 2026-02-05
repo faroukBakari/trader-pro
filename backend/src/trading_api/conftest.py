@@ -9,8 +9,9 @@ Fixtures defined here are automatically available to all test files
 in trading_api and its subdirectories.
 """
 
-import asyncio
-from collections.abc import AsyncGenerator, Generator
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import pytest
 from fastapi import FastAPI
@@ -18,7 +19,11 @@ from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
 from trading_api.app_factory import AppFactory, ModularApp
-from trading_api.shared import FastWSAdapter
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Generator
+
+    from trading_api.shared import FastWSAdapter
 
 # ============================================================================
 # Application Fixtures (Module-Scoped for Compatibility)
@@ -28,7 +33,7 @@ from trading_api.shared import FastWSAdapter
 
 
 @pytest.fixture(scope="module")
-def apps() -> ModularApp:
+async def apps() -> ModularApp:
     """Full application with all modules enabled (shared per test module).
 
     This fixture is the source for all other app-related fixtures.
@@ -38,11 +43,11 @@ def apps() -> ModularApp:
     - Load only required modules (enabled_module_names)
     - Use mock/fake providers (enabled_provider_names)
 
-    Note: Uses sync wrapper to avoid pytest-asyncio event_loop scope conflicts.
-    The session-scoped event_loop from tests/conftest.py is used.
+    Note: Uses async to let pytest-asyncio manage the event loop lifecycle,
+    avoiding RuntimeError with asyncio.get_event_loop() in Python 3.10+.
     """
     factory = AppFactory()
-    return asyncio.get_event_loop().run_until_complete(factory.create_app())
+    return await factory.create_app()
 
 
 @pytest.fixture(scope="module")

@@ -38,9 +38,6 @@ logger = logging.getLogger(__name__)
 DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
 DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
 
-# Default cache location
-DEFAULT_CACHE_PATH = ".cache/bars.db"
-
 # Bar finalization threshold - bars older than this are considered finalized
 BAR_FINALIZATION_THRESHOLD_SECONDS = 120.0
 

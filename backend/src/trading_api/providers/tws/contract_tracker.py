@@ -34,7 +34,12 @@ DEBUG_TWS_REQUEST = os.environ.get("DEBUG_TWS_REQUEST") == "true"
 DEBUG_TWS_CACHE = os.environ.get("DEBUG_TWS_CACHE") == "true"
 
 # Default cache location
-DEFAULT_CACHE_PATH = ".cache/contracts.db"
+DEFAULT_CACHE_PATH = ".local/DB/sqlite/contracts.db"
+
+
+def get_cache_path() -> str:
+    """Get contract cache path from env var or default."""
+    return os.environ.get("TWS_CONTRACT_CACHE_PATH", DEFAULT_CACHE_PATH)
 
 
 class _ThreadLocalConnection:
@@ -221,7 +226,7 @@ class ContractTracker(ContractTrackerCBWiringInterface):
         Args:
             ibsocket: IbSocketWiringInterface for TWS communication and wiring
             db_path: Path to SQLite database. Defaults to TWS_CONTRACT_CACHE_PATH
-                     env var or ".cache/contracts.db"
+                     env var or ".local/DB/sqlite/contracts.db"
         """
         self.tracker_lock = threading.Lock()
         ibsocket.wire_contract_tracker(self)

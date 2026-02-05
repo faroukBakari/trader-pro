@@ -41,6 +41,7 @@ This guide helps you extend and maintain the backend testing suite. The backend 
 | Task                    | Command                                   | Section                                               |
 | ----------------------- | ----------------------------------------- | ----------------------------------------------------- |
 | Run all tests           | `make test`                               | [Running Tests](#running-tests)                       |
+| Run all tests (full)    | `make test-full`                          | [Running Tests](#running-tests)                       |
 | Run unit tests only     | `make test-modules`                       | [Running Tests](#running-tests)                       |
 | Run integration tests   | `make test-integration`                   | [Running Tests](#running-tests)                       |
 | Add a module unit test  | See template below                        | [Adding Unit Tests](#adding-unit-tests)               |
@@ -72,7 +73,19 @@ Run it: `make test-module-broker`
 ```python
 # backend/tests/integration/test_my_integration.py
 import pytest
-from trading_api.app_factory import ModularApp
+from httpx import AsyncClient
+from trading_api.app_factory import AppFactory, ModularApp
+
+@pytest.fixture
+async def broker_only_app() -> ModularApp:
+    """Create app with broker module for integration tests.
+
+    Note: Calls build_modules() for production-like initialization.
+    """
+    factory = AppFactory()
+    app = await factory.create_app(enabled_module_names=["broker"])
+    await app.build_modules()  # Required: initializes modules
+    return app
 
 @pytest.mark.asyncio
 async def test_my_workflow(broker_only_app: ModularApp):
@@ -83,6 +96,110 @@ async def test_my_workflow(broker_only_app: ModularApp):
 ```
 
 Run it: `make test-integration`
+
+### Test Fixture Patterns for ModularApp
+
+The refactored `ModularApp` supports two initialization patterns for different test needs:
+
+**Pattern 1: Production-like (with build_modules)**
+
+Use for integration tests that need the full initialization flow:
+
+```python
+@pytest.fixture
+async def full_app() -> ModularApp:
+    factory = AppFactory()
+    app = await factory.create_app(enabled_module_names=["broker", "datafeed"])
+    await app.build_modules()  # Runs full lifecycle: datastores → providers → modules
+    return app
+```
+
+**Pattern 2: Direct registry control (unit tests)**
+
+Use for isolated unit tests or when you need mock providers:
+
+```python
+@pytest.fixture
+def isolated_broker_app() -> ModularApp:
+    """Create app with direct registry control for test isolation."""
+    from pathlib import Path
+    from trading_api.shared import ModuleRegistry, ProviderRegistry, DatastoreRegistry, ModuleApp, settings
+    import asyncio
+
+    # Create registries pointing to test directories
+    modules_dir = Path(__file__).parents[2] / "src" / "trading_api" / "modules"
+    providers_dir = Path(__file__).parents[2] / "src" / "trading_api" / "providers"
+    datastores_dir = Path(__file__).parents[2] / "src" / "trading_api" / "datastores"
+
+    module_registry = ModuleRegistry(modules_dir)
+    provider_registry = ProviderRegistry(providers_dir)
+    datastore_registry = DatastoreRegistry(datastores_dir)
+
+    # Auto-discover with specific filtering
+    module_registry.auto_discover(enabled_modules=["broker"])
+    provider_registry.auto_discover(enabled_names=["fakebroker"])  # Use fake provider
+    datastore_registry.auto_discover(enabled_names=["inmemory"])
+
+    # Create instances synchronously
+    loop = asyncio.get_event_loop()
+    datastores = loop.run_until_complete(datastore_registry.get_datastores())
+    providers = loop.run_until_complete(
+        provider_registry.get_providers(module_registry.required_capabilities())
+    )
+    enabled_modules = module_registry.get_modules(providers=providers, datastores=datastores)
+
+    # Create app without lifespan (no automatic build_modules)
+    app = ModularApp(
+        base_url=settings.API_PREFIX,
+        enabled_modules=["broker"],
+        enabled_providers=["fakebroker"],
+        title="Trading API (Test)",
+        version="1.0.0",
+    )
+
+    # Manually set runtime state
+    app._modules = enabled_modules
+    app._modules_apps = [ModuleApp(module) for module in enabled_modules]
+
+    # Mount and start
+    for module_app in app._modules_apps:
+        for api_app in module_app.api_versions:
+            app.mount(f"{app.base_url}/{api_app.version}/{module_app.module.name}", api_app)
+        module_app.start()
+
+    return app
+```
+
+**Pattern 3: Mock provider injection**
+
+Use when you need to inject mock providers for controlled testing:
+
+```python
+@pytest.fixture
+async def app_with_mocks() -> ModularApp:
+    """Create app with mock providers."""
+    from trading_api.shared import ModuleRegistry, ProviderRegistry
+    from tests.mocks import MockDatafeedProvider, MockAuthProvider
+
+    module_registry = ModuleRegistry(modules_dir)
+    provider_registry = ProviderRegistry(providers_dir)
+
+    module_registry.auto_discover()
+
+    # Register mocks instead of auto-discovering real providers
+    provider_registry.register(MockDatafeedProvider, "mock_datafeed")
+    provider_registry.register(MockAuthProvider, "mock_auth")
+
+    # Continue with standard instantiation...
+```
+
+**Decision Guide:**
+
+| Test Type                 | Pattern   | build_modules() | Lifespan    |
+| ------------------------- | --------- | --------------- | ----------- |
+| Integration tests         | Pattern 1 | Yes             | Via fixture |
+| Unit tests (isolated)     | Pattern 2 | No (manual)     | None        |
+| Tests with mock providers | Pattern 3 | Yes             | Via fixture |
 
 ---
 
@@ -157,6 +274,46 @@ Pytest automatically discovers tests in:
 - **Module test suite**: < 5 seconds
 - **Integration tests**: < 1 minute total
 - **Full test suite**: < 2 minutes
+
+### Incremental Testing with pytest-testmon
+
+pytest-testmon tracks which tests are affected by code changes and only runs those tests. **All `make test*` commands use testmon by default for faster development cycles.**
+
+#### Quick Start
+
+| Command                     | Description                                  |
+| --------------------------- | -------------------------------------------- |
+| `make test`                 | Run all tests (incremental, testmon)         |
+| `make test-full`            | Run all tests (complete suite)               |
+| `make test-modules`         | Run module tests (incremental)               |
+| `make test-modules-full`    | Run module tests (complete suite)            |
+| `make test-boundaries`      | Run boundary tests (incremental)             |
+| `make test-boundaries-full` | Run boundary tests (complete suite)          |
+| `make testmon-forcerun`     | Force full run + rebuild dependency database |
+| `make testmon-reset`        | Clear testmon database                       |
+| `make testmon-status`       | Show testmon database status                 |
+
+**Tip:** Add `-full` suffix to any test target for a complete (non-incremental) run.
+
+#### How It Works
+
+1. **First run**: All tests execute, testmon builds dependency map
+2. **Subsequent runs**: Only tests depending on changed files run
+3. **Database location**: `.testmondata` (git-ignored, machine-specific)
+
+#### When to Force Full Runs
+
+- After rebasing/merging main
+- After major refactoring
+- When test behavior seems inconsistent
+- In CI (main branch builds)
+
+#### Limitations
+
+- Single-process only (no pytest-xdist parallel execution)
+- Database is machine-specific (not shared across devs)
+- External service changes (PostgreSQL schema) not detected
+- **Backend manager tests excluded**: `test_backend_manager_integration.py` uses session-scoped fixtures that require ordered execution - always run without testmon reordering
 
 ---
 
@@ -283,16 +440,254 @@ backend/tests/integration/
 
 **Key characteristics:**
 
-- Use session-scoped fixtures for efficiency
+- Use module-scoped fixtures for efficiency with xdist compatibility
 - Real uvicorn servers with nginx
 - Test backend manager orchestration
-- Comprehensive cleanup to prevent leaks
+- Comprehensive cleanup with emergency shutdown handlers
+
+#### Two-Class Test Design Pattern (BackendManager)
+
+BackendManager integration tests use a **two-class design** optimized for parallel test execution:
+
+| Class                         | Fixture Scope | Server Lifecycle    | Use Case                                                 |
+| ----------------------------- | ------------- | ------------------- | -------------------------------------------------------- |
+| `TestBackendManagerReadOnly`  | module        | Never stops servers | Health checks, endpoint validation, multi-module testing |
+| `TestBackendManagerLifecycle` | function      | Fresh per test      | Start/stop semantics, error recovery testing             |
+
+**Why two classes?**
+
+- **xdist compatibility**: Module-scoped fixtures prevent parallel worker collisions via `@pytest.mark.xdist_group`
+- **Test isolation**: Lifecycle tests need clean state; read-only tests can share servers
+- **Efficiency**: Read-only tests reuse running servers; lifecycle tests pay startup cost once per test
+
+**Port allocation with `get_unique_port_base()`:**
+
+```python
+def get_unique_port_base(test_name: str, offset: int = 0) -> int:
+    """Generate unique ports based on test name hash.
+
+    Avoids port collisions when tests run in parallel by hashing
+    test_name to a deterministic port range (10000-59999).
+    """
+    hash_val = int(hashlib.sha256(test_name.encode()).hexdigest(), 16)
+    return 10000 + (hash_val % 50000) + offset
+```
+
+**Emergency cleanup pattern:**
+
+```python
+_active_managers: dict[str, BackendManager] = {}
+
+def _emergency_cleanup():
+    """atexit handler - forcefully stop any orphaned managers."""
+    for name, manager in list(_active_managers.items()):
+        try:
+            manager.stop_all()
+        except Exception:
+            pass
+
+atexit.register(_emergency_cleanup)
+```
 
 **Run with:**
 
 ```bash
 make test-integration
 ```
+
+### 5. PostgreSQL Integration Testing
+
+Tests requiring a real PostgreSQL database use a **dual-path architecture** with `test_settings` as the single source of truth:
+
+| Environment | Detection                        | PostgreSQL Source                  |
+| ----------- | -------------------------------- | ---------------------------------- |
+| **Local**   | `DATASTORE_POSTGRES_DSN` not set | testcontainers (auto-provisioned)  |
+| **CI**      | `DATASTORE_POSTGRES_DSN` set     | Service container (pre-configured) |
+
+**Location:** `backend/conftest.py` (session-scoped `test_settings` fixture)
+
+#### The `test_settings` Fixture (Single Source of Truth)
+
+All test configuration flows through a session-scoped `test_settings` fixture in `backend/conftest.py`:
+
+```python
+@pytest.fixture(scope="session")
+def test_settings() -> Iterator[Settings]:
+    """Session-scoped test settings - SINGLE SOURCE OF TRUTH for all config.
+
+    Handles PostgreSQL setup automatically:
+    - CI mode: Uses DATASTORE_POSTGRES_DSN from environment
+    - Local mode: Spins up postgres:16 via testcontainers, creates test database
+
+    DSN presence in environment IS the CI indicator - no separate detection needed.
+    """
+    # ... see backend/conftest.py for full implementation
+```
+
+The fixture returns a fully-configured `Settings` instance with:
+
+- `DATASTORE_ALLOW_RESET=True` - Enables `reset()` for test isolation
+- `DATASTORE_POSTGRES_POOL_MAX_SIZE=2` - Minimal pool for test efficiency
+- `DATASTORE_POSTGRES_DSN` - Set from environment (CI) or testcontainers (local)
+
+#### Local Development (testcontainers)
+
+Tests automatically provision a PostgreSQL container via [testcontainers-python](https://testcontainers-python.readthedocs.io/):
+
+```python
+import pytest
+from trading_api.shared.config import Settings
+
+@pytest.fixture
+async def postgres_datastore(test_settings: Settings):
+    """Create PostgresDatastore using test_settings fixture."""
+    from trading_api.datastores import PostgresDatastore
+    # test_settings has DATASTORE_POSTGRES_DSN configured
+    # create() uses config, auto-detects pytest for NullConnectionPool
+    ds = await PostgresDatastore.create(config=test_settings)
+    yield ds
+    await ds.close()
+
+@pytest.mark.asyncio
+async def test_database_operation(postgres_datastore):
+    users_table = postgres_datastore.table(User)
+    # ...
+```
+
+**Benefits:**
+
+- ✅ No manual Docker setup required
+- ✅ Isolated container per test session
+- ✅ Automatic cleanup on test completion
+- ✅ Uses PostgreSQL 16 (matches production)
+- ✅ 12-Factor compliant (config via Settings injection)
+
+#### CI Environment (Service Containers)
+
+In GitHub Actions, the workflow provides a PostgreSQL service container:
+
+```yaml
+# .github/workflows/ci.yml
+services:
+  postgres:
+    image: postgres:16
+    env:
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: trader_dev
+      POSTGRES_DB: trader_test
+env:
+  DATASTORE_POSTGRES_DSN: postgresql://trader:trader_dev@localhost:5432/trader_test
+```
+
+The `test_settings` fixture detects CI mode by checking if `DATASTORE_POSTGRES_DSN` is set in the environment - no separate `_is_ci_environment()` function needed.
+
+#### Fixture Usage Pattern
+
+```python
+# tests/integration/conftest.py
+from trading_api.shared.config import Settings
+
+@pytest.fixture
+async def postgres_datastore(
+    test_settings: Settings,
+) -> AsyncIterator[DatastoreInterface]:
+    """PostgresDatastore fixture with cleanup.
+
+    Uses test_settings which has DATASTORE_POSTGRES_DSN configured.
+    PostgresDatastore.create() auto-detects test mode and uses NullConnectionPool.
+    """
+    from trading_api.datastores import PostgresDatastore
+    ds = await PostgresDatastore.create(config=test_settings)
+    yield ds
+    await ds.close()
+```
+
+**Note:** The `test_settings` fixture handles both paths transparently - local tests get testcontainers, CI tests use the pre-configured DSN from environment.
+
+### 6. Datastore Contract Testing
+
+Datastore tests follow a **three-tier architecture** for comprehensive coverage:
+
+```
+backend/
+├── tests/integration/
+│   ├── test_datastore_contract.py      # Contract tests (ALL implementations)
+│   └── test_datastore_integration.py   # Repository integration tests
+└── src/trading_api/datastores/
+    ├── inmemory/tests/
+    │   └── test_inmemory_specific.py   # InMemory-specific tests
+    └── postgres/tests/
+        └── test_postgres_specific.py   # Postgres-specific tests
+```
+
+| Test Tier                   | Location                                          | Purpose                                       |
+| --------------------------- | ------------------------------------------------- | --------------------------------------------- |
+| **Contract Tests**          | `tests/integration/test_datastore_contract.py`    | Validates interface compliance (parametrized) |
+| **Implementation-Specific** | `datastores/{impl}/tests/`                        | Tests unique features per implementation      |
+| **Integration Tests**       | `tests/integration/test_datastore_integration.py` | End-to-end with repositories                  |
+
+#### Parametrized Contract Tests
+
+Contract tests use a parametrized `any_datastore` fixture to run against all implementations:
+
+```python
+@pytest.fixture(
+    params=[
+        pytest.param("inmemory", id="inmemory"),
+        pytest.param(
+            "postgres",
+            id="postgres",
+            marks=[pytest.mark.integration, pytest.mark.postgres],
+        ),
+    ]
+)
+async def any_datastore(
+    request: pytest.FixtureRequest,
+    inmemory_datastore: DatastoreInterface,
+    postgres_datastore: DatastoreInterface | None,
+) -> AsyncIterator[DatastoreInterface]:
+    """Parametrized fixture providing each datastore implementation."""
+    if request.param == "inmemory":
+        yield inmemory_datastore
+    elif request.param == "postgres":
+        if postgres_datastore is None:
+            pytest.skip("PostgreSQL not available")
+        yield postgres_datastore
+```
+
+#### Test Isolation with `reset()`
+
+The `reset()` method clears data AND removes custom indexes (unlike `clear()` which only removes data):
+
+```python
+@pytest.fixture
+async def table(any_datastore: DatastoreInterface) -> AsyncIterator[TableInterface]:
+    tbl = any_datastore.table(ContractTestModel)
+    await tbl.reset()  # Clean state: no data, no indexes
+    yield tbl
+    await tbl.reset()  # Cleanup after test
+```
+
+**Important:** `reset()` is protected by `DATASTORE_ALLOW_RESET` setting to prevent accidental use in production.
+
+#### Running Datastore Tests
+
+```bash
+# All contract tests (InMemory + Postgres)
+cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v
+
+# InMemory only (fast)
+cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v -k inmemory
+
+# Postgres only (requires testcontainers)
+cd backend && poetry run pytest tests/integration/test_datastore_contract.py -v -k postgres -m integration
+
+# Implementation-specific tests
+cd backend && poetry run pytest src/trading_api/datastores/inmemory/tests/ -v
+cd backend && poetry run pytest src/trading_api/datastores/postgres/tests/ -v -m integration
+```
+
+See [datastores/README.md](../src/trading_api/datastores/README.md) for the complete test architecture documentation.
 
 ---
 
@@ -435,9 +830,15 @@ Integration tests verify multi-process communication, nginx routing, and cross-m
 # Location: tests/integration/test_module_isolation.py
 # Tests that modules can run independently
 
+# Note: broker_only_app fixture must call build_modules() before use
 @pytest.mark.asyncio
 async def test_broker_isolation(broker_only_app: ModularApp):
-    """Test broker-only app has no datafeed endpoints."""
+    """Test broker-only app has no datafeed endpoints.
+
+    The broker_only_app fixture handles initialization via:
+    - await factory.create_app(enabled_module_names=["broker"])
+    - await app.build_modules()
+    """
     async with AsyncClient(app=broker_only_app, base_url="http://test") as client:
         # Broker available
         response = await client.get("/api/v1/broker/accounts")
@@ -1497,11 +1898,6 @@ def broker_only_app() -> ModularApp:
 def datafeed_only_app() -> ModularApp:
     """Application with only datafeed module."""
     return create_test_app(enabled_modules=["datafeed"])
-
-@pytest.fixture(scope="session")
-def no_modules_app() -> ModularApp:
-    """Application with no modules."""
-    return create_test_app(enabled_modules=[])
 ````
 
 **Function-scoped (new instance per test):**
@@ -1568,30 +1964,43 @@ def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
 
 ### Session-Based Testing Pattern
 
-Integration tests use session-scoped fixtures to minimize overhead:
+Integration tests use **module-scoped fixtures** for xdist compatibility:
 
 ```python
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="module")
+@pytest.mark.xdist_group(name="backend-manager")
 async def session_backend_manager(...) -> AsyncGenerator[ServerManager, None]:
-    """Start backend once for entire test session."""
+    """Start backend once for test module (xdist-compatible).
+
+    Module scope (not session) ensures xdist workers don't share state.
+    The xdist_group marker keeps these tests on the same worker.
+    """
     manager = ServerManager(...)
 
-    # Start once
+    # Start once per module
     success = await manager.start_all()
     if not success:
         raise RuntimeError("Failed to start backend")
 
-    yield manager  # All tests share this instance
+    yield manager  # Tests in this module share this instance
 
-    # Cleanup once at end
+    # Cleanup at module end
     await _ensure_all_processes_killed(manager)
 ```
 
+**Why module scope instead of session scope?**
+
+- `scope="session"` can cause issues with pytest-xdist parallel workers
+- `scope="module"` provides test isolation per worker process
+- `@pytest.mark.xdist_group` keeps related tests together
+- Still provides efficiency (start once per module, not per test)
+
 **Benefits:**
 
-- ✅ Start backend once (10-15 seconds) instead of per test
-- ✅ Share across multiple tests
-- ✅ Automatic cleanup at session end
+- ✅ Start backend once per module (10-15 seconds saved vs per-test)
+- ✅ xdist-compatible for parallel test execution
+- ✅ Share across tests within same module
+- ✅ Automatic cleanup at module end
 - ✅ 75% faster integration test execution
 
 ### Test Autonomy with `ensure_started()`
@@ -1638,12 +2047,21 @@ async def test_my_feature(self, session_backend_manager: ServerManager):
     # Test logic - backend is guaranteed running
 ```
 
-**When to use:**
+**When to use (Two-Class Design):**
+
+The two-class design (see Section 4) determines when `ensure_started()` is needed:
+
+| Test Class                    | `ensure_started()` | Rationale                                               |
+| ----------------------------- | ------------------ | ------------------------------------------------------- |
+| `TestBackendManagerReadOnly`  | ✅ Always call     | Read-only tests share servers; ensures healthy state    |
+| `TestBackendManagerLifecycle` | ❌ Not needed      | Function-scoped fixtures guarantee fresh state per test |
+
+**General guidance:**
 
 - ✅ After destructive operations (stop/restart tests)
 - ✅ When test order is uncertain
-- ✅ For test isolation and resilience
-- ❌ Not needed for pure read-only operations
+- ✅ For test isolation and resilience in read-only tests
+- ❌ Not needed in lifecycle tests (function-scoped fixtures reset state)
 - ❌ Not needed for non-backend-manager tests
 
 ### Module Isolation Pattern
@@ -3239,29 +3657,7 @@ def test_subscribe_to_quotes(client: TestClient) -> None:
         assert "symbol" in quote["payload"]
 ```
 
-### Example 3: Integration Test for Module Isolation
-
-```python
-# backend/tests/integration/test_module_isolation.py
-import pytest
-from httpx import AsyncClient
-from trading_api.app_factory import ModularApp
-
-@pytest.mark.asyncio
-async def test_no_modules_app(no_modules_app: ModularApp):
-    """Test that app with no modules has no module endpoints."""
-    async with AsyncClient(app=no_modules_app, base_url="http://test") as client:
-        # Module endpoints should NOT be available
-        broker = await client.get("/api/v1/broker/accounts")
-        assert broker.status_code == 404
-
-        datafeed = await client.get("/api/v1/datafeed/symbols")
-        assert datafeed.status_code == 404
-
-        # Only ModularApp base endpoints available (if any)
-```
-
-### Example 4: Backend Manager Integration Test
+### Example 3: Backend Manager Integration Test
 
 ```python
 # backend/tests/integration/test_backend_manager_integration.py
@@ -3281,7 +3677,7 @@ async def test_08a_custom_module_routes(
         assert response.status_code == 200
 ```
 
-### Example 5: Isolated Integration Test
+### Example 4: Isolated Integration Test
 
 ```python
 # backend/tests/integration/test_custom_config.py
@@ -3543,9 +3939,10 @@ pytest -m "not slow"      # Skip slow tests
 - `apps` - Full application with all modules
 - `broker_only_app` - Broker module only
 - `datafeed_only_app` - Datafeed module only
-- `no_modules_app` - No modules
 - `session_backend_manager` - Multi-process backend for integration tests
 - `session_test_config` - Test configuration
+
+> **Note**: All fixtures require `InMemoryDatastore` injection. The `no_modules_app` fixture was removed.
 
 **Function-scoped (per test):**
 

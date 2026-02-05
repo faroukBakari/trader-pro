@@ -9,7 +9,7 @@ This module provides REST API endpoints for broker operations:
 - Retrieve account information
 """
 
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, List, Optional
 
 from fastapi import Depends, Query
 
@@ -313,7 +313,7 @@ class BrokerApi(APIRouterInterface):
             position_id: str,
             brackets: Brackets,
             user_data: Annotated[UserData, Depends(get_current_user)],
-            customFields: Optional[Dict[str, Any]] = None,
+            customFields: Optional[dict[str, Any]] = None,
         ) -> SuccessResponse:
             """
             Update stop-loss and take-profit for an existing position.

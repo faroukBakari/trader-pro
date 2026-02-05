@@ -443,6 +443,9 @@ class TestBrokerConnectionWebSocket:
                 }
             )
             unsubscribe_response = websocket.receive_json()
+            # Handle update arriving before unsubscribe response
+            if unsubscribe_response["type"] == "broker-connection.update":
+                unsubscribe_response = websocket.receive_json()
 
             # Verify unsubscribe response
             assert (

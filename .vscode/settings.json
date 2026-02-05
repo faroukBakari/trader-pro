@@ -1,5 +1,13 @@
 {
     "typescript.preferences.importModuleSpecifier": "non-relative",
+    "chat.agentSkills.validation.enabled": false,
+    "github.copilot.chat.skills.validation.enabled": false,
+    "[skill]": {
+        "editor.formatOnSave": false
+    },
+    "files.associations": {
+        ".github/skills/**/SKILL.md": "markdown"
+    },
     "python-envs.pythonProjects": [
         {
             "path": "",
@@ -23,5 +31,9 @@
         "${workspaceFolder}/backend/external_packages",
         "${workspaceFolder}/backend/stubs"
     ],
-    "isort.args": ["--profile", "black"],
+    "isort.args": [
+        "--profile",
+        "black"
+    ],
+    "python.defaultInterpreterPath": "/home/farouk/trader-pro/backend/.venv/bin/python",
 }

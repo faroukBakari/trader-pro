@@ -18,20 +18,19 @@ from trading_api.app_factory import AppFactory
 # Parse ENABLED_MODULES environment variable
 enabled_modules_str = os.getenv("ENABLED_MODULES", "all")
 
-enabled_modules: list[str] | None
+enabled_modules: list[str]
 if enabled_modules_str != "all":
     enabled_modules = [m.strip() for m in enabled_modules_str.split(",")]
 else:
-    enabled_modules = None  # None = all modules
-
+    enabled_modules = []  # Empty list = all modules
 # Parse ENABLED_PROVIDERS environment variable
 enabled_providers_str = os.getenv("ENABLED_PROVIDERS", "all")
 
-enabled_providers: list[str] | None
+enabled_providers: list[str]
 if enabled_providers_str != "all":
     enabled_providers = [p.strip() for p in enabled_providers_str.split(",")]
 else:
-    enabled_providers = None  # None = all providers
+    enabled_providers = []  # Empty list = all providers
 
 # Create application using async factory
 factory = AppFactory()

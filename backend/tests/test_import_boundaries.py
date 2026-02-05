@@ -10,13 +10,17 @@ import pytest
 # Generic rules - no hardcoded module names
 BOUNDARY_RULES = {
     "models/*": {
-        "allowed_patterns": [],
+        "allowed_patterns": [
+            "trading_api.models.*",  # Models can import other models
+            "trading_api.types.*",  # Pure type definitions (Range types, TypeDecorators)
+        ],
         "forbidden_patterns": ["trading_api.*"],
-        "description": "Models are pure data - no trading_api imports allowed",
+        "description": "Models are pure data - only models and types allowed from trading_api",
     },
     "capabilities/*": {
         "allowed_patterns": [
             "trading_api.models.*",
+            "trading_api.types.*",  # Pure type definitions
             "trading_api.capabilities.*",  # Capabilities can reference each other
         ],
         "forbidden_patterns": [
@@ -29,7 +33,9 @@ BOUNDARY_RULES = {
     "providers/*": {
         "allowed_patterns": [
             "trading_api.models.*",
+            "trading_api.types.*",  # Pure type definitions
             "trading_api.shared.*",
+            "trading_api.datastores.*",
             "trading_api.providers.*",  # Providers can import other providers
             "trading_api.capabilities.*",  # Providers implement capabilities
         ],
@@ -39,7 +45,9 @@ BOUNDARY_RULES = {
     "shared/tests/*": {
         "allowed_patterns": [
             "trading_api.models.*",
+            "trading_api.types.*",  # Pure type definitions
             "trading_api.shared.*",
+            "trading_api.datastores.*",
             "trading_api.providers.*",  # Tests can import concrete providers for DI
             "trading_api.capabilities.*",
             "trading_api.app_factory",
@@ -50,13 +58,14 @@ BOUNDARY_RULES = {
     "shared/*": {
         "allowed_patterns": [
             "trading_api.models.*",
+            "trading_api.types.*",  # Pure type definitions (Range types, TypeDecorators)
             "trading_api.shared.*",
-            "trading_api.providers.base",  # Provider ABC for type hints
+            "trading_api.datastores.*",
             "trading_api.app_factory",
         ],
         "forbidden_patterns": [
             "trading_api.modules.*",
-            "trading_api.providers.google",  # Block concrete providers
+            "trading_api.providers.*",  # Block concrete providers (ABC is in shared)
             "trading_api.capabilities.*",  # Block capability interfaces
         ],
         "exception_patterns": [
@@ -68,14 +77,15 @@ BOUNDARY_RULES = {
     "modules/*": {
         "allowed_patterns": [
             "trading_api.models.*",
+            "trading_api.types.*",  # Pure type definitions (Range types, TypeDecorators)
             "trading_api.shared.*",
-            "trading_api.providers.base",  # Provider ABC for types
+            "trading_api.datastores.*",
             "trading_api.capabilities.*",  # Capability interfaces
             "trading_api.app_factory",
         ],
         "forbidden_patterns": [
             "trading_api.modules.*",  # Block ALL cross-module imports
-            "trading_api.providers.google",  # Block concrete providers
+            "trading_api.providers.*",  # Block concrete providers (ABC is in shared)
         ],
         "description": "Modules can import models, shared, provider"
         "interfaces, but not other modules or concrete providers",
@@ -83,7 +93,9 @@ BOUNDARY_RULES = {
     "modules/*/tests/*": {
         "allowed_patterns": [
             "trading_api.models.*",
+            "trading_api.types.*",  # Pure type definitions (Range types, TypeDecorators)
             "trading_api.shared.*",
+            "trading_api.datastores.*",
             "trading_api.providers.*",  # Tests can import concrete providers for DI
             "trading_api.capabilities.*",  # Capability interfaces
             "trading_api.app_factory",
@@ -185,21 +197,7 @@ def validate_import(
                 if import_name.startswith(f"trading_api.modules.{own_module}"):
                     return True
 
-    # Check forbidden patterns first
-    for pattern in forbidden:
-        # Direct pattern match
-        if fnmatch.fnmatch(import_name, pattern):
-            return False
-        # Check if import starts with forbidden pattern (e.g., trading_api.modules.broker)
-        pattern_prefix = pattern.rstrip("*").rstrip(".")
-        if import_name.startswith(pattern_prefix):
-            return False
-
-    # If no allowed patterns specified, allow all (except forbidden)
-    if not allowed:
-        return True
-
-    # Check if matches any allowed pattern
+    # Check allowed patterns BEFORE forbidden (allowed acts as whitelist)
     for pattern in allowed:
         # Direct match with wildcard
         if fnmatch.fnmatch(import_name, pattern):
@@ -209,6 +207,21 @@ def validate_import(
         if import_name == pattern_base or import_name.startswith(pattern_base + "."):
             return True
 
+    # Check forbidden patterns
+    for pattern in forbidden:
+        # Direct pattern match
+        if fnmatch.fnmatch(import_name, pattern):
+            return False
+        # Check if import starts with forbidden pattern (e.g., trading_api.modules.broker)
+        pattern_prefix = pattern.rstrip("*").rstrip(".")
+        if import_name.startswith(pattern_prefix):
+            return False
+
+    # If no allowed patterns specified and not forbidden, allow all
+    if not allowed:
+        return True
+
+    # Has allowed patterns but didn't match any (and not forbidden) - deny
     return False
 
 
