@@ -34,8 +34,7 @@ pytestmark = pytest.mark.integration
 async def manager(test_settings: Settings) -> BarCacheManager:
     """Create a fresh BarCacheManager with short TTL for testing."""
     datastore = await PostgresDatastore.create(config=test_settings)
-    settings = Settings(BAR_CACHE_PENDING_TTL_MS=1000)
-    mgr = await BarCacheManager.create(datastore=datastore, settings=settings)
+    mgr = BarCacheManager(datastore=datastore, pending_ttl_ms=1000)
     # Clear any existing data for clean test state
     await mgr.clear()
     return mgr

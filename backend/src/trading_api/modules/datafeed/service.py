@@ -2,6 +2,7 @@
 Datafeed service for handling market data operations
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -23,18 +24,22 @@ from trading_api.models import (
 )
 from trading_api.models.common import DatastoreCapabilitySpec, ProviderCapabilitySpec
 from trading_api.models.exceptions import ServiceException, TradingApiException
-from trading_api.models.market import Resolution
+from trading_api.models.market import Resolution, TimeRange
 from trading_api.models.market.quotes import QuoteValues
+from trading_api.modules.datafeed.bar_cache_manager import BarCacheManager
 from trading_api.modules.datafeed.repository import BarRepository
+from trading_api.shared.config import settings
 from trading_api.shared.ws.ws_router import (
     ProviderUpdateCallback,
     TopicErrorCallback,
     WsRouteService,
 )
+from trading_api.types import StorageType
 
 logger = logging.getLogger(__name__)
 
 DEBUG_TWS_DATAFEED = os.environ.get("DEBUG_TWS_DATAFEED") == "true"
+DEBUG_TWS_CACHE = os.environ.get("DEBUG_TWS_CACHE") == "true"
 
 us_eastern = ZoneInfo("US/Eastern")
 
@@ -56,6 +61,14 @@ _RECOVERABLE_ERROR_CODES: frozenset[str] = frozenset(
 )
 
 _DEFAULT_RETRY_AFTER_MS = 5000
+
+# ============================================================================
+# Read-Through Cache Configuration
+# ============================================================================
+# Concurrent wait strategy: When another request owns a pending range,
+# we poll until the range is covered or timeout is reached.
+_CONCURRENT_WAIT_POLL_INTERVAL_MS = 100  # Poll every 100ms
+_CONCURRENT_WAIT_TIMEOUT_MS = 10_000  # Give up after 10s, fetch directly
 
 
 ProviderErrorCallback = Callable[[TradingApiException], Coroutine[Any, Any, None]]
@@ -79,12 +92,24 @@ class DatafeedService(WsRouteService):
     def datastore_capabilities(cls) -> list[DatastoreCapabilitySpec]:
         """Return required datastore capabilities for datafeed service.
 
-        Requires timeseries capability for efficient bar storage/retrieval.
+        Requires:
+        - timeseries: Efficient bar storage/retrieval (time-range queries)
+        - rangequery: Gap detection via PostgreSQL multirange operations
+        - exclusion: Concurrent request deduplication (exclusion constraints)
+        - transactions: Atomic mark_covered operations
+
+        All capabilities are optional for MVP - service falls back to
+        provider-only mode when PostgresDatastore not available.
 
         Returns:
-            List with timeseries capability requirement (optional for MVP)
+            List of datastore capability requirements
         """
-        return [DatastoreCapabilitySpec(name="timeseries", optional=True)]
+        return [
+            DatastoreCapabilitySpec(name="timeseries", optional=True),
+            DatastoreCapabilitySpec(name="rangequery", optional=True),
+            DatastoreCapabilitySpec(name="exclusion", optional=True),
+            DatastoreCapabilitySpec(name="transactions", optional=True),
+        ]
 
     @property
     def datafeed_provider(self) -> DatafeedCapability:
@@ -119,14 +144,40 @@ class DatafeedService(WsRouteService):
         # Track provider subscription IDs for each topic (for cleanup)
         self._topic_to_subs: dict[str, list[str]] = {}
         self._last_bars: dict[str, Bar] = {}
-        # Bar repository for persistent storage (wiring for future use)
-        # Use capability-based selection: prefer timeseries-capable datastore
+
+        # Initialize repository and cache manager
+        # Use capability-based selection: prefer feature-rich datastore
+        self._bar_repository: BarRepository | None = None
+        self._cache_manager: BarCacheManager | None = None
+
+        # Attempt to get featured datastore for bar storage
         try:
             bar_datastore = self.get_featured_datastore("timeseries")
+            self._bar_repository = BarRepository(bar_datastore)
+
+            # Check if datastore supports all cache manager requirements
+            has_cache_support = all(
+                bar_datastore.has_capability(cap)
+                for cap in ["exclusion", "transactions", "rangequery"]
+            )
+            if has_cache_support:
+                self._cache_manager = BarCacheManager(
+                    datastore=bar_datastore,
+                    pending_ttl_ms=settings.BAR_CACHE_PENDING_TTL_MS,
+                )
+                logger.info(
+                    "DatafeedService: Read-through cache enabled (PostgresDatastore)"
+                )
+            else:
+                logger.info(
+                    "DatafeedService: Cache manager disabled - "
+                    "datastore missing required capabilities"
+                )
         except Exception:
-            # Fallback to first available (timeseries is optional for MVP)
-            bar_datastore = next(iter(self.datastores))
-        self._bar_repository = BarRepository(bar_datastore)
+            # Fallback to first available datastore (timeseries is optional)
+            fallback_datastore = next(iter(self.datastores))
+            self._bar_repository = BarRepository(fallback_datastore)
+            logger.info("DatafeedService: Using fallback datastore without caching")
 
     def get_configuration(self) -> DatafeedConfiguration:
         """Get datafeed configuration.
@@ -399,9 +450,17 @@ class DatafeedService(WsRouteService):
         to_time: int,
         count_back: Optional[int] = None,
     ) -> List[Bar]:
-        """Get historical bars for a symbol.
+        """Get historical bars for a symbol with read-through caching.
 
-        Delegates to datafeed provider with proper parameter conversion.
+        Orchestration flow:
+        1. Find gaps in cached coverage
+        2. For each gap, try to acquire pending lock
+        3. If owned, fetch from provider and store
+        4. If not owned (concurrent request), wait for coverage
+        5. Mark covered ranges after successful fetch
+        6. Return full range from repository
+
+        Falls back to provider-only mode when cache manager unavailable.
 
         Args:
             ticker: Symbol ticker (format: "SYMBOL" or "SYMBOL:EXCHANGE")
@@ -413,7 +472,234 @@ class DatafeedService(WsRouteService):
         Returns:
             List of bars in ascending time order
         """
-        # Convert timestamps from milliseconds to datetime
+        # Fallback: provider-only mode (no caching)
+        if self._cache_manager is None:
+            if DEBUG_TWS_CACHE:
+                logger.info(
+                    f"[CACHE BYPASS] {ticker}/{resolution.value} - no cache manager"
+                )
+            return await self._fetch_bars_from_provider(
+                ticker, resolution, from_time, to_time, count_back
+            )
+
+        # Read-through cache orchestration
+        assert self._bar_repository is not None
+
+        # Step 1: Find gaps in coverage
+        gaps = await self._cache_manager.find_missing_ranges(
+            symbol=ticker,
+            resolution=resolution,
+            from_time=from_time,
+            to_time=to_time,
+        )
+
+        if DEBUG_TWS_CACHE:
+            if gaps:
+                gap_ranges = ", ".join(f"[{g.start}-{g.end}]" for g in gaps)
+                logger.info(
+                    f"[CACHE MISS] {ticker}/{resolution.value} - {len(gaps)} gap(s): {gap_ranges}"
+                )
+            else:
+                logger.info(
+                    f"[CACHE HIT] {ticker}/{resolution.value} [{from_time}-{to_time}]"
+                )
+
+        # Step 2-5: Process each gap
+        for gap in gaps:
+            await self._process_gap(
+                ticker=ticker,
+                resolution=resolution,
+                gap=gap,
+            )
+
+        # Step 6: Return full range from repository
+        bars = await self._bar_repository.get_bars(
+            symbol=ticker,
+            resolution=resolution,
+            from_time=from_time,
+            to_time=to_time,
+        )
+
+        # Apply count_back filter if specified
+        if count_back and count_back > 0:
+            bars = bars[-count_back:]
+
+        # Update last bar cache for fallback quotes
+        if bars and (
+            ticker not in self._last_bars
+            or self._last_bars[ticker].time < bars[-1].time
+        ):
+            self._last_bars[ticker] = bars[-1]
+
+        return bars
+
+    async def _process_gap(
+        self,
+        ticker: str,
+        resolution: Resolution,
+        gap: TimeRange,
+    ) -> None:
+        """Process a single cache gap with concurrent request handling.
+
+        Strategy:
+        - Try to acquire pending lock (exclusion constraint)
+        - If acquired: fetch, store, mark covered
+        - If blocked: wait for other request to complete, with timeout
+
+        On timeout, fetch directly (stale pending will TTL-expire).
+        """
+        assert self._cache_manager is not None
+        assert self._bar_repository is not None
+
+        # Try to acquire pending lock
+        pending = await self._cache_manager.try_add_pending(
+            symbol=ticker,
+            resolution=resolution,
+            time_range=gap,
+        )
+
+        if pending is not None:
+            # We own this range - fetch and cache
+            if DEBUG_TWS_DATAFEED:
+                logger.info(
+                    f"[PENDING ACQUIRED] {ticker}/{resolution.value} [{gap.start}-{gap.end}]"
+                )
+            await self._fetch_and_cache_gap(
+                ticker=ticker,
+                resolution=resolution,
+                gap=gap,
+            )
+        else:
+            # Another request owns this range - wait for completion
+            if DEBUG_TWS_DATAFEED:
+                logger.info(
+                    f"[PENDING BLOCKED] {ticker}/{resolution.value} [{gap.start}-{gap.end}] - waiting"
+                )
+            await self._wait_for_gap_coverage(
+                ticker=ticker,
+                resolution=resolution,
+                gap=gap,
+            )
+
+    async def _fetch_and_cache_gap(
+        self,
+        ticker: str,
+        resolution: Resolution,
+        gap: TimeRange,
+    ) -> None:
+        """Fetch bars from provider and store in cache.
+
+        Called when we successfully acquired the pending lock.
+        """
+        assert self._cache_manager is not None
+        assert self._bar_repository is not None
+
+        try:
+            # Fetch from provider
+            start_time = datetime.fromtimestamp(gap.start / 1000)
+            end_time = datetime.fromtimestamp(gap.end / 1000)
+
+            bars = await self.datafeed_provider.get_historical_bars(
+                ticker_name=ticker,
+                start_time=start_time,
+                end_time=end_time,
+                resolution=resolution,
+                timeout=10.0,  # 10s provider + ~1s overhead = 11s frontend timeout
+            )
+
+            # Store in repository
+            bar_count = await self._bar_repository.store_bars(
+                symbol=ticker,
+                resolution=resolution,
+                bars=bars,
+            )
+
+            # Mark as covered (atomically removes pending)
+            await self._cache_manager.mark_covered(
+                symbol=ticker,
+                resolution=resolution,
+                time_range=gap,
+                storage_type=StorageType.DATABASE,
+                bar_count=bar_count,
+            )
+
+            if DEBUG_TWS_DATAFEED:
+                logger.info(
+                    f"Cached {bar_count} bars for {ticker}/{resolution.value} "
+                    f"[{gap.start}-{gap.end}]"
+                )
+
+        except Exception as e:
+            # On error, pending range will TTL-expire automatically
+            logger.error(
+                f"Failed to fetch/cache bars for {ticker}/{resolution.value} "
+                f"[{gap.start}-{gap.end}]: {e}"
+            )
+            raise
+
+    async def _wait_for_gap_coverage(
+        self,
+        ticker: str,
+        resolution: Resolution,
+        gap: TimeRange,
+    ) -> None:
+        """Wait for another request to complete coverage of a gap.
+
+        Polls find_missing_ranges() until gap is covered or timeout.
+        On timeout, fetches directly (stale pending will TTL-expire).
+        """
+        assert self._cache_manager is not None
+
+        elapsed_ms = 0
+
+        while elapsed_ms < _CONCURRENT_WAIT_TIMEOUT_MS:
+            await asyncio.sleep(_CONCURRENT_WAIT_POLL_INTERVAL_MS / 1000)
+            elapsed_ms += _CONCURRENT_WAIT_POLL_INTERVAL_MS
+
+            # Check if gap is now covered
+            remaining_gaps = await self._cache_manager.find_missing_ranges(
+                symbol=ticker,
+                resolution=resolution,
+                from_time=gap.start,
+                to_time=gap.end,
+            )
+
+            if not remaining_gaps:
+                # Gap is fully covered by other request
+                if DEBUG_TWS_DATAFEED:
+                    logger.info(
+                        f"Gap covered by concurrent request: {ticker}/{resolution.value} "
+                        f"[{gap.start}-{gap.end}] after {elapsed_ms}ms"
+                    )
+                return
+
+        # Timeout - fetch directly (owner may have failed)
+        logger.warning(
+            f"Concurrent wait timeout for {ticker}/{resolution.value} "
+            f"[{gap.start}-{gap.end}] - fetching directly"
+        )
+        # Try to acquire pending (may succeed if original TTL-expired)
+        pending = await self._cache_manager.try_add_pending(
+            symbol=ticker,
+            resolution=resolution,
+            time_range=gap,
+        )
+        if pending is not None:
+            await self._fetch_and_cache_gap(ticker, resolution, gap)
+        # If still blocked, we'll just read partial data from repo
+
+    async def _fetch_bars_from_provider(
+        self,
+        ticker: str,
+        resolution: Resolution,
+        from_time: int,
+        to_time: int,
+        count_back: Optional[int] = None,
+    ) -> List[Bar]:
+        """Fallback: Fetch bars directly from provider without caching.
+
+        Used when cache manager is not available (no PostgresDatastore).
+        """
         start_time = datetime.fromtimestamp(from_time / 1000)
         end_time = datetime.fromtimestamp(to_time / 1000)
 
@@ -422,14 +708,14 @@ class DatafeedService(WsRouteService):
             start_time=start_time,
             end_time=end_time,
             resolution=resolution,
-            timeout=30.0,
+            timeout=10.0,  # 10s provider + ~1s overhead = 11s frontend timeout
         )
 
         # Apply count_back filter if specified
         if count_back and count_back > 0:
             bars = bars[-count_back:]
 
-        # Cache the last bar for the ticker
+        # Update last bar cache for fallback quotes
         if bars and (
             ticker not in self._last_bars
             or self._last_bars[ticker].time < bars[-1].time

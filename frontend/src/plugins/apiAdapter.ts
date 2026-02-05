@@ -204,7 +204,7 @@ export class ApiAdapter {
       // @ts-expect-error - withCredentials not in type definition but supported by axios
       withCredentials: true,
       baseOptions: {
-        timeout: 5000,  // 5 seconds
+        timeout: 11000,  // 11 seconds - historical bars can take ~7s for large requests
       },
     })
     this.authConfig = new AuthConfigurationV1({
