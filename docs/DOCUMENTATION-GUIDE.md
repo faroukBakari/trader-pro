@@ -142,11 +142,23 @@ When updating documentation for large-scale changes, follow this three-phase app
 
 ### docs/methodologies/ (Implementation Methodologies)
 
-| File                                            | Purpose                                        |
-| ----------------------------------------------- | ---------------------------------------------- |
-| **docs/methodologies/README.md**                | Implementation methodologies index             |
-| **docs/methodologies/API-METHODOLOGY.md**       | TDD methodology for REST API backend services  |
-| **docs/methodologies/WEBSOCKET-METHODOLOGY.md** | 6-phase TDD methodology for WebSocket features |
+| File                                            | Purpose                                                   |
+| ----------------------------------------------- | --------------------------------------------------------- |
+| **docs/methodologies/README.md**                | Implementation methodologies index                        |
+| **docs/methodologies/API-METHODOLOGY.md**       | TDD methodology for REST API backend services             |
+| **docs/methodologies/WEBSOCKET-METHODOLOGY.md** | 6-phase TDD methodology for WebSocket features            |
+| **docs/methodologies/AGENT-MD-METHODOLOGY.md**  | ⭐ Comprehensive guide for creating VS Code custom agents |
+
+### .github/agents/ (Custom Agent Definitions)
+
+| File                                  | Purpose                                     |
+| ------------------------------------- | ------------------------------------------- |
+| **.github/agents/study.agent.md**     | Solutions architect - research and planning |
+| **.github/agents/plan.agent.md**      | Planning agent with handoff to implement    |
+| **.github/agents/implement.agent.md** | Implementation agent with handoff to review |
+| **.github/agents/review.agent.md**    | Code review specialist                      |
+| **.github/agents/test.agent.md**      | Testing specialist                          |
+| **.github/agents/research.agent.md**  | Hidden subagent for read-only research      |
 
 ---
 
@@ -348,6 +360,9 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 | User Query Pattern                                 | Relevant Documents                                                                                                                                                                                                                                                             | Load Order             |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
+| **"Custom agents/agent.md/subagents"**             | **`methodologies/AGENT-MD-METHODOLOGY.md` → `.github/agents/` (implementations) → `.github/copilot-instructions.md`**                                                                                                                                                          | **Methodology first**  |
+| **"Create agent/agent prompt/agent workflow"**     | **`methodologies/AGENT-MD-METHODOLOGY.md` (YAML Properties, Tool Configuration) → `.github/agents/study.agent.md` (example)**                                                                                                                                                  | **Methodology first**  |
+| **"Handoffs/agent orchestration/runSubagent"**     | **`methodologies/AGENT-MD-METHODOLOGY.md` (Subagent Orchestration, Handoffs) → `.github/agents/plan.agent.md` (handoff example)**                                                                                                                                              | **Methodology first**  |
 | "How do I set up..."                               | `GETTING-STARTED.md` → `DEVELOPMENT.md`                                                                                                                                                                                                                                        | Sequential             |
 | "How does [feature] work"                          | `ARCHITECTURE.md` → topic-specific docs                                                                                                                                                                                                                                        | Architecture first     |
 | "Implement [backend feature]"                      | `MODULAR_BACKEND_ARCHITECTURE.md` → `API-METHODOLOGY.md` → module docs                                                                                                                                                                                                         | Sequential             |
@@ -450,6 +465,17 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 ---
 
 ## 🔍 Quick Reference by Topic
+
+### AI Agents & Custom Agents
+
+**Keywords**: .agent.md, custom agents, subagents, runSubagent, handoffs, agent orchestration, YAML frontmatter, user-invokable, disable-model-invocation, tool restrictions, agent composition, Claude Opus 4.5, Claude Sonnet 4.5, agent prompts, constraint hierarchy, XML sections, context isolation, parallel execution
+
+**Scope**: VS Code custom agent configuration and Claude-optimized prompt engineering  
+**Out of Scope**: GitHub Actions, CI bots, external automation
+
+- **docs/methodologies/AGENT-MD-METHODOLOGY.md** - ⭐ Comprehensive guide: YAML syntax, tool aliases, subagent patterns, Claude optimizations
+- **.github/agents/** - Custom agent implementations (study, plan, implement, review, test, research)
+- **.github/copilot-instructions.md** - Base instructions referenced by all agents
 
 ### Architecture & Design
 
@@ -655,6 +681,7 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 **Recent Changes Timeline**:
 
+- **2026-02-07**: Custom Agent Infrastructure & Methodology - Created comprehensive `AGENT-MD-METHODOLOGY.md` documentation (~30KB) covering VS Code custom agent configuration: YAML frontmatter properties (`name`, `description`, `model`, `tools`, `agents`, `handoffs`, `user-invokable`, `disable-model-invocation`), tool aliases (read, search, edit, bash, agent, fetch, todo, web), Claude-specific optimizations (XML semantic sections, constraint hierarchy CRITICAL/IMPORTANT/GUIDELINES, model specifications Opus/Sonnet/Haiku 4.5), subagent orchestration patterns (context isolation, parallel execution, task delegation), handoffs configuration (sequential workflow transitions with `label`, `agent`, `prompt`, `send`). Created `.github/agents/` directory with 6 starter agents: `study.agent.md` (solutions architect with dual handoffs), `plan.agent.md` (planning with implement handoff), `implement.agent.md` (implementation with review handoff), `review.agent.md` (code review), `test.agent.md` (testing specialist), `research.agent.md` (hidden subagent with read-only tools). Updated DOCUMENTATION-GUIDE.md (docs/methodologies/ table, .github/agents/ table, AI Agents & Custom Agents topic section, query patterns for custom agents/handoffs/orchestration, timeline).
 - **2026-02-06**: Read-Through Cache Orchestration & Integration Tests - Implemented `DatafeedService.get_bars()` read-through cache pattern: gap detection via `BarCacheManager.find_missing_ranges()`, pending range locking via `try_add_pending()`, provider fetch for gaps only, storage via `BarRepository.store_bars()`, coverage tracking via `mark_covered()`. Added cache observability logging (`[CACHE BYPASS/HIT/MISS]`, `[PENDING ACQUIRED/BLOCKED]`). Configured timeouts: frontend 11s (`apiAdapter.ts`), backend 10s (`asyncio.wait_for`). Added 5 integration tests in `test_api_integration.py::TestGetBarsCaching`: cache bypass with InMemoryDatastore, cache miss flow, cache hit skips provider, partial cache fills gaps only, count_back applied after cache. Added `cached_service` fixture using `PostgresDatastore.create()` pattern. Updated datafeed/README.md (Read-Through Cache Orchestration section with flow diagram, logging table, timeout configuration, test coverage matrix), DOCUMENTATION-GUIDE.md (keywords: read-through cache, cache orchestration, gap detection, pending range locking, CACHE BYPASS, CACHE HIT, CACHE MISS, PENDING ACQUIRED, PENDING BLOCKED, TestGetBarsCaching, cached_service fixture; query pattern: "Cache orchestration/read-through cache"; timeline).
 - **2026-02-04**: Capability-Based Datastore Selection - Unified capability detection via `has_capability(name)` method replacing 5 individual `has_*` properties (`has_persistence`, `has_transactions`, `has_exclusion`, `has_timeseries`, `has_rangequery`). Added `DatastoreCapabilitySpec` model to `models/common.py` (mirrors `ProviderCapabilitySpec` with `name` and `optional` fields). Added `DatastoreCapabilityName` literal type for type-safe capability names. Added abstract `capabilities()` classmethod to `DatastoreInterface` (PostgresDatastore returns 5 capabilities, InMemoryDatastore returns empty list). Renamed `ServiceInterface.capabilities()` → `provider_capabilities()` and added new `datastore_capabilities()` classmethod (default returns empty list). Added `_resolve_datastore_capabilities()` method for automatic datastore selection based on declared capabilities. Added `required_datastore_capabilities()` to `ModuleRegistry` aggregating capabilities from all registered service classes. Updated `DatastoreRegistry.get_datastores()` with optional `required_capabilities` parameter for filtering. Migrated `DatafeedService` to declare `timeseries` capability (optional). Added 12 unit tests in `test_datastore_capability_selection.py` covering capability matching, optional vs required, aggregation, and datastore filtering. Updated datastores/README.md (Feature Detection section migrated to `has_capability()` pattern, Capability-Based Selection section), DOCUMENTATION-GUIDE.md (keywords: has_capability(), DatastoreCapabilityName, DatastoreCapabilitySpec, datastore_capabilities, provider_capabilities, capability-based selection, required_datastore_capabilities; timeline).
 - **2026-02-05**: RangeQueryTableInterface & has_rangequery Capability - Added `has_rangequery` property to `DatastoreInterface` (PostgresDatastore=True, InMemoryDatastore=False). Added `RangeQueryTableInterface` extending `TableInterface` with `get_missing_ranges()` method using PostgreSQL multirange operations (`func.int8range()`, `func.int8multirange()`, `func.range_agg()`, multirange subtraction via `.op("-")`). Created `RangeQuerySQLModelTable` implementation. Refactored `BarCacheManager.find_missing_ranges()` to use `has_rangequery` capability check with InMemory fallback. Deleted dead code: `adapters/range_adapter.py` (unused psycopg3 adapters). Added 14 unit tests for `RangeQuerySQLModelTable` (`test_rangequery_table.py`), 2 integration tests for internal gap detection (`test_bar_cache_manager.py`). Updated datastores/README.md (Feature Detection table with `has_rangequery`, Interface Segregation section with RangeQueryTableInterface factory/algorithm/usage), DOCUMENTATION-GUIDE.md (keywords: RangeQueryTableInterface, has_rangequery, rangequery_table, get_missing_ranges, INT8MULTIRANGE, range_agg, multirange subtraction, internal gap detection; query pattern: "Range query/gap detection/internal gaps"; timeline; removed dead code keywords: range_adapter, register_range_adapters).
@@ -728,5 +755,5 @@ Complete offline documentation for Interactive Brokers TWS API for Python.
 
 ---
 
-**Last Updated**: February 6, 2026  
+**Last Updated**: February 7, 2026  
 **Maintained by**: Development Team

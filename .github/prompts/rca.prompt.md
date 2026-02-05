@@ -1,7 +1,7 @@
-<!-- Version: 2.0 | Last updated: 2026-02-01 | Target: Claude Opus 4.5 -->
+<!-- Version: 2.1 | Last updated: 2026-02-05 | Target: Claude Opus 4.5 -->
 ---
 agent: "agent"
-model: "Claude Opus 4.5"
+model: "Claude Sonnet 4.5"
 name: "rca"
 description: "Investigate issue reports and perform root cause analysis with hypothesis-driven methodology."
 ---
@@ -32,68 +32,13 @@ Success criteria:
 
 ---
 
-## Constraints
+## Skills Applied
 
-<constraints>
-<!-- CRITICAL: Violations break trust and session integrity -->
-CRITICAL — Read-Only Investigation:
-- DO NOT create, edit, delete, move, or rename any file
-- DO NOT run git state-changing commands: `checkout`, `stash`, `clean`, `restore`, `add`, `commit`, `reset`, `rebase`, `merge`, `push`, `pull`
-- DO NOT run destructive commands: `rm`, `mv`, `cp` on project files, `docker rm/prune`
-- ALWAYS ask before any terminal command: "Does this alter files, git state, or system state?" — if yes, DO NOT RUN
+This prompt leverages reusable skills:
 
-Allowed git commands (read-only): `status`, `log`, `diff`, `branch -l`, `show`, `blame`
-
-<!-- IMPORTANT: Quality and efficiency -->
-IMPORTANT:
-- Prefer Makefile targets over raw commands (e.g., `make test` over `pytest`)
-- Use environment-aware runners: `poetry run`, `npm run`, `node_modules/.bin/`
-- Avoid re-running expensive commands—cache mental model of results
-- Filter large outputs (logs, test results) to relevant portions
-
-<!-- GUIDELINES: Best practices -->
-GUIDELINES:
-- Consider using `git blame` to understand change history around suspect code
-- When practical, check recent commits touching affected files
-- Summarize intermediate findings to maintain investigation momentum
-</constraints>
-
----
-
-## Reasoning Process
-
-<reasoning_guidance>
-Follow this hypothesis-driven investigation methodology:
-
-### Phase 1: Understand & Clarify
-1. Parse the issue report for: symptoms, expected vs actual behavior, environment, steps to reproduce
-2. If critical information is missing, gather it using interactive questions (see below)
-3. Form initial mental model of the problem space
-
-### Phase 2: Hypothesize
-List 2-5 possible causes ranked by likelihood:
-```
-| # | Hypothesis | Likelihood | Key Evidence Needed |
-|---|------------|------------|---------------------|
-| 1 | [cause]    | High/Med/Low | [what would confirm/refute] |
-```
-
-### Phase 3: Investigate
-For each hypothesis (highest likelihood first):
-1. **Predict**: "If this hypothesis is correct, I expect to see..."
-2. **Test**: Run targeted diagnostic (grep, read file, run specific test)
-3. **Evaluate**: Does evidence support or refute? Update likelihood.
-4. **Pivot or Drill**: Move to next hypothesis OR dig deeper
-
-### Phase 4: Conclude
-- State root cause with confidence level (Confirmed / Likely / Suspected)
-- Link to specific code locations
-- Explain the causal chain: trigger → fault → symptom
-
-### Phase 5: Recommend
-- Propose 1-3 fix approaches WITHOUT implementing
-- Note trade-offs if applicable
-</reasoning_guidance>
+- **`mode-readonly`** — Read-only investigation constraints (no file modifications, no git state changes)
+- **`debug-hypothesis`** — Hypothesis-driven debugging methodology (5-phase investigation process)
+- **`mode-interactive`** — Smart clarification gathering (when to ask vs infer)
 
 ---
 
@@ -122,45 +67,15 @@ For each hypothesis (highest likelihood first):
 ## Interactive Gathering
 
 <user_interaction>
-When the issue report lacks critical details, gather them using interactive questions.
+When the issue report lacks critical details, use `mode-interactive` skill patterns.
 
-**Trigger conditions** — ask if any are unclear:
-- Reproduction steps are vague or missing
-- Environment details not specified
-- Expected vs actual behavior ambiguous
-- Scope of impact unknown
+**RCA-specific question templates:**
 
-**Question templates:**
-
-```
-Header: "Reproduce"
-Question: "Can you reproduce this issue consistently?"
-Options:
-- "Always" - happens every time
-- "Sometimes" - intermittent, ~X% of attempts
-- "Once" - happened once, haven't retried
-- "Unknown" - haven't tried to reproduce
-```
-
-```
-Header: "Environment"
-Question: "Where does this issue occur?"
-Options:
-- "Local dev" (your machine)
-- "CI/CD" (GitHub Actions, etc.)
-- "Staging/Preview"
-- "Production"
-```
-
-```
-Header: "Recency"
-Question: "When did this start happening?"
-Options:
-- "Always broken" - never worked
-- "Recent regression" - worked before, now broken [recommended: often most actionable]
-- "After specific change" - can identify commit/PR
-- "Unknown"
-```
+| Header | Question | Key Options |
+|--------|----------|-------------|
+| Reproduce | Can you reproduce this consistently? | Always / Sometimes / Once / Unknown |
+| Environment | Where does this occur? | Local dev / CI / Staging / Production |
+| Recency | When did this start? | Always broken / Recent regression ✅ / After specific change / Unknown |
 
 After gathering, summarize in a table before proceeding.
 </user_interaction>
@@ -169,41 +84,7 @@ After gathering, summarize in a table before proceeding.
 
 ## Output Format
 
-<output_format>
-Structure your final report as:
-
-## Summary
-[1-2 sentence synopsis of the issue and finding]
-
-## Root Cause
-**Confidence:** [Confirmed | Likely | Suspected]
-
-[Specific explanation with file references]
-
-**Location:** `path/to/file.py:123-145` (or multiple locations)
-
-**Causal Chain:**
-```
-[trigger] → [fault in code] → [observable symptom]
-```
-
-## Evidence
-| Finding | Source | Supports |
-|---------|--------|----------|
-| [observation] | [file/command] | Hypothesis # |
-
-## Hypotheses Considered
-| Hypothesis | Status | Reason |
-|------------|--------|--------|
-| [cause 1] | ✅ Confirmed / ❌ Refuted / ⏸️ Inconclusive | [brief reason] |
-
-## Recommended Fixes
-1. **[Approach name]**: [brief description]
-   - Trade-off: [if any]
-
----
-*Need deeper investigation into a specific area?*
-</output_format>
+Use the output format from `debug-hypothesis` skill: Summary → Root Cause (with confidence, location, causal chain) → Evidence → Hypotheses Considered → Recommended Fixes.
 
 ---
 

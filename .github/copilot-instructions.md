@@ -215,3 +215,27 @@ Use [docs/DOCUMENTATION-GUIDE.md](../docs/DOCUMENTATION-GUIDE.md) as your map:
 | Provider/capability system | `backend/docs/PROVIDER-SYSTEM.md` |
 | Client generation | `backend/docs/SPECS_AND_CLIENT_GEN.md` + `docs/CLIENT-GENERATION.md` |
 | Testing strategy | `docs/TESTING.md` + `backend/docs/BACKEND_TESTING.md` |
+
+---
+
+## 9. Agent Leverage
+
+Before complex tasks, consider whether a specialist agent could achieve better results. Apply the `agent-routing` skill for systematic delegation decisions.
+
+### Available Agents
+
+| Agent | Use For | Trigger Keywords |
+|-------|---------|------------------|
+| `test` | Test creation, coverage analysis | "test", "coverage", "add tests" |
+| `review` | Code quality, security audit | "review", "check", "audit" |
+| `plan` | Multi-step implementation planning | "plan", "how should we" |
+| `study` | Architecture decisions, design tradeoffs | "evaluate", "compare", "refactor strategy" |
+| `implement` | Code execution with validation | "implement", "build", "fix" |
+
+### Quick Decision Rules
+
+1. **Need context you don't have?** → `research` subagent first
+2. **Multi-file feature?** → `plan` before `implement`
+3. **Writing tests?** → Consider `test` agent
+4. **Large change complete?** → Offer `review` handoff
+5. **Architecture question?** → `study` agent

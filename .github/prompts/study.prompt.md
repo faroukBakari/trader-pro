@@ -76,34 +76,9 @@ Before generating a solution, evaluate context sufficiency:
 
 ## Smart-Detect Interaction Strategy
 
-Use interactive UI components to gather structured user input **when the request is ambiguous**. Skip straight to analysis when intent is clear.
+Apply `mode-interactive` skill for structured user input when ambiguous.
 
-### When to Trigger Interactive Components
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│            SHOULD I USE INTERACTIVE QUESTIONS?                  │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  Is the study type obvious from the request?                    │
-│     NO  → Ask (Feature / Refactor / Flaw / Architecture)        │
-│     YES → Infer and proceed                                     │
-│                                                                 │
-│  Is complexity/scope explicitly stated?                         │
-│     NO  → Ask (Simple / Moderate / Complex)                     │
-│     YES → Use stated complexity                                 │
-│                                                                 │
-│  Are focus areas mentioned or implied?                          │
-│     NO  → Ask multi-select for analysis priorities              │
-│     YES → Include mentioned areas + "Codebase Leverage" default │
-│                                                                 │
-│  Rule: If 2+ areas unclear → batch into one interaction         │
-│        If 1 unclear → infer default, note in Context Validation │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Default Inference (When Not Asking)
+### Study-Specific Inference Table
 
 | Request Pattern | Inferred Type | Default Focus Areas |
 |-----------------|---------------|---------------------|
@@ -114,39 +89,13 @@ Use interactive UI components to gather structured user input **when the request
 | "quick", "brief", "just tell me" | Simple | → Quick Verdict format |
 | "thorough", "comprehensive", "deep" | Complex | → Full Report |
 
-### Decision Point Interactions
-
-Use interactive components at these phases:
+### Study-Specific Decision Points
 
 | Phase | Trigger Condition | Component |
 |-------|-------------------|----------|
 | **Initialization** | Ambiguous scope (2+ unclear areas) | Multi-question wizard |
 | **Section 7: Options** | 2+ viable approaches exist | Single-select with trade-offs |
 | **Section 12: Next Steps** | Implementation path unclear | Single-select for action |
-
-### Interaction Format Rules
-
-- **Batch** related questions (max 4 per interaction)
-- **Provide** 2-6 options per question with brief descriptions
-- **Mark** one option as recommended with justification
-- **Multi-select** for additive choices ("which features")
-- **Single-select** for either/or choices ("which approach")
-- **Summarize** user choices in a table after interaction
-- **Don't re-ask** unless requirements change
-
-### Sample Interaction at Section 7
-
-When presenting solution options:
-```
-Header: "Solution"
-Question: "Which approach should I detail further?"
-Options:
-  - "Option A" — [trade-off summary] [recommended if best ROI]
-  - "Option B" — [trade-off summary]
-  - "Option C (Do Nothing)" — Status quo, problems persist
-```
-
-After selection: expand chosen option, include comparison table, adjust next steps.
 
 </interactive_mode>
 
@@ -198,64 +147,12 @@ Classify the request before proceeding:
 
 ## Phase 3: Analysis
 
-5. **Leverage assessment** (before proposing new solutions):
-   ```
-   ┌─────────────────────────────────────────────────────────┐
-   │            SOLUTION SELECTION HEURISTIC                 │
-   ├─────────────────────────────────────────────────────────┤
-   │  Can existing code be extended/configured?              │
-   │     YES → Propose extension, skip new implementation    │
-   │     NO  ↓                                               │
-   │                                                         │
-   │  Does a project-approved library solve this?            │
-   │     YES → Use it, document integration approach         │
-   │     NO  ↓                                               │
-   │                                                         │
-   │  Is there a well-maintained OSS solution?               │
-   │     YES → Evaluate: adoption cost vs build cost         │
-   │     NO  ↓                                               │
-   │                                                         │
-   │  Custom implementation justified?                       │
-   │     → Document why alternatives were rejected           │
-   └─────────────────────────────────────────────────────────┘
-   ```
+5. **Design review**: Apply `design-review` skill — prioritize existing assets, then stress-test your proposal.
 
-6. **Portability assessment** (for external dependencies):
-   - Abstraction layer: Can we swap the underlying provider?
-   - Data portability: Can we export/migrate data if we switch?
-   - API stability: Is this a stable, well-maintained project?
-
-7. **Complexity calibration:**
+6. **Complexity calibration:**
    - Match solution complexity to problem complexity
    - If a simple approach works, prefer it over "elegant" patterns
    - Flag when suggesting patterns: why is the pattern needed here?
-
-8. **Cost-benefit sanity check:**
-   - Effort vs. value: Is the solution proportionate to the problem?
-   - Opportunity cost: What else could this time be spent on?
-   - Maintenance burden: What's the ongoing cost of this solution?
-
-## Phase 3.5: Design Stress Test (MANDATORY for Moderate/Complex)
-
-Before finalizing your recommendation, argue against it. This is not a checklist — it requires genuine adversarial thinking.
-
-**Challenge your solution against these concerns:**
-
-| Concern | Challenge Question |
-|---------|--------------------|
-| **Architectural drift** | Does this fit where the codebase is heading, or does it fight the grain? |
-| **Pattern violations** | What existing conventions does this break? Is breaking them justified? |
-| **Reinvented wheels** | What existing code/libraries were considered? Why weren't they sufficient? |
-| **Abstraction errors** | Is this the right abstraction level? What might leak? |
-| **Coupling creep** | What new dependencies does this introduce? Will they hurt later? |
-| **API surface issues** | Would a new team member understand this interface? Is naming consistent? |
-| **Over/under-engineering** | Is the solution complexity proportionate to the problem? |
-
-**For each relevant concern:**
-- If no risk → briefly note why in your thinking
-- If risk exists with mitigation → document the mitigation
-- If risk is accepted as tradeoff → document explicitly in output section 8
-- **If risk reveals a serious flaw → REVISE SOLUTION before proceeding**
 
 **Scaling:**
 - **Simple complexity**: Use judgment — skip if concerns clearly don't apply
@@ -263,7 +160,7 @@ Before finalizing your recommendation, argue against it. This is not a checklist
 
 ## Phase 4: Solution Design
 
-9. **Generate report** using the output template below
+7. **Generate report** using the output template below
    - Use Quick Verdict for Simple complexity, Standard Report for Moderate/Complex
    - Include sections per the relevance table below
    - Flag confidence level based on available context
